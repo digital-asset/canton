@@ -171,15 +171,14 @@ trait MediatorOnboardingTest
       .map(participant =>
         SignedTopologyTransaction
           .signAndCreate(
-            TopologyTransaction(
+            TopologyTransaction.tryCreate(
               TopologyChangeOp.Replace,
               serial = PositiveInt.two,
               PartyToParticipant.tryCreate(
                 alice,
                 threshold = PositiveInt.one,
-                participants = Seq(participant1, participant2).map(p =>
-                  HostingParticipant(p.id, ParticipantPermission.Submission)
-                ),
+                participants = Seq(participant1, participant2)
+                  .map(p => HostingParticipant(p.id, ParticipantPermission.Submission)),
               ),
               BaseTest.testedProtocolVersion,
             ),
@@ -209,7 +208,7 @@ trait MediatorOnboardingTest
     (1 to 5).map(serial =>
       SignedTopologyTransaction
         .signAndCreate(
-          TopologyTransaction(
+          TopologyTransaction.tryCreate(
             TopologyChangeOp.Replace,
             serial = PositiveInt.tryCreate(serial),
             PartyToParticipant.tryCreate(

@@ -316,6 +316,7 @@ class GrpcTopologyManagerReadService(
         idFilter = None,
         namespaceFilter = Some(request.filterNamespace),
       )
+
       resultsE = transactions
         .collect {
           case (result, x: NamespaceDelegation)
@@ -323,26 +324,27 @@ class GrpcTopologyManagerReadService(
             (result, x)
         }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+          elem.toProto
+            .leftMap { err =>
+              val protoVersion =
+                TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          (if (protoVersion == 30)
-             ListNamespaceDelegationResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize namespace delegations using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListNamespaceDelegationResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize namespace delegations using proto version $protoVersion: $err"
+                )
+                .toCantonRpcError
+            }
+            .map(serializedElem =>
+              new adminProto.ListNamespaceDelegationResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = ListNamespaceDelegationResponse.Result.Item.V30(serializedElem),
+              )
             )
-          )
         }
-
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListNamespaceDelegationResponse(results = results)
+
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -391,24 +393,23 @@ class GrpcTopologyManagerReadService(
             (result, x)
         }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
-
-          (if (protoVersion == 30)
-             ListOwnerToKeyMappingResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize owner to key mapping using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListOwnerToKeyMappingResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
+          elem.toProto
+            .leftMap { err =>
+              val protoVersion =
+                TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize owner to key mapping using proto version $protoVersion: $err"
+                )
+                .toCantonRpcError
+            }
+            .map(serializedElem =>
+              new adminProto.ListOwnerToKeyMappingResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = ListOwnerToKeyMappingResponse.Result.Item.V30(serializedElem),
+              )
             )
-          )
         }
-
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListOwnerToKeyMappingResponse(results = results)
     CantonGrpcUtil.mapErrNewEUS(ret)
@@ -427,26 +428,27 @@ class GrpcTopologyManagerReadService(
       resultsE = transactions
         .collect { case (result, x: PartyToKeyMapping) => (result, x) }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
-
-          (if (protoVersion == 30)
-             ListPartyToKeyMappingResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize party to key mappings using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListPartyToKeyMappingResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
+          elem.toProto
+            .leftMap { err =>
+              val protoVersion =
+                TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize party to key mappings using proto version $protoVersion: $err"
+                )
+                .toCantonRpcError
+            }
+            .map(serializedElem =>
+              new adminProto.ListPartyToKeyMappingResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = ListPartyToKeyMappingResponse.Result.Item.V30(serializedElem),
+              )
             )
-          )
-        }
 
+        }
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListPartyToKeyMappingResponse(results = results)
+
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -556,6 +558,7 @@ class GrpcTopologyManagerReadService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     def partyPredicate(x: PartyToParticipant) =
       x.partyId.toProtoPrimitive.startsWith(request.filterParty)
+
     def participantPredicate(x: PartyToParticipant) =
       request.filterParticipant.isEmpty || x.participantIds.exists(
         _.toProtoPrimitive.contains(request.filterParticipant)
@@ -573,26 +576,26 @@ class GrpcTopologyManagerReadService(
             (result, x)
         }
         .traverse { case (context, elem) =>
-          val protoVersion =
-            TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
-
-          (if (protoVersion == 30)
-             ListPartyToParticipantResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize party to participant mappings using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListPartyToParticipantResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
+          elem.toProto
+            .leftMap { err =>
+              val protoVersion =
+                TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize party to participant mappings using proto version $protoVersion: $err"
+                )
+                .toCantonRpcError
+            }
+            .map(serializedElem =>
+              new adminProto.ListPartyToParticipantResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = ListPartyToParticipantResponse.Result.Item.V30(serializedElem),
+              )
             )
-          )
         }
-
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListPartyToParticipantResponse(results = results)
+
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 

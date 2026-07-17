@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import cats.Eval
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -27,7 +28,6 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ReleaseProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
@@ -35,8 +35,7 @@ import DbStorage.Implicits.BuilderChain.*
 
 class DbAcsDigestStore(
     indexedSynchronizer: IndexedSynchronizer,
-    stringInterning: StringInterning,
-    releaseProtocolVersion: ReleaseProtocolVersion,
+    stringInterningEval: Eval[StringInterning],
     override protected val storage: DbStorage,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val timeouts: ProcessingTimeout,
@@ -46,6 +45,9 @@ class DbAcsDigestStore(
   import storage.api.*
 
   private val synchronizerIdx = indexedSynchronizer.index
+
+  @inline
+  private def stringInterning = stringInterningEval.value
 
   override protected val party_
       : AcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId], RawDigest] =
@@ -57,7 +59,6 @@ class DbAcsDigestStore(
       prettyKey = _.map(stringInterning.party.externalize).toString,
       journalTable = PartyJournalTable,
       createJournalImplicitsF = PartyJournalImplicits(_),
-      releaseProtocolVersion,
     )
   override protected val participant_
       : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] =
@@ -69,7 +70,6 @@ class DbAcsDigestStore(
       prettyKey = stringInterning.participantId.externalize,
       journalTable = ParticipantJournalTable,
       createJournalImplicitsF = ParticipantJournalImplicits(_),
-      releaseProtocolVersion,
     )
 
   override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit

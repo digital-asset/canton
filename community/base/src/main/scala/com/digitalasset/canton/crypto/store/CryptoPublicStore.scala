@@ -341,6 +341,7 @@ object CryptoPublicStoreError extends CantonErrorGroups.CommandErrorGroup {
         extends CantonBaseError.Impl(cause = "An error occurred with the public crypto store")
   }
 
+  // TODO(i34279): Make error handling in public and private key stores uniform
   final case class FailedToInsertKey(keyId: Fingerprint, reason: String)
       extends CryptoPublicStoreError {
     override protected def pretty: Pretty[FailedToInsertKey] =

@@ -180,9 +180,14 @@ class ReceivedAcsCommitmentValidatorTest
       val expectedCommitments = ReceivedAcsCommitments(messages)
       publisher.publishRef.get.value shouldBe Some(
         ReceivedAcsCommitment(
-          physicalSynchronizerId.logical,
-          CantonTimestamp.ofEpochSecond(10),
-          expectedCommitments.toByteString(testedProtocolVersion),
+          synchronizerId = physicalSynchronizerId.logical,
+          recordTime = CantonTimestamp.ofEpochSecond(10),
+          payload = expectedCommitments.toByteString(testedProtocolVersion),
+          updateId = ReceivedAcsCommitmentValidator.updateId(
+            localParticipantId = participant1,
+            synchronizerId = physicalSynchronizerId,
+            recordTime = CantonTimestamp.ofEpochSecond(10),
+          ),
         )
       )
     }
@@ -241,9 +246,14 @@ class ReceivedAcsCommitmentValidatorTest
       val expectedCommitments = ReceivedAcsCommitments(NonEmpty(Seq, messages.head1))
       publisher.publishRef.get.value shouldBe Some(
         ReceivedAcsCommitment(
-          physicalSynchronizerId.logical,
-          CantonTimestamp.ofEpochSecond(10),
-          expectedCommitments.toByteString(testedProtocolVersion),
+          synchronizerId = physicalSynchronizerId.logical,
+          recordTime = CantonTimestamp.ofEpochSecond(10),
+          payload = expectedCommitments.toByteString(testedProtocolVersion),
+          updateId = ReceivedAcsCommitmentValidator.updateId(
+            localParticipantId = participant1,
+            synchronizerId = physicalSynchronizerId,
+            recordTime = CantonTimestamp.ofEpochSecond(10),
+          ),
         )
       )
     }

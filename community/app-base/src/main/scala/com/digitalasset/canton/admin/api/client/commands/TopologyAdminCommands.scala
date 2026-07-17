@@ -1046,12 +1046,10 @@ object TopologyAdminCommands {
         ] {
 
       override protected def createRequest(): Either[String, GenerateTransactionsRequest] =
-        Right(
-          GenerateTransactionsRequest(
-            proposals.map(_.toGenerateTransactionProposal(serverVersion)),
-            Some(baseRequest.toProtoV30),
-          )
-        )
+        proposals
+          .traverse(_.toGenerateTransactionProposal(serverVersion))
+          .map(GenerateTransactionsRequest(_, Some(baseRequest.toProtoV30)))
+
       override protected def submitRequest(
           service: TopologyManagerWriteServiceStub,
           request: GenerateTransactionsRequest,
@@ -1090,16 +1088,18 @@ object TopologyAdminCommands {
       ) {
         def toGenerateTransactionProposal(
             serverVersion: Option[ReleaseVersion]
-        ): GenerateTransactionsRequest.Proposal =
-          GenerateTransactionsRequest.Proposal(
-            change.toProto,
-            serial.map(_.value).getOrElse(0),
-            if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-              // TODO(#32231) Switch to v31
-              GenerateTransactionsRequest.Proposal.Mapping.V30(mapping.toProtoV30)
-            else
-              GenerateTransactionsRequest.Proposal.Mapping.V30(mapping.toProtoV30),
-            Some(store.toProtoV30),
+        ): Either[String, GenerateTransactionsRequest.Proposal] =
+          mapping.toProtoV30.map(serializedMapping =>
+            GenerateTransactionsRequest.Proposal(
+              change.toProto,
+              serial.map(_.value).getOrElse(0),
+              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+                // TODO(#32231) Switch to v31
+                GenerateTransactionsRequest.Proposal.Mapping.V30(serializedMapping)
+              else
+                GenerateTransactionsRequest.Proposal.Mapping.V30(serializedMapping),
+              Some(store.toProtoV30),
+            )
           )
       }
     }
@@ -1121,27 +1121,29 @@ object TopologyAdminCommands {
           SignedTopologyTransaction[TopologyChangeOp, M],
         ] {
 
-      override protected def createRequest(): Either[String, AuthorizeRequest] = mapping.map(m =>
-        AuthorizeRequest(
-          Proposal(
-            AuthorizeRequest.Proposal(
-              change.toProto,
-              serial.map(_.value).getOrElse(0),
-              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                // TODO(#32231) Switch to v31
-                AuthorizeRequest.Proposal.Mapping.V30(m.toProtoV30)
-              else
-                AuthorizeRequest.Proposal.Mapping.V30(m.toProtoV30),
-            )
-          ),
-          mustFullyAuthorize = mustFullyAuthorize,
-          forceChanges = forceChanges.toProtoV30,
-          signedBy = signedBy.map(_.toProtoPrimitive),
-          store = Some(store.toProtoV30),
-          waitToBecomeEffective =
-            waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
+      override protected def createRequest(): Either[String, AuthorizeRequest] = mapping
+        .flatMap(_.toProtoV30)
+        .map(serializedMapping =>
+          AuthorizeRequest(
+            Proposal(
+              AuthorizeRequest.Proposal(
+                change.toProto,
+                serial.map(_.value).getOrElse(0),
+                if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+                  // TODO(#32231) Switch to v31
+                  AuthorizeRequest.Proposal.Mapping.V30(serializedMapping)
+                else
+                  AuthorizeRequest.Proposal.Mapping.V30(serializedMapping),
+              )
+            ),
+            mustFullyAuthorize = mustFullyAuthorize,
+            forceChanges = forceChanges.toProtoV30,
+            signedBy = signedBy.map(_.toProtoPrimitive),
+            store = Some(store.toProtoV30),
+            waitToBecomeEffective =
+              waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
+          )
         )
-      )
       override protected def submitRequest(
           service: TopologyManagerWriteServiceStub,
           request: AuthorizeRequest,

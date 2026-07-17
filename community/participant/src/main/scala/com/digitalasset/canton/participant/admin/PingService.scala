@@ -34,21 +34,19 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.PingService.{
-  AdditionalRetryOnKnownRaceConditions,
-  SyncServiceHandle,
-}
+import com.digitalasset.canton.participant.admin.PingService.AdditionalRetryOnKnownRaceConditions
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
 import com.digitalasset.canton.participant.ledger.api.client.{
   CommandResult,
   CommandSubmitterWithRetry,
   LedgerConnection,
 }
+import com.digitalasset.canton.participant.sync.CantonSyncService.SyncServiceHandle
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.Clock.ClockHandle
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
-import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{FutureUtil, LoggerUtil}
 import com.google.rpc.status.Status
@@ -105,11 +103,12 @@ class PingService(
     with NamedLogging
     with Spanning {
 
-  override protected def isActive: Boolean = syncService.isActive
+  override protected def isActive: Boolean = syncService.isActive()
   // Execute vacuuming task when (re)connecting to a new synchronizer
-  syncService.subscribeToConnections(_.withTraceContext { implicit traceContext => synchronizerId =>
-    logger.debug(s"Received connection notification from $synchronizerId")
-    vacuumStaleContracts(synchronizerId)
+  private val connectionListenerHandle = syncService.subscribeToConnections(_.withTraceContext {
+    implicit traceContext => synchronizerId =>
+      logger.debug(s"Received connection notification from $synchronizerId")
+      vacuumStaleContracts(synchronizerId)
   })
 
   private def userId = "PingService"
@@ -120,6 +119,7 @@ class PingService(
     // return proper on shutdown abort
     LifeCycle.close(
       () => cancelRequests(),
+      connectionListenerHandle,
       retrySubmitter,
       connection,
     )(logger)
@@ -182,11 +182,6 @@ class PingService(
 }
 
 object PingService {
-
-  trait SyncServiceHandle {
-    def isActive: Boolean
-    def subscribeToConnections(subscriber: Traced[SynchronizerId] => Unit): Unit
-  }
 
   private val DefaultRetryableDelay = 1.second
   private val AdditionalRetryOnKnownRaceConditions = Seq(

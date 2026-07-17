@@ -209,14 +209,18 @@ class SyncCryptoSignerWithSessionKeys(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncCryptoError, SignatureDelegation] =
     for {
+      delegationHash <- SignatureDelegation
+        .generateHash(
+          synchronizerId,
+          sessionKey,
+          validityPeriod,
+        )
+        .leftMap[SyncCryptoError](err => SyncCryptoError.SyncCryptoDelegationHashingError(err))
+        .toEitherT[FutureUnlessShutdown]
       // sign the hash with the long-term key
       signature <- signPrivateApiWithLongTermKeys
         .sign(
-          SignatureDelegation.generateHash(
-            synchronizerId,
-            sessionKey,
-            validityPeriod,
-          ),
+          delegationHash,
           activeLongTermKey.fingerprint,
           SigningKeyUsage.ProtocolOnly,
         )

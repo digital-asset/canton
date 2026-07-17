@@ -38,7 +38,11 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
-import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  ParticipantProtocolVersion,
+  ProtocolVersion,
+  ReleaseProtocolVersion,
+}
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
@@ -131,6 +135,7 @@ object ConfigTransforms {
       // disable exit on fatal error in tests
       ConfigTransforms.setExitOnFatalFailures(false),
       ConfigTransforms.useNewAggregator(true),
+      ConfigTransforms.enableNewAcsDigestProcessorPipeline,
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
@@ -144,6 +149,14 @@ object ConfigTransforms {
       _.focus(_.parameters.dontWarnOnDeprecatedPV).replace(true)
     ),
   )
+
+  lazy val enableNewAcsDigestProcessorPipeline: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor)
+        .replace(
+          BaseTest.testedProtocolVersion >= ReleaseProtocolVersion.acsCommitmentRedesignStorage.v
+        )
+    )
 
   lazy val enableInteractiveSubmissionTransforms: ConfigTransform =
     ConfigTransforms

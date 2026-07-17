@@ -309,7 +309,7 @@ class StoreBasedSynchronizerOutboxTest
     manager.clearObservers()
 
   private def txAddFromMapping(mapping: TopologyMapping) =
-    TopologyTransaction(
+    TopologyTransaction.tryCreate(
       TopologyChangeOp.Replace,
       serial = PositiveInt.one,
       mapping,
@@ -432,7 +432,8 @@ class StoreBasedSynchronizerOutboxTest
     "also push deprecated transactions" in {
       val (source, target, manager, handle, client) =
         mk(transactions.length - 1)
-      val midRevertSerialBumped = transactions(2).reverse
+      val midRevertSerialBumped =
+        transactions(2).reverse
       for {
         res <- push(manager, transactions :+ midRevertSerialBumped)
         _ <- outboxConnected(manager, handle, client, source, target)

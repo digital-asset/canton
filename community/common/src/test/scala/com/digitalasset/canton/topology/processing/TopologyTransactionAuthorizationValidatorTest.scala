@@ -895,7 +895,8 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
       "accept authorized removals" in {
         val validator = mk()
         import Factory.*
-        val Rns1k2_k1 = mkTrans(ns1k2_k1.transaction.reverse)
+        val Rns1k2_k1 =
+          mkTrans(ns1k2_k1.transaction.reverse)
         for {
           res <- validate(
             validator,
@@ -912,7 +913,8 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
       "reject un-authorized after removal" in {
         val validator = mk()
         import Factory.*
-        val Rns1k2_k1 = mkTrans(ns1k2_k1.transaction.reverse)
+        val Rns1k2_k1 =
+          mkTrans(ns1k2_k1.transaction.reverse)
         for {
           res <- validate(
             validator,
@@ -1355,7 +1357,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           ),
         )
 
-        pkgTx = TopologyTransaction(
+        pkgTx = TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           serial = PositiveInt.one,
           VettedPackages.tryCreate(
@@ -1428,7 +1430,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
           ),
         )
 
-        pkgTx = TopologyTransaction(
+        pkgTx = TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           serial = PositiveInt.one,
           VettedPackages.tryCreate(
@@ -1507,7 +1509,7 @@ abstract class TopologyTransactionAuthorizationValidatorTest(multiTransactionHas
         ParticipantId(UniqueIdentifier.tryCreate("consortium-participiant", dns_id)),
         Seq.empty,
       )
-      val pkgTx = TopologyTransaction(
+      val pkgTx = TopologyTransaction.tryCreate(
         TopologyChangeOp.Replace,
         serial = PositiveInt.one,
         pkgMapping,

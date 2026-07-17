@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
+import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
 import com.digitalasset.canton.util.ShowUtil.*
@@ -553,6 +554,141 @@ class TransactionViewTest
         create(
           externalCallResults = Seq(viewExternalCallResult(exerciseIndex = 7))
         ).left.value shouldBe "External call results require an exercise root action"
+      }
+    }
+
+    "the same external call is recorded with conflicting outputs in one view" must {
+      // Distinct occurrences share a semantic key but record different outputs: the participant
+      // data is well-formed on its own; the disagreement is caught when the view is validated.
+      "reject the view as malformed without leaking the payloads" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        val vpd = create(
+          actionDescription = exerciseActionDescription,
+          coreInputs = exerciseCoreInputs,
+          externalCallResults = Seq(
+            viewExternalCallResult(exerciseIndex = 7, callIndex = 0),
+            viewExternalCallResult(
+              exerciseIndex = 7,
+              callIndex = 1,
+              result = externalCallResult.copy(output = Bytes.fromStringUtf8("other-output")),
+            ),
+          ),
+        ).value
+
+        val commonData =
+          factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0.viewCommonData
+        val subviews = TransactionSubviews(Seq.empty)(testedProtocolVersion, factory.cryptoOps)
+
+        val error = TransactionView
+          .create(hashOps)(commonData, vpd, subviews, testedProtocolVersion)
+          .left
+          .value
+        error should startWith(
+          "externalCallResults records conflicting outputs for the same external call:"
+        )
+        error should not include externalCallResult.output.toHexString
+        error should not include Bytes.fromStringUtf8("other-output").toHexString
+        error should not include externalCallResult.config.toHexString
+        error should not include externalCallResult.input.toHexString
+      }
+    }
+
+    "the same external call is recorded with conflicting outputs across a view and its subview" must {
+      // The aggregation spans the whole subtree: a key recorded in the parent core and again,
+      // differently, in a subview core is a disagreement even though neither view's participant
+      // data conflicts on its own.
+      "reject the parent view as malformed" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+        val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
+        def withCall(output: String): TransactionView =
+          TransactionView.Optics.viewParticipantDataUnsafe.modify(vpd =>
+            vpd.tryUnwrap.copy(externalCallResults =
+              Seq(
+                viewExternalCallResult(
+                  exerciseIndex = 7,
+                  callIndex = 0,
+                  result = externalCallResult.copy(output = Bytes.fromStringUtf8(output)),
+                )
+              )
+            )
+          )(view)
+
+        val parent = withCall("output")
+        // A distinct salt keeps the child's viewCommonData different from the parent's, so the
+        // fixture stays valid for the equal-viewCommonData check and this test isolates the
+        // external-call disagreement.
+        val child = TransactionView.Optics.viewCommonDataUnsafe
+          .andThen(MerkleTree.Optics.unblinded[ViewCommonData])
+          .modify(_.copy(salt = TestSalt.generateSalt(1)))
+          .apply(withCall("other-output"))
+        val subviews = TransactionSubviews(Seq(child))(testedProtocolVersion, factory.cryptoOps)
+
+        val error = TransactionView
+          .create(hashOps)(
+            parent.viewCommonData,
+            parent.viewParticipantData,
+            subviews,
+            testedProtocolVersion,
+          )
+          .left
+          .value
+        error should startWith(
+          "externalCallResults records conflicting outputs for the same external call:"
+        )
+        error should not include externalCallResult.output.toHexString
+        error should not include Bytes.fromStringUtf8("other-output").toHexString
+      }
+    }
+
+    "parts of the view are blinded" must {
+      // Blinding legitimately constructs views with blinded participant data or subviews (and
+      // `validated` runs on them), so validation must tolerate blinded parts; the replay-data
+      // accessor must instead refuse them, so replay never runs on silently-partial data.
+      "validate the view but refuse to compute the replay data" in {
+        implicit val namedLoggingContext: NamedLoggingContext =
+          NamedLoggingContext(loggerFactory, traceContext)
+        val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
+        val child = TransactionView.Optics.viewCommonDataUnsafe
+          .andThen(MerkleTree.Optics.unblinded[ViewCommonData])
+          .modify(_.copy(salt = TestSalt.generateSalt(1)))
+          .apply(view)
+        val subviews =
+          TransactionSubviews(Seq(child.blindFully))(testedProtocolVersion, factory.cryptoOps)
+
+        val created = TransactionView
+          .create(hashOps)(
+            view.viewCommonData,
+            view.viewParticipantData,
+            subviews,
+            testedProtocolVersion,
+          )
+          .value
+
+        val blindedHash = created.subviews.blindedElements.loneElement
+        loggerFactory.assertInternalError[IllegalStateException](
+          created.tryExternalCallReplayData,
+          _.getMessage shouldBe s"External-call replay data of view ${created.viewHash} can be" +
+            s" computed only if all subviews are unblinded, but $blindedHash is blinded",
+        )
+      }
+
+      "validate a view whose own participant data is blinded but refuse the replay data" in {
+        implicit val namedLoggingContext: NamedLoggingContext =
+          NamedLoggingContext(loggerFactory, traceContext)
+        val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
+        val subviews = TransactionSubviews(Seq.empty)(testedProtocolVersion, factory.cryptoOps)
+        val created = TransactionView
+          .create(hashOps)(
+            view.viewCommonData,
+            view.viewParticipantData.blindFully,
+            subviews,
+            testedProtocolVersion,
+          )
+          .value
+
+        loggerFactory.assertInternalError[IllegalStateException](
+          created.tryExternalCallReplayData,
+          _.getMessage shouldBe s"External-call replay data of view ${created.viewHash} can be" +
+            s" computed only if the view participant data is unblinded",
+        )
       }
     }
 

@@ -21,7 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.component.IndexComponentTest.ServiceParams
 import com.digitalasset.canton.platform.config.IndexServiceConfig
-import com.digitalasset.canton.protocol.ContractInstance
+import com.digitalasset.canton.protocol.{ContractInstance, TestUpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ValueParty
@@ -121,6 +121,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       synchronizerId = synchronizerId,
       recordTime = nextRecordTime(),
       payload = payload,
+      updateId = TestUpdateId("ReceivedAcsCommitment"),
     )
 
   "acsUpdates" should {

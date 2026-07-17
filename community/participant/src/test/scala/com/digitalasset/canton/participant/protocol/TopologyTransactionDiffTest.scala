@@ -76,12 +76,14 @@ class TopologyTransactionDiffTest
       },
     )
 
-    val tx: TopologyTransaction[Replace, PartyToParticipant] = TopologyTransaction(
-      Replace,
-      PositiveInt.one,
-      mapping,
-      testedProtocolVersion,
-    )
+    val tx: TopologyTransaction[Replace, PartyToParticipant] = TopologyTransaction
+      .create(
+        Replace,
+        PositiveInt.one,
+        mapping,
+        testedProtocolVersion,
+      )
+      .valueOrFail("creating topology transaction")
 
     topologyFactory.mkTrans[Replace, PartyToParticipant](trans = tx)
   }
@@ -90,12 +92,13 @@ class TopologyTransactionDiffTest
       participantId: ParticipantId
   ): SignedTopologyTransaction[Replace, SynchronizerTrustCertificate] = {
 
-    val tx: TopologyTransaction[Replace, SynchronizerTrustCertificate] = TopologyTransaction(
-      Replace,
-      PositiveInt.one,
-      SynchronizerTrustCertificate(participantId, synchronizerId),
-      testedProtocolVersion,
-    )
+    val tx: TopologyTransaction[Replace, SynchronizerTrustCertificate] =
+      TopologyTransaction.tryCreate(
+        Replace,
+        PositiveInt.one,
+        SynchronizerTrustCertificate(participantId, synchronizerId),
+        testedProtocolVersion,
+      )
 
     topologyFactory.mkTrans[Replace, SynchronizerTrustCertificate](trans = tx)
   }

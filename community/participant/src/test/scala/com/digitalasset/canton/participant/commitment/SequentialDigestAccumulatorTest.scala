@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.commitment
 
+import cats.Eval
 import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.crypto.{LtHash16Blake3, TestHash}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -40,7 +41,7 @@ import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -635,7 +636,7 @@ class SequentialDigestAccumulatorTestInMemory extends SequentialDigestAccumulato
   override protected def minimumVersionToRunTest: ProtocolVersion = ProtocolVersion.minimum
 
   override protected def createStore(stringInterning: StringInterning): AcsDigestStore =
-    InMemoryAcsDigestStore.create(stringInterning, loggerFactory)
+    InMemoryAcsDigestStore.create(Eval.now(stringInterning), loggerFactory)
 }
 
 abstract class BaseDbSequentialDigestAccumulatorTest
@@ -651,8 +652,7 @@ abstract class BaseDbSequentialDigestAccumulatorTest
   ): AcsDigestStore =
     new DbAcsDigestStore(
       IndexedSynchronizer.tryCreate(DefaultTestIdentities.synchronizerId, 1),
-      stringInterning,
-      ReleaseProtocolVersion.acsCommitmentRedesign,
+      Eval.now(stringInterning),
       storage,
       loggerFactory,
       timeouts,

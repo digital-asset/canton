@@ -198,16 +198,18 @@ private[canton] class ExternalPartiesTestingAdministration(
     val decentralizedNamespace =
       DecentralizedNamespaceDefinition.computeNamespace(namespaceOwners.forgetNE)
     val partyId = PartyId.tryCreate(name, decentralizedNamespace.fingerprint)
-    val namespaceTx = TopologyTransaction(
-      TopologyChangeOp.Replace,
-      serial = PositiveInt.one,
-      DecentralizedNamespaceDefinition.tryCreate(
-        decentralizedNamespace,
-        namespaceThreshold,
-        namespaceOwners,
-      ),
-      protocolVersion,
-    )
+    val namespaceTx = TopologyTransaction
+      .create(
+        TopologyChangeOp.Replace,
+        serial = PositiveInt.one,
+        DecentralizedNamespaceDefinition.tryCreate(
+          decentralizedNamespace,
+          namespaceThreshold,
+          namespaceOwners,
+        ),
+        protocolVersion,
+      )
+      .valueOr(consoleEnvironment.raiseError)
     (partyId, namespaceTx)
   }
 
@@ -237,16 +239,18 @@ private[canton] class ExternalPartiesTestingAdministration(
 
       namespace = Namespace(namespaceKey.fingerprint)
 
-      namespaceTx = TopologyTransaction(
-        TopologyChangeOp.Replace,
-        serial = PositiveInt.one,
-        NamespaceDelegation.tryCreate(
-          namespace = namespace,
-          target = namespaceKey,
-          CanSignAllMappings,
-        ),
-        psid.protocolVersion,
-      )
+      namespaceTx = TopologyTransaction
+        .create(
+          TopologyChangeOp.Replace,
+          serial = PositiveInt.one,
+          NamespaceDelegation.tryCreate(
+            namespace = namespace,
+            target = namespaceKey,
+            CanSignAllMappings,
+          ),
+          psid.protocolVersion,
+        )
+        .valueOr(consoleEnvironment.raiseError)
 
       signature <- consoleEnvironment.tryGlobalCrypto.privateCrypto
         .sign(
@@ -421,22 +425,24 @@ private[canton] class ExternalPartiesTestingAdministration(
           HostingParticipant(_, ParticipantPermission.Observation)
         )
 
-        partyToParticipantTx = TopologyTransaction(
-          TopologyChangeOp.Replace,
-          serial = PositiveInt.one,
-          PartyToParticipant.tryCreate(
-            partyId = partyId,
-            threshold = confirmationThreshold,
-            participants = hostingConfirming ++ hostingObserving,
-            partySigningKeysWithThreshold = Some(
-              SigningKeysWithThreshold.tryCreate(
-                threshold = keysThreshold,
-                keys = protocolSigningKeys,
-              )
+        partyToParticipantTx = TopologyTransaction
+          .create(
+            TopologyChangeOp.Replace,
+            serial = PositiveInt.one,
+            PartyToParticipant.tryCreate(
+              partyId = partyId,
+              threshold = confirmationThreshold,
+              participants = hostingConfirming ++ hostingObserving,
+              partySigningKeysWithThreshold = Some(
+                SigningKeysWithThreshold.tryCreate(
+                  threshold = keysThreshold,
+                  keys = protocolSigningKeys,
+                )
+              ),
             ),
-          ),
-          protocolVersion,
-        )
+            protocolVersion,
+          )
+          .valueOr(consoleEnvironment.raiseError)
 
         onboardingTransactions <- bundle_onboarding_transactions(
           partyId = partyId,
@@ -578,17 +584,19 @@ private[canton] class ExternalPartiesTestingAdministration(
         HostingParticipant(_, ParticipantPermission.Observation)
       )
 
-      partyToParticipantTx = TopologyTransaction(
-        TopologyChangeOp.Replace,
-        serial = PositiveInt.one,
-        PartyToParticipant.tryCreate(
-          partyId = party.partyId,
-          threshold = confirmationThreshold,
-          participants = hostingConfirming ++ hostingObserving,
-          partySigningKeysWithThreshold = Some(signingKeys),
-        ),
-        protocolVersion,
-      )
+      partyToParticipantTx = TopologyTransaction
+        .create(
+          TopologyChangeOp.Replace,
+          serial = PositiveInt.one,
+          PartyToParticipant.tryCreate(
+            partyId = party.partyId,
+            threshold = confirmationThreshold,
+            participants = hostingConfirming ++ hostingObserving,
+            partySigningKeysWithThreshold = Some(signingKeys),
+          ),
+          protocolVersion,
+        )
+        .valueOr(consoleEnvironment.raiseError)
 
       onboardingTransactions <- bundle_onboarding_transactions(
         partyId = party.partyId,

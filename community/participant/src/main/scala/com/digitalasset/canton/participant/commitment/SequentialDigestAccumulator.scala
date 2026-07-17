@@ -35,12 +35,13 @@ class SequentialDigestAccumulator(
     hashOps: HashOps,
     tracingMode: AcsDigestTracingMode,
     protected override val loggerFactory: NamedLoggerFactory,
-)(implicit traceContext: TraceContext, ec: ExecutionContext)
+)(implicit ec: ExecutionContext)
     extends NamedLogging {
 
   def process(
       input: ProcessingContext[CheckpointFenceOr[Classification]]
-  ): FutureUnlessShutdown[Option[CheckpointWritten]] =
+  ): FutureUnlessShutdown[Option[CheckpointWritten]] = {
+    implicit val traceContext: TraceContext = input.traceContext
     // for now use the offset as the tiebreaker
     input match {
       case ProcessingContext(_, CheckpointFence) =>
@@ -111,6 +112,7 @@ class SequentialDigestAccumulator(
             FutureUnlessShutdown.pure(None)
         }
     }
+  }
 
   /** Generic logic for updating the digest for a party or participant.
     */
@@ -122,7 +124,7 @@ class SequentialDigestAccumulator(
   )(
       toLtHash16Blake3: V => LtHash16Blake3,
       toV: LtHash16Blake3 => V,
-  ): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val offset = timepoint.offset
     journal
       .lookup(key, offset)
@@ -189,7 +191,7 @@ class SequentialDigestAccumulator(
       party: LfPartyId,
       participant: LedgerParticipantId,
       isAddition: Boolean,
-  ): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val internedPid = stringInterning.participantId.internalize(participant)
     val partyKey = PartyAndOrder(
       stringInterning.party.internalize(party),

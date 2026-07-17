@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.{
   BufferException,
+  DurationConversionError,
   FieldNotSet,
   StringConversionError,
   TimestampConversionError,
@@ -233,7 +234,11 @@ object ProtoConverter {
     override def fromProtoPrimitive(
         duration: com.google.protobuf.duration.Duration
     ): ParsingResult[java.time.Duration] =
-      Right(java.time.Duration.ofSeconds(duration.seconds, duration.nanos.toLong))
+      Either
+        .catchOnly[ArithmeticException](
+          java.time.Duration.ofSeconds(duration.seconds, duration.nanos.toLong)
+        )
+        .leftMap(err => DurationConversionError(err.getMessage))
   }
 
   object UuidConverter extends ProtoConverter[UUID, String, StringConversionError] {

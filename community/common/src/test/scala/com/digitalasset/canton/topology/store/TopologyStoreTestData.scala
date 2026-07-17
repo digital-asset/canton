@@ -39,7 +39,7 @@ class TopologyStoreTestData(
       isProposal: Boolean = false,
       serial: PositiveInt = PositiveInt.one,
   )(signingKeys: SigningPublicKey*): SignedTopologyTransaction[Op, M] = {
-    val tx = TopologyTransaction(
+    val tx = TopologyTransaction.tryCreate(
       op,
       serial,
       mapping,

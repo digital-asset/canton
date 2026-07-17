@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.localstore.*
 import com.digitalasset.canton.ledger.participant.state.metrics.TimedSyncService
 import com.digitalasset.canton.ledger.participant.state.{
+  InternalIndexService,
   InternalIndexServiceImpl,
   PackageSyncService,
 }
@@ -84,8 +85,8 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc, TracerProvider}
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.{IdentityProviderId, User, UserRight}
-import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
+import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, SingleUseCell}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
@@ -149,6 +150,14 @@ class LedgerApiServer(
       }
     } yield this
   }
+
+  private val internalIndexServiceRef = new SingleUseCell[InternalIndexService]()
+  def internalIndexService(implicit traceContext: TraceContext): InternalIndexService =
+    internalIndexServiceRef.getOrElse(
+      ErrorUtil.invalidState(
+        "Referenced internalIndexService before LedgerApiServer was initialized"
+      )
+    )
 
   private def buildLedgerApiServerOwner()(implicit
       traceContext: TraceContext
@@ -278,9 +287,10 @@ class LedgerApiServer(
         updateServiceConfig = updateServiceConfig,
         scheduler = actorSystem.scheduler,
       )
-      _ = timedSyncService.registerInternalIndexService(
-        new InternalIndexServiceImpl(indexService)
-      )
+      internalIndexServiceImpl = new InternalIndexServiceImpl(indexService)
+      _ = internalIndexServiceRef.putIfAbsent(internalIndexServiceImpl)
+      _ = timedSyncService
+        .registerInternalIndexService(internalIndexServiceImpl)
       userManagementStore = getUserManagementStore(dbSupport, loggerFactory)
       partyRecordStore = new PersistentPartyRecordStore(
         dbSupport = dbSupport,

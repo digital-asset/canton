@@ -9,7 +9,6 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.commitment.AcsDigestTrace
 import com.digitalasset.canton.participant.store.data.AcsDigestJournalData.JournalTable
 import com.digitalasset.canton.participant.store.data.DbAcsDigestJournalImplicits
 import com.digitalasset.canton.participant.store.{
@@ -21,10 +20,9 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
+import slick.jdbc.PositionedParameters
 import slick.jdbc.canton.SQLActionBuilder
-import slick.jdbc.{PositionedParameters, SetParameter}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
@@ -39,7 +37,6 @@ class DbAcsDigestJournal[K, V](
     prettyKey: K => String,
     journalTable: JournalTable,
     createJournalImplicitsF: DbStorage => DbAcsDigestJournalImplicits[K, V],
-    releaseProtocolVersion: ReleaseProtocolVersion,
 )(implicit ec: ExecutionContext)
     extends AcsDigestJournal[K, V]
     with DbStore {
@@ -49,11 +46,6 @@ class DbAcsDigestJournal[K, V](
   import DbAcsDigestJournal.*
   import storage.api.*
   import journalTable.*
-
-  implicit val setParameterAcsDigestTrace: SetParameter[AcsDigestTrace] =
-    AcsDigestTrace.getVersionedSetParameter(releaseProtocolVersion.v)
-  implicit val setParameterAcsDigestTraceO: SetParameter[Option[AcsDigestTrace]] =
-    AcsDigestTrace.getVersionedSetParameterO(releaseProtocolVersion.v)
 
   private val synchronizerIdx = indexedSynchronizer.index
 

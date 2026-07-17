@@ -461,18 +461,20 @@ class NextGenTransactionTreeFactory(
         externalCallResults,
       )
 
-    } yield {
-      // Compute the result
-      val subviews = TransactionSubviews(childViews)(protocolVersion, cryptoOps)
-      val transactionView =
-        TransactionView.tryCreate(cryptoOps)(
-          viewCommonData,
-          viewParticipantData,
-          subviews,
-          protocolVersion,
-        )
-      transactionView
-    }
+      // A soft error rather than tryCreate: view validation can fail on submitted data (e.g.
+      // conflicting recorded external-call outputs, reachable from a crafted execute request or
+      // a non-deterministic extension service), which must reject the submission gracefully.
+      transactionView <- EitherT.fromEither[FutureUnlessShutdown](
+        TransactionView
+          .create(cryptoOps)(
+            viewCommonData,
+            viewParticipantData,
+            TransactionSubviews(childViews)(protocolVersion, cryptoOps),
+            protocolVersion,
+          )
+          .leftMap[TransactionTreeConversionError](InvalidTransactionViewError.apply)
+      )
+    } yield transactionView
   }
 
   private def updateStateWithContractCreation(

@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
+  ExternalCallKey,
   ParticipantTransactionView,
   PathRollbackContextFactory,
   TransactionView,
@@ -23,7 +24,6 @@ import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsi
   ExternalCallOccurrence,
   Inconsistency,
 }
-import com.digitalasset.canton.participant.util.DAMLe
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
   signatory,
@@ -67,8 +67,8 @@ final class ExternalCallProtocolIntegrationTest
 
   private val confirmers: Set[LfPartyId] = Set(submitter, signatory)
 
-  private val externalCallKey: DAMLe.ExternalCallKey =
-    DAMLe.ExternalCallKey.fromResult(externalCallResult)
+  private val externalCallKey: ExternalCallKey =
+    ExternalCallKey.fromResult(externalCallResult)
 
   private val leftViewPosition: ViewPosition =
     ViewPosition(
@@ -80,15 +80,15 @@ final class ExternalCallProtocolIntegrationTest
     )
 
   private final class RecordingExternalCallValidator(
-      results: Map[DAMLe.ExternalCallKey, ExternalCallValidator.Result]
+      results: Map[ExternalCallKey, ExternalCallValidator.Result]
   ) extends ExternalCallValidator {
-    private val observedKeys: ConcurrentLinkedQueue[DAMLe.ExternalCallKey] =
-      new ConcurrentLinkedQueue[DAMLe.ExternalCallKey]
+    private val observedKeys: ConcurrentLinkedQueue[ExternalCallKey] =
+      new ConcurrentLinkedQueue[ExternalCallKey]
 
-    def observed: Seq[DAMLe.ExternalCallKey] = observedKeys.asScala.toSeq
+    def observed: Seq[ExternalCallKey] = observedKeys.asScala.toSeq
 
     override def validate(
-        key: DAMLe.ExternalCallKey,
+        key: ExternalCallKey,
         recordedOutput: Bytes,
     )(implicit
         traceContext: TraceContext

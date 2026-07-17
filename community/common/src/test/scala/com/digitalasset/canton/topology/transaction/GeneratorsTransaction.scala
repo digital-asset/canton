@@ -243,8 +243,9 @@ final class GeneratorsTransaction(
     for {
       op <- Arbitrary.arbitrary[TopologyChangeOp]
       serial <- Arbitrary.arbitrary[PositiveInt]
+      // TODO(i32231): ensure that we create a valid mapping (i.e. usage?)
       mapping <- Arbitrary.arbitrary[TopologyMapping]
-    } yield TopologyTransaction(op, serial, mapping, protocolVersion)
+    } yield TopologyTransaction.tryCreate(op, serial, mapping, protocolVersion)
   )
 
   implicit val topologyTransactionSignaturesArb: Arbitrary[NonEmpty[Set[Signature]]] =

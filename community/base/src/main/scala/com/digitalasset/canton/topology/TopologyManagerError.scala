@@ -84,7 +84,7 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     final case class Unexpected(description: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"Unhandled error: $description"
+          cause = s"Unexpected error: $description"
         )
         with TopologyManagerError
 

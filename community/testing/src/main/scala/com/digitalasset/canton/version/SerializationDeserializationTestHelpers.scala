@@ -54,35 +54,28 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
     * instance).
     */
   protected def test[
-      T <: HasProtocolVersionedWrapper[T],
+      F[_],
+      T <: HasProtocolVersionedWrapperF[F, T],
       DeserializedValueClass <: HasRepresentativeProtocolVersion,
   ](
-      companion: BaseVersioningCompanion[
-        T,
-        Unit,
-        DeserializedValueClass,
-        Unit,
-      ],
+      companion: BaseVersioningCompanionF[F, T, Unit, DeserializedValueClass, Unit],
       protocolVersion: ProtocolVersion,
       warnWhenTestRunsLongerThan: Duration = maxDurationWarning,
-  )(implicit arb: Arbitrary[T]): Assertion =
+  )(implicit arb: Arbitrary[T], getByteStringValue: F[ByteString] => ByteString): Assertion =
     testProtocolVersionedCommon(
-      companion,
-      companion.fromByteString(protocolVersion, ()),
-      warnWhenTestRunsLongerThan,
+      companion = companion,
+      deserializer = companion.fromByteString(protocolVersion, ()),
+      warnWhenTestRunsLongerThan = warnWhenTestRunsLongerThan,
     )
 
-  protected def testContext[
-      T <: HasProtocolVersionedWrapper[T],
-      DeserializedValueClass <: HasRepresentativeProtocolVersion,
-      Context,
-      Dependency,
-  ](
-      companion: BaseVersioningCompanion[T, Context, DeserializedValueClass, Dependency],
+  protected def testContext[F[
+      _
+  ], T <: HasProtocolVersionedWrapperF[F, T], DeserializedValueClass <: HasRepresentativeProtocolVersion, Context, Dependency](
+      companion: BaseVersioningCompanionF[F, T, Context, DeserializedValueClass, Dependency],
       context: Context,
       protocolVersion: ProtocolVersion,
       warnWhenTestRunsLongerThan: Duration = maxDurationWarning,
-  )(implicit arb: Arbitrary[T]): Assertion =
+  )(implicit arb: Arbitrary[T], getByteStringValue: F[ByteString] => ByteString): Assertion =
     testProtocolVersionedCommon(
       companion,
       companion.fromByteString(protocolVersion, context),
@@ -90,15 +83,19 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
     )
 
   protected def testContextTaggedProtocolVersion[
-      ValueClass <: HasProtocolVersionedWrapper[ValueClass],
+      F[_],
+      ValueClass <: HasProtocolVersionedWrapperF[F, ValueClass],
       T[X] <: ReassignmentTag[X],
       Context,
   ](
-      companion: VersioningCompanionContextTaggedPVValidation2[ValueClass, T, Context],
+      companion: VersioningCompanionContextTaggedPVValidation2F[F, ValueClass, T, Context],
       context: Context,
       protocolVersion: T[ProtocolVersion],
       warnWhenTestRunsLongerThan: Duration = maxDurationWarning,
-  )(implicit arb: Arbitrary[ValueClass]): Assertion =
+  )(implicit
+      arb: Arbitrary[ValueClass],
+      getByteStringValue: F[ByteString] => ByteString,
+  ): Assertion =
     testProtocolVersionedCommon(
       companion,
       companion.fromByteString(context, protocolVersion),
@@ -135,23 +132,25 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
     }
 
   /*
-     Shared test code for classes extending `HasProtocolVersionedWrapper` (protocol version embedded in the instance),
+     Shared test code for classes extending `HasProtocolVersionedWrapperF` (protocol version embedded in the instance),
      with/without context for deserialization.
    */
   protected def testProtocolVersionedCommon[
-      T <: HasProtocolVersionedWrapper[T],
+      F[_],
+      T <: HasProtocolVersionedWrapperF[F, T],
       DeserializedValueClass <: HasRepresentativeProtocolVersion,
   ](
-      companion: BaseVersioningCompanion[T, ?, DeserializedValueClass, ?],
+      companion: BaseVersioningCompanionF[F, T, ?, DeserializedValueClass, ?],
       deserializer: ByteString => ParsingResult[DeserializedValueClass],
       warnWhenTestRunsLongerThan: Duration = maxDurationWarning,
-  )(implicit arb: Arbitrary[T]): Assertion = {
+  )(implicit arb: Arbitrary[T], getByteStringValue: F[ByteString] => ByteString): Assertion = {
     val className = companion.getClass.getName
     testedClasses.add(className)
 
     val start = System.nanoTime()
     val result = forAll { (instance: T) =>
-      val proto = clue(s"Serializing instance of ${companion.name}")(instance.toByteString)
+      val proto =
+        clue(s"Serializing instance of ${companion.name}")(instance.toByteString)
 
       val deserializedInstance =
         clue(s"Deserializing serialized ${companion.name}")(deserializer(proto).value)

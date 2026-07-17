@@ -133,7 +133,7 @@ class TopologyAdministrationIntegrationTest
       // we forcibly add an unintended key to the OwnerToKeyMapping
       val otkmWithNewKey = OwnerToKeyMapping.tryCreate(otkm.member, otkm.keys :+ keyToAdd)
 
-      val topologyTransaction = TopologyTransaction(
+      val topologyTransaction = TopologyTransaction.tryCreate(
         storedOtkm.transaction.transaction.operation,
         storedOtkm.transaction.transaction.serial.increment,
         otkmWithNewKey,

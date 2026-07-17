@@ -399,6 +399,7 @@ class PackageOpsTest extends PackageOpsTestBase {
         TopologyConfig(),
         timeouts,
         futureSupervisor: FutureSupervisor,
+        cleanSynchronizerRecordTime = _ => None,
         topologyManagerO = topologyTestSetup.get(_).map(_._1),
         psidLookup = lsid => topologyTestSetup.keySet.find(_.logical == lsid),
         topologyClientO = topologyTestSetup.view.mapValues(_._3).get,
@@ -500,7 +501,7 @@ class PackageOpsTest extends PackageOpsTestBase {
         participantId: ParticipantId = participantId1,
     ) =
       SignedTopologyTransaction.withSignatures(
-        transaction = TopologyTransaction(
+        transaction = TopologyTransaction.tryCreate(
           op = TopologyChangeOp.Replace,
           serial = txSerial,
           mapping =

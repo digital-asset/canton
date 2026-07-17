@@ -71,7 +71,9 @@ final class OfflineRootKeyScriptsIntegrationTest
 
         val offlineRootKey = global_secret.keys.secret.generate_key(keySpec, SigningKeyUsage.All)
         val rootPubKeyPath = (tmpDir / "public_root_key.der")
-        rootPubKeyPath.outputStream.apply(os => offlineRootKey.toProtoV30.publicKey.writeTo(os))
+        rootPubKeyPath.outputStream.apply(os =>
+          offlineRootKey.toProtoV30.valueOrFail("serializing public key").publicKey.writeTo(os)
+        )
 
         val intermediatePubKeyPath = (tmpDir / "public_intermediate_key.der")
         val intermediateKey = participant1.keys.secret

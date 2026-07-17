@@ -424,7 +424,7 @@ trait TopologyManagementIntegrationTest
       val ptkProto = com.digitalasset.canton.protocol.v30.PartyToKeyMapping(
         party.toProtoPrimitive,
         threshold = 5,
-        Seq(partyKey.toProtoV30),
+        Seq(partyKey.toProtoV30.valueOrFail("serializing public key")),
       )
 
       PartyToKeyMapping.fromProtoV30(ptkProto).isRight shouldBe true
@@ -441,7 +441,10 @@ trait TopologyManagementIntegrationTest
       val ptkProto = com.digitalasset.canton.protocol.v30.PartyToKeyMapping(
         party.toProtoPrimitive,
         threshold = 1,
-        signingKeys = Seq(partyKey.toProtoV30, partyKey.toProtoV30),
+        signingKeys = Seq(
+          partyKey.toProtoV30.valueOrFail("serializing public key"),
+          partyKey.toProtoV30.valueOrFail("serializing public key"),
+        ),
       )
 
       val transaction = com.digitalasset.canton.protocol.v30.TopologyTransaction(
@@ -539,7 +542,7 @@ trait TopologyManagementIntegrationTest
       val partyKey =
         global_secret.keys.secret.generate_keys(PositiveInt.one, usage = SigningKeyUsage.All).head1
 
-      val partyToParticipantMapping = TopologyTransaction(
+      val partyToParticipantMapping = TopologyTransaction.tryCreate(
         TopologyChangeOp.Replace,
         PositiveInt.one,
         PartyToParticipant.tryCreate(
@@ -594,7 +597,7 @@ trait TopologyManagementIntegrationTest
       val partyKey =
         global_secret.keys.secret.generate_keys(PositiveInt.one, usage = SigningKeyUsage.All).head1
 
-      val partyToKeyMapping = TopologyTransaction(
+      val partyToKeyMapping = TopologyTransaction.tryCreate(
         TopologyChangeOp.Replace,
         PositiveInt.one,
         PartyToKeyMapping.tryCreate(
@@ -1153,7 +1156,7 @@ trait TopologyManagementIntegrationTest
           .generate_signing_key("test-key1", SigningKeyUsage.NamespaceOnly)
       val tx = genTx(
         participant1,
-        TopologyTransaction(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Remove,
           PositiveInt.tryCreate(1),
           NamespaceDelegation.tryCreate(participant1.namespace, key1, CanSignAllMappings),
@@ -1188,7 +1191,7 @@ trait TopologyManagementIntegrationTest
             .generate_signing_key("unauthorized-sequencer", SigningKeyUsage.ProtocolOnly)
         val tx = genTx(
           participant1,
-          TopologyTransaction(
+          TopologyTransaction.tryCreate(
             TopologyChangeOp.Replace,
             PositiveInt.tryCreate(2),
             OwnerToKeyMapping.tryCreate(sequencer1.id, NonEmpty(Seq, key)),
@@ -1250,7 +1253,10 @@ trait TopologyManagementIntegrationTest
       )
 
       participant1.keys.public
-        .upload(p2Key.toByteString(testedProtocolVersion), Some("p2-some-key"))
+        .upload(
+          p2Key.toByteString(testedProtocolVersion).valueOrFail("serializing public key"),
+          Some("p2-some-key"),
+        )
       assertThrowsAndLogsCommandFailures(
         add(force = true),
         _.shouldBeCantonErrorCode(TopologyManagerError.SecretKeyNotInStore),
@@ -1309,7 +1315,7 @@ trait TopologyManagementIntegrationTest
 
       def create(serial: Int) = genTx(
         participant1,
-        TopologyTransaction(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.tryCreate(serial),
           NamespaceDelegation.tryCreate(participant1.namespace, key1, CanSignAllMappings),
@@ -1669,13 +1675,13 @@ trait TopologyManagementIntegrationTest
       )
 
       transactions should contain theSameElementsAs List(
-        TopologyTransaction.apply(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.one,
           namespaceDelegationMapping,
           testedProtocolVersion,
         ),
-        TopologyTransaction.apply(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.one,
           partyHostingMapping,
@@ -1794,7 +1800,7 @@ trait TopologyManagementIntegrationTest
 
       // Now we expect the serial returned to be 2 (because it's the second PartyToParticipant mapping for Max)
       transactions2 should contain theSameElementsAs List(
-        TopologyTransaction.apply(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.two,
           hostingTransaction2,

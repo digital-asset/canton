@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.Eval
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -34,7 +35,7 @@ class BlockingAcsDigestStore(
     blockingRef.set(releaseAfter)
 
   private val delegate: InMemoryAcsDigestStore =
-    InMemoryAcsDigestStore.create(stringInterning, loggerFactory)
+    InMemoryAcsDigestStore.create(Eval.now(stringInterning), loggerFactory)
 
   private def blockAndThen[A](f: => FutureUnlessShutdown[A]): FutureUnlessShutdown[A] =
     blockingRef.get.flatMap(_ => f)

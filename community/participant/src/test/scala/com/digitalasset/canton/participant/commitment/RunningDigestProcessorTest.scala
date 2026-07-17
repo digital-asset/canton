@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.commitment
 
+import cats.Eval
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -30,8 +31,8 @@ import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
   PartyRemovedFromParticipant,
   ProcessingContext,
 }
-import com.digitalasset.canton.participant.config.AcsDigestTracingMode
-import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
+import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
 import com.digitalasset.canton.protocol.{
@@ -118,18 +119,23 @@ class RunningDigestProcessorTest
         )
       ),
     ).build()
+
     new RunningDigestProcessor(
       participant,
       synchronizerId = DefaultTestIdentities.synchronizerId,
-      maxNumUpdatesBetweenCheckpoints = maxNumUpdatesBetweenCheckpoints,
+      AcsCommitmentConfig(
+        enableRunningDigestProcessor = true,
+        maxNumUpdatesBetweenCheckpoints = maxNumUpdatesBetweenCheckpoints,
+        counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
+        AcsDigestTracingMode.Disabled,
+      ),
       indexService,
       getTopologySnapshot = ts =>
-        FutureUnlessShutdown.pure(testingTopology.topologySnapshot(timestampOfSnapshot = ts)),
-      mock[AcsDigestStore],
+        FutureUnlessShutdown.pure(testingTopology.topologySnapshot(timestampOfSnapshot = ts.value)),
+      InMemoryAcsDigestStore.create(Eval.now(mock[StringInterning]), loggerFactory),
       mock[StringInterning],
       mock[HashOps],
-      PositiveInt.tryCreate(counterpartyBatchSize),
-      AcsDigestTracingMode.Disabled,
+      timeouts,
       loggerFactory,
     )
   }
@@ -152,10 +158,9 @@ class RunningDigestProcessorTest
             ProcessingContext(tp(6), dummyAcsChange),
             ProcessingContext(tp(7), dummyAcsChange),
           )
-        ).via(rdp.checkpointing).runWith(Sink.seq).futureValue
+        ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
-          // TODO(#33084) Remove initial CheckpointFence once crash recovery is implemented
           ProcessingContext(tp1_0, None),
           ProcessingContext(tp(2), Some(dummyAcsChange)),
           ProcessingContext(tp(3), Some(dummyAcsChange)),
@@ -184,18 +189,17 @@ class RunningDigestProcessorTest
             ProcessingContext(Timepoint(off(8))(ts(5)), dummyAcsChange),
             ProcessingContext(Timepoint(off(9))(ts(6)), dummyAcsChange),
           )
-        ).via(rdp.checkpointing).runWith(Sink.seq).futureValue
+        ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
-          // TODO(#33084) Remove initial CheckpointFence once crash recovery is implemented
           ProcessingContext(tp1_0, None),
           ProcessingContext(tp(2), Some(dummyAcsChange)),
           ProcessingContext(Timepoint(off(3))(ts(2)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(3))(ts(2).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(4))(ts(2)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(4))(ts(3).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(5))(ts(3)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(7))(ts(5).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(8))(ts(5)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(8))(ts(6).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(9))(ts(6)), Some(dummyAcsChange)),
         )
       }
@@ -220,7 +224,10 @@ class RunningDigestProcessorTest
           reconciliationInterval = 1.hour,
         )
 
-        val result = Source(inputEvents).via(rdp.checkpointing).runWith(Sink.seq).futureValue
+        val result = Source(inputEvents)
+          .via(rdp.checkpointing(None, TraceContext.empty))
+          .runWith(Sink.seq)
+          .futureValue
 
         // match on CheckpointFenceOr[InputEvent].toOption, so we don't have to match on the topology snapshot
         val expectedResult =
@@ -234,6 +241,54 @@ class RunningDigestProcessorTest
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs (expectedResult)
       }
+
+      "respect the initial checkpoint timestamp from crash recovery when the checkpoint falls on the reconciliation boundary" in {
+        val rdp = mkRunningDigestProcessor(
+          reconciliationInterval = 5.seconds
+        )
+
+        val dummyAcsChange =
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+        val result = Source(
+          Seq(
+            ProcessingContext(tp(6), dummyAcsChange),
+            ProcessingContext(tp(7), dummyAcsChange),
+            ProcessingContext(tp(11), dummyAcsChange),
+          )
+        ).via(rdp.checkpointing(Some(ts(5)), TraceContext.empty)).runWith(Sink.seq).futureValue
+
+        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
+          // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
+          ProcessingContext(tp(5), None),
+          ProcessingContext(tp(6), Some(dummyAcsChange)),
+          ProcessingContext(tp(7), Some(dummyAcsChange)),
+          ProcessingContext(tp(10), None),
+          ProcessingContext(tp(11), Some(dummyAcsChange)),
+        )
+      }
+
+      "respect the initial checkpoint timestamp from crash recovery for checkpoints not on reconciliation boundaries" in {
+        val rdp = mkRunningDigestProcessor(
+          reconciliationInterval = 5.seconds
+        )
+
+        val dummyAcsChange =
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+        val result = Source(
+          Seq(
+            ProcessingContext(tp(7), dummyAcsChange),
+            ProcessingContext(tp(11), dummyAcsChange),
+          )
+        ).via(rdp.checkpointing(Some(ts(6)), TraceContext.empty)).runWith(Sink.seq).futureValue
+
+        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
+          // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
+          ProcessingContext(tp(7), Some(dummyAcsChange)),
+          ProcessingContext(tp(10), None),
+          ProcessingContext(tp(11), Some(dummyAcsChange)),
+        )
+      }
+
     }
 
     // test cases for the classification stage

@@ -43,6 +43,7 @@ import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import com.digitalasset.canton.util.SingleUseCell
 import monocle.macros.GenLens
 import monocle.macros.syntax.lens.*
+import org.scalatest.EitherValues
 
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
@@ -82,7 +83,8 @@ final class UseBftSequencer(
     maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
     availabilityMinProposalCreationDelay: FiniteDuration = 50.millis,
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
-) extends EnvironmentSetupPlugin {
+) extends EnvironmentSetupPlugin
+    with EitherValues {
 
   private val tmpDir = better.files.File(System.getProperty("java.io.tmpdir"))
 
@@ -233,8 +235,8 @@ final class UseBftSequencer(
             val pubKey = keyPair.publicKey
             val privKeyFile = tmpDir / s"node-${selfInstanceName}_signing_private_key.bin"
             val pubKeyFile = tmpDir / s"node-${selfInstanceName}_signing_public_key.bin"
-            privKeyFile.writeByteArray(privKey.toProtoV30.toByteArray)
-            pubKeyFile.writeByteArray(pubKey.toProtoV30.toByteArray)
+            privKeyFile.writeByteArray(privKey.toProtoV30.value.toByteArray)
+            pubKeyFile.writeByteArray(pubKey.toProtoV30.value.toByteArray)
             BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig(
               thisSequencerId = sequencerId(selfInstanceName),
               signingPrivateKeyProtoFile = privKeyFile.toJava,

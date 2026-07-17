@@ -256,6 +256,11 @@ object SyncCryptoError {
         unnamedParam(_.error.unquoted)
       )
   }
+
+  final case class SyncCryptoDelegationHashingError(error: String) extends SyncCryptoError {
+    override protected def pretty: Pretty[SyncCryptoDelegationHashingError] =
+      prettyOfClass(unnamedParam(_.error.unquoted))
+  }
 }
 
 /** impure part of the crypto api with access to private key store and knowledge about the current

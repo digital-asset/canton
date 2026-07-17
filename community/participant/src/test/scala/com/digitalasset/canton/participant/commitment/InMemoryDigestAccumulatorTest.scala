@@ -77,7 +77,7 @@ class InMemoryDigestAccumulatorTest
   ) {
     val stringInterning: StringInterning = new MockStringInterning()
     val digestStore: AcsDigestStore = InMemoryAcsDigestStore.create(
-      stringInterning,
+      Eval.now(stringInterning),
       loggerFactory,
     )
     val accumulator: InMemoryDigestAccumulator = new InMemoryDigestAccumulator(

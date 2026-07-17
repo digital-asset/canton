@@ -5,8 +5,9 @@ package com.digitalasset.canton.participant
 
 import cats.Eval
 import cats.data.EitherT
-import cats.implicits.toTraverseOps
+import cats.syntax.foldable.*
 import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
@@ -93,7 +94,7 @@ import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
 import com.digitalasset.canton.topology.transaction.HostingParticipant
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, SingleUseCell}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -602,6 +603,12 @@ class ParticipantNodeBootstrap(
           topologyClientO = psid => cantonSyncService.get.flatMap(_.lookupTopologyClient(psid)),
           syncPersistentStateO = psid =>
             cantonSyncService.get.flatMap(_.syncPersistentStateManager.get(psid)),
+          cleanSynchronizerRecordTime = lsid =>
+            ledgerApiIndexerContainer.asEval
+              .flatMap(_.ledgerApiStore)
+              .value
+              .cleanSynchronizerIndex(lsid)
+              .map(_.recordTime),
           loggerFactory = loggerFactory,
         )
 
@@ -926,6 +933,65 @@ class ParticipantNodeBootstrap(
           if (sync.isActive()) EitherT.right[String](ledgerApiServerContainer.initializeNext())
           else EitherT.right[String](FutureUnlessShutdown.unit)
 
+        // running the new pipeline requires both dev-version-support and the digest processor to be explicitly enabled
+        acsDigestProcessorEnabled =
+          parameters.acsCommitments.enableRunningDigestProcessor && parameters.devVersionSupport
+        acsDigestProcessorManagerO = Option.when(acsDigestProcessorEnabled)(
+          new LifeCycleContainer[AcsDigestProcessorManager](
+            "ACS digest processor manager",
+            create = () => {
+              val ledgerApiStore = ledgerApiIndexerContainer.asEval.flatMap(_.ledgerApiStore).value
+              val topologyLookupForAcsDigestProcessing = new TopologyLookup(
+                clock = clock,
+                topologyConfig = parameters.topologyConfig,
+                timeouts = timeouts,
+                futureSupervisor = futureSupervisor,
+                topologyManagerO = sync.lookupTopologyManager,
+                psidLookup = sync.activePsidForLsid _,
+                topologyClientO = lookupTopologyClient,
+                syncPersistentStateO = psid =>
+                  // TODO(#33506): This is not good, but makes LsuLateParticipantUpgradeTest and LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest green :(
+                  //               In a late/manual lsu, the new psid might become active before the stores are even initialized.
+                  //               That's why RepairServiceHelpers uses latestKnownPsid.
+                  syncPersistentStateManager
+                    .latestKnownPsid(psid.logical)
+                    .flatMap(syncPersistentStateManager.get),
+                cleanSynchronizerRecordTime = lsid =>
+                  ledgerApiStore
+                    .cleanSynchronizerIndex(lsid)
+                    .map(_.recordTime),
+                loggerFactory = loggerFactory,
+              )
+
+              val manager =
+                new AcsDigestProcessorManager(
+                  participantId,
+                  topologyLookupForAcsDigestProcessing,
+                  syncPersistentStateManager.acsDigestStore,
+                  ledgerApiServerContainer.asEval.value.internalIndexService,
+                  syncCryptoSignerWithSessionKeys.pureCrypto,
+                  ledgerApiStore.stringInterningView,
+                  parameters.acsCommitments,
+                  timeouts,
+                  loggerFactory,
+                )
+
+              manager.subscribeToSynchronizerConnections(sync)
+
+              // start digest processors for all known logical synchronizers
+              MonadUtil
+                .sequentialTraverse_(syncPersistentStateManager.getAllLogical.keys.toSeq)(
+                  synchronizerId => manager.startDigestProcessorForSynchronizer(synchronizerId)
+                )
+                .map(_ => manager)
+            },
+            loggerFactory,
+          )
+        )
+        _ = MonadUtil.when(sync.isActive())(
+          EitherT.right(acsDigestProcessorManagerO.traverse_(_.initializeNext()))
+        )
+
         // Initialize the traffic enforcement components if traffic enforcement is enabled and if the participant is active
         _ <- trafficEnforcementComponentContainersO.traverseTap {
           case (trafficEnforcementAppContainer, trafficEnforcementBackendContainer) =>
@@ -953,6 +1019,7 @@ class ParticipantNodeBootstrap(
             adminServerRegistry,
             adminTokenDispenser,
             partyReplicatorContainerO.map(_.asEval),
+            ledgerApiIndexerContainer.asEval.flatMap(_.ledgerApiStore),
             futureSupervisor,
             loggerFactory,
             tracerProvider,
@@ -1046,8 +1113,9 @@ class ParticipantNodeBootstrap(
         addCloseable(indexedStringStore)
         addCloseable(topologyDispatcher)
         addCloseable(schedulers)
-        partyReplicatorContainerO.foreach(_.currentAutoCloseable())
+        partyReplicatorContainerO.foreach(repl => addCloseable(repl.currentAutoCloseable()))
         addCloseable(ledgerApiServerContainer.currentAutoCloseable())
+        acsDigestProcessorManagerO.foreach(mgr => addCloseable(mgr.currentAutoCloseable()))
         addCloseable(ledgerApiDependentServices)
         addCloseable(mutablePackageMetadataView)
         // Health components owned by the bootstrap, not closed by the health service.
@@ -1074,6 +1142,7 @@ class ParticipantNodeBootstrap(
           participantTopologyDispatcher = topologyDispatcher,
           trafficEnforcementBackendContainerO = trafficEnforcementBackendContainerO,
           trafficEnforcementAppContainerO = trafficEnforcementAppContainerO,
+          acsDigestProcessorManagerO = acsDigestProcessorManagerO,
         )
       }
     }
@@ -1170,6 +1239,7 @@ object ParticipantNodeBootstrap {
       ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer],
       startableStoppableLedgerApiDependentServices: StartableStoppableLedgerApiDependentServices,
       participantTopologyDispatcher: ParticipantTopologyDispatcher,
+      acsDigestProcessorManagerO: Option[LifeCycleContainer[AcsDigestProcessorManager]],
   )
 }
 

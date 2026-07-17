@@ -97,7 +97,7 @@ sealed trait TopologyMapping extends Product with Serializable with PrettyPrinti
 
   def restrictedToSynchronizer: Option[SynchronizerId]
 
-  def toProtoV30: v30.TopologyMapping
+  def toProtoV30: Either[String, v30.TopologyMapping]
 
   def uniqueKey: MappingHash
 
@@ -542,24 +542,26 @@ final case class NamespaceDelegation private (
       ),
     )
 
-  def toProto: v30.NamespaceDelegation =
-    v30.NamespaceDelegation(
-      namespace = namespace.fingerprint.unwrap,
-      targetKey = Some(target.toProtoV30),
-      // never set the isRootDelegation flag to true
-      isRootDelegation = false,
-      restriction = restriction.toProtoV30,
-    )
+  def toProto: Either[String, v30.NamespaceDelegation] =
+    target.toProtoV30.map { targetP =>
+      v30.NamespaceDelegation(
+        namespace = namespace.fingerprint.unwrap,
+        targetKey = Some(targetP),
+        // never set the isRootDelegation flag to true
+        isRootDelegation = false,
+        restriction = restriction.toProtoV30,
+      )
+    }
 
   override def referencedUids: Set[UniqueIdentifier] = Set.empty
 
   def canSign(mappingCodeToSign: Code): Boolean =
     restriction.canSign(mappingCodeToSign)
 
-  override def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.NamespaceDelegation(
-        toProto
+  override def toProtoV30: Either[String, v30.TopologyMapping] =
+    toProto.map(mappingP =>
+      v30.TopologyMapping(
+        v30.TopologyMapping.Mapping.NamespaceDelegation(mappingP)
       )
     )
 
@@ -712,10 +714,12 @@ final case class DecentralizedNamespaceDefinition private (
       owners = owners.toSeq.map(_.toProtoPrimitive),
     )
 
-  override def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(toProto)
-    )
+  override def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(toProto)
+      )
+      .asRight
 
   override def maybeUid: Option[UniqueIdentifier] = None
   override def referencedUids: Set[UniqueIdentifier] = Set.empty
@@ -870,15 +874,20 @@ final case class OwnerToKeyMapping private (
     ),
   )
 
-  def toProto: v30.OwnerToKeyMapping = v30.OwnerToKeyMapping(
-    member = member.toProtoPrimitive,
-    publicKeys = keys.map(_.toProtoPublicKeyV30),
-  )
+  def toProto: Either[String, v30.OwnerToKeyMapping] =
+    keys.forgetNE.traverse(_.toProtoPublicKeyV30).map { keysP =>
+      v30.OwnerToKeyMapping(
+        member = member.toProtoPrimitive,
+        publicKeys = keysP,
+      )
+    }
 
-  def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.OwnerToKeyMapping(
-        toProto
+  def toProtoV30: Either[String, v30.TopologyMapping] =
+    toProto.map(mappingP =>
+      v30.TopologyMapping(
+        v30.TopologyMapping.Mapping.OwnerToKeyMapping(
+          mappingP
+        )
       )
     )
 
@@ -975,16 +984,22 @@ final case class PartyToKeyMapping private (
     )
   override def companion: PartyToKeyMapping.type = PartyToKeyMapping
 
-  def toProto: v30.PartyToKeyMapping = v30.PartyToKeyMapping(
-    party = party.toProtoPrimitive,
-    threshold = signingKeysWithThreshold.threshold.unwrap,
-    signingKeys = signingKeysWithThreshold.keys.toSeq.sortBy(_.fingerprint).map(_.toProtoV30),
-  )
+  def toProto: Either[String, v30.PartyToKeyMapping] =
+    signingKeysWithThreshold.keys.toSeq.sortBy(_.fingerprint).forgetNE.traverse(_.toProtoV30).map {
+      signingKeysP =>
+        v30.PartyToKeyMapping(
+          party = party.toProtoPrimitive,
+          threshold = signingKeysWithThreshold.threshold.unwrap,
+          signingKeys = signingKeysP,
+        )
+    }
 
-  def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.PartyToKeyMapping(
-        toProto
+  def toProtoV30: Either[String, v30.TopologyMapping] =
+    toProto.map(mappingP =>
+      v30.TopologyMapping(
+        v30.TopologyMapping.Mapping.PartyToKeyMapping(
+          mappingP
+        )
       )
     )
 
@@ -1124,12 +1139,14 @@ final case class SynchronizerTrustCertificate(
       featureFlags = featureFlags.map(_.toProtoV30),
     )
 
-  override def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.SynchronizerTrustCertificate(
-        toProto
+  override def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.SynchronizerTrustCertificate(
+          toProto
+        )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = participantId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
@@ -1328,12 +1345,14 @@ final case class ParticipantSynchronizerPermission(
       loginAfter = loginAfter.map(_.toProtoPrimitive),
     )
 
-  override def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.ParticipantPermission(
-        toProto
+  override def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.ParticipantPermission(
+          toProto
+        )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = participantId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
@@ -1423,12 +1442,14 @@ final case class PartyHostingLimits(
       party = partyId.toProtoPrimitive,
     )
 
-  override def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.PartyHostingLimits(
-        toProto
+  override def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.PartyHostingLimits(
+          toProto
+        )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = partyId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
@@ -1535,12 +1556,14 @@ final case class VettedPackages private (
       packages = packages.map(_.toProtoV30),
     )
 
-  override def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.VettedPackages(
-        toProto
+  override def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.VettedPackages(
+          toProto
+        )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = participantId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
@@ -1698,19 +1721,19 @@ final case class PartyToParticipant private (
         .toMap,
     ),
   )
-  def toProto: v30.PartyToParticipant =
-    v30.PartyToParticipant(
-      party = partyId.toProtoPrimitive,
-      threshold = threshold.value,
-      participants = participants.map(_.toProto),
-      partySigningKeys = partySigningKeysWithThreshold.map(_.toProto),
-    )
-
-  override def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.PartyToParticipant(
-        toProto
+  def toProto: Either[String, v30.PartyToParticipant] =
+    partySigningKeysWithThreshold.traverse(_.toProto).map { partySigningKeysWithThreshold =>
+      v30.PartyToParticipant(
+        party = partyId.toProtoPrimitive,
+        threshold = threshold.value,
+        participants = participants.map(_.toProto),
+        partySigningKeys = partySigningKeysWithThreshold,
       )
+    }
+
+  override def toProtoV30: Either[String, v30.TopologyMapping] =
+    toProto.map(mappingP =>
+      v30.TopologyMapping(v30.TopologyMapping.Mapping.PartyToParticipant(mappingP))
     )
 
   @VisibleForTesting
@@ -1971,15 +1994,17 @@ final case class SynchronizerParametersState(
     param("synchronizerId", _.synchronizerId),
     param("parameters", _.parameters),
   )
-  def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.SynchronizerParametersState(
-        v30.SynchronizerParametersState(
-          synchronizerId = synchronizerId.toProtoPrimitive,
-          synchronizerParameters = Some(parameters.toProtoV30),
+  def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.SynchronizerParametersState(
+          v30.SynchronizerParametersState(
+            synchronizerId = synchronizerId.toProtoPrimitive,
+            synchronizerParameters = Some(parameters.toProtoV30),
+          )
         )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
@@ -2035,15 +2060,17 @@ final case class SequencingParametersState(
     param("synchronizerId", _.synchronizerId),
     param("parameters", _.parameters),
   )
-  def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.SequencingDynamicParametersState(
-        v30.DynamicSequencingParametersState(
-          synchronizerId = synchronizerId.toProtoPrimitive,
-          sequencingParameters = Some(parameters.toProtoV30),
+  def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.SequencingDynamicParametersState(
+          v30.DynamicSequencingParametersState(
+            synchronizerId = synchronizerId.toProtoPrimitive,
+            sequencingParameters = Some(parameters.toProtoV30),
+          )
         )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
@@ -2114,12 +2141,14 @@ final case class MediatorSynchronizerState private (
       observers = observers.map(_.uid.toProtoPrimitive),
     )
 
-  def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.MediatorSynchronizerState(
-        toProto
+  def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.MediatorSynchronizerState(
+          toProto
+        )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
@@ -2250,12 +2279,14 @@ final case class SequencerSynchronizerState private (
       observers = observers.map(_.uid.toProtoPrimitive),
     )
 
-  def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.SequencerSynchronizerState(
-        toProto
+  def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.SequencerSynchronizerState(
+          toProto
+        )
       )
-    )
+      .asRight
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
@@ -2366,10 +2397,12 @@ final case class LsuAnnouncement(
       upgradeTime = Some(upgradeTime.toProtoTimestamp),
     )
 
-  def toProtoV30: v30.TopologyMapping =
-    v30.TopologyMapping(
-      v30.TopologyMapping.Mapping.SynchronizerUpgradeAnnouncement(toProto)
-    )
+  def toProtoV30: Either[String, v30.TopologyMapping] =
+    v30
+      .TopologyMapping(
+        v30.TopologyMapping.Mapping.SynchronizerUpgradeAnnouncement(toProto)
+      )
+      .asRight
 
   override def namespace: Namespace = successorSynchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(successorSynchronizerId.uid)
@@ -2485,11 +2518,13 @@ final case class LsuSequencerConnectionSuccessor(
     connection = Some(connection.toProtoV30),
   )
 
-  override def toProtoV30: v30.TopologyMapping = v30.TopologyMapping(
-    v30.TopologyMapping.Mapping.SequencerConnectionSuccessor(
-      toProto
+  override def toProtoV30: Either[String, v30.TopologyMapping] = v30
+    .TopologyMapping(
+      v30.TopologyMapping.Mapping.SequencerConnectionSuccessor(
+        toProto
+      )
     )
-  )
+    .asRight
 
   override def uniqueKey: MappingHash =
     LsuSequencerConnectionSuccessor.uniqueKey(sequencerId, successorPsid.logical)

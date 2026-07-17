@@ -422,12 +422,26 @@ final case class ParticipantNodeParameterConfig(
 ) extends LocalNodeParametersConfig
 
 /** Config for the ACS commitment processing pipeline.
+  *
+  * @param enableRunningDigestProcessor
+  *   whether the new ACS digest processor should be enabled or not. Default is false.
+  * @param maxNumUpdatesBetweenCheckpoints
+  *   the maximum number of acs updates after which a checkpoint should be written.
+  * @param counterpartyBatchSize
+  *   how many counterparties get their digest updated at a time in case of a local party onboarding
+  *   or offboarding. With the assumption that a party may have a lot of counterparties, but each
+  *   counterparty is only hosted on a small number of participants, this parameter essentially
+  *   limits how many digests are loaded into memory: `numDigestsInMemory = counterPartyBatchSize *
+  *   hostingParticipantsOfCounterparties`
   * @param tracing
   *   the tracing mode. Default is disabled.
   * @param receivedCommitmentValidationParallelism
   *   the number of parallel threads to use for verifying incoming commitments. Default is 1.
   */
 final case class AcsCommitmentConfig(
+    enableRunningDigestProcessor: Boolean = false,
+    maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(10_000),
+    counterpartyBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
     receivedCommitmentValidationParallelism: PositiveInt = PositiveInt.tryCreate(1),
 )

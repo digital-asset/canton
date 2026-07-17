@@ -290,7 +290,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       OwnerToKeyMapping.tryCreate(p1, com.digitalasset.nonempty.NonEmpty(Seq, evictedKey))
 
     // create a topology transaction for the removal of the created OTK
-    val removeTopologyTx = TopologyTransaction(
+    val removeTopologyTx = TopologyTransaction.tryCreate(
       TopologyChangeOp.Remove,
       PositiveInt.one,
       evictedOtk,
@@ -379,7 +379,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       OwnerToKeyMapping.tryCreate(p1, com.digitalasset.nonempty.NonEmpty(Seq, retainedKey))
 
     // Create an OTK for the retainedKey
-    val replaceTopologyTx = TopologyTransaction(
+    val replaceTopologyTx = TopologyTransaction.tryCreate(
       TopologyChangeOp.Replace,
       PositiveInt.one,
       retainedOtk,

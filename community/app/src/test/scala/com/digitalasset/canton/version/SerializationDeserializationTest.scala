@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.version
 
+import cats.Id
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{SymmetricKey, TestHash}
 import com.digitalasset.canton.data.*
@@ -103,6 +104,9 @@ final class SerializationDeserializationTest
 
     s"Serialization and deserialization methods using protocol version $version" should {
       "compose to the identity" in {
+        implicit val getByteStringId: Id[ByteString] => ByteString = identity
+        implicit val getByteStringE: Either[String, ByteString] => ByteString = _.value
+
         testVersioned(SymmetricKey, version)
 
         test(StaticSynchronizerParameters, version)
@@ -166,23 +170,31 @@ final class SerializationDeserializationTest
 
         testContext(RootHashMessage, SerializedRootHashMessagePayload.fromByteString, version)
         testContext(AssignmentMediatorMessage, (TestHash, Target(version)), version)(
-          assignmentMediatorMessageArb
+          assignmentMediatorMessageArb,
+          getByteStringId,
         )
         testContext(
           UnassignmentMediatorMessage,
           (TestHash, Source(ProtocolVersionValidation.PV(version))),
           version,
         )(
-          unassignmentMediatorMessageArb
+          unassignmentMediatorMessageArb,
+          getByteStringId,
         )
         // InformeeMessage become large due to the embedded ExternalAuthorization (quadratic list)
         // on top of transaction view trees, so give this test more time.
-        testContext(InformeeMessage, (TestHash, version), version)(informeeMessageArb)
+        testContext(InformeeMessage, (TestHash, version), version)(
+          informeeMessageArb,
+          getByteStringId,
+        )
 
         if (version >= ProtocolVersion.v35) {
-          test(EncryptedMultipleViewsMessage, version)(encryptedMultipleViewsMessage)
+          test(EncryptedMultipleViewsMessage, version)(
+            encryptedMultipleViewsMessage,
+            getByteStringId,
+          )
         } else {
-          test(EncryptedSingleViewMessage, version)(encryptedSingleViewMessage)
+          test(EncryptedSingleViewMessage, version)(encryptedSingleViewMessage, getByteStringId)
         }
 
         test(TopologyTransaction, version)
@@ -226,7 +238,7 @@ final class SerializationDeserializationTest
         testContext(SequencedEvent, defaultMaxBytesToDecompress, version)
         // Also cover the deferred-decompression path: parse keeping the batch compressed, then
         // decompress separately.
-        testProtocolVersionedCommon[SequencedEvent[GenBatch[?]], SequencedEvent[
+        testProtocolVersionedCommon[Id, SequencedEvent[GenBatch[?]], SequencedEvent[
           Batch[ClosedEnvelope]
         ]](
           SequencedEvent,

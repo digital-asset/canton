@@ -338,10 +338,9 @@ final case class ReleaseProtocolVersion(v: ProtocolVersion) extends AnyVal
 object ReleaseProtocolVersion {
   val latest: ReleaseProtocolVersion = ReleaseProtocolVersion(ProtocolVersion.latest)
 
-  // TODO(#33849): remove and replace with the target protocol version
-  val acsCommitmentRedesign: ReleaseProtocolVersion = ReleaseProtocolVersion(
-    ProtocolVersion.acsCommitmentRedesign
-  )
+  // TODO(#33849): remove and replace with latest
+  // local storage doesn't depend on a synchronizer with a specific protocol version
+  val acsCommitmentRedesignStorage: ReleaseProtocolVersion = ReleaseProtocolVersion.latest
 }
 
 final case class ProtoVersion(v: Int)

@@ -58,6 +58,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectSynchronizer,
   ConnectedSynchronizers,
   ConnectionListener,
+  ConnectionListenerHandle,
   NoAutomaticLsuHandler,
   PerformLsuHandler,
 }
@@ -173,8 +174,16 @@ private[sync] class SynchronizerConnectionsManager(
   // Listeners to synchronizer connections
   // The listeners are notified only if the connection starts synchronizer processing
   private val connectionListeners = new AtomicReference[List[ConnectionListener]](List.empty)
-  def subscribeToConnections(subscriber: ConnectionListener): Unit =
+
+  /** @return
+    *   a handle that can be closed to unsubscribe the subscriber
+    */
+  def subscribeToConnections(subscriber: ConnectionListener): ConnectionListenerHandle = {
     connectionListeners.updateAndGet(subscriber :: _).discard
+    new ConnectionListenerHandle(() =>
+      connectionListeners.updateAndGet(_.filter(_ != subscriber)).discard
+    )
+  }
 
   protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
 
@@ -1730,6 +1739,12 @@ private[sync] class SynchronizerConnectionsManager(
 
 object SynchronizerConnectionsManager {
   type ConnectionListener = Traced[SynchronizerId] => Unit
+
+  /** A handle to remove/unsubscribe the synchronizer connection listener
+    */
+  class ConnectionListenerHandle(closeAction: () => Unit) extends AutoCloseable {
+    override def close(): Unit = closeAction()
+  }
 
   sealed trait ConnectSynchronizer extends Product with Serializable {
 

@@ -61,6 +61,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{pureCrypto, submitter}
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
@@ -174,6 +175,8 @@ final class AssignmentProcessingStepsTest
   private lazy val assignmentProcessingSteps = testInstance(targetPsid, cryptoClient, None)
 
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1)
+  private lazy val ledgerApiStore = mock[LedgerApiStore]
+  when(ledgerApiStore.stringInterningView).thenReturn(new StringInterningView(loggerFactory))
 
   private def statefulDependencies: Future[(SyncPersistentState, SyncEphemeralState)] = {
     val ledgerApiIndexer = mock[LedgerApiIndexer]
@@ -185,7 +188,7 @@ final class AssignmentProcessingStepsTest
         indexedStringStore = indexedStringStore,
         contractStore = contractStore,
         acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
-        ledgerApiStore = Eval.now(mock[LedgerApiStore]),
+        ledgerApiStore = Eval.now(ledgerApiStore),
         loggerFactory = loggerFactory,
       )
 

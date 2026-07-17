@@ -132,9 +132,8 @@ class ExtensionServiceManager(
     // Log the full error here, at the last common point before the per-consumer
     // sanitization drops the message.
     result.map(_.tapLeft { error =>
-      val requestId = error.requestId.fold("")(id => s", requestId=$id")
       logger.warn(
-        s"External call to extension '$extensionId' (function '$functionId') failed: status=${error.statusCode}, retryable=${error.retryable}$requestId, message=${error.message}"
+        s"External call to extension '$extensionId' (function '$functionId') failed: $error"
       )
     })
   }

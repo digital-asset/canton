@@ -607,17 +607,20 @@ object SignatureDelegation extends PrettyPrintingCompanion[SignatureDelegation] 
       synchronizerId: SynchronizerId,
       sessionKey: SigningPublicKey,
       validityPeriod: SignatureDelegationValidityPeriod,
-  ): Hash = {
+  ): Either[String, Hash] = {
     val hashBuilder =
       HashBuilderFromMessageDigest(HashAlgorithm.Sha256, HashPurpose.SessionKeyDelegation)
-    hashBuilder
-      .addString(sessionKey.id.unwrap)
-      .addInt(sessionKey.keySpec.toProtoEnum.value)
-      .addInt(sessionKey.format.toProtoEnum.value)
-      .addByteString(encodeUsageForHash(sessionKey.usage))
-      .addByteString(validityPeriod.getCryptographicEvidence)
-      .addString(synchronizerId.toProtoPrimitive)
-      .finish()
+
+    encodeUsageForHash(sessionKey.usage).map { usage =>
+      hashBuilder
+        .addString(sessionKey.id.unwrap)
+        .addInt(sessionKey.keySpec.toProtoEnum.value)
+        .addInt(sessionKey.format.toProtoEnum.value)
+        .addByteString(usage)
+        .addByteString(validityPeriod.getCryptographicEvidence)
+        .addString(synchronizerId.toProtoPrimitive)
+        .finish()
+    }
   }
 
   def fromProtoV30(
@@ -774,7 +777,7 @@ sealed trait SigningKeyUsage extends Product with Serializable with PrettyPrinti
   // NOTE: If you add a new dbType, add them also to `function debug.key_usage` in sql for debugging
   def dbType: Byte
 
-  def toProtoEnumV30: v30.SigningKeyUsage
+  def toProtoEnumV30: Either[String, v30.SigningKeyUsage]
 
   override def prettyCompanion: PrettyPrintingCompanion[SigningKeyUsage] = SigningKeyUsage
 }
@@ -833,18 +836,18 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   /** Encodes a non-empty set of signing key usages into a ByteString for hashing. The usages are
     * converted to their proto enum integer values and sorted to ensure determinism.
     */
-  def encodeUsageForHash(usage: NonEmpty[Set[SigningKeyUsage]]): ByteString = {
-    val orderedUsages = usage.forgetNE.toSeq.map(_.toProtoEnumV30.value).sorted
-    DeterministicEncoding.encodeSeqWith(orderedUsages)(usageInt =>
-      DeterministicEncoding.encodeInt(usageInt)
-    )
-  }
+  def encodeUsageForHash(usages: NonEmpty[Set[SigningKeyUsage]]): Either[String, ByteString] =
+    usages.forgetNE.toSeq.traverse(_.toProtoEnumV30.map(_.value)).map(_.sorted).map {
+      orderedUsages =>
+        DeterministicEncoding
+          .encodeSeqWith(orderedUsages)(usageInt => DeterministicEncoding.encodeInt(usageInt))
+    }
 
   case object Namespace extends SigningKeyUsage {
     override val identifier: String = "namespace"
     override val dbType: Byte = 0
-    override def toProtoEnumV30: v30.SigningKeyUsage =
-      v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE
+    override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
+      v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE.asRight
   }
 
   // IdentifyDelegation (dbType = 1) usage was deprecated and has now been removed.
@@ -852,8 +855,8 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   case object SequencerAuthentication extends SigningKeyUsage {
     override val identifier: String = "sequencer-auth"
     override val dbType: Byte = 2
-    override def toProtoEnumV30: v30.SigningKeyUsage =
-      v30.SigningKeyUsage.SIGNING_KEY_USAGE_SEQUENCER_AUTHENTICATION
+    override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
+      v30.SigningKeyUsage.SIGNING_KEY_USAGE_SEQUENCER_AUTHENTICATION.asRight
   }
 
   case object Protocol extends SigningKeyUsage {
@@ -861,8 +864,8 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     // that we use to search for keys during node bootstrap.
     override val identifier: String = "signing"
     override val dbType: Byte = 3
-    override def toProtoEnumV30: v30.SigningKeyUsage =
-      v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL
+    override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
+      v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL.asRight
   }
 
   /** Internal type used to identify keys that can self-sign to prove ownership, required for
@@ -872,8 +875,8 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   private case object ProofOfOwnership extends SigningKeyUsage {
     override val identifier: String = "proof-of-ownership"
     override val dbType: Byte = 4
-    override def toProtoEnumV30: v30.SigningKeyUsage =
-      v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP
+    override def toProtoEnumV30: Either[String, v30.SigningKeyUsage] =
+      v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP.asRight
 
   }
 
@@ -1320,11 +1323,11 @@ final case class SigningKeyPair private (publicKey: SigningPublicKey, privateKey
       privateKey = privateKey.replaceId(publicKey.id),
     )
 
-  protected def toProtoV30: v30.SigningKeyPair =
-    v30.SigningKeyPair(Some(privateKey.toProtoV30))
+  protected def toProtoV30: Either[String, v30.SigningKeyPair] =
+    privateKey.toProtoV30.map(proto => v30.SigningKeyPair(Some(proto)))
 
-  protected def toProtoCryptoKeyPairPairV30: v30.CryptoKeyPair.Pair =
-    v30.CryptoKeyPair.Pair.SigningKeyPair(toProtoV30)
+  protected def toProtoCryptoKeyPairPairV30: Either[String, v30.CryptoKeyPair.Pair] =
+    toProtoV30.map(v30.CryptoKeyPair.Pair.SigningKeyPair.apply)
 }
 
 object SigningKeyPair {
@@ -1404,7 +1407,7 @@ final case class SigningPublicKey private (
     override val migrated: Boolean = false
 ) extends PublicKey
     with PrettyPrintingFromCompanion
-    with HasVersionedWrapper[SigningPublicKey] {
+    with HasVersionedWrapperE[SigningPublicKey] {
 
   override type K = SigningPublicKey
 
@@ -1425,18 +1428,23 @@ final case class SigningPublicKey private (
       )
       .map(_ => this)
 
-  def toProtoV30: v30.SigningPublicKey =
-    v30.SigningPublicKey(
-      format = format.toProtoEnum,
-      publicKey = key,
-      // we no longer use this field so we set this scheme as unspecified
-      scheme = v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED,
-      keySpec = keySpec.toProtoEnum,
-      usage = usage.map(_.toProtoEnumV30).toSeq,
-    )
+  override def toByteStringE(version: ProtocolVersion): Either[String, ByteString] =
+    toByteString(version)
 
-  override protected def toProtoPublicKeyKeyV30: v30.PublicKey.Key =
-    v30.PublicKey.Key.SigningPublicKey(toProtoV30)
+  def toProtoV30: Either[String, v30.SigningPublicKey] =
+    usage.toSeq.forgetNE.traverse(_.toProtoEnumV30).map { usage =>
+      v30.SigningPublicKey(
+        format = format.toProtoEnum,
+        publicKey = key,
+        // we no longer use this field so we set this scheme as unspecified
+        scheme = v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED,
+        keySpec = keySpec.toProtoEnum,
+        usage = usage,
+      )
+    }
+
+  override protected def toProtoPublicKeyKeyV30: Either[String, v30.PublicKey.Key] =
+    toProtoV30.map(v30.PublicKey.Key.SigningPublicKey.apply)
 
   override def prettyCompanion: PrettyPrintingCompanion[SigningPublicKey] = SigningPublicKey
 
@@ -1507,8 +1515,7 @@ final case class SigningPublicKey private (
 }
 
 object SigningPublicKey
-    extends HasVersionedMessageCompanion[SigningPublicKey]
-    with HasVersionedMessageCompanionDbHelpers[SigningPublicKey]
+    extends HasVersionedMessageCompanionE[SigningPublicKey]
     with PrettyPrintingCompanion[SigningPublicKey] {
   override def name: String = "signing public key"
 
@@ -1649,7 +1656,7 @@ final case class SigningPrivateKey private (
 )(
     override val migrated: Boolean = false
 ) extends PrivateKey
-    with HasVersionedWrapper[SigningPrivateKey] {
+    with HasVersionedWrapperE[SigningPrivateKey] {
 
   override type K = SigningPrivateKey
 
@@ -1665,21 +1672,26 @@ final case class SigningPrivateKey private (
       )
       .map(_ => this)
 
-  def toProtoV30: v30.SigningPrivateKey =
-    v30.SigningPrivateKey(
-      id = id.toProtoPrimitive,
-      format = format.toProtoEnum,
-      privateKey = key,
-      // we no longer use this field so we set this scheme as unspecified
-      scheme = v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED,
-      keySpec = keySpec.toProtoEnum,
-      usage = usage.map(_.toProtoEnumV30).toSeq,
-    )
+  override def toByteStringE(version: ProtocolVersion): Either[String, ByteString] =
+    toByteString(version)
+
+  def toProtoV30: Either[String, v30.SigningPrivateKey] =
+    usage.toSeq.forgetNE.traverse(_.toProtoEnumV30).map { usage =>
+      v30.SigningPrivateKey(
+        id = id.toProtoPrimitive,
+        format = format.toProtoEnum,
+        privateKey = key,
+        // we no longer use this field so we set this scheme as unspecified
+        scheme = v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED,
+        keySpec = keySpec.toProtoEnum,
+        usage = usage,
+      )
+    }
 
   override def purpose: KeyPurpose = KeyPurpose.Signing
 
-  override protected def toProtoPrivateKeyKeyV30: v30.PrivateKey.Key =
-    v30.PrivateKey.Key.SigningPrivateKey(toProtoV30)
+  override protected def toProtoPrivateKeyKeyV30: Either[String, v30.PrivateKey.Key] =
+    toProtoV30.map(v30.PrivateKey.Key.SigningPrivateKey.apply)
 
   @nowarn("msg=Der in object CryptoKeyFormat is deprecated")
   private[crypto] def migrate(): Either[String, Option[SigningPrivateKey]] = {
@@ -1744,7 +1756,7 @@ final case class SigningPrivateKey private (
 
 }
 
-object SigningPrivateKey extends HasVersionedMessageCompanion[SigningPrivateKey] {
+object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
       ProtocolVersion.v34,
@@ -2286,6 +2298,16 @@ object SignatureCheckError extends CantonErrorGroups.AuthorizationChecksErrorGro
     )
   }
 
+  final case class DelegationHashingError(message: String) extends SignatureCheckError {
+    override def prettyCompanion: PrettyPrintingCompanion[DelegationHashingError] =
+      DelegationHashingError
+  }
+  object DelegationHashingError extends PrettyPrintingCompanion[DelegationHashingError] {
+    override val pretty: Pretty[DelegationHashingError] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
+    )
+  }
+
   /** Thrown when verifying a message request that does not support session signing keys, e.g., a
     * non-protocol message.
     */
@@ -2345,10 +2367,16 @@ final case class SigningKeysWithThreshold(
     keys: NonEmpty[Set[SigningPublicKey]],
     threshold: PositiveInt,
 ) {
-  def toProto: v30.SigningKeysWithThreshold = v30.SigningKeysWithThreshold(
-    keys = keys.toSeq.sortBy(_.fingerprint).map(_.toProtoV30),
-    threshold = threshold.value,
-  )
+  def toProto: Either[String, v30.SigningKeysWithThreshold] =
+    keys.toSeq.forgetNE
+      .sortBy(_.fingerprint)
+      .traverse(_.toProtoV30)
+      .map(keys =>
+        v30.SigningKeysWithThreshold(
+          keys = keys,
+          threshold = threshold.value,
+        )
+      )
 
   @VisibleForTesting
   private def copy(

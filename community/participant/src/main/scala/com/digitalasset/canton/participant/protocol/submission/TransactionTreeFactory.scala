@@ -208,6 +208,16 @@ object TransactionTreeFactory {
     }
   }
 
+  /** Indicates that a constructed view failed validation, e.g. because the submitted transaction
+    * records conflicting outputs for the same external call.
+    */
+  final case class InvalidTransactionViewError(message: String)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[InvalidTransactionViewError] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
+    )
+  }
+
   final case class ContractIdAbsolutizationError(message: String)
       extends TransactionTreeConversionError {
     override protected def pretty: Pretty[ContractIdAbsolutizationError] = prettyOfClass(

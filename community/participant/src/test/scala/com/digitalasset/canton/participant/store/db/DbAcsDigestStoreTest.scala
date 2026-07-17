@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import cats.Eval
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.annotations.AcsCommitmentTest
@@ -11,7 +12,6 @@ import com.digitalasset.canton.participant.store.AcsDigestStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ReleaseProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait BaseDbAcsDigestStoreTest { self: DbTest =>
@@ -44,8 +44,7 @@ trait DbAcsDigestStoreTest
     behave like acsDigestSingleStoreTests((ec) =>
       new DbAcsDigestStore(
         indexedSynchronizer = defaultSync,
-        mockStringInterning,
-        ReleaseProtocolVersion.acsCommitmentRedesign,
+        Eval.now(mockStringInterning),
         storage,
         loggerFactory,
         timeouts,
@@ -54,8 +53,7 @@ trait DbAcsDigestStoreTest
     behave like acsDigestMultiStoresTests((ec, indexedSynchronizer) =>
       new DbAcsDigestStore(
         indexedSynchronizer = indexedSynchronizer,
-        mockStringInterning,
-        ReleaseProtocolVersion.acsCommitmentRedesign,
+        Eval.now(mockStringInterning),
         storage,
         loggerFactory,
         timeouts,

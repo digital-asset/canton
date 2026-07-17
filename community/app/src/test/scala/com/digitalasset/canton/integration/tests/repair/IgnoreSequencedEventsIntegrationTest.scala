@@ -421,7 +421,10 @@ trait IgnoreSequencedEventsIntegrationTest extends CommunityIntegrationTest with
             participant2.keys.secret
               .generate_signing_key("p2 signing key", SigningKeyUsage.NamespaceOnly)
           participant1.keys.public
-            .upload(signingKey.toByteString(testedProtocolVersion), Some("p2 signing key"))
+            .upload(
+              signingKey.toByteString(testedProtocolVersion).valueOrFail("serializing signing key"),
+              Some("p2 signing key"),
+            )
           participant1.topology.namespace_delegations.propose_delegation(
             participant1.namespace,
             signingKey,
