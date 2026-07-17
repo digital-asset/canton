@@ -25,6 +25,12 @@ class ExternalCallConsistencyCheckerTest
 
   private val checkingParties: Set[LfPartyId] = Set(ExampleTransactionFactory.signatory)
 
+  private val leftPosition: ViewPosition = ViewPosition.root
+  private val rightPosition: ViewPosition =
+    ViewPosition(
+      List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
+    )
+
   private def check(
       rightResult: ExternalCallResult = otherExternalCallResult
   ): Seq[ExternalCallConsistencyChecker.Inconsistency] = {
@@ -52,11 +58,8 @@ class ExternalCallConsistencyCheckerTest
 
     ExternalCallConsistencyChecker.check(
       Map(
-        ViewPosition.root -> participantView(left),
-        ViewPosition(
-          List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
-        ) ->
-          participantView(right),
+        leftPosition -> participantView(left),
+        rightPosition -> participantView(right),
       )
     )
   }
@@ -69,12 +72,7 @@ class ExternalCallConsistencyCheckerTest
         externalCallResult.output,
         otherExternalCallResult.output,
       )
-      inconsistency.occurrences.map(_.viewPosition) shouldBe Set(
-        ViewPosition.root,
-        ViewPosition(
-          List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
-        ),
-      )
+      inconsistency.occurrences.map(_.viewPosition) shouldBe Set(leftPosition, rightPosition)
     }
 
     "not report identical outputs" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
@@ -123,11 +121,8 @@ class ExternalCallConsistencyCheckerTest
 
       val inconsistencies = ExternalCallConsistencyChecker.check(
         Map(
-          ViewPosition.root -> participantView(left),
-          ViewPosition(
-            List(ViewPosition.MerkleSeqIndex(List(ViewPosition.MerkleSeqIndex.Direction.Right)))
-          ) ->
-            participantView(right),
+          leftPosition -> participantView(left),
+          rightPosition -> participantView(right),
         )
       )
 
@@ -138,7 +133,7 @@ class ExternalCallConsistencyCheckerTest
       val example = factory.MultipleRoots
 
       ExternalCallConsistencyChecker.check(
-        Map(ViewPosition.root -> participantView(example.rootViews(4)))
+        Map(leftPosition -> participantView(example.rootViews(4)))
       ) shouldBe Seq.empty
     }
   }

@@ -124,20 +124,15 @@ object ExternalCallConsistencyChecker {
         }
       }
 
-  private def visibleInconsistencies(
-      occurrences: Seq[VisibleExternalCallOccurrence]
-  ): Seq[Inconsistency] =
-    occurrences
+  /** Returns the disagreements across all occurrences visible to this participant, sorted
+    * deterministically (by key, then outputs, then occurrences).
+    */
+  def check(views: Map[ViewPosition, ParticipantTransactionView]): Seq[Inconsistency] =
+    visibleOccurrences(views)
       .groupMap(_.key)(occurrence => occurrence.output -> occurrence.occurrence)
       .toSeq
       .flatMap { case (key, outputsAndOccurrences) =>
         inconsistencyFor(key, outputsAndOccurrences)
       }
       .sorted(orderInconsistency)
-
-  /** Returns the disagreements across all occurrences visible to this participant, sorted
-    * deterministically (by key, then outputs, then occurrences).
-    */
-  def check(views: Map[ViewPosition, ParticipantTransactionView]): Seq[Inconsistency] =
-    visibleInconsistencies(visibleOccurrences(views))
 }
