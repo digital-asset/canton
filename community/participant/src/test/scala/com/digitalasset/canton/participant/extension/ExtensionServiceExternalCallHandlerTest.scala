@@ -39,11 +39,11 @@ class ExtensionServiceExternalCallHandlerTest
               .futureValue
             result.left.value.message shouldBe
               "ExtensionCallError(status code = 404, " +
-              "message = \"Extension 'unknown-ext' not configured\", retryable = false)"
+              "message = \"Extension 'unknown-ext' not configured\", retryable = false, trace id = tid:)"
           },
           _.warningMessage shouldBe
             "External call to extension 'unknown-ext' (function 'test-func') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'unknown-ext' not configured\", retryable = false)",
+            "ExtensionCallError(status code = 404, message = \"Extension 'unknown-ext' not configured\", retryable = false, trace id = tid:)",
         )
       } finally manager.close()
     }
@@ -89,11 +89,11 @@ class ExtensionServiceExternalCallHandlerTest
               .value
             error.message shouldBe
               "ExtensionCallError(status code = 404, " +
-              "message = \"Extension 'unknown-ext' not configured\", retryable = false)"
+              "message = \"Extension 'unknown-ext' not configured\", retryable = false, trace id = tid:)"
           },
           _.warningMessage shouldBe
             "External call to extension 'unknown-ext' (function 'test-func') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'unknown-ext' not configured\", retryable = false)",
+            "ExtensionCallError(status code = 404, message = \"Extension 'unknown-ext' not configured\", retryable = false, trace id = tid:)",
         )
       } finally manager.close()
     }
@@ -179,9 +179,10 @@ class ExtensionServiceExternalCallHandlerTest
 
   "ExtensionCallError" should {
     // The full-error log interpolates `$error`, so its rendering (via PrettyPrinting) must cover
-    // every client-relevant field -- in particular the optional identifiers, which the 404 cases
-    // above omit. `clientActionable` is deliberately not rendered: it is control metadata, and
-    // the rendering doubles as the client payload for actionable errors.
+    // every client-relevant field -- in particular the optional external call id, which the 404
+    // cases above omit, and the trace id, which always renders (bare tid: when empty).
+    // `clientActionable` is deliberately not rendered: it is control metadata, and the rendering
+    // doubles as the client payload for actionable errors.
     "render the client-relevant fields, including the tracing identifiers, via pretty-printing" in {
       TraceContext.withNewTraceContext("test") { tc =>
         ExtensionCallError(
@@ -192,11 +193,11 @@ class ExtensionServiceExternalCallHandlerTest
           clientActionable = false,
         )(tc).toString shouldBe
           "ExtensionCallError(status code = 503, message = \"boom\", external call id = 'req-1'," +
-          s" retryable = true, trace id = '${tc.traceId.value}')"
+          s" retryable = true, trace id = tid:${tc.traceId.value})"
       }
     }
 
-    "omit the tracing identifiers from the rendering when absent" in {
+    "render an absent external call id as omitted and an empty trace context as a bare tid" in {
       ExtensionCallError(
         statusCode = 503,
         message = "boom",
@@ -204,7 +205,7 @@ class ExtensionServiceExternalCallHandlerTest
         retryable = true,
         clientActionable = false,
       )(TraceContext.empty).toString shouldBe
-        "ExtensionCallError(status code = 503, message = \"boom\", retryable = true)"
+        "ExtensionCallError(status code = 503, message = \"boom\", retryable = true, trace id = tid:)"
     }
   }
 }

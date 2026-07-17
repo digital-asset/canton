@@ -851,7 +851,7 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           },
           _.warningMessage shouldBe
             "External call to extension 'missing-extension' (function 'function') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'missing-extension' not configured\", retryable = false)",
+            "ExtensionCallError(status code = 404, message = \"Extension 'missing-extension' not configured\", retryable = false, trace id = tid:)",
         )
       } finally {
         manager.close()

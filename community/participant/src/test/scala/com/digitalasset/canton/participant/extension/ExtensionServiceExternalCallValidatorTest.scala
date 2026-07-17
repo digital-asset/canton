@@ -88,7 +88,7 @@ class ExtensionServiceExternalCallValidatorTest extends AsyncWordSpec with BaseT
             },
           _.warningMessage shouldBe
             "External call to extension 'extension-id' (function 'function-id') failed: " +
-            "ExtensionCallError(status code = 404, message = \"Extension 'extension-id' not configured\", retryable = false)",
+            "ExtensionCallError(status code = 404, message = \"Extension 'extension-id' not configured\", retryable = false, trace id = tid:)",
         )
         .thereafter(_ => manager.close())
     }

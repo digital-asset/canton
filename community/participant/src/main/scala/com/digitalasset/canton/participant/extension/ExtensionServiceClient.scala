@@ -39,7 +39,7 @@ final case class ExtensionCallError(
     param("message", _.message.doubleQuoted),
     paramIfDefined("external call id", _.externalCallId.map(_.singleQuoted)),
     param("retryable", _.retryable),
-    paramIfDefined("trace id", _.traceContext.traceId.map(_.singleQuoted)),
+    param("trace id", _.traceContext),
   )
 }
 
