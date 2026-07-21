@@ -26,13 +26,14 @@ final class GeneratorsProtocol(
     protocolVersion: ProtocolVersion,
     generatorsLf: GeneratorsLf,
     generatorsTopology: GeneratorsTopology,
+    generatorsCrypto: GeneratorsCrypto,
 ) {
   import com.digitalasset.canton.Generators.*
   import generatorsLf.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
-  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import com.digitalasset.canton.time.GeneratorsTime.*
   import generatorsTopology.*
+  import generatorsCrypto.*
   import org.scalatest.EitherValues.*
 
   implicit val staticSynchronizerParametersArb: Arbitrary[StaticSynchronizerParameters] =

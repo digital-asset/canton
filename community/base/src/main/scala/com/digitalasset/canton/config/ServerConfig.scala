@@ -16,6 +16,7 @@ import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.math.Ordering.Implicits.infixOrderingOps
 
@@ -131,7 +132,9 @@ final case class AdminServerConfig(
     override val adminTokenConfig: AdminTokenConfig = AdminTokenConfig(),
     override val maxTokenLifetime: NonNegativeDuration = NonNegativeDuration(5.minutes),
     override val jwksCacheConfig: JwksCacheConfig = JwksCacheConfig(),
-    override val limits: Option[ActiveRequestLimitsConfig] = None,
+    override val limits: Option[ActiveRequestLimitsConfig] = Some(
+      AdminServerConfig.defaultStreamingRequestLimits
+    ),
 ) extends ServerConfig {
   override val name: String = "admin"
   def clientConfig: FullClientConfig =
@@ -153,6 +156,44 @@ final case class AdminServerConfig(
 }
 object AdminServerConfig {
   val defaultAddress: String = "127.0.0.1"
+
+  private val defaultStreamLimit: NonNegativeInt = NonNegativeInt.tryCreate(10)
+
+  /** Default limits on the number of concurrently open streaming calls on the admin API.
+    *
+    * Entries are matched by full gRPC method name. Keep this list in sync if any of these endpoints
+    * is renamed or moved. Typed `getFullMethodName` entries are checked at compile time, the
+    * spelled-out strings are not.
+    */
+  @nowarn("cat=deprecation") // deprecated V1 streaming endpoints are still served
+  val defaultStreamingRequestLimits: ActiveRequestLimitsConfig = {
+    import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
+    import com.digitalasset.canton.admin.participant.v30.{
+      ParticipantInspectionServiceGrpc,
+      ParticipantRepairServiceGrpc,
+      PartyManagementServiceGrpc,
+    }
+    import com.digitalasset.canton.topology.admin.v30.TopologyManagerReadServiceGrpc
+
+    ActiveRequestLimitsConfig(
+      active = Seq(
+        TopologyManagerReadServiceGrpc.METHOD_EXPORT_TOPOLOGY_SNAPSHOT.getFullMethodName,
+        TopologyManagerReadServiceGrpc.METHOD_EXPORT_TOPOLOGY_SNAPSHOT_V2.getFullMethodName,
+        TopologyManagerReadServiceGrpc.METHOD_GENESIS_STATE.getFullMethodName,
+        TopologyManagerReadServiceGrpc.METHOD_GENESIS_STATE_V2.getFullMethodName,
+        TopologyManagerReadServiceGrpc.METHOD_SEQUENCER_LSU_STATE.getFullMethodName,
+        ParticipantRepairServiceGrpc.METHOD_EXPORT_ACS.getFullMethodName,
+        PartyManagementServiceGrpc.METHOD_EXPORT_PARTY_ACS.getFullMethodName,
+        ParticipantInspectionServiceGrpc.METHOD_OPEN_COMMITMENT.getFullMethodName,
+        ParticipantInspectionServiceGrpc.METHOD_INSPECT_COMMITMENT_CONTRACTS.getFullMethodName,
+        StatusServiceGrpc.METHOD_HEALTH_DUMP.getFullMethodName,
+        // spelled out because this module cannot depend on the synchronizer module
+        "com.digitalasset.canton.sequencer.admin.v30.SequencerAdministrationService/OnboardingState",
+        "com.digitalasset.canton.sequencer.admin.v30.SequencerAdministrationService/OnboardingStateV2",
+        "com.digitalasset.canton.mediator.admin.v30.MediatorInspectionService/Verdicts",
+      ).map(_ -> defaultStreamLimit).toMap
+    )
+  }
 }
 
 /** GRPC keep alive server configuration. */

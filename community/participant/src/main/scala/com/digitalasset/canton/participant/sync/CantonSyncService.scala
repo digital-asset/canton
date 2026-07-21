@@ -31,6 +31,7 @@ import com.digitalasset.canton.data.{
   ReassignmentSubmitterMetadata,
   SynchronizerSuccessor,
 }
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.error.TransactionRoutingError.{
   MalformedInputErrors,
@@ -84,6 +85,7 @@ import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.Active
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
+import com.digitalasset.canton.participant.sync.CantonSyncService.SyncServiceHandle
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
 import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgrade.FinishAutomaticLsuRequest
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
@@ -94,6 +96,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectSynchronizer,
   ConnectionListener,
+  ConnectionListenerHandle,
 }
 import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
@@ -176,7 +179,7 @@ class CantonSyncService(
     connectedSynchronizerFactory: ConnectedSynchronizer.Factory[ConnectedSynchronizer],
     metrics: ParticipantMetrics,
     sequencerInfoLoader: SequencerInfoLoader,
-    val isActive: () => Boolean,
+    override val isActive: () => Boolean,
     declarativeChangeTrigger: () => Unit,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
@@ -192,7 +195,8 @@ class CantonSyncService(
     with Spanning
     with NamedLogging
     with HasCloseContext
-    with InternalIndexServiceProviderImpl {
+    with InternalIndexServiceProviderImpl
+    with SyncServiceHandle {
 
   private[canton] val pendingLsuOperationsStore: PendingLsuOperation.Store =
     PendingOperationStore(
@@ -270,7 +274,10 @@ class CantonSyncService(
     participantNodePersistentState.value.settingsStore.settings.maxDeduplicationDuration
       .getOrElse(throw new RuntimeException("Max deduplication duration is not available"))
 
-  def subscribeToConnections(subscriber: ConnectionListener): Unit =
+  /** @return
+    *   a handle that can be closed to unsubscribe the subscriber
+    */
+  def subscribeToConnections(subscriber: ConnectionListener): ConnectionListenerHandle =
     connectionsManager.subscribeToConnections(subscriber)
 
   protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
@@ -382,7 +389,7 @@ class CantonSyncService(
       logger.debug(s"Vetting admin workflows on $lsid")
       vetAdminWorkflowsOnSynchronizer(lsid)
     }
-  })
+  }).discard // discarding the handle, because this subscription is tied to the lifecycle of the canton sync service anyway
 
   /** Return the active psid corresponding to the given id, if any. Since at most one synchronizer
     * connection per lsid can be active, this is well-defined.
@@ -1368,10 +1375,17 @@ class CantonSyncService(
       topologyConfig = parameters.topologyConfig,
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
-      topologyManagerO = lookupTopologyManager _,
+      topologyManagerO = lookupTopologyManager,
       psidLookup = activePsidForLsid _,
       topologyClientO = lookupTopologyClient,
       syncPersistentStateO = syncPersistentStateManager.get,
+      cleanSynchronizerRecordTime = lsid =>
+        ledgerApiIndexer
+          .asEval(TraceContext.empty)
+          .flatMap(_.ledgerApiStore)
+          .value
+          .cleanSynchronizerIndex(lsid)
+          .map(_.recordTime),
       loggerFactory = loggerFactory,
     )
 
@@ -2011,6 +2025,11 @@ object CantonSyncService {
         externalCallValidator,
       )
     syncService
+  }
+
+  trait SyncServiceHandle {
+    def isActive: () => Boolean
+    def subscribeToConnections(subscriber: ConnectionListener): ConnectionListenerHandle
   }
 
 }

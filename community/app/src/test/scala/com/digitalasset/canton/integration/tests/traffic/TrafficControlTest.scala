@@ -223,7 +223,7 @@ trait TrafficControlTest
         participant4.id,
         synchronizer1Id,
       )
-      val stcTx = TopologyTransaction(
+      val stcTx = TopologyTransaction.tryCreate(
         op = Replace,
         serial = PositiveInt.one,
         mapping = stcForP4,
@@ -234,7 +234,7 @@ trait TrafficControlTest
         participant4.id,
         VettedPackage.unbounded(AdminWorkflowServices.PingPackages.keys.toSeq),
       )
-      val vettedPackagesTx = TopologyTransaction(
+      val vettedPackagesTx = TopologyTransaction.tryCreate(
         op = Replace,
         serial = PositiveInt.one,
         mapping = vettedPackages,

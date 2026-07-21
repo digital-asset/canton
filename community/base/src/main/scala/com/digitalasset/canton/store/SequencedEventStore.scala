@@ -39,7 +39,7 @@ import com.digitalasset.canton.store.db.DbSequencedEventStore
 import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbType
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, SerializableTraceContext, TraceContext}
-import com.digitalasset.canton.util.{ErrorUtil, MaxBytesToDecompress, Thereafter}
+import com.digitalasset.canton.util.{ErrorUtil, Thereafter}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
@@ -577,7 +577,7 @@ object SequencedEventStore {
       }
 
     def fromProtoV30(
-        maxBytesToDecompress: MaxBytesToDecompress,
+        decompressionPolicy: DecompressionPolicy,
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
     )(
@@ -599,7 +599,7 @@ object SequencedEventStore {
             .fromByteString(protocolVersion, _)
             .flatMap(
               _.deserializeContent(
-                SequencedEvent.fromByteStringOpen(maxBytesToDecompress, hashOps, protocolVersion)
+                SequencedEvent.fromByteStringOpen(decompressionPolicy, hashOps, protocolVersion)
               )
             )
         )

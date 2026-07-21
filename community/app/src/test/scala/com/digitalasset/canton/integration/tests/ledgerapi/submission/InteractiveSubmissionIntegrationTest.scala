@@ -253,7 +253,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
 
       val partyId = PartyId.tryCreate("Alice", namespaceKey.fingerprint)
 
-      val namespaceDelegation = TopologyTransaction(
+      val namespaceDelegation = TopologyTransaction.tryCreate(
         mapping = NamespaceDelegation.tryCreate(
           Namespace(namespaceKey.fingerprint),
           namespaceKey,
@@ -264,7 +264,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
         protocolVersion = testedProtocolVersion,
       )
 
-      val partyToParticipant = TopologyTransaction(
+      val partyToParticipant = TopologyTransaction.tryCreate(
         mapping = PartyToParticipant.tryCreate(
           partyId = partyId,
           threshold = PositiveInt.one,
@@ -275,7 +275,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
         protocolVersion = testedProtocolVersion,
       )
 
-      val partyToKeyMapping = TopologyTransaction(
+      val partyToKeyMapping = TopologyTransaction.tryCreate(
         mapping = PartyToKeyMapping.tryCreate(
           partyId = partyId,
           threshold = PositiveInt.two,
@@ -414,7 +414,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
           .item
 
         // Change cpn to observation rights
-        val newPTP = TopologyTransaction(
+        val newPTP = TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           serial = PositiveInt.two,
           mapping = PartyToParticipant

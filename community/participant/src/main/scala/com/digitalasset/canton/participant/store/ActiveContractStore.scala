@@ -271,7 +271,7 @@ trait ActiveContractStore
     * The caller must ensure that the given timestamp is at most the one of the clean cursor in the
     * [[com.digitalasset.canton.participant.protocol.RequestJournal]]
     */
-  override protected[canton] def doPrune(
+  override protected def doPrune(
       beforeAndIncluding: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit

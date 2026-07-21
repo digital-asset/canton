@@ -122,7 +122,7 @@ final class GrpcParticipantRepairService(
       (out: OutputStream) => processExportAcs(request, new GZIPOutputStream(out)),
       responseObserver,
       byteString => v30.ExportAcsResponse(byteString),
-      processingTimeout.unbounded.duration,
+      processingTimeout.adminStreamOpenBound.duration,
       chunkSizeO = None,
     )
   }

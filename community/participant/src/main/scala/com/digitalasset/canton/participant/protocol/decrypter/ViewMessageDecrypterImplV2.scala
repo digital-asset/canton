@@ -23,26 +23,28 @@ import com.digitalasset.nonempty.NonEmpty
 import scala.annotation.unused
 import scala.concurrent.ExecutionContext
 
-class ViewMessageDecrypterV2(
+@unused
+private[decrypter] class ViewMessageDecrypterImplV2(
     @unused
     participantId: ParticipantId,
-    @unused
-    protocolVersion: ProtocolVersion,
     @unused
     sessionKeyStore: ConfirmationRequestSessionKeyStore,
     @unused
     snapshot: SynchronizerSnapshotSyncCryptoApi,
     @unused
+    protocolVersion: ProtocolVersion,
+    @unused
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit @unused executionContext: ExecutionContext)
-    extends NamedLogging
-    with ViewMessageDecrypter {
+    extends NamedLogging {
 
   @unused
   def decryptViews(
+      @unused
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]]
   )(implicit
+      @unused
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
     LightTransactionViewTree

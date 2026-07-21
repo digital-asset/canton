@@ -201,7 +201,7 @@ object IterableUtil {
   def zipAllOption[A, B](xs: Seq[A], ys: Iterable[B]): Seq[(Option[A], Option[B])] =
     xs.map(Some(_)).zipAll(ys.map(Some(_)), None, None)
 
-  def isSorted[A: Ordering](xs: immutable.Iterable[A]): Boolean = {
+  def isSorted[A: Ordering](xs: IterableOnce[A]): Boolean = {
     val iter = xs.iterator
 
     @tailrec def go(prev: A): Boolean =
@@ -213,4 +213,32 @@ object IterableUtil {
 
     if (iter.hasNext) go(iter.next()) else true
   }
+
+  /** Merges two sorted iterables into a single sorted iterables. `order`-equal elements from `xs`
+    * precedes those from `ys`.
+    */
+  def mergeSortedBy[A, B](xs: IterableOnce[A], ys: IterableOnce[A])(
+      by: A => B
+  )(implicit order: Ordering[B]): Iterator[A] =
+    new Iterator[A] {
+      private val iterX: scala.collection.BufferedIterator[A] = xs.iterator.buffered
+      private val iterY: scala.collection.BufferedIterator[A] = ys.iterator.buffered
+      override def hasNext: Boolean = iterX.hasNext || iterY.hasNext
+
+      override def next(): A =
+        if (!iterX.hasNext) iterY.next()
+        else if (!iterY.hasNext) iterX.next()
+        else {
+          // If both iterators are empty, the call to head throws a `NoSuchElement` exception
+          val headX = iterX.head
+          val headY = iterY.head
+          if (order.compare(by(headX), by(headY)) <= 0) iterX.next() else iterY.next()
+        }
+
+      override def knownSize: Int = {
+        val knownX = iterX.knownSize
+        val knownY = iterY.knownSize
+        if (knownX >= 0 && knownY >= 0) knownX + knownY else -1
+      }
+    }
 }

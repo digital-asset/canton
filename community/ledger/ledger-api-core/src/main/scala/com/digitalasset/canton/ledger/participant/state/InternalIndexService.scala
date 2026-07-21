@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   Observation,
   Submission,
 }
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
   AuthorizationEvent,
@@ -124,8 +125,10 @@ object InternalIndexService {
             case GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction) =>
               Some(
                 topologyAcsUpdateContainer(
-                  acsUpdate = AcsUpdate.EffectivePartyToParticipantMappings(
-                    mappings = effectivePartyToParticipantMappings(topologyTransaction)
+                  acsUpdate = AcsUpdate.EffectiveTopologyUpdate(
+                    partyToParticipantMappings =
+                      effectivePartyToParticipantMappings(topologyTransaction),
+                    synchronizerParameterState = None, // TODO(i33326)
                   ),
                   recordTime = topologyTransaction.recordTime,
                   offset = topologyTransaction.offset,
@@ -225,11 +228,11 @@ object InternalIndexService {
 
   sealed trait AcsUpdate extends Product with Serializable
   object AcsUpdate {
+    import Update.TopologyTransactionEffective.TopologyEvent.*
     final case class AcsCommitment(payload: ByteString) extends AcsUpdate
-    final case class EffectivePartyToParticipantMappings(
-        mappings: Set[
-          Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
-        ]
+    final case class EffectiveTopologyUpdate(
+        partyToParticipantMappings: Set[PartyToParticipantAuthorization],
+        synchronizerParameterState: Option[SynchronizerParametersState],
     ) extends AcsUpdate
     final case class AcsChangeUpdate(
         acsChange: AcsChange

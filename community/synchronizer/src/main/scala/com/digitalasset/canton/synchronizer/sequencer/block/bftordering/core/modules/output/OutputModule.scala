@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.sequencing.protocol.AllMembersOfSynchronizer
+import com.digitalasset.canton.sequencing.protocol.{AllMembersOfSynchronizer, DecompressionPolicy}
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.deserializeSignedSubmissionRequest
@@ -1352,9 +1352,11 @@ object OutputModule {
         logger: TracedLogger,
         traceContext: TraceContext,
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
-      // TODO(#21615) we should avoid a further deserialization downstream, which would also eliminate
-      //  a zip bomb vulnerability in the BUG that could be triggered by byzantine sequencers (#26169)
-      deserializeSignedSubmissionRequest(synchronizerProtocolVersion, maxBytesToDecompress)(
+      // TODO(#21615) we should avoid a further deserialization downstream
+      deserializeSignedSubmissionRequest(
+        synchronizerProtocolVersion,
+        DecompressionPolicy.forProtocolVersion(synchronizerProtocolVersion, maxBytesToDecompress),
+      )(
         request.payload
       ) match {
         case Right(signedSubmissionRequest) =>

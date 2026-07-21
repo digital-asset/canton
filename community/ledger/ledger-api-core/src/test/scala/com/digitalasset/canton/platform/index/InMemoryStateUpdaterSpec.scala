@@ -1668,6 +1668,7 @@ object InMemoryStateUpdaterSpec {
           authorizationEvent = Added(authorizationLevel),
         )
       ),
+      genericTopologyEvents = Nil, // TODO(i33326)
     )
 
   private val someLedgerEnd =

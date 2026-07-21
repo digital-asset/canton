@@ -14,13 +14,17 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
-import com.digitalasset.canton.sequencing.protocol.{SequencedEvent, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  DecompressionPolicy,
+  SequencedEvent,
+  SignedContent,
+}
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.store.SequencedEventStore.CounterAndTimestamp
 import com.digitalasset.canton.store.db.DbSequencedEventStore.*
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
-import com.digitalasset.canton.util.{EitherTUtil, MaxBytesToDecompress}
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
@@ -72,7 +76,8 @@ class DbSequencedEventStore(
               _.deserializeContent(
                 SequencedEvent.fromByteString(
                   ProtocolVersionValidation.PV(protocolVersion),
-                  MaxBytesToDecompress.MaxValueUnsafe,
+                  // No decompression bound needed: the database is trusted.
+                  DecompressionPolicy.MaxValueUnsafe,
                   _,
                 )
               )
@@ -189,7 +194,7 @@ class DbSequencedEventStore(
       functionFullName,
     )
 
-  override protected[canton] def doPrune(
+  override protected def doPrune(
       untilInclusive: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {

@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.platform.config
 
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.PositiveFiniteDuration
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.resource.{DbStorageSingle, Storage}
 import com.typesafe.config.{Config, ConfigFactory}
@@ -47,6 +48,10 @@ object TrafficEnforcementServerConfig {
       inProcessTeaServerName: String = "TeaGrpcInProcServer",
       projection: ProjectionConfig = ProjectionConfig(),
   ) extends TrafficEnforcementServerConfig {
+
+    def processServerNameForInstance(instance: InstanceName, ledgerApiPort: Port): String =
+      s"$inProcessTeaServerName-${instance.unwrap}-${ledgerApiPort.unwrap}"
+
     def pekkoConfig(storage: Storage): Config = storage match {
       case storage: DbStorageSingle =>
         storage.profile match {

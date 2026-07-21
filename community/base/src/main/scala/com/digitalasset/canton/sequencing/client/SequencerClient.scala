@@ -327,14 +327,42 @@ abstract class SequencerClientImpl(
     // We're ignoring the size of the SignedContent wrapper here.
     // TODO(#12320) Look into what we really want to do here
     val serializedRequestSize = request.toProtoVersioned.serializedSize
-    Either.cond(
-      serializedRequestSize <= maxRequestSize.unwrap,
-      (),
-      SendAsyncClientError.RequestInvalid(
-        s"Batch size ($serializedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for synchronizer $psid"
-      ),
-    )
+    for {
+      _ <- Either.cond(
+        serializedRequestSize <= maxRequestSize.unwrap,
+        (),
+        SendAsyncClientError.RequestInvalid(
+          s"Batch size ($serializedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for synchronizer $psid"
+        ),
+      )
+      _ <- checkUncompressedRequestSize(request, maxRequestSize)
+    } yield ()
   }
+
+  /** From protocol version 36 on, the receiving end decompresses the batch's envelopes within a
+    * single cumulative budget of `maxRequestSize` bytes, so a request must also fit in
+    * `maxRequestSize` in uncompressed form. Checking this here rejects an oversized request at the
+    * sender instead of failing its decompression downstream.
+    */
+  private def checkUncompressedRequestSize(
+      request: SubmissionRequest,
+      maxRequestSize: MaxRequestSize,
+  ): Either[SendAsyncClientError, Unit] =
+    if (protocolVersion <= ProtocolVersion.v35) Either.unit
+    else
+      for {
+        uncompressedBatch <- request.batch.toClosedUncompressedBatchResult.leftMap(err =>
+          SendAsyncClientError.RequestInvalid(s"Unable to compute uncompressed batch size: $err")
+        )
+        uncompressedRequestSize = uncompressedBatch.envelopes.map(_.uncompressedByteSize.toLong).sum
+        _ <- Either.cond(
+          uncompressedRequestSize <= maxRequestSize.unwrap.toLong,
+          (),
+          SendAsyncClientError.RequestInvalid(
+            s"Uncompressed batch size ($uncompressedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for synchronizer $psid"
+          ),
+        )
+      } yield ()
   @nowarn("cat=deprecation")
   private def sendAsyncInternal(
       batch: Batch[DefaultOpenEnvelope],

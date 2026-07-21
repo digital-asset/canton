@@ -47,7 +47,9 @@ abstract class ReassignmentBackdatingIntegrationTest
 
         P4.keys.public
           .upload(
-            synchronizerOwnerSigningKey.toByteString(testedProtocolVersion),
+            synchronizerOwnerSigningKey
+              .toByteString(testedProtocolVersion)
+              .valueOrFail("serializing public key"),
             Some("synchronizer owner pubkey"),
           )
         P4.topology.namespace_delegations.propose_delegation(

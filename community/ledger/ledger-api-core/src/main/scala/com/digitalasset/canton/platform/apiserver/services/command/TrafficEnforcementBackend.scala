@@ -5,7 +5,9 @@ package com.digitalasset.canton.platform.apiserver.services.command
 
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
+import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.TrafficAccountValidationFailed
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
@@ -29,6 +31,7 @@ import scala.concurrent.ExecutionContext
 class TrafficEnforcementBackend(
     enforceCostOnSubmissions: Boolean,
     val trafficServiceClient: RichTrafficServiceClient,
+    adminParty: LfPartyId,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -88,6 +91,11 @@ class TrafficEnforcementBackend(
     )
 
     actAs match {
+      case singleActAs :: Nil if singleActAs == adminParty =>
+        logger.debug(
+          show"Skipping traffic enforcement validation for participant admin party: $singleActAs"
+        )
+        FutureUnlessShutdown.unit
       case singleActAs :: Nil =>
         validateTraffic(
           // In Canton 3.5, the account ID is bound to the submitter party
@@ -110,15 +118,18 @@ object TrafficEnforcementBackend {
   def apply(
       enforceCostOnSubmissions: Boolean,
       trafficEnforcementServerConfig: TrafficEnforcementServerConfig,
+      instanceName: InstanceName,
+      ledgerApiPort: Port,
+      adminParty: LfPartyId,
       processingTimeout: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContextIdlenessExecutorService
   ): TrafficEnforcementBackend = {
     val trafficServiceClient = trafficEnforcementServerConfig match {
-      case TrafficEnforcementServerConfig.Internal(inProcessTeaServerName, _projection) =>
+      case internal: TrafficEnforcementServerConfig.Internal =>
         RichTrafficServiceClient.toInternalServer(
-          grpcChannelName = inProcessTeaServerName,
+          grpcChannelName = internal.processServerNameForInstance(instanceName, ledgerApiPort),
           timeout = processingTimeout,
           loggerFactory = loggerFactory,
         )
@@ -127,6 +138,7 @@ object TrafficEnforcementBackend {
     new TrafficEnforcementBackend(
       enforceCostOnSubmissions,
       trafficServiceClient,
+      adminParty,
       processingTimeout,
       loggerFactory,
     )

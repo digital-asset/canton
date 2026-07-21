@@ -10,11 +10,17 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   Onboarding,
   Revoked,
 }
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationLevel,
+  GenericTopologyEvent,
+}
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.DefaultTestIdentities.sequencerId
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.transaction.SignedTopologyTransactions.PositiveSignedTopologyTransactions
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.{
   ParticipantId,
@@ -76,12 +82,14 @@ class TopologyTransactionDiffTest
       },
     )
 
-    val tx: TopologyTransaction[Replace, PartyToParticipant] = TopologyTransaction(
-      Replace,
-      PositiveInt.one,
-      mapping,
-      testedProtocolVersion,
-    )
+    val tx: TopologyTransaction[Replace, PartyToParticipant] = TopologyTransaction
+      .create(
+        Replace,
+        PositiveInt.one,
+        mapping,
+        testedProtocolVersion,
+      )
+      .valueOrFail("creating topology transaction")
 
     topologyFactory.mkTrans[Replace, PartyToParticipant](trans = tx)
   }
@@ -90,14 +98,34 @@ class TopologyTransactionDiffTest
       participantId: ParticipantId
   ): SignedTopologyTransaction[Replace, SynchronizerTrustCertificate] = {
 
-    val tx: TopologyTransaction[Replace, SynchronizerTrustCertificate] = TopologyTransaction(
-      Replace,
-      PositiveInt.one,
-      SynchronizerTrustCertificate(participantId, synchronizerId),
-      testedProtocolVersion,
-    )
+    val tx: TopologyTransaction[Replace, SynchronizerTrustCertificate] =
+      TopologyTransaction.tryCreate(
+        Replace,
+        PositiveInt.one,
+        SynchronizerTrustCertificate(participantId, synchronizerId),
+        testedProtocolVersion,
+      )
 
     topologyFactory.mkTrans[Replace, SynchronizerTrustCertificate](trans = tx)
+  }
+
+  private def synchronizerParametersState(
+      reconciliationInterval: PositiveSeconds
+  ): SignedTopologyTransaction[Replace, SynchronizerParametersState] = {
+    val tx: TopologyTransaction[Replace, SynchronizerParametersState] =
+      TopologyTransaction.tryCreate(
+        Replace,
+        PositiveInt.one,
+        SynchronizerParametersState(
+          synchronizerId,
+          DynamicSynchronizerParameters
+            .defaultValues(testedProtocolVersion)
+            .update(reconciliationInterval = reconciliationInterval),
+        ),
+        testedProtocolVersion,
+      )
+
+    topologyFactory.mkTrans[Replace, SynchronizerParametersState](trans = tx)
   }
 
   /** Determines the expected value of onboarding-related local party flags based on the protocol
@@ -174,19 +202,23 @@ class TopologyTransactionDiffTest
 
       def diffInitialWith(
           newState: Seq[SignedTopologyTransaction[Replace, TopologyMapping]]
-      ) = TopologyTransactionDiff(
-        synchronizerId,
-        initialTxs,
-        newState,
-        p1,
-      ).map(_.topologyEvents)
+      ) = {
+        val diff = TopologyTransactionDiff(
+          synchronizerId,
+          initialTxs,
+          newState,
+          p1,
+        )
+        diff.foreach(_.genericTopologyEvents shouldBe empty)
+        diff.map(_.topologyEvents)
+      }
 
       "return None for identical transactions" in {
         diffInitialWith(initialTxs) shouldBe None
       }
 
       "revoke everything when the target state is empty" in {
-        diffInitialWith(Nil).value.forgetNE should contain theSameElementsAs Set(
+        diffInitialWith(Nil).value should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked),
           PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked),
           PartyToParticipantAuthorization(bob.toLf, p1.toLf, Revoked),
@@ -201,7 +233,7 @@ class TopologyTransactionDiffTest
             ptp(bob, List(p1 -> ParticipantPermission.Submission)),
             ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
           )
-        ).value.forgetNE should contain theSameElementsAs Set(
+        ).value should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked)
         )
       }
@@ -213,7 +245,7 @@ class TopologyTransactionDiffTest
             ptp(bob, List(p1 -> ParticipantPermission.Submission)),
             ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
           )
-        ).value.forgetNE should contain theSameElementsAs Set(
+        ).value should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(alice.toLf, p1.toLf, Revoked),
           PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked),
         )
@@ -232,7 +264,7 @@ class TopologyTransactionDiffTest
             ), // p2 added
             ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
           )
-        ).value.forgetNE should contain theSameElementsAs Set(
+        ).value should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(bob.toLf, p2.toLf, Added(Submission))
         )
       }
@@ -242,7 +274,7 @@ class TopologyTransactionDiffTest
           List(
             ptp(donald, List(p1 -> ParticipantPermission.Submission)) // new
           ) ++ initialTxs
-        ).value.forgetNE should contain theSameElementsAs Set(
+        ).value should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(donald.toLf, p1.toLf, Added(Submission))
         )
       }
@@ -253,7 +285,7 @@ class TopologyTransactionDiffTest
             synchronizerTrustCertificate(p1), // new
             synchronizerTrustCertificate(p2), // new
           ) ++ initialTxs
-        ).value.forgetNE should contain theSameElementsAs Set(
+        ).value should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(p1.adminParty.toLf, p1.toLf, Added(Submission)),
           PartyToParticipantAuthorization(p2.adminParty.toLf, p2.toLf, Added(Submission)),
         )
@@ -265,7 +297,7 @@ class TopologyTransactionDiffTest
           List(synchronizerTrustCertificate(p1)), // old state has admin
           Nil, // new state revokes admin
           p1,
-        ).value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+        ).value.topologyEvents should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(p1.adminParty.toLf, p1.toLf, Revoked)
         )
       }
@@ -286,7 +318,7 @@ class TopologyTransactionDiffTest
             ),
             ptp(charlie, List(p2 -> ParticipantPermission.Submission)),
           )
-        ).value.forgetNE should contain theSameElementsAs Set(
+        ).value should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(bob.toLf, p1.toLf, ChangedTo(Confirmation)),
           PartyToParticipantAuthorization(bob.toLf, p2.toLf, Added(Observation)),
         )
@@ -405,7 +437,7 @@ class TopologyTransactionDiffTest
           List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
           p1,
         )
-        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+        res.value.topologyEvents should contain theSameElementsAs Set(
           expectedOnboardingEvent(alice, p2, Submission)
         )
         res.value.onboardingLocalParty shouldBe
@@ -441,7 +473,7 @@ class TopologyTransactionDiffTest
           List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
           p1,
         )
-        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+        res.value.topologyEvents should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
         )
         res.value.onboardingLocalParty shouldBe
@@ -467,7 +499,7 @@ class TopologyTransactionDiffTest
           List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
           p2,
         )
-        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+        res.value.topologyEvents should contain theSameElementsAs Set(
           expectedOnboardingEvent(alice, p2, Submission)
         )
         res.value.onboardingLocalParty shouldBe
@@ -503,7 +535,7 @@ class TopologyTransactionDiffTest
           List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
           p2,
         )
-        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+        res.value.topologyEvents should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
         )
         res.value.onboardingLocalParty shouldBe
@@ -530,9 +562,52 @@ class TopologyTransactionDiffTest
           List(ptpOB(alice, List(p1 -> Subm, p2 -> ConfOB))),
           p2,
         )
-        res.value.topologyEvents.forgetNE should contain theSameElementsAs Set(
+        res.value.topologyEvents should contain theSameElementsAs Set(
           PartyToParticipantAuthorization(alice.toLf, p2.toLf, ChangedTo(Confirmation))
         )
+      }
+    }
+
+    "synchronizer parameters changes" should {
+      val tx1 = synchronizerParametersState(PositiveSeconds.tryOfSeconds(1))
+      val tx2 = synchronizerParametersState(PositiveSeconds.tryOfSeconds(2))
+
+      "be reflected in the diff if something has changed" onlyRunWithOrGreaterThan (ProtocolVersion.acsCommitmentRedesign) in {
+        val oldState = List(tx1)
+        val newState = List(tx2)
+
+        TopologyTransactionDiff(
+          synchronizerId,
+          oldState,
+          newState,
+          p1,
+        ).value.genericTopologyEvents.loneElement shouldBe GenericTopologyEvent
+          .SynchronizerParametersState(tx2.transaction.toByteStringChecked)
+      }
+
+      "not trigger an update if no values have changed" onlyRunWithOrGreaterThan (ProtocolVersion.acsCommitmentRedesign) in {
+        val state = List(tx1)
+        TopologyTransactionDiff(synchronizerId, state, state, p1) shouldBe None
+      }
+
+      "be computed alongside party changes" onlyRunWithOrGreaterThan (ProtocolVersion.acsCommitmentRedesign) in {
+        val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
+        val alicePtp = ptp(alice, List(p1 -> ParticipantPermission.Submission))
+
+        val oldState = List(tx1)
+        val newState = List(tx2, alicePtp)
+
+        def checkDiff(
+            oldState: PositiveSignedTopologyTransactions,
+            newState: PositiveSignedTopologyTransactions,
+        ) = {
+          val diff = TopologyTransactionDiff(synchronizerId, oldState, newState, p1).value
+          diff.topologyEvents should not be empty
+          diff.genericTopologyEvents should not be empty
+        }
+
+        checkDiff(oldState, newState)
+        checkDiff(newState, oldState)
       }
     }
 
@@ -543,9 +618,10 @@ class TopologyTransactionDiffTest
       val tx1 = ptp(alice, List(p1 -> ParticipantPermission.Submission))
       val tx2 = ptp(bob, List(p1 -> ParticipantPermission.Submission))
       val tx3 = ptp(alice, List(p1 -> ParticipantPermission.Confirmation))
+      val paramsTx = synchronizerParametersState(PositiveSeconds.tryOfSeconds(1))
 
       val oldState = List(tx1, tx2)
-      val newState = List(tx2, tx3)
+      val newState = List(tx2, tx3, paramsTx)
 
       "be independent of sequence order" in {
         val updateId1 = TopologyTransactionDiff.updateId(synchronizerId, oldState, newState)
@@ -565,6 +641,14 @@ class TopologyTransactionDiffTest
         val updateId1 = TopologyTransactionDiff.updateId(synchronizerId, oldState, newState)
         val updateIdSwapped = TopologyTransactionDiff.updateId(synchronizerId, newState, oldState)
         updateId1 should not be updateIdSwapped
+      }
+
+      "take synchronizer parameters into account" in {
+        val updateIdWithParams =
+          TopologyTransactionDiff.updateId(synchronizerId, oldState, List(tx2, tx3, paramsTx))
+        val updateIdWithoutParams =
+          TopologyTransactionDiff.updateId(synchronizerId, oldState, List(tx2, tx3))
+        updateIdWithParams should not be updateIdWithoutParams
       }
     }
   }

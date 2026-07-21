@@ -291,12 +291,12 @@ object LedgerApiCommands {
         service.generateExternalPartyTopology(request)
 
       override protected def createRequest(): Either[String, GenerateExternalPartyTopologyRequest] =
-        Right(
+        publicKey.toProtoV30.map(serializedPublicKey =>
           GenerateExternalPartyTopologyRequest(
             synchronizer = synchronizerId.toProtoPrimitive,
             partyHint = partyHint,
             publicKey = Some(
-              publicKey.toProtoV30
+              serializedPublicKey
                 .into[v2.crypto.SigningPublicKey]
                 .withFieldRenamed(_.publicKey, _.keyData)
                 .transform

@@ -292,7 +292,7 @@ class InMemoryActiveContractStore(
     } yield ()
   }
 
-  override def doPrune(
+  override protected def doPrune(
       beforeAndIncluding: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {

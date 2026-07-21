@@ -83,7 +83,7 @@ class TestProcessingSteps(
   override type ResultError = TestProcessingError
 
   override type RequestType = TestPendingRequestDataType
-  override val requestType = TestPendingRequestDataType
+  override val requestType: TestPendingRequestDataType = TestPendingRequestDataType
 
   override type ViewAbsoluteLedgerEffects = Unit
   override type FullViewAbsoluteLedgerEffects = Unit
@@ -211,35 +211,33 @@ class TestProcessingSteps(
       )
     }
 
-    EitherT.rightT(
-      DecryptedViews(
-        decryptedViewTrees.toList
-          .map(_.map((_, None)))
-      )
-    )
+    EitherT.rightT(DecryptedViews.fromViews(decryptedViewTrees))
   }
 
   override def absolutizeLedgerEffects(
-      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[
-        (WithRecipients[DecryptedView], Option[Signature])
-      ]
+      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[DecryptedViewData[DecryptedView]]
   ): (
-      Seq[(WithRecipients[DecryptedView], Option[Signature], Unit)],
+      Seq[(DecryptedViewData[DecryptedView], Unit)],
       Seq[ProtocolProcessor.MalformedPayload],
   ) = (
-    viewsWithCorrectRootHashAndRecipientsAndSignature.map { case (view, sig) => (view, sig, ()) },
+    viewsWithCorrectRootHashAndRecipientsAndSignature.map(decryptedView => (decryptedView, ())),
     Seq.empty,
   )
 
   override def computeFullViews(
       decryptedViewsWithSignatures: Seq[
-        (WithRecipients[DecryptedView], Option[Signature], ViewAbsoluteLedgerEffects)
+        (DecryptedViewData[DecryptedView], ViewAbsoluteLedgerEffects)
       ]
   ): (
       Seq[(WithRecipients[FullView], Option[Signature], FullViewAbsoluteLedgerEffects)],
       Seq[ProtocolProcessor.MalformedPayload],
   ) =
-    (decryptedViewsWithSignatures, Seq.empty)
+    (
+      decryptedViewsWithSignatures.map { case (decryptedViews, effects) =>
+        (decryptedViews.view, decryptedViews.signatureO, effects)
+      },
+      Seq.empty,
+    )
 
   override def computeParsedRequest(
       rc: RequestCounter,

@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import cats.{Applicative, Functor}
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import cats.syntax.traverse.*
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
@@ -19,59 +19,69 @@ import com.digitalasset.canton.ledger.participant.state.{
   ContractStakeholdersAndReassignmentCounter,
   InternalIndexService,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.*
-import com.digitalasset.canton.participant.config.AcsDigestTracingMode
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  LifeCycle,
+  SyncCloseable,
+}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
+import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
-import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
-import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ReassignmentCounter}
-import com.google.common.annotations.VisibleForTesting
+import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil, SingleUseCell}
+import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.{Flow, Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
+import org.apache.pekko.stream.{KillSwitches, Materializer, UniqueKillSwitch}
 
 import scala.collection.immutable
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** Builds the pipeline for processing events that trigger a change in the ACS commitment, namely
   *   - contract activations/deactivations
   *   - party onboarding to or offboarding from this or a remote participant
-  * @param maxNumUpdatesBetweenCheckpoints
-  *   a checkpoint is generated after this many events since the last checkpoint
-  * @param counterpartyBatchSize
-  *   how many counterparties get their digest updated at a time in case of a local party
-  *   onboarding. With the assumption that a party may have a lot of counterparties, but each
-  *   counterparty is only hosted on a small number of participants, this parameter essentially
-  *   limits how many digests are loaded into memory: `numDigestsInMemory = counterPartyBatchSize *
-  *   hostingParticipantsOfCounterparties`
   */
+// TODO(#33506): expose health status and metrics
 class RunningDigestProcessor(
     thisParticipant: ParticipantId,
     synchronizerId: SynchronizerId,
-    maxNumUpdatesBetweenCheckpoints: PositiveInt,
+    acsCommitmentConfig: AcsCommitmentConfig,
     indexService: InternalIndexService,
-    getTopologySnapshot: CantonTimestamp => FutureUnlessShutdown[TopologySnapshot],
+    getTopologySnapshot: Traced[CantonTimestamp] => FutureUnlessShutdown[TopologySnapshot],
     acsDigestStore: AcsDigestStore,
     stringInterning: StringInterning,
     hashOps: HashOps,
-    counterpartyBatchSize: PositiveInt,
-    tracingMode: AcsDigestTracingMode,
+    protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit
-    ec: ExecutionContext,
-    traceContext: TraceContext,
-) extends NamedLogging {
+    val executionContext: ExecutionContext,
+    mat: Materializer,
+) extends NamedLogging
+    with FlagCloseable
+    with BaseDigestProcessor {
 
   private val thisLfParticipant = thisParticipant.toLf
+
+  /** Helper method to calculate the most recent reconciliation/affirmation interval tick up to and
+    * including the given record time.
+    */
+  private def mostRecentIntervalTickUpToInclusive(
+      recordTime: CantonTimestamp,
+      interval: RefinedDuration,
+  ) =
+    CantonTimestamp.assertFromLong(
+      recordTime.toMicros - (recordTime.toMicros % interval.toScala.toMicros)
+    )
 
   /** A checkpoint is required if the reconciliation interval boundary is after or at the previously
     * processed timestamp and before the currently processed timestamp.
@@ -80,13 +90,11 @@ class RunningDigestProcessor(
       recordTime: CantonTimestamp,
       previouslyProcessedRecordTime: CantonTimestamp,
       topologySnapshot: TopologySnapshot,
-  ): FutureUnlessShutdown[Option[CantonTimestamp]] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[CantonTimestamp]] =
     topologySnapshot.findDynamicSynchronizerParameters().map {
       case Right(params) =>
         val boundary =
-          CantonTimestamp.assertFromLong(
-            recordTime.toMicros - (recordTime.toMicros % params.parameters.reconciliationInterval.toScala.toMicros)
-          )
+          mostRecentIntervalTickUpToInclusive(recordTime, params.parameters.reconciliationInterval)
         Option.when(previouslyProcessedRecordTime <= boundary && boundary < recordTime)(boundary)
       case Left(error) => ErrorUtil.invalidState(error)
     }
@@ -96,15 +104,18 @@ class RunningDigestProcessor(
     *   - before an AcsUpdate with the predecessor timestamp of the AcsChange, if a checkpoint
     *     boundary has been crossed
     */
-  def checkpointing: Flow[Checkpointing_Input, Checkpointing_Output, NotUsed] =
+  def checkpointing(
+      startingRecordTimeO: Option[CantonTimestamp],
+      // intentionally not implicit to not accidentally be used instead of the update's TraceContext
+      traceContext: TraceContext,
+  ): Flow[Checkpointing_Input, Checkpointing_Output, NotUsed] =
     Flow[Checkpointing_Input]
       .statefulMapAsyncUSAndDrain(
         (
           // numEventsSinceLastCheckpointFence
           0,
-          // TODO(#33084) use proper value from crash recovery
           // previously processed record time
-          CantonTimestamp.MinValue,
+          startingRecordTimeO.getOrElse(CantonTimestamp.MinValue),
         )
       ) {
         case (
@@ -114,7 +125,7 @@ class RunningDigestProcessor(
           implicit val traceContext: TraceContext = context.traceContext
           val recordTime = timepoint.recordTime
           for {
-            topologySnapshot <- getTopologySnapshot(recordTime)
+            topologySnapshot <- getTopologySnapshot(Traced(recordTime))
             crossedReconciliationIntervalBoundary <- determineCheckpointAtReconciliationBoundary(
               recordTime = recordTime,
               previouslyProcessedRecordTime = previousRecordTime,
@@ -125,7 +136,7 @@ class RunningDigestProcessor(
               case InternalIndexService.AcsUpdate.AcsChangeUpdate(_) =>
                 // emit a checkpoint at the record time's predecessor after maxNumUpdatesBetweenCheckpoints events have been emitted
                 @inline def checkpointByNumProcessedEvents = Option.when(
-                  (numEventsSinceLastCheckpoint >= maxNumUpdatesBetweenCheckpoints.unwrap && previousRecordTime != recordTime)
+                  numEventsSinceLastCheckpoint >= acsCommitmentConfig.maxNumUpdatesBetweenCheckpoints.unwrap
                 )(recordTime.immediatePredecessor)
                 val offset = timepoint.offset
                 // emit a checkpoint fence after crossing a reconciliation interval boundary
@@ -147,15 +158,16 @@ class RunningDigestProcessor(
                   // otherwise increase the counter and emit just the AcsChange
                   .getOrElse((numEventsSinceLastCheckpoint + 1, acsEvent))
 
-              case InternalIndexService.AcsUpdate.EffectivePartyToParticipantMappings(_) =>
+              case InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(partyTopologyEvents, _) =>
                 // add a checkpoint fence after the topology event
-                val events =
-                  Seq(
-                    NotCheckpointFence(topologySnapshot, event),
-                    CheckpointFence,
-                  ).map(context.withValue)
+                val partyEvents = Option.when(partyTopologyEvents.nonEmpty)(
+                  NotCheckpointFence(topologySnapshot, event)
+                )
+
+                val events = partyEvents.toList :+
+                  CheckpointFence
                 // the checkpoint is emitted AFTER the topology change, so we reset the counter to 0
-                (0, events)
+                (0, events.map(context.withValue))
 
               case InternalIndexService.AcsUpdate.AcsCommitment(_) =>
                 (numEventsSinceLastCheckpoint, Seq.empty)
@@ -163,7 +175,7 @@ class RunningDigestProcessor(
 
             (updatedNumEventsSinceLastCheckpoint, recordTime) -> result
           }
-      }
+      }(NamedLoggingContext(loggerFactory, traceContext))
       .mapConcat(identity)
 
   /** Enriches the incoming events (acs change or topology change) with the data that is needed to
@@ -176,6 +188,7 @@ class RunningDigestProcessor(
           // propagate checkpoint fences
           case CheckpointFence => Source.single(CheckpointFence: CheckpointFenceOr[Classification])
           case other @ NotCheckpointFence(topoSnapshot, value) =>
+            implicit val traceContext: TraceContext = context.traceContext
             value match {
               case InternalIndexService.AcsUpdate.AcsChangeUpdate(acsChange) =>
                 // determine which digests need to be changed for acs changes:
@@ -183,7 +196,7 @@ class RunningDigestProcessor(
                 // the returned classification also contains the information about the counterparticipants that need to be updated.
                 determineRequiredDigestChangesFromAcsChange(topoSnapshot, acsChange)
                   .map(update => other.withValue(update: Classification))
-              case InternalIndexService.AcsUpdate.EffectivePartyToParticipantMappings(events) =>
+              case InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(events, _) =>
                 // determine the digests that need to be changed for topology changes
                 //
                 // given n topology events at the same record time, when processing the i-th topology event (where i <= n),
@@ -274,60 +287,6 @@ class RunningDigestProcessor(
     }
   }
 
-  def reinitializationAcsUpdates(
-      recordTime: CantonTimestamp,
-      offset: Offset,
-      topologySnapshot: TopologySnapshot,
-  ): Source[ProcessingContext[CheckpointFenceOr[AcsUpdate]], NotUsed] = {
-    val timepoint = Timepoint(offset)(recordTime)
-    val acsUpdates = indexService
-      .counterParties(synchronizerId, offset, party = None)
-      .grouped(counterpartyBatchSize.unwrap)
-      .flatMap { counterparties =>
-        val counterpartiesSet = counterparties.toSet
-
-        indexService
-          .acs(synchronizerId, offset, counterpartiesSet, Set.empty)
-          .mapAsyncAndDrainUS(1) { activeContractOfCounterparty =>
-            val stakeholdersOfContract = activeContractOfCounterparty.stakeholders
-
-            for {
-              partyToParticipant <- getOnboardedParticipantsOfParties(
-                topologySnapshot,
-                stakeholdersOfContract,
-              )
-            } yield {
-              val stakeholdersToHostingParticipants = stakeholdersOfContract.view
-                .filter(counterpartiesSet.contains)
-                .map { sh =>
-                  sh -> partyToParticipant
-                    .getOrElse(sh, Set.empty)
-                }
-                .toMap
-
-              val thisParticipantStakeholders = partyToParticipant.collect {
-                case (party, hostingParticipants)
-                    if hostingParticipants.contains(thisLfParticipant) =>
-                  party
-              }
-
-              val acsUpdate = AcsUpdate(
-                stakeholdersToHostingParticipants,
-                thisParticipantStakeholders.toSeq,
-                activeContractOfCounterparty.contractId,
-                activeContractOfCounterparty.reassignmentCounter,
-                isActivation = true,
-              )
-
-              ProcessingContext(timepoint, NotCheckpointFence(topologySnapshot, acsUpdate))
-            }
-          }
-
-      }
-
-    acsUpdates.concat(Source.single(ProcessingContext(timepoint, CheckpointFence)))
-  }
-
   /** Determines the required digests that need to be updated by:
     *   1. loading the ACS of `partyAffectedByTopologyChange` to find all counterparties
     *   1. loading the ACS for batches of counterparties, discarding contracts that are not shared
@@ -368,6 +327,8 @@ class RunningDigestProcessor(
       topologySnapshot: TopologySnapshot,
       ptp: PartyToParticipantAuthorization,
       changeTracker: TopologyChangeTracker,
+  )(implicit
+      traceContext: TraceContext
   ): (TopologyChangeTracker, Source[Classification, NotUsed]) = {
     val isPartyBeingAdded = ptp.authorizationEvent match {
       case _: AuthorizationEvent.Added => true
@@ -390,7 +351,7 @@ class RunningDigestProcessor(
     val acsUpdates = indexService
       // load the ACS of the party to determine the counterparties that need to have their digest updated
       .counterParties(synchronizerId, offset, Some(partyAffectedByTopologyChange))
-      .grouped(counterpartyBatchSize.unwrap)
+      .grouped(acsCommitmentConfig.counterpartyBatchSize.unwrap)
       .flatMapConcat { counterparties =>
         // for a group of counterparties, load the acs that is shared with the locally onboarded party
         // and emit the corresponding classification
@@ -451,7 +412,7 @@ class RunningDigestProcessor(
   private def determineRequiredDigestChangesFromAcsChange(
       topologySnapshot: TopologySnapshot,
       acsChange: AcsChange,
-  ): Source[AcsUpdate, NotUsed] = {
+  )(implicit traceContext: TraceContext): Source[AcsUpdate, NotUsed] = {
     val allStakeholders = acsChange.activations.values.flatMap(_.stakeholders) ++
       acsChange.deactivations.values.flatMap(_.stakeholders)
 
@@ -461,299 +422,149 @@ class RunningDigestProcessor(
         allStakeholders.toSet,
       )
     } yield {
-      def toAcsChange(
-          change: Map[LfContractId, ContractStakeholdersAndReassignmentCounter],
-          isActivation: Boolean,
-      ): immutable.Iterable[AcsUpdate] =
-        change.flatMap {
-          case (
-                cid,
-                ContractStakeholdersAndReassignmentCounter(stakeholders, reassignmentCounter),
-              ) =>
-            val locallyHostedStakeholders =
-              stakeholders
-                .filter(sh =>
-                  partyToParticipants.getOrElse(sh, Set.empty).contains(thisLfParticipant)
-                )
-                .toSeq
-            // if the change does not affect a locally hosted party, which could be the case if a party hasn't been fully onboarded yet,
-            // simply ignore the change. Once the party onboarding has completed, the corresponding topology change will trigger the appropriate digest updates.
-            if (locallyHostedStakeholders.isEmpty) Seq.empty
-            else {
-              val stakeholdersToHostingParticipants = stakeholders.view
-                .map(sh => sh -> partyToParticipants.getOrElse(sh, Set.empty))
-                .toMap
-              Seq(
-                AcsUpdate(
-                  // update the digest for these stakeholders and their respective hosting participants
-                  stakeholdersToHostingParticipants,
-                  // with all locally hosted parties
-                  locallyHostedStakeholders,
-                  // for this contract
-                  cid,
-                  // and reassignment counter
-                  reassignmentCounter,
-                  // with an additive or negative change
-                  isActivation = isActivation,
-                )
-              )
-            }
-        }
-
-      val changes = toAcsChange(acsChange.activations, isActivation = true) ++
-        toAcsChange(acsChange.deactivations, isActivation = false)
+      val changes = toAcsChange(acsChange.activations, partyToParticipants, isActivation = true) ++
+        toAcsChange(acsChange.deactivations, partyToParticipants, isActivation = false)
       Source(changes)
     }
     PekkoUtil.futureSourceUS(futureSource)
   }
 
-  /** Returns a mapping between parties and the participants to which they are fully onboarded (i.e.
-    * onboarding flag is false).
-    * @param topologySnapshot
-    *   the topology snapshot for looking up the party hosting information
-    * @param parties
-    *   the parties for which to load the hosting participants
-    * @return
-    */
-  private def getOnboardedParticipantsOfParties(
-      topologySnapshot: TopologySnapshot,
-      parties: Set[LfPartyId],
-  ): FutureUnlessShutdown[Map[LfPartyId, Set[LedgerParticipantId]]] =
-    topologySnapshot
-      .activeParticipantsOfPartiesWithInfo(parties.toSeq)
-      .map { ptp =>
-        val onboardingCompleted = ptp.view
-          .mapValues(info =>
-            info.participants.view.collect {
-              case (pid, attr) if !attr.onboarding => pid.toLf
-            }.toSet
+  private def toAcsChange(
+      change: Map[LfContractId, ContractStakeholdersAndReassignmentCounter],
+      partyToParticipants: Map[LfPartyId, Set[LedgerParticipantId]],
+      isActivation: Boolean,
+  ): immutable.Iterable[AcsUpdate] =
+    change.flatMap {
+      case (
+            cid,
+            ContractStakeholdersAndReassignmentCounter(stakeholders, reassignmentCounter),
+          ) =>
+        val locallyHostedStakeholders =
+          stakeholders
+            .filter(sh => partyToParticipants.getOrElse(sh, Set.empty).contains(thisLfParticipant))
+            .toSeq
+        // if the change does not affect a locally hosted party, which could be the case if a party hasn't been fully onboarded yet,
+        // simply ignore the change. Once the party onboarding has completed, the corresponding topology change will trigger the appropriate digest updates.
+        if (locallyHostedStakeholders.isEmpty) Seq.empty
+        else {
+          val stakeholdersToHostingParticipants = stakeholders.view
+            .map(sh => sh -> partyToParticipants.getOrElse(sh, Set.empty))
+            .toMap
+          Seq(
+            AcsUpdate(
+              // update the digest for these stakeholders and their respective hosting participants
+              stakeholdersToHostingParticipants,
+              // with all locally hosted parties
+              locallyHostedStakeholders,
+              // for this contract
+              cid,
+              // and reassignment counter
+              reassignmentCounter,
+              // with an additive or negative change
+              isActivation = isActivation,
+            )
           )
-          .toMap
-        onboardingCompleted
-      }
+        }
+    }
 
-  private val digestAccumulator = new SequentialDigestAccumulator(
+  override protected val digestAccumulator = new SequentialDigestAccumulator(
     thisLfParticipant,
     acsDigestStore,
     stringInterning,
     hashOps,
-    tracingMode,
+    acsCommitmentConfig.tracing,
     loggerFactory,
   )
-  def inMemoryDigestAccumulator: Flow[DigestAccumulator_Input, DigestAccumulator_Output, NotUsed] =
-    Flow[DigestAccumulator_Input]
-      .mapAsyncAndDrainUS(1)(digestAccumulator.process)
-      .collect { case Some(checkpointWritten) => checkpointWritten }
 
-  def pipeline: Flow[Checkpointing_Input, DigestAccumulator_Output, NotUsed] =
+  def pipeline(startingRecordTimeO: Option[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): Flow[Checkpointing_Input, DigestAccumulator_Output, NotUsed] =
     Flow[Checkpointing_Input].async
-      .via(checkpointing)
+      .via(checkpointing(startingRecordTimeO, traceContext))
       .async
       .via(classification)
       .async
       .via(inMemoryDigestAccumulator)
 
-  def run()(implicit mat: Materializer) = for {
-    latestCheckpointO <- acsDigestStore.latestCheckpointUpTo(Offset.MaxValue)
-    startingOffsetO = latestCheckpointO
-      .map { case (offset, _) => offset }
-    _ = PekkoUtil.runSupervised(
-      indexService
+  private val killSwitch = new SingleUseCell[UniqueKillSwitch]
+  private val doneFuture = new SingleUseCell[Future[Unit]]
+
+  override def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    def runPipeline(promise: Promise[Unit]) = for {
+      latestCheckpointO <- acsDigestStore.latestCheckpointUpTo(Offset.MaxValue)
+      (startingOffsetO, startingRecordTimeO) = latestCheckpointO.unzip
+      _ <- startingOffsetO.traverse { startingOffset =>
+        logger.info(
+          s"Deleting ACS digest data after latest checkpoint $latestCheckpointO before starting the processing pipeline"
+        )
+        acsDigestStore.deleteAfter(startingOffset)
+      }
+    } yield {
+      logger.info(s"Starting ACS digest processor from latest checkpoint $latestCheckpointO.")
+      val graph = indexService
         .acsUpdates(synchronizerId, startingOffsetO)
+        .viaMat(KillSwitches.single)(Keep.right)
         .map { update =>
           val timepoint = Timepoint(update.offset)(update.synchronizerTime)
-          ProcessingContext(timepoint, update.acsUpdate)
+          ProcessingContext(timepoint, update.acsUpdate)(update.traceContext)
         }
-        .via(pipeline)
-        .to(
+        .via(pipeline(startingRecordTimeO))
+        .toMat(
           Sink.foreach(cp =>
             logger.debug(
               s"An ACS digest checkpoint was written at ${cp.recordTimeInclusive} ${cp.offsetInclusive}"
             )
           )
-        ),
-      s"AcsDigestProcessor($synchronizerId)",
-    )
-  } yield ()
-}
+        )(Keep.both)
 
-object RunningDigestProcessor {
+      val (ks, doneF) = PekkoUtil.runSupervised(graph, this.toString)
+      promise.completeWith(doneF.map(_ => ()))
 
-  type Checkpointing_Input = ProcessingContext[InternalIndexService.AcsUpdate]
-  type Checkpointing_Output = ProcessingContext[CheckpointFenceOr[InternalIndexService.AcsUpdate]]
-
-  type Classifcation_Input = Checkpointing_Output
-  type Classification_Output = ProcessingContext[CheckpointFenceOr[Classification]]
-
-  type DigestAccumulator_Input = Classification_Output
-  type DigestAccumulator_Output = CheckpointWritten
-
-  /** Holds some data that we thread through the pipeline for a given input event.
-    */
-  final case class ProcessingContext[+T](
-      timepoint: Timepoint,
-      value: T,
-  )(implicit val traceContext: TraceContext) {
-    def offset: Offset = timepoint.offset
-    def recordTime: CantonTimestamp = timepoint.recordTime
-
-    def withValue[U](newValue: U): ProcessingContext[U] = copy(value = newValue)
-
-    def map[U](f: T => U): ProcessingContext[U] = copy(value = f(value))
-
-    def traverse[F[_], U](f: T => F[U])(implicit F: Functor[F]): F[ProcessingContext[U]] =
-      F.map(f(value))(u => copy(value = u))
-  }
-
-  /** Data type to represent a checkpointing fence or some event to be processed. While this is
-    * isomorphic to Either[Unit, A], the explicit type adds clarity.
-    */
-  sealed trait CheckpointFenceOr[+A] extends Product with Serializable {
-    def map[B](f: A => B): CheckpointFenceOr[B] = this match {
-      case CheckpointFence => CheckpointFence
-      case NotCheckpointFence(topologySnapshot, value) =>
-        NotCheckpointFence(topologySnapshot, f(value))
-    }
-
-    def getOption: Option[A] = this match {
-      case CheckpointFence => None
-      case NotCheckpointFence(_, x) => Some(x)
-    }
-
-    def traverse[F[_], B](f: A => F[B])(implicit F: Applicative[F]): F[CheckpointFenceOr[B]] =
-      this match {
-        case CheckpointFence => F.pure(CheckpointFence)
-        case NotCheckpointFence(topologySnapshot, value) =>
-          F.map(f(value))(b => NotCheckpointFence(topologySnapshot, b))
+      synchronizeWithClosingSync("register kill switch") {
+        // No need for CAS here because that's the only place where we write to killSwitch
+        // and the logic around `runPipeline` already ensures that this runs at most once.
+        ErrorUtil.requireState(
+          killSwitch.putIfAbsent(ks).isEmpty,
+          "killSwitch has already been initialized",
+        )
+      }.onShutdown {
+        // the component has been closed while the stream was starting up. So we need to pull the kill switch ourselves.
+        ks.shutdown()
       }
-
-    @VisibleForTesting
-    private[commitment] def tryValue: A = this match {
-      case CheckpointFence => throw new NoSuchElementException("CheckpointFence")
-      case NotCheckpointFence(_, value) => value
     }
 
-    @VisibleForTesting
-    private[commitment] def toOption: Option[A] =
-      this match {
-        case CheckpointFence => None
-        case NotCheckpointFence(_, value) => Some(value)
+    // Use the `Sync` version so that synchronization stops when we've registered the futre in `doneFuture`
+    synchronizeWithClosingSync("start digest processor pipeline") {
+      val promise = Promise[Unit]()
+      val notYetStarted = doneFuture.putIfAbsent(promise.future).isEmpty
+      if (notYetStarted) {
+        runPipeline(promise)
+      } else {
+        logger.info("digest processor has already been started before")
+        FutureUnlessShutdown.unit
       }
-  }
-  case object CheckpointFence extends CheckpointFenceOr[Nothing]
-  type CheckpointFence = CheckpointFence.type
-
-  final case class NotCheckpointFence[+A](topologySnapshot: TopologySnapshot, value: A)
-      extends CheckpointFenceOr[A]
-      with PrettyPrinting {
-    def withValue[B](newValue: B): NotCheckpointFence[B] = copy(value = newValue)
-
-    override protected def pretty: Pretty[NotCheckpointFence.this.type] =
-      prettyOfClass(
-        unnamedParam(c => prettyOfString[A](_.toString).treeOf(c.value))
-      )
+    }.onShutdown(FutureUnlessShutdown.unit)
   }
 
-  /** The output of classification describes which digests need to be updated
-    */
-  sealed trait Classification extends Product with Serializable
-
-  /** Defines which digests (party and participant) need to be updated with the hash of the
-    * contract.
-    * @param stakeholders
-    *   the parties and affected participants for which the digest needs to be updated with the hash
-    *   of the contract and the locally hosted stakeholders.
-    * @param locallyHostedStakeholders
-    *   the stakeholders of the contract that are hosted by the processing participant. This
-    *   collection does not contain duplicates.
-    */
-  final case class AcsUpdate(
-      stakeholders: Map[LfPartyId, Set[LedgerParticipantId]],
-      locallyHostedStakeholders: Seq[LfPartyId],
-      cid: LfContractId,
-      rc: ReassignmentCounter,
-      isActivation: Boolean,
-  ) extends Classification
-
-  /** When a party is being onboarded to a participant.
-    */
-  final case class PartyOnboardingToParticipant(
-      party: LfPartyId,
-      participant: LedgerParticipantId,
-  ) extends Classification
-
-  sealed trait PartyHostingChange extends Classification {
-    def party: LfPartyId
-    def participant: LedgerParticipantId
-  }
-
-  /** When a party has been added to a participant.
-    */
-  final case class PartyAddedToParticipant(
-      override val party: LfPartyId,
-      override val participant: LedgerParticipantId,
-  ) extends PartyHostingChange
-
-  /** When a party has been removed from a participant.
-    */
-  final case class PartyRemovedFromParticipant(
-      override val party: LfPartyId,
-      override val participant: LedgerParticipantId,
-  ) extends PartyHostingChange
-
-  /** When a checkpoint has been written, meaning that all digests up to record time and offset
-    * (both inclusive) have been persisted.
-    */
-  final case class CheckpointWritten(recordTimeInclusive: CantonTimestamp, offsetInclusive: Offset)
-
-  object CheckpointWritten {
-    def apply(timepoint: Timepoint): CheckpointWritten =
-      CheckpointWritten(timepoint.recordTime, timepoint.offset)
-  }
-
-  /** Tracks changes to the hosting relationship per party.
-    */
-  class TopologyChangeTracker(
-      private val deltas: Map[LfPartyId, Set[LedgerParticipantId] => Set[LedgerParticipantId]]
-  ) {
-
-    /** Returns a function that updates a party to participants map by adding the association from
-      * the given party to the given participant.
-      */
-    def addPartyToParticipant(
-        party: LfPartyId,
-        participant: LedgerParticipantId,
-    ): TopologyChangeTracker =
-      new TopologyChangeTracker(
-        deltas.updatedWith(party)(
-          _.map(_.andThen(s => s + participant)).orElse(Some(s => s + participant))
+  override protected def onClosed(): Unit = {
+    import TraceContext.Implicits.Empty.*
+    val closeKillSwitch = killSwitch.get
+      .map(ks =>
+        SyncCloseable(
+          s"killSwitch shutdown",
+          ks.shutdown(),
         )
       )
-
-    /** Returns a function that updates a party to participants map by removing the association from
-      * the given party to the given participant.
-      */
-    def removePartyFromParticipant(
-        party: LfPartyId,
-        participant: LedgerParticipantId,
-    ): TopologyChangeTracker = new TopologyChangeTracker(
-      deltas.updatedWith(party)(
-        _.map(_.andThen(s => s - participant)).orElse(Some(s => s - participant))
+      .toList
+    val processingCompletion = doneFuture.get.map(doneF =>
+      AsyncCloseable(
+        s"processing completion",
+        doneF,
+        timeouts.shutdownProcessing,
       )
     )
-
-    def applyPendingTopologyChanges(
-        map: Map[LfPartyId, Set[LedgerParticipantId]]
-    ): Map[LfPartyId, Set[LedgerParticipantId]] =
-      if (deltas.isEmpty) map
-      else {
-        map.view.map { case kv @ (party, participants) =>
-          deltas.get(party).map(f => (party, f(participants))).getOrElse(kv)
-        }.toMap
-      }
+    LifeCycle.close((closeKillSwitch ++ processingCompletion)*)(logger)
   }
 
-  object TopologyChangeTracker {
-    val empty: TopologyChangeTracker = new TopologyChangeTracker(Map.empty)
-  }
+  override def toString: String = s"RunningDigestProcessor($synchronizerId)"
 }

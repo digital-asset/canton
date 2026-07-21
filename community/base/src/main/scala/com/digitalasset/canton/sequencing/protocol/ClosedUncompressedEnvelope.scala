@@ -131,18 +131,29 @@ final case class ClosedUncompressedEnvelope private[protocol] (
   override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
     this.asRight
 
-  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope = {
-    val uncompressed = checkedToByteString(
-      v31.EnvelopeWithoutRecipients(
-        content = bytes,
-        signatures = signatures.map(_.toProtoV30),
-      )
+  private def toEnvelopeWithoutRecipientsProto: v31.EnvelopeWithoutRecipients =
+    v31.EnvelopeWithoutRecipients(
+      content = bytes,
+      signatures = signatures.map(_.toProtoV30),
     )
+
+  /** The number of bytes that decompressing this envelope draws from the receiver's
+    * [[DecompressionBudget]]: the size of the serialization that [[toClosedCompressedEnvelope]]
+    * compresses.
+    */
+  def uncompressedByteSize: Int = toEnvelopeWithoutRecipientsProto.serializedSize
+
+  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope = {
+    val uncompressed = checkedToByteString(toEnvelopeWithoutRecipientsProto)
     ClosedCompressedEnvelope.create(
       bytes = ByteStringUtil.compressGzip(uncompressed),
       recipients = recipients,
       algorithm = CompressionAlgorithm.GZIP,
-    )(maxBytesToDecompress = MaxBytesToDecompress(NonNegativeInt.tryCreate(uncompressed.size)))
+    )(
+      DecompressionBudget(
+        MaxBytesToDecompress(NonNegativeInt.tryCreate(uncompressed.size))
+      )
+    )
   }
 
   def toProtoV30: v30.Envelope = v30.Envelope(
@@ -154,8 +165,8 @@ final case class ClosedUncompressedEnvelope private[protocol] (
   def updateSignatures(signatures: Seq[Signature]): ClosedUncompressedEnvelope =
     copy(signatures = signatures)
 
-  override def withMaxBytesToDecompress(
-      maxBytesToDecompress: MaxBytesToDecompress
+  override private[protocol] def withDecompressionBudget(
+      decompressionBudget: DecompressionBudget
   ): ClosedUncompressedEnvelope = this
 
   @VisibleForTesting

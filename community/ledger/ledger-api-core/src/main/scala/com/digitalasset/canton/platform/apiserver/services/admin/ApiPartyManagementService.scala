@@ -95,6 +95,7 @@ import com.digitalasset.canton.user.{
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.nonempty.NonEmptyColl.`cats nonempty traverse`
 import io.grpc.Status.Code.ALREADY_EXISTS
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer
@@ -1114,26 +1115,30 @@ private[apiserver] final class ApiPartyManagementService private (
           )
         ),
       )
-    } yield {
-      val transactions =
+      transactions <- {
+        // Importing globally appears to conflict with `import scalaz.syntax.traverse.*`
+        import cats.syntax.traverse.*
+
         NonEmpty
           .mk(List, p2p)
-          .map(mapping =>
-            TopologyTransaction(
+          .toNEF
+          .traverse(mapping =>
+            TopologyTransaction.create(
               op = TopologyChangeOp.Replace,
               serial = PositiveInt.one,
               mapping = mapping,
               protocolVersion = protocolVersion,
             )
           )
-
+      }
+    } yield {
       GenerateExternalPartyTopologyResponse(
         partyId = party.toProtoPrimitive,
         publicKeyFingerprint = pubKey.fingerprint.toProtoPrimitive,
-        topologyTransactions = transactions.map(_.toByteString),
+        topologyTransactions = transactions.map(_.toByteStringChecked),
         multiHash = MultiTransactionSignature
           .computeCombinedHash(
-            transactions.map(_.hash).toSet,
+            transactions.fromNEF.map(_.hash).toSet,
             syncService.hashOps,
           )
           .getCryptographicEvidence,

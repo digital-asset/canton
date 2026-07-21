@@ -14,6 +14,7 @@ import com.daml.metrics.api.{
   MetricQualification,
   MetricsContext,
 }
+import com.digitalasset.canton.metrics.IndexerMetrics.Labels
 
 class IndexerHistograms(val prefix: MetricName)(implicit
     inventory: HistogramInventory
@@ -284,6 +285,23 @@ class IndexerMetrics(
     0,
   )
 
+  val lastReceivedRecordTime: Gauge[Long] =
+    factory.gauge(
+      MetricInfo(
+        prefix :+ "last_received_record_time",
+        summary =
+          "The time of the last event ingested by the index db (in milliseconds since EPOCH).",
+        description = """The last received record time is a monotonically increasing integer
+                      |value that represents the record time of the last event ingested by the index
+                      |db. It is measured in milliseconds since the EPOCH time.""",
+        qualification = MetricQualification.Debug,
+        labelsWithDescription = Map(
+          Labels.synchronizerId -> "The id of the synchronizer."
+        ),
+      ),
+      0L,
+    )
+
   val ledgerEndSequentialId: Gauge[Long] =
     factory.gauge(
       MetricInfo(
@@ -344,6 +362,7 @@ object IndexerMetrics {
   object Labels {
     val userId = "user_id"
     val grpcCode = "grpc_code"
+    val synchronizerId = "synchronizer_id"
     object eventType {
 
       val key = "event_type"

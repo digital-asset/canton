@@ -181,7 +181,7 @@ trait P2PConnectionEventListener {
 
   def onDisconnect(p2pEndpointId: P2PEndpoint.Id)(implicit traceContext: TraceContext): Unit
 
-  def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
+  def onNodeId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
       traceContext: TraceContext
   ): Unit
 }
@@ -199,8 +199,8 @@ object P2PConnectionEventListener {
           traceContext: TraceContext
       ): Unit = ()
 
-      override def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(
-          implicit traceContext: TraceContext
+      override def onNodeId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
+          traceContext: TraceContext
       ): Unit =
         ()
     }

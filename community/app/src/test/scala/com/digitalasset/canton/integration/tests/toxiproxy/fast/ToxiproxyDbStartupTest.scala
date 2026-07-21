@@ -293,6 +293,17 @@ abstract class ToxiproxyParticipantStartupTestPostgres extends ToxiproxyDbStartu
 }
 
 class ToxiproxyParticipantStartupFailsFastPostgres extends ToxiproxyParticipantStartupTestPostgres {
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      // Disabling LAPI verification for the participants
+      // to avoid the test failing due to LAPI verification failing when the database is down.
+      .updateTestingConfig(
+        _.focus(_.participantsWithoutLapiVerification).replace(
+          Set(
+            "participant1"
+          )
+        )
+      )
   participantStartupFailsFast()
 }
 

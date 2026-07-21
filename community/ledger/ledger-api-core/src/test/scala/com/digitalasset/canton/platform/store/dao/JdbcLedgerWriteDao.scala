@@ -165,6 +165,7 @@ private class JdbcLedgerWriteDao(
                 ),
               )
             ),
+            genericTopologyEvents = Nil,
             synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
             effectiveTime = CantonTimestamp(recordTime),
           )

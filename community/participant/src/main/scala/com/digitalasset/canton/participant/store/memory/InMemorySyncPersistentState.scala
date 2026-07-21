@@ -58,12 +58,17 @@ class InMemoryLogicalSyncPersistentState(
       loggerFactory,
     )
 
-  val acsCommitmentStore =
+  override val acsCommitmentStore =
     new InMemoryAcsCommitmentStore(
       synchronizerIdx.synchronizerId,
       acsCounterParticipantConfigStore,
       loggerFactory,
     )
+
+  override val acsDigestStore: InMemoryAcsDigestStore = InMemoryAcsDigestStore.create(
+    ledgerApiStore.map(_.stringInterningView),
+    loggerFactory,
+  )
 
   override val acsInspection: AcsInspection =
     new AcsInspection(

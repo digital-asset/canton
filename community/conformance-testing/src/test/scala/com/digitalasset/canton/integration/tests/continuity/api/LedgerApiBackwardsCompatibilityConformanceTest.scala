@@ -7,6 +7,7 @@ import com.digitalasset.canton.integration.tests.continuity.{
   MultiVersionLedgerApiConformanceBase,
   ProtocolContinuityConformanceTest,
 }
+import com.digitalasset.canton.integration.tests.ledgerapi.ProtocolType
 import com.digitalasset.canton.integration.{EnvironmentDefinition, IsolatedEnvironments}
 import com.digitalasset.canton.util.ReleaseUtils
 import com.digitalasset.canton.version.ReleaseVersion
@@ -51,8 +52,8 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
     }
   }
 
-  override def excludedTests(version: ReleaseVersion): Seq[String] =
-    super.excludedTests(version) ++ ledgerApiCompatiblityExcludedTests
+  override def excludedTests(version: ReleaseVersion, protocolType: ProtocolType): Seq[String] =
+    super.excludedTests(version, protocolType) ++ ledgerApiCompatiblityExcludedTests
 
   private val ledgerApiCompatiblityExcludedTests: Seq[String] = Seq(
     // TODO (i31463) Recheck excluded tests
@@ -80,16 +81,6 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
     "ExplicitDisclosureIT:EDRouteByDisclosedContractSynchronizerId",
     // Unknown reason TT 3.4.12 never ends
     "DeduplicationMixedClients",
-
-    // 3.5 JSON - changed error message due to json security checks
-    "DeeplyNestedValueIT:RejectCreateCommand110",
-    "DeeplyNestedValueIT:RejectCreateCommand200",
-    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand110",
-    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand200",
-    "DeeplyNestedValueIT:RejectExerciseCommand110",
-    "DeeplyNestedValueIT:RejectExerciseCommand200",
-    "DeeplyNestedValueIT:RejectChoiceArgumentInCreateAndExerciseCommand110",
-    "DeeplyNestedValueIT:RejectChoiceArgumentInCreateAndExerciseCommand200",
   )
 }
 

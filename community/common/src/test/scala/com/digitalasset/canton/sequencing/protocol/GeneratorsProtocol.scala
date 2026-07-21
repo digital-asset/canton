@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.Generators
 import com.digitalasset.canton.config.CantonRequireTypes.String73
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.crypto.{AsymmetricEncrypted, Signature}
+import com.digitalasset.canton.crypto.{AsymmetricEncrypted, GeneratorsCrypto, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.protocol.ProtocolSymmetricKey
@@ -39,13 +39,14 @@ final class GeneratorsProtocol(
     protocolVersion: ProtocolVersion,
     generatorsMessages: GeneratorsMessages,
     generatorsTopology: GeneratorsTopology,
+    generatorsCrypto: GeneratorsCrypto,
 ) {
   import com.digitalasset.canton.Generators.*
   import com.digitalasset.canton.config.GeneratorsConfig.*
-  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
   import com.digitalasset.canton.data.GeneratorsDataTime.*
   import generatorsTopology.*
   import generatorsMessages.*
+  import generatorsCrypto.*
 
   implicit val mediatorGroupRecipientArb: Arbitrary[MediatorGroupRecipient] = Arbitrary(
     Arbitrary.arbitrary[NonNegativeInt].map(MediatorGroupRecipient(_))

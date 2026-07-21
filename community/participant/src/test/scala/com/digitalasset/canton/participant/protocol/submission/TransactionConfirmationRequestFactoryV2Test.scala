@@ -6,9 +6,6 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{
-  HashAlgorithm,
-  HashBuilderFromMessageDigest,
-  HashPurpose,
   SecureRandomness,
   Signature,
   SymmetricKeyScheme,
@@ -125,17 +122,11 @@ class TransactionConfirmationRequestFactoryV2Test
         )
         .valueOr(err => fail(s"fail to encrypt view tree: $err"))
 
+      val ciphertextId = encryptedViews.computeCiphertextId(cryptoPureApi.pureCrypto)
       lightTreesWithCtIds.zipWithIndex.foreach { case (lightTree, i) =>
-        val hashBuilder =
-          HashBuilderFromMessageDigest(HashAlgorithm.Sha256, HashPurpose.CiphertextId)
-
-        val ciphertextHash = hashBuilder
-          .addByteString(encryptedViews.viewTrees.ciphertext)
-          .finish()
-
         byCiphertextIdMap.put(
           lightTree.viewHash,
-          ByCiphertextId(ciphertextHash, NonNegativeInt.tryCreate(i)),
+          ByCiphertextId(ciphertextId, NonNegativeInt.tryCreate(i)),
         )
       }
 
@@ -159,9 +150,10 @@ class TransactionConfirmationRequestFactoryV2Test
     }
   }
 
-  // TODO(#32393): Enable for v36+ after implementing the new full view encryption/decryption flow.
+  // TODO(#32393): Enable for PV`transparency`+ after implementing the new full view encryption/decryption flow.
   "A ConfirmationRequestFactory version 2 (uses ciphertext IDs references)" must {
-    // behave like transactionConfirmationRequestFactoryTest(useNewEncryptionAlgorithm = true)
+    /*if (testedProtocolVersion >= ProtocolVersion.transparency)
+      behave like transactionConfirmationRequestFactoryTest()*/
   }
 
 }

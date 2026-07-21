@@ -12,6 +12,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 
@@ -23,16 +24,16 @@ abstract class GenericInMemoryP2PEndpointsStore[E <: Env[E]](
 ) extends P2PEndpointsStore[E] {
 
   private val lock = new Mutex()
-  private val endpoints = new mutable.HashMap[P2PEndpoint.Id, P2PEndpoint]
-  initialEndpoints.foreach(endpoint => endpoints.put(endpoint.id, endpoint).discard)
+  private val endpoints = new mutable.HashMap[P2PEndpoint.Id, (P2PEndpoint, Option[BftNodeId])]()
+  initialEndpoints.foreach(endpoint => endpoints.put(endpoint.id, endpoint -> None).discard)
 
   protected def createFuture[A](action: String)(x: () => Try[A]): E#FutureUnlessShutdownT[A]
 
   override final def listEndpoints()(implicit
       traceContext: TraceContext
-  ): E#FutureUnlessShutdownT[Seq[P2PEndpoint]] =
+  ): E#FutureUnlessShutdownT[Seq[(P2PEndpoint, Option[BftNodeId])]] =
     lock.exclusive {
-      createFuture("") { () =>
+      createFuture(listEndpointsActionName) { () =>
         Success(
           endpoints.keySet.toSeq.sorted.map(endpointId => endpoints(endpointId))
         )
@@ -43,14 +44,31 @@ abstract class GenericInMemoryP2PEndpointsStore[E <: Env[E]](
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Boolean] =
     lock.exclusive {
-      createFuture("") { () =>
+      createFuture(addEndpointActionName(endpoint)) { () =>
         val endpointId = endpoint.id
         val changed =
           if (!endpoints.contains(endpointId)) {
-            endpoints.addOne(endpointId -> endpoint).discard
+            endpoints.addOne(endpointId -> (endpoint -> None)).discard
             true
           } else {
             false
+          }
+        Success(changed)
+      }
+    }
+
+  override def associate(existingEndpoint: P2PEndpoint, nodeId: BftNodeId)(implicit
+      traceContext: TraceContext
+  ): E#FutureUnlessShutdownT[Boolean] =
+    lock.exclusive {
+      createFuture(associateActionName(existingEndpoint, nodeId)) { () =>
+        val endpointId = existingEndpoint.id
+        val changed =
+          endpoints.get(endpointId) match {
+            case None => false
+            case Some((endpoint, _)) =>
+              endpoints.update(endpointId, (endpoint, Some(nodeId)))
+              true
           }
         Success(changed)
       }

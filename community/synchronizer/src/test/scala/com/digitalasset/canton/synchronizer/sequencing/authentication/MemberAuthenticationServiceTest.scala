@@ -38,6 +38,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{Member, *}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -55,6 +56,11 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
   private val topology = TestingTopology().withSimpleParticipants(participant1).build()
   private val syncCrypto = topology.forOwnerAndSynchronizer(participant1, physicalSynchronizerId)
 
+  private val store = new MemberAuthenticationStore(
+    PositiveInt.tryCreate(10),
+    loggerFactory,
+  )
+
   private def service(
       participantIsActive: Boolean,
       useExponentialRandomTokenExpiration: Boolean = false,
@@ -62,7 +68,6 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       tokenDuration: JDuration = JDuration.ofHours(1),
       invalidateMemberCallback: Member => Unit = _ => (),
       store: MemberAuthenticationStore = new MemberAuthenticationStore(
-        PositiveInt.tryCreate(10),
         PositiveInt.tryCreate(10),
         loggerFactory,
       ),
@@ -112,7 +117,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
 
     def generateToken(sut: MemberAuthenticationService) =
       for {
-        challenge <- sut.generateNonce(p1)
+        challenge <- sut.generateChallenge(p1)
         (nonce, fingerprints) = challenge
         signature <- getMemberAuthentication(p1)
           .signSynchronizerNonce(p1, nonce, physicalSynchronizerId, fingerprints, syncCrypto.crypto)
@@ -180,7 +185,9 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     "use random expiry" in {
       val sut = service(participantIsActive = true, useExponentialRandomTokenExpiration = true)
       for {
-        expireTimes <- Seq.fill(10)(generateToken(sut).map(_.expiresAt)).sequence
+        expireTimes <- MonadUtil.sequentialTraverse(Seq.range(0, 10)) { _ =>
+          generateToken(sut).map(_.expiresAt)
+        }
       } yield {
         expireTimes.distinct.size should be > 1
       }
@@ -189,7 +196,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     "fail every method if participant is not active" in {
       val sut = service(participantIsActive = false)
       for {
-        generateNonceError <- leftOrFail(sut.generateNonce(p1))("generating nonce")
+        generateChallengeError <- leftOrFail(sut.generateChallenge(p1))("generating challenge")
         validateSignatureError <- leftOrFail(
           sut.validateSignature(p1, null, Nonce.generate(syncCrypto.pureCrypto))
         )(
@@ -199,7 +206,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
           "token validation should fail"
         )
       } yield {
-        generateNonceError shouldBe MemberAccessDisabled(p1)
+        generateChallengeError shouldBe MemberAccessDisabled(p1)
         validateSignatureError shouldBe MemberAccessDisabled(p1)
         validateTokenError shouldBe MissingToken(p1)
       }
@@ -218,11 +225,6 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     }
 
     "invalidate all tokens from a member when logging out" in {
-      val store = new MemberAuthenticationStore(
-        PositiveInt.tryCreate(10),
-        PositiveInt.tryCreate(10),
-        loggerFactory,
-      )
       val sut = service(participantIsActive = true, store = store)
 
       for {
@@ -247,11 +249,6 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
   }
 
   "revoke tokens via the topology processing subscriber when an OwnerToKeyMapping is removed" in {
-    val store = new MemberAuthenticationStore(
-      PositiveInt.tryCreate(10),
-      PositiveInt.tryCreate(10),
-      loggerFactory,
-    )
 
     val sutImpl = serviceImpl(store)
 
@@ -290,7 +287,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       OwnerToKeyMapping.tryCreate(p1, com.digitalasset.nonempty.NonEmpty(Seq, evictedKey))
 
     // create a topology transaction for the removal of the created OTK
-    val removeTopologyTx = TopologyTransaction(
+    val removeTopologyTx = TopologyTransaction.tryCreate(
       TopologyChangeOp.Remove,
       PositiveInt.one,
       evictedOtk,
@@ -333,10 +330,8 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
   "revoke evicted tokens via the topology processing subscriber when an OwnerToKeyMapping is replaced" in {
     val store = new MemberAuthenticationStore(
       PositiveInt.tryCreate(10),
-      PositiveInt.tryCreate(10),
       loggerFactory,
     )
-
     val sutImpl = serviceImpl(store)
 
     // For a Replace operation, the transaction payload only contains the new (retained) keys.
@@ -379,7 +374,7 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
       OwnerToKeyMapping.tryCreate(p1, com.digitalasset.nonempty.NonEmpty(Seq, retainedKey))
 
     // Create an OTK for the retainedKey
-    val replaceTopologyTx = TopologyTransaction(
+    val replaceTopologyTx = TopologyTransaction.tryCreate(
       TopologyChangeOp.Replace,
       PositiveInt.one,
       retainedOtk,
@@ -418,16 +413,21 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
   "fail token persistence if the signing key is revoked mid-flight (TOCTOU race condition check)" in {
     val store = new MemberAuthenticationStore(
       PositiveInt.tryCreate(10),
-      PositiveInt.tryCreate(10),
       loggerFactory,
     )
+
     val dummySignature = noSignature
     // Prepare a valid nonce in the store to satisfy the challenge check
-    val nonce = Nonce.generate(syncCrypto.pureCrypto)
-    val storedNonce = StoredNonce(p1, nonce, clock.now, JDuration.ofMinutes(1))
-    store.saveNonce(storedNonce)
+
+    val storedNonce = store.fetchOrGenerateNonce(
+      p1, {
+        val rawNonce = Nonce.generate(syncCrypto.pureCrypto)
+        StoredNonce(p1, rawNonce, clock.now, JDuration.ofMinutes(1))
+      },
+    )
+
     val expectedHash = MemberAuthentication
-      .hashSynchronizerNonce(nonce, physicalSynchronizerId, syncCrypto.pureCrypto)
+      .hashSynchronizerNonce(storedNonce.nonce, physicalSynchronizerId, syncCrypto.pureCrypto)
 
     // create mocks of the crypto API and snapshot objects
     val mockCryptoApi = mock[SynchronizerCryptoClient]
@@ -503,7 +503,9 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
     // Execute validateSignature to test the behaviour. This will call headIpsSnapshot.signingKeys, which will return an empty set, which
     // tells the method that the member's key has been revoked and triggers the rollback behaviour.
     for {
-      resultError <- leftOrFail(authService.validateSignature(p1, dummySignature, nonce))(
+      resultError <- leftOrFail(
+        authService.validateSignature(p1, dummySignature, storedNonce.nonce)
+      )(
         "should catch mid-flight revocation"
       )
     } yield {
@@ -518,17 +520,20 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
   "fail token generation if the member is deactivated mid-flight (TOCTOU race condition check)" in {
     val store = new MemberAuthenticationStore(
       PositiveInt.tryCreate(10),
-      PositiveInt.tryCreate(10),
       loggerFactory,
     )
     val dummySignature = noSignature
 
     // Prepare a valid nonce in the store to satisfy the challenge check
-    val nonce = Nonce.generate(syncCrypto.pureCrypto)
-    val storedNonce = StoredNonce(p1, nonce, clock.now, JDuration.ofMinutes(1))
-    store.saveNonce(storedNonce)
+    val storedNonce = store.fetchOrGenerateNonce(
+      p1, {
+        val rawNonce = Nonce.generate(syncCrypto.pureCrypto)
+        StoredNonce(p1, rawNonce, clock.now, JDuration.ofMinutes(1))
+      },
+    )
+
     val expectedHash = MemberAuthentication
-      .hashSynchronizerNonce(nonce, physicalSynchronizerId, syncCrypto.pureCrypto)
+      .hashSynchronizerNonce(storedNonce.nonce, physicalSynchronizerId, syncCrypto.pureCrypto)
 
     // create mocks of the crypto API and snapshot objects
     val mockCryptoApi = mock[SynchronizerCryptoClient]
@@ -621,7 +626,9 @@ class MemberAuthenticationServiceTest extends AsyncWordSpec with BaseTest with F
 
     // Execute validateSignature to test the behaviour
     for {
-      resultError <- leftOrFail(authService.validateSignature(p1, dummySignature, nonce))(
+      resultError <- leftOrFail(
+        authService.validateSignature(p1, dummySignature, storedNonce.nonce)
+      )(
         "should catch mid-flight deactivation"
       )
     } yield {

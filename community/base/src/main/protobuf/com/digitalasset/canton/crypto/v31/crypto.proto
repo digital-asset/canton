@@ -1,0 +1,103 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.crypto.v31;
+
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
+
+message PublicKey {
+  oneof key {
+    SigningPublicKey signing_public_key = 1;
+    v30.EncryptionPublicKey encryption_public_key = 2;
+  }
+}
+
+message PublicKeyWithName {
+  PublicKey public_key = 1;
+
+  // Optional name of the public key
+  string name = 2;
+}
+
+message PrivateKey {
+  oneof key {
+    SigningPrivateKey signing_private_key = 1;
+    v30.EncryptionPrivateKey encryption_private_key = 2;
+  }
+}
+
+// Difference with v30:
+// - added new usage: SIGNING_KEY_USAGE_PARTY_JWT_AUTHENTICATION
+// - removed deprecated usage: SIGNING_KEY_USAGE_IDENTITY_DELEGATION
+enum SigningKeyUsage {
+  SIGNING_KEY_USAGE_UNSPECIFIED = 0;
+  // the root namespace key that defines a node's identity and signs topology requests
+  SIGNING_KEY_USAGE_NAMESPACE = 1;
+  // keys that authenticate members of the network towards a sequencer
+  SIGNING_KEY_USAGE_SEQUENCER_AUTHENTICATION = 3;
+  // keys that deal with all the signing that happens as part of the protocol
+  SIGNING_KEY_USAGE_PROTOCOL = 4;
+  // used internally to identify keys that can self-sign to prove ownership
+  SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP = 5;
+  // keys that can sign party JWTs to authenticate to the Ledger API as well as Off-Ledger APIs
+  SIGNING_KEY_USAGE_PARTY_JWT_AUTHENTICATION = 6;
+}
+
+// Difference with v30:
+// - updated usage to v31
+message SigningPublicKey {
+  v30.CryptoKeyFormat format = 2;
+
+  // Serialized public key in the format specified above
+  bytes public_key = 3;
+
+  // Explicitly state the key's intended use
+  repeated SigningKeyUsage usage = 5;
+
+  // The key specification that was used to generate the key pair
+  v30.SigningKeySpec key_spec = 6;
+}
+
+// Difference with v30:
+// - update usage to v31
+message SigningPrivateKey {
+  string id = 1;
+
+  v30.CryptoKeyFormat format = 2;
+
+  // Serialized private key in the format specified above
+  bytes private_key = 3;
+
+  // Explicitly state the key's intended use
+  repeated SigningKeyUsage usage = 5;
+
+  // The key specification that was used to generate the key pair
+  v30.SigningKeySpec key_spec = 6;
+}
+
+// Difference with v30:
+// - update private_key to v31
+message SigningKeyPair {
+  SigningPrivateKey private_key = 2;
+}
+
+// Difference with v30:
+// - update signing_key_pair to v31
+message CryptoKeyPair {
+  oneof pair {
+    SigningKeyPair signing_key_pair = 1;
+    v30.EncryptionKeyPair encryption_key_pair = 2;
+  }
+}
+
+// Difference with v30:
+// - update keys to v31
+message SigningKeysWithThreshold {
+  // the designated signing keys
+  repeated SigningPublicKey keys = 1;
+
+  // the authorization threshold
+  uint32 threshold = 2;
+}

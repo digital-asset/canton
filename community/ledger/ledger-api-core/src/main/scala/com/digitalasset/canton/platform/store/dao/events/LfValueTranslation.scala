@@ -18,7 +18,6 @@ import com.digitalasset.canton.platform.store.dao.events.LfValueTranslation.ApiC
 import com.digitalasset.canton.platform.store.serialization.{Compression, ValueSerializer}
 import com.digitalasset.canton.platform.{
   ContractId,
-  Create,
   Exercise,
   Identifier as LfIdentifier,
   PackageId as LfPackageId,
@@ -31,7 +30,6 @@ import com.digitalasset.daml.lf.data.Ref.{FullIdentifier, Identifier}
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
-import com.digitalasset.daml.lf.value.Value.VersionedValue
 import com.digitalasset.daml.lf.{crypto, engine as LfEngine}
 import com.google.protobuf.ByteString
 import com.google.rpc.Status
@@ -49,13 +47,6 @@ import scala.util.chaining.*
   * synchronous.
   */
 trait LfValueSerialization {
-  def serialize(
-      contractId: ContractId,
-      contractArgument: VersionedValue,
-  ): Array[Byte]
-
-  /** Returns (contract argument, contract key) */
-  def serialize(create: Create): (Array[Byte], Option[Array[Byte]])
 
   /** Returns (choice argument, exercise result, contract key) */
   def serialize(
@@ -93,26 +84,6 @@ final class LfValueTranslation(
   private def cantSerialize(attribute: String, forContract: ContractId): String =
     s"Cannot serialize $attribute for ${forContract.coid}"
 
-  private def serializeCreateArgOrThrow(
-      contractId: ContractId,
-      arg: VersionedValue,
-  ): Array[Byte] =
-    ValueSerializer.serializeValue(
-      value = arg,
-      errorContext = cantSerialize(attribute = "create argument", forContract = contractId),
-    )
-
-  private def serializeCreateArgOrThrow(c: Create): Array[Byte] =
-    serializeCreateArgOrThrow(c.coid, c.versionedArg)
-
-  private def serializeNullableKeyOrThrow(c: Create): Option[Array[Byte]] =
-    c.versionedKey.map(k =>
-      ValueSerializer.serializeValue(
-        value = k.map(_.value),
-        errorContext = cantSerialize(attribute = "key", forContract = c.coid),
-      )
-    )
-
   private def serializeNullableKeyOrThrow(e: Exercise): Option[Array[Byte]] =
     e.versionedKey.map(k =>
       ValueSerializer.serializeValue(
@@ -134,15 +105,6 @@ final class LfValueTranslation(
         errorContext = cantSerialize(attribute = "exercise result", forContract = e.targetCoid),
       )
     )
-
-  override def serialize(
-      contractId: ContractId,
-      contractArgument: VersionedValue,
-  ): Array[Byte] =
-    serializeCreateArgOrThrow(contractId, contractArgument)
-
-  override def serialize(create: Create): (Array[Byte], Option[Array[Byte]]) =
-    serializeCreateArgOrThrow(create) -> serializeNullableKeyOrThrow(create)
 
   override def serialize(
       exercise: Exercise

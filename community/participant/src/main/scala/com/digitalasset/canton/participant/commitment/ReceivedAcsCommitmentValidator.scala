@@ -174,7 +174,10 @@ class ReceivedAcsCommitmentValidatorImpl(
       messages: NonEmpty[Seq[AcsCommitmentProtocolMessage]],
   )(implicit traceContext: TraceContext): ReceivedAcsCommitment = {
     val serializedMessages =
-      ReceivedAcsCommitments(messages).toByteString(ReleaseProtocolVersion.acsCommitmentRedesign.v)
+      ReceivedAcsCommitments(messages).toByteString(
+        // TODO(#33849): use latest once the acs commitment redesign becomes stable
+        ReleaseProtocolVersion.acsCommitmentRedesignStorage.v
+      )
     ReceivedAcsCommitment(
       synchronizerId = physicalSynchronizerId.logical,
       recordTime = timestamp,
@@ -209,7 +212,8 @@ object ReceivedAcsCommitments
     SupportedProtoVersions(
       ProtoVersion(-1) -> unsupportedProtoCodec(ProtocolVersion.v34),
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.acsCommitmentRedesign,
+        // TODO(#33849): use the protocol version with which the acs commitment redesign is released
+        ReleaseProtocolVersion.acsCommitmentRedesignStorage.v,
         supportedProtoVersion(v30participant.ReceivedAcsCommitments)(fromProtoV30),
         _.toProtoV30,
       ),

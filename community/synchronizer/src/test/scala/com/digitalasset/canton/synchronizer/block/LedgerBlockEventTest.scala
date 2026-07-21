@@ -16,6 +16,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
   ClosedUncompressedEnvelope,
+  DecompressionPolicy,
   Envelope,
   MessageId,
   Recipients,
@@ -64,7 +65,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
       LedgerBlockEvent
         .deserializeSignedSubmissionRequest(
           testedProtocolVersion,
-          defaultMaxBytesToDecompress,
+          defaultDecompressionPolicy,
         )(
           byteString
         )
@@ -76,7 +77,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
     "not deserialize submission request over the max size limit" in {
       LedgerBlockEvent.deserializeSignedSubmissionRequest(
         testedProtocolVersion,
-        MaxBytesToDecompress(NonNegativeInt.zero),
+        DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.zero)),
       )(
         byteString
       ) shouldBe Left(
@@ -89,7 +90,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
         LedgerBlockEvent
           .fromRawBlockEvent(
             testedProtocolVersion,
-            defaultMaxBytesToDecompress,
+            defaultDecompressionPolicy,
           )(
             RawBlockEvent.Send(byteString, 0, sequencer.toProtoPrimitive)
           )

@@ -437,7 +437,7 @@ class GrpcTopologyManagerWriteService(
             existingTransaction,
           )
           .leftWiden[RpcError]
-      } yield transaction.toByteString -> transaction.hash.hash.getCryptographicEvidence
+      } yield transaction.toByteStringChecked -> transaction.hash.hash.getCryptographicEvidence
     }
 
     CantonGrpcUtil.mapErrNewEUS(

@@ -79,7 +79,7 @@ class SynchronizerOnboardingOutboxTest
   ): GenericSignedTopologyTransaction =
     SignedTopologyTransaction
       .signAndCreate(
-        TopologyTransaction(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           serial = PositiveInt.one,
           mapping,

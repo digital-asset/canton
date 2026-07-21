@@ -124,7 +124,7 @@ object OrderingTopology {
       }.toMap,
       epochLength,
       sequencingParameters.getOrElse(SequencingParameters.Default),
-      // TODO(i10428) Move this method under BftSequencerBaseTest so we can reuse defaultMaxBytesToDecompress
+      // No decompression bound needed: test-only constructor.
       MaxBytesToDecompress.MaxValueUnsafe,
       activationTime,
       areTherePendingCantonTopologyChanges,

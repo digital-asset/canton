@@ -363,7 +363,14 @@ class ExampleTransactionConformanceTest
                 ),
                 s"$absoluteTransaction should equal ${example.wellFormedSuffixedTransaction} up to nid renaming",
               )
-              reInterpreter.getInterpretationCount shouldBe 0
+
+              // From PV36 the sub-views are re-evaluated to ensure package vetting
+              val expected =
+                if (testedProtocolVersion >= ProtocolVersion.v36)
+                  example.transactionViewTrees.size - topLevelViewTrees.size
+                else 0
+
+              reInterpreter.getInterpretationCount shouldBe expected
             }
           }
 

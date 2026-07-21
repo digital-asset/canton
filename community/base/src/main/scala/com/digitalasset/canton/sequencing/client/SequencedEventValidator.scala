@@ -40,6 +40,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
   DecompressedSequencedEvent,
+  DecompressionPolicy,
   SequencedEvent,
 }
 import com.digitalasset.canton.sequencing.{
@@ -233,7 +234,7 @@ object SequencedEventValidator extends HasLoggerName {
       // No validation means we blindly trust the sequencer, so we do not enforce a maxRequestSize
       // bound on decompression here.
       EitherT(
-        FutureUnlessShutdown.pure(decompressEvent(event, MaxBytesToDecompress.MaxValueUnsafe))
+        FutureUnlessShutdown.pure(decompressEvent(event, DecompressionPolicy.MaxValueUnsafe))
       )
     override def validateOnReconnect(
         priorEvent: Option[ProcessingSerializedEvent],
@@ -267,10 +268,10 @@ object SequencedEventValidator extends HasLoggerName {
     */
   private[client] def decompressEvent(
       event: MaybeCompressedSerializedEvent,
-      maxBytesToDecompress: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
   ): Either[SequencedEventValidationError[Nothing], SequencedSerializedEvent] =
     event.signedEvent
-      .traverse(SequencedEvent.decompress(_, maxBytesToDecompress))
+      .traverse(SequencedEvent.decompress(_, decompressionPolicy))
       .bimap(
         err => SequencedEventValidationError.DecompressionFailed(event.timestamp, err.toString),
         signedEvent => SequencedEventWithTraceContext(signedEvent)(event.traceContext),
@@ -632,26 +633,31 @@ class SequencedEventValidatorImpl(
       )
   }
 
-  /** Derives the [[com.digitalasset.canton.util.MaxBytesToDecompress]] bound to use when
+  /** Derives the [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy]] to use when
     * decompressing the event's batch. The dynamic `maxRequestSize` bound from the topology snapshot
     * is only used from protocol version 36 on; earlier protocol versions keep the historical fixed
-    * [[com.digitalasset.canton.util.MaxBytesToDecompress.HardcodedDefault]] bound.
+    * [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy.HardcodedDefault]] policy.
     */
-  private def decompressionBound(
+  private def decompressionPolicy(
       snapshot: SyncCryptoApi
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[MaxBytesToDecompress] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[DecompressionPolicy] =
     if (psid.protocolVersion <= ProtocolVersion.v35)
-      FutureUnlessShutdown.pure(MaxBytesToDecompress.HardcodedDefault)
+      FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
     else
       snapshot.ipsSnapshot
         .findDynamicSynchronizerParametersOrDefault(psid.protocolVersion)
-        .map(parameters => MaxBytesToDecompress(parameters.maxRequestSize.value))
+        .map(parameters =>
+          DecompressionPolicy.forProtocolVersion(
+            psid.protocolVersion,
+            MaxBytesToDecompress(parameters.maxRequestSize.value),
+          )
+        )
 
   /** Verifies the event's signature against the resolved topology snapshot and decompresses its
-    * batch within the [[com.digitalasset.canton.util.MaxBytesToDecompress]] bound derived from that
-    * snapshot. On a fresh subscription (no prior event yet) there is no topology snapshot
+    * batch within the [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy]] derived
+    * from that snapshot. On a fresh subscription (no prior event yet) there is no topology snapshot
     * available, so signature verification is skipped and the batch is decompressed within the
-    * [[com.digitalasset.canton.util.MaxBytesToDecompress.HardcodedDefault]] bound.
+    * [[com.digitalasset.canton.sequencing.protocol.DecompressionPolicy.HardcodedDefault]] policy.
     */
   private def verifySignatureAndDecompress(
       priorEventO: Option[ProcessingSerializedEvent],
@@ -676,7 +682,7 @@ class SequencedEventValidatorImpl(
         .fromEither[FutureUnlessShutdown](checkNoTimestampOfSigningKey(event))
         .flatMap(_ =>
           EitherT.fromEither[FutureUnlessShutdown](
-            decompressEvent(event, MaxBytesToDecompress.HardcodedDefault)
+            decompressEvent(event, DecompressionPolicy.HardcodedDefault)
           )
         )
     } else
@@ -685,7 +691,7 @@ class SequencedEventValidatorImpl(
         _ <- verifySignature(snapshot, event, sequencerId)
         _ = logger.debug("Successfully verified signature")
         maxBytesToDecompress <- EitherT.right[SequencedEventValidationError[Nothing]](
-          decompressionBound(snapshot)
+          decompressionPolicy(snapshot)
         )
         decompressed <- EitherT.fromEither[FutureUnlessShutdown](
           decompressEvent(event, maxBytesToDecompress)

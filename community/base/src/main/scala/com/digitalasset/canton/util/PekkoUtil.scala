@@ -85,7 +85,7 @@ object PekkoUtil extends HasLoggerName {
 
   /** Utility function to run the graph supervised and stop on an unhandled exception.
     *
-    * By default, an Pekko flow will discard exceptions. Use this method to avoid discarding
+    * By default, a Pekko flow will discard exceptions. Use this method to avoid discarding
     * exceptions.
     */
   def runSupervised[MaterializedValueT](

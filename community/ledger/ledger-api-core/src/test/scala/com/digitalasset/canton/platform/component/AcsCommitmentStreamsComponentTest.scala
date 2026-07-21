@@ -282,7 +282,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
         // commitment p2
         AcsUpdate.AcsCommitment(payload2),
         // topology tx
-        AcsUpdate.EffectivePartyToParticipantMappings(
+        AcsUpdate.EffectiveTopologyUpdate(
           Set(
             Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization(
               party = Ref.Party.assertFromString("mixed-topology-party"),
@@ -290,7 +290,8 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
               authorizationEvent = Update.TopologyTransactionEffective.AuthorizationEvent
                 .Onboarding(Update.TopologyTransactionEffective.AuthorizationLevel.Observation),
             )
-          )
+          ),
+          None,
         ),
       )
     }
@@ -847,6 +848,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
           authorizationEvent = Onboarding(AuthorizationLevel.Observation),
         )
       ).toSet,
+      genericTopologyEvents = Nil, // TODO(i33326)
       synchronizerId = synchronizer1,
       effectiveTime = nextRecordTime(),
     )
@@ -859,6 +861,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
           authorizationEvent = Onboarding(AuthorizationLevel.Observation),
         )
       ).toSet,
+      genericTopologyEvents = Nil, // TODO(i33326)
       synchronizerId = synchronizer2,
       effectiveTime = nextRecordTime(),
     )

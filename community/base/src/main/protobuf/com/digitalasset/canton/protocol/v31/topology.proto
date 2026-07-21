@@ -1,0 +1,168 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.protocol.v31;
+
+import "com/digitalasset/canton/crypto/v31/crypto.proto";
+import "com/digitalasset/canton/protocol/v30/topology.proto";
+import "scalapb/scalapb.proto";
+
+// [start NamespaceDelegation definition]
+// namespace delegation (equivalent to X509v3 CA root or intermediate CAs)
+// if is_root_delegation==false, the target key may sign all mappings requiring a signature
+// for the namespace except other NamespaceDelegation mappings.
+// authorization: a namespace delegation is either signed by the root key, or is signed by
+//   a key for which there exists a series of properly authorized namespace delegations
+//   that are ultimately signed by the root key
+// revocation: a revoked namespace delegation cannot be re-created. While the delegation itself is revoked,
+//   valid transactions that have been signed using the authority of the delegation before its revocation stay valid.
+// UNIQUE(namespace, target_key)
+//
+// Difference with v30:
+// - updated target_key to v31
+// - removed deprecated is_root_delegation
+message NamespaceDelegation {
+  // fingerprint of the root key defining the namespace
+  string namespace = 1;
+  // target key of getting full rights on the namespace (if target == namespace, it's a root CA)
+  com.digitalasset.canton.crypto.v31.SigningPublicKey target_key = 2;
+  // restricts target_key to only sign transactions with the specified mapping types.
+  // for backwards compatibility, only the following combinations are valid:
+  // * is_root_delegation = true,  restriction = empty: the key can sign all mappings
+  // * is_root_delegation = false, restriction = empty: the key can sign all mappings but namespace delegations
+  // * is_root_delegation = false, restriction = non-empty: the key can only sign the mappings according the restriction that is set
+  oneof restriction {
+    v30.NamespaceDelegation.CanSignAllMappings can_sign_all_mappings = 4;
+    v30.NamespaceDelegation.CanSignAllButNamespaceDelegations can_sign_all_but_namespace_delegations = 5;
+    v30.NamespaceDelegation.CanSignSpecificMappings can_sign_specific_mapings = 6;
+  }
+}
+// [end NamespaceDelegation definition]
+
+// mapping a member (participant, mediator, sequencer) to a key
+// authorization: whoever controls the member uid
+// UNIQUE(member)
+//
+// Difference with v30:
+// - updated public_keys to v31
+message OwnerToKeyMapping {
+  // the sequencing process member
+  string member = 1;
+
+  // the designated keys
+  repeated com.digitalasset.canton.crypto.v31.PublicKey public_keys = 2;
+}
+
+// mapping a party to a key
+// authorization: whoever controls the party uid
+// UNIQUE(party)
+message PartyToKeyMapping {
+  // Deprecated in favor of PartyToParticipant
+  option deprecated = true;
+  // the party
+  string party = 1;
+  // the authorization threshold
+  uint32 threshold = 3;
+  // the designated signing keys
+  repeated com.digitalasset.canton.crypto.v31.SigningPublicKey signing_keys = 4;
+
+  reserved 2; // was synchronizer_id = 2
+}
+
+// [doc-entry-start: PartyToParticipant]
+// Mapping that maps a party to a participant
+// The PartyToParticipant mapping may also specify a list of signing keys for setting up an external party, in which
+// case the keys and the threshold take precedence over any PartyToKeyMapping for the same party.
+// Additionally, the list of signing keys may contain the public key of the party's namespace, which allows this
+// mapping to authorize itself without the need of a NamespaceDelegation root certificate (called self-signed).
+// authorization: the required authorization of the mapping is a union of the authorization for individual changes
+//  - threshold change: party namespace
+//  - adding a signing key: party namespace + all the new signing key
+//  - removing a signing key: party namespace
+//  - changing the signing key threshold: party namespace
+//  - upgrading a participant permission or adding a new participant: namespaces from party and the participant namespace
+//  - downgrading a participant permission or removing a participant: party namespace OR the participant namespace
+//  - setting a participant's onboarding flag from false to true: party namespace
+//  - setting a participant's onboarding flag from true to false: participant namespace
+//  - the removal of a PTP must be authorized just by the party
+// revocation: Revoking a self-signed PTP does not prevent later re-creation of a PTP with the same partyId.
+//  To prevent further usage of the key associated with the party's namespace,
+//  revoke a NamespaceDelegation root certificate for that namespace.
+// UNIQUE(party)
+//
+// Difference with v30:
+// - updated party_signing_keys to v31
+message PartyToParticipant {
+  // the party that is to be represented by the participants
+  string party = 1;
+
+  // the signatory threshold required by the participants to be able to act on behalf of the party.
+  // a mapping with threshold > 1 is considered a definition of a consortium party
+  uint32 threshold = 2;
+
+  // which participants will host the party.
+  // if threshold > 1, must be Confirmation or Observation.
+  // if all participants have Observation permission, the confirmation treshold is ignored, making the party
+  // a purely observing party.
+  repeated v30.PartyToParticipant.HostingParticipant participants = 3;
+
+  // Contains protocol signing keys for the party used to authorize externally signed Daml transactions,
+  // along with a signing threshold.
+  // The max number of keys is 20
+  optional com.digitalasset.canton.crypto.v31.SigningKeysWithThreshold party_signing_keys = 6;
+}
+// [doc-entry-end: PartyToParticipant]
+
+// Difference with v30:
+// - updated namespace_delegation, owner_to_key_mapping and party_to_participant to v31
+//
+// [docs-entry-start: topology mapping]
+message TopologyMapping {
+  oneof mapping {
+    NamespaceDelegation namespace_delegation = 1;
+    v30.DecentralizedNamespaceDefinition decentralized_namespace_definition = 3;
+
+    OwnerToKeyMapping owner_to_key_mapping = 4;
+
+    v30.SynchronizerTrustCertificate synchronizer_trust_certificate = 5;
+    v30.ParticipantSynchronizerPermission participant_permission = 6;
+    v30.PartyHostingLimits party_hosting_limits = 7;
+    v30.VettedPackages vetted_packages = 8;
+
+    PartyToParticipant party_to_participant = 9;
+
+    v30.SynchronizerParametersState synchronizer_parameters_state = 11;
+    v30.MediatorSynchronizerState mediator_synchronizer_state = 12;
+    v30.SequencerSynchronizerState sequencer_synchronizer_state = 13;
+    v30.DynamicSequencingParametersState sequencing_dynamic_parameters_state = 15;
+
+    // Deprecated in favor of PartyToParticipant
+    // TODO(i32231): is it necessary to bump this to v31 if it's deprecated?
+    PartyToKeyMapping party_to_key_mapping = 16 [deprecated = true];
+
+    v30.LsuAnnouncement synchronizer_upgrade_announcement = 17;
+    v30.LsuSequencerConnectionSuccessor sequencer_connection_successor = 18;
+  }
+  reserved 2; // was identifier_delegation
+  reserved 10; // was authority_of
+  reserved 14; // was purge_topology_txs
+}
+// [docs-entry-end: topology mapping]
+
+// Difference with v30:
+// - updated mapping to v31
+message TopologyTransaction {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  v30.Enums.TopologyChangeOp operation = 1;
+
+  // Serial identifier of this transaction used to prevent replay attacks.
+  // A topology transaction is replacing the existing transaction with serial - 1
+  // that has the same unique key.
+  uint32 serial = 2;
+
+  // the element of this topology transaction
+  TopologyMapping mapping = 3;
+}

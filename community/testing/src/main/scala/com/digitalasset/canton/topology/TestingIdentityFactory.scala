@@ -675,7 +675,7 @@ class TestingIdentityFactory(
       isProposal: Boolean = false,
   ): SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping] =
     SignedTopologyTransaction.withSignatures(
-      TopologyTransaction(
+      TopologyTransaction.tryCreate(
         TopologyChangeOp.Replace,
         serial,
         mapping,
@@ -1076,7 +1076,7 @@ class TestingOwnerWithKeys(
   )(implicit ec: ExecutionContext) = {
     import trans.transaction as tx
     mkTrans(
-      TopologyTransaction(
+      TopologyTransaction.tryCreate(
         tx.operation,
         serial,
         tx.mapping,
@@ -1105,7 +1105,7 @@ class TestingOwnerWithKeys(
       ec: ExecutionContext
   ): SignedTopologyTransaction[TopologyChangeOp.Replace, M] =
     mkTrans(
-      TopologyTransaction(
+      TopologyTransaction.tryCreate(
         TopologyChangeOp.Replace,
         serial,
         mapping,
@@ -1131,7 +1131,7 @@ class TestingOwnerWithKeys(
       isProposal: Boolean = false,
   )(implicit ec: ExecutionContext): SignedTopologyTransaction[TopologyChangeOp.Remove, M] =
     mkTrans(
-      TopologyTransaction(
+      TopologyTransaction.tryCreate(
         TopologyChangeOp.Remove,
         serial,
         mapping,

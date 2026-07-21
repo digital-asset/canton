@@ -116,6 +116,36 @@ class ModelConformanceChecker(
     val mediator = headViewTree.mediator
     val transactionUuid = headViewTree.transactionUuid
 
+    def checkSubviewPackageVetting(): FutureUnlessShutdown[Seq[Error]] = {
+      val childViews = rootViewTrees.forgetNE.flatMap { case (rootView, _) =>
+        rootView.view.subviews.unblindedElements.flatMap(_.allSubviews.preorder)
+      }
+
+      MonadUtil
+        .parTraverseWithLimit(parallelism)(childViews) { view =>
+          (for {
+            interpretationResult <- reInterpret(
+              view,
+              ledgerTime,
+              preparationTime,
+              getEngineAbortStatus,
+              topologySnapshot,
+            )
+
+            _ <- checkPackageVetting(
+              view,
+              topologySnapshot,
+              interpretationResult.reInterpretationResult.usedPackages,
+              ledgerTime,
+              protocolVersion,
+            )
+          } yield {
+            ()
+          }).value.map(_.swap.toOption)
+        }
+        .map(_.flatten)
+    }
+
     def findValidSubtransactions(
         views: Seq[
           (
@@ -136,53 +166,53 @@ class ModelConformanceChecker(
             )
           ],
       )
-    ] = views
-      // TODO(#24573): add and use a parallelism limit
-      .parTraverse { case (view, effects, viewPos, submittingParticipantO) =>
-        for {
-          wfTxE <- checkView(
-            updateId,
-            view,
-            viewPos,
-            mediator,
-            transactionUuid,
-            ledgerTime,
-            preparationTime,
-            submittingParticipantO,
-            topologySnapshot,
-            getEngineAbortStatus,
-            reInterpretedTopLevelViews,
-            protocolVersion,
-          ).value
+    ] = MonadUtil
+      .parTraverseWithLimit(parallelism)(views) {
+        case (view, effects, viewPos, submittingParticipantO) =>
+          for {
+            wfTxE <- checkView(
+              updateId,
+              view,
+              viewPos,
+              mediator,
+              transactionUuid,
+              ledgerTime,
+              preparationTime,
+              submittingParticipantO,
+              topologySnapshot,
+              getEngineAbortStatus,
+              reInterpretedTopLevelViews,
+              protocolVersion,
+            ).value
 
-          errorsViewsTxs <- wfTxE match {
-            case Right(wfTx) => FutureUnlessShutdown.pure((Seq.empty, Seq((view, effects, wfTx))))
+            errorsViewsTxs <- wfTxE match {
+              case Right(wfTx) => FutureUnlessShutdown.pure((Seq.empty, Seq((view, effects, wfTx))))
 
-            // There is no point in checking subviews if we have aborted
-            case Left(error @ DAMLeError(DAMLe.EngineAborted(_), _)) =>
-              FutureUnlessShutdown.pure((Seq(error), Seq.empty))
+              // There is no point in checking subviews if we have aborted
+              case Left(error @ DAMLeError(DAMLe.EngineAborted(_), _)) =>
+                FutureUnlessShutdown.pure((Seq(error), Seq.empty))
 
-            case Left(error) =>
-              val subviewsWithIndex = view.subviews.unblindedElementsWithIndex
-              val childEffects = effects.children
-              ErrorUtil.requireArgument(
-                subviewsWithIndex.sizeCompare(childEffects) == 0,
-                s"Number of subviews (${subviewsWithIndex.size}) and child effects (${childEffects.size}) do not match for view at position $viewPos",
-              )
-              val subviewsWithInfo =
-                subviewsWithIndex.zip(childEffects).map { case ((sv, svIndex), svEffects) =>
-                  (sv, svEffects, svIndex +: viewPos, None)
+              case Left(error) =>
+                val subviewsWithIndex = view.subviews.unblindedElementsWithIndex
+                val childEffects = effects.children
+                ErrorUtil.requireArgument(
+                  subviewsWithIndex.sizeCompare(childEffects) == 0,
+                  s"Number of subviews (${subviewsWithIndex.size}) and child effects (${childEffects.size}) do not match for view at position $viewPos",
+                )
+                val subviewsWithInfo =
+                  subviewsWithIndex.zip(childEffects).map { case ((sv, svIndex), svEffects) =>
+                    (sv, svEffects, svIndex +: viewPos, None)
+                  }
+
+                findValidSubtransactions(subviewsWithInfo).map { case (subErrors, subViewsTxs) =>
+                  // If a view is not model conformant, all its ancestors are not either.
+                  // To avoid redundant errors, return this view's error only if the subviews are valid.
+                  val errors = if (subErrors.isEmpty) Seq(error) else subErrors
+
+                  (errors, subViewsTxs)
                 }
-
-              findValidSubtransactions(subviewsWithInfo).map { case (subErrors, subViewsTxs) =>
-                // If a view is not model conformant, all its ancestors are not either.
-                // To avoid redundant errors, return this view's error only if the subviews are valid.
-                val errors = if (subErrors.isEmpty) Seq(error) else subErrors
-
-                (errors, subViewsTxs)
-              }
-          }
-        } yield errorsViewsTxs
+            }
+          } yield errorsViewsTxs
       }
       .map { aggregate =>
         val (errorsSeq, viewsTxsSeq) = aggregate.separate
@@ -201,6 +231,11 @@ class ModelConformanceChecker(
 
       errorsAndViewTxs <- findValidSubtransactions(rootViewsWithInfo)
 
+      subviewPackageVettingErrors <-
+        if (protocolVersion >= ProtocolVersion.v36)
+          checkSubviewPackageVetting()
+        else FutureUnlessShutdown.pure(Seq.empty)
+
     } yield {
       val (errors, viewsTxs) = errorsAndViewTxs
       val (_, effects, txs) = viewsTxs.unzip3
@@ -208,7 +243,9 @@ class ModelConformanceChecker(
       val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(transactionMerge.merge(_)).separate
       val mergeErrorO = mergeErrorOO.flatten.map(MergeError.apply)
 
-      NonEmpty.from(errors ++ mergeErrorO ++ conflictingStoredContractErrors) match {
+      NonEmpty.from(
+        errors ++ subviewPackageVettingErrors ++ mergeErrorO ++ conflictingStoredContractErrors
+      ) match {
         case None =>
           wftxO match {
             case Some(wftx) =>
@@ -245,8 +282,7 @@ class ModelConformanceChecker(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Map[PackageName, PackageId]] =
     EitherT(for {
-      // TODO(#24573): add and use a parallelism limit
-      resolvedE <- packageIds.toSeq.parTraverse(pId =>
+      resolvedE <- MonadUtil.parTraverseWithLimit(parallelism)(packageIds)(pId =>
         packageResolver
           .resolve(
             pId,
@@ -452,16 +488,14 @@ class ModelConformanceChecker(
           // For protocol version v35 and beyond, only pass the directly used packages to loadUnvettedPackagesOrDependencies
           usedPackages.actionNodePackageIds
         }
-      unvetted <- informeeParticipants.toSeq
-        // TODO(#24573): add and use a parallelism limit
-        .parTraverse(p =>
-          snapshot.loadUnvettedPackagesOrDependencies(
-            participantId = p,
-            packages = packagesForVettingChecks,
-            ledgerTime = ledgerTime,
-            checkDependencyVetting = checkDependencyVetting,
-          )
+      unvetted <- MonadUtil.parTraverseWithLimit(parallelism)(informeeParticipants)(p =>
+        snapshot.loadUnvettedPackagesOrDependencies(
+          participantId = p,
+          packages = packagesForVettingChecks,
+          ledgerTime = ledgerTime,
+          checkDependencyVetting = checkDependencyVetting,
         )
+      )
     } yield {
       val combined = unvetted.combineAll.unknownOrUnvetted
       Either.cond(combined.isEmpty, (), UnvettedPackages(combined))

@@ -64,7 +64,6 @@ class SequencerAuthenticationServerInterceptorTest
     lazy val store: MemberAuthenticationStore =
       new MemberAuthenticationStore(
         PositiveInt.tryCreate(10),
-        PositiveInt.tryCreate(10),
         loggerFactory,
       )
     lazy val synchronizerId = SynchronizerId(

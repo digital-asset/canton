@@ -6,8 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer
 import cats.syntax.all.*
 import com.digitalasset.canton.Generators.*
 import com.digitalasset.canton.config.GeneratorsConfig.*
-import com.digitalasset.canton.crypto.GeneratorsCrypto.*
-import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.crypto.{GeneratorsCrypto, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.GeneratorsDataTime.*
 import com.digitalasset.canton.protocol.{GeneratorsProtocol, StaticSynchronizerParameters}
@@ -42,11 +41,13 @@ final class GeneratorsSequencer(
     generatorsTransaction: GeneratorsTransaction,
     generatorsProtocolSeq: GeneratorsProtocolSeq,
     generatorsProtocol: GeneratorsProtocol,
+    generatorsCrypto: GeneratorsCrypto,
 ) {
   import generatorsTopology.*
   import generatorsTransaction.*
   import generatorsProtocolSeq.*
   import generatorsProtocol.*
+  import generatorsCrypto.*
 
   implicit val inFlightAggregationArb: Arbitrary[InFlightAggregation] = Arbitrary(
     for {

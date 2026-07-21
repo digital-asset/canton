@@ -91,7 +91,9 @@ trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with
                 SigningKeyUsage.ProtocolOnly,
                 signingKeySpec,
               )
-              publicKeyP = publicKey.toProtoVersioned(testedProtocolVersion)
+              publicKeyP = publicKey
+                .toProtoVersioned(testedProtocolVersion)
+                .valueOrFail("serialization of public key")
               publicKey2 = SigningPublicKey
                 .fromProtoVersioned(publicKeyP)
                 .valueOrFail("serialize key")

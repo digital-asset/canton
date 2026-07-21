@@ -57,6 +57,7 @@ class StartableStoppableLedgerApiDependentServices(
     registry: CantonMutableHandlerRegistry,
     adminTokenDispenser: CantonAdminTokenDispenser,
     partyReplicatorEvalO: Option[Eval[PartyReplicator]],
+    ledgerApiStore: Eval[LedgerApiStore],
     futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
     tracerProvider: TracerProvider,
@@ -155,6 +156,10 @@ class StartableStoppableLedgerApiDependentServices(
             psidLookup = syncService.activePsidForLsid(_),
             topologyClientO = syncService.lookupTopologyClient,
             syncPersistentStateO = psid => syncService.syncPersistentStateManager.get(psid),
+            cleanSynchronizerRecordTime = lsid =>
+              ledgerApiStore.value
+                .cleanSynchronizerIndex(lsid)
+                .map(_.recordTime),
             loggerFactory = loggerFactory,
           )
 

@@ -15,6 +15,7 @@ import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOpe
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.{
   AcsCounterParticipantConfigStore,
+  AcsDigestStore,
   AcsInspection,
   ContractStore,
   LogicalSyncPersistentState,
@@ -79,6 +80,14 @@ class DbLogicalSyncPersistentState(
     loggerFactory,
     ledgerApiStore.map(_.stringInterningView),
     parameters.batchingConfig,
+  )
+
+  override def acsDigestStore: AcsDigestStore = new DbAcsDigestStore(
+    synchronizerIdx,
+    ledgerApiStore.map(_.stringInterningView),
+    storage,
+    loggerFactory,
+    timeouts,
   )
 
   override val acsInspection: AcsInspection =

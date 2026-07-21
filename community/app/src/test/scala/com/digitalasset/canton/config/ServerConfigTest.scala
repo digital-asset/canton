@@ -16,11 +16,14 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.util.JarResourceUtils
+import io.grpc.MethodDescriptor.MethodType
+import io.grpc.ServiceDescriptor
 import io.grpc.netty.shaded.io.netty.handler.ssl.{OpenSslServerContext, SslContext}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.security.Security
+import scala.jdk.CollectionConverters.*
 
 class ServerConfigTest extends AnyWordSpec with BeforeAndAfterEach with BaseTest {
 
@@ -106,6 +109,34 @@ class ServerConfigTest extends AnyWordSpec with BeforeAndAfterEach with BaseTest
       verifyOcsp(Enabled)
     }
 
+  }
+
+  "AdminServerConfig.defaultStreamingRequestLimits" should {
+    // Guards against forgetting to bound a newly-added admin streaming endpoint.
+    // If this fails, add the new endpoint's full method name to `defaultStreamingRequestLimits`.
+    "cover every server-streaming method of the bounded admin services" in {
+      val servicesToCheck: Seq[ServiceDescriptor] = Seq(
+        com.digitalasset.canton.topology.admin.v30.TopologyManagerReadServiceGrpc.SERVICE,
+        com.digitalasset.canton.admin.participant.v30.ParticipantRepairServiceGrpc.SERVICE,
+        com.digitalasset.canton.admin.participant.v30.PartyManagementServiceGrpc.SERVICE,
+        com.digitalasset.canton.admin.participant.v30.ParticipantInspectionServiceGrpc.SERVICE,
+        com.digitalasset.canton.admin.health.v30.StatusServiceGrpc.SERVICE,
+        com.digitalasset.canton.sequencer.admin.v30.SequencerAdministrationServiceGrpc.SERVICE,
+        com.digitalasset.canton.mediator.admin.v30.MediatorInspectionServiceGrpc.SERVICE,
+      )
+
+      val limited = AdminServerConfig.defaultStreamingRequestLimits.active.keySet
+      val streamingMethods = servicesToCheck
+        .flatMap(_.getMethods.asScala)
+        .filter(m => m.getType == MethodType.SERVER_STREAMING)
+        .map(_.getFullMethodName)
+
+      streamingMethods.foreach { method =>
+        withClue(s"$method is not bounded in defaultStreamingRequestLimits: ") {
+          limited should contain(method)
+        }
+      }
+    }
   }
 
   private def configWithProtocols(minTls: Option[TlsVersion]): Option[TlsServerConfig] =

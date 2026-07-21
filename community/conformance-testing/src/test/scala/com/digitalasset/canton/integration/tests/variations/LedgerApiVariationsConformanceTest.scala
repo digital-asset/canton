@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.tests.ledgerapi.{
   LedgerApiConformanceBase,
+  ProtocolType,
   SingleVersionLedgerApiConformanceBase,
 }
 import com.digitalasset.canton.integration.util.TestUtils
@@ -205,7 +206,9 @@ trait LedgerApiStaticTimeConformanceTest extends SingleVersionLedgerApiConforman
         ledgerApiTestToolPlugin.runShardedSuites(
           shard = 0,
           numShards = 1,
-          exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion) ++ exclusions,
+          exclude = LedgerApiConformanceBase
+            .excludedTests(testedProtocolVersion, ProtocolType.Grpc)
+            .toSeq ++ exclusions,
           concurrentTestRuns = VariationsConformanceTestUtils.ConcurrentTestRuns,
           useJson = false,
         )

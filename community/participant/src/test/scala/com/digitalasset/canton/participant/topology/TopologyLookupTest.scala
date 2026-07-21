@@ -71,6 +71,7 @@ final class TopologyLookupTest
         topologyConfig = TopologyConfig(),
         timeouts = timeouts,
         futureSupervisor = FutureSupervisor.Noop,
+        cleanSynchronizerRecordTime = _ => None,
         topologyManagerO = _ => None, // Simulate offline
         topologyClientO = _ => None, // Simulate offline
         psidLookup = new PsidLookup {

@@ -3,76 +3,20 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.crypto.MessageDigestPrototype
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
-import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
-import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.store.IndexedSynchronizer
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{
-  BaseTest,
-  InternedPartyId,
-  LfPartyId,
-  ProtocolVersionChecksAsyncWordSpec,
-}
-import com.digitalasset.daml.lf.data.Ref.IdString
-import com.google.protobuf.ByteString
+import com.digitalasset.canton.{BaseTest, InternedPartyId, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.concurrent.ExecutionContext
-import scala.util.ChainingSyntax
 
-trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncWordSpec {
+trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDigestTestBase {
   this: AsyncWordSpecLike & BaseTest =>
-
-  protected val rawDigestByteSize = 2048
-  protected val sha256Digest = MessageDigestPrototype.Sha256.newDigest
-  protected val mockStringInterning = new MockStringInterning()
-
-  protected def genRawDigest(fill: Byte): RawDigest =
-    LtHash16.tryCreate(Array.fill[Byte](rawDigestByteSize)(fill)).getByteString()
-
-  protected def genHashedDigest(rawDigest: RawDigest): HashedDigest =
-    sha256Digest
-      .digest(rawDigest.toByteArray)
-      .array
-      .pipe(ByteString.copyFrom)
-
-  protected def timestamp(epochSeconds: PositiveLong): CantonTimestamp =
-    CantonTimestamp.ofEpochSecond(epochSeconds.unwrap)
-
-  protected def offsetTime(epochSeconds: PositiveLong): (Offset, CantonTimestamp) =
-    (Offset.tryFromLong(epochSeconds.unwrap), timestamp(epochSeconds))
-
-  protected def localOrderParty(partyIndex: Int): PartyAndOrder[InternedPartyId] =
-    PartyAndOrder[InternedPartyId](internedPartyId(partyIndex), order = LocalPartyFirst)
-
-  protected def remoteOrderParty(partyIndex: Int): PartyAndOrder[InternedPartyId] =
-    PartyAndOrder[InternedPartyId](internedPartyId(partyIndex), order = RemotePartyFirst)
-
-  protected def indexedSynchronizer(synchronizerIndex: Int, name: String): IndexedSynchronizer = {
-    val synchronizerId: SynchronizerId = SynchronizerId.tryFromString(s"$name::id")
-    IndexedSynchronizer.tryCreate(synchronizerId, synchronizerIndex)
-  }
-
-  protected def genParticipantDigest(rawDigest: RawDigest): (RawDigest, HashedDigest) =
-    (rawDigest, genHashedDigest(rawDigest))
-
-  private def internedPartyId(partyInt: Int): InternedPartyId =
-    mockStringInterning.party.internalize(LfPartyId.assertFromString(s"testParty::$partyInt"))
-
-  private def internedParticipantId(participantId: Int): InternedParticipantId =
-    mockStringInterning.participantId.internalize(
-      IdString.ParticipantId.assertFromString(s"testParticipant::$participantId")
-    )
-
-  private def externalizeParticipantId(participantId: InternedParticipantId) =
-    mockStringInterning.participantId.externalize(participantId)
 
   /** Reusable validation for verifying that any type of journal behaves correctly when completely
     * empty.
@@ -292,7 +236,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
         token shouldBe Left(PaginationTokenDone)
 
         // At t0, both key1 and key2 are active
-        page.map(d => d.key -> d.offset).toMap shouldBe Map(
+        page.map(d => d.digestUpdate.key -> d.digestUpdate.offset).toMap shouldBe Map(
           key1 -> offset0,
           key2 -> offset0,
         )
@@ -317,7 +261,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
         page2.size shouldBe 1
 
         // At t0, both key1 and key2 should be active (aggregated view)
-        (page1 ++ page2).map(d => d.key -> d.offset).toMap shouldBe Map(
+        (page1 ++ page2).map(d => d.digestUpdate.key -> d.digestUpdate.offset).toMap shouldBe Map(
           key1 -> offset0,
           key2 -> offset0,
         )
@@ -1275,7 +1219,7 @@ trait AcsDigestStoreTest extends ChainingSyntax with ProtocolVersionChecksAsyncW
           changesOnB_T1_T3.map(_.digestO.value) should contain only (rawDigestB)
 
           snapshotOnBAtT2 should have size 1
-          snapshotOnBAtT2.headOption.value.digestO.value shouldBe rawDigestB
+          snapshotOnBAtT2.headOption.value.digestUpdate.digestO.value shouldBe rawDigestB
         }
       }
 

@@ -739,7 +739,6 @@ class SequencerNodeBootstrap(
             val authenticationService = memberAuthServiceFactory.createAndSubscribe(
               syncCryptoForAuthentication,
               new MemberAuthenticationStore(
-                parameters.maxAuthNoncesPerMember,
                 parameters.maxAuthTokensPerMember,
                 loggerFactory,
               ),

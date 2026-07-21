@@ -26,7 +26,10 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
-import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.EventInfo
+import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.{
+  EventInfo,
+  relevantMappingsForEffectiveStateChanges,
+}
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
@@ -51,6 +54,20 @@ object ParticipantTopologyTerminateProcessing {
       clearingOnboardingLocallyHostedParty: Boolean,
       abortingOnboardingLocallyHostedParty: Boolean,
   )
+
+  def relevantMappingsForEffectiveStateChanges(pv: ProtocolVersion): Seq[TopologyMapping.Code] =
+    if (pv >= ProtocolVersion.acsCommitmentRedesign)
+      Seq(
+        TopologyMapping.Code.PartyToParticipant,
+        TopologyMapping.Code.SynchronizerTrustCertificate,
+        TopologyMapping.Code.SynchronizerParametersState,
+      )
+    else
+      Seq(
+        TopologyMapping.Code.PartyToParticipant,
+        TopologyMapping.Code.SynchronizerTrustCertificate,
+      )
+
 }
 
 class ParticipantTopologyTerminateProcessing(
@@ -70,6 +87,10 @@ class ParticipantTopologyTerminateProcessing(
 
   private val psid = store.storeId.psid
 
+  private val mappingsForEffectiveStateChanges = relevantMappingsForEffectiveStateChanges(
+    store.protocolVersion
+  )
+
   override def terminate(
       sc: SequencerCounter,
       sequencedTime: SequencedTime,
@@ -87,12 +108,7 @@ class ParticipantTopologyTerminateProcessing(
         effectiveStateChanges <- store.findEffectiveStateChanges(
           fromEffectiveInclusive = effectiveTime.value,
           onlyAtEffective = true,
-          filterTypes = Some(
-            Seq(
-              TopologyMapping.Code.PartyToParticipant,
-              TopologyMapping.Code.SynchronizerTrustCertificate,
-            )
-          ),
+          filterTypes = Some(mappingsForEffectiveStateChanges),
         )
         _ = if (effectiveStateChanges.sizeIs > 1)
           logger.error(
@@ -350,12 +366,7 @@ class ParticipantTopologyTerminateProcessing(
       outstandingEffectiveChanges <- store.findEffectiveStateChanges(
         fromEffectiveInclusive = initialRecordTime,
         onlyAtEffective = false,
-        filterTypes = Some(
-          Seq(
-            TopologyMapping.Code.PartyToParticipant,
-            TopologyMapping.Code.SynchronizerTrustCertificate,
-          )
-        ),
+        filterTypes = Some(mappingsForEffectiveStateChanges),
       )
       eventFromEffectiveChangeWithInitializationTraceContext =
         (effectiveChange: EffectiveStateChange) =>
@@ -469,6 +480,7 @@ class ParticipantTopologyTerminateProcessing(
             onboardingLocalParty,
             clearingOnboardingLocalParty,
             revokingLocalParty,
+            genericTopologyEvents,
           ) =>
         EventInfo(
           Update.TopologyTransactionEffective(
@@ -476,6 +488,7 @@ class ParticipantTopologyTerminateProcessing(
             events = events,
             synchronizerId = psid.logical,
             effectiveTime = effectiveStateChange.effectiveTime.value,
+            genericTopologyEvents = genericTopologyEvents,
           ),
           onboardingLocallyHostedParty = onboardingLocalParty,
           clearingOnboardingLocallyHostedParty = clearingOnboardingLocalParty,

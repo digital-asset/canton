@@ -172,19 +172,22 @@ private[participant] class HookedAcs(
   ): FutureUnlessShutdown[Map[LfContractId, ReassignmentCounter]] =
     acs.contractsReassignmentCounterSnapshotBefore(contractIds, timestampExclusive)
 
-  override def doPrune(beforeAndIncluding: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
-      implicit traceContext: TraceContext
+  override protected def doPrune(
+      beforeAndIncluding: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Int] =
-    acs.doPrune(beforeAndIncluding, lastPruning: Option[CantonTimestamp])
+    acs.doPruneInternal(beforeAndIncluding, lastPruning: Option[CantonTimestamp])
 
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     acs.purge()
 
-  override protected[canton] def advancePruningTimestamp(
+  override protected def advancePruningTimestamp(
       phase: PruningPhase,
       timestamp: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    acs.advancePruningTimestamp(phase, timestamp)
+    acs.advancePruningTimestampInternal(phase, timestamp)
 
   override def pruningStatus(implicit
       traceContext: TraceContext

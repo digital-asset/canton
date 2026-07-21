@@ -61,7 +61,7 @@ class GenTransactionTreeTest
       tvt: FullTransactionViewTree,
       pureCrypto: CryptoPureApi,
   ): Either[String, LightTransactionViewTree] =
-    // TODO(#32393): depending on the protocol version we should use view hash or ciphertext ID references
+    // TODO(#32406): depending on the protocol version we should use view hash or ciphertext ID references
     LightTransactionViewTree.fromTransactionViewTreeUsingViewHashReference(
       tvt,
       // we are not interested in the correctness of the subtree keys

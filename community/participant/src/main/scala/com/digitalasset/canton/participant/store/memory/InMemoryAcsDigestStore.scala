@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.memory
 
+import cats.Eval
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -68,17 +69,17 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
 }
 
 object InMemoryAcsDigestStore {
-  def create(stringInterning: StringInterning, loggerFactory: NamedLoggerFactory)(implicit
+  def create(stringInterning: Eval[StringInterning], loggerFactory: NamedLoggerFactory)(implicit
       executionContext: ExecutionContext
   ): InMemoryAcsDigestStore = {
     val party = new InMemoryAcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest](
       loggerFactory,
-      prettyKey = _.map(stringInterning.party.externalize).party,
+      prettyKey = _.map(stringInterning.value.party.externalize).party,
     )
     val participant =
       new InMemoryAcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)](
         loggerFactory,
-        prettyKey = stringInterning.participantId.externalize,
+        prettyKey = stringInterning.value.participantId.externalize,
       )
     new InMemoryAcsDigestStore(loggerFactory, party, participant)
   }

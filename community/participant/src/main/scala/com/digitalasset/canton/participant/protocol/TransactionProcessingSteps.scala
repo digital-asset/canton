@@ -28,7 +28,11 @@ import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.metrics.TransactionProcessingMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
-import com.digitalasset.canton.participant.protocol.ProcessingSteps.{DecryptedViews, ParsedRequest}
+import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
+  DecryptedViewData,
+  DecryptedViews,
+  ParsedRequest,
+}
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   MalformedPayload,
   NoMediatorError,
@@ -614,30 +618,25 @@ class TransactionProcessingSteps(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[DecryptedView]] =
     metrics.protocolMessages.transactionMessageReceipt.timeEitherFUS {
-      ViewMessageDecrypter
-        .create(
-          participantId,
-          protocolVersion,
-          sessionKeyStore,
-          snapshot,
-          futureSupervisor,
-          loggerFactory,
-        )
-        .decryptViews(batch)
+      ViewMessageDecrypter(
+        participantId,
+        sessionKeyStore,
+        protocolVersion,
+        futureSupervisor,
+        loggerFactory,
+      ).decryptViews(batch, snapshot)
     }
 
   override def absolutizeLedgerEffects(
-      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[
-        (WithRecipients[DecryptedView], Option[Signature])
-      ]
+      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[DecryptedViewData[DecryptedView]]
   ): (
-      Seq[(WithRecipients[DecryptedView], Option[Signature], ViewAbsoluteLedgerEffect)],
+      Seq[(DecryptedViewData[DecryptedView], ViewAbsoluteLedgerEffect)],
       Seq[MalformedPayload],
   ) =
     NonEmpty.from(viewsWithCorrectRootHashAndRecipientsAndSignature) match {
       case Some(viewsNE) =>
         // All views have the same root hash, so we can take the first one
-        val firstView = viewsNE.head1._1.unwrap
+        val firstView = viewsNE.head1.view.unwrap
         val updateId = firstView.updateId
         val ledgerTime = firstView.ledgerTime
         // TODO(#23971) Generate absolutization data based on the protocol version
@@ -649,7 +648,8 @@ class TransactionProcessingSteps(
         val contractAbsolutizer = new ContractIdAbsolutizer(crypto.pureCrypto, absolutizationData)
         val absolutizer = new LedgerEffectAbsolutizer(contractAbsolutizer)
 
-        viewsNE.partitionMap { case (withRecipients @ WithRecipients(view, _), sig) =>
+        viewsNE.partitionMap { decryptedView =>
+          val view = decryptedView.view.unwrap
           val vpd = view.viewParticipantData
           absolutizer
             .absoluteViewEffects(vpd, view.informees)
@@ -660,7 +660,7 @@ class TransactionProcessingSteps(
                     s"Failed to absolutize view at position ${view.viewPosition}: $err"
                   )
                 ),
-              effects => (withRecipients, sig, effects),
+              effects => (decryptedView, effects),
             )
             .swap
         }
@@ -669,7 +669,7 @@ class TransactionProcessingSteps(
 
   override def computeFullViews(
       decryptedViewsWithSignatures: Seq[
-        (WithRecipients[DecryptedView], Option[Signature], ViewAbsoluteLedgerEffects)
+        (DecryptedViewData[DecryptedView], ViewAbsoluteLedgerEffects)
       ]
   ): (
       Seq[(WithRecipients[FullView], Option[Signature], FullViewAbsoluteLedgerEffects)],
@@ -688,14 +688,18 @@ class TransactionProcessingSteps(
       }
     )
 
+    val decryptedViewsWithMetadata =
+      decryptedViewsWithSignatures.map { case (decryptedView, effects) =>
+        ((decryptedView.view, decryptedView.signatureO, effects), decryptedView.ciphertextIdO)
+      }
+
     val ToFullViewTreesResult(fullViews, incompleteLightViewTrees, duplicateLightViewTrees) =
       LightTransactionViewTree.toFullViewTrees(
         lens,
         protocolVersion,
         crypto.pureCrypto,
         topLevelOnly = true,
-        // TODO(#32393): wire ciphertext ID
-        decryptedViewsWithSignatures.map(view => (view, None)),
+        decryptedViewsWithMetadata,
       )
 
     val incompleteLightViewTreeErrors = incompleteLightViewTrees.map {

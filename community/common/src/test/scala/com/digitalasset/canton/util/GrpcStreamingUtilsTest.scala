@@ -255,6 +255,7 @@ final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExe
             responseF = producer,
             responseObserver = responseObserver,
             fromByteString = fromByteString,
+            processingTimeout = timeouts.adminStreamOpenBound.duration,
             chunkSizeO = Some(chunkSize),
           )
         }
@@ -352,6 +353,7 @@ final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExe
         },
         responseObserver = responseObserver,
         fromByteString = fromByteString,
+        processingTimeout = timeouts.adminStreamOpenBound.duration,
         chunkSizeO = Some(defaultChunkSize),
       )
 
@@ -425,6 +427,7 @@ final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExe
             responseF = producer,
             responseObserver = responseObserver,
             fromByteString = (chunk: ByteString) => chunk,
+            processingTimeout = timeouts.adminStreamOpenBound.duration,
             chunkSizeO = Some(chunkSize),
           )
         }
@@ -491,6 +494,7 @@ final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExe
             responseF = producer,
             responseObserver = responseObserver,
             fromByteString = fromByteString,
+            processingTimeout = timeouts.adminStreamOpenBound.duration,
             chunkSizeO = Some(defaultChunkSize),
           )
         catch {
@@ -634,6 +638,7 @@ final class GrpcStreamingUtilsTest extends AnyWordSpec with BaseTest with HasExe
             responseF = producer,
             responseObserver = responseObserver,
             fromByteString = slowFromByteString,
+            processingTimeout = timeouts.adminStreamOpenBound.duration,
             chunkSizeO = Some(1024),
           )
         }

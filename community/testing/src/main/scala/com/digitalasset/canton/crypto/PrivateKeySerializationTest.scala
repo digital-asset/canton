@@ -51,7 +51,9 @@ trait PrivateKeySerializationTest extends AsyncWordSpec with BaseTest with HasEx
               .leftMap(_.toString)
               .subflatMap(_.toRight("Private key not found"))
               .valueOrFail("get key")
-            privateKeyP = privateKey.toProtoVersioned(testedProtocolVersion)
+            privateKeyP = privateKey
+              .toProtoVersioned(testedProtocolVersion)
+              .valueOrFail("serialization of private key")
             privateKey2 = SigningPrivateKey
               .fromProtoVersioned(privateKeyP)
               .valueOrFail("serialize key")

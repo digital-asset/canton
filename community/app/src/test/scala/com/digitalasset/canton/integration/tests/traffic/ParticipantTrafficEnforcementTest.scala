@@ -3,18 +3,24 @@
 
 package com.digitalasset.canton.integration.tests.traffic
 
+import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.AuthServiceConfig
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.CommandFailure
+import com.digitalasset.canton.console.{CommandFailure, ExternalLedgerApiClient}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.http.json.v2.JsTrafficServiceCodecs.*
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.TrafficAccountValidationFailed
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.config.{
   TrafficEnforcementConfig,
   TrafficEnforcementServerConfig,
@@ -31,7 +37,7 @@ import io.circe.syntax.*
 import io.grpc.Status
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
-import org.slf4j.event.Level.INFO
+import org.slf4j.event.Level.{DEBUG, INFO}
 
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.net.{URI, URLEncoder}
@@ -45,6 +51,8 @@ sealed trait ParticipantTrafficEnforcementTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasCycleUtils {
+
+  protected val teaServerName = "tea-server"
 
   protected var aliceE: ExternalParty = _
   protected var bobE: ExternalParty = _
@@ -147,8 +155,6 @@ final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTraffic
 }
 
 final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficEnforcementTest {
-  private val teaServerName = "tea-server"
-
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
@@ -330,6 +336,49 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           },
         )
       }
+
+      "not enforce the balance check for the participant admin party" in { implicit env =>
+        import env.*
+
+        val adminParty = participant1.adminParty
+
+        // The admin party should starts with no balance.
+        participant1.ledger_api.traffic
+          .get_account(adminParty.toProtoPrimitive)
+          .balance shouldBe 0L
+
+        // The submission succeeds even though the balance check would reject any other
+        // party with no balance.
+        val transaction = loggerFactory.assertLogsSeq(
+          SuppressionRule.forLogger[TrafficEnforcementBackend] && SuppressionRule.Level(DEBUG)
+        )(
+          participant1.ledger_api.javaapi.commands.submit(
+            Seq(adminParty),
+            Seq(createCycleCommandJava(adminParty, "traffic")),
+          ),
+          forAtLeast(1, _) {
+            _.debugMessage should include(
+              show"Skipping traffic enforcement validation for participant admin party: ${adminParty.toLf}"
+            )
+          },
+        )
+        val cost = transaction.getPaidTrafficCost
+
+        // The admin account is still debited through the completion stream.
+        eventually() {
+          participant1.ledger_api.traffic
+            .get_account(adminParty.toProtoPrimitive)
+            .balance shouldBe 0L - cost
+        }
+
+        // Interactive preparation is not rejected either.
+        val preparedAdmin = participant1.ledger_api.interactive_submission.prepare(
+          actAs = Seq(adminParty),
+          commands = Seq(createCycleCommand(adminParty, "traffic-prepare")),
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
+        )
+        preparedAdmin.getPreparedTransaction should not be null
+      }
     }
 
     "traffic enforcement is enabled but traffic enforcement server is not available" should {
@@ -410,8 +459,6 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
 
 final class ParticipantTrafficEnforcementSubmissionDisabledTest
     extends ParticipantTrafficEnforcementTest {
-  private val teaServerName = "tea-server"
-
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
@@ -456,6 +503,94 @@ final class ParticipantTrafficEnforcementSubmissionDisabledTest
             participant1.ledger_api.traffic
               .get_account(alice)
               .balance shouldBe initialAliceBalance - cost
+          }
+      }
+    }
+  }
+}
+
+/** Like [[ParticipantTrafficEnforcementEnabledTest]] but with a real LAPI auth service configured,
+  * so [[com.digitalasset.canton.auth.TeaTokenAuthService]] is on the code path.
+  */
+final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTrafficEnforcementTest {
+  private val jwtSecret = NonEmptyString.tryCreate("tea-auth-test-secret")
+
+  registerPlugin(new UsePostgres(loggerFactory))
+
+  override def beforeAll(): Unit =
+    loggerFactory.suppress(AuthStartupConfigSuppressionRule) {
+      super.beforeAll()
+    }
+
+  override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
+    ConfigTransforms.updateParticipantConfig("participant1")(
+      _.focus(_.trafficEnforcement)
+        .replace(
+          TrafficEnforcementConfig(
+            enabled = true,
+            enforceCostOnSubmissions = true,
+            trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
+          )
+        )
+        .focus(_.ledgerApi.authServices)
+        .replace(
+          Seq(
+            AuthServiceConfig.UnsafeJwtHmac256(
+              secret = jwtSecret,
+              targetAudience = None,
+              targetScope = None,
+            )
+          )
+        )
+        // The admin token needs ClaimAdmin for: setup-time external party allocation, update_account, and users.create.
+        .focus(_.ledgerApi.adminTokenConfig.adminClaim)
+        .replace(true)
+    ),
+    // Shorten network timeout so retries to the non-existent traffic service give up quickly
+    _.focus(_.parameters.timeouts.processing.network)
+      .replace(config.NonNegativeDuration.tryFromDuration(5.seconds)),
+  )
+
+  "Participant" when {
+    "traffic enforcement is enabled with a real LAPI auth service" should {
+      "debit traffic from the submitting party, proving TeaTokenAuthService authorised TEA" in {
+        implicit env =>
+          import env.*
+
+          val alice = aliceE.partyId.toProtoPrimitive
+
+          // update_account requires ClaimAdmin. The admin token (adminClaim=true) satisfies that.
+          participant1.ledger_api.traffic.update_account(alice, balanceDelta = Some(1_000_000L))
+
+          val userId = participant1.ledger_api.users
+            .create("alice-traffic-test-user", actAs = Set(aliceE.partyId))
+            .id
+          val client = ExternalLedgerApiClient.forReference(
+            participant1,
+            JwtTokenUtilities.buildUnsafeToken(jwtSecret.unwrap, userId = Some(userId)),
+          )
+
+          val balance = client.ledger_api.traffic.get_account(alice).balance
+          balance shouldBe 1_000_000L
+
+          val iouCmd = IouSyntax.testIou(aliceE, aliceE, 10L).create().commands().asScala.toSeq
+          // The default event format uses filtersForAnyParty (wildcard), which requires ReadAsAnyParty.
+          val eventFormat = EventFormat(
+            filtersByParty = Map(alice -> Filters(Nil)),
+            filtersForAnyParty = None,
+            verbose = true,
+          )
+          val transaction = client.ledger_api.javaapi.commands.submit(
+            Seq(aliceE),
+            iouCmd,
+            customEventFormat = Some(eventFormat),
+          )
+          val cost = transaction.getPaidTrafficCost
+
+          eventually() {
+            client.ledger_api.traffic
+              .get_account(alice)
+              .balance shouldBe balance - cost
           }
       }
     }

@@ -20,8 +20,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedWrapper,
+  HasVersionedMessageCompanionE,
+  HasVersionedWrapperE,
   ProtoVersion,
   ProtocolVersion,
 }
@@ -125,7 +125,7 @@ trait CryptoKeyPairKey extends CryptoKey {
 }
 
 trait CryptoKeyPair[+PK <: PublicKey, +SK <: PrivateKey]
-    extends HasVersionedWrapper[CryptoKeyPair[PublicKey, PrivateKey]]
+    extends HasVersionedWrapperE[CryptoKeyPair[PublicKey, PrivateKey]]
     with Product
     with Serializable {
 
@@ -142,12 +142,13 @@ trait CryptoKeyPair[+PK <: PublicKey, +SK <: PrivateKey]
   // The keypair is identified by the public key's id
   def id: Fingerprint = publicKey.id
 
-  protected def toProtoCryptoKeyPairPairV30: v30.CryptoKeyPair.Pair
+  protected def toProtoCryptoKeyPairPairV30: Either[String, v30.CryptoKeyPair.Pair]
 
-  def toProtoCryptoKeyPairV30: v30.CryptoKeyPair = v30.CryptoKeyPair(toProtoCryptoKeyPairPairV30)
+  def toProtoCryptoKeyPairV30: Either[String, v30.CryptoKeyPair] =
+    toProtoCryptoKeyPairPairV30.map(v30.CryptoKeyPair.apply)
 }
 
-object CryptoKeyPair extends HasVersionedMessageCompanion[CryptoKeyPair[PublicKey, PrivateKey]] {
+object CryptoKeyPair extends HasVersionedMessageCompanionE[CryptoKeyPair[PublicKey, PrivateKey]] {
 
   override def name: String = "crypto key pair"
 
@@ -185,7 +186,14 @@ object CryptoKeyPair extends HasVersionedMessageCompanion[CryptoKeyPair[PublicKe
 trait PublicKey extends CryptoKeyPairKey {
   type K <: PublicKey
 
-  def toByteString(version: ProtocolVersion): ByteString
+  // We need a different method to unify the encryption and signing public keys, since in a few places they are
+  // serialized as just `PublicKey`. Before serialization could fail, it was mapping on either `SigningPublicKey`
+  // or `EncryptionPublicKey`'s `toByteString`, but now they have a different signature since one can fail and not the other.
+  // TODO(i33934): We could also decide to keep them unified by having `EncryptionPublicKey`'s serialization also possibly fail.
+  def toByteStringE(version: ProtocolVersion): Either[String, ByteString]
+
+  def toByteArrayE(version: ProtocolVersion): Either[String, Array[Byte]] =
+    toByteStringE(version).map(_.toByteArray)
 
   def fingerprint: Fingerprint = id
 
@@ -215,14 +223,18 @@ trait PublicKey extends CryptoKeyPairKey {
 
   override def isPublicKey: Boolean = true
 
-  protected def toProtoPublicKeyKeyV30: v30.PublicKey.Key
+  protected def toProtoPublicKeyKeyV30: Either[String, v30.PublicKey.Key]
+  protected def toProtoPublicKeyKeyV31: Either[String, v31.PublicKey.Key]
 
   /** With the v30.PublicKey message we model the class hierarchy of public keys in protobuf. Each
     * child class that implements this trait can be serialized with `toProto` to their corresponding
     * protobuf message. With the following method, it can be serialized to this trait's protobuf
     * message.
     */
-  def toProtoPublicKeyV30: v30.PublicKey = v30.PublicKey(key = toProtoPublicKeyKeyV30)
+  def toProtoPublicKeyV30: Either[String, v30.PublicKey] =
+    toProtoPublicKeyKeyV30.map(v30.PublicKey.apply)
+  def toProtoPublicKeyV31: Either[String, v31.PublicKey] =
+    toProtoPublicKeyKeyV31.map(v31.PublicKey.apply)
 }
 
 object PublicKey {
@@ -239,6 +251,15 @@ object PublicKey {
         EncryptionPublicKey.fromProtoV30(encPubKeyP)
       case v30.PublicKey.Key.SigningPublicKey(signPubKeyP) =>
         SigningPublicKey.fromProtoV30(signPubKeyP)
+    }
+
+  def fromProtoPublicKeyV31(publicKeyP: v31.PublicKey): ParsingResult[PublicKey] =
+    publicKeyP.key match {
+      case v31.PublicKey.Key.Empty => Left(ProtoDeserializationError.FieldNotSet("key"))
+      case v31.PublicKey.Key.EncryptionPublicKey(encPubKeyP) =>
+        EncryptionPublicKey.fromProtoV30(encPubKeyP)
+      case v31.PublicKey.Key.SigningPublicKey(signPubKeyP) =>
+        SigningPublicKey.fromProtoV31(signPubKeyP)
     }
 
 }
@@ -260,7 +281,7 @@ object KeyName extends LengthLimitedStringWrapperCompanion[String300, KeyName] {
 trait PublicKeyWithName
     extends Product
     with Serializable
-    with HasVersionedWrapper[PublicKeyWithName] {
+    with HasVersionedWrapperE[PublicKeyWithName] {
   type PK <: PublicKey
   def publicKey: PK
   def name: Option[KeyName]
@@ -270,16 +291,25 @@ trait PublicKeyWithName
   override protected def companionObj: PublicKeyWithName.type =
     PublicKeyWithName
 
-  def toProtoV30: v30.PublicKeyWithName =
-    v30.PublicKeyWithName(
-      publicKey = Some(
-        publicKey.toProtoPublicKeyV30
-      ),
-      name = name.map(_.unwrap).getOrElse(""),
+  def toProtoV30: Either[String, v30.PublicKeyWithName] =
+    publicKey.toProtoPublicKeyV30.map(proto =>
+      v30.PublicKeyWithName(
+        publicKey = Some(proto),
+        name = name.map(_.unwrap).getOrElse(""),
+      )
     )
+
+  def toProtoV31: Either[String, v31.PublicKeyWithName] =
+    publicKey.toProtoPublicKeyV31.map(proto =>
+      v31.PublicKeyWithName(
+        publicKey = Some(proto),
+        name = name.map(_.unwrap).getOrElse(""),
+      )
+    )
+
 }
 
-object PublicKeyWithName extends HasVersionedMessageCompanion[PublicKeyWithName] {
+object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName] {
 
   override def name: String = "PublicKeyWithName"
 
@@ -305,20 +335,42 @@ object PublicKeyWithName extends HasVersionedMessageCompanion[PublicKeyWithName]
         case k: EncryptionPublicKey => EncryptionPublicKeyWithName(k, name.emptyStringAsNone)
       }
     }
+
+  def fromProto31(key: v31.PublicKeyWithName): ParsingResult[PublicKeyWithName] =
+    for {
+      publicKey <- ProtoConverter.parseRequired(
+        PublicKey.fromProtoPublicKeyV31,
+        "public_key",
+        key.publicKey,
+      )
+      name <- KeyName.fromProtoPrimitive(key.name)
+    } yield {
+      (publicKey: @unchecked) match {
+        case k: SigningPublicKey => SigningPublicKeyWithName(k, name.emptyStringAsNone)
+        case k: EncryptionPublicKey => EncryptionPublicKeyWithName(k, name.emptyStringAsNone)
+      }
+    }
 }
 
 // The private key id must match the corresponding public key's one
 trait PrivateKey extends CryptoKeyPairKey {
-  type K <: PrivateKey & HasVersionedWrapper[K]
+  type K <: PrivateKey
+
+  // We need a different method to unify the encryption and signing private keys, since in a few places they are
+  // serialized as just `PrivateKey`. Before serialization could fail, it was mapping on either `SigningPrivateKey`
+  // or `EncryptionPrivateKey`'s `toByteString`, but now they have a different signature since one can fail and not the other.
+  // TODO(i33934): We could also decide to keep them unified by having `EncryptionPrivateKey`'s serialization also possibly fail.
+  def toByteStringE(version: ProtocolVersion): Either[String, ByteString]
 
   def purpose: KeyPurpose
 
   override def isPublicKey: Boolean = false
 
-  protected def toProtoPrivateKeyKeyV30: v30.PrivateKey.Key
+  protected def toProtoPrivateKeyKeyV30: Either[String, v30.PrivateKey.Key]
 
   /** Same representation of the class hierarchy in protobuf messages, see [[PublicKey]]. */
-  def toProtoPrivateKey: v30.PrivateKey = v30.PrivateKey(key = toProtoPrivateKeyKeyV30)
+  def toProtoPrivateKey: Either[String, v30.PrivateKey] =
+    toProtoPrivateKeyKeyV30.map(v30.PrivateKey.apply)
 }
 
 object PrivateKey {

@@ -608,8 +608,8 @@ final case class EncryptionKeyPair private (
   def toProtoV30: v30.EncryptionKeyPair =
     v30.EncryptionKeyPair(Some(privateKey.toProtoV30))
 
-  protected def toProtoCryptoKeyPairPairV30: v30.CryptoKeyPair.Pair =
-    v30.CryptoKeyPair.Pair.EncryptionKeyPair(toProtoV30)
+  protected def toProtoCryptoKeyPairPairV30: Either[String, v30.CryptoKeyPair.Pair] =
+    v30.CryptoKeyPair.Pair.EncryptionKeyPair(toProtoV30).asRight
 }
 
 object EncryptionKeyPair {
@@ -696,6 +696,9 @@ final case class EncryptionPublicKey private (
 
   val purpose: KeyPurpose = KeyPurpose.Encryption
 
+  override def toByteStringE(version: ProtocolVersion): Either[String, ByteString] =
+    toByteString(version).asRight
+
   def toProtoV30: v30.EncryptionPublicKey =
     v30.EncryptionPublicKey(
       format = format.toProtoEnum,
@@ -705,8 +708,10 @@ final case class EncryptionPublicKey private (
       keySpec = keySpec.toProtoEnum,
     )
 
-  override protected def toProtoPublicKeyKeyV30: v30.PublicKey.Key =
-    v30.PublicKey.Key.EncryptionPublicKey(toProtoV30)
+  override protected def toProtoPublicKeyKeyV30: Either[String, v30.PublicKey.Key] =
+    v30.PublicKey.Key.EncryptionPublicKey(toProtoV30).asRight
+  override protected def toProtoPublicKeyKeyV31: Either[String, v31.PublicKey.Key] =
+    v31.PublicKey.Key.EncryptionPublicKey(toProtoV30).asRight
 
   override def prettyCompanion: PrettyPrintingCompanion[EncryptionPublicKey] = EncryptionPublicKey
 
@@ -847,6 +852,9 @@ final case class EncryptionPrivateKey private (
       )
       .map(_ => this)
 
+  override def toByteStringE(version: ProtocolVersion): Either[String, ByteString] =
+    toByteString(version).asRight
+
   def toProtoV30: v30.EncryptionPrivateKey =
     v30.EncryptionPrivateKey(
       id = id.toProtoPrimitive,
@@ -857,8 +865,8 @@ final case class EncryptionPrivateKey private (
       keySpec = keySpec.toProtoEnum,
     )
 
-  override protected def toProtoPrivateKeyKeyV30: v30.PrivateKey.Key =
-    v30.PrivateKey.Key.EncryptionPrivateKey(toProtoV30)
+  override protected def toProtoPrivateKeyKeyV30: Either[String, v30.PrivateKey.Key] =
+    v30.PrivateKey.Key.EncryptionPrivateKey(toProtoV30).asRight
 
   @nowarn("msg=Der in object CryptoKeyFormat is deprecated")
   private def migrate(): Option[EncryptionPrivateKey] =

@@ -4,6 +4,8 @@
 package com.digitalasset.canton.util
 
 import cats.data.EitherT
+import com.daml.ledger.api.v2.commands.Command
+import com.daml.ledger.javaapi as javab
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -444,6 +446,16 @@ class MaliciousParticipantNode(
       maxSequencingTime = maxSequencingTime,
       topologyTimestamp = topologyTimestamp,
     )
+  }
+
+  def submitJavaApiCommand(actAs: Seq[Party], commands: Seq[javab.data.Command])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, SendResult.Success] = {
+    val commandsWithMetadata = CommandsWithMetadata(
+      commands = commands.map(c => Command.fromJavaProto(c.toProtoCommand)),
+      actAs = actAs.map(_.partyId),
+    )
+    submitCommand(commandsWithMetadata)
   }
 
   def submitCommand(

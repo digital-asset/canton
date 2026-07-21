@@ -33,7 +33,7 @@ class GrpcStatusService(
       (file: File) => healthDump(file),
       responseObserver,
       byteString => HealthDumpResponse(byteString),
-      processingTimeout.unbounded.duration,
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 

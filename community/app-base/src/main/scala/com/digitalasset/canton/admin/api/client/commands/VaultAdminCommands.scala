@@ -46,23 +46,25 @@ object VaultAdminCommands {
       ] {
 
     override protected def createRequest(): Either[String, v30.ListMyKeysRequest] =
-      Right(
-        v30.ListMyKeysRequest(
-          baseRequest = Some(baseRequest.toProtoV30),
-          filters = Some(
-            v30.ListKeysFilters(
-              fingerprint = filterFingerprint,
-              name = filterName,
-              purpose = filterPurpose.map(_.toProtoEnum).toSeq,
-              usageV30 =
-                if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                  Seq()
-                else
-                  filterUsage.map(_.toProtoEnumV30).toSeq,
-            )
-          ),
+      filterUsage.toSeq
+        .traverse(_.toProtoEnumV30)
+        .map(serializedFilterUsage =>
+          v30.ListMyKeysRequest(
+            baseRequest = Some(baseRequest.toProtoV30),
+            filters = Some(
+              v30.ListKeysFilters(
+                fingerprint = filterFingerprint,
+                name = filterName,
+                purpose = filterPurpose.map(_.toProtoEnum).toSeq,
+                usageV30 =
+                  if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+                    Seq()
+                  else
+                    serializedFilterUsage,
+              )
+            ),
+          )
         )
-      )
 
     override protected def submitRequest(
         service: VaultServiceStub,
@@ -91,23 +93,25 @@ object VaultAdminCommands {
       ] {
 
     override protected def createRequest(): Either[String, ListPublicKeysRequest] =
-      Right(
-        v30.ListPublicKeysRequest(
-          baseRequest = Some(baseRequest.toProtoV30),
-          filters = Some(
-            v30.ListKeysFilters(
-              fingerprint = filterFingerprint,
-              name = filterName,
-              purpose = filterPurpose.map(_.toProtoEnum).toSeq,
-              usageV30 =
-                if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-                  Seq()
-                else
-                  filterUsage.map(_.toProtoEnumV30).toSeq,
-            )
-          ),
+      filterUsage.toSeq
+        .traverse(_.toProtoEnumV30)
+        .map(serializedFilterUsage =>
+          v30.ListPublicKeysRequest(
+            baseRequest = Some(baseRequest.toProtoV30),
+            filters = Some(
+              v30.ListKeysFilters(
+                fingerprint = filterFingerprint,
+                name = filterName,
+                purpose = filterPurpose.map(_.toProtoEnum).toSeq,
+                usageV30 =
+                  if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+                    Seq()
+                  else
+                    serializedFilterUsage,
+              )
+            ),
+          )
         )
-      )
 
     override protected def submitRequest(
         service: VaultServiceStub,
@@ -160,21 +164,24 @@ object VaultAdminCommands {
         SigningPublicKey,
       ] {
 
+    import cats.syntax.traverse.*
     override protected def createRequest(): Either[String, v30.GenerateSigningKeyRequest] =
-      Right(
-        v30.GenerateSigningKeyRequest(
-          baseRequest = Some(baseRequest.toProtoV30),
-          name = name,
-          usageV30 =
-            if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-              Seq()
-            else
-              usage.map(_.toProtoEnumV30).toSeq,
-          keySpec = keySpec.fold[cryptoprotoV30.SigningKeySpec](
-            cryptoprotoV30.SigningKeySpec.SIGNING_KEY_SPEC_UNSPECIFIED
-          )(_.toProtoEnum),
+      usage.forgetNE.toSeq
+        .traverse(_.toProtoEnumV30)
+        .map(serializedUsage =>
+          v30.GenerateSigningKeyRequest(
+            baseRequest = Some(baseRequest.toProtoV30),
+            name = name,
+            usageV30 =
+              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+                Seq()
+              else
+                serializedUsage,
+            keySpec = keySpec.fold[cryptoprotoV30.SigningKeySpec](
+              cryptoprotoV30.SigningKeySpec.SIGNING_KEY_SPEC_UNSPECIFIED
+            )(_.toProtoEnum),
+          )
         )
-      )
 
     override protected def submitRequest(
         service: VaultServiceStub,
@@ -244,18 +251,20 @@ object VaultAdminCommands {
       ] {
 
     override protected def createRequest(): Either[String, v30.RegisterKmsSigningKeyRequest] =
-      Right(
-        v30.RegisterKmsSigningKeyRequest(
-          baseRequest = Some(baseRequest.toProtoV30),
-          kmsKeyId = kmsKeyId,
-          usageV30 =
-            if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
-              Seq()
-            else
-              usage.map(_.toProtoEnumV30).toSeq,
-          name = name,
+      usage.forgetNE.toSeq
+        .traverse(_.toProtoEnumV30)
+        .map(serializedUsage =>
+          v30.RegisterKmsSigningKeyRequest(
+            baseRequest = Some(baseRequest.toProtoV30),
+            kmsKeyId = kmsKeyId,
+            usageV30 =
+              if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(serverVersion))
+                Seq()
+              else
+                serializedUsage,
+            name = name,
+          )
         )
-      )
 
     override protected def submitRequest(
         service: VaultServiceStub,

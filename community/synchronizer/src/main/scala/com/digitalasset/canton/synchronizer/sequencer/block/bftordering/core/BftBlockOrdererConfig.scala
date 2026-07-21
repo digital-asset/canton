@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.{TlsClientConfig, TlsServerConfig}
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.config.{
   ActiveRequestLimitsConfig,
   AdminTokenConfig,
@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.{
   ClientConfig,
   JwksCacheConfig,
   PemFileOrString,
+  PositiveFiniteDuration,
   ServerConfig,
   StorageConfig,
 }
@@ -44,6 +45,9 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultMaxRequestPayloadBytes,
   DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
+  DefaultNetworkSendAttempts,
+  DefaultNetworkSendRetryMaximumDelay,
+  DefaultNetworkSendRetryMinimumDelay,
   DefaultOutputEnqueueMaxRetries,
   DefaultOutputEnqueueMaxRetryDelay,
   DefaultOutputFetchMinimumDelay,
@@ -142,8 +146,8 @@ import scala.concurrent.duration.*
   *   overwhelming peers with rapid successive fetch requests, for example if the jitter returns
   *   very low values.
   * @param outputFetchTimeoutCap
-  *   The maximum timeout, after jitter and backoff are considered, that a node's availability
-  *   module will wait while fetching batch data from a peer.
+  *   The maximum jittered duration that a node's availability module will wait while fetching batch
+  *   data from a peer. The minimum delay is added to the jittered delay.
   * @param outputEnqueueMaxRetries
   *   The maximum number of retry attempts when enqueuing ordered output blocks for delivery to the
   *   sequencer core.
@@ -194,6 +198,15 @@ import scala.concurrent.duration.*
   * @param initQueryTimeout
   *   The maximum time allowed for individual queries during BFT block orderer initialization (e.g.,
   *   topology or state queries). Must be less than or equal to `initTimeout`.
+  * @param networkSendAttempts
+  *   The maximum number of gRPC message send attempts before dropping the message.
+  * @param networkSendRetryMinimumDelay
+  *   The minimum delay between consecutive gRPC message send attempts. This prevents a node from
+  *   overwhelming peers with rapid successive gRPC message sends, for example if the jitter returns
+  *   very low values.
+  * @param networkSendRetryJitterCap
+  *   The maximum jittered delay that a node will use to wait between consecutive gRPC message send
+  *   attempts. The minimum delay is added to the jittered delay.
   */
 final case class BftBlockOrdererConfig(
     segmentLengthForPv34: Option[Long] = None,
@@ -240,6 +253,9 @@ final case class BftBlockOrdererConfig(
       DefaultSequencerCoreSubscriptionConfig,
     initTimeout: config.NonNegativeFiniteDuration = DefaultInitTimeout,
     initQueryTimeout: config.NonNegativeFiniteDuration = DefaultInitQueryTimeout,
+    networkSendAttempts: PositiveInt = DefaultNetworkSendAttempts,
+    networkSendRetryMinimumDelay: PositiveFiniteDuration = DefaultNetworkSendRetryMinimumDelay,
+    networkSendRetryJitterCap: PositiveFiniteDuration = DefaultNetworkSendRetryMaximumDelay,
 ) {
   private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
 
@@ -281,7 +297,7 @@ object BftBlockOrdererConfig {
   val DefaultEpochStateTransferTimeout: FiniteDuration = 4.seconds
   val DefaultOutputFetchTimeout: FiniteDuration = 1_000.millis
   val DefaultOutputFetchMinimumDelay: FiniteDuration = 1_000.millis
-  val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
+  val DefaultOutputFetchTimeoutCap: FiniteDuration = 5_000.millis
   val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
   val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
   val DefaultOutputSizeOfChunkOfEpochsToLoadAtStart: Int = 10
@@ -300,6 +316,12 @@ object BftBlockOrdererConfig {
     config.NonNegativeFiniteDuration(10.minutes)
   val DefaultInitQueryTimeout: config.NonNegativeFiniteDuration =
     config.NonNegativeFiniteDuration(5.minutes)
+
+  val DefaultNetworkSendAttempts: PositiveInt = PositiveInt.tryCreate(5)
+  val DefaultNetworkSendRetryMinimumDelay: PositiveFiniteDuration =
+    PositiveFiniteDuration.tryFromDuration(2_000.millis)
+  val DefaultNetworkSendRetryMaximumDelay: PositiveFiniteDuration =
+    PositiveFiniteDuration.tryFromDuration(30_000.millis)
 
   /** Configuration for peer-to-peer network settings
     *
@@ -457,6 +479,7 @@ object BftBlockOrdererConfig {
       signingPublicKeyProtoFile: File,
       segmentLength: Long,
       peers: Seq[BftBlockOrderingStandalonePeerConfig],
+      postOrderingDelay: Option[FiniteDuration] = None,
   )
 
   final case class BftBlockOrderingStandalonePeerConfig(

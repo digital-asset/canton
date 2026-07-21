@@ -401,7 +401,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           implicit val tc: TraceContext = traceContext
           logger.debug(s"Establish connection '$from' -> '$to' via endpoint $maybeP2PEndpoint")
           p2pConnectionEventListener.onConnect(maybeP2PEndpoint.map(_.id))
-          p2pConnectionEventListener.onSequencerId(to, maybeP2PEndpoint)
+          p2pConnectionEventListener.onNodeId(to, maybeP2PEndpoint)
           val machine = tryGetMachine(from)
           runNodeCollector(from, EventOriginator.FromNetwork, machine.nodeCollector)
         case CrashNode(node, permanent, traceContext) =>

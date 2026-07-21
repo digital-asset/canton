@@ -13,11 +13,7 @@ import com.digitalasset.canton.data.ActionDescription.{
   ExerciseActionDescription,
   FetchActionDescription,
 }
-import com.digitalasset.canton.data.ViewParticipantData.{
-  InvalidSerializationVersion,
-  InvalidViewParticipantData,
-  RootAction,
-}
+import com.digitalasset.canton.data.ViewParticipantData.{InvalidViewParticipantData, RootAction}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{v30, v31, *}
@@ -40,7 +36,6 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
-import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
@@ -208,21 +203,62 @@ final case class ViewParticipantData private (
   private def checkMaxSerializationVersion(
       protocolVersion: ProtocolVersion
   ): Either[String, Unit] = {
-    val contracts = coreInputs.values.map(_.contract) ++ createdCore.map(_.contract)
     val maxSerializationVersion =
       com.digitalasset.canton.version.LfSerializationVersionToProtocolVersions
         .maxSerializationVersionForProtocolVersion(protocolVersion)
+    for {
+      _ <- checkMaxContractSerializationVersion(protocolVersion, maxSerializationVersion)
+      _ <-
+        if (protocolVersion >= ProtocolVersion.v36)
+          checkMaxKeyResolutionSerializationVersion(protocolVersion, maxSerializationVersion)
+        else Either.unit
+      _ <-
+        if (protocolVersion >= ProtocolVersion.v36)
+          checkMaxChoiceValueSerializationVersion(protocolVersion, maxSerializationVersion)
+        else Either.unit
+    } yield ()
+  }
+
+  private def checkMaxContractSerializationVersion(
+      protocolVersion: ProtocolVersion,
+      maxSerializationVersion: LfSerializationVersion,
+  ): Either[String, Unit] = {
+    val contracts = coreInputs.values.map(_.contract) ++ createdCore.map(_.contract)
     val invalid = contracts
       .filter(_.inst.version > maxSerializationVersion)
       .map(c => c.contractId -> c.inst.version)
       .toMap
-    NonEmpty
-      .from(invalid)
-      .toLeft(())
-      .leftMap(invalidContracts =>
-        InvalidSerializationVersion(invalidContracts, protocolVersion).getMessage
-      )
+    Either.cond(
+      invalid.isEmpty,
+      (),
+      s"ViewParticipantData contains contract serialization versions not supported by protocol version $protocolVersion: $invalid",
+    )
   }
+
+  private def checkMaxKeyResolutionSerializationVersion(
+      protocolVersion: ProtocolVersion,
+      maxSerializationVersion: LfSerializationVersion,
+  ): Either[String, Unit] = {
+    val invalid = keyResolution.values.map(_.version).toSet.filter(_ > maxSerializationVersion)
+    Either.cond(
+      invalid.isEmpty,
+      (),
+      s"ViewParticipantData contains key resolution serialization versions not supported by protocol version $protocolVersion: $invalid",
+    )
+  }
+
+  private def checkMaxChoiceValueSerializationVersion(
+      protocolVersion: ProtocolVersion,
+      maxSerializationVersion: LfSerializationVersion,
+  ): Either[String, Unit] =
+    actionDescription match {
+      case ExerciseActionDescription(_, _, _, _, _, chosenValue, _, _, _, _)
+          if chosenValue.version > maxSerializationVersion =>
+        Left(
+          s"ViewParticipantData contains an exercise choice value serialization version not supported by protocol version $protocolVersion: ${chosenValue.version}"
+        )
+      case _ => Right(())
+    }
 
   private def checkKeyResolution(protocolVersion: ProtocolVersion): Either[String, Unit] =
     Either.cond(
@@ -708,13 +744,6 @@ object ViewParticipantData
 
   /** Indicates an attempt to create an invalid [[ViewParticipantData]]. */
   final case class InvalidViewParticipantData(message: String) extends RuntimeException(message)
-
-  final case class InvalidSerializationVersion(
-      invalid: NonEmpty[Map[LfContractId, LfSerializationVersion]],
-      protocolVersion: ProtocolVersion,
-  ) extends RuntimeException(
-        s"ViewParticipantData contains contracts with serialization versions not supported by protocol version $protocolVersion: $invalid"
-      )
 
   /** External-call result recorded in this view's core.
     *

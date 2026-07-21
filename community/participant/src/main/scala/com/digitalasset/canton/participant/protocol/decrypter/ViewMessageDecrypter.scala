@@ -22,52 +22,49 @@ import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
-/** Interface for decrypting encrypted view messages. The decryption logic may differ based on the
+/** Class for decrypting encrypted view messages. The decryption logic may differ based on the
   * protocol version.
   *
-  * For PV up to and including v35, the decryption logic (V1) assumes view hashes are unique and may
+  * For PV up to `transparency`, the decryption logic (V1) assumes view hashes are unique and may
   * fail if this assumption does not hold.
   *
-  * For PV36 and above, we introduce a new decryption logic (V2) that no longer relies on view
-  * hashes to guarantee uniqueness. Instead, it uses the ciphertext ID (i.e., the hash of a view’s
-  * ciphertext) to identify a view.
+  * For PV`transparency` and above, we introduce a new decryption logic (V2) that no longer relies
+  * on view hashes to guarantee uniqueness. Instead, it uses the ciphertext ID (i.e., the hash of a
+  * view’s ciphertext) to identify a view.
   */
-trait ViewMessageDecrypter {
+final case class ViewMessageDecrypter(
+    participantId: ParticipantId,
+    sessionKeyStore: ConfirmationRequestSessionKeyStore,
+    protocolVersion: ProtocolVersion,
+    futureSupervisor: FutureSupervisor,
+    loggerFactory: NamedLoggerFactory,
+)(implicit executionContext: ExecutionContext) {
+
   def decryptViews(
-      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]]
+      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]],
+      snapshot: SynchronizerSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
     LightTransactionViewTree
-  ]]
-}
-
-object ViewMessageDecrypter {
-  def create(
-      participantId: ParticipantId,
-      protocolVersion: ProtocolVersion,
-      sessionKeyStore: ConfirmationRequestSessionKeyStore,
-      snapshot: SynchronizerSnapshotSyncCryptoApi,
-      futureSupervisor: FutureSupervisor,
-      loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext): ViewMessageDecrypter =
-    if (protocolVersion <= ProtocolVersion.v35)
-      new ViewMessageDecrypterV1(
+  ]] =
+    if (protocolVersion >= ProtocolVersion.transparency)
+      // TODO(#32393): Change to [[ViewMessageDecrypterV2]] after implementing the new decryption logic.
+      new ViewMessageDecrypterImplV1(
         participantId,
-        protocolVersion,
         sessionKeyStore,
         snapshot,
+        protocolVersion,
         futureSupervisor,
         loggerFactory,
-      )
-    // TODO(#32393): Change to [[ViewMessageDecrypterV2]] after implementing the new decryption logic.
+      ).decryptViews(batch)
     else
-      new ViewMessageDecrypterV1(
+      new ViewMessageDecrypterImplV1(
         participantId,
-        protocolVersion,
         sessionKeyStore,
         snapshot,
+        protocolVersion,
         futureSupervisor,
         loggerFactory,
-      )
+      ).decryptViews(batch)
 }

@@ -37,13 +37,19 @@ trait CryptoPrivateStoreExtendedTest extends CryptoPrivateStoreTest {
     val sigKey1WithName: SigningPrivateKeyWithName =
       SigningPrivateKeyWithName(sigKey1, Some(KeyName.tryCreate(sigKey1Name)))
     val sigKey1BytesWithName =
-      (sigKey1.toByteString(testedReleaseProtocolVersion.v), sigKey1WithName.name)
+      (
+        sigKey1.toByteString(testedReleaseProtocolVersion.v).valueOrFail("serializing key"),
+        sigKey1WithName.name,
+      )
 
     val sigKey2: SigningPrivateKey =
       crypto.newSymbolicSigningKeyPair(SigningKeyUsage.ProtocolOnly).privateKey
     val sigKey2WithName: SigningPrivateKeyWithName = SigningPrivateKeyWithName(sigKey2, None)
     val sigKey2BytesWithName =
-      (sigKey2.toByteString(testedReleaseProtocolVersion.v), sigKey2WithName.name)
+      (
+        sigKey2.toByteString(testedReleaseProtocolVersion.v).valueOrFail("serializing key"),
+        sigKey2WithName.name,
+      )
 
     val encKey1: EncryptionPrivateKey = crypto.newSymbolicEncryptionKeyPair().privateKey
     val encKey1WithName: EncryptionPrivateKeyWithName =

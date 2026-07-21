@@ -60,7 +60,8 @@ class PartyToParticipantKeyUsageIntegrationTest
           )
         ),
       )
-      val ptpTx = TopologyTransaction(Replace, PositiveInt.one, ptpMapping, testedProtocolVersion)
+      val ptpTx =
+        TopologyTransaction.tryCreate(Replace, PositiveInt.one, ptpMapping, testedProtocolVersion)
 
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         loadTransaction(ptpTx, NonEmpty.mk(Set, namespaceKey.fingerprint)),
@@ -102,7 +103,8 @@ class PartyToParticipantKeyUsageIntegrationTest
             )
           ),
         )
-        val ptpTx = TopologyTransaction(Replace, PositiveInt.one, ptpMapping, testedProtocolVersion)
+        val ptpTx =
+          TopologyTransaction.tryCreate(Replace, PositiveInt.one, ptpMapping, testedProtocolVersion)
         loadTransaction(ptpTx, NonEmpty.mk(Set, namespaceKey.fingerprint, protocolKey.fingerprint))
 
         // Creating a contract with alice should work

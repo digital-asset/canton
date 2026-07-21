@@ -146,6 +146,7 @@ class ParallelIndexerSubscriptionSpec
         ),
       )
     ),
+    genericTopologyEvents = Nil, // TODO(i33326)
     synchronizerId = deadbeefSynchronizer,
     effectiveTime = CantonTimestamp.assertFromInstant(someTime),
   )
@@ -2520,6 +2521,7 @@ class ParallelIndexerSubscriptionSpec
     TopologyTransactionEffective(
       updateId = TestUpdateId("16000"),
       events = Set.empty,
+      genericTopologyEvents = Nil, // TODO(i33326)
       synchronizerId = someSynchronizerId,
       effectiveTime = recordTime,
     )(TraceContext.empty)

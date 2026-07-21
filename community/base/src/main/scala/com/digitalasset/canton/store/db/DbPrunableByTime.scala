@@ -49,8 +49,8 @@ trait DbPrunableByTime[Idx] extends PrunableByTime {
     storage.query(query, functionFullName)
   }
 
-  protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
-      implicit traceContext: TraceContext
+  protected def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
 
     val query = (storage.profile, phase) match {

@@ -19,6 +19,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   AggregationRule,
   AllMembersOfSynchronizer,
   Batch,
+  DecompressionPolicy,
   MediatorGroupRecipient,
   MemberRecipientOrBroadcast,
   SequencersOfSynchronizer,
@@ -42,7 +43,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{AnnouncedLsu, SubmissionO
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.collection.IterableUtil
-import com.digitalasset.canton.util.{MaxBytesToDecompress, MonadUtil, TracedPossiblyPrevalidated}
+import com.digitalasset.canton.util.{MonadUtil, TracedPossiblyPrevalidated}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import io.opentelemetry.api.trace.Tracer
@@ -227,8 +228,8 @@ class BlockUpdateGeneratorImpl(
           // hardcoded value, which only bounds the eager decompression of the recipients (needed
           // for chunking). The envelope contents are decompressed later, in the block chunk
           // processor, with the dynamic `maxRequestSize` value (for protocol versions >= 36).
-          val maxBytesToDecompress = MaxBytesToDecompress.HardcodedDefault
-          LedgerBlockEvent.fromRawBlockEvent(protocolVersion, maxBytesToDecompress)(
+          val decompressionPolicy = DecompressionPolicy.HardcodedDefault
+          LedgerBlockEvent.fromRawBlockEvent(protocolVersion, decompressionPolicy)(
             tracedEvent.value
           ) match {
             case Left(error) =>

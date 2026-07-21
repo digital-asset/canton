@@ -73,7 +73,6 @@ final case class SequencerNodeParameters(
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
     requestLimits: Option[ActiveRequestLimitsConfig] = None,
-    maxAuthNoncesPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
     maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
     drSequencingTimeUpperBound: Option[DisasterRecoverySequencingTimeUpperBound] = None,

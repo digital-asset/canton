@@ -68,7 +68,7 @@ class InMemoryAcsDigestJournal[K, V](
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
         immutable.Iterable[
-          AcsDigestStore.AcsDigest[K, V]
+          AcsDigestStore.AcsDigestUpdate[K, V]
         ],
         Either[PaginationTokenDone, SnapshotPaginationToken],
     )
@@ -85,7 +85,7 @@ class InMemoryAcsDigestJournal[K, V](
               .map(entry => atInclusive -> entry)
               .orElse(history.maxBefore(atInclusive))
           }
-          .map { case (_, update) => update.digestUpdate }
+          .map { case (_, update) => update }
     }
 
     val (page, next) = stream.splitAt(limit)
@@ -110,7 +110,7 @@ class InMemoryAcsDigestJournal[K, V](
     )
   ] = {
     val stream = tokenOrStart match {
-      case Left(SnapshotToken(remaining)) => remaining
+      case Left(ChangesBetweenToken(remaining)) => remaining
       case Right(ChangesBetweenOffsetRange(fromInclusive, toExclusive)) =>
         LazyList
           .from(journal.values)
@@ -127,13 +127,13 @@ class InMemoryAcsDigestJournal[K, V](
 
     val (page, next) = stream.splitAt(limit)
 
-    val nextToken = Either.cond(next.nonEmpty, SnapshotToken(next), PaginationTokenDone)
+    val nextToken = Either.cond(next.nonEmpty, ChangesBetweenToken(next), PaginationTokenDone)
 
     FutureUnlessShutdown.pure {
       page -> nextToken
     }
   }
-  override type ChangesBetweenPaginationToken = SnapshotToken[K, V]
+  override type ChangesBetweenPaginationToken = ChangesBetweenToken[K, V]
 
   override def checkReplacesInvariant(upToInclusive: Offset)(implicit
       traceContext: TraceContext
@@ -239,5 +239,6 @@ class InMemoryAcsDigestJournal[K, V](
 }
 
 object InMemoryAcsDigestJournal {
-  final case class SnapshotToken[K, V](remaining: LazyList[AcsDigest[K, V]])
+  final case class SnapshotToken[K, V](remaining: LazyList[AcsDigestUpdate[K, V]])
+  final case class ChangesBetweenToken[K, V](remaining: LazyList[AcsDigest[K, V]])
 }

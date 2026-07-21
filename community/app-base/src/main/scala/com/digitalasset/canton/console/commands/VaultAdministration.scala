@@ -66,7 +66,7 @@ class SecretKeyAdministration(
           keySpec = Some(signKey.keySpec),
           name = name,
         )
-      case unknown => throw new IllegalArgumentException(s"Invalid public key type: $unknown")
+      case unknown => consoleEnvironment.raiseError(s"Invalid public key type: $unknown")
     }
 
   @Help.Summary("List keys in private vault")
@@ -138,7 +138,7 @@ class SecretKeyAdministration(
             )
           )
         }
-      case None => throw new IllegalArgumentException("no signing key usage specified")
+      case None => consoleEnvironment.raiseError("no signing key usage specified")
     }
 
   @Help.Summary("Generate new public/private key pair for encryption and store it in the vault")
@@ -197,7 +197,7 @@ class SecretKeyAdministration(
             )
           )
         }
-      case None => throw new IllegalArgumentException("no signing key usage specified")
+      case None => consoleEnvironment.raiseError("no signing key usage specified")
     }
 
   @Help.Summary(
@@ -225,10 +225,7 @@ class SecretKeyAdministration(
   ): PublicKey =
     findPublicKeys(topologyAdmin, owner).find(_.fingerprint.unwrap == fingerprint) match {
       case Some(key) => key
-      case None =>
-        throw new IllegalStateException(
-          s"The key $fingerprint does not exist"
-        )
+      case None => consoleEnvironment.raiseError(s"The key $fingerprint does not exist")
     }
 
   @Help.Summary("Rotate a given node's keypair with a new pre-generated KMS keypair")
@@ -259,7 +256,7 @@ class SecretKeyAdministration(
       case _: EncryptionPublicKey =>
         instance.keys.secret.register_kms_encryption_key(newKmsKeyId, name)
       case _ =>
-        throw new IllegalStateException("Unsupported key type")
+        consoleEnvironment.raiseError("Unsupported key type")
     }
 
     // Rotate the key for the node in the topology management
@@ -733,7 +730,7 @@ class PublicKeyAdministration(
   )
   def upload_from(filename: String, name: Option[String]): Fingerprint =
     BinaryFileUtil.readByteStringFromFile(filename).map(upload(_, name)).valueOr { err =>
-      throw new IllegalArgumentException(err)
+      consoleEnvironment.raiseError(err)
     }
 
   @Help.Summary("Download public key")
@@ -743,12 +740,14 @@ class PublicKeyAdministration(
   ): ByteString = {
     val keys = list(fingerprint.unwrap)
     if (keys.sizeCompare(1) == 0) { // vector doesn't like matching on Nil
-      val key = keys.headOption.getOrElse(sys.error("no key"))
-      key.publicKey.toByteString(protocolVersion)
+      val key = keys.headOption.getOrElse(
+        consoleEnvironment.raiseError("should not happen: no head for seq with 1 element")
+      )
+      key.publicKey.toByteStringE(protocolVersion).valueOr(consoleEnvironment.raiseError)
     } else {
-      if (keys.isEmpty) throw new IllegalArgumentException(s"no key found for [$fingerprint]")
+      if (keys.isEmpty) consoleEnvironment.raiseError(s"no key found for [$fingerprint]")
       else
-        throw new IllegalArgumentException(
+        consoleEnvironment.raiseError(
           s"found multiple results for [$fingerprint]: ${keys.map(_.publicKey.fingerprint)}"
         )
     }
@@ -934,17 +933,20 @@ object LocalSecretKeyAdministration {
           EncryptionKeyPair.create(pub, pkey)
         case _ => sys.error("public and private keys must have same purpose")
       }
+      serializedKeyPair <- EitherT.fromEither[FutureUnlessShutdown](
+        keyPair.toByteString(protocolVersion)
+      )
 
       // Encrypt the keypair if a password is provided
       keyPairBytes = password match {
         case Some(password) =>
           crypto.pureCrypto
-            .encryptWithPassword(keyPair.toByteString(protocolVersion), password)
+            .encryptWithPassword(serializedKeyPair, password)
             .fold(
               err => sys.error(s"Failed to encrypt key pair for export: $err"),
               _.toByteString(protocolVersion),
             )
-        case None => keyPair.toByteString(protocolVersion)
+        case None => serializedKeyPair
       }
     } yield keyPairBytes
 }

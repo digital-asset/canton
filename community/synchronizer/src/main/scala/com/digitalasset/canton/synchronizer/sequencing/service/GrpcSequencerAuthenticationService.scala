@@ -115,7 +115,7 @@ class GrpcSequencerAuthenticationService(
       _ <- eitherT(handshakeValidation(request))
       member <- eitherT(deserializeMember(request.member))
       result <- authenticationService
-        .generateNonce(member)
+        .generateChallenge(member)
         .leftMap(handleAuthError)
     } yield {
       val (nonce, fingerprints) = result

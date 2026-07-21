@@ -39,6 +39,7 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
   ErrorWithSubTransaction,
   LazyAsyncReInterpretationMap,
   Result,
+  UnvettedPackages,
   ViewReconstructionError,
 }
 import com.digitalasset.canton.participant.store.ContractLookup
@@ -58,6 +59,7 @@ import com.digitalasset.canton.{
   LfPackageId,
   LfPartyId,
   LfVersioned,
+  ProtocolVersionChecksAnyWordSpec,
   config,
 }
 import com.digitalasset.daml.lf
@@ -76,6 +78,7 @@ import org.scalatest.LoneElement.convertToCollectionLoneElementWrapper
 import org.scalatest.wordspec.AnyWordSpecLike
 import org.scalatest.{Assertion, EitherValues, OptionValues}
 
+import scala.annotation.tailrec
 import scala.collection.convert.AsJavaExtensions
 import scala.util.{Failure, Random, Success, Try}
 
@@ -83,6 +86,7 @@ class ModelConformanceCheckerTest
     extends AnyWordSpecLike
     with BaseTest
     with HasExecutionContext
+    with ProtocolVersionChecksAnyWordSpec
     with MockitoSugar
     with FailOnShutdown {
 
@@ -193,6 +197,53 @@ class ModelConformanceCheckerTest
     )
   }
 
+  private def isSubview(parent: ViewPositionFromRoot, child: ViewPositionFromRoot): Boolean =
+    child.position.startsWith(parent.position)
+
+  private def findParentPositions(
+      viewPositions: Seq[ViewPositionFromRoot]
+  ): Seq[ViewPositionFromRoot] = {
+    @tailrec
+    def go(
+        todo: List[ViewPositionFromRoot],
+        done: Set[ViewPositionFromRoot],
+    ): Set[ViewPositionFromRoot] =
+      todo match {
+        case viewPos :: tail =>
+          if (!done.exists(d => isSubview(d, viewPos))) {
+            go(tail, done + viewPos)
+          } else {
+            go(tail, done)
+          }
+        case Nil => done
+      }
+    go(viewPositions.toList, Set.empty).toSeq
+  }
+
+  private val MainViewTree: FullTransactionViewTree => Seq[FullTransactionViewTree] = Seq(_)
+
+  private def projectionsFor(
+      party: PartyId
+  )(fvt: FullTransactionViewTree): Seq[FullTransactionViewTree] = {
+
+    val viewPositionsForParty: Seq[ViewPositionFromRoot] = for {
+      (rootView, index) <- fvt.tree.rootViews.unblindedElementsWithIndex
+      viewPos <- rootView.allSubviewsWithPosition(index +: ViewPosition.root).collect {
+        case (view, viewPos)
+            if view.viewCommonData.tryUnwrap.viewConfirmationParameters.informees
+              .contains(party.toLf) =>
+          viewPos
+      }
+    } yield viewPos.reverse
+
+    // Having both the parent and a child will result in merge failure (due to duplicate creations for example).
+    val parentPositions = findParentPositions(viewPositionsForParty)
+
+    parentPositions.map(viewPos =>
+      FullTransactionViewTree.tryCreate(fvt.tree.tryBlindForTransactionViewTree(viewPos))
+    )
+  }
+
   "When provided with valid input" should {
 
     val underTest: ModelConformanceChecker = buildUnderTest()
@@ -249,29 +300,12 @@ class ModelConformanceCheckerTest
 
     "pass with projected views" in {
 
-      def projections(
-          filter: Set[Int]
-      )(fvt: FullTransactionViewTree): Seq[FullTransactionViewTree] = {
-        val views = for {
-          (rootView, index) <- fvt.tree.rootViews.unblindedElementsWithIndex
-          (_, viewPos) <- rootView.allSubviewsWithPosition(index +: ViewPosition.root)
-          genTransactionTree = fvt.tree.tryBlindForTransactionViewTree(viewPos.reverse)
-        } yield FullTransactionViewTree.tryCreate(genTransactionTree)
-        views.zipWithIndex.collect { case (t, i) if filter(i) => t }
-      }
-
       // This example has a top level view visible to Alice and two subviews visible to Bob
       val example = exampleFactory.multiReaderCreate()
 
       // Top level subview is complete
-      verifyExample(underTest, example, projections(Set(0)))
-
-      // Although incomplete the following examples should pass model conformance
-      verifyExample(underTest, example, projections(Set(1)))
-      verifyExample(underTest, example, projections(Set(2)))
-
-      // What Bob actually sees
-      verifyExample(underTest, example, projections(Set(1, 2)))
+      verifyExample(underTest, example, projectionsFor(exampleFactory.alice))
+      verifyExample(underTest, example, projectionsFor(exampleFactory.bob))
 
     }
 
@@ -693,6 +727,43 @@ class ModelConformanceCheckerTest
     }
   }
 
+  "When a subview is not vetted" should {
+
+    val underTest: ModelConformanceChecker = buildUnderTest()
+
+    "fail with vetting error" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+      val example = exampleFactory.multiReaderCreate()
+
+      // Here we only vet packages for the alice (acting party) on participant 1. The root view package
+      // vetting will be valid (as the only informee is alice). The child views will are invalid
+      // as bob/participant2 have not vetted the packages.
+      val actingParty = example.actAs.toLf
+      val actingParticipant = partyParticipants(actingParty)
+
+      val topology = example.tx.informees.view.map { partyId =>
+        val participantId = partyParticipants(partyId)
+        partyId -> Map(participantId -> ParticipantPermission.Confirmation)
+      }.toMap
+
+      val packages =
+        Map(
+          actingParticipant -> example.requiredVettedPackages
+            .map(p => VettedPackage(p, None, None))
+            .toSeq
+        )
+
+      val topologySnapshot = buildTopologySnapshot(topology, packages)
+
+      inside(
+        checkExample(underTest, example, topologySnapshot, MainViewTree)
+      ) { case ModelConformanceRejection(err) =>
+        inside(err.errors.head) { case UnvettedPackages(unvetted) =>
+          unvetted.keySet should contain(partyParticipants(exampleFactory.bob.toLf))
+        }
+      }
+    }
+  }
+
   def unsuffixed(
       suffixed: WellFormedTransaction[WellFormedTransaction.Stage]
   ): WellFormedTransaction[WellFormedTransaction.WithoutSuffixes] =
@@ -710,7 +781,7 @@ class ModelConformanceCheckerTest
   def verifyExample(
       underTest: ModelConformanceChecker,
       example: Example,
-      projections: FullTransactionViewTree => Seq[FullTransactionViewTree] = Seq(_),
+      projections: FullTransactionViewTree => Seq[FullTransactionViewTree] = MainViewTree,
   ): Assertion = {
 
     val topologySnapshot: TopologySnapshot = buildTopologySnapshotFor(example)
@@ -835,13 +906,6 @@ class ModelConformanceCheckerTest
       informees = Set.empty[LfPartyId],
     )
   )
-
-  def checkTree(
-      underTest: ModelConformanceChecker,
-      fullTransactionViewTree: FullTransactionViewTree,
-      topologySnapshot: TopologySnapshot,
-  ): Either[ErrorWithSubTransaction[ViewAbsoluteLedgerEffect], Result] =
-    checkTrees(underTest, Seq(fullTransactionViewTree), topologySnapshot)
 
   def checkTrees(
       underTest: ModelConformanceChecker,

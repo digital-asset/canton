@@ -217,10 +217,17 @@ trait PrunableByTime {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[PruningStatus]]
 
-  @VisibleForTesting
-  protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
-      implicit traceContext: TraceContext
+  protected def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
+
+  @VisibleForTesting
+  @inline private[canton] final def advancePruningTimestampInternal(
+      phase: PruningPhase,
+      timestamp: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = advancePruningTimestamp(phase, timestamp)
 
   /** Actual invocation of doPrune
     *
@@ -228,8 +235,16 @@ trait PrunableByTime {
     *   the approximate number of pruned rows, used to adjust the pruning windows to reach optimal
     *   batch sizes
     */
-  @VisibleForTesting
-  protected[canton] def doPrune(limit: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
-      implicit traceContext: TraceContext
+  protected def doPrune(limit: CantonTimestamp, lastPruning: Option[CantonTimestamp])(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Int]
+
+  @VisibleForTesting
+  @inline
+  private[canton] final def doPruneInternal(
+      limit: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Int] = doPrune(limit, lastPruning)
 }

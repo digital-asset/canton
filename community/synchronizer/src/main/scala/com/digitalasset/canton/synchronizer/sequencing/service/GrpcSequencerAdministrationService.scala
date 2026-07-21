@@ -246,6 +246,7 @@ class GrpcSequencerAdministrationService(
       },
       responseObserver,
       byteString => OnboardingStateResponse(byteString),
+      parameters.processingTimeouts.adminStreamOpenBound.duration,
     )
   }
 
@@ -298,6 +299,7 @@ class GrpcSequencerAdministrationService(
       },
       responseObserver,
       byteString => OnboardingStateV2Response(byteString),
+      parameters.processingTimeouts.adminStreamOpenBound.duration,
     )
   }
 

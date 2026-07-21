@@ -12,6 +12,7 @@ import com.digitalasset.canton.integration.ConfigTransforms.updateAllParticipant
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.LAPITTVersion
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.tests.ledgerapi.ProtocolType.Json
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.ApiUserManagementServiceSuppressionRule
 import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
@@ -51,7 +52,8 @@ trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       ledgerApiTestToolPlugin.runShardedSuites(
         shard = shard,
         numShards = numShards,
-        exclude = LedgerApiConformanceBase.excludedTests(testedProtocolVersion),
+        exclude =
+          LedgerApiConformanceBase.excludedTests(testedProtocolVersion, ProtocolType.Grpc).toSeq,
         concurrentTestRuns = concurrentTestRuns,
         useJson = false,
       )(env)
@@ -228,11 +230,30 @@ object LedgerApiConformanceBase {
     "VettingIT:PVCheckUnvettedPackagesExceptWithForceFlag"
   )
 
-  def excludedTests(testedProtocolVersion: ProtocolVersion): Seq[String] =
-    disabledTests ++ {
-      if (testedProtocolVersion <= ProtocolVersion.v34) excludedTestsForPV34
-      else excludedTestsForPV35AndAbove
-    }
+  /** Tests that only fail over the JSON API for PV35, because the JSON security checks reject the
+    * payload with a different error message than the test tool expects.
+    */
+  private val jsonExcludedTestsForPV35 = Seq(
+    "DeeplyNestedValueIT:RejectCreateCommand110",
+    "DeeplyNestedValueIT:RejectCreateCommand200",
+    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand110",
+    "DeeplyNestedValueIT:RejectCreateArgumentInCreateAndExerciseCommand200",
+    "DeeplyNestedValueIT:RejectExerciseCommand110",
+    "DeeplyNestedValueIT:RejectExerciseCommand200",
+    "DeeplyNestedValueIT:RejectChoiceArgumentInCreateAndExerciseCommand110",
+    "DeeplyNestedValueIT:RejectChoiceArgumentInCreateAndExerciseCommand200",
+  )
+
+  def excludedTests(version: ProtocolVersion, protocolType: ProtocolType): Set[String] = {
+    val perProtocolVersionExclusions =
+      (version, protocolType) match {
+        case (ProtocolVersion.v34, _) => excludedTestsForPV34
+        case (ProtocolVersion.v35, Json) => excludedTestsForPV35AndAbove ++ jsonExcludedTestsForPV35
+        case (version, _) if version >= ProtocolVersion.v35 => excludedTestsForPV35AndAbove
+        case _ => Seq.empty
+      }
+    (disabledTests ++ perProtocolVersionExclusions).toSet
+  }
 }
 
 abstract class LedgerApiShardedConformanceBase(shard: Int)

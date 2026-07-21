@@ -11,7 +11,6 @@ import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -22,10 +21,10 @@ final case class ClosedCompressedEnvelope(
     override val recipients: Recipients,
     algorithm: CompressionAlgorithm,
 )(
-    // Moved maxBytesToCompress to a separate argument group, so it doesn't affect "equals"
-    maxBytesToDecompress: MaxBytesToDecompress
+    // Moved the deferred decompression to a separate argument group, so it doesn't affect "equals"
+    deferredDecompression: DeferredDecompression
 ) extends ClosedEnvelope {
-  // Internal cache in case we need to uncompress more than once
+  // Internal cache in case we need to uncompress more than once.
   private lazy val uncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
     prepareUncompressedEnvelopeResult
 
@@ -41,11 +40,7 @@ final case class ClosedCompressedEnvelope(
   override def toClosedCompressedEnvelope: ClosedCompressedEnvelope = this
 
   private def prepareUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] = for {
-    decompressed <- Batch.decompress(
-      algorithm = v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP,
-      compressed = bytes,
-      maxRequestSize = maxBytesToDecompress,
-    )
+    decompressed <- deferredDecompression.decompressed
     protoEnvelope <- ProtoConverter.protoParser(v31.EnvelopeWithoutRecipients.parseFrom)(
       decompressed
     )
@@ -69,12 +64,15 @@ final case class ClosedCompressedEnvelope(
 
   @VisibleForTesting
   override def withRecipients(newRecipients: Recipients): ClosedCompressedEnvelope =
-    ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(maxBytesToDecompress)
+    // Share the deferred decompression, so that copies draw the budget at most once
+    ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(deferredDecompression)
 
-  override def withMaxBytesToDecompress(
-      maxBytesToDecompress: MaxBytesToDecompress
+  override private[protocol] def withDecompressionBudget(
+      decompressionBudget: DecompressionBudget
   ): ClosedCompressedEnvelope =
-    ClosedCompressedEnvelope(bytes, recipients, algorithm)(maxBytesToDecompress)
+    ClosedCompressedEnvelope(bytes, recipients, algorithm)(
+      DeferredDecompression(bytes, decompressionBudget)
+    )
 }
 
 object ClosedCompressedEnvelope {
@@ -85,7 +83,29 @@ object ClosedCompressedEnvelope {
     )
 
   def create(bytes: ByteString, recipients: Recipients, algorithm: CompressionAlgorithm)(
-      maxBytesToDecompress: MaxBytesToDecompress
+      decompressionBudget: DecompressionBudget
   ): ClosedCompressedEnvelope =
-    ClosedCompressedEnvelope(bytes, recipients, algorithm)(maxBytesToDecompress)
+    ClosedCompressedEnvelope(bytes, recipients, algorithm)(
+      DeferredDecompression(bytes, decompressionBudget)
+    )
+}
+
+/** Deferred, memoized decompression of a [[ClosedCompressedEnvelope]] payload. Per-recipient copies
+  * of an envelope share the same instance, so the payload is decompressed once for all of them.
+  */
+private[protocol] final class DeferredDecompression(
+    bytes: ByteString,
+    budget: DecompressionBudget,
+) {
+  lazy val decompressed: ParsingResult[ByteString] =
+    Batch.decompress(
+      algorithm = v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP,
+      compressed = bytes,
+      decompressionBudget = budget,
+    )
+}
+
+private[protocol] object DeferredDecompression {
+  def apply(bytes: ByteString, budget: DecompressionBudget): DeferredDecompression =
+    new DeferredDecompression(bytes, budget)
 }

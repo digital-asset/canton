@@ -34,6 +34,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
+  DecryptedViewData,
   DecryptedViews,
   ParsedRequest,
   PendingRequestData,
@@ -211,43 +212,46 @@ private[reassignment] trait ReassignmentProcessingSteps[
       .parTraverseWithLimit(snapshot.pureCrypto.encryptionParallelism)(batch.toSeq) { envelope =>
         decryptTree(snapshot, sessionKeyStore)(envelope).value
       }
-      .map(DecryptedViews(_))
+      .map(DecryptedViews.fromViewsWithSignature)
     EitherT.right(result)
   }
 
   override def absolutizeLedgerEffects(
-      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[
-        (WithRecipients[DecryptedView], Option[Signature])
-      ]
+      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[DecryptedViewData[DecryptedView]]
   ): (
-      Seq[(WithRecipients[DecryptedView], Option[Signature], ViewAbsoluteLedgerEffects)],
+      Seq[(DecryptedViewData[DecryptedView], ViewAbsoluteLedgerEffects)],
       Seq[MalformedPayload],
   ) =
     // Merely check that all reassigned contract IDs are absolute.
-    viewsWithCorrectRootHashAndRecipientsAndSignature.partitionMap {
-      case (withRecipients @ WithRecipients(view, _), sig) =>
-        val invalidContractIds =
-          view.contracts.contracts.view.map(_.contract.contractId).filterNot(_.isAbsolute).toSeq
-        Either.cond(
-          invalidContractIds.nonEmpty,
-          ViewMessageError(
-            InvalidContractIdInView(
-              s"Invalid contract IDs in view at position ${view.viewPosition}: $invalidContractIds"
-            )
-          ),
-          (withRecipients, sig, ()),
-        )
+    viewsWithCorrectRootHashAndRecipientsAndSignature.partitionMap { decryptedView =>
+      val view = decryptedView.view.unwrap
+      val invalidContractIds =
+        view.contracts.contracts.view.map(_.contract.contractId).filterNot(_.isAbsolute).toSeq
+      Either.cond(
+        invalidContractIds.nonEmpty,
+        ViewMessageError(
+          InvalidContractIdInView(
+            s"Invalid contract IDs in view at position ${view.viewPosition}: $invalidContractIds"
+          )
+        ),
+        (decryptedView, ()),
+      )
     }
 
   override def computeFullViews(
       decryptedViewsWithSignatures: Seq[
-        (WithRecipients[DecryptedView], Option[Signature], ViewAbsoluteLedgerEffects)
+        (DecryptedViewData[DecryptedView], ViewAbsoluteLedgerEffects)
       ]
   ): (
       Seq[(WithRecipients[FullView], Option[Signature], FullViewAbsoluteLedgerEffects)],
       Seq[ProtocolProcessor.MalformedPayload],
   ) =
-    (decryptedViewsWithSignatures, Seq.empty)
+    (
+      decryptedViewsWithSignatures.map { case (decryptedView, effects) =>
+        (decryptedView.view, decryptedView.signatureO, effects)
+      },
+      Seq.empty,
+    )
 
   override def computeParsedRequest(
       rc: RequestCounter,

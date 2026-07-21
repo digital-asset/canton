@@ -10,7 +10,6 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.{
   SecureRandomness,
   Signature,
-  SynchronizerCryptoPureApi,
   SynchronizerSnapshotSyncCryptoApi,
 }
 import com.digitalasset.canton.data.ViewType.TransactionViewType
@@ -33,12 +32,7 @@ import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessageError,
   TransactionViewMessage,
 }
-import com.digitalasset.canton.sequencing.protocol.{
-  MemberRecipient,
-  OpenEnvelope,
-  Recipients,
-  WithRecipients,
-}
+import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, OpenEnvelope, WithRecipients}
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.ParticipantId
@@ -46,7 +40,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 
 import scala.concurrent.ExecutionContext
 import scala.util.Success
@@ -68,18 +61,17 @@ import scala.util.Success
   *
   * This implementation assumes that view hashes are UNIQUE across the batch.
   */
-class ViewMessageDecrypterV1(
+private[decrypter] class ViewMessageDecrypterImplV1(
     participantId: ParticipantId,
-    protocolVersion: ProtocolVersion,
     sessionKeyStore: ConfirmationRequestSessionKeyStore,
     snapshot: SynchronizerSnapshotSyncCryptoApi,
+    protocolVersion: ProtocolVersion,
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
-    extends NamedLogging
-    with ViewMessageDecrypter {
+    extends NamedLogging {
 
-  private def pureCrypto: SynchronizerCryptoPureApi = snapshot.pureCrypto
+  private val pureCrypto = snapshot.pureCrypto
 
   def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]]
@@ -91,10 +83,6 @@ class ViewMessageDecrypterV1(
     // To recover parallel processing to the largest possible extent, we'll associate a promise to each received
     // view. The promise gets fulfilled once the randomness of that view has been extracted,
     // either from EncryptedViewMessage.sessionKeys or from LightTransactionViewTree.subviewHashesAndKeys.
-
-    val messagesWithRecipients = batch.map { envelope =>
-      envelope.protocolMessage -> envelope.recipients
-    }
 
     val randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]] =
       batch
@@ -111,11 +99,11 @@ class ViewMessageDecrypterV1(
     EitherT.right(for {
       // Extract randomness from EncryptedViewMessages
       _ <- MonadUtil.parTraverseWithLimit_(pureCrypto.encryptionParallelism)(
-        messagesWithRecipients.toSeq
-      ) { case (message, recipients) =>
+        batch.toSeq
+      ) { encryptedViewMessageEnvelope =>
         // For multi-view messages, let's put the randomness for all the hashes
-        val viewHashes = message.viewHashes
-        extractRandomnessFromEnvelope(message, recipients).map { randomnessO =>
+        val viewHashes = encryptedViewMessageEnvelope.protocolMessage.viewHashes
+        extractRandomnessFromEnvelope(encryptedViewMessageEnvelope).map { randomnessO =>
           randomnessO.foreach { randomness =>
             viewHashes.foreach { viewHash =>
               storeRandomness(viewHash, randomness, checked(randomnessMap(viewHash)))
@@ -127,10 +115,10 @@ class ViewMessageDecrypterV1(
       // Decrypt LightTransactionViewTrees and keep adding randomness to randomnessMap whenever they become available.
       decryptionResult <- MonadUtil
         .parTraverseWithLimit(pureCrypto.encryptionParallelism)(
-          messagesWithRecipients.toSeq
-        ) { case (message, recipients) =>
+          batch.toSeq
+        ) { encryptedViewMessageEnvelope =>
           // Transform single view to a list for a compatibility with the v35+ multi-view result
-          decryptViews(randomnessMap, message, recipients).map {
+          decryptViewMessageEnvelope(randomnessMap, encryptedViewMessageEnvelope).map {
             case Left(error) => Seq(Left(error))
             case Right(views) =>
               views.forgetNE.map(view => Right(view))
@@ -138,14 +126,14 @@ class ViewMessageDecrypterV1(
         }
         .map(_.flatten)
 
-    } yield DecryptedViews(decryptionResult))
+    } yield DecryptedViews.fromViewsWithSignature(decryptionResult))
   }
 
   private def extractRandomnessFromEnvelope(
-      message: TransactionViewMessage,
-      recipients: Recipients,
+      envelope: OpenEnvelope[TransactionViewMessage]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[SecureRandomness]] =
-    if (recipients.leafRecipients.contains(MemberRecipient(participantId))) {
+    if (envelope.recipients.leafRecipients.contains(MemberRecipient(participantId))) {
+      val message = envelope.protocolMessage
       EncryptedViewMessage
         .decryptRandomness(
           snapshot,
@@ -164,32 +152,34 @@ class ViewMessageDecrypterV1(
         .map(Some(_))
     } else FutureUnlessShutdown.pure(None)
 
-  private def decryptViews(
+  private def decryptViewMessageEnvelope(
       randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]],
-      message: TransactionViewMessage,
-      recipients: Recipients,
+      encryptedViewEnvelope: OpenEnvelope[TransactionViewMessage],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Either[
     EncryptedViewMessageError,
     NonEmpty[Seq[(WithRecipients[LightTransactionViewTree], Option[Signature])]],
-  ]] =
+  ]] = {
+
+    val encryptedViewMessage = encryptedViewEnvelope.protocolMessage
     for {
       // For the multiple views, we can take randomness from any hash from list, it should be the same
       // TODO(#31213): Handle multiple views with the same view hash during decryption
-      randomness <- randomnessMap(message.viewHashes.head1).futureUS
-      decryptionResult <- decryptViewsWithRandomness(
+      randomness <- randomnessMap(encryptedViewMessage.viewHashes.head1).futureUS
+      decryptionResult <- decryptMessageWithRandomness(
         randomnessMap,
-        message,
+        encryptedViewMessage,
         randomness,
       ).value
     } yield decryptionResult.map { case (viewTrees, signature) =>
       viewTrees.map { viewTree =>
-        (WithRecipients(viewTree, recipients), signature)
+        (WithRecipients(viewTree, encryptedViewEnvelope.recipients), signature)
       }
     }
+  }
 
-  private def decryptViewsWithRandomness(
+  private def decryptMessageWithRandomness(
       randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]],
-      viewMessage: TransactionViewMessage,
+      encryptedViewMessage: TransactionViewMessage,
       randomness: SecureRandomness,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
@@ -203,11 +193,16 @@ class ViewMessageDecrypterV1(
       lightTransactionMultiViewTree <- EncryptedViewMessage.decryptFor(
         snapshot,
         sessionKeyStore,
-        viewMessage,
+        encryptedViewMessage,
         participantId,
         Some(randomness),
       )(
-        lightTransactionViewTreeDeserializer
+        LightTransactionViewTree
+          .fromByteString(
+            (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+            protocolVersion,
+          )(_)
+          .leftMap(err => DefaultDeserializationError(err.message))
       )
 
       viewTrees = lightTransactionMultiViewTree.viewTrees
@@ -233,7 +228,7 @@ class ViewMessageDecrypterV1(
               )
           }
       }
-    } yield (viewTrees, viewMessage.submittingParticipantSignature)
+    } yield (viewTrees, encryptedViewMessage.submittingParticipantSignature)
 
   private def storeRandomness(
       viewHash: ViewHash,
@@ -252,16 +247,4 @@ class ViewMessageDecrypterV1(
       }
     }
   }
-
-  private def lightTransactionViewTreeDeserializer(
-      bytes: ByteString
-  ): Either[DefaultDeserializationError, LightTransactionViewTree] =
-    LightTransactionViewTree
-      .fromByteString(
-        (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
-        protocolVersion,
-      )(
-        bytes
-      )
-      .leftMap(err => DefaultDeserializationError(err.message))
 }

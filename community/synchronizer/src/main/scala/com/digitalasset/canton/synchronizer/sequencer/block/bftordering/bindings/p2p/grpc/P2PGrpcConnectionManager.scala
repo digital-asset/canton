@@ -34,9 +34,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   AuthenticateServerClientInterceptor,
   ServerAuthenticatingServerInterceptor,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PConnectionManagementConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PConnectionState.Error
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PMetrics.emitIdentityEquivocation
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   ModuleRef,
@@ -80,6 +82,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
     thisNode: BftNodeId,
     p2pConnectionManagementConfig: P2PConnectionManagementConfig,
     p2pGrpcConnectionState: P2PGrpcConnectionState, // Owns it and closes it
+    p2pEndpointsStore: P2PEndpointsStore[PekkoEnv],
     // None if authentication is disabled
     authenticationInitialState: Option[AuthenticationInitialState],
     serverToClientAuthenticationEndpoint: Option[P2PEndpoint],
@@ -409,15 +412,17 @@ private[bftordering] final class P2PGrpcConnectionManager(
       .flatMap { sequencerId =>
         toUnitFutureUS(
           peerSenderOT
-            .map { peerSender =>
+            .flatMap { peerSender =>
               logger.info(
                 s"P2P endpoint $p2pEndpointId successfully connected and authenticated " +
                   s"as ${sequencerId.toProtoPrimitive}"
               )
-              tryAddPeerEndpointAndSender(
-                sequencerId,
-                peerSender,
-                Some(p2pEndpoint),
+              OptionT.liftF(
+                completeConnectivitySetupAfterSuccessfulAuthentication(
+                  sequencerId,
+                  peerSender,
+                  Some(p2pEndpoint),
+                )
               )
             }
         )
@@ -448,16 +453,16 @@ private[bftordering] final class P2PGrpcConnectionManager(
       }
   }
 
-  private def tryAddPeerEndpointAndSender(
+  private def completeConnectivitySetupAfterSuccessfulAuthentication(
       sequencerId: SequencerId,
       peerSender: PeerSender,
       // It may be None if the peer is connecting to us and did not communicate its endpoint
       maybeP2PEndpoint: Option[P2PEndpoint],
-  )(implicit traceContext: TraceContext): Unit = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val bftNodeId = SequencerNodeId.toBftNodeId(sequencerId)
     val maybeP2PEndpointId = maybeP2PEndpoint.map(_.id)
     logger.info(
-      s"Adding peer endpoint $maybeP2PEndpointId for $bftNodeId with peer sender $peerSender"
+      s"Associating P2P endpoint $maybeP2PEndpointId with $bftNodeId and new peer sender $peerSender"
     )
     maybeP2PEndpointId.map(
       p2pGrpcConnectionState.associateP2PEndpointIdToBftNodeId(_, bftNodeId)
@@ -466,11 +471,12 @@ private[bftordering] final class P2PGrpcConnectionManager(
       case None | Some(Right(())) =>
         if (!p2pGrpcConnectionState.addSenderIfMissing(bftNodeId, peerSender)) {
           logger.info(
-            s"Completing peer sender $peerSender for $bftNodeId <-> $maybeP2PEndpointId " +
+            s"Completing new peer sender $peerSender for $bftNodeId <-> $maybeP2PEndpointId " +
               "because one already exists"
           )
           completeGrpcStreamObserver(peerSender, logger)
         }
+
         // Prevents a stuck "sender present, network ref missing" state by ensuring a network ref is
         //  (re)asserted regardless of whether this connection "wins" the race.
         //
@@ -489,7 +495,56 @@ private[bftordering] final class P2PGrpcConnectionManager(
         //
         //  Re-asserting here is safe and idempotent: `addNetworkRefIfMissing` doesn't touch the state
         //  when a ref exists.
-        p2pConnectionEventListener.onSequencerId(bftNodeId, maybeP2PEndpoint)
+        p2pConnectionEventListener.onNodeId(bftNodeId, maybeP2PEndpoint)
+
+        maybeP2PEndpoint
+          .fold {
+            logger.info(
+              s"No P2P endpoint was provided for $bftNodeId, " +
+                "so it was not associated with any endpoint in the configured endpoints store"
+            )
+            FutureUnlessShutdown.unit
+          } { p2pEndpoint =>
+            logger.info(
+              s"Associating P2P endpoint $p2pEndpoint with $bftNodeId in the configured endpoints store"
+            )
+            p2pEndpointsStore
+              .associate(p2pEndpoint, bftNodeId)
+              .map { updated =>
+                if (updated)
+                  logger.info(
+                    s"Successfully associated P2P endpoint $p2pEndpoint with $bftNodeId " +
+                      "in the configured endpoints store"
+                  )
+                else
+                  logger.info(
+                    s"P2P endpoint $p2pEndpoint did not exist in the configured endpoints store, " +
+                      s"so it was not associated with $bftNodeId"
+                  )
+              }
+              .futureUnlessShutdown()
+          }
+          .transform { result =>
+            result match {
+              case Success(UnlessShutdown.Outcome(_)) =>
+                logger.info(
+                  s"Successfully associated P2P endpoint $maybeP2PEndpointId " +
+                    s"with $bftNodeId and new peer sender $peerSender"
+                )
+              case Success(UnlessShutdown.AbortedDueToShutdown) =>
+                logger.info(
+                  s"Association of P2P endpoint $maybeP2PEndpointId with $bftNodeId and new peer sender $peerSender " +
+                    "aborted due to shutdown"
+                )
+              case Failure(exception) =>
+                logger.warn(
+                  s"Failed to associate P2P endpoint $maybeP2PEndpointId " +
+                    s"with $bftNodeId and new peer sender $peerSender",
+                  exception,
+                )
+            }
+            result
+          }
 
       case Some(Left(error)) =>
         error match {
@@ -503,10 +558,10 @@ private[bftordering] final class P2PGrpcConnectionManager(
             emitIdentityEquivocation(metrics, p2pEndpointId, newBftNodeId)
         }
         logger.warn(
-          s"Detected identity equivocation when adding peer endpoint $maybeP2PEndpointId for $bftNodeId, " +
-            s"failing the peer sender $peerSender"
+          s"Detected identity equivocation when trying to associate P2P endpoint $maybeP2PEndpointId " +
+            s"with $bftNodeId"
         )
-        throw new RuntimeException(error.toString)
+        FutureUnlessShutdown.failed(new RuntimeException(error.toString))
     }
   }
 
@@ -561,7 +616,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
       )
 
       // When authentication is enabled, the external address normally also
-      //  appears as peer endpoint for this peer in other peers' configurations, so
+      //  appears as the P2P endpoint for this peer in other peers' configurations, so
       //  if the connecting peer always sends it (i.e., even when authentication is disabled),
       //  the server peer can use it to deduplicate connections:
       //
@@ -1062,7 +1117,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
             s"Successfully created a peer receiver $peerReceiverId for an incoming connection"
           )
           logger.info(
-            s"Peer endpoint communicated via the server context: $maybeCommunicatedEndpoint; " +
+            s"P2P endpoint communicated via the server context: $maybeCommunicatedEndpoint; " +
               "adding the connection to the state asynchronously as soon as a sequencer ID is available"
           )
 
@@ -1071,7 +1126,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
           //  communicated externally reachable P2P endpoint is wrong, authentication will fail and thus the P2P
           //  connection won't be established.
           //  When P2P endpoint authentication is disabled, however, a connecting node could skip communicating
-          //  its peer endpoint or send a wrong one (e.g. it may not be aware that the Internet-exposed one is
+          //  its P2P endpoint or send a wrong one (e.g. it may not be aware that the Internet-exposed one is
           //  different); in that case, a subsequent send attempt by this node to an endpoint of that peer won't find
           //  the gRPC channel and will try and create a new one in the opposite direction; if successful, it will
           //  effectively be a duplicate of the incoming connection.
@@ -1079,7 +1134,13 @@ private[bftordering] final class P2PGrpcConnectionManager(
           //  by the connection state and shut down.
           //  This also protects against potentially malicious peers that try to establish more than one connection.
           sequencerIdPromiseUS.futureUS
-            .map(tryAddPeerEndpointAndSender(_, peerSender, maybeCommunicatedEndpoint))
+            .flatMap(
+              completeConnectivitySetupAfterSuccessfulAuthentication(
+                _,
+                peerSender,
+                maybeCommunicatedEndpoint,
+              )
+            )
             .transform(
               identity,
               { exception =>

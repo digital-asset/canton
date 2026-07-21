@@ -688,7 +688,7 @@ object LockableStatesTest {
         fetched.result()
       }
 
-    override protected[canton] def doPrune(
+    override protected def doPrune(
         limit: CantonTimestamp,
         lastPruning: Option[CantonTimestamp],
     )(implicit

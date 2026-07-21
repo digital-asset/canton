@@ -36,6 +36,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.store.PersistedContractInstance
+import com.digitalasset.canton.platform.Exercise
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   authorizationEventInt,
   participantPermissionInt,
@@ -51,7 +52,6 @@ import com.digitalasset.canton.platform.store.dao.events.{
   FieldCompressionStrategy,
   LfValueSerialization,
 }
-import com.digitalasset.canton.platform.{ContractId, Create, Exercise}
 import com.digitalasset.canton.protocol.{
   ContractInstance,
   ExampleContractFactory,
@@ -2784,6 +2784,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.TopologyTransactionEffective(
         updateId = updateId,
         events = events,
+        genericTopologyEvents = Nil, // TODO(i33326)
         synchronizerId = someSynchronizerId1,
         effectiveTime = someRecordTime,
       )
@@ -2947,14 +2948,6 @@ object UpdateToDbDtoSpec {
   // These tests do not check the correctness of the LF value serialization.
   // All LF values are serialized into empty arrays in this suite.
   private val valueSerialization = new LfValueSerialization {
-    override def serialize(
-        contractId: ContractId,
-        contractArgument: Value.VersionedValue,
-    ): Array[Byte] = emptyArray
-
-    /** Returns (contract argument, contract key) */
-    override def serialize(create: Create): (Array[Byte], Option[Array[Byte]]) =
-      (emptyArray, create.keyOpt.map(_ => emptyArray))
 
     /** Returns (choice argument, exercise result, contract key) */
     override def serialize(
