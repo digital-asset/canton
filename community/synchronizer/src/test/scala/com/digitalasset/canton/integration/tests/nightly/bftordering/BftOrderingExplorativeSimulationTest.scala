@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.nightly.bftordering
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.PartitionSymmetry.{
@@ -40,7 +41,14 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
         "but it cannot be verified in the currently known dissemination topology"
       )
       logEntry.loggerName should include("AvailabilityModule")
-    }
+    },
+    // We might get messages about waiting for new membership after epoch completion, don't count these as errors.
+    { logEntry =>
+      logEntry.message should include(
+        "Waiting for new membership after epoch completion"
+      )
+      logEntry.loggerName should include("IssConsensusModule")
+    },
   )
 
   private val zeroProbability: Probability = Probability(0)
@@ -96,23 +104,32 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
             1 -> shortTime,
             2 -> longTime,
           ),
+          permanentlyCrashNodes = randomWeightedOneOf(
+            2 -> None,
+            1 -> Some(OrderingTopology.numToleratedFaults(numberInitialNodes)),
+          ),
         ),
         NetworkSettings(
           randomSeed = randomSourceToCreateSettings.nextLong(),
           packetLoss = randomEquallyWeightedOneOf(zeroProbability, generateProb(0.0, 0.33)),
           packetReplay = randomEquallyWeightedOneOf(zeroProbability, generateProb(0.0, 0.33)),
-          partitionProbability =
-            randomEquallyWeightedOneOf(generateProb(0.0, 0.2), generateProb(0.0, 0.5)),
-          partitionMode = randomEquallyWeightedOneOf(
-            PartitionMode.NoPartition,
-            PartitionMode.UniformSize,
-            PartitionMode.RandomlyDropConnections(generateProb(0, 0.5)),
+          networkPartitionFaultSettings = NetworkPartitionFaultSettings(
+            partitionProbability =
+              randomEquallyWeightedOneOf(generateProb(0.0, 0.2), generateProb(0.0, 0.5)),
+            partitionMode = randomEquallyWeightedOneOf(
+              PartitionMode.NoPartition,
+              PartitionMode.UniformSize,
+              PartitionMode.RandomlyDropConnections(generateProb(0, 0.5)),
+            ),
+            partitionStability = randomEquallyWeightedOneOf(2.seconds, 5.seconds, 10 seconds),
+            partitionSymmetry = randomEquallyWeightedOneOf(Symmetric, ASymmetric),
+            unPartitionProbability =
+              randomEquallyWeightedOneOf(generateProb(0.0, 0.2), generateProb(0.0, 0.5)),
+            unPartitionStability = randomEquallyWeightedOneOf(2.seconds, 5.seconds, 10 seconds),
           ),
-          partitionStability = randomEquallyWeightedOneOf(2.seconds, 5.seconds, 10 seconds),
-          partitionSymmetry = randomEquallyWeightedOneOf(Symmetric, ASymmetric),
-          unPartitionProbability =
-            randomEquallyWeightedOneOf(generateProb(0.0, 0.2), generateProb(0.0, 0.5)),
-          unPartitionStability = randomEquallyWeightedOneOf(2.seconds, 5.seconds, 10 seconds),
+          slowFaultSettings = SlowFaultSettings(
+            enabled = randomEquallyWeightedOneOf(true, false)
+          ),
         ),
         FutureSettings(
           randomSeed = randomSourceToCreateSettings.nextLong()

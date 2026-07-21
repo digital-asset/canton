@@ -82,7 +82,11 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
   "BlacklistLeaderSelectionPolicyState" should {
     "a clean node" should {
       "stay clean if not punished" in {
-        BlacklistLeaderSelectionPolicyStateWithTopology(initState(), orderingTopology)
+        BlacklistLeaderSelectionPolicyStateWithTopology(
+          initState(),
+          orderingTopology,
+          testedProtocolVersion,
+        )
           .update(
             orderingTopology,
             blockToLeaderAll,
@@ -92,7 +96,11 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
       }
 
       "be blacklisted if punished" in {
-        BlacklistLeaderSelectionPolicyStateWithTopology(initState(), orderingTopology)
+        BlacklistLeaderSelectionPolicyStateWithTopology(
+          initState(),
+          orderingTopology,
+          testedProtocolVersion,
+        )
           .update(
             orderingTopology,
             blockToLeaderAll,
@@ -109,6 +117,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.Blacklisted(1, 2)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAllWithoutN0,
@@ -122,6 +131,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.Blacklisted(1, 1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAllWithoutN0,
@@ -137,6 +147,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.OnTrial(1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAll,
@@ -150,6 +161,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.OnTrial(1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAll,
@@ -163,6 +175,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             n0 -> BlacklistStatus.OnTrial(1)
           ),
           orderingTopology,
+          testedProtocolVersion,
         ).update(
           orderingTopology,
           blockToLeaderAllWithoutN0,
@@ -175,6 +188,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
       BlacklistLeaderSelectionPolicyStateWithTopology(
         initState(n1 -> BlacklistStatus.OnTrial(1), n2 -> BlacklistStatus.Blacklisted(1, 1)),
         orderingTopology,
+        testedProtocolVersion,
       ).computeLeaders() shouldBe Seq(n0, n1, n3)
     }
 
@@ -182,6 +196,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
       BlacklistLeaderSelectionPolicyStateWithTopology(
         initState(n1 -> BlacklistStatus.Blacklisted(2, 2), n2 -> BlacklistStatus.Blacklisted(1, 1)),
         orderingTopology,
+        testedProtocolVersion,
       )
         .computeLeaders() shouldBe Seq(n0, n2, n3)
     }
@@ -194,6 +209,7 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
             BlacklistLeaderSelectionPolicyConfig.HowManyCanWeBlacklist.NoBlacklisting
           )
         ),
+        testedProtocolVersion,
       ).computeLeaders() shouldBe Seq(n0, n1, n2, n3)
     }
 
@@ -201,65 +217,87 @@ class BlacklistLeaderSelectionPolicyStateTest extends AnyWordSpec with BaseTest 
       "not blacklist further than cap" in {
         val limit = 10L
         val failedAttempts = 100L
-        val topology = makeOrderingTopology(
-          makeConfig(howLongToBlacklist =
-            BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear(
-              Some(limit)
+        Table(
+          "policy",
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear(Some(limit)),
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
+            .LinearWithParameters(Some(limit), 10, 10),
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
+            .Exponential(Some(limit), 10),
+        )
+          .forEvery { policy =>
+            val topology = makeOrderingTopology(makeConfig(howLongToBlacklist = policy))
+            BlacklistLeaderSelectionPolicyStateWithTopology(
+              initState(n1 -> BlacklistStatus.OnTrial(failedAttempts)),
+              topology,
+              testedProtocolVersion,
+            ).update(
+              topology,
+              blockToLeaderAllWithoutN0,
+              Set(n1),
+            ).state shouldBe stateNextEpoch(
+              n1 -> BlacklistStatus.Blacklisted(failedAttempts + 1, limit)
             )
-          )
-        )
-        BlacklistLeaderSelectionPolicyStateWithTopology(
-          initState(n1 -> BlacklistStatus.OnTrial(failedAttempts)),
-          topology,
-        ).update(
-          topology,
-          blockToLeaderAllWithoutN0,
-          Set(n1),
-        ).state shouldBe stateNextEpoch(
-          n1 -> BlacklistStatus.Blacklisted(failedAttempts + 1, limit)
-        )
+          }
       }
 
       "don't apply limit if you are below" in {
         val limit = 100L
-        val failedAttempts = 10L
-        val topology = makeOrderingTopology(
-          makeConfig(howLongToBlacklist =
-            BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear(
-              Some(limit)
-            )
+        val failedAttempts = 5L
+        Table(
+          ("policy", "next value"),
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear(
+            Some(limit)
+          ) -> (failedAttempts + 1),
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.LinearWithParameters(
+            Some(limit),
+            5,
+            10,
+          ) -> (5 * (failedAttempts + 1) + 10),
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Exponential(
+            Some(limit),
+            5,
+          ) -> 69L, // 2 ^{5+1} + 5
+        ).forEvery { case (policy, nextHowManyLeft) =>
+          val topology = makeOrderingTopology(makeConfig(howLongToBlacklist = policy))
+          BlacklistLeaderSelectionPolicyStateWithTopology(
+            initState(n1 -> BlacklistStatus.OnTrial(failedAttempts)),
+            topology,
+            testedProtocolVersion,
+          ).update(
+            topology,
+            blockToLeaderAllWithoutN0,
+            Set(n1),
+          ).state shouldBe stateNextEpoch(
+            n1 -> BlacklistStatus.Blacklisted(failedAttempts + 1, nextHowManyLeft)
           )
-        )
-        BlacklistLeaderSelectionPolicyStateWithTopology(
-          initState(n1 -> BlacklistStatus.OnTrial(failedAttempts)),
-          topology,
-        ).update(
-          topology,
-          blockToLeaderAllWithoutN0,
-          Set(n1),
-        ).state shouldBe stateNextEpoch(
-          n1 -> BlacklistStatus.Blacklisted(failedAttempts + 1, failedAttempts + 1)
-        )
+        }
       }
 
       "update if config change" in {
         val oldValue = 100L
         val newLimit = 10L
-        BlacklistLeaderSelectionPolicyStateWithTopology(
-          initState(n0 -> BlacklistStatus.Blacklisted(oldValue, oldValue)),
-          orderingTopology,
-        ).update(
-          makeOrderingTopology(
-            makeConfig(howLongToBlacklist =
-              BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
-                .Linear(Some(newLimit))
-            )
-          ),
-          blockToLeaderAllWithoutN0,
-          Set.empty,
-        ).state shouldBe stateNextEpoch(
-          n0 -> BlacklistStatus.Blacklisted(oldValue, newLimit - 1)
-        )
+        Table(
+          "policy",
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
+            .Linear(Some(newLimit)),
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
+            .LinearWithParameters(Some(newLimit), 0L, 0L),
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist
+            .Exponential(Some(newLimit), 0L),
+        ).forEvery { policy =>
+          BlacklistLeaderSelectionPolicyStateWithTopology(
+            initState(n0 -> BlacklistStatus.Blacklisted(oldValue, oldValue)),
+            orderingTopology,
+            testedProtocolVersion,
+          ).update(
+            makeOrderingTopology(makeConfig(howLongToBlacklist = policy)),
+            blockToLeaderAllWithoutN0,
+            Set.empty,
+          ).state shouldBe stateNextEpoch(
+            n0 -> BlacklistStatus.Blacklisted(oldValue, newLimit - 1)
+          )
+        }
       }
     }
   }

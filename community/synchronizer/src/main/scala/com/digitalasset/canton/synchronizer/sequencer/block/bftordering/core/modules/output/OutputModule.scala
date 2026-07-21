@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output
 
 import com.daml.metrics.api.MetricsContext
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -52,15 +53,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderedBlock,
   OrderedBlockForOutput,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
-  Membership,
-  OrderingTopology,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   CompleteBlockData,
   OrderingRequest,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.NewEpochTopology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.NewEpochMembership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Output.Admin.GetOrderingTopologyResponse
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Output.SequencerSnapshotMessage.{
   AdditionalInfo,
   AdditionalInfoRetrievalError,
@@ -165,8 +164,8 @@ class OutputModule[E <: Env[E]](
   //  resulting in fetching multiple topologies concurrently.
   @VisibleForTesting
   private[output] val maybeNewEpochTopologyMessagePeanoQueue =
-    new SingleUseCell[PeanoQueue[EpochNumber, NewEpochTopology[E]]]
-  private def newEpochTopologyMessagePeanoQueue: PeanoQueue[EpochNumber, NewEpochTopology[E]] =
+    new SingleUseCell[PeanoQueue[EpochNumber, NewEpochMembership[E]]]
+  private def newEpochTopologyMessagePeanoQueue: PeanoQueue[EpochNumber, NewEpochMembership[E]] =
     maybeNewEpochTopologyMessagePeanoQueue.getOrElse(
       throw new IllegalStateException(
         "NewEpochTopology message Peano queue not initialized: no new topologies were being fetched"
@@ -180,7 +179,9 @@ class OutputModule[E <: Env[E]](
     )
   }
 
-  private var currentEpochOrderingTopology: OrderingTopology = startupState.initialOrderingTopology
+  private var currentEpochNumber: EpochNumber =
+    startupState.initialEpochWeHaveLeaderSelectionStateFor
+  private var currentMembership: Membership = startupState.initialMembership
   private var currentEpochCryptoProvider: CryptoProvider[E] = startupState.initialCryptoProvider
   @VisibleForTesting
   private[output] var currentEpochCouldAlterOrderingTopology =
@@ -308,8 +309,10 @@ class OutputModule[E <: Env[E]](
         //
         // Another reason that we may need to recover is that the leader selection is only snapshotting the state at
         //  epoch boundaries. As such we might need to recover from the start of the epoch.
+        @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
         val recoverFromBlockNumberThatCouldBeInMiddleOfEpoch =
-          Seq(
+          NonEmpty(
+            Seq,
             lastAcknowledgedBlockNumber.getOrElse(BlockNumber.First),
             lastStoredBlockNumber.getOrElse(BlockNumber.First),
             leaderSelectionPolicy.firstBlockWeNeedToAdd.getOrElse(
@@ -492,7 +495,7 @@ class OutputModule[E <: Env[E]](
                 s"Output module bootstrap: querying restart topology at $bootstrapTopologyActivationTime for epoch $startEpochNumber " +
                   s"(could alter ordering topology: $currentEpochCouldAlterOrderingTopology)"
               )
-              (oldOrderingTopology, oldCryptoProvider) <- context.blockingAwait(
+              (orderingTopology, cryptoProvider) <- context.blockingAwait(
                 orderingTopologyProvider.getOrderingTopologyAt(
                   activationTime = Some(bootstrapTopologyActivationTime),
                   // Don't check for pending changes if we are restarting from the first epoch,
@@ -508,12 +511,19 @@ class OutputModule[E <: Env[E]](
                 config.blockingDbReadTimeout,
               )
             } {
-              currentEpochOrderingTopology = oldOrderingTopology
-              currentEpochCryptoProvider = oldCryptoProvider
-              currentEpochCouldAlterOrderingTopology =
-                oldOrderingTopology.areTherePendingCantonTopologyChanges.exists(identity)
               leaderSelectionPolicy = leaderSelectionInitializer
-                .leaderSelectionPolicy(leaderSelectionPolicyState, currentEpochOrderingTopology)
+                .leaderSelectionPolicy(leaderSelectionPolicyState, orderingTopology)
+              currentEpochNumber = startEpochNumber
+              currentMembership = Membership(
+                thisNode,
+                orderingTopology,
+                leaderSelectionPolicy.getLeaders(orderingTopology, startEpochNumber),
+                leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, startEpochNumber),
+              )
+              metrics.topology.update(currentMembership)
+              currentEpochCryptoProvider = cryptoProvider
+              currentEpochCouldAlterOrderingTopology =
+                orderingTopology.areTherePendingCantonTopologyChanges.exists(identity)
               logger.info(
                 s"Output module bootstrap is reading blocks from an older epoch $startEpochNumber " +
                   s"we fetched topology info from $bootstrapTopologyActivationTime " +
@@ -536,6 +546,9 @@ class OutputModule[E <: Env[E]](
             logger.info(
               "Output module received Start message, but initialization is already complete, ignoring"
             )
+
+          case message: Output.Admin =>
+            handleAdminMessage(message)
 
           case ProcessNewEpochTopologyMessagesIfPossible =>
             scheduleBackpressureCheck(context)
@@ -618,14 +631,14 @@ class OutputModule[E <: Env[E]](
             completedBlocksPeanoQueue.insert(blockNumber, completedBlockData)
             processFetchedBlocks()
 
-          // Blocks metadata persistence can complete in any order, so no assumption can be made
-          //  on the epoch number in this handler.
           case BlockDataStored(
                 orderedBlockData,
                 orderedBlockNumber,
                 orderedBlockBftTime,
                 epochCouldAlterOrderingTopology,
               ) =>
+            // Blocks metadata persistence can complete in any order, so no assumption can be made
+            //  on the epoch number in this handler.
             emitRequestsOrderingStats(metrics, orderedBlockData, orderedBlockBftTime)
 
             val epochNumber =
@@ -741,6 +754,14 @@ class OutputModule[E <: Env[E]](
               ) =>
             logger.debug(s"Fetched topology $orderingTopology for new epoch $newEpochNumber")
 
+            val membership =
+              Membership(
+                thisNode,
+                orderingTopology,
+                leaderSelectionPolicy.getLeaders(orderingTopology, newEpochNumber),
+                leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, newEpochNumber),
+              )
+
             // We only store metadata for an epoch if it may alter the topology, i.e.,
             //  we never insert `false` and then change it; this avoids updates
             //  and allows leveraging idempotency for easier CFT support.
@@ -754,21 +775,21 @@ class OutputModule[E <: Env[E]](
                 case Success(_) =>
                   MetadataStoredForNewEpoch(
                     newEpochNumber,
-                    orderingTopology,
+                    membership,
                     cryptoProvider,
                   )
               }
             } else {
               setupNewEpoch(
                 newEpochNumber,
-                Some(orderingTopology -> cryptoProvider),
+                Some(membership -> cryptoProvider),
                 epochMetadataStored = false,
               )
             }
 
           case MetadataStoredForNewEpoch(
                 newEpochNumber,
-                orderingTopology,
+                membership,
                 cryptoProvider: CryptoProvider[E],
               ) =>
             logger.debug(
@@ -776,7 +797,7 @@ class OutputModule[E <: Env[E]](
             )
             setupNewEpoch(
               newEpochNumber,
-              Some(orderingTopology -> cryptoProvider),
+              Some(membership -> cryptoProvider),
               epochMetadataStored = true,
             )
 
@@ -831,6 +852,24 @@ class OutputModule[E <: Env[E]](
       endInstant = now,
     )
   }
+
+  private def handleAdminMessage(message: Output.Admin): Unit =
+    message match {
+
+      case Output.Admin.GetOrderingTopology(callback) =>
+        callback(
+          GetOrderingTopologyResponse(
+            currentEpochNumber,
+            currentMembership.orderingTopology.nodes,
+            currentMembership.leaders,
+            currentMembership.blacklistedNodes,
+            currentMembership.orderingTopology.sequencingParameters,
+          )
+        )
+
+      case Output.Admin.SetPerformanceMetricsEnabled(enabled) =>
+        metrics.performance.enabled = enabled
+    }
 
   private def processFetchedBlocks()(implicit
       context: E#ActorContextT[Message[E]],
@@ -947,7 +986,7 @@ class OutputModule[E <: Env[E]](
       case GetAdditionalInfo(timestamp, from) =>
         snapshotAdditionalInfoProvider.provide(
           timestamp,
-          currentEpochOrderingTopology,
+          currentMembership.orderingTopology,
           leaderSelectionPolicy,
           from,
         )
@@ -974,7 +1013,7 @@ class OutputModule[E <: Env[E]](
               orderedBlockData.orderedBlockForOutput.orderedBlock.metadata,
               idx,
               orderingRequest,
-              currentEpochOrderingTopology.maxBytesToDecompress,
+              currentMembership.orderingTopology.maxBytesToDecompress,
               logger,
               tracedOrderingRequest.traceContext,
             )
@@ -1046,14 +1085,14 @@ class OutputModule[E <: Env[E]](
     } else {
       logger.debug(s"Completed epoch $completedEpochNumber that did not change the topology")
       pipeToSelfOpt(
-        leaderSelectionPolicy.saveStateFor(newEpochNumber, currentEpochOrderingTopology)
+        leaderSelectionPolicy.saveStateFor(newEpochNumber, currentMembership.orderingTopology)
       ) {
         case Failure(exception) =>
           abort(s"Failed to save leader selection state", exception)
         case Success(()) =>
           setupNewEpoch(
             newEpochNumber,
-            newOrderingTopologyAndCryptoProvider = None,
+            newMembershipAndCryptoProvider = None,
             epochMetadataStored = false,
           )
           None
@@ -1064,20 +1103,21 @@ class OutputModule[E <: Env[E]](
   @SuppressWarnings(Array("org.wartremover.warts.Return"))
   private def setupNewEpoch(
       newEpochNumber: EpochNumber,
-      newOrderingTopologyAndCryptoProvider: Option[(OrderingTopology, CryptoProvider[E])],
+      newMembershipAndCryptoProvider: Option[(Membership, CryptoProvider[E])],
       epochMetadataStored: Boolean,
   )(implicit
       context: E#ActorContextT[Message[E]],
       traceContext: TraceContext,
   ): Unit = {
-    val orderingTopology =
-      newOrderingTopologyAndCryptoProvider.fold(currentEpochOrderingTopology)(_._1)
+    val membership =
+      newMembershipAndCryptoProvider.fold(currentMembership)(_._1)
+    val orderingTopology = membership.orderingTopology
     val newEpochLeaders = leaderSelectionPolicy.getLeaders(orderingTopology, newEpochNumber)
     val newEpochBlacklisted =
       leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, newEpochNumber)
     val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders, newEpochBlacklisted)
     val cryptoProvider =
-      newOrderingTopologyAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
+      newMembershipAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
 
     if (epochMetadataStored)
       setEpochMetadataStoredCache(newEpochNumber)
@@ -1089,7 +1129,7 @@ class OutputModule[E <: Env[E]](
     )
     newEpochTopologyMessagePeanoQueue.insert(
       newEpochNumber,
-      Consensus.NewEpochTopology(newEpochNumber, newMembership, cryptoProvider),
+      Consensus.NewEpochMembership(newEpochNumber, newMembership, cryptoProvider),
     )
 
     processNewEpochTopologyMessagesIfPossible()
@@ -1141,7 +1181,7 @@ class OutputModule[E <: Env[E]](
       // Not using the accessor because this gets called periodically and may not be set
       //  for a period of time after init.
       val newEpochTopologyMessages =
-        maybeNewEpochTopologyMessagePeanoQueue.get.fold(Seq.empty[NewEpochTopology[E]])(
+        maybeNewEpochTopologyMessagePeanoQueue.get.fold(Seq.empty[NewEpochMembership[E]])(
           _.pollAvailable()
         )
       logger.debug(
@@ -1162,19 +1202,20 @@ class OutputModule[E <: Env[E]](
         logger.debug(s"Setting up new epoch $newEpochNumber")
         currentEpochCouldAlterOrderingTopology = false
         processingFetchedBlocksInEpoch = Some(newEpochNumber)
-
-        currentEpochOrderingTopology = newEpochTopologyMessage.membership.orderingTopology
+        currentEpochNumber = newEpochNumber
+        currentMembership = newEpochTopologyMessage.membership
+        metrics.topology.update(currentMembership)
         currentEpochCryptoProvider = newEpochTopologyMessage.cryptoProvider
         val pendingTopologyChanges =
-          currentEpochOrderingTopology.areTherePendingCantonTopologyChanges
+          currentMembership.orderingTopology.areTherePendingCantonTopologyChanges
         logger.debug(
           s"Pending topology changes in new ordering topology = $pendingTopologyChanges"
         )
         currentEpochCouldAlterOrderingTopology = pendingTopologyChanges.exists(identity)
 
-        metrics.topology.validators.updateValue(currentEpochOrderingTopology.nodes.size)
+        metrics.topology.validators.updateValue(currentMembership.orderingTopology.nodes.size)
         logger.debug(
-          s"Sending topology $currentEpochOrderingTopology of a new epoch $newEpochNumber " +
+          s"Sending topology $currentMembership of a new epoch $newEpochNumber " +
             s"to a consensus behavior (epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength})"
         )
 
@@ -1242,7 +1283,7 @@ object OutputModule {
       previousBftTimeForOnboarding: Option[CantonTimestamp],
       onboardingEpochCouldAlterOrderingTopology: Boolean,
       initialCryptoProvider: CryptoProvider[E],
-      initialOrderingTopology: OrderingTopology,
+      initialMembership: Membership,
       initialLowerBound: Option[(EpochNumber, BlockNumber)],
       initialLeaderSelectionPolicy: LeaderSelectionPolicy[E],
   )

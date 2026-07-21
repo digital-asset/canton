@@ -46,9 +46,9 @@ object SequencerBftAdminData {
       endpoint.port.unwrap,
       endpoint match {
         case _: P2PGrpcNetworking.PlainTextP2PEndpoint =>
-          ProtoPeerEndpoint.Security.PlainText(ProtoPlainTextPeerEndpoint())
+          Security.PlainText(ProtoPlainTextPeerEndpoint())
         case P2PGrpcNetworking.TlsP2PEndpoint(clientConfig) =>
-          ProtoPeerEndpoint.Security.Tls(
+          Security.Tls(
             ProtoTlsPeerEndpoint(
               clientConfig.tlsConfig.flatMap(_.trustCollectionFile).map(_.pemBytes),
               clientConfig.tlsConfig.flatMap(_.clientCert).map { clientCertificate =>
@@ -60,6 +60,7 @@ object SequencerBftAdminData {
             )
           )
       },
+      sequencerId = None,
     )
 
   def endpointIdToProto(endpointId: P2PEndpoint.Id): ProtoPeerEndpointId =

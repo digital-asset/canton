@@ -168,7 +168,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       thisNodeFirstKnownAt
         .flatMap(_.startEpochCouldAlterOrderingTopology)
         .exists(pendingChanges => pendingChanges)
-    val currentTopology = bootstrapTopologyInfo.currentTopology
+    val currentMembership = bootstrapTopologyInfo.currentMembership
     val outputModuleStartupState =
       OutputModule.StartupState(
         bootstrapTopologyInfo.thisNode,
@@ -178,11 +178,11 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         previousBftTimeForOnboarding,
         onboardingEpochCouldAlterOrderingTopology,
         bootstrapTopologyInfo.currentCryptoProvider,
-        currentTopology,
+        currentMembership,
         initialLowerBound,
         leaderSelectionPolicyFactory.leaderSelectionPolicy(
           blacklistLeaderSelectionState,
-          currentTopology,
+          currentMembership.orderingTopology,
         ),
       )
     new OrderingModuleSystemInitializer[E, P2PNetworkManagerT](
@@ -198,7 +198,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           )
           new MempoolModule(
             cfg,
-            new MempoolState(currentTopology.weakQuorum),
+            new MempoolState(currentMembership.orderingTopology.weakQuorum),
             metrics,
             availabilityRef,
             loggerFactory,

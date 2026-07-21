@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.Signature.noSignature
 import com.digitalasset.canton.crypto.{Hash, Signature}
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType.BftSignedAvailabilityMessage
@@ -1207,7 +1208,7 @@ class AvailabilityModuleConsensusProposalRequestTest
           )
         }
 
-        loggerFactory.assertLogs(
+        loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
           availability.receive(
             Availability.Consensus
               .CreateProposal(
@@ -1218,7 +1219,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               )
           ),
           log => {
-            log.level shouldBe Level.WARN
+            log.level shouldBe Level.INFO
             log.message should include("discarding expired batches")
           },
         )
@@ -1282,7 +1283,7 @@ class AvailabilityModuleConsensusProposalRequestTest
           )
         }
 
-        loggerFactory.assertLogs(
+        loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
           availability.receive(
             Availability.Consensus
               .CreateProposal(
@@ -1293,7 +1294,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               )
           ),
           log => {
-            log.level shouldBe Level.WARN
+            log.level shouldBe Level.INFO
             log.message should include("discarding expired batches")
           },
         )

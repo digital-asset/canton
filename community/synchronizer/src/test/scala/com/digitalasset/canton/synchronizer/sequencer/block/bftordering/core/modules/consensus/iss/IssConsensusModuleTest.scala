@@ -75,8 +75,9 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PbftUnverifiedNetworkMessage,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.{
+  Internal,
+  NewEpochMembership,
   NewEpochStored,
-  NewEpochTopology,
   ProtocolMessage,
   RetransmissionsMessage,
 }
@@ -171,7 +172,7 @@ class IssConsensusModuleTest
 
         consensus.receive(Consensus.Start)
         consensus.receive(
-          Consensus.NewEpochTopology(
+          Consensus.NewEpochMembership(
             EpochNumber(2L),
             aMembership,
             failingCryptoProvider,
@@ -217,7 +218,7 @@ class IssConsensusModuleTest
 
           consensus.receive(Consensus.Start)
           consensus.receive(
-            Consensus.NewEpochTopology(
+            Consensus.NewEpochMembership(
               EpochNumber(1L),
               Membership(
                 myId,
@@ -311,7 +312,7 @@ class IssConsensusModuleTest
         implicit val ctx: ContextType = context
 
         consensus.receive(
-          Consensus.NewEpochTopology(
+          Consensus.NewEpochMembership(
             newEpochInfo.number,
             membership,
             cryptoProvider,
@@ -383,7 +384,7 @@ class IssConsensusModuleTest
 
         consensus.receive(Consensus.Start)
         consensus.receive(
-          Consensus.NewEpochTopology(
+          Consensus.NewEpochMembership(
             EpochNumber(1L),
             aMembership,
             failingCryptoProvider,
@@ -429,7 +430,7 @@ class IssConsensusModuleTest
         assertThrows[TestFailedException](
           loggerFactory.assertLogs(
             consensus.receive(
-              Consensus.NewEpochTopology(
+              Consensus.NewEpochMembership(
                 EpochNumber(1L),
                 aMembership,
                 failingCryptoProvider,
@@ -477,8 +478,8 @@ class IssConsensusModuleTest
               epochStore = epochStore,
               preConfiguredInitialEpochState =
                 Some(newEpochState(latestCompletedEpochFromStore, _)),
-              newEpochTopology = Some(
-                NewEpochTopology(
+              newEpochMembership = Some(
+                NewEpochMembership(
                   EpochNumber(1L),
                   Membership(
                     myId,
@@ -504,6 +505,104 @@ class IssConsensusModuleTest
           )
           succeed
         }
+      }
+
+      "schedule a warning timer when topology for the next epoch is missing" in {
+        val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
+        val latestCompletedEpochFromStore = EpochStore.Epoch(
+          EpochInfo(
+            EpochNumber.First,
+            BlockNumber.First,
+            epochLength,
+            TopologyActivationTime(aTimestamp),
+          ),
+          Seq.empty,
+        )
+
+        when(epochStore.latestEpoch(anyBoolean)(anyTraceContext))
+          .thenReturn(() => Some(latestCompletedEpochFromStore))
+
+        val (context, consensus) =
+          createIssConsensusModule(
+            epochStore = epochStore,
+            preConfiguredInitialEpochState = Some(newEpochState(latestCompletedEpochFromStore, _)),
+          )
+        implicit val ctx: ContextType = context
+
+        consensus.receive(Consensus.Start)
+        consensus.receive(CompleteEpochStored(latestCompletedEpochFromStore, Seq.empty))
+
+        context.lastDelayedMessage.map(_._2) shouldBe Some(Internal.WarnWaitingForNewEpochTopology)
+      }
+
+      "cancel the warning timer when a new topology arrives" in {
+        val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
+        val latestCompletedEpochFromStore = EpochStore.Epoch(
+          EpochInfo(
+            EpochNumber.First,
+            BlockNumber.First,
+            epochLength,
+            TopologyActivationTime(aTimestamp),
+          ),
+          Seq.empty,
+        )
+
+        when(epochStore.latestEpoch(anyBoolean)(anyTraceContext))
+          .thenReturn(() => Some(latestCompletedEpochFromStore))
+
+        val (context, consensus) =
+          createIssConsensusModule(
+            epochStore = epochStore,
+            preConfiguredInitialEpochState = Some(newEpochState(latestCompletedEpochFromStore, _)),
+          )
+        implicit val ctx: ContextType = context
+
+        consensus.receive(Consensus.Start)
+        consensus.receive(CompleteEpochStored(latestCompletedEpochFromStore, Seq.empty))
+
+        consensus.receive(
+          Consensus.NewEpochMembership(
+            EpochNumber.First,
+            aMembership,
+            failingCryptoProvider,
+          )
+        )
+
+        context.lastCancelledEvent.map(_._2) shouldBe Some(Internal.WarnWaitingForNewEpochTopology)
+      }
+
+      "emit a warning when the topology wait timer fires" in {
+        val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
+        val latestCompletedEpochFromStore = EpochStore.Epoch(
+          EpochInfo(
+            EpochNumber.First,
+            BlockNumber.First,
+            epochLength,
+            TopologyActivationTime(aTimestamp),
+          ),
+          Seq.empty,
+        )
+
+        when(epochStore.latestEpoch(anyBoolean)(anyTraceContext))
+          .thenReturn(() => Some(latestCompletedEpochFromStore))
+
+        val (context, consensus) =
+          createIssConsensusModule(
+            epochStore = epochStore,
+            preConfiguredInitialEpochState = Some(newEpochState(latestCompletedEpochFromStore, _)),
+          )
+        implicit val ctx: ContextType = context
+
+        consensus.receive(Consensus.Start)
+        consensus.receive(CompleteEpochStored(latestCompletedEpochFromStore, Seq.empty))
+
+        assertLogs(
+          context.runOneDelayedMessage(consensus),
+          log => {
+            log.level shouldBe Level.WARN
+            log.message should include("Waiting for new topology after epoch completion")
+          },
+        ) shouldBe ()
       }
     }
 
@@ -564,7 +663,7 @@ class IssConsensusModuleTest
 
         consensus.receive(
           Consensus.StateTransferCompleted(
-            Consensus.NewEpochTopology(
+            Consensus.NewEpochMembership(
               EpochNumber(1L),
               Membership(
                 myId,
@@ -619,7 +718,7 @@ class IssConsensusModuleTest
         consensus.receive(Consensus.Start)
 
         context.extractSelfMessages() should matchPattern {
-          case Seq(Consensus.NewEpochTopology(epochNumber, membership, _))
+          case Seq(Consensus.NewEpochMembership(epochNumber, membership, _))
               if epochNumber == EpochNumber.First && membership.orderingTopology == anOrderingTopology =>
         }
       }
@@ -747,14 +846,14 @@ class IssConsensusModuleTest
           consensus.receive(Consensus.Start)
 
           // Consensus is starting from genesis, so it'll start a new epoch
-          val newEpochTopologyMsg = NewEpochTopology(
+          val newEpochTopologyMsg = NewEpochMembership(
             EpochNumber.First,
             aMembership,
             failingCryptoProvider,
           )
           val selfSentMessages = context.extractSelfMessages()
           selfSentMessages should matchPattern {
-            case Seq(Consensus.NewEpochTopology(epochNumber, membership, _))
+            case Seq(Consensus.NewEpochMembership(epochNumber, membership, _))
                 if epochNumber == newEpochTopologyMsg.epochNumber &&
                   membership.orderingTopology == newEpochTopologyMsg.membership.orderingTopology =>
           }
@@ -1201,7 +1300,7 @@ class IssConsensusModuleTest
           consensus.storingNewEpoch shouldBe false
           // simulate starting the first epoch (whose topology is self-sent by consensus)
           consensus.receive(
-            NewEpochTopology(
+            NewEpochMembership(
               EpochNumber.First,
               aMembership,
               failingCryptoProvider,
@@ -1366,7 +1465,7 @@ class IssConsensusModuleTest
         None,
       maybeCatchupDetector: Option[CatchupDetector] = None,
       maybeRetransmissionsManager: Option[RetransmissionsManager[ProgrammableUnitTestEnv]] = None,
-      newEpochTopology: Option[NewEpochTopology[ProgrammableUnitTestEnv]] = None,
+      newEpochMembership: Option[NewEpochMembership[ProgrammableUnitTestEnv]] = None,
       completedBlocks: Seq[EpochStore.Block] = Seq.empty,
       resolveAwaits: Boolean = false,
       futurePbftMessageQueue: FairBoundedQueue[
@@ -1469,7 +1568,7 @@ class IssConsensusModuleTest
         catchupDetector = maybeCatchupDetector.getOrElse(
           new DefaultCatchupDetector(topologyInfo.currentMembership, loggerFactory)
         ),
-        newEpochTopology = newEpochTopology,
+        newEpochTopology = newEpochMembership,
       )
   }
 }

@@ -58,7 +58,7 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
   *   database dump.
   * @param shouldUseMemoryStorageForBftOrderer
   *   Overwrites the dedicated BFT Orderer's storage to in-memory.
-  * @param standaloneOrderingNodes
+  * @param useStandaloneConfig
   *   Enable standalone BFT ordering nodes mode.
   */
 final class UseBftSequencer(
@@ -69,10 +69,12 @@ final class UseBftSequencer(
     shouldOverwriteStoredEndpoints: Boolean = false,
     shouldUseMemoryStorageForBftOrderer: Boolean = false,
     shouldBenchmarkBftSequencer: Boolean = false,
-    standaloneOrderingNodes: Option[UseStandaloneConfig] = None,
+    useStandaloneConfig: Option[UseStandaloneConfig] = None,
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
+    // Use a longer topology warn timeout in tests to avoid flakes under concurrent CI load.
+    consensusNewEpochTopologyWarnTimeout: FiniteDuration = 10.seconds,
     sequencingParameters: Option[topology.SequencingParameters] = None,
     maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
@@ -80,6 +82,8 @@ final class UseBftSequencer(
     maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
     availabilityMinProposalCreationDelay: FiniteDuration = 50.millis,
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
+    sequencerCoreSubscriptionConfig: BftBlockOrdererConfig.SequencerCoreSubscriptionConfig =
+      BftBlockOrdererConfig.DefaultSequencerCoreSubscriptionConfig,
 ) extends EnvironmentSetupPlugin {
 
   private val tmpDir = better.files.File(System.getProperty("java.io.tmpdir"))
@@ -108,6 +112,7 @@ final class UseBftSequencer(
       }
     }
 
+  // Only called if `shouldGenerateEndpointsOnly` is true
   private def generateEndpoints(
       config: CantonConfig,
       sequencingParameters: Option[topology.SequencingParameters],
@@ -120,19 +125,24 @@ final class UseBftSequencer(
         val sequencer =
           sequencerNodeConfig.sequencer match {
             case BftSequencer(blockSequencerConfig, bftOrdererConfig) =>
+              // When changing this, also update `createFullConfig`
               BftSequencer(
                 blockSequencerConfig,
                 bftOrdererConfig
                   .copy(
-                    leaderSelectionPolicyConfigForPv34 =
-                      getLeaderSelectionPolicyConfigForPv34(sequencingParameters, bftOrdererConfig),
+                    leaderSelectionPolicyConfigForPv34 = getLeaderSelectionPolicyConfigForPv34(
+                      sequencingParameters,
+                      bftOrdererConfig,
+                    ),
                     consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
+                    consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
                     maxRequestsInBatch = maxRequestsInBatch,
                     minRequestsInBatch = minRequestsInBatch,
                     maxBatchCreationInterval = maxBatchCreationInterval,
                     maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
                     availabilityMinProposalCreationDelay = availabilityMinProposalCreationDelay,
                     dedicatedExecutionContextDivisor = dedicatedExecutionContextDivisor,
+                    sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
                   )
                   // server endpoint's lens
                   .focus(_.initialNetwork)
@@ -176,6 +186,7 @@ final class UseBftSequencer(
     config.focus(_.sequencers).replace(sequencers)
   }
 
+  // Only called if `shouldGenerateEndpointsOnly` is false
   private def createFullConfig(
       config: CantonConfig,
       sequencingParameters: Option[topology.SequencingParameters],
@@ -222,7 +233,7 @@ final class UseBftSequencer(
             peerEndpoints = otherInitialEndpoints,
             overwriteStoredEndpoints = shouldOverwriteStoredEndpoints,
           )
-          val standaloneOpt = standaloneOrderingNodes.map { standaloneConfig =>
+          val standaloneOpt = useStandaloneConfig.map { standaloneConfig =>
             val keyPair = JcePrivateCrypto
               .generateSigningKeypair(SigningKeySpec.EcCurve25519, SigningKeyUsage.ProtocolOnly)
               .getOrElse(throw new RuntimeException("Failed to generate keypair"))
@@ -232,6 +243,13 @@ final class UseBftSequencer(
             val pubKeyFile = tmpDir / s"node-${selfInstanceName}_signing_public_key.bin"
             privKeyFile.writeByteArray(privKey.toProtoV30.toByteArray)
             pubKeyFile.writeByteArray(pubKey.toProtoV30.toByteArray)
+            val postOrderingDelayO =
+              standaloneConfig.postOrderingDelayConfig.flatMap { config =>
+                val suffixDigits = selfInstanceName.unwrap.reverse.takeWhile(_.isDigit).reverse
+                Option.when(
+                  suffixDigits.nonEmpty && config.nodesToDelay.contains(suffixDigits.toInt)
+                )(config.delay)
+              }
             BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig(
               thisSequencerId = sequencerId(selfInstanceName),
               signingPrivateKeyProtoFile = privKeyFile.toJava,
@@ -245,15 +263,25 @@ final class UseBftSequencer(
                       tmpDir / s"node-${otherInitialInstanceName}_signing_public_key.bin" toJava,
                   )
                 },
+              postOrderingDelay = postOrderingDelayO,
             )
           }
-          val blockSequencerConfig =
+          val blockSequencerConfig = {
+            // without this config overrides (which are applied before plugins) are not preserved
+            val existingBlockSequencerConfig =
+              config.sequencers.get(selfInstanceName).map(_.sequencer) match {
+                case Some(bft: SequencerConfig.BftSequencer) => bft.block
+                case Some(external: SequencerConfig.External) => external.block
+                case _ => BlockSequencerConfig()
+              }
             if (shouldBenchmarkBftSequencer)
               BlockSequencerConfig(
                 circuitBreaker = BlockSequencerConfig.CircuitBreakerConfig(enabled = false),
                 streamInstrumentation = BlockSequencerStreamInstrumentationConfig(isEnabled = true),
               )
-            else BlockSequencerConfig()
+            else existingBlockSequencerConfig
+          }
+          // When changing this, also update `generateEndpoints`
           selfInstanceName -> SequencerConfig.BftSequencer(
             block = blockSequencerConfig,
             config = BftBlockOrdererConfig(
@@ -262,6 +290,7 @@ final class UseBftSequencer(
                 BftBlockOrdererConfig(),
               ),
               consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
+              consensusNewEpochTopologyWarnTimeout = consensusNewEpochTopologyWarnTimeout,
               maxRequestsInBatch = maxRequestsInBatch,
               minRequestsInBatch = minRequestsInBatch,
               maxBatchCreationInterval = maxBatchCreationInterval,
@@ -271,6 +300,7 @@ final class UseBftSequencer(
               initialNetwork = Some(network),
               standalone = standaloneOpt,
               storage = Option.when(shouldUseMemoryStorageForBftOrderer)(Memory()),
+              sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
             ),
           )
         }
@@ -315,5 +345,14 @@ final class UseBftSequencer(
 }
 
 object UseBftSequencer {
-  final case class UseStandaloneConfig(segmentLength: Long)
+
+  final case class PostOrderingDelayConfig(
+      nodesToDelay: Set[Int],
+      delay: FiniteDuration,
+  )
+
+  final case class UseStandaloneConfig(
+      segmentLength: Long,
+      postOrderingDelayConfig: Option[PostOrderingDelayConfig],
+  )
 }

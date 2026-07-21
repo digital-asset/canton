@@ -123,9 +123,27 @@ object PartitionMode {
 sealed trait PartitionSymmetry extends Product with Serializable
 
 object PartitionSymmetry {
-  final case object Symmetric extends PartitionSymmetry
-  final case object ASymmetric extends PartitionSymmetry
+  case object Symmetric extends PartitionSymmetry
+  case object ASymmetric extends PartitionSymmetry
 }
+
+final case class SlowFaultSettings(
+    enabled: Boolean = false,
+    messageDelay: PowerDistribution = PowerDistribution(2.seconds, 5.seconds),
+    noFaultsDistribution: PowerDistribution = PowerDistribution(10.seconds, 15.seconds),
+    faultDistribution: PowerDistribution = PowerDistribution(10.seconds, 15.seconds),
+    partitionMode: PartitionMode = PartitionMode.UniformSize,
+    partitionSymmetry: PartitionSymmetry = PartitionSymmetry.Symmetric,
+)
+
+final case class NetworkPartitionFaultSettings(
+    partitionMode: PartitionMode = PartitionMode.NoPartition,
+    partitionSymmetry: PartitionSymmetry = PartitionSymmetry.Symmetric,
+    partitionProbability: Probability = Probability(0),
+    unPartitionProbability: Probability = Probability(0),
+    partitionStability: FiniteDuration = 0.microseconds,
+    unPartitionStability: FiniteDuration = 0.microseconds,
+)
 
 final case class NetworkSettings(
     randomSeed: Long,
@@ -134,12 +152,8 @@ final case class NetworkSettings(
       NetworkSettings.defaultRemoteMessageTimeDistribution,
     packetLoss: Probability = Probability(0),
     packetReplay: Probability = Probability(0),
-    partitionMode: PartitionMode = PartitionMode.NoPartition,
-    partitionSymmetry: PartitionSymmetry = PartitionSymmetry.Symmetric,
-    partitionProbability: Probability = Probability(0),
-    unPartitionProbability: Probability = Probability(0),
-    partitionStability: FiniteDuration = 0.microseconds,
-    unPartitionStability: FiniteDuration = 0.microseconds,
+    networkPartitionFaultSettings: NetworkPartitionFaultSettings = NetworkPartitionFaultSettings(),
+    slowFaultSettings: SlowFaultSettings = SlowFaultSettings(),
 )
 
 object NetworkSettings {
@@ -157,6 +171,7 @@ final case class LocalSettings(
     crashRestartChance: Probability = Probability(0),
     crashTimeDistribution: PowerDistribution = LocalSettings.defaultCrashTimeDistribution,
     crashRestartGracePeriod: PowerDistribution = LocalSettings.defaultCrashRestartGracePeriod,
+    permanentlyCrashNodes: Option[Int] = None,
 )
 
 object LocalSettings {

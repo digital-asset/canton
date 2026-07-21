@@ -20,7 +20,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SystemInitializer,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
-  Consensus,
   Output,
   P2PNetworkOut,
   Pruning,
@@ -171,8 +170,6 @@ object PipeTest {
         system.setModule(inputModuleRef, module)
         val p2PAdminModuleRef =
           system.newModuleRef[P2PNetworkOut.Admin](ModuleName("p2PAdminModule"))()
-        val consensusAdminModuleRef =
-          system.newModuleRef[Consensus.Admin](ModuleName("consensusAdminModule"))()
         val outputModuleRef =
           system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
         val pruningModuleRef =
@@ -182,7 +179,6 @@ object PipeTest {
           inputModuleRef,
           inputModuleRef,
           p2PAdminModuleRef,
-          consensusAdminModuleRef,
           outputModuleRef,
           pruningModuleRef,
           p2pNetworkManager,

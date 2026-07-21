@@ -11,6 +11,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.db.DbP2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.memory.InMemoryP2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
@@ -19,7 +20,7 @@ trait P2PEndpointsStore[E <: Env[E]] extends AutoCloseable {
 
   def listEndpoints()(implicit
       traceContext: TraceContext
-  ): E#FutureUnlessShutdownT[Seq[P2PEndpoint]]
+  ): E#FutureUnlessShutdownT[Seq[(P2PEndpoint, Option[BftNodeId])]]
   protected final val listEndpointsActionName: String = "list BFT ordering P2P endpoints"
 
   def addEndpoint(endpoint: P2PEndpoint)(implicit
@@ -27,6 +28,13 @@ trait P2PEndpointsStore[E <: Env[E]] extends AutoCloseable {
   ): E#FutureUnlessShutdownT[Boolean]
   protected final def addEndpointActionName(endpoint: P2PEndpoint): String =
     s"add BFT ordering P2P endpoint $endpoint"
+
+  // TODO(#34191): disallow changing associations once fixed (requiring removal first)
+  def associate(existingEndpoint: P2PEndpoint, nodeId: BftNodeId)(implicit
+      traceContext: TraceContext
+  ): E#FutureUnlessShutdownT[Boolean]
+  protected final def associateActionName(endpoint: P2PEndpoint, nodeId: BftNodeId): String =
+    s"associate existing BFT ordering P2P endpoint $endpoint with node $nodeId"
 
   def removeEndpoint(endpointId: P2PEndpoint.Id)(implicit
       traceContext: TraceContext

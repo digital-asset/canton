@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderedBlockForOutput,
   OrderingMode,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.JitterGenerator
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.Jitter
 
@@ -20,45 +21,23 @@ import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
 
-/** A stream of jittered delays for retrying a request, based on the number of attempts. The delay
-  * is calculated using the provided `Jitter` implementation, and is at least `minimumDelay`. The
-  * `initialDelay` is used as the starting point for the first attempt.
-  */
-@SuppressWarnings(Array("org.wartremover.warts.Var"))
-final case class JitterStream(
-    jitter: Jitter,
-    initialDelay: FiniteDuration,
-    minimumDelay: FiniteDuration,
-) {
-  private var lastDelay: FiniteDuration = initialDelay
-  private var lastAttempt: Int = 1
+object OutputFetchProtocolState {
 
-  def next(attempt: Int): FiniteDuration = {
-    require(attempt >= lastAttempt)
-    if (attempt >= lastAttempt) {
-      lastDelay = jitter(initialDelay, lastDelay, attempt)
-      lastAttempt = attempt
-    }
-    lastDelay.plus(minimumDelay)
-  }
-}
-
-object JitterStream {
-
-  /** Create a JitterStream from the given configuration and random source. It uses the
+  /** Creates a jitter generator from the given configuration and random source. It uses the
     * `Jitter.full` implementation to calculate the delays, with the provided
     * `outputFetchTimeoutCap`, `outputFetchTimeout`, and `outputFetchMinimumDelay` values.
-    * `Jitter.full.apply` produces a timeout value between 0 and the exponential (we use base 2) as
-    * `initialValue*math.pow(base.toDouble, attempt.toDouble)`, the unit of the initial delay is
-    * important because the exp is on the non-converted value, the cap is converted to the same unit
-    * of the initial delay with ceiling, and what guarantees that the jitter does not yield 0 is the
-    * minimum delay.
+    *
+    * Note that `Jitter.full.apply` produces a timeout value between 0 and the exponential (we use
+    * base 2) as `initialValue*math.pow(base.toDouble, attempt.toDouble)`, the unit of the initial
+    * delay is important because the exp is on the non-converted value, the cap is converted to the
+    * same unit of the initial delay with ceiling, and what guarantees that the jitter does not
+    * yield 0 is the minimum delay.
     */
-  def create(config: BftBlockOrdererConfig, random: Random): JitterStream =
-    JitterStream(
-      Jitter.full(config.outputFetchTimeoutCap, Jitter.randomSource(random.self)),
-      config.outputFetchTimeout,
-      config.outputFetchMinimumDelay,
+  def createJitterGenerator(config: BftBlockOrdererConfig, random: Random): JitterGenerator =
+    JitterGenerator(
+      Jitter.full(cap = config.outputFetchTimeoutCap, Jitter.randomSource(random.self)),
+      initialDelay = config.outputFetchTimeout,
+      minimumDelay = config.outputFetchMinimumDelay,
     )
 }
 
@@ -66,7 +45,7 @@ final case class MissingBatchStatus(
     batchId: BatchId,
     originalProof: ProofOfAvailability,
     numberOfAttempts: Int,
-    jitterStream: JitterStream,
+    jitterStream: JitterGenerator,
     orderingMode: OrderingMode,
 ) {
   def calculateTimeout(): FiniteDuration = jitterStream.next(numberOfAttempts)

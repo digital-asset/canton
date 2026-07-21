@@ -38,6 +38,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultMaxBatchesPerProposal,
   DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
+  DefaultSequencerCoreSubscriptionConfig,
+  SequencerCoreSubscriptionConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.dabft.DaBftBindingFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.{
@@ -68,7 +70,12 @@ import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
   * -Dbft-ordering-benchmark.num-db-connections-per-node=5 \
   * -Dbft-ordering-benchmark.transaction-sizes-and-weights={payloads=[{size-bytes=2000,weight=1}]} \
   * -Dbft-ordering-benchmark.test-catchup={nodes-to-stop=[2],duration-nodes-are-down=1minutes,duration-node-need-to-startup=10seconds}\
-  * -Dbft-ordering-benchmark.benchmark-duration=1minute"
+  * -Dbft-ordering-benchmark.test-pekko-source-buffer-size=1 \
+  * -Dbft-ordering-benchmark.test-pause-orderer-threshold-buffer-size=10 \
+  * -Dbft-ordering-benchmark.test-resume-orderer-threshold-buffer-size=5 \
+  * -Dbft-ordering-benchmark.test-backpressure={nodes-to-delay=[2],delay=1minute} \
+  * -Dbft-ordering-benchmark.benchmark-duration=1minute \
+  * -Dbft-ordering-benchmark.per-node-write-period=1millisecond"
   *
   * export CI=1 # When this defined, it ensures no dockerized Postgres is being used
   *
@@ -251,6 +258,42 @@ class BftOrderingBenchmark
       }
       .getOrElse(BftBenchmarkConfig.TestCatchup.NoTestCatchup)
 
+  private val pekkoQueueSourceBufferSize: PositiveInt =
+    PositiveInt.tryCreate(
+      Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-pekko-source-buffer-size"))
+        .map(_.toInt)
+        .getOrElse(DefaultSequencerCoreSubscriptionConfig.pekkoQueueSourceBufferSize)
+    )
+
+  private val pauseOrdererThresholdBufferSize: PositiveInt =
+    PositiveInt.tryCreate(
+      Option(
+        System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-pause-orderer-threshold-buffer-size")
+      )
+        .map(_.toInt)
+        .getOrElse(DefaultSequencerCoreSubscriptionConfig.pauseOrdererThresholdBufferSize)
+    )
+
+  private val resumeOrdererThresholdBufferSize: PositiveInt =
+    PositiveInt.tryCreate(
+      Option(
+        System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-resume-orderer-threshold-buffer-size")
+      )
+        .map(_.toInt)
+        .getOrElse(DefaultSequencerCoreSubscriptionConfig.resumeOrdererThresholdBufferSize)
+    )
+
+  private val testPostOrderingDelayConfigO: Option[UseBftSequencer.PostOrderingDelayConfig] =
+    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-backpressure"))
+      .map { s =>
+        val result =
+          ConfigSource
+            .string(s)
+            .load[UseBftSequencer.PostOrderingDelayConfig]
+        result.left.foreach(errors => logger.error(s"Failed to parse testCatchup config: $errors"))
+        result.getOrElse(throw new RuntimeException("Invalid test catchup configuration"))
+      }
+
   registerPlugin(
     new UsePostgres(
       loggerFactory,
@@ -265,7 +308,9 @@ class BftOrderingBenchmark
       shouldOverwriteStoredEndpoints = true,
       shouldUseMemoryStorageForBftOrderer = useInMemoryStorageForBftOrderer,
       shouldBenchmarkBftSequencer = true,
-      standaloneOrderingNodes = Some(UseStandaloneConfig(segmentLength)),
+      useStandaloneConfig = Some(
+        UseStandaloneConfig(segmentLength, postOrderingDelayConfig = testPostOrderingDelayConfigO)
+      ),
       consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
       maxRequestsInBatch = maxRequestsInBatch,
       minRequestsInBatch = minRequestsInBatch,
@@ -273,6 +318,11 @@ class BftOrderingBenchmark
       maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
       availabilityMinProposalCreationDelay = availabilityMinProposalCreationDelay,
       dedicatedExecutionContextDivisor = dedicatedExecutionContextDivisor,
+      sequencerCoreSubscriptionConfig = SequencerCoreSubscriptionConfig(
+        pekkoQueueSourceBufferSize = pekkoQueueSourceBufferSize.value,
+        pauseOrdererThresholdBufferSize = pauseOrdererThresholdBufferSize.value,
+        resumeOrdererThresholdBufferSize = resumeOrdererThresholdBufferSize.value,
+      ),
     )
   registerPlugin(bftSequencerPlugin)
 

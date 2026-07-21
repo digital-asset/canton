@@ -13,7 +13,6 @@ import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
-  Consensus,
   Output,
   P2PNetworkOut,
   Pruning,
@@ -182,7 +181,7 @@ trait P2PConnectionEventListener {
 
   def onDisconnect(p2pEndpointId: P2PEndpoint.Id)(implicit traceContext: TraceContext): Unit
 
-  def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
+  def onNodeId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
       traceContext: TraceContext
   ): Unit
 }
@@ -200,8 +199,8 @@ object P2PConnectionEventListener {
           traceContext: TraceContext
       ): Unit = ()
 
-      override def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(
-          implicit traceContext: TraceContext
+      override def onNodeId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
+          traceContext: TraceContext
       ): Unit =
         ()
     }
@@ -540,7 +539,6 @@ object Module {
       inputModuleRef: ModuleRef[InputMessageT],
       p2pNetworkInModuleRef: ModuleRef[P2PMessageT],
       p2pNetworkOutAdminModuleRef: ModuleRef[P2PNetworkOut.Admin],
-      consensusAdminModuleRef: ModuleRef[Consensus.Admin],
       outputModuleRef: ModuleRef[Output.Message[E]],
       pruningModuleRef: ModuleRef[Pruning.Message],
       p2pNetworkManager: P2PNetworkManagerT,

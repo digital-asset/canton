@@ -33,7 +33,7 @@ private[iss] object IssConsensusModuleMetrics {
     lastConsensusCommitInstant = Some(now)
   }
 
-  def emitEpochStats(
+  def emitEpochMetrics(
       metrics: BftOrderingMetrics,
       epoch: EpochInfo,
       prevEpoch: Epoch,

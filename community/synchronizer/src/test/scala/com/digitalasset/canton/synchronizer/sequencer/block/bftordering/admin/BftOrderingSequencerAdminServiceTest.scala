@@ -26,11 +26,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  EpochNumber,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
-  Consensus,
   Mempool,
+  Output,
   P2PNetworkOut,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
@@ -50,15 +53,15 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         spy[ModuleRef[P2PNetworkOut.Admin]](fakeIgnoringModule[P2PNetworkOut.Admin])
       val mempoolAdminSpy =
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
-      val consensusAdminSpy =
-        spy[ModuleRef[Consensus.Admin]](fakeIgnoringModule[Consensus.Admin])
+      val outputAdminSpy =
+        spy[ModuleRef[Output.Admin]](fakeIgnoringModule[Output.Admin])
       val resultPromise = Promise[Boolean]()
       resultPromise.success(true)
       val bftOrderingSequencerAdminService =
         new BftOrderingSequencerAdminService(
           mempoolAdminSpy,
           p2PNetworkOutAdminSpy,
-          consensusAdminSpy,
+          outputAdminSpy,
           loggerFactory,
           createBoolPromise = () => resultPromise,
         )
@@ -72,6 +75,7 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
                 PeerEndpoint.Security.Tls(
                   TlsPeerEndpoint(customServerTrustCertificate = None, clientCertificate = None)
                 ),
+                sequencerId = None,
               )
             )
           )
@@ -86,7 +90,7 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
                 any[Boolean => Unit],
               )
           )(any[TraceContext], any[MetricsContext])
-          verifyZeroInteractions(mempoolAdminSpy, consensusAdminSpy)
+          verifyZeroInteractions(mempoolAdminSpy, outputAdminSpy)
           response.added shouldBe true
         }
     }
@@ -96,15 +100,15 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         spy[ModuleRef[P2PNetworkOut.Admin]](fakeIgnoringModule[P2PNetworkOut.Admin])
       val mempoolAdminSpy =
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
-      val consensusAdminSpy =
-        spy[ModuleRef[Consensus.Admin]](fakeIgnoringModule[Consensus.Admin])
+      val outputAdminSpy =
+        spy[ModuleRef[Output.Admin]](fakeIgnoringModule[Output.Admin])
       val resultPromise = Promise[Boolean]()
       resultPromise.success(true)
       val bftOrderingSequencerAdminService =
         new BftOrderingSequencerAdminService(
           mempoolAdminSpy,
           p2PNetworkOutAdminSpy,
-          consensusAdminSpy,
+          outputAdminSpy,
           loggerFactory,
           createBoolPromise = () => resultPromise,
         )
@@ -128,7 +132,7 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
                 any[Boolean => Unit],
               )
           )(any[TraceContext], any[MetricsContext])
-          verifyZeroInteractions(mempoolAdminSpy, consensusAdminSpy)
+          verifyZeroInteractions(mempoolAdminSpy, outputAdminSpy)
           response.removed shouldBe true
         }
     }
@@ -139,8 +143,8 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
       val mempoolAdminSpy =
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
       val consensusAdminSpy =
-        spy[ModuleRef[Consensus.Admin]](fakeIgnoringModule[Consensus.Admin])
-      val resultPromise = Promise[Seq[P2PEndpoint]]()
+        spy[ModuleRef[Output.Admin]](fakeIgnoringModule[Output.Admin])
+      val resultPromise = Promise[Seq[(P2PEndpoint, Option[BftNodeId])]]()
       resultPromise.success(Seq.empty)
       val bftOrderingSequencerAdminService =
         new BftOrderingSequencerAdminService(
@@ -154,7 +158,8 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         .listConfiguredEndpoints(ListConfiguredEndpointsRequest())
         .map { response =>
           verify(p2PNetworkOutAdminSpy).asyncSend(
-            P2PNetworkOut.Admin.ListConfiguredEndpoints(any[Seq[P2PEndpoint] => Unit])
+            P2PNetworkOut.Admin
+              .ListConfiguredEndpoints(any[Seq[(P2PEndpoint, Option[BftNodeId])] => Unit])
           )(any[TraceContext], any[MetricsContext])
           verifyZeroInteractions(mempoolAdminSpy, consensusAdminSpy)
           response.endpoints shouldBe empty
@@ -166,15 +171,15 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
       val p2PNetworkOutAdminSpy =
         spy[ModuleRef[P2PNetworkOut.Admin]](fakeIgnoringModule[P2PNetworkOut.Admin])
-      val consensusAdminSpy =
-        spy[ModuleRef[Consensus.Admin]](fakeIgnoringModule[Consensus.Admin])
+      val outputAdminSpy =
+        spy[ModuleRef[Output.Admin]](fakeIgnoringModule[Output.Admin])
       val resultPromise = Promise[PeerNetworkStatus]()
       resultPromise.success(PeerNetworkStatus(Seq.empty))
       val bftOrderingSequencerAdminService =
         new BftOrderingSequencerAdminService(
           mempoolAdminSpy,
           p2PNetworkOutAdminSpy,
-          consensusAdminSpy,
+          outputAdminSpy,
           loggerFactory,
           createNetworkStatusPromise = () => resultPromise,
         )
@@ -184,21 +189,21 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
           verify(p2PNetworkOutAdminSpy).asyncSend(
             P2PNetworkOut.Admin.GetStatus(any[PeerNetworkStatus => Unit])
           )(any[TraceContext], any[MetricsContext])
-          verifyZeroInteractions(mempoolAdminSpy, consensusAdminSpy)
+          verifyZeroInteractions(mempoolAdminSpy, outputAdminSpy)
           response.statuses shouldBe empty
         }
     }
 
-    "delegate getOrderingTopology to the consensus module" in {
-      val consensusAdminSpy =
-        spy[ModuleRef[Consensus.Admin]](fakeIgnoringModule[Consensus.Admin])
+    "delegate getOrderingTopology to the output module" in {
+      val outputAdminSpy =
+        spy[ModuleRef[Output.Admin]](fakeIgnoringModule[Output.Admin])
       val mempoolAdminSpy =
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
       val p2PNetworkOutAdminSpy =
         spy[ModuleRef[P2PNetworkOut.Admin]](fakeIgnoringModule[P2PNetworkOut.Admin])
-      val resultPromise = Promise[Consensus.Admin.GetOrderingTopologyResponse]()
+      val resultPromise = Promise[Output.Admin.GetOrderingTopologyResponse]()
       resultPromise.success(
-        Consensus.Admin
+        Output.Admin
           .GetOrderingTopologyResponse(
             EpochNumber.First,
             Set.empty,
@@ -211,19 +216,19 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         new BftOrderingSequencerAdminService(
           mempoolAdminSpy,
           p2PNetworkOutAdminSpy,
-          consensusAdminSpy,
+          outputAdminSpy,
           loggerFactory,
           createOrderingTopologyPromise = () => resultPromise,
         )
       bftOrderingSequencerAdminService
         .getOrderingTopology(GetOrderingTopologyRequest())
         .map { response =>
-          verify(consensusAdminSpy).asyncSend(
-            Consensus.Admin
-              .GetOrderingTopology(any[Consensus.Admin.GetOrderingTopologyResponse => Unit])
+          verify(outputAdminSpy).asyncSend(
+            Output.Admin
+              .GetOrderingTopology(any[Output.Admin.GetOrderingTopologyResponse => Unit])
           )(any[TraceContext], any[MetricsContext])
-          verifyZeroInteractions(mempoolAdminSpy)
-          verifyNoMoreInteractions(consensusAdminSpy)
+          verifyNoMoreInteractions(mempoolAdminSpy)
+          verifyNoMoreInteractions(outputAdminSpy)
           response.sequencerIds shouldBe empty
         }
     }
@@ -231,8 +236,8 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
     "delegate getSendServiceReadiness to the mempool module" in {
       val mempoolAdminSpy =
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
-      val consensusAdminSpy =
-        spy[ModuleRef[Consensus.Admin]](fakeIgnoringModule[Consensus.Admin])
+      val outputAdminSpy =
+        spy[ModuleRef[Output.Admin]](fakeIgnoringModule[Output.Admin])
       val p2PNetworkOutAdminSpy =
         spy[ModuleRef[P2PNetworkOut.Admin]](fakeIgnoringModule[P2PNetworkOut.Admin])
       val resultPromise = Promise[WriteReadiness]()
@@ -241,7 +246,7 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         new BftOrderingSequencerAdminService(
           mempoolAdminSpy,
           p2PNetworkOutAdminSpy,
-          consensusAdminSpy,
+          outputAdminSpy,
           loggerFactory,
           createWriteReadinessPromise = () => resultPromise,
         )
@@ -251,7 +256,7 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
           verify(mempoolAdminSpy).asyncSend(
             Mempool.Admin.GetWriteReadiness(any[WriteReadiness => Unit])
           )(any[TraceContext], any[MetricsContext])
-          verifyZeroInteractions(consensusAdminSpy, p2PNetworkOutAdminSpy)
+          verifyZeroInteractions(outputAdminSpy, p2PNetworkOutAdminSpy)
           WriteReadiness.fromProto(response) shouldBe Right(
             WriteReadiness.Ready(
               WriteReadiness.P2P(1, 1)

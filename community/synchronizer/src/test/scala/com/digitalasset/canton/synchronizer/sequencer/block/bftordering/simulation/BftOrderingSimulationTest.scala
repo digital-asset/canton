@@ -278,6 +278,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
                     sim.simulationTopologyData.offboardingTime.map(node -> _)
                   }.toMap,
                   alreadyOnboardedAll.keys.toSeq,
+                  Set.empty,
                   simSettings,
                   epochChecker,
                   loggerFactory,

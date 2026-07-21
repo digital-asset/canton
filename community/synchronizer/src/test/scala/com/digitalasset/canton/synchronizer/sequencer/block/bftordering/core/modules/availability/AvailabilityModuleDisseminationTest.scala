@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability
 
 import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
@@ -606,12 +607,12 @@ class AvailabilityModuleDisseminationTest
       // because the initial batch id will be accepted since we always accept a batch that has been accepted before
       canAcceptBatch(secondBatchId) shouldBe false
       // receiving a new batch after the quota is full gives a warning and the batch is rejected
-      loggerFactory.assertLogs(
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
         availability.receive(
           RemoteDissemination.RemoteBatch.create(secondBatchId, secondBatch, from = Node1)
         ),
         log => {
-          log.level shouldBe Level.WARN
+          log.level shouldBe Level.INFO
           log.message shouldBe (
             s"Batch $secondBatchId from 'node1' cannot be taken because we have reached the limit of 1 unordered and unexpired batches from this node that we can hold on to, skipping"
           )

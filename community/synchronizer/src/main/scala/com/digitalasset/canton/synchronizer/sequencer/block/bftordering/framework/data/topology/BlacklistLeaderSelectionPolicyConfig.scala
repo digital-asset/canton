@@ -58,6 +58,23 @@ object BlacklistLeaderSelectionPolicyConfig {
         ParsingResult.pure(HowLongToBlacklist.Linear(value.maximumEpochLengthBlacklisted))
       case v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist.HowLongNoBlacklisting(value) =>
         ParsingResult.pure(HowLongToBlacklist.NoBlacklisting)
+      case v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist
+            .HowLongLinearWithParameters(value) =>
+        ParsingResult.pure(
+          HowLongToBlacklist.LinearWithParameters(
+            slope = value.slope,
+            initialValue = value.initialValue,
+            maximumEpochBlacklisted = value.maximumEpochLengthBlacklisted,
+          )
+        )
+      case v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist
+            .HowLongExponential(value) =>
+        ParsingResult.pure(
+          HowLongToBlacklist.Exponential(
+            initialValue = value.initialValue,
+            maximumEpochBlacklisted = value.maximumEpochLengthBlacklisted,
+          )
+        )
     }
     howManyCanWeBlacklist <- proto.howManyCanWeBlacklist match {
       case v31.BlacklistLeaderSelectionPolicy.HowManyCanWeBlacklist.Empty =>
@@ -102,6 +119,78 @@ object BlacklistLeaderSelectionPolicyConfig {
 
       override def updateLeftUntilNextTrial(epochsLeftUntilNextTrial: Long): Long =
         maximumEpochBlacklisted.getOrElse(epochsLeftUntilNextTrial).min(epochsLeftUntilNextTrial)
+    }
+
+    // X |-> min(slope*X+initialValue, maximumEpochBlacklisted)
+    final case class LinearWithParameters(
+        maximumEpochBlacklisted: Option[Long],
+        slope: Long,
+        initialValue: Long,
+    ) extends HowLongToBlacklist {
+      override protected def pretty: Pretty[LinearWithParameters] = prettyOfClass(
+        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted),
+        param("slope", _.slope),
+        param("initialValue", _.initialValue),
+      )
+
+      override def punishNodeThatFailed(failedEpochSoFar: Long): BlacklistStatus =
+        BlacklistStatus.Blacklisted.create(
+          failedAttemptsBefore = failedEpochSoFar,
+          epochsLeftUntilNewTrial = updateLeftUntilNextTrial(
+            slope * failedEpochSoFar + initialValue
+          ),
+        )
+
+      override def updateLeftUntilNextTrial(epochsLeftUntilNextTrial: Long): Long =
+        maximumEpochBlacklisted.getOrElse(epochsLeftUntilNextTrial).min(epochsLeftUntilNextTrial)
+
+      override def toProto: v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist =
+        v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist.HowLongLinearWithParameters(
+          v31.HowLongLinearWithParameters(
+            slope = slope,
+            initialValue = initialValue,
+            maximumEpochLengthBlacklisted = maximumEpochBlacklisted,
+          )
+        )
+    }
+
+    final case class Exponential(
+        maximumEpochBlacklisted: Option[Long],
+        initialValue: Long,
+    ) extends HowLongToBlacklist {
+      override protected def pretty: Pretty[Exponential] = prettyOfClass(
+        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted),
+        param("initialValue", _.initialValue),
+      )
+
+      override def punishNodeThatFailed(failedEpochSoFar: Long): BlacklistStatus =
+        BlacklistStatus.Blacklisted.create(
+          failedAttemptsBefore = failedEpochSoFar,
+          epochsLeftUntilNewTrial = updateLeftUntilNextTrial(
+            fixOverflow(
+              pow(failedEpochSoFar) + initialValue
+            )
+          ),
+        )
+
+      private def fixOverflow(x: Long): Long =
+        if (x < 0) Long.MaxValue else x
+
+      private def pow(x: Long): Long = {
+        val temp = scala.math.pow(2, x.toDouble)
+        if (temp < 0.0 || temp > Long.MaxValue.toDouble) Long.MaxValue else temp.toLong
+      }
+
+      override def updateLeftUntilNextTrial(epochsLeftUntilNextTrial: Long): Long =
+        maximumEpochBlacklisted.getOrElse(epochsLeftUntilNextTrial).min(epochsLeftUntilNextTrial)
+
+      override def toProto: v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist =
+        v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist.HowLongExponential(
+          v31.HowLongExponential(
+            initialValue = initialValue,
+            maximumEpochLengthBlacklisted = maximumEpochBlacklisted,
+          )
+        )
     }
 
     case object NoBlacklisting extends HowLongToBlacklist {
