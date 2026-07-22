@@ -32,9 +32,9 @@ class ExtensionServiceExternalCallValidator(
       )
       .map {
         case Left(error) =>
-          val requestId = error.requestId.fold("")(id => s", requestId=$id")
+          val externalCallId = error.externalCallId.fold("")(id => s", externalCallId=$id")
           ExternalCallValidator.UnableToValidate(
-            s"external-call validation failed with status ${error.statusCode}$requestId"
+            s"external-call validation failed with status ${error.statusCode}$externalCallId"
           )
 
         case Right(output) =>
