@@ -1040,8 +1040,19 @@ commands:
                     FIXED="<< parameters.fixed_volunteer >>"
                     if [ -n "$FIXED" ]; then
                       SELECTED_VOLUNTEER="$FIXED"
-                    else
+                    elif command -v nix-shell >/dev/null 2>&1; then
                       SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB")
+                    else
+                      # Machine executors (e.g. test_ping_arm) have no nix, so nix-exec cannot run.
+                      # select_rota.py needs cryptography to sign the Google auth JWT; install it
+                      # best-effort so we still ping the live rota person. If the install fails the
+                      # script degrades to its deterministic roster fallback rather than breaking.
+                      # The plain install covers older pip; the retry adds --break-system-packages
+                      # (pip 23+) for images that mark the system Python externally managed (PEP 668).
+                      python3 -m pip install -q --user cryptography \
+                        || python3 -m pip install -q --user --break-system-packages cryptography \
+                        || echo "warning: cryptography install failed; select_rota will use its roster fallback" >&2
+                      SELECTED_VOLUNTEER=$(python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB")
                     fi
 
                     echo "$SELECTED_VOLUNTEER"

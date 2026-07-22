@@ -32,6 +32,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.Se
   endpointToProto,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.topology.SequencerId
 import io.grpc.ManagedChannel
 
 import scala.concurrent.Future
@@ -100,7 +101,7 @@ object SequencerBftAdminCommands {
       extends BaseSequencerBftAdministrationCommand[
         ListConfiguredEndpointsRequest,
         ListConfiguredEndpointsResponse,
-        Seq[P2PEndpoint],
+        Seq[(P2PEndpoint, Option[SequencerId])],
       ] {
 
     override protected def createRequest(): Either[String, ListConfiguredEndpointsRequest] = Right(
@@ -115,10 +116,22 @@ object SequencerBftAdminCommands {
 
     override protected def handleResponse(
         response: ListConfiguredEndpointsResponse
-    ): Either[String, Seq[P2PEndpoint]] =
+    ): Either[String, Seq[(P2PEndpoint, Option[SequencerId])]] =
       response.endpoints
-        .map(endpointFromProto)
+        .map { peerEndpointAndSequencerId =>
+          for {
+            endpoint <- endpointFromProto(peerEndpointAndSequencerId)
+            sequencerIdO <- peerEndpointAndSequencerId.sequencerId
+              .map(
+                SequencerId
+                  .fromProtoPrimitive(_, "sequencerId")
+                  .leftMap(err => s"Failed to parse sequencerId: $err")
+              )
+              .sequence
+          } yield (endpoint, sequencerIdO)
+        }
         .sequence
+        .leftMap(err => s"Failed to parse response: $err")
   }
 
   final case class GetPeerNetworkStatus(endpoints: Option[Iterable[P2PEndpoint.Id]])

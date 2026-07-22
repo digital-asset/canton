@@ -301,6 +301,8 @@ class TopologyStateProcessorImpl private[processing] (
       inStore: Option[GenericSignedTopologyTransaction],
       toValidate: GenericSignedTopologyTransaction,
   ): Either[TopologyTransactionRejection, Unit] = inStore match {
+    case Some(value) if value.serial.value == Int.MaxValue =>
+      Left(TopologyTransactionRejection.Processor.MaxSerialReached)
     case Some(value) =>
       val expected = value.serial.increment
       Either.cond(

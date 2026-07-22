@@ -145,7 +145,7 @@ final class StateTransferBehavior[E <: Env[E]](
   private var latestCompletedEpoch = initialState.latestCompletedEpoch
 
   @VisibleForTesting
-  private[iss] var maybeLastReceivedEpochTopology: Option[Consensus.NewEpochTopology[E]] =
+  private[iss] var maybeLastReceivedEpochTopology: Option[Consensus.NewEpochMembership[E]] =
     None
 
   override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
@@ -199,29 +199,29 @@ final class StateTransferBehavior[E <: Env[E]](
       case stateTransferMessage: Consensus.StateTransferMessage =>
         handleStateTransferMessage(stateTransferMessage)
 
-      case newEpochTopologyMessage: Consensus.NewEpochTopology[E] =>
+      case newEpochMembershipMessage: Consensus.NewEpochMembership[E] =>
         val currentEpochInfo = epochState.epoch.info
         val currentEpochNumber = currentEpochInfo.number
-        val newEpochNumber = newEpochTopologyMessage.epochNumber
+        val newEpochNumber = newEpochMembershipMessage.epochNumber
 
         if (newEpochNumber == currentEpochNumber + 1) {
           stateTransferManager.emitEpochTransferLatency(currentEpochNumber)
-          maybeLastReceivedEpochTopology = Some(newEpochTopologyMessage)
+          maybeLastReceivedEpochTopology = Some(newEpochMembershipMessage)
 
           // Update the active topology in Availability as well to use the most recently available topology
           //  to fetch batches.
-          updateAvailabilityTopology(newEpochTopologyMessage)
+          updateAvailabilityTopology(newEpochMembershipMessage)
 
           val newEpochInfo =
             currentEpochInfo.next(
-              newEpochTopologyMessage.membership.orderingTopology.epochLength,
-              newEpochTopologyMessage.membership.orderingTopology.activationTime,
+              newEpochMembershipMessage.membership.orderingTopology.epochLength,
+              newEpochMembershipMessage.membership.orderingTopology.activationTime,
             )
           storeEpochs(
             currentEpochInfo,
             newEpochInfo,
-            newEpochTopologyMessage.membership,
-            newEpochTopologyMessage.cryptoProvider,
+            newEpochMembershipMessage.membership,
+            newEpochMembershipMessage.cryptoProvider,
             messageType,
           )
         } else if (newEpochNumber <= currentEpochNumber) {
@@ -261,17 +261,6 @@ final class StateTransferBehavior[E <: Env[E]](
           initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
           nodeThatTimedOut = None,
         )(abort)
-
-      case Consensus.Admin.GetOrderingTopology(callback) =>
-        callback(
-          Consensus.Admin.GetOrderingTopologyResponse(
-            epochState.epoch.info.number,
-            activeTopologyInfo.currentMembership.orderingTopology.nodes,
-            activeTopologyInfo.currentMembership.leaders,
-            activeTopologyInfo.currentMembership.blacklistedNodes,
-            activeTopologyInfo.currentMembership.orderingTopology.sequencingParameters,
-          )
-        )
 
       case Consensus.ConsensusMessage.AsyncException(e) =>
         logger.error(s"$messageType: exception raised from async consensus message: ${e.toString}")
@@ -392,7 +381,7 @@ final class StateTransferBehavior[E <: Env[E]](
         }
     }
 
-  private def updateAvailabilityTopology(newEpochTopology: Consensus.NewEpochTopology[E])(implicit
+  private def updateAvailabilityTopology(newEpochTopology: Consensus.NewEpochMembership[E])(implicit
       traceContext: TraceContext
   ): Unit =
     dependencies.availability.asyncSend(
@@ -468,7 +457,7 @@ final class StateTransferBehavior[E <: Env[E]](
     }.discard
   }
 
-  private def transitionBackToConsensus(newEpochTopologyMessage: Consensus.NewEpochTopology[E])(
+  private def transitionBackToConsensus(newEpochTopologyMessage: Consensus.NewEpochMembership[E])(
       implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
@@ -554,6 +543,7 @@ final class StateTransferBehavior[E <: Env[E]](
       loggerFactory = loggerFactory,
       timeouts = timeouts,
     )
+    epochState.emitEpochMetrics(metrics, previousEpochState.epoch)
 
     dependencies.p2pNetworkOut.asyncSend(
       P2PNetworkOut.Network.TopologyUpdate(epochState.epoch.currentMembership)

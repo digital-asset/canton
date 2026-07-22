@@ -1227,6 +1227,16 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistLinearConfigReader
         : ConfigReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear] =
       deriveReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistLinearWithParametersConfigReader
+        : ConfigReader[
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.LinearWithParameters
+        ] =
+      deriveReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.LinearWithParameters]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistExponentialConfigReader
+        : ConfigReader[
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Exponential
+        ] =
+      deriveReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Exponential]
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistNoBlacklistingConfigReader
         : ConfigReader[
           BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.NoBlacklisting.type
@@ -2102,6 +2112,16 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistLinearConfigWriter
         : ConfigWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear] =
       deriveWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Linear]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistLinearWithParametersConfigWriter
+        : ConfigWriter[
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.LinearWithParameters
+        ] =
+      deriveWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.LinearWithParameters]
+    lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistExponentialConfigWriter
+        : ConfigWriter[
+          BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Exponential
+        ] =
+      deriveWriter[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.Exponential]
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistNoBlacklistingConfigWriter
         : ConfigWriter[
           BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist.NoBlacklisting.type

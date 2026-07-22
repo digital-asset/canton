@@ -15,7 +15,8 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-- improvement
+- Fixed an edge case that could cause deserialization of proto durations to fail
+- Fixed an issue where topology transactions with max serial where not handled properly
 
 ### Preview Features
 - preview feature

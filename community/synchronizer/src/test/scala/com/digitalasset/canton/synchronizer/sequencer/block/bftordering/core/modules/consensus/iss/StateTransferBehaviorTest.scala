@@ -61,7 +61,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 }
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.SingleUseCell
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -215,7 +214,7 @@ class StateTransferBehaviorTest
             (None, None),
             (
               Some(
-                Consensus.NewEpochTopology(
+                Consensus.NewEpochMembership(
                   EpochNumber.First,
                   aMembership,
                   aFakeCryptoProviderInstance,
@@ -279,7 +278,7 @@ class StateTransferBehaviorTest
           implicit val ctx: ContextType = context
 
           stateTransferBehavior.maybeLastReceivedEpochTopology = Some(
-            Consensus.NewEpochTopology(
+            Consensus.NewEpochMembership(
               EpochNumber.First,
               aMembership,
               aFakeCryptoProviderInstance,
@@ -344,7 +343,7 @@ class StateTransferBehaviorTest
       )
 
       stateTransferBehavior.receive(
-        Consensus.NewEpochTopology(
+        Consensus.NewEpochMembership(
           newEpochNumber,
           aMembership,
           aFakeCryptoProviderInstance,
@@ -427,30 +426,6 @@ class StateTransferBehaviorTest
 
           succeed
         }
-    }
-  }
-
-  "receiving a 'GetOrderingTopology' message" should {
-    "return the ordering topology" in {
-      val (context, stateTransferBehavior) = createStateTransferBehavior()
-      implicit val ctx: ContextType = context
-
-      val callbackCell = new SingleUseCell[Consensus.Admin.GetOrderingTopologyResponse]
-      def callback(response: Consensus.Admin.GetOrderingTopologyResponse): Unit =
-        callbackCell.putIfAbsent(response)
-
-      stateTransferBehavior.receive(Consensus.Admin.GetOrderingTopology(callback))
-
-      callbackCell.get shouldBe
-        Some(
-          Consensus.Admin.GetOrderingTopologyResponse(
-            Bootstrap.BootstrapEpochNumber,
-            aMembership.orderingTopology.nodes,
-            aMembership.leaders,
-            aMembership.blacklistedNodes,
-            aMembership.orderingTopology.sequencingParameters,
-          )
-        )
     }
   }
 

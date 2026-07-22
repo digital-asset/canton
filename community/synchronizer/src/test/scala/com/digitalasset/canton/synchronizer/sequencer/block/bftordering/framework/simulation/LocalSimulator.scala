@@ -26,6 +26,9 @@ class LocalSimulator(
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var canUseFaults = true
 
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var havePermanentlyCrashedNodes = false
+
   private val crashNodeStatus: mutable.Map[BftNodeId, LocalSimulator.CrashNodeStatus] =
     mutable.Map.from(
       nodes.map(node => node -> LocalSimulator.Uninitialized)
@@ -35,6 +38,16 @@ class LocalSimulator(
   def tick(at: CantonTimestamp): Unit = {
     if (!canUseFaults) {
       return
+    }
+    if (!havePermanentlyCrashedNodes) {
+      settings.permanentlyCrashNodes.foreach { numberOfNodesToPermanentlyCrash =>
+        val nodesToCrashPermanently = random.shuffle(nodes).take(numberOfNodesToPermanentlyCrash)
+        nodesToCrashPermanently.foreach { node =>
+          crashNodeStatus(node) = LocalSimulator.Permanent
+          agenda.addOne(CrashNode(node, permanent = true), duration = 1.microsecond)
+        }
+      }
+      havePermanentlyCrashedNodes = true
     }
     crashNodeStatus.mapValuesInPlace { case (node, status) =>
       if (status.shouldUpdate(at)) {
@@ -129,5 +142,9 @@ object LocalSimulator {
 
   private final case class Initialized(dontUpdateUntil: CantonTimestamp) extends CrashNodeStatus {
     override def shouldUpdate(at: CantonTimestamp): Boolean = dontUpdateUntil.isBefore(at)
+  }
+
+  private object Permanent extends CrashNodeStatus {
+    override def shouldUpdate(at: CantonTimestamp): Boolean = false
   }
 }

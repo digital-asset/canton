@@ -57,6 +57,9 @@ message PeerEndpoint {
     PlainTextPeerEndpoint plain_text = 3;
     TlsPeerEndpoint tls = 4;
   }
+  // Ignored when storing an endpoint, but returned when listing configured endpoints:
+  //  if the peer authenticated as a sequencer over this endpoint, this field will contain its sequencer ID.
+  optional string sequencer_id = 5;
 }
 
 message PeerEndpointId {

@@ -82,6 +82,81 @@ trait TopologyManagementIntegrationTest
     }
 
   "A Canton operator" can {
+
+    // This test is a reproducer for https://github.com/DACH-NY/canton/issues/34248
+    // See the issue for details
+    "gracefully handle submissions with serial == Int.max" in { implicit env =>
+      import env.*
+      val party = PartyId.tryCreate("localalice", participant1.namespace)
+      val ptpMapping = PartyToParticipant.tryCreate(
+        party,
+        PositiveInt.one,
+        Seq(HostingParticipant(participant1.id, ParticipantPermission.Submission)),
+      )
+
+      val ptpReplace = TopologyTransaction(
+        TopologyChangeOp.Replace,
+        PositiveInt.tryCreate(Int.MaxValue - 1),
+        ptpMapping,
+        testedProtocolVersion,
+      )
+      val signedPtpReplace = SignedTopologyTransaction
+        .signAndCreate(
+          ptpReplace,
+          NonEmpty.mk(Set, participant1.fingerprint),
+          isProposal = false,
+          participant1.crypto.privateCrypto,
+          testedProtocolVersion,
+        )
+        .futureValueUS
+        .value
+      participant1.topology.transactions.load(Seq(signedPtpReplace), daId)
+
+      val ptpRemove = TopologyTransaction(
+        TopologyChangeOp.Remove,
+        PositiveInt.MaxValue,
+        ptpMapping,
+        testedProtocolVersion,
+      )
+      val signedPtpRemove = SignedTopologyTransaction
+        .signAndCreate(
+          ptpRemove,
+          NonEmpty.mk(Set, participant1.fingerprint),
+          isProposal = false,
+          participant1.crypto.privateCrypto,
+          testedProtocolVersion,
+        )
+        .futureValueUS
+        .value
+      participant1.topology.transactions.load(Seq(signedPtpRemove), daId)
+
+      val ptpReplace2 = TopologyTransaction(
+        TopologyChangeOp.Replace,
+        // The serial does not matter here to trigger the bug
+        // The current serial is already at Int.Max
+        PositiveInt.three,
+        ptpMapping,
+        testedProtocolVersion,
+      )
+      val signedPtpReplace2 = SignedTopologyTransaction
+        .signAndCreate(
+          ptpReplace2,
+          NonEmpty.mk(Set, participant1.fingerprint),
+          isProposal = false,
+          participant1.crypto.privateCrypto,
+          testedProtocolVersion,
+        )
+        .futureValueUS
+        .value
+      loggerFactory.assertThrowsAndLogs[CommandFailure](
+        participant1.topology.transactions.load(Seq(signedPtpReplace2), daId),
+        _.errorMessage should (include("INVALID_ARGUMENT") and include(
+          "A security-sensitive error has been received"
+        )),
+      )
+
+    }
+
     "reconnect a participant to a synchronizer twice" in { implicit env =>
       import env.*
 

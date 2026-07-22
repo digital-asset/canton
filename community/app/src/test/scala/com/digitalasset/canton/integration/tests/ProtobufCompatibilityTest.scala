@@ -195,13 +195,20 @@ final class ProtobufCompatibilityReaderTest
       """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "ordering_start_instant" on message "OrderingRequest" changed type from "bytes" to "message".""",
       """com/digitalasset/canton/synchronizer/v30/synchronizer.proto:Previously present field "3" with name "is_late_upgrade" on message "SynchronizerPredecessor" was deleted.""",
       """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present field "3" with name "version" on message "NotInitialized" was deleted.""",
-      // Added DABFT leaders and blacklisted nodes to `get_ordering_topology` console admin function's output
+      // Added CantonBFT leaders and blacklisted nodes to `get_ordering_topology` console admin function's output
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "leader_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "6" with name "blacklisted_sequencer_ids" on message "GetOrderingTopologyResponse" was deleted.""",
-      // undefined epoch_number case is handled
+      // CantonBFT: undefined epoch_number case is handled
       """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Previously present field "2" with name "epoch_number" on message "BatchRequest" was deleted.""",
+      // Added CantonBFT sequencer_id info to configured endpoints returned by `list_configured_endpoints` console admin function when a peer successfully authenticated as a sequencer over that endpoint
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
     ),
     (3, 5) -> Seq(
+      // Added CantonBFT sequencer_id info to configured endpoints returned by `list_configured_endpoints` console admin function when a peer successfully authenticated as a sequencer over that endpoint
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
+      // CantonBFT blacklisting
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto:Previously present field "5" with name "how_long_linear_with_parameters" on message "BlacklistLeaderSelectionPolicy" was deleted.""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto:Previously present field "6" with name "how_long_exponential" on message "BlacklistLeaderSelectionPolicy" was deleted.""",
     ),
   )
 
