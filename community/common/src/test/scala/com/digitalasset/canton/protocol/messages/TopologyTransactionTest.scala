@@ -52,7 +52,12 @@ class TopologyTransactionTest
   private def mk[T <: TopologyMapping](
       mapping: T
   ): TopologyTransaction[TopologyChangeOp.Replace, T] =
-    TopologyTransaction(TopologyChangeOp.Replace, PositiveInt.one, mapping, testedProtocolVersion)
+    TopologyTransaction.tryCreate(
+      TopologyChangeOp.Replace,
+      PositiveInt.one,
+      mapping,
+      testedProtocolVersion,
+    )
 
   private val deserialize: ByteString => TopologyTransaction[TopologyChangeOp, TopologyMapping] =
     bytes =>
@@ -100,7 +105,7 @@ class TopologyTransactionTest
       // Test case: is_root_delegation=true, restriction=empty <=> CanSignAllMappings
       val rootDelegationProto = v30.NamespaceDelegation(
         uid.namespace.toProtoPrimitive,
-        Some(publicKey.toProtoV30),
+        Some(publicKey.toProtoV30.valueOrFail("serializing public key")),
         isRootDelegation = true,
         restriction = v30.NamespaceDelegation.Restriction.Empty,
       )
@@ -129,7 +134,7 @@ class TopologyTransactionTest
       // Test case: is_root_delegation=false, restriction=empty <=> CanSignAllButNamespaceDelegations
       val nonRootDelegationProto = v30.NamespaceDelegation(
         uid.namespace.toProtoPrimitive,
-        Some(publicKey.toProtoV30),
+        Some(publicKey.toProtoV30.valueOrFail("serializing public key")),
         isRootDelegation = false,
         restriction = v30.NamespaceDelegation.Restriction.Empty,
       )
@@ -161,7 +166,7 @@ class TopologyTransactionTest
       ).foreach { case (protoRestriction, scalaRestriction) =>
         val restrictedDelegationProto = v30.NamespaceDelegation(
           uid.namespace.toProtoPrimitive,
-          Some(publicKey.toProtoV30),
+          Some(publicKey.toProtoV30.valueOrFail("serializing public key")),
           isRootDelegation = false,
           restriction = protoRestriction,
         )
@@ -175,7 +180,9 @@ class TopologyTransactionTest
         NamespaceDelegation
           .fromProtoV30(restrictedDelegationProto)
           .value shouldBe restrictedFromScala
-        restrictedFromScala.toProto shouldBe restrictedDelegationProto
+        restrictedFromScala.toProtoNamespaceDelegationV30.valueOrFail(
+          "serializing transaction"
+        ) shouldBe restrictedDelegationProto
       }
     }
 

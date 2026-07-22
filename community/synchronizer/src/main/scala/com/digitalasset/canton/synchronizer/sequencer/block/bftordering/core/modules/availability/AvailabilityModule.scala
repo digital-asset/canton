@@ -63,6 +63,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   CancellableEvent,
   Env,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.JitterGenerator
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -102,8 +103,8 @@ final class AvailabilityModule[E <: Env[E]](
 )(
     // Only passed in tests
     private var messageAuthorizer: MessageAuthorizer = initialMembership.orderingTopology,
-    private val jitterConstructor: (BftBlockOrdererConfig, Random) => JitterStream =
-      JitterStream.create,
+    private val jitterConstructor: (BftBlockOrdererConfig, Random) => JitterGenerator =
+      OutputFetchProtocolState.createJitterGenerator,
 )(implicit
     override val config: BftBlockOrdererConfig,
     synchronizerProtocolVersion: ProtocolVersion,
@@ -570,7 +571,7 @@ final class AvailabilityModule[E <: Env[E]](
           .map(_._1)
 
       if (expiredBatchIds.nonEmpty) {
-        logger.warn(s"$actingOnMessageType: discarding expired batches: ${expiredBatchIds.toSeq}")
+        logger.info(s"$actingOnMessageType: discarding expired batches: ${expiredBatchIds.toSeq}")
         disseminationProtocolState.disseminationProgress --= expiredBatchIds
       }
 
@@ -1031,7 +1032,9 @@ final class AvailabilityModule[E <: Env[E]](
           _ <- validateBatch(batchId, batch, from)
           _ <- validateDisseminationQuota(batchId, from)
         } yield batch).fold(
-          error => logger.warn(error),
+          { case (error, logAsWarning) =>
+            logValidationError(error, logAsWarning)
+          },
           batch => {
             emitBatchValidationLatency(validationStart)
             outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
@@ -1320,7 +1323,9 @@ final class AvailabilityModule[E <: Env[E]](
         val batch = message.batch
         val from = message.from
         validateBatch(batchId, batch, from).fold(
-          error => logger.warn(error),
+          { case (error, logAsWarning) =>
+            logValidationError(error, logAsWarning)
+          },
           _ => {
             logger.debug(s"$messageType: received $batchId, persisting it")
             outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
@@ -1336,6 +1341,11 @@ final class AvailabilityModule[E <: Env[E]](
         logger.debug(s"$messageType: received $batchId but nobody needs it, ignoring")
     }
   }
+
+  private def logValidationError(error: String, logAsWarning: Boolean)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    if (logAsWarning) logger.warn(error) else logger.info(error)
 
   @SuppressWarnings(Array("org.wartremover.warts.Return"))
   private def fetchBatchDataFromNodes(
@@ -1580,12 +1590,15 @@ final class AvailabilityModule[E <: Env[E]](
       }
     )
 
+  /** Validates a batch received from a remote node, returning an error message if the batch is
+    * invalid and whether it should be logged as a warning.
+    */
   private def validateBatch(
       batchId: BatchId,
       batch: OrderingRequestBatch,
       from: BftNodeId,
-  ): Either[String, Unit] =
-    for {
+  ): Either[(String, Boolean), Unit] =
+    (for {
       _ <- Either.cond(
         BatchId.from(batch) == batchId,
         (), {
@@ -1641,20 +1654,27 @@ final class AvailabilityModule[E <: Env[E]](
             s"compared to last known epoch $lastKnownEpochNumber, skipping"
         },
       )
-    } yield ()
+    } yield ()).left.map(_ -> true)
 
+  /** Validates whether a batch received from a remote node exceeds the dissemination quota for that
+    * node, returning an error message if the batch is invalid and whether it should be logged as a
+    * warning.
+    */
   private def validateDisseminationQuota(
       batchId: BatchId,
       from: BftNodeId,
-  ): Either[String, Unit] = Either.cond(
-    disseminationProtocolState.disseminationQuotas
-      .canAcceptForNode(from, batchId, config.availabilityMaxNonOrderedBatchesPerNode.toInt),
-    (), {
-      emitInvalidMessage(metrics, from)
-      s"Batch $batchId from '$from' cannot be taken because we have reached the limit of ${config.availabilityMaxNonOrderedBatchesPerNode} unordered and unexpired batches from " +
-        s"this node that we can hold on to, skipping"
-    },
-  )
+  ): Either[(String, Boolean), Unit] = Either
+    .cond(
+      disseminationProtocolState.disseminationQuotas
+        .canAcceptForNode(from, batchId, config.availabilityMaxNonOrderedBatchesPerNode.toInt),
+      (), {
+        emitInvalidMessage(metrics, from)
+        s"Batch $batchId from '$from' cannot be taken because we have reached the limit of ${config.availabilityMaxNonOrderedBatchesPerNode} unordered and unexpired batches from " +
+          s"this node that we can hold on to, skipping"
+      },
+    )
+    .left
+    .map(_ -> false)
 
   private def emitBatchWaitLatency(): Unit = {
     import metrics.performance.orderingStageLatency.*

@@ -50,6 +50,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.RemoteDissemination
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.LocalAvailability.ProposalCreated
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.AvailabilityModuleDependencies
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.JitterGenerator
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   BftSequencerBaseTest,
   failingCryptoProvider,
@@ -72,7 +73,8 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
   protected val metrics =
     SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
 
-  protected val jitterStream = JitterStream.create(BftBlockOrdererConfig(), new Random(0L))
+  protected val jitterStream =
+    OutputFetchProtocolState.createJitterGenerator(BftBlockOrdererConfig(), new Random(0L))
   protected val Node0 = node(0)
   protected val Node1 = node(1)
   protected val Node2 = node(2)
@@ -391,7 +393,8 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       outputFetchProtocolState: MainOutputFetchProtocolState = new MainOutputFetchProtocolState(),
       customMembership: Option[Membership] = None,
       customMessageAuthorizer: Option[MessageAuthorizer] = None,
-      jitterConstructor: (BftBlockOrdererConfig, Random) => JitterStream = JitterStream.create,
+      jitterConstructor: (BftBlockOrdererConfig, Random) => JitterGenerator =
+        OutputFetchProtocolState.createJitterGenerator,
   )(implicit
       synchronizerProtocolVersion: ProtocolVersion,
       context: E#ActorContextT[Availability.Message[E]],

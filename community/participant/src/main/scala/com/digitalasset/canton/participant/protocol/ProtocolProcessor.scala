@@ -35,6 +35,7 @@ import com.digitalasset.canton.participant.protocol.EngineController.EngineAbort
 import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   CleanReplayData,
+  DecryptedViewData,
   DecryptedViews,
   PendingRequestData,
   ReplayDataOr,
@@ -139,9 +140,8 @@ abstract class ProtocolProcessor[
 
   def participantId: ParticipantId
 
-  private val recipientsValidator
-      : RecipientsValidator[(WithRecipients[steps.DecryptedView], Option[Signature])] =
-    new RecipientsValidator(_._1.unwrap, _._1.recipients, loggerFactory)
+  private val recipientsValidator: RecipientsValidator[DecryptedViewData[steps.DecryptedView]] =
+    new RecipientsValidator(_.view.unwrap, _.view.recipients, loggerFactory)
 
   private[this] def withKind(message: String): String = s"${steps.requestKind}: $message"
 
@@ -1057,21 +1057,21 @@ abstract class ProtocolProcessor[
     val decryptionErrors = rawDecryptionErrors.map(ViewMessageError(_))
 
     val (viewsWithCorrectRootHash, viewsWithWrongRootHash) =
-      decryptedViewsWithSignatures.partition { case (view, _) =>
-        view.unwrap.rootHash == correctRootHash
-      }
+      decryptedViewsWithSignatures.partition(decryptedView =>
+        decryptedView.view.unwrap.rootHash == correctRootHash
+      )
 
     val incorrectRootHashes: Seq[MalformedPayload] =
-      viewsWithWrongRootHash.map { case (viewTree, _) =>
-        ProtocolProcessor.WrongRootHash(viewTree.unwrap, correctRootHash)
-      }
+      viewsWithWrongRootHash.map(decryptedView =>
+        ProtocolProcessor.WrongRootHash(decryptedView.view.unwrap, correctRootHash)
+      )
 
     incorrectRootHashes.foreach { incorrectRootHash =>
       logger.warn(s"Request $rc: Found malformed payload: $incorrectRootHash")
     }
 
     val submitterMetadataO = steps.getSubmitterInformation(
-      viewsWithCorrectRootHash.map { case (view, _) => view.unwrap }
+      viewsWithCorrectRootHash.map(decryptedView => decryptedView.view.unwrap)
     )
 
     val submissionTopologyTimestamp = rootHashMessage.submissionTopologyTimestamp

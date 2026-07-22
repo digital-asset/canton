@@ -8,7 +8,13 @@ import cats.syntax.alternative.*
 import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{HashOps, Signature, SynchronizerSnapshotSyncCryptoApi}
-import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, ViewType}
+import com.digitalasset.canton.data.{
+  ByCiphertextId,
+  CantonTimestamp,
+  DeduplicationPeriod,
+  ViewTree,
+  ViewType,
+}
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.participant.state.{AcsChangeFactory, SequencedEventUpdate}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -17,6 +23,7 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
+  DecryptedViewData,
   DecryptedViews,
   InternalContractIds,
   ParsedRequest,
@@ -403,11 +410,9 @@ trait ProcessingSteps[
     *   for the root hash and the recipients.
     */
   def absolutizeLedgerEffects(
-      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[
-        (WithRecipients[DecryptedView], Option[Signature])
-      ]
+      viewsWithCorrectRootHashAndRecipientsAndSignature: Seq[DecryptedViewData[DecryptedView]]
   ): (
-      Seq[(WithRecipients[DecryptedView], Option[Signature], ViewAbsoluteLedgerEffects)],
+      Seq[(DecryptedViewData[DecryptedView], ViewAbsoluteLedgerEffects)],
       Seq[MalformedPayload],
   )
 
@@ -421,7 +426,7 @@ trait ProcessingSteps[
     */
   def computeFullViews(
       decryptedViewsWithSignatures: Seq[
-        (WithRecipients[DecryptedView], Option[Signature], ViewAbsoluteLedgerEffects)
+        (DecryptedViewData[DecryptedView], ViewAbsoluteLedgerEffects)
       ]
   ): (
       Seq[(WithRecipients[FullView], Option[Signature], FullViewAbsoluteLedgerEffects)],
@@ -633,6 +638,16 @@ trait ProcessingSteps[
 }
 
 object ProcessingSteps {
+
+  /** Contains a decrypted view, its recipients, and any associated reference (i.e. ciphertext ID)
+    * and signature.
+    */
+  final case class DecryptedViewData[View <: ViewTree](
+      view: WithRecipients[View],
+      ciphertextIdO: Option[ByCiphertextId],
+      signatureO: Option[Signature],
+  )
+
   def getAssignmentExclusivity(
       topologySnapshot: Target[TopologySnapshot],
       ts: Target[CantonTimestamp],
@@ -854,24 +869,58 @@ object ProcessingSteps {
   /** Phase 3, step 1a:
     *
     * @param views
-    *   The successfully decrypted views and their signatures. Signatures are only present for
-    *   top-level views (where the submitter metadata is not blinded)
+    *   The successfully decrypted views, their ciphertext IDs, and signatures. Signatures are only
+    *   present for top-level views (where the submitter metadata is not blinded). Ciphertext IDs
+    *   are only present for PV`transparency` as a new unambiguous way to identify views.
     * @param decryptionErrors
     *   The decryption errors while trying to decrypt the views
     */
-  final case class DecryptedViews[V](
-      views: Seq[(WithRecipients[V], Option[Signature])],
+  final case class DecryptedViews[View <: ViewTree](
+      views: Seq[DecryptedViewData[View]],
       decryptionErrors: Seq[EncryptedViewMessageError],
   )
 
   object DecryptedViews {
-    def apply[V](
+    def fromViewsWithCiphertextId[View <: ViewTree](
         all: Seq[
-          Either[EncryptedViewMessageError, (WithRecipients[V], Option[Signature])]
+          Either[
+            EncryptedViewMessageError,
+            DecryptedViewData[View],
+          ]
         ]
-    ): DecryptedViews[V] = {
+    ): DecryptedViews[View] = {
       val (errors, views) = all.separate
-      DecryptedViews(views, errors)
+      DecryptedViews(
+        views,
+        errors,
+      )
     }
+
+    def fromViewsWithSignature[View <: ViewTree](
+        all: Seq[
+          Either[EncryptedViewMessageError, (WithRecipients[View], Option[Signature])]
+        ]
+    ): DecryptedViews[View] = {
+      val (errors, views) = all.separate
+      DecryptedViews(
+        views.map { case (decryptedViews, signature) =>
+          DecryptedViewData(decryptedViews, None, signature)
+        },
+        errors,
+      )
+    }
+
+    def fromViews[View <: ViewTree](
+        all: Seq[
+          Either[EncryptedViewMessageError, WithRecipients[View]]
+        ]
+    ): DecryptedViews[View] = {
+      val (errors, views) = all.separate
+      DecryptedViews(
+        views.map(decryptedViews => DecryptedViewData(decryptedViews, None, None)),
+        errors,
+      )
+    }
+
   }
 }

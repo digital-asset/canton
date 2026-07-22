@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance
 
+import cats.syntax.either.*
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
@@ -53,8 +54,16 @@ object GenStandaloneConfig extends App {
     val pubKey = keyPair.publicKey
     val privKeyFile = dir / s"node${i}_signing_private_key.bin"
     val pubKeyFile = dir / s"node${i}_signing_public_key.bin"
-    privKeyFile.writeByteArray(privKey.toProtoV30.toByteArray)
-    pubKeyFile.writeByteArray(pubKey.toProtoV30.toByteArray)
+    privKeyFile.writeByteArray(
+      privKey.toProtoV30
+        .valueOr(err => throw new IllegalStateException(s"Failed to serialize private key: $err"))
+        .toByteArray
+    )
+    pubKeyFile.writeByteArray(
+      pubKey.toProtoV30
+        .valueOr(err => throw new IllegalStateException(s"Failed to serialize private key: $err"))
+        .toByteArray
+    )
 
     val config = BftBlockOrderingStandaloneNetworkConfig(
       thisSequencerId = sequencerId(i),

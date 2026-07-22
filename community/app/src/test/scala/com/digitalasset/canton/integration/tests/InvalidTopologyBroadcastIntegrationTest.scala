@@ -716,7 +716,7 @@ class InvalidTopologyBroadcastIntegrationTest
       recipients: Recipients = Recipients.cc(AllMembersOfSynchronizer),
   ): Unit = {
     val tx =
-      TopologyTransaction(
+      TopologyTransaction.tryCreate(
         op,
         serial,
         mapping,

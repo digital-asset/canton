@@ -37,14 +37,14 @@ import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
+import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.TopologyManagerError.{
   MappingAlreadyExists,
   NoAppropriateSigningKeyInStore,
   SecretKeyNotInStore,
 }
-import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
-import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced, TracerProvider}
+import com.digitalasset.canton.tracing.{Spanning, TraceContext, TracerProvider}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.digitalasset.canton.util.{DamlPackageLoader, EitherTUtil, FutureUtil, MonadUtil}
@@ -121,11 +121,7 @@ class AdminWorkflowServices(
       timeouts,
       syncService.maxDeduplicationDuration, // Set the deduplication duration for Ping command to the maximum allowed.
       tracer,
-      new PingService.SyncServiceHandle {
-        override def isActive: Boolean = syncService.isActive()
-        override def subscribeToConnections(subscriber: Traced[SynchronizerId] => Unit): Unit =
-          syncService.subscribeToConnections(subscriber)
-      },
+      syncService,
       futureSupervisor,
       loggerFactory,
       clock,

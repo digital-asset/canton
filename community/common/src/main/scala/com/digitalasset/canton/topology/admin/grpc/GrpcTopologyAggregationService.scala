@@ -4,9 +4,11 @@
 package com.digitalasset.canton.topology.admin.grpc
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.ProtoSerializationError.ProtoSerializationFailure
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -233,40 +235,46 @@ class GrpcTopologyAggregationService(
 
       matched <- snapshots(synchronizerIds.toSet, request.asOf)
 
-      res <- EitherT.right(
-        MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(matched) {
-          case (storeId, client) =>
-            client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
-              (storeId, res)
-            }
-        }
-      )
-    } yield {
-      val records = for {
+      res <- EitherT.right(MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(matched) {
+        case (storeId, client) =>
+          client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
+            (storeId, res)
+          }
+      })
+
+      records = for {
         (storeId, keyPerMember) <- res
         (owner, keys) <- keyPerMember
       } yield MemberKeyRecord(owner, storeId, keys)
 
-      val mapped = records.groupMap(r => r.owner)(r => (r.storeId, r.keys))
+      mapped = records.groupMap(r => r.owner)(r => (r.storeId, r.keys))
 
-      v30.ListKeyOwnersResponse(
-        results = mapped.toSeq.flatMap { case (owner, keyPerSynchronizer) =>
-          keyPerSynchronizer.map { case (psid, keys) =>
-            v30.ListKeyOwnersResponse.Result(
-              keyOwner = owner.toProtoPrimitive,
-              synchronizerId = psid.logical.toProtoPrimitive,
-              signingKeysV30 =
+      resultsE = mapped.toSeq
+        .flatTraverse { case (owner, keyPerSynchronizer) =>
+          keyPerSynchronizer
+            .traverse { case (psid, keys) =>
+              val serializedKeysE =
+                // TODO(#32231) Switch to v31
                 if (ReleaseVersion.Feature.signingKeyUsageProtoV31.supported(clientVersion))
-                  Seq()
+                  Seq().asRight
                 else
-                  keys.signingKeys.map(_.toProtoV30),
-              encryptionKeys = keys.encryptionKeys.map(_.toProtoV30),
-              physicalSynchronizerId = psid.toProtoPrimitive,
-            )
-          }
+                  keys.signingKeys.traverse(_.toProtoV30)
+              serializedKeysE.map(serializedKeys =>
+                v30.ListKeyOwnersResponse.Result(
+                  keyOwner = owner.toProtoPrimitive,
+                  synchronizerId = psid.logical.toProtoPrimitive,
+                  signingKeysV30 = serializedKeys,
+                  encryptionKeys = keys.encryptionKeys.map(_.toProtoV30),
+                  physicalSynchronizerId = psid.toProtoPrimitive,
+                )
+              )
+            }
         }
-      )
-    }
+        .leftMap(ProtoSerializationFailure.Wrap(_).toCantonRpcError)
+
+      results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
+    } yield v30.ListKeyOwnersResponse(results = results)
+
     CantonGrpcUtil.mapErrNewEUS(res)
   }
 }

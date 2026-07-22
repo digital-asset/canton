@@ -160,7 +160,7 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
             validFrom = EffectiveTime(SignedTopologyTransaction.InitialTopologySequencingTime),
             validUntil = None,
             transaction = SignedTopologyTransaction.withSignatures(
-              TopologyTransaction(
+              TopologyTransaction.tryCreate(
                 TopologyChangeOp.Replace,
                 serial = PositiveInt.one,
                 SequencerSynchronizerState

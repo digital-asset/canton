@@ -14,8 +14,11 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   ChangedTo,
   Revoked,
 }
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationLevel,
+  GenericTopologyEvent,
+}
 import com.digitalasset.canton.ledger.participant.state.{FloatingUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -27,13 +30,16 @@ import com.digitalasset.canton.participant.metrics.{ParticipantHistograms, Parti
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore
+import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   SequencedTime,
   TopologyTransactionTestFactory,
 }
+import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   TopologyStore,
@@ -51,6 +57,7 @@ import com.digitalasset.canton.{
   FailOnShutdown,
   HasExecutionContext,
   LfPartyId,
+  ProtocolVersionChecksAsyncWordSpec,
   SequencerCounter,
 }
 import org.mockito.ArgumentCaptor
@@ -63,7 +70,8 @@ final class ParticipantTopologyTerminateProcessingTest
     extends AsyncWordSpec
     with BaseTest
     with FailOnShutdown
-    with HasExecutionContext {
+    with HasExecutionContext
+    with ProtocolVersionChecksAsyncWordSpec {
 
   protected def mkStore: TopologyStore[TopologyStoreId.SynchronizerStore] =
     new InMemoryTopologyStore(
@@ -228,10 +236,28 @@ final class ParticipantTopologyTerminateProcessingTest
     )
   )
 
-  val trustCertificate: SignedTopologyTransaction[Replace, SynchronizerTrustCertificate] = mkAdd(
-    SynchronizerTrustCertificate(
-      DefaultTestIdentities.participant1,
-      DefaultTestIdentities.synchronizerId,
+  private val trustCertificate: SignedTopologyTransaction[Replace, SynchronizerTrustCertificate] =
+    mkAdd(
+      SynchronizerTrustCertificate(
+        DefaultTestIdentities.participant1,
+        DefaultTestIdentities.synchronizerId,
+      )
+    )
+
+  lazy val synchronizerParams1 = mkAdd(
+    SynchronizerParametersState(
+      synchronizerId,
+      DynamicSynchronizerParameters
+        .defaultValues(testedProtocolVersion)
+        .update(reconciliationInterval = PositiveSeconds.tryOfSeconds(1)),
+    )
+  )
+  lazy val synchronizerParams2 = mkAdd(
+    SynchronizerParametersState(
+      synchronizerId,
+      DynamicSynchronizerParameters
+        .defaultValues(testedProtocolVersion)
+        .update(reconciliationInterval = PositiveSeconds.tryOfSeconds(2)),
     )
   )
 
@@ -286,7 +312,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -324,7 +350,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -362,7 +388,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -437,7 +463,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -833,5 +859,66 @@ final class ParticipantTopologyTerminateProcessingTest
         succeed
       }
     }
+
+    "only query the effective state changes for the relevant topology mappings for the target protocol version" in {
+      val (cts1, sc1) = timestampWithCounter(1)
+
+      val mockStore = mock[TopologyStore[SynchronizerStore]]
+      val mappingCodeCaptor: ArgumentCaptor[Option[Seq[TopologyMapping.Code]]] =
+        ArgumentCaptor.forClass(classOf[Option[Seq[TopologyMapping.Code]]])
+      when(
+        mockStore.findEffectiveStateChanges(
+          any[CantonTimestamp],
+          mappingCodeCaptor.capture(),
+          any[Boolean],
+        )(anyTraceContext)
+      ).thenReturn(FutureUnlessShutdown.pure(Seq.empty))
+      when(mockStore.storeId).thenReturn(SynchronizerStore(synchronizerId.toPhysical))
+      when(mockStore.protocolVersion).thenReturn(synchronizerId.toPhysical.protocolVersion)
+
+      val (proc, _, _, _, _) = mk(store = mockStore)
+      for {
+        _ <- proc.terminate(sc1, SequencedTime(cts1), EffectiveTime(cts1))
+      } yield {
+        mappingCodeCaptor
+          .getValue()
+          .value should contain theSameElementsAs ParticipantTopologyTerminateProcessing
+          .relevantMappingsForEffectiveStateChanges(testedProtocolVersion)
+      }
+    }
+
+    "notify of dynamic synchronizer parameter changes" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val (proc, store, eventCaptor, rop, _) = mk()
+      val (cts0, sc0) = timestampWithCounter(0)
+      val (cts1, sc1) = timestampWithCounter(1)
+      val (cts2, sc2) = timestampWithCounter(2)
+
+      for {
+        _ <- add(store, cts0, List(synchronizerParams1))
+        _ <- proc.terminate(sc0, SequencedTime(cts0), EffectiveTime(cts0))
+        _ <- add(store, cts1, List(synchronizerParams2))
+        _ <- proc.terminate(sc1, SequencedTime(cts1), EffectiveTime(cts1))
+        // store the same parameter transaction again, e.g. because of an additional signature
+        _ <- add(store, cts2, List(synchronizerParams2))
+        _ <- proc.terminate(sc2, SequencedTime(cts2), EffectiveTime(cts2))
+      } yield {
+        // the most recently stored topology transaction doesn't trigger a floating publication, because no actual change was stored
+        verify(rop, times(2)).scheduleFloatingEventPublication(
+          any[CantonTimestamp],
+          any[CantonTimestamp => Option[FloatingUpdate]],
+        )(any[TraceContext])
+        val events =
+          eventCaptor.getAllValues.asScala.zip(Seq(cts0, cts1)).flatMap { case (f, ts) => f(ts) }
+        events.size shouldBe 2
+
+        forAll(events.zip(List(synchronizerParams1, synchronizerParams2))) {
+          case (TopologyTransactionEffective(_, _, genericTopologyEvents, _, _), expected) =>
+            genericTopologyEvents.loneElement shouldBe GenericTopologyEvent.SynchronizerParametersState
+              .fromTopologyTransaction(expected.transaction)
+          case _ => fail("unexpected transaction type")
+        }
+      }
+    }
+
   }
 }

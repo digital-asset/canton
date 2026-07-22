@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
+import cats.Eval
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.HashOps
-import com.digitalasset.canton.data.{CantonTimestamp, Counter, Offset}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   Onboarding,
@@ -15,13 +14,9 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
-import com.digitalasset.canton.ledger.participant.state.{
-  AcsChange,
-  ContractStakeholdersAndReassignmentCounter,
-  InternalIndexService,
-}
+import com.digitalasset.canton.ledger.participant.state.{AcsChange, InternalIndexService}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   NotCheckpointFence,
@@ -30,68 +25,30 @@ import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
   PartyRemovedFromParticipant,
   ProcessingContext,
 }
-import com.digitalasset.canton.participant.config.AcsDigestTracingMode
-import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
+import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
-import com.digitalasset.canton.protocol.{
-  DynamicSynchronizerParameters,
-  ExampleTransactionFactory,
-  LfContractId,
-}
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.TopologyTransactionTestFactory
-import com.digitalasset.canton.topology.transaction.ParticipantAttributes
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.topology.{
-  DefaultTestIdentities,
-  ParticipantId,
-  SynchronizerId,
-  TestingTopology,
-}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{
-  BaseTest,
-  HasActorSystem,
-  HasExecutionContext,
-  LfPartyId,
-  ReassignmentCounter,
-  ReassignmentDiscriminator,
-}
-import com.digitalasset.daml.lf.data.Ref.Party
-import org.apache.pekko.NotUsed
+import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, LfPartyId}
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
-import org.scalatest.wordspec.AnyWordSpec
 
-import scala.collection.immutable
 import scala.concurrent.duration.*
-import scala.language.implicitConversions
 
 class RunningDigestProcessorTest
-    extends AnyWordSpec
-    with BaseTest
+    extends BaseDigestProcessorTest
     with HasExecutionContext
     with HasActorSystem {
 
-  import RunningDigestProcessorTest.*
+  import BaseDigestProcessorTest.*
 
   object Factory extends TopologyTransactionTestFactory(loggerFactory, parallelExecutionContext)
-
-  val alice = party("alice::aaa")
-  val bob = party("bob::bbb")
-  val charlie = party("charlie::ccc")
-
-  val p1 = ParticipantId.tryFromProtoPrimitive("PAR::p1::zzz")
-  val p2 = ParticipantId.tryFromProtoPrimitive("PAR::p2::yyy")
-  val p3 = ParticipantId.tryFromProtoPrimitive("PAR::p3::xxx")
-  val p4 = ParticipantId.tryFromProtoPrimitive("PAR::p4::www")
-  val thisParticipant = p1
-
-  val ts0 = ts(0)
-  val off1 = off(1)
-  val tp1_0 = Timepoint(off1)(ts0)
 
   def mkRunningDigestProcessor(
       participant: ParticipantId = thisParticipant,
@@ -118,18 +75,23 @@ class RunningDigestProcessorTest
         )
       ),
     ).build()
+
     new RunningDigestProcessor(
       participant,
       synchronizerId = DefaultTestIdentities.synchronizerId,
-      maxNumUpdatesBetweenCheckpoints = maxNumUpdatesBetweenCheckpoints,
+      AcsCommitmentConfig(
+        enableRunningDigestProcessor = true,
+        maxNumUpdatesBetweenCheckpoints = maxNumUpdatesBetweenCheckpoints,
+        counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
+        AcsDigestTracingMode.Disabled,
+      ),
       indexService,
       getTopologySnapshot = ts =>
-        FutureUnlessShutdown.pure(testingTopology.topologySnapshot(timestampOfSnapshot = ts)),
-      mock[AcsDigestStore],
+        FutureUnlessShutdown.pure(testingTopology.topologySnapshot(timestampOfSnapshot = ts.value)),
+      InMemoryAcsDigestStore.create(Eval.now(mock[StringInterning]), loggerFactory),
       mock[StringInterning],
       mock[HashOps],
-      PositiveInt.tryCreate(counterpartyBatchSize),
-      AcsDigestTracingMode.Disabled,
+      timeouts,
       loggerFactory,
     )
   }
@@ -152,10 +114,9 @@ class RunningDigestProcessorTest
             ProcessingContext(tp(6), dummyAcsChange),
             ProcessingContext(tp(7), dummyAcsChange),
           )
-        ).via(rdp.checkpointing).runWith(Sink.seq).futureValue
+        ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
-          // TODO(#33084) Remove initial CheckpointFence once crash recovery is implemented
           ProcessingContext(tp1_0, None),
           ProcessingContext(tp(2), Some(dummyAcsChange)),
           ProcessingContext(tp(3), Some(dummyAcsChange)),
@@ -184,18 +145,17 @@ class RunningDigestProcessorTest
             ProcessingContext(Timepoint(off(8))(ts(5)), dummyAcsChange),
             ProcessingContext(Timepoint(off(9))(ts(6)), dummyAcsChange),
           )
-        ).via(rdp.checkpointing).runWith(Sink.seq).futureValue
+        ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
-          // TODO(#33084) Remove initial CheckpointFence once crash recovery is implemented
           ProcessingContext(tp1_0, None),
           ProcessingContext(tp(2), Some(dummyAcsChange)),
           ProcessingContext(Timepoint(off(3))(ts(2)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(3))(ts(2).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(4))(ts(2)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(4))(ts(3).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(5))(ts(3)), Some(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(7))(ts(5).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(8))(ts(5)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(8))(ts(6).immediatePredecessor), None),
           ProcessingContext(Timepoint(off(9))(ts(6)), Some(dummyAcsChange)),
         )
       }
@@ -220,7 +180,10 @@ class RunningDigestProcessorTest
           reconciliationInterval = 1.hour,
         )
 
-        val result = Source(inputEvents).via(rdp.checkpointing).runWith(Sink.seq).futureValue
+        val result = Source(inputEvents)
+          .via(rdp.checkpointing(None, TraceContext.empty))
+          .runWith(Sink.seq)
+          .futureValue
 
         // match on CheckpointFenceOr[InputEvent].toOption, so we don't have to match on the topology snapshot
         val expectedResult =
@@ -233,6 +196,53 @@ class RunningDigestProcessorTest
           }
 
         result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs (expectedResult)
+      }
+
+      "respect the initial checkpoint timestamp from crash recovery when the checkpoint falls on the reconciliation boundary" in {
+        val rdp = mkRunningDigestProcessor(
+          reconciliationInterval = 5.seconds
+        )
+
+        val dummyAcsChange =
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+        val result = Source(
+          Seq(
+            ProcessingContext(tp(6), dummyAcsChange),
+            ProcessingContext(tp(7), dummyAcsChange),
+            ProcessingContext(tp(11), dummyAcsChange),
+          )
+        ).via(rdp.checkpointing(Some(ts(5)), TraceContext.empty)).runWith(Sink.seq).futureValue
+
+        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
+          // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
+          ProcessingContext(tp(5), None),
+          ProcessingContext(tp(6), Some(dummyAcsChange)),
+          ProcessingContext(tp(7), Some(dummyAcsChange)),
+          ProcessingContext(tp(10), None),
+          ProcessingContext(tp(11), Some(dummyAcsChange)),
+        )
+      }
+
+      "respect the initial checkpoint timestamp from crash recovery for checkpoints not on reconciliation boundaries" in {
+        val rdp = mkRunningDigestProcessor(
+          reconciliationInterval = 5.seconds
+        )
+
+        val dummyAcsChange =
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+        val result = Source(
+          Seq(
+            ProcessingContext(tp(7), dummyAcsChange),
+            ProcessingContext(tp(11), dummyAcsChange),
+          )
+        ).via(rdp.checkpointing(Some(ts(6)), TraceContext.empty)).runWith(Sink.seq).futureValue
+
+        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
+          // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
+          ProcessingContext(tp(7), Some(dummyAcsChange)),
+          ProcessingContext(tp(10), None),
+          ProcessingContext(tp(11), Some(dummyAcsChange)),
+        )
       }
     }
 
@@ -423,7 +433,7 @@ class RunningDigestProcessorTest
 
         def processTopologyEventsWithParticipant(
             participant: ParticipantId
-        ): Seq[RunningDigestProcessor.Classification] = {
+        ): Seq[BaseDigestProcessor.Classification] = {
 
           val rdp_p1 = mkRunningDigestProcessor(
             participant = participant,
@@ -666,250 +676,5 @@ class RunningDigestProcessorTest
         }
       }
     }
-
-    "reinitializing" should {
-      val topologySnapshot = TestingTopology(topology =
-        Map(
-          partyHosting(alice)(p1, p2),
-          partyHosting(bob)(p2, p3),
-          partyHosting(charlie)(p1, p3, p4),
-        )
-      ).build().topologySnapshot()
-
-      "handle a simple case of a few ACS updates" in {
-        val rdp = mkRunningDigestProcessor(
-          indexService = mkIndexService(
-            (off(1), cid(1), Seq(party(alice), party(bob))),
-            (off(2), cid(2), Seq(party(alice), party(bob), party(charlie))),
-          )
-        )
-
-        val acsUpdates = rdp
-          .reinitializationAcsUpdates(ts(3), off(3), topologySnapshot)
-          .runWith(Sink.seq)
-          .futureValue
-
-        acsUpdates shouldBe Seq(
-          ProcessingContext(
-            tp(3),
-            NotCheckpointFence(
-              topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
-                  alice -> Set(p1.toLf, p2.toLf),
-                  bob -> Set(p2.toLf, p3.toLf),
-                ),
-                locallyHostedStakeholders = Seq(alice),
-                cid = cid(1),
-                rc = rc,
-                isActivation = true,
-              ),
-            ),
-          ),
-          ProcessingContext(
-            tp(3),
-            NotCheckpointFence(
-              topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
-                  alice -> Set(p1.toLf, p2.toLf),
-                  bob -> Set(p2.toLf, p3.toLf),
-                  charlie -> Set(p1.toLf, p3.toLf, p4.toLf),
-                ),
-                locallyHostedStakeholders = Seq(alice, charlie),
-                cid = cid(2),
-                rc = rc,
-                isActivation = true,
-              ),
-            ),
-          ),
-          ProcessingContext(
-            tp(3),
-            CheckpointFence,
-          ),
-        )
-      }
-
-      "handle grouping and filtering by record time" in {
-        val before = off(1)
-        val requestedOffset = off(2)
-        val after = off(3)
-
-        val rdp = mkRunningDigestProcessor(
-          indexService = mkIndexService(
-            (before, cid(1), Seq(party(alice), party(bob))),
-            (before, cid(2), Seq(party(alice), party(bob), party(charlie))),
-            (requestedOffset, cid(3), Seq(party(alice), party(bob))),
-            (after, cid(4), Seq(party(alice), party(charlie))), // Should be filtered out
-          ),
-          counterpartyBatchSize = 2,
-        )
-
-        val requestedTimepoint = Timepoint(requestedOffset)(requestedOffset.toEpochTimestamp)
-
-        val acsUpdates = rdp
-          .reinitializationAcsUpdates(
-            requestedOffset.toEpochTimestamp,
-            requestedOffset,
-            topologySnapshot,
-          )
-          .runWith(Sink.seq)
-          .futureValue
-
-        acsUpdates shouldBe Seq(
-          ProcessingContext(
-            requestedTimepoint,
-            NotCheckpointFence(
-              topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
-                  alice -> Set(p1.toLf, p2.toLf),
-                  bob -> Set(p2.toLf, p3.toLf),
-                ),
-                locallyHostedStakeholders = Seq(alice),
-                cid = cid(1),
-                rc = rc,
-                isActivation = true,
-              ),
-            ),
-          ),
-          ProcessingContext(
-            requestedTimepoint,
-            NotCheckpointFence(
-              topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
-                  alice -> Set(p1.toLf, p2.toLf),
-                  bob -> Set(p2.toLf, p3.toLf),
-                ),
-                locallyHostedStakeholders = Seq(alice, charlie),
-                cid = cid(2),
-                rc = rc,
-                isActivation = true,
-              ),
-            ),
-          ),
-          ProcessingContext(
-            requestedTimepoint,
-            NotCheckpointFence(
-              topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
-                  alice -> Set(p1.toLf, p2.toLf),
-                  bob -> Set(p2.toLf, p3.toLf),
-                ),
-                locallyHostedStakeholders = Seq(alice),
-                cid = cid(3),
-                rc = rc,
-                isActivation = true,
-              ),
-            ),
-          ),
-          ProcessingContext(
-            requestedTimepoint,
-            NotCheckpointFence(
-              topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
-                  charlie -> Set(p1.toLf, p3.toLf, p4.toLf)
-                ),
-                locallyHostedStakeholders = Seq(alice, charlie),
-                cid = cid(2),
-                rc = rc,
-                isActivation = true,
-              ),
-            ),
-          ),
-          ProcessingContext(requestedTimepoint, CheckpointFence),
-        )
-      }
-    }
   }
-}
-object RunningDigestProcessorTest {
-  private val rc: Counter[ReassignmentDiscriminator] = ReassignmentCounter.Genesis
-
-  implicit def toAcsChangeData(
-      parties: Set[LfPartyId]
-  ): ContractStakeholdersAndReassignmentCounter =
-    ContractStakeholdersAndReassignmentCounter(parties, rc)
-  implicit class RichOffset(off: Offset) {
-    def toEpochTimestamp: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(off.positive)
-  }
-
-  def cid(i: Int): LfContractId = ExampleTransactionFactory.suffixedId(i, i)
-  def ts(i: Int): CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(i.toLong)
-  def off(i: Int): Offset = Offset.tryFromLong(i.toLong)
-  def tp(i: Int): Timepoint = Timepoint(off(i))(ts(i))
-  def tte(events: PartyToParticipantAuthorization*) =
-    InternalIndexService.AcsUpdate.EffectivePartyToParticipantMappings(events.toSet)
-  def party(s: String): LfPartyId = LfPartyId.assertFromString(s)
-
-  def partyHosting(party: LfPartyId)(participants: ParticipantId*): (LfPartyId, PartyInfo) =
-    (
-      party,
-      PartyInfo(PositiveInt.one, participants.map(_ -> ParticipantAttributes(Submission)).toMap),
-    )
-
-  def mkIndexService(
-      contractsWithStakeholders: (Offset, LfContractId, Seq[LfPartyId])*
-  ): InternalIndexService = {
-    val acs = for {
-      (offset, cid, rawStakeholders) <- contractsWithStakeholders
-      stakeholders = rawStakeholders.map(LfPartyId.assertFromString)
-      activeContract = InternalIndexService.ActiveContract(cid, stakeholders.toSet, rc)
-      stakeholder <- stakeholders
-    } yield {
-      stakeholder -> (offset, activeContract)
-    }
-    val partyToContracts = immutable.MultiDict.from(acs)
-
-    new InternalIndexService {
-      override def activeContracts(partyIds: Set[LfPartyId], validAt: Option[Offset])(implicit
-          traceContext: TraceContext
-      ): Source[GetActiveContractsResponse, NotUsed] = ???
-
-      override def topologyTransactions(partyId: LfPartyId, fromExclusive: Offset)(implicit
-          traceContext: TraceContext
-      ): Source[TopologyTransaction, NotUsed] = ???
-
-      override def acsUpdates(synchronizerId: SynchronizerId, fromExclusive: Option[Offset])(
-          implicit traceContext: TraceContext
-      ): Source[InternalIndexService.AcsUpdateContainer, NotUsed] = ???
-
-      override def acs(
-          synchronizerId: SynchronizerId,
-          activeAt: Offset,
-          stakeholders1: Set[Party],
-          stakeholders2: Set[Party],
-      )(implicit
-          traceContext: TraceContext
-      ): Source[InternalIndexService.ActiveContract, NotUsed] = {
-        val result =
-          partyToContracts.values.collect {
-            case (rt, contract)
-                if rt <= activeAt &&
-                  (stakeholders1.isEmpty || contract.stakeholders.exists(
-                    stakeholders1
-                  )) && (stakeholders2.isEmpty || contract.stakeholders.exists(stakeholders2)) =>
-              contract
-          }.toSet
-
-        Source(result)
-      }
-
-      override def counterParties(
-          synchronizerId: SynchronizerId,
-          activeAt: Offset,
-          party: Option[Party],
-      )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed] = Source(
-        party
-          .flatMap(partyToContracts.sets.get(_))
-          .getOrElse(partyToContracts.sets.values.flatten)
-          .flatMap { case (offset, c) => if (offset <= activeAt) c.stakeholders else Set.empty }
-          .toSet
-      )
-    }
-  }
-
 }

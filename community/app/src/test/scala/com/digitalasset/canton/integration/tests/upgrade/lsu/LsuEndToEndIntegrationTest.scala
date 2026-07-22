@@ -173,7 +173,7 @@ private object LsuEndToEndIntegrationTest {
   )(implicit env: TestConsoleEnvironment) {
     import env.*
 
-    val currentRegisteredSynchronizerBeforeLsu = RegisteredSynchronizer(
+    val currentRegisteredSynchronizerBeforeLsu: RegisteredSynchronizer = RegisteredSynchronizer(
       config = initialSynchronizerConnectionConfig,
       status = Status.Active,
       psid = KnownPhysicalSynchronizerId(fixture.currentPsid),
@@ -190,7 +190,7 @@ private object LsuEndToEndIntegrationTest {
       )
       .value
 
-    val newRegisteredSynchronizerBeforeLsu = RegisteredSynchronizer(
+    val newRegisteredSynchronizerBeforeLsu: RegisteredSynchronizer = RegisteredSynchronizer(
       config = initialSynchronizerConnectionConfig
         .focus(_.sequencerConnections.aliasToConnection)
         .replace(newSequencerConnections)

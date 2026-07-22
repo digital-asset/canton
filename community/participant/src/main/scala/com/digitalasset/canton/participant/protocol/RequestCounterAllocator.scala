@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.protocol
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, Mutex}
-import com.digitalasset.canton.{RequestCounter, SequencerCounter}
+import com.digitalasset.canton.{RequestCounter, SequencerCounter, SynchronizedLikeMethod}
 import com.google.common.annotations.VisibleForTesting
 
 /** Allocates [[com.digitalasset.canton.RequestCounter]]s for the transaction processor. */
@@ -88,6 +88,7 @@ class RequestCounterAllocatorImpl(
   private var boundSequenceCounter: SequencerCounter = cleanReplaySequencerCounter
 
   private val lock = new Mutex()
+  @SynchronizedLikeMethod
   private def withLock[A](body: => A): A = lock.exclusive(body)
 
   override def allocateFor(

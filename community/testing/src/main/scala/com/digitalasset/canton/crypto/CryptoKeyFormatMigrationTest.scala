@@ -44,7 +44,9 @@ trait CryptoKeyFormatMigrationTest
             legacyPrivateKey.format shouldBe expectedLegacyFormat
 
             val newPublicKey = SigningPublicKey
-              .fromProtoV30(legacyPublicKey.toProtoV30)
+              .fromProtoV30(
+                legacyPublicKey.toProtoV30.valueOrFail("serialization of legacy public key")
+              )
               .valueOrFail("deserialize public")
 
             newPublicKey.format shouldBe CryptoKeyFormat.DerX509Spki
@@ -52,7 +54,9 @@ trait CryptoKeyFormatMigrationTest
             newPublicKey shouldBe publicKey
 
             val newPrivateKey = SigningPrivateKey
-              .fromProtoV30(legacyPrivateKey.toProtoV30)
+              .fromProtoV30(
+                legacyPrivateKey.toProtoV30.valueOrFail("serialization of legacy private key")
+              )
               .valueOrFail("deserialize private")
 
             newPrivateKey.format shouldBe CryptoKeyFormat.DerPkcs8Pki

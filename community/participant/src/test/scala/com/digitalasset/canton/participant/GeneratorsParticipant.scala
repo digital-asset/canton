@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant
 
 import com.digitalasset.canton.config.GeneratorsConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.crypto.Hash
+import com.digitalasset.canton.crypto.{GeneratorsCrypto, Hash}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
@@ -67,6 +67,7 @@ final class GeneratorsParticipant(
     generatorsTopology: GeneratorsTopology,
     generatorsTransaction: GeneratorsTransaction,
     generatorsLf: GeneratorsLf,
+    generatorsCrypto: GeneratorsCrypto,
     version: ProtocolVersion,
 ) {
 
@@ -76,7 +77,7 @@ final class GeneratorsParticipant(
   import generatorsTransaction.*
   import generatorsLf.*
   import com.digitalasset.canton.ledger.api.GeneratorsApi.*
-  import com.digitalasset.canton.crypto.GeneratorsCrypto.*
+  import generatorsCrypto.*
 
   implicit val completionInfoArb: Arbitrary[CompletionInfo] = Arbitrary {
     for {

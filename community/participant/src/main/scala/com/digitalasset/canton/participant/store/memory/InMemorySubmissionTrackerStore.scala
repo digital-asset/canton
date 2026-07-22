@@ -54,7 +54,7 @@ class InMemorySubmissionTrackerStore(
     FutureUnlessShutdown.pure(isFresh)
   }
 
-  override protected[canton] def doPrune(
+  override protected def doPrune(
       beforeAndIncluding: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {

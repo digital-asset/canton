@@ -1352,7 +1352,7 @@ abstract class SequencerReference(
       }
 
     @Help.Summary("List peer endpoints configured and stored in DB")
-    def list_configured_peer_endpoints(): Seq[P2PEndpoint] =
+    def list_configured_peer_endpoints(): Seq[(P2PEndpoint, Option[SequencerId])] =
       consoleEnvironment.run {
         runner.adminCommand(SequencerBftAdminCommands.ListConfiguredEndpoints)
       }

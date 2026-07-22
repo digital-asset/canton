@@ -163,7 +163,7 @@ class GrpcPartyManagementService(
       (out: OutputStream) => processExportPartyAcsRequest(request, new GZIPOutputStream(out)),
       responseObserver,
       byteString => v30.ExportPartyAcsResponse(byteString),
-      parameters.processingTimeouts.unbounded.duration,
+      parameters.processingTimeouts.adminStreamOpenBound.duration,
       chunkSizeO = None,
     )
   }

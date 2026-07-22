@@ -148,6 +148,16 @@ final case class EncryptedMultipleViews[+VT <: ViewType](
     viewTrees: Encrypted[CompressedView[MultipleViewTrees[VT#View]]],
 ) {
   lazy val sizeHint: Int = viewTrees.ciphertext.size
+
+  /** Computes a deterministic identifier for the encrypted message by hashing its underlying
+    * ciphertext. This is only implemented for multiple-view encryption, as the new `CiphertextId`
+    * primitive is only used in PV`transparency`+, which are higher than PV35.
+    */
+  def computeCiphertextId(hashOps: HashOps): Hash =
+    hashOps.digest(
+      HashPurpose.CiphertextId,
+      viewTrees.ciphertext,
+    )
 }
 
 object EncryptedMultipleViews {
@@ -256,6 +266,7 @@ sealed trait EncryptedViewMessage[+VT <: ViewType] extends UnsignedProtocolMessa
   def viewType: VT
 
   def encryptedSizeHint: Int
+
 }
 
 /** @param viewHash
@@ -825,6 +836,7 @@ final case class EncryptedMultipleViewsMessage[+VT <: ViewType](
     viewEncryptionScheme,
     submittingParticipantSignature,
   )(representativeProtocolVersion)
+
 }
 
 object EncryptedMultipleViewsMessage

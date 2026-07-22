@@ -302,7 +302,7 @@ object GrpcStreamingUtils {
       responseF: OutputStream => Future[Unit],
       responseObserver: StreamObserver[T],
       fromByteString: FromByteString[T],
-      processingTimeout: Duration = DefaultProcessingTimeouts.unbounded.duration,
+      processingTimeout: Duration,
       chunkSizeO: Option[Int] = None,
   )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext): Unit = {
     val context = io.grpc.Context.current().withCancellation()
@@ -385,7 +385,7 @@ object GrpcStreamingUtils {
       responseF: File => Future[Unit],
       responseObserver: StreamObserver[T],
       fromByteString: FromByteString[T],
-      processingTimeout: Duration = DefaultProcessingTimeouts.unbounded.duration,
+      processingTimeout: Duration,
       chunkSizeO: Option[Int] = None,
   )(implicit ec: ExecutionContext, loggingContext: ErrorLoggingContext): Unit = {
     val file = newTemporaryFile()

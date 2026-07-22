@@ -8,6 +8,7 @@ import cats.implicits.{toBifunctorOps, toTraverseOps}
 import cats.syntax.either.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution, RpcError}
 import com.digitalasset.canton.admin.participant.v30
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.ParticipantInspectionServiceErrorGroup
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
@@ -57,6 +58,7 @@ class GrpcParticipantInspectionService(
     ips: IdentityProvidingServiceClient,
     indexedStringStore: IndexedStringStore,
     synchronizerAliasManager: SynchronizerAliasManager,
+    processingTimeout: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -424,6 +426,7 @@ class GrpcParticipantInspectionService(
       (out: OutputStream) => openCommitment(request, out),
       responseObserver,
       byteString => v30.OpenCommitmentResponse(byteString),
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 
@@ -614,6 +617,7 @@ class GrpcParticipantInspectionService(
       (out: OutputStream) => inspectCommitmentContracts(request, out),
       responseObserver,
       byteString => v30.InspectCommitmentContractsResponse(byteString),
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 

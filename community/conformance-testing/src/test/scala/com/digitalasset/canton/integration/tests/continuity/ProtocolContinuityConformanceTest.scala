@@ -18,7 +18,11 @@ import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   ApiUserManagementServiceSuppressionRule,
   DbActiveContractStoreConsistencyCheckSuppressionRule,
 }
-import com.digitalasset.canton.integration.tests.ledgerapi.{ExcludedTests, LedgerApiConformanceBase}
+import com.digitalasset.canton.integration.tests.ledgerapi.{
+  ExcludedTests,
+  LedgerApiConformanceBase,
+  ProtocolType,
+}
 import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -77,14 +81,11 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       .runShardedSuites(
         shard,
         numShards,
-        exclude = excludedTests(version) ++ jsonExclusions,
+        exclude = excludedTests(version, ProtocolType.fromUseJson(useJsonApi)) ++ jsonExclusions,
         useJson = useJsonApi,
       )(env)
   }
-  def excludedTests(version: ReleaseVersion): Seq[String] = {
-    // GetPreferredPackageVersion was removed from the InteractiveSubmissionService (#29742).
-    // Test tools of previously released versions still exercise this RPC, which now returns
-    // UNIMPLEMENTED, so exclude those tests for all tested releases.
+  def excludedTests(version: ReleaseVersion, protocolType: ProtocolType): Seq[String] = {
     val removedGetPreferredPackageVersionTests =
       Seq(
         "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionKnown",
@@ -106,8 +107,9 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
           "ExplicitDisclosureIT:EDDuplicates",
         )
       else Seq.empty
+
     removedGetPreferredPackageVersionTests ++ perReleaseExclusions ++ LedgerApiConformanceBase
-      .excludedTests(testedProtocolVersion)
+      .excludedTests(testedProtocolVersion, protocolType)
   }
 
 }

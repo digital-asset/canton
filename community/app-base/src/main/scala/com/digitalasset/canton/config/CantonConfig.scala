@@ -531,7 +531,6 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
         unsafeSequencerChannelSupport =
           sequencerNodeConfig.parameters.unsafeSequencerChannelSupport,
         requestLimits = sequencerNodeConfig.publicApi.limits,
-        maxAuthNoncesPerMember = sequencerNodeConfig.publicApi.maxAuthNoncesPerMember,
         maxAuthTokensPerMember = sequencerNodeConfig.publicApi.maxAuthTokensPerMember,
         maxSubscriptionsPerMember = sequencerNodeConfig.publicApi.maxSubscriptionsPerMember,
         drSequencingTimeUpperBound =
@@ -1542,6 +1541,7 @@ object CantonConfig {
 
     implicit val publicServerConfigReader: ConfigReader[PublicServerConfig] =
       deriveReader[PublicServerConfig]
+
     implicit val sequencerNodeConfigReader: ConfigReader[SequencerNodeConfig] = {
       import DeclarativeSequencerConfig.Readers.*
       deriveReader[SequencerNodeConfig]

@@ -52,7 +52,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
-import com.google.protobuf.ByteString
 
 import scala.annotation.unused
 import scala.concurrent.ExecutionContext
@@ -329,7 +328,7 @@ class TransactionConfirmationRequestFactory(
      * This provides a unique, stable, and non-duplicable reference to an encrypted view, which can be
      * used by parent views to refer to their subviews.
      *
-     * Only supported for protocol versions > v35.
+     * Only supported for protocol versions >= `ProtocolVersion.transparency`.
      */
     def createOpenEnvelopesWithTransactionV2(
         viewsWithWitnessesAndRecipients: NonEmpty[Seq[ViewWithWitnessesAndRecipients]],
@@ -338,7 +337,7 @@ class TransactionConfirmationRequestFactory(
       OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]
     ]] = {
       require(
-        protocolVersion > ProtocolVersion.v35,
+        protocolVersion >= ProtocolVersion.transparency,
         s"Ciphertext ID-based subview references are only supported for protocol versions > v35 (got $protocolVersion)",
       )
 
@@ -366,13 +365,6 @@ class TransactionConfirmationRequestFactory(
               LightTransactionViewTreeCreationError.apply
             )
         }
-
-      // Create a deterministic ciphertext ID for a view by hashing the ciphertext.
-      def createCiphertextId(ciphertext: ByteString): Hash = {
-        val hashBuilder =
-          HashBuilderFromMessageDigest(HashAlgorithm.Sha256, HashPurpose.CiphertextId)
-        hashBuilder.addByteString(ciphertext).finish()
-      }
 
       // Create `LightTransactionViewTrees` and encrypt a list of views that share the same recipient tree group.
       def processGroupOfRecipients(
@@ -412,7 +404,7 @@ class TransactionConfirmationRequestFactory(
               EncryptedViewMessageCreationError.apply
             )
 
-          ciphertextId = createCiphertextId(encrypted.encryptedViews.viewTrees.ciphertext)
+          ciphertextId = encrypted.encryptedViews.computeCiphertextId(pureCrypto)
 
           ids = lightTrees.zipWithIndex.map { case (lvt, i) =>
             // To use it as a view reference, we combine this ciphertext ID with the relative
@@ -487,7 +479,7 @@ class TransactionConfirmationRequestFactory(
      * This is the legacy encryption flow where subviews are referenced using their viewHash. It
      * assumes view hashes are unique and stable during decryption.
      *
-     * Used for protocol versions <= v35.
+     * Used for protocol versions < `ProtocolVersion.transparency`.
      */
     def createOpenEnvelopesWithTransactionV1(
         viewsWithWitnessesAndRecipients: NonEmpty[Seq[ViewWithWitnessesAndRecipients]],
@@ -497,7 +489,7 @@ class TransactionConfirmationRequestFactory(
     ]] = {
       // TODO(#32393): Make sure this is only executed for protocol versions that support viewHash-based encryption
       /*require(
-        protocolVersion <= ProtocolVersion.v35,
+        protocolVersion < ProtocolVersion.transparency,
         s"ViewHash-based encryption is only supported for protocol versions <= v35 (got $protocolVersion)",
       )*/
 
@@ -637,12 +629,11 @@ class TransactionConfirmationRequestFactory(
             viewsWithWitnessesAndRecipientsNE,
             viewsKeyDataMap,
           )
-        else {
+        else
           createOpenEnvelopesWithTransactionV2(
             viewsWithWitnessesAndRecipientsNE,
             viewsKeyDataMap,
           )
-        }
 
     } yield envelopes
   }

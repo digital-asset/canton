@@ -180,9 +180,12 @@ sealed trait ParticipantSimulatorIntegrationTest
       }
 
     // wait for all contracts to be fully processed
-    receivedAllContracts.futureValue(timeout =
-      PatienceConfiguration.Timeout(1.minute)
-    ) should have size numContracts.toLong
+    // Note: futureValue timeout must be >= the inner transactions() timeout
+    val receivedContracts =
+      receivedAllContracts.futureValue(timeout = PatienceConfiguration.Timeout(10.minutes))
+    withClue(s"Expected $numContracts transactions but received ${receivedContracts.size}. ") {
+      receivedContracts should have size numContracts.toLong
+    }
 
     closables.foreach(_.close())
   }

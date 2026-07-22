@@ -33,6 +33,8 @@ import scala.concurrent.ExecutionContext
   */
 class TrafficEnforcementApp(
     config: TrafficEnforcementServerConfig.Internal,
+    instanceName: InstanceName,
+    ledgerApiPort: Port,
     service: TrafficEnforcementService,
     ledgerResources: TeaLedgerResources,
     debitProjection: TeaProjectionFactory,
@@ -47,8 +49,15 @@ class TrafficEnforcementApp(
   // Distinguishes this instance's top-level actors from those of a previous (closing) instance.
   private val instanceId: String = UUID.randomUUID().toString
 
+  // Each TEA in the same JVM needs its own in-process gRPC name, otherwise two of them would try to
+  // register under the same name and collide on start. In CI several suites share one JVM and reuse
+  // instance names like "participant1", so the instance name alone is not unique. The ledger API port
+  // is handed out from a machine wide unique counter.
+  private val serverName: String =
+    config.processServerNameForInstance(instanceName, ledgerApiPort)
+
   private val server = InProcessServerBuilder
-    .forName(config.inProcessTeaServerName)
+    .forName(serverName)
     .addService(new TrafficEnforcementServiceGrpc(service, loggerFactory))
     .build()
 
@@ -84,7 +93,7 @@ class TrafficEnforcementApp(
       debitIngestion,
       ledgerResources,
       LifeCycle.toCloseableActorSystem(system.classicSystem, logger, timeouts),
-      LifeCycle.toCloseableServer(server, logger, config.inProcessTeaServerName),
+      LifeCycle.toCloseableServer(server, logger, serverName),
     )(logger)
 }
 
@@ -139,6 +148,8 @@ object TrafficEnforcementApp {
     val service = new TrafficEnforcementService(store, clock, loggerFactory)
     new TrafficEnforcementApp(
       config,
+      instanceName,
+      ledgerApiPort,
       service,
       ledgerResources,
       projectionFactory,

@@ -93,7 +93,7 @@ class QueueBasedSynchronizerOutboxTest
 
   private val rootCertF = SignedTopologyTransaction
     .signAndCreate(
-      TopologyTransaction(
+      TopologyTransaction.tryCreate(
         op = TopologyChangeOp.Replace,
         serial = PositiveInt.one,
         NamespaceDelegation.tryCreate(namespace, publicKey, CanSignAllMappings),
@@ -366,7 +366,7 @@ class QueueBasedSynchronizerOutboxTest
   }
 
   private def txAddFromMapping(mapping: TopologyMapping) =
-    TopologyTransaction(
+    TopologyTransaction.tryCreate(
       TopologyChangeOp.Replace,
       serial = PositiveInt.one,
       mapping,

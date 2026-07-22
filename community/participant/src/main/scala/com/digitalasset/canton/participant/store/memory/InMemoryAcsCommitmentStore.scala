@@ -315,7 +315,7 @@ class InMemoryAcsCommitmentStore(
 
   }
 
-  override def doPrune(
+  override protected def doPrune(
       before: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] =

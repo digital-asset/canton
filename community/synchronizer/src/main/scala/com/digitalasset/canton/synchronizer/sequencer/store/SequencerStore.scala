@@ -25,7 +25,12 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage, ToDbPrimitive}
-import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, MessageId}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  ClosedEnvelope,
+  DecompressionPolicy,
+  MessageId,
+}
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -38,7 +43,7 @@ import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{BytesUnit, ErrorUtil, MaxBytesToDecompress, MonadUtil, retry}
+import com.digitalasset.canton.util.{BytesUnit, ErrorUtil, MonadUtil, retry}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.digitalasset.nonempty.NonEmpty
@@ -133,7 +138,8 @@ final case class BytesPayload(id: PayloadId, content: ByteString) extends Payloa
   def decodeBatch(
       protocolVersion: ProtocolVersion
   ): Batch[ClosedEnvelope] = {
-    val noLimitFromStore = MaxBytesToDecompress.MaxValueUnsafe
+    // No decompression bound needed: the database is trusted.
+    val noLimitFromStore = DecompressionPolicy.MaxValueUnsafe
     Batch
       .fromByteString(ProtocolVersionValidation.PV(protocolVersion), noLimitFromStore, content)
       .valueOr(err => throw new DbDeserializationException(err.toString))

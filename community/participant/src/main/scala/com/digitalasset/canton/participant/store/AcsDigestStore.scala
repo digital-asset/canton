@@ -191,7 +191,7 @@ object AcsDigestStore {
         traceContext: TraceContext
     ): FutureUnlessShutdown[
       (
-          immutable.Iterable[AcsDigest[K, V]],
+          immutable.Iterable[AcsDigestUpdate[K, V]],
           Either[PaginationTokenDone, SnapshotPaginationToken],
       )
     ]

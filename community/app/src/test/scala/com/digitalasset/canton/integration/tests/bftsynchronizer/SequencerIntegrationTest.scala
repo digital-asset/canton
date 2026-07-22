@@ -169,7 +169,7 @@ trait SequencerIntegrationTest
         Seq(
           SignedTopologyTransaction
             .signAndCreate(
-              TopologyTransaction(
+              TopologyTransaction.tryCreate(
                 TopologyChangeOp.Replace: TopologyChangeOp,
                 PositiveInt.one,
                 nsd,

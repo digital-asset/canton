@@ -126,6 +126,46 @@ class IterableUtilTest extends AnyWordSpec with BaseTest {
     }
   }
 
+  "mergeSortedBy" should {
+    "merge two sorted iterables" in {
+      IterableUtil
+        .mergeSortedBy(1 to 11 by 2, 2 to 12 by 2)(Predef.identity)
+        .toSeq shouldBe (1 to 12)
+
+      IterableUtil
+        .mergeSortedBy(2 to 12 by 2, 1 to 11 by 2)(Predef.identity)
+        .toSeq shouldBe (1 to 12)
+    }
+
+    "deal with short sequences" in {
+      IterableUtil.mergeSortedBy(1 to 10, Seq.empty)(Predef.identity).toSeq shouldBe (1 to 10)
+      IterableUtil.mergeSortedBy(Seq.empty, 1 to 10)(Predef.identity).toSeq shouldBe (1 to 10)
+    }
+
+    "deal with infinite iterables" in {
+      IterableUtil
+        .mergeSortedBy(LazyList.from(1, 2), LazyList.from(2, 2))(Predef.identity)
+        .take(20)
+        .toSeq shouldBe (1 to 20)
+    }
+
+    "throw NoSuchElement exception" in {
+      a[NoSuchElementException] shouldBe thrownBy(
+        IterableUtil.mergeSortedBy(Seq.empty[Int], Seq.empty)(Predef.identity).next()
+      )
+    }
+
+    "report the known size if known" in {
+      val known = IterableUtil.mergeSortedBy(1 to 10, 1 to 2)(Predef.identity)
+      known.knownSize shouldBe 12
+      val _ = known.next()
+      known.knownSize shouldBe 11
+
+      IterableUtil.mergeSortedBy(1 to 5, LazyList.from(1))(Predef.identity).knownSize shouldBe -1
+      IterableUtil.mergeSortedBy(LazyList.from(1), 1 to 10)(Predef.identity).knownSize shouldBe -1
+    }
+  }
+
   @tailrec
   private def isPrime(i: Int): Boolean =
     if (i == Integer.MIN_VALUE) false

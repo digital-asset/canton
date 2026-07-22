@@ -36,7 +36,7 @@ object P2PGrpcNetworking {
     *     network output module would have to be split into a networked and a non-networked part and
     *     networked-only functionality should be tested separately.
     */
-  sealed trait P2PEndpoint extends Product {
+  sealed trait P2PEndpoint extends Product with Serializable {
 
     def address: String
     def port: Port

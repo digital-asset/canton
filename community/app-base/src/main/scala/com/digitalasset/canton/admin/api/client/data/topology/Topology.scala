@@ -33,12 +33,14 @@ sealed trait TopologyResult[M <: TopologyMapping] {
     * server and not be done in the console macro
     */
   def toTopologyTransaction: TopologyTransaction[TopologyChangeOp, M] =
-    TopologyTransaction[TopologyChangeOp, M](
-      context.operation,
-      context.serial,
-      item,
-      ProtocolVersion.latest,
-    )
+    TopologyTransaction
+      .create[TopologyChangeOp, M](
+        context.operation,
+        context.serial,
+        item,
+        ProtocolVersion.latest,
+      ) // This is only used in a doc snippet. The alternative is to return the `Either` but break backwards compatibility.
+      .valueOr(err => throw new IllegalStateException(s"Transaction cannot be serialized: $err"))
 }
 
 final case class BaseResult(

@@ -7,6 +7,7 @@ import com.daml.grpc.test.StreamConsumer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
+import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import io.grpc.reflection.v1.{
   ServerReflectionGrpc,
   ServerReflectionRequest,
@@ -27,6 +28,10 @@ final class ReflectionIT extends CantonFixture {
 
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
+
+  // The traffic service adds a gRPC service that is not reflected in the expected count.
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition.addConfigTransform(ConfigTransforms.disableTrafficAccounting)
 
   private val listServices: ServerReflectionRequest =
     ServerReflectionRequest.newBuilder().setHost("127.0.0.1").setListServices("").build()

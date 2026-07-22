@@ -162,19 +162,28 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
   ```
 - AWS KMS keys created by Canton can now be configured with custom tags through the `custom-tags` setting.
 - The default of the indexer's uncommitted-queue warning threshold (`<participant>.ledger-api.indexer.queue-uncommitted-warn-threshold`) has been increased from 5000 to 14000. This threshold controls when the `Uncommitted queue is growing too large` warning is emitted.
+- Admin API streaming calls are now bounded to protect nodes from resource exhaustion:
+  - Their duration is capped by the new `<node>.parameters.processing-timeouts.admin-stream-open-bound` value (default: 2 hours).
+  - The number of concurrently open calls is capped per method (default: 10) via the admin server's `limits` configuration.
 - *BREAKING*: The sequencers now also enforce confirmation throughput caps. If throughput caps are
   configured, they will also apply to confirmations. The cap for confirmations can be configured with `confirmation-response.per-client-tps-cap`.
   It should be set slightly above the global confirmation request cap, as a member should not need to confirm more
   requests than can be submitted globally. The `confirmation-response.global-tps-cap` can be set to the maximum
   sequencer event capacity.
 - Changing identity providers for a party through `UpdatePartyDetails` is no longer possible, `UpdatePartyIdentityProviderId` must be used instead.
+- An internal change is introduced which grants `ReadAsAnyParty` permissions to the traffic enforcement service. This removes the need to use non-standard config options to run local traffic enforcement with auth enabled:
+  ```
+  canton.participants.<participant_name>.ledger-api.admin-token-config.act-as-any-party-claim=true
+  canton.participants.parameters.non-standard-config=true
+  ```
+- The participant admin party is now exempt from the traffic enforcement balance check during submission.
+- Subview package vetting, checked at submission time, is now verified during confirmation request validation.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
 - Ledger JSON API `/v2/state/active-contracts-page` is now available via POST; the GET variant that expects a request body is deprecated.
-
 
 #### Issue Description
 

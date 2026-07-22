@@ -38,7 +38,11 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
-import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  ParticipantProtocolVersion,
+  ProtocolVersion,
+  ReleaseProtocolVersion,
+}
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
@@ -144,6 +148,14 @@ object ConfigTransforms {
       _.focus(_.parameters.dontWarnOnDeprecatedPV).replace(true)
     ),
   )
+
+  lazy val enableNewAcsDigestProcessorPipeline: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor)
+        .replace(
+          BaseTest.testedProtocolVersion >= ReleaseProtocolVersion.acsCommitmentRedesignStorage.v
+        )
+    )
 
   lazy val enableInteractiveSubmissionTransforms: ConfigTransform =
     ConfigTransforms
@@ -252,12 +264,39 @@ object ConfigTransforms {
     true
   )
 
+  /** Turns on TEA accounting (not enforcement) on all participants. Used under
+    * CANTON_TEST_EXTERNAL_PARTIES so integration tests exercise the traffic accounting path without
+    * rejecting submissions.
+    */
+  lazy val enableTrafficAccounting: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.trafficEnforcement.enabled)
+        .replace(true)
+        .focus(_.trafficEnforcement.enforceCostOnSubmissions)
+        .replace(false)
+    )
+
+  /** Turns TEA off on all participants. Use to override [[enableTrafficAccounting]] for tests that
+    * need the base set of Ledger API services without the optional traffic service.
+    */
+  lazy val disableTrafficAccounting: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.trafficEnforcement.enabled).replace(false)
+    )
+
+  /** Enables traffic accounting for integration tests when CANTON_TEST_EXTERNAL_PARTIES is set. We
+    * turn on TEA only for external parties tests for now while we stabilize it, since TEA is most
+    * relevant for external party submissions.
+    */
+  lazy val enableTrafficAccountingForExternalPartiesTests: Seq[ConfigTransform] =
+    if (BaseTest.cantonTestExternalParties) List(enableTrafficAccounting) else Nil
+
   /** Default transforms to apply to tests using a [[EnvironmentDefinition]]. Covers the primary
     * ways that distinct concurrent environments may unintentionally collide.
     */
   val defaults: Seq[ConfigTransform] =
     heavyTestDefaults ++
-      Seq(
+      Seq[ConfigTransform](
         // Make unbounded durations bounded for integration tests
         _.focus(_.parameters.timeouts.console.unbounded)
           .replace(config.NonNegativeDuration.tryFromDuration(3.minutes))
@@ -292,7 +331,8 @@ object ConfigTransforms {
             SessionSigningKeysConfig.enabled
           else SessionSigningKeysConfig.disabled
         ),
-      )
+      ) ++
+      enableTrafficAccountingForExternalPartiesTests
 
   lazy val clearMinimumProtocolVersion: Seq[ConfigTransform] =
     Seq(

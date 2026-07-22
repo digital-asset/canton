@@ -72,11 +72,11 @@ class MemberAuthenticationService(
     with FlagCloseable
     with HasCloseContext {
 
-  /** synchronizer generates nonce that he expects the participant to use to concatenate with the
-    * synchronizer's id and sign to proceed with the authentication (step 2). We expect to find a
-    * key with usage 'SequencerAuthentication' to sign these messages.
+  /** Synchronizer generates or retrieves the unique nonce for the participant to use, concatenates
+    * it with the allowed signing key fingerprints and returns the tuple as the challenge. We expect
+    * to find a key with usage 'SequencerAuthentication' to sign these messages.
     */
-  def generateNonce(member: Member)(implicit
+  def generateChallenge(member: Member)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, AuthenticationError, (Nonce, NonEmpty[Seq[Fingerprint]])] =
     for {
@@ -97,12 +97,21 @@ class MemberAuthenticationService(
               )
           }
       )
-      nonce = Nonce.generate(cryptoApi.pureCrypto)
-      storedNonce = StoredNonce(member, nonce, clock.now, nonceExpirationInterval)
-      _ = store.saveNonce(storedNonce)
+      // It will only run if the store is empty.
+      // If not, it simply retrieves the existing nonce.
+      // Thus, the same unique nonce will be returned to any member
+      // until it is consumed through a signature or expires.
+      // This prevents the blocking of legitimate actors from
+      // authenticating through constant nonce replacement/deletion.
+      storedNonce = store.fetchOrGenerateNonce(
+        member, {
+          val rawNonce = Nonce.generate(cryptoApi.pureCrypto)
+          StoredNonce(member, rawNonce, clock.now, nonceExpirationInterval)
+        },
+      )
     } yield {
       scheduleExpirations(storedNonce.expireAt)
-      (nonce, fingerprints)
+      (storedNonce.nonce, fingerprints)
     }
 
   private def waitForInitialized(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
@@ -126,14 +135,17 @@ class MemberAuthenticationService(
       _ <- EitherT.right(waitForInitialized)
       _ <- isActive(member)
 
+      // Match the provided nonce with the nonce in the store and fail the method if it is not found
       storedNonce <- EitherT
         .fromEither[FutureUnlessShutdown](
           store
-            .fetchAndRemoveNonce(member, providedNonce)
+            .fetchNonceIfMatches(member, providedNonce)
             .toRight(MissingNonce(member): AuthenticationError)
         )
+
       StoredNonce(_, nonce, generatedAt, expireAt) = storedNonce
 
+      // Ensure the nonce is not expired
       _ <- {
         val now = clock.now
         EitherTUtil.condUnitET[FutureUnlessShutdown](
@@ -162,6 +174,20 @@ class MemberAuthenticationService(
             logger.info(s"Member $member provided invalid signature. Details: $err")
             EitherT.leftT[FutureUnlessShutdown, Unit](InvalidSignature(member): AuthenticationError)
         }
+
+      // Delete the token from the store if it is still there.
+      // If this fails, it means another thread has consumed the nonce
+      // already or that it expired in the time after it was fetched.
+      // We defer the deletion to after the signature verification to ensure that
+      // deletion cannot be triggered by illegitimate actors.
+      // This blocks DoS situations where an attacker floods the endpoint with junk
+      // signatures only to knock out the nonce
+      // and prevent the legitimate actor from authenticating.
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        store.removeNonceIfMatches(member, nonce),
+        (),
+        MissingNonce(member): AuthenticationError,
+      )
       token = AuthenticationToken.generate(cryptoApi.pureCrypto)
       maybeRandomTokenExpirationTime =
         if (useExponentialRandomTokenExpiration) {

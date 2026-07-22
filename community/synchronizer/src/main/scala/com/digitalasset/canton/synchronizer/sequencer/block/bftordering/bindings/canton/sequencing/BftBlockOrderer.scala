@@ -108,7 +108,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{PekkoUtil, SingleUseCell}
+import com.digitalasset.canton.util.{DelayUtil, PekkoUtil, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -169,6 +169,20 @@ final class BftBlockOrderer(
     sequencerSubscriptionInitialHeight >= BlockNumber.First,
     s"The sequencer subscription initial height must be non-negative, but was $sequencerSubscriptionInitialHeight",
   )
+
+  private val standalonePostOrderingDelay: Option[() => Future[Unit]] =
+    config.standalone.flatMap { standaloneConfig =>
+      standaloneConfig.postOrderingDelay.map { delay =>
+        implicit val traceContext: TraceContext = TraceContext.empty
+        logger.info(s"Standalone mode: adding post-ordering delay of $delay")
+        () =>
+          Future(logger.info("Starting post-ordering delay"))
+            .flatMap(_ => DelayUtil.delay(delay))
+            .map(_ => logger.info("Completed post-ordering delay, resuming processing"))
+      }
+    }
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  @volatile private var standalonePostOrderingDelayApplied = false
 
   private val longRunningExecutor = Executors.newCachedThreadPool()
 
@@ -365,10 +379,25 @@ final class BftBlockOrderer(
       .runSupervised(
         blockSubscription
           .subscription()
-          .map(b =>
-            // The server is started earlier if standalone mode is enabled
-            standaloneServiceRef.get.foreach(_.push(b.value))
-          )
+          .async
+          .mapAsync(parallelism = 1) { b =>
+            val standaloneService = standaloneServiceRef.get
+            def pushBlock(): Unit = {
+              logger.debug(
+                s"Standalone mode: pushing block ${b.value.blockHeight} to the standalone service"
+              )(b.traceContext)
+              standaloneService.foreach(_.push(b.value))
+            }
+            standalonePostOrderingDelay.fold(Future(pushBlock())) { lazyFuture =>
+              // The server is started earlier if standalone mode is enabled
+              if (!standalonePostOrderingDelayApplied) {
+                standalonePostOrderingDelayApplied = true
+                lazyFuture.apply().map(_ => pushBlock())
+              } else {
+                Future(pushBlock())
+              }
+            }
+          }
           .toMat(Sink.ignore)(Keep.both),
         errorLogMessagePrefix = "Failed to handle state changes",
       )
@@ -478,6 +507,7 @@ final class BftBlockOrderer(
   ) =
     new PekkoP2PGrpcNetworkManager(
       createConnectionManager(connectionEventListener, p2pNetworkIn),
+      config,
       timeouts,
       loggerFactory,
       metrics,
@@ -504,6 +534,7 @@ final class BftBlockOrderer(
         .map(_.connectionManagementConfig)
         .getOrElse(P2PConnectionManagementConfig()),
       p2pGrpcConnectionState,
+      p2pEndpointsStore,
       maybeGrpcNetworkingAuthenticationInitialState,
       getServerToClientAuthenticationEndpoint(config),
       p2pConnectionEventListener,

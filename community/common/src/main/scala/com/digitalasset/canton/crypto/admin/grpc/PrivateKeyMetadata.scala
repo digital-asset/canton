@@ -38,12 +38,13 @@ final case class PrivateKeyMetadata(
 
   def encrypted: Boolean = wrapperKeyId.isDefined
 
-  def toProtoV30: v30.PrivateKeyMetadata =
-    v30.PrivateKeyMetadata(
-      publicKeyWithName =
-        v30.PrivateKeyMetadata.PublicKeyWithName.V30(publicKeyWithName.toProtoV30),
-      wrapperKeyId = wrapperKeyId.map(_.toProtoPrimitive),
-      kmsKeyId = kmsKeyId.map(_.toProtoPrimitive),
+  def toProtoV30: Either[String, v30.PrivateKeyMetadata] =
+    publicKeyWithName.toProtoV30.map(serializedPubKey =>
+      v30.PrivateKeyMetadata(
+        publicKeyWithName = v30.PrivateKeyMetadata.PublicKeyWithName.V30(serializedPubKey),
+        wrapperKeyId = wrapperKeyId.map(_.toProtoPrimitive),
+        kmsKeyId = kmsKeyId.map(_.toProtoPrimitive),
+      )
     )
 }
 

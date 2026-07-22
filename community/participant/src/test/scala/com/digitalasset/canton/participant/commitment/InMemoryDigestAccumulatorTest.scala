@@ -7,11 +7,7 @@ import cats.Eval
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.PromiseUnlessShutdown
-import com.digitalasset.canton.participant.commitment.InMemoryDigestAccumulator.{
-  ParticipantDigestIdentifier,
-  PartyDigestIdentifier,
-}
-import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   CheckpointFenceOr,
@@ -21,6 +17,10 @@ import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.{
   PartyAddedToParticipant,
   PartyRemovedFromParticipant,
   ProcessingContext,
+}
+import com.digitalasset.canton.participant.commitment.InMemoryDigestAccumulator.{
+  ParticipantDigestIdentifier,
+  PartyDigestIdentifier,
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
@@ -77,7 +77,7 @@ class InMemoryDigestAccumulatorTest
   ) {
     val stringInterning: StringInterning = new MockStringInterning()
     val digestStore: AcsDigestStore = InMemoryAcsDigestStore.create(
-      stringInterning,
+      Eval.now(stringInterning),
       loggerFactory,
     )
     val accumulator: InMemoryDigestAccumulator = new InMemoryDigestAccumulator(

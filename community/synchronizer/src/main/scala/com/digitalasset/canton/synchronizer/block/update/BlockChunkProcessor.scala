@@ -540,15 +540,20 @@ final class BlockChunkProcessor(
                 // Now that the sequencing timestamp is assigned, we can resolve the topology
                 // snapshot and re-bind the envelope contents' decompression to the dynamic
                 // `maxRequestSize`. Earlier protocol versions keep the hardcoded value.
-                maxBytesToDecompress <-
+                decompressionPolicy <-
                   if (protocolVersion <= ProtocolVersion.v35)
-                    FutureUnlessShutdown.pure(MaxBytesToDecompress.HardcodedDefault)
+                    FutureUnlessShutdown.pure(DecompressionPolicy.HardcodedDefault)
                   else
                     snapshotAtSequencingTime.ipsSnapshot
                       .findDynamicSynchronizerParametersOrDefault(protocolVersion)
-                      .map(parameters => MaxBytesToDecompress(parameters.maxRequestSize.value))
+                      .map(parameters =>
+                        DecompressionPolicy.forProtocolVersion(
+                          protocolVersion,
+                          MaxBytesToDecompress(parameters.maxRequestSize.value),
+                        )
+                      )
                 boundedSignedSubmissionRequest = signedSubmissionRequest.copy(
-                  content = submissionRequest.withMaxBytesToDecompress(maxBytesToDecompress)
+                  content = submissionRequest.withDecompressionPolicy(decompressionPolicy)
                 )
                 tracedBoundedSubmissionRequest = TracedPossiblyPrevalidated(
                   boundedSignedSubmissionRequest,

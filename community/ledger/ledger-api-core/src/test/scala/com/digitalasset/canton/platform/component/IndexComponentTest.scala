@@ -663,6 +663,7 @@ trait IndexComponentTest
           authorizationEvent = Onboarding(AuthorizationLevel.Observation),
         )
       ),
+      genericTopologyEvents = Nil, // TODO(i33326)
       synchronizerId = synchronizer1,
       effectiveTime = recordTime,
     )

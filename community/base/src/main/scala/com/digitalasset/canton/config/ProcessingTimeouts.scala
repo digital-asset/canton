@@ -49,6 +49,8 @@ import scala.concurrent.duration.*
   * @param dynamicStateConsistencyTimeout
   *   Timeout for dynamic state consistency checks. When we apply some state changes, we sometimes
   *   need to wait until they are applied to the entire node.
+  * @param adminStreamOpenBound
+  *   maximum time an admin API streaming call may remain open
   */
 final case class ProcessingTimeout(
     unbounded: NonNegativeDuration = DefaultProcessingTimeouts.unbounded,
@@ -71,6 +73,7 @@ final case class ProcessingTimeout(
     sequencedEventProcessingBound: NonNegativeDuration =
       DefaultProcessingTimeouts.sequencedEventProcessingBound,
     dynamicStateConsistencyTimeout: NonNegativeDuration = NonNegativeDuration.ofSeconds(60),
+    adminStreamOpenBound: NonNegativeDuration = DefaultProcessingTimeouts.adminStreamOpenBound,
 )
 
 /** Reasonable default timeouts */
@@ -112,6 +115,8 @@ object DefaultProcessingTimeouts {
 
   val sequencedEventProcessingBound: NonNegativeDuration =
     NonNegativeDuration.tryFromDuration(1.day)
+
+  val adminStreamOpenBound: NonNegativeDuration = NonNegativeDuration.tryFromDuration(2.hours)
 
   @VisibleForTesting
   lazy val testing: ProcessingTimeout = ProcessingTimeout()

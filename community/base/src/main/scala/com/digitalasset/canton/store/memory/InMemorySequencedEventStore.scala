@@ -118,7 +118,7 @@ class InMemorySequencedEventStore(
       eventByTimestamp.values.take(limit.getOrElse(Int.MaxValue)).toList
     }))
 
-  override def doPrune(
+  override protected def doPrune(
       beforeAndIncluding: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = FutureUnlessShutdown.pure {

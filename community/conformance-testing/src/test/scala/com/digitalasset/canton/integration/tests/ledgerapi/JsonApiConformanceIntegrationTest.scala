@@ -204,7 +204,8 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
   protected def inclusions: TestInclusions = TestInclusions.AllIncluded
   override protected def exclusions: Set[String] =
     ExcludedTests.jsonApiExcludedTests.toSet ++ LedgerApiConformanceBase.excludedTests(
-      testedProtocolVersion
+      testedProtocolVersion,
+      ProtocolType.Json,
     )
 
   protected def testCaseName = "pass the Ledger API conformance tests"

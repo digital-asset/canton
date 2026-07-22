@@ -9,7 +9,7 @@ import com.digitalasset.canton.crypto.{HashOps, HashPurpose, LtHash16Blake3}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.*
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.digest.{DigestDelta, DigestOperation, DigestOps}
 import com.digitalasset.canton.participant.store.AcsDigestStore
@@ -22,7 +22,7 @@ import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
 import scala.concurrent.ExecutionContext
 
 /** A digest accumulator processes
-  * [[com.digitalasset.canton.participant.commitment.RunningDigestProcessor.Classification]]s and
+  * [[com.digitalasset.canton.participant.commitment.BaseDigestProcessor.Classification]]s and
   * updates the affected digests accordingly.
   *
   * This simplistic implementation loads each affected digest from the digest store, updates it, and
@@ -35,12 +35,13 @@ class SequentialDigestAccumulator(
     hashOps: HashOps,
     tracingMode: AcsDigestTracingMode,
     protected override val loggerFactory: NamedLoggerFactory,
-)(implicit traceContext: TraceContext, ec: ExecutionContext)
+)(implicit ec: ExecutionContext)
     extends NamedLogging {
 
   def process(
       input: ProcessingContext[CheckpointFenceOr[Classification]]
-  ): FutureUnlessShutdown[Option[CheckpointWritten]] =
+  ): FutureUnlessShutdown[Option[CheckpointWritten]] = {
+    implicit val traceContext: TraceContext = input.traceContext
     // for now use the offset as the tiebreaker
     input match {
       case ProcessingContext(_, CheckpointFence) =>
@@ -111,6 +112,7 @@ class SequentialDigestAccumulator(
             FutureUnlessShutdown.pure(None)
         }
     }
+  }
 
   /** Generic logic for updating the digest for a party or participant.
     */
@@ -122,21 +124,21 @@ class SequentialDigestAccumulator(
   )(
       toLtHash16Blake3: V => LtHash16Blake3,
       toV: LtHash16Blake3 => V,
-  ): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val offset = timepoint.offset
     journal
       .lookup(key, offset)
       .flatMap { acsDigestUpdateO =>
-        val (existingDigestO, existingOffsetO) = acsDigestUpdateO.flatMap { digest =>
+        val (existingDigestO, existingOffsetO) = acsDigestUpdateO.map { digest =>
+          val isIncrementalChangeForSameOffset = digest.digestUpdate.offset == offset
+          val replacesOffset =
+            // if the offset of the digest update from the store is the same as the offset currently being processed,
+            // then this is another update to the digest at the same offset and we need to retain the "replaces_offset" value.
+            if (isIncrementalChangeForSameOffset) digest.replacesOffset
+            // otherwise, this update is a new link in the replacement chain.
+            else Some(digest.digestUpdate.offset)
           digest.digestUpdate.digestO
             .map { rawDigest =>
-              val isIncrementalChangeForSameOffset = digest.digestUpdate.offset == offset
-              val replacesOffset =
-                // if the offset of the digest update from the store is the same as the offset currently being processed,
-                // then this is another update to the digest at the same offset and we need to retain the "replaces_offset" value.
-                if (isIncrementalChangeForSameOffset) digest.replacesOffset
-                // otherwise, this update is a new link in the replacement chain.
-                else Some(digest.digestUpdate.offset)
               val trace =
                 // check whether the existing trace that was loaded from the store must be propagated
                 if (
@@ -147,6 +149,7 @@ class SequentialDigestAccumulator(
                 else None
               TracedLtHash16Blake3(toLtHash16Blake3(rawDigest), trace) -> replacesOffset
             }
+            .getOrElse(TracedLtHash16Blake3.empty -> replacesOffset)
         }.unzip
 
         val updatedDigest = existingDigestO.getOrElse(TracedLtHash16Blake3.empty)
@@ -189,7 +192,7 @@ class SequentialDigestAccumulator(
       party: LfPartyId,
       participant: LedgerParticipantId,
       isAddition: Boolean,
-  ): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val internedPid = stringInterning.participantId.internalize(participant)
     val partyKey = PartyAndOrder(
       stringInterning.party.internalize(party),

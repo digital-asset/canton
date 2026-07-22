@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClient,
   TopologySnapshot,
 }
+import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{NoPackageDependencies, TopologyStore}
 import com.digitalasset.canton.topology.{
@@ -45,6 +46,11 @@ import scala.concurrent.ExecutionContext
   *   there is no active synchronizer.
   * @param syncPersistentStateO
   *   Retrieve the persistent state for the given psid. Returns None if the psid is unknown
+  * @param cleanSynchronizerRecordTime
+  *   Retrieve the latest clean record time of the synchronizer. Returns None if the psid is
+  *   unknown. The fact, that this is a clean record time, means there must have been a sequenced
+  *   time greater than or equal to the record time. As a consequenced, the clean record time serves
+  *   as the lower bound for sequenced time to initialize the topology client.
   */
 final class TopologyLookup(
     clock: Clock,
@@ -55,6 +61,7 @@ final class TopologyLookup(
     private val topologyClientO: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
     private val psidLookup: PsidLookup,
     private val syncPersistentStateO: PhysicalSynchronizerId => Option[SyncPersistentState],
+    cleanSynchronizerRecordTime: SynchronizerId => Option[CantonTimestamp],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
@@ -134,8 +141,18 @@ final class TopologyLookup(
         futureSupervisor = futureSupervisor,
         loggerFactory = loggerFactory,
       )
-
       _ <- EitherT.liftF(client.updateKnownTimestampsDuringStartup())
+      _ = cleanSynchronizerRecordTime(psid.logical).foreach(sequencedTime =>
+        client.updateHead(
+          SequencedTime(sequencedTime),
+          EffectiveTime(
+            sequencedTime.add(
+              syncPersistentState.staticSynchronizerParameters.topologyChangeDelay.toScala
+            )
+          ),
+          ApproximateTime(sequencedTime),
+        )
+      )
 
     } yield client
 
@@ -148,7 +165,6 @@ final class TopologyLookup(
         case psid: PhysicalSynchronizerId =>
           EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](psid)
       }
-
       client <- topologyClientO(psid).fold(offlineTopologyClient(psid))(
         EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](_)
       )

@@ -98,7 +98,7 @@ final class P2PNetworkOutModule[
     self.asyncSend(P2PNetworkOut.Start)
   }
 
-  override def onSequencerId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
+  override def onNodeId(bftNodeId: BftNodeId, maybeP2PEndpoint: Option[P2PEndpoint])(implicit
       traceContext: TraceContext
   ): Unit =
     state.maybeSelf.foreach(
@@ -128,11 +128,11 @@ final class P2PNetworkOutModule[
         startModulesIfNeeded()
 
       case P2PNetworkOut.Internal.Connect(p2pEndpoint) =>
-        logger.info("Connecting to operator-added endpoint " + p2pEndpoint.id)
+        logger.info("Connecting to operator-added P2P endpoint " + p2pEndpoint.id)
         ensureSendingEnabledTo(P2PAddress.Endpoint(p2pEndpoint))
 
       case P2PNetworkOut.Internal.Disconnect(p2pEndpointId) =>
-        logger.info("Disconnecting from operator-removed endpoint " + p2pEndpointId)
+        logger.info("Disconnecting from operator-removed P2P endpoint " + p2pEndpointId)
         disconnect(p2pEndpointId)
 
       case P2PNetworkOut.Network.Connected(maybeP2pEndpointId) =>
@@ -154,7 +154,7 @@ final class P2PNetworkOutModule[
         val maybeP2PEndpointId = maybeP2PEndpoint.map(_.id)
         val p2pEndpointIdString = maybeP2PEndpointId.map(_.toString).getOrElse("<unknown>")
         logger.info(
-          s"Authenticated node $bftNodeId at $p2pEndpointIdString, marking endpoint (if known) as connected " +
+          s"Authenticated node $bftNodeId at $p2pEndpointIdString, marking P2P endpoint (if known) as connected " +
             "and ensuring connectivity to it"
         )
         maybeP2PEndpointId.foreach(connectedP2PEndpointIds.add(_).discard)
@@ -424,7 +424,7 @@ final class P2PNetworkOutModule[
               Some(P2PNetworkOut.Internal.Connect(p2pEndpoint))
             }
           case Failure(exception) =>
-            abort(s"Failed to P2P add endpoint $p2pEndpoint", exception)
+            abort(s"Failed to add P2P endpoint $p2pEndpoint", exception)
         }
 
       case Admin.RemoveEndpoint(p2pEndpointId, callback) =>
@@ -463,7 +463,7 @@ final class P2PNetworkOutModule[
       case Admin.ListConfiguredEndpoints(callback) =>
         context.pipeToSelf(p2pEndpointsStore.listEndpoints()) {
           case Success(endpoints) =>
-            callback(endpoints.sortBy(_.id)) // For output determinism and easier testing
+            callback(endpoints.sortBy(_._1.id)) // For output determinism and easier testing
             None
           case Failure(exception) =>
             abort(s"Failed to list P2P endpoints", exception)
@@ -471,7 +471,7 @@ final class P2PNetworkOutModule[
 
       case Admin.GetStatus(callback, p2pEndpointIds) =>
         logger.info(
-          s"Operator requested P2P status for endpoints ${p2pEndpointIds.getOrElse("<all>")}"
+          s"Operator requested status for P2P endpoints ${p2pEndpointIds.getOrElse("<all>")}"
         )
         callback(getStatus(p2pEndpointIds))
     }
@@ -540,7 +540,9 @@ final class P2PNetworkOutModule[
                   SequencerNodeId
                     .fromBftNodeId(
                       maybeBftNodeId.getOrElse(
-                        abort(s"A known connection cannot miss both endpoint and node information")
+                        abort(
+                          s"A known connection cannot miss both P2P endpoint and node information"
+                        )
                       )
                     )
                     .getOrElse(abort(s"Cannot convert '$maybeBftNodeId' to a sequencer ID"))
@@ -620,13 +622,16 @@ final class P2PNetworkOutModule[
     )
 
   private def connectInitialNodes(
-      otherInitialP2PEndpoints: Seq[P2PEndpoint]
+      otherInitialP2PEndpoints: Seq[(P2PEndpoint, Option[BftNodeId])]
   )(implicit context: E#ActorContextT[P2PNetworkOut.Message], traceContext: TraceContext): Unit =
     if (!initialNodesConnecting) {
       logger.info(s"Connecting to initial P2P endpoints: $otherInitialP2PEndpoints")
-      otherInitialP2PEndpoints.foreach(initialP2PEndpoint =>
-        ensureSendingEnabledTo(P2PAddress.Endpoint(initialP2PEndpoint)).discard
-      )
+      otherInitialP2PEndpoints.foreach { case (initialP2PEndpoint, nodeIdO) =>
+        val address = nodeIdO.fold[P2PAddress](P2PAddress.Endpoint(initialP2PEndpoint))(
+          P2PAddress.NodeId(_, Some(initialP2PEndpoint))
+        )
+        ensureSendingEnabledTo(address).discard
+      }
       initialNodesConnecting = true
     }
 

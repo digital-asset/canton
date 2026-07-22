@@ -30,8 +30,8 @@ trait InMemoryPrunableByTime extends PrunableByTime {
   ): FutureUnlessShutdown[Option[PruningStatus]] =
     FutureUnlessShutdown.pure(pruningStatusF.get)
 
-  protected[canton] def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(
-      implicit traceContext: TraceContext
+  protected def advancePruningTimestamp(phase: PruningPhase, timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
     val previousO =
       pruningStatusF.getAndAccumulate(

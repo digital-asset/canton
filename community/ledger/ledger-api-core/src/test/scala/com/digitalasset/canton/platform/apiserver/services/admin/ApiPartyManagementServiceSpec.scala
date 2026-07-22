@@ -215,7 +215,7 @@ class ApiPartyManagementServiceSpec
             publicKey = publicKey.keyData,
             // Deprecated field
             scheme = SIGNING_KEY_SCHEME_UNSPECIFIED,
-            usage = Seq(SigningKeyUsage.Namespace.toProtoEnumV30),
+            usage = Seq(SigningKeyUsage.Namespace.toProtoEnumV30.valueOrFail("serializing usage")),
             keySpec =
               publicKey.keySpec.transformInto[com.digitalasset.canton.crypto.v30.SigningKeySpec],
           )
@@ -301,7 +301,7 @@ class ApiPartyManagementServiceSpec
         val namespaceOwners = ownersKeys.map(_._1.fingerprint).toSet.map(Namespace(_))
         val decentralizedNamespace =
           DecentralizedNamespaceDefinition.computeNamespace(namespaceOwners)
-        val decentralizedTx = TopologyTransaction(
+        val decentralizedTx = TopologyTransaction.tryCreate(
           Replace,
           PositiveInt.one,
           DecentralizedNamespaceDefinition.tryCreate(
@@ -316,7 +316,7 @@ class ApiPartyManagementServiceSpec
         }
         (
           SignedTransaction(
-            decentralizedTx.toByteString,
+            decentralizedTx.toByteString.valueOrFail("serializing topology transaction"),
             signatures,
           ),
           decentralizedNamespace,
@@ -357,15 +357,19 @@ class ApiPartyManagementServiceSpec
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
-                  _.toProtoV30.mapping.value.update(
-                    _.partyToParticipant.partySigningKeys.keys.modify(
-                      _.map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL)))
+                  _.toProtoV30
+                    .valueOrFail("serializing mapping")
+                    .mapping
+                    .value
+                    .update(
+                      _.partyToParticipant.partySigningKeys.keys.modify(
+                        _.map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL)))
+                      )
                     )
-                  )
                 )
                 .map(TopologyMapping.fromProtoV30(_).value)
                 .map(
-                  TopologyTransaction(
+                  TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
                     PositiveInt.one,
                     _,
@@ -373,7 +377,10 @@ class ApiPartyManagementServiceSpec
                   )
                 )
                 .map { updatedTx =>
-                  SignedTransaction(updatedTx.toByteString, tx.signatures)
+                  SignedTransaction(
+                    updatedTx.toByteString.valueOrFail("serializing mapping"),
+                    tx.signatures,
+                  )
                 }
                 .getOrElse(tx)
             )
@@ -391,15 +398,19 @@ class ApiPartyManagementServiceSpec
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
-                  _.toProtoV30.mapping.value.update(
-                    _.partyToParticipant.partySigningKeys.keys.modify(
-                      _.map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE)))
+                  _.toProtoV30
+                    .valueOrFail("serializing mapping")
+                    .mapping
+                    .value
+                    .update(
+                      _.partyToParticipant.partySigningKeys.keys.modify(
+                        _.map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE)))
+                      )
                     )
-                  )
                 )
                 .map(TopologyMapping.fromProtoV30(_).value)
                 .map(
-                  TopologyTransaction(
+                  TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
                     PositiveInt.one,
                     _,
@@ -407,7 +418,10 @@ class ApiPartyManagementServiceSpec
                   )
                 )
                 .map { updatedTx =>
-                  SignedTransaction(updatedTx.toByteString, tx.signatures)
+                  SignedTransaction(
+                    updatedTx.toByteString.valueOrFail("serializing topology transaction"),
+                    tx.signatures,
+                  )
                 }
                 .getOrElse(tx)
             )
@@ -425,13 +439,17 @@ class ApiPartyManagementServiceSpec
                 .value
                 .selectMapping[PartyToParticipant]
                 .map(
-                  _.toProtoV30.mapping.value.update(
-                    _.partyToParticipant.optionalPartySigningKeys.set(None)
-                  )
+                  _.toProtoV30
+                    .valueOrFail("serializing mapping")
+                    .mapping
+                    .value
+                    .update(
+                      _.partyToParticipant.optionalPartySigningKeys.set(None)
+                    )
                 )
                 .map(TopologyMapping.fromProtoV30(_).value)
                 .map(
-                  TopologyTransaction(
+                  TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
                     PositiveInt.one,
                     _,
@@ -439,7 +457,10 @@ class ApiPartyManagementServiceSpec
                   )
                 )
                 .map { updatedTx =>
-                  SignedTransaction(updatedTx.toByteString, tx.signatures)
+                  SignedTransaction(
+                    updatedTx.toByteString.valueOrFail("serializing topology transaction"),
+                    tx.signatures,
+                  )
                 }
                 .getOrElse(tx)
             )
@@ -455,7 +476,7 @@ class ApiPartyManagementServiceSpec
         val (publicKey, keyPair) = createSigningKey
         val cantonPublicKey = cantonSigningPublicKey(publicKey.value)
 
-        def mkPtkTransaction(partyId: PartyId) = TopologyTransaction(
+        def mkPtkTransaction(partyId: PartyId) = TopologyTransaction.tryCreate(
           Replace,
           PositiveInt.one,
           PartyToKeyMapping.tryCreate(
@@ -490,7 +511,10 @@ class ApiPartyManagementServiceSpec
             val ptk = mkPtkTransaction(partyId)
             val signature = mkSignature(ptk, partyId)
 
-            transactions :+ SignedTransaction(ptk.toByteString, Seq(signature))
+            transactions :+ SignedTransaction(
+              ptk.toByteString.valueOrFail("serializing topology transaction"),
+              Seq(signature),
+            )
           },
           _ =>
             Some(
@@ -523,7 +547,7 @@ class ApiPartyManagementServiceSpec
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
-                  TopologyTransaction(
+                  TopologyTransaction.tryCreate(
                     p2p.operation,
                     p2p.serial,
                     PartyToParticipant.tryCreate(
@@ -535,7 +559,10 @@ class ApiPartyManagementServiceSpec
                   )
                 }
                 .map { updatedTx =>
-                  SignedTransaction(updatedTx.toByteString, tx.signatures)
+                  SignedTransaction(
+                    updatedTx.toByteString.valueOrFail("serializing topology transaction"),
+                    tx.signatures,
+                  )
                 }
                 .getOrElse(tx)
             )
@@ -556,7 +583,7 @@ class ApiPartyManagementServiceSpec
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
-                  TopologyTransaction(
+                  TopologyTransaction.tryCreate(
                     p2p.operation,
                     p2p.serial,
                     PartyToParticipant.tryCreate(
@@ -573,7 +600,10 @@ class ApiPartyManagementServiceSpec
                   )
                 }
                 .map { updatedTx =>
-                  SignedTransaction(updatedTx.toByteString, tx.signatures)
+                  SignedTransaction(
+                    updatedTx.toByteString.valueOrFail("serializing topology transaction"),
+                    tx.signatures,
+                  )
                 }
                 .getOrElse(tx)
             )
@@ -594,7 +624,7 @@ class ApiPartyManagementServiceSpec
                 .value
                 .selectMapping[PartyToParticipant]
                 .map { p2p =>
-                  TopologyTransaction(
+                  TopologyTransaction.tryCreate(
                     p2p.operation,
                     p2p.serial,
                     PartyToParticipant.tryCreate(
@@ -615,7 +645,10 @@ class ApiPartyManagementServiceSpec
                   )
                 }
                 .map { updatedTx =>
-                  SignedTransaction(updatedTx.toByteString, tx.signatures)
+                  SignedTransaction(
+                    updatedTx.toByteString.valueOrFail("serializing topology transaction"),
+                    tx.signatures,
+                  )
                 }
                 .getOrElse(tx)
             )
@@ -632,7 +665,7 @@ class ApiPartyManagementServiceSpec
         val cantonPublicKey = cantonSigningPublicKey(publicKey.value)
         val ptkPartyId = PartyId.tryCreate("alice", cantonPublicKey.fingerprint)
 
-        val ptkTransaction = TopologyTransaction(
+        val ptkTransaction = TopologyTransaction.tryCreate(
           Replace,
           PositiveInt.one,
           PartyToKeyMapping.tryCreate(
@@ -650,7 +683,7 @@ class ApiPartyManagementServiceSpec
         testAllocateExternalPartyValidation(
           _.onboardingTransactions.modify(transactions =>
             transactions :+ SignedTransaction(
-              ptkTransaction.toByteString,
+              ptkTransaction.toByteString.valueOrFail("serializing topology transaction"),
               Seq(signature),
             )
           ),
@@ -666,7 +699,7 @@ class ApiPartyManagementServiceSpec
         val cantonPublicKey = cantonSigningPublicKey(publicKey.value)
         val nsdPartyId = PartyId.tryCreate("alice", cantonPublicKey.fingerprint)
 
-        val nsdTransaction = TopologyTransaction(
+        val nsdTransaction = TopologyTransaction.tryCreate(
           Replace,
           PositiveInt.one,
           NamespaceDelegation.tryCreate(
@@ -684,7 +717,7 @@ class ApiPartyManagementServiceSpec
         testAllocateExternalPartyValidation(
           _.onboardingTransactions.modify(transactions =>
             transactions :+ SignedTransaction(
-              nsdTransaction.toByteString,
+              nsdTransaction.toByteString.valueOrFail("serializing topology transaction"),
               Seq(signature),
             )
           ),
@@ -745,15 +778,18 @@ class ApiPartyManagementServiceSpec
           _.onboardingTransactions.modify(
             _.appended(
               SignedTransaction(
-                TopologyTransaction(
-                  TopologyChangeOp.Replace,
-                  PositiveInt.one,
-                  PartyHostingLimits.apply(
-                    DefaultTestIdentities.synchronizerId,
-                    DefaultTestIdentities.party1,
-                  ),
-                  testedProtocolVersion,
-                ).toByteString,
+                TopologyTransaction
+                  .tryCreate(
+                    TopologyChangeOp.Replace,
+                    PositiveInt.one,
+                    PartyHostingLimits.apply(
+                      DefaultTestIdentities.synchronizerId,
+                      DefaultTestIdentities.party1,
+                    ),
+                    testedProtocolVersion,
+                  )
+                  .toByteString
+                  .valueOrFail("serializing topology transaction"),
                 Seq.empty,
               )
             )

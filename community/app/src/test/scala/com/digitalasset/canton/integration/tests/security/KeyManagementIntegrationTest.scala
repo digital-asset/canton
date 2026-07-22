@@ -391,7 +391,9 @@ sealed trait KeyManagementIntegrationTest
         privateKeyName: Option[KeyName],
     ) = {
 
-      val cryptoKeyPairSerialized = cryptoKeyPair.toProtoCryptoKeyPairV30.toByteString
+      val cryptoKeyPairSerialized = cryptoKeyPair.toProtoCryptoKeyPairV30
+        .valueOrFail("serializing crypto key pair")
+        .toByteString
 
       val force = true
       // Delete the secret key before re-uploading

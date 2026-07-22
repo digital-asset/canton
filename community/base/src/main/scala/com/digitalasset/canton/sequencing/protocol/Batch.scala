@@ -13,7 +13,7 @@ import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{MediatorId, Member}
-import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress}
+import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -67,7 +67,6 @@ final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
     val batch =
       v30.Batch(envelopes = envelopes.map(_.toClosedUncompressedEnvelopeUnsafe.toProtoV30))
     val uncompressed = checkedToByteString(batch)
-    // TODO(i10428): if (uncompressed.size > maxBytesToDecompress) we should fail
     val compressed = ByteStringUtil.compressGzip(uncompressed)
     v30.CompressedBatch(
       algorithm = v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP,
@@ -111,9 +110,9 @@ final case class Batch[+Env <: Envelope[?]] private (envelopes: List[Env])(
 }
 
 /** A batch that has been received but not yet decompressed. It intentionally retains the original
-  * wire proto so that decompression can be deferred until a
-  * [[com.digitalasset.canton.util.MaxBytesToDecompress]] bound, derived from the topology snapshot
-  * at the event's timestamp, is available. Re-serialization simply hands the retained proto back.
+  * wire proto so that decompression can be deferred until a [[DecompressionPolicy]], derived from
+  * the topology snapshot at the event's timestamp, is available. Re-serialization simply hands the
+  * retained proto back.
   */
 final case class CompressedBatch(proto: ProtoBatch) extends GenBatch[Nothing] {
   override private[protocol] def toProtoV30: v30.CompressedBatch =
@@ -130,11 +129,11 @@ final case class CompressedBatch(proto: ProtoBatch) extends GenBatch[Nothing] {
     }
 
   def decompress(
-      maxBytesToDecompress: MaxBytesToDecompress
+      decompressionPolicy: DecompressionPolicy
   ): ParsingResult[Batch[ClosedEnvelope]] =
     proto match {
-      case ProtoBatchV30(wrapped) => Batch.fromProtoV30(maxBytesToDecompress, wrapped)
-      case ProtoBatchV31(wrapped) => Batch.fromProtoV31(maxBytesToDecompress, wrapped)
+      case ProtoBatchV30(wrapped) => Batch.fromProtoV30(decompressionPolicy, wrapped)
+      case ProtoBatchV31(wrapped) => Batch.fromProtoV31(decompressionPolicy, wrapped)
     }
 
   override protected def pretty: Pretty[CompressedBatch.this.type] = prettyOfClass()
@@ -143,7 +142,7 @@ final case class CompressedBatch(proto: ProtoBatch) extends GenBatch[Nothing] {
 object Batch
     extends VersioningCompanionContext2[Batch[Envelope[?]], Batch[
       ClosedEnvelope
-    ], MaxBytesToDecompress] {
+    ], DecompressionPolicy] {
 
   override def name: String = "Batch"
 
@@ -182,12 +181,16 @@ object Batch
     Batch(envelopes.toList)(protocolVersionRepresentativeFor(protocolVersion))
 
   private[protocol] def fromProtoV30(
-      maxBytesToDecompress: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       batchProto: v30.CompressedBatch,
   ): ParsingResult[Batch[ClosedEnvelope]] = {
     val v30.CompressedBatch(algorithm, compressed) = batchProto
     for {
-      uncompressed <- decompress(algorithm, compressed, maxBytesToDecompress)
+      uncompressed <- decompress(
+        algorithm,
+        compressed,
+        DecompressionBudget(decompressionPolicy.limit),
+      )
       uncompressedBatchProto <- ProtoConverter.protoParser(v30.Batch.parseFrom)(uncompressed)
       v30.Batch(envelopesProto) = uncompressedBatchProto
       envelopes <- envelopesProto.toList.traverse(ClosedUncompressedEnvelope.fromProtoV30)
@@ -196,16 +199,19 @@ object Batch
   }
 
   private[protocol] def fromProtoV31(
-      maxBytesToDecompress: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       batchProto: v31.CompressedBatch,
   ): ParsingResult[Batch[ClosedEnvelope]] = {
     val v31.CompressedBatch(protoAlgorithm, compressedRecipients, compressedEnvelopes) = batchProto
 
+    val allocator = decompressionPolicy.newBatchAllocator()
+
     for {
+      // The recipients blob is always bounded on its own.
       decompressedRecipientsBytes <- decompress(
         protoAlgorithm,
         compressedRecipients,
-        maxBytesToDecompress,
+        DecompressionBudget(decompressionPolicy.limit),
       )
       decompressedRecipientsProto <- ProtoConverter.protoParser(
         v31.CompressedBatch.DecompressedRecipients.parseFrom
@@ -225,7 +231,7 @@ object Batch
             envelopes,
             recipients,
             algorithm,
-          )(maxBytesToDecompress)
+          )(allocator.nextEnvelopeBudget())
         },
         InvariantViolation(
           None,
@@ -240,17 +246,26 @@ object Batch
   private[protocol] def decompress(
       algorithm: v30.CompressedBatch.CompressionAlgorithm,
       compressed: ByteString,
-      maxRequestSize: MaxBytesToDecompress,
+      decompressionBudget: DecompressionBudget,
   ): ParsingResult[ByteString] =
     algorithm match {
       case v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED =>
         Right(compressed)
       case v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP =>
-        ByteStringUtil
-          .decompressGzip(compressed, maxBytesLimit = maxRequestSize)
-          .leftMap(_.toProtoDeserializationError)
+        decompressionBudget.decompressGzip(compressed)
       case _ => Left(FieldNotSet("CompressedBatch.Algorithm"))
     }
+
+  /** Rebinds the deferred decompression of the batch's envelopes to the given policy. */
+  def withDecompressionPolicy(
+      batch: Batch[ClosedEnvelope],
+      decompressionPolicy: DecompressionPolicy,
+  ): Batch[ClosedEnvelope] = {
+    val allocator = decompressionPolicy.newBatchAllocator()
+    Batch(batch.envelopes.map(_.withDecompressionBudget(allocator.nextEnvelopeBudget())))(
+      batch.representativeProtocolVersion
+    )
+  }
 
   /** Constructs a batch with no envelopes */
   def empty[Env <: Envelope[?]](protocolVersion: ProtocolVersion): Batch[Env] =

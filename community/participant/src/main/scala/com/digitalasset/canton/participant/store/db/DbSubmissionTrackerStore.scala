@@ -85,7 +85,7 @@ class DbSubmissionTrackerStore(
   override protected[this] def pruning_status_table: String & Singleton =
     "par_fresh_submitted_transaction_pruning"
 
-  override protected[canton] def doPrune(
+  override protected def doPrune(
       beforeAndIncluding: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {

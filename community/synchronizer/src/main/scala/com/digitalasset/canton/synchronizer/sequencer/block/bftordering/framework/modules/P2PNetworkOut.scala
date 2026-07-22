@@ -50,7 +50,9 @@ object P2PNetworkOut {
         p2pEndpointId: P2PEndpoint.Id,
         callback: Boolean => Unit,
     ) extends Admin
-    final case class ListConfiguredEndpoints(callback: Seq[P2PEndpoint] => Unit) extends Admin
+    final case class ListConfiguredEndpoints(
+        callback: Seq[(P2PEndpoint, Option[BftNodeId])] => Unit
+    ) extends Admin
     final case class GetStatus(
         callback: PeerNetworkStatus => Unit,
         p2pEndpointIds: Option[Iterable[P2PEndpoint.Id]] = None,

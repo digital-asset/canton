@@ -18,7 +18,7 @@ import com.digitalasset.canton.sequencing.{EnvelopeBox, RawSignedContentEnvelope
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
-import com.digitalasset.canton.util.{MaxBytesToDecompress, NoCopy}
+import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -82,7 +82,7 @@ sealed trait SequencedEvent[+B <: GenBatch[?]]
 object SequencedEvent
     extends VersioningCompanionContextMemoization2[
       SequencedEvent[GenBatch[?]],
-      MaxBytesToDecompress,
+      DecompressionPolicy,
       SequencedEvent[Batch[ClosedEnvelope]],
       Unit,
     ] {
@@ -112,25 +112,25 @@ object SequencedEvent
   }
 
   private[sequencing] def fromProtoV30(
-      maxBytesToDecompress: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       sequencedEventP: v30.SequencedEvent,
   )(
       bytes: ByteString
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
     fromProtoGeneric(
       ProtoSequencedEventV30(sequencedEventP),
-      decompressBatch(maxBytesToDecompress),
+      decompressBatch(decompressionPolicy),
     )(bytes)
 
   private[sequencing] def fromProtoV31(
-      maxBytesToDecompress: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       sequencedEventP: v31.SequencedEvent,
   )(
       bytes: ByteString
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
     fromProtoGeneric(
       ProtoSequencedEventV31(sequencedEventP),
-      decompressBatch(maxBytesToDecompress),
+      decompressBatch(decompressionPolicy),
     )(bytes)
 
   private[sequencing] def fromProtoV30Compressed(
@@ -154,9 +154,9 @@ object SequencedEvent
     event.toProtoV31
 
   private def decompressBatch(
-      maxBytesToDecompress: MaxBytesToDecompress
+      decompressionPolicy: DecompressionPolicy
   )(proto: ProtoBatch): ParsingResult[Batch[ClosedEnvelope]] =
-    CompressedBatch(proto).decompress(maxBytesToDecompress)
+    CompressedBatch(proto).decompress(decompressionPolicy)
 
   /** Generic deserialization that delegates the batch decoding to `decodeBatch`. This allows either
     * eagerly decompressing the batch (see [[decompressBatch]]) or keeping it compressed (see
@@ -253,13 +253,13 @@ object SequencedEvent
   }
 
   def fromByteStringOpen(
-      maxBytesToDecompress: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
   )(
       bytes: ByteString
   ): ParsingResult[DecompressedSequencedEvent[DefaultOpenEnvelope]] =
-    fromTrustedByteString(maxBytesToDecompress)(bytes).flatMap {
+    fromTrustedByteString(decompressionPolicy)(bytes).flatMap {
       case deliver: Deliver[Batch[ClosedEnvelope]] =>
         deliver.traverse[ParsingResult, ClosedEnvelope, DefaultOpenEnvelope](
           _.toOpenEnvelope(hashOps, protocolVersion)
@@ -287,10 +287,10 @@ object SequencedEvent
     */
   private[canton] def decompress(
       event: SequencedEvent[GenBatch[ClosedEnvelope]],
-      maxBytesToDecompress: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
     traverseBatch(event) {
-      case compressed: CompressedBatch => compressed.decompress(maxBytesToDecompress)
+      case compressed: CompressedBatch => compressed.decompress(decompressionPolicy)
       case batch: Batch[ClosedEnvelope] => Right(batch)
     }
 

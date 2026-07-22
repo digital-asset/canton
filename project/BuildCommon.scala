@@ -704,6 +704,7 @@ object BuildCommon {
       `magnolify-addon`,
       `scalatest-addon`,
       `base-errors`,
+      `base-validation`,
       `daml-adjustable-clock`,
       `daml-tls`,
       `kms-driver-api`,
@@ -1718,6 +1719,16 @@ object BuildCommon {
         libraryDependencies += scalatest,
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",
+      )
+
+    lazy val `base-validation` = project
+      .in(file("base/validation"))
+      .dependsOn(`wartremover-annotations`)
+      .settings(
+        sharedCommunitySettings ++ cantonWarts,
+        libraryDependencies ++= Seq(
+          scalatest % Test
+        ),
       )
 
     lazy val `base-errors` = project

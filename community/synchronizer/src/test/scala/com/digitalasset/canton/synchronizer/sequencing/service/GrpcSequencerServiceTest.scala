@@ -335,10 +335,12 @@ class GrpcSequencerServiceTest
         .modify(_.map {
           case closedEnvelope: ClosedEnvelope =>
             if (testedProtocolVersion >= ProtocolVersion.v35) {
-              closedEnvelope.toClosedCompressedEnvelope
-                .copy(bytes = ByteString.empty)(maxBytesToDecompress =
-                  MaxBytesToDecompress.HardcodedDefault
-                )
+              val compressed = closedEnvelope.toClosedCompressedEnvelope
+              ClosedCompressedEnvelope.create(
+                ByteString.empty,
+                compressed.recipients,
+                compressed.algorithm,
+              )(DecompressionBudget(MaxBytesToDecompress.HardcodedDefault))
             } else {
               closedEnvelope.toClosedUncompressedEnvelopeUnsafe.copy(bytes = ByteString.empty)
             }

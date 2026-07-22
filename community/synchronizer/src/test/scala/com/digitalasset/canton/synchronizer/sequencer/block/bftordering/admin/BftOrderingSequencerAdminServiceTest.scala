@@ -26,7 +26,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  EpochNumber,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Mempool,
@@ -72,6 +75,7 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
                 PeerEndpoint.Security.Tls(
                   TlsPeerEndpoint(customServerTrustCertificate = None, clientCertificate = None)
                 ),
+                sequencerId = None,
               )
             )
           )
@@ -140,7 +144,7 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         spy[ModuleRef[Mempool.Admin]](fakeIgnoringModule[Mempool.Admin])
       val consensusAdminSpy =
         spy[ModuleRef[Output.Admin]](fakeIgnoringModule[Output.Admin])
-      val resultPromise = Promise[Seq[P2PEndpoint]]()
+      val resultPromise = Promise[Seq[(P2PEndpoint, Option[BftNodeId])]]()
       resultPromise.success(Seq.empty)
       val bftOrderingSequencerAdminService =
         new BftOrderingSequencerAdminService(
@@ -154,7 +158,8 @@ class BftOrderingSequencerAdminServiceTest extends AsyncWordSpec with BftSequenc
         .listConfiguredEndpoints(ListConfiguredEndpointsRequest())
         .map { response =>
           verify(p2PNetworkOutAdminSpy).asyncSend(
-            P2PNetworkOut.Admin.ListConfiguredEndpoints(any[Seq[P2PEndpoint] => Unit])
+            P2PNetworkOut.Admin
+              .ListConfiguredEndpoints(any[Seq[(P2PEndpoint, Option[BftNodeId])] => Unit])
           )(any[TraceContext], any[MetricsContext])
           verifyZeroInteractions(mempoolAdminSpy, consensusAdminSpy)
           response.endpoints shouldBe empty

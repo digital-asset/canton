@@ -270,13 +270,17 @@ class SyncCryptoVerifier(
     ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] =
       for {
         // validate signature of delegation (key validity is tested below)
+        delegationHash <- SignatureDelegation
+          .generateHash(
+            synchronizerId,
+            signatureDelegation.sessionKey,
+            signatureDelegation.validityPeriod,
+          )
+          .leftMap[SignatureCheckError](SignatureCheckError.DelegationHashingError(_))
+          .toEitherT[FutureUnlessShutdown]
         _ <- verifyPublicApiWithLongTermKeys
           .verifySignature(
-            SignatureDelegation.generateHash(
-              synchronizerId,
-              signatureDelegation.sessionKey,
-              signatureDelegation.validityPeriod,
-            ),
+            delegationHash,
             longTermKey,
             signatureDelegation.signature,
             usage,

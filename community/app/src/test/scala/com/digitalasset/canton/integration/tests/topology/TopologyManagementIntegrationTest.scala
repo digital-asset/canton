@@ -47,6 +47,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Submission,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.v1.UntypedVersionedMessage
 import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level.DEBUG
@@ -82,6 +83,88 @@ trait TopologyManagementIntegrationTest
     }
 
   "A Canton operator" can {
+
+    // This test is a reproducer for https://github.com/DACH-NY/canton/issues/34248
+    // See the issue for details
+    "gracefully handle submissions with serial == Int.max" onlyRunLessThan ProtocolVersion.v36 in {
+      implicit env =>
+        import env.*
+        val party = PartyId.tryCreate("localalice", participant1.namespace)
+        val ptpMapping = PartyToParticipant.tryCreate(
+          party,
+          PositiveInt.one,
+          Seq(HostingParticipant(participant1.id, ParticipantPermission.Submission)),
+        )
+
+        val ptpReplace = TopologyTransaction
+          .create(
+            TopologyChangeOp.Replace,
+            PositiveInt.tryCreate(Int.MaxValue - 1),
+            ptpMapping,
+            testedProtocolVersion,
+          )
+          .value
+        val signedPtpReplace = SignedTopologyTransaction
+          .signAndCreate(
+            ptpReplace,
+            NonEmpty.mk(Set, participant1.fingerprint),
+            isProposal = false,
+            participant1.crypto.privateCrypto,
+            testedProtocolVersion,
+          )
+          .futureValueUS
+          .value
+        participant1.topology.transactions.load(Seq(signedPtpReplace), daId)
+
+        val ptpRemove = TopologyTransaction
+          .create(
+            TopologyChangeOp.Remove,
+            PositiveInt.MaxValue,
+            ptpMapping,
+            testedProtocolVersion,
+          )
+          .value
+        val signedPtpRemove = SignedTopologyTransaction
+          .signAndCreate(
+            ptpRemove,
+            NonEmpty.mk(Set, participant1.fingerprint),
+            isProposal = false,
+            participant1.crypto.privateCrypto,
+            testedProtocolVersion,
+          )
+          .futureValueUS
+          .value
+        participant1.topology.transactions.load(Seq(signedPtpRemove), daId)
+
+        val ptpReplace2 = TopologyTransaction
+          .create(
+            TopologyChangeOp.Replace,
+            // The serial does not matter here to trigger the bug
+            // The current serial is already at Int.Max
+            PositiveInt.three,
+            ptpMapping,
+            testedProtocolVersion,
+          )
+          .value
+        val signedPtpReplace2 = SignedTopologyTransaction
+          .signAndCreate(
+            ptpReplace2,
+            NonEmpty.mk(Set, participant1.fingerprint),
+            isProposal = false,
+            participant1.crypto.privateCrypto,
+            testedProtocolVersion,
+          )
+          .futureValueUS
+          .value
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          participant1.topology.transactions.load(Seq(signedPtpReplace2), daId),
+          _.errorMessage should (include("INVALID_ARGUMENT") and include(
+            "A security-sensitive error has been received"
+          )),
+        )
+
+    }
+
     "reconnect a participant to a synchronizer twice" in { implicit env =>
       import env.*
 
@@ -424,7 +507,7 @@ trait TopologyManagementIntegrationTest
       val ptkProto = com.digitalasset.canton.protocol.v30.PartyToKeyMapping(
         party.toProtoPrimitive,
         threshold = 5,
-        Seq(partyKey.toProtoV30),
+        Seq(partyKey.toProtoV30.valueOrFail("serializing public key")),
       )
 
       PartyToKeyMapping.fromProtoV30(ptkProto).isRight shouldBe true
@@ -441,7 +524,10 @@ trait TopologyManagementIntegrationTest
       val ptkProto = com.digitalasset.canton.protocol.v30.PartyToKeyMapping(
         party.toProtoPrimitive,
         threshold = 1,
-        signingKeys = Seq(partyKey.toProtoV30, partyKey.toProtoV30),
+        signingKeys = Seq(
+          partyKey.toProtoV30.valueOrFail("serializing public key"),
+          partyKey.toProtoV30.valueOrFail("serializing public key"),
+        ),
       )
 
       val transaction = com.digitalasset.canton.protocol.v30.TopologyTransaction(
@@ -539,7 +625,7 @@ trait TopologyManagementIntegrationTest
       val partyKey =
         global_secret.keys.secret.generate_keys(PositiveInt.one, usage = SigningKeyUsage.All).head1
 
-      val partyToParticipantMapping = TopologyTransaction(
+      val partyToParticipantMapping = TopologyTransaction.tryCreate(
         TopologyChangeOp.Replace,
         PositiveInt.one,
         PartyToParticipant.tryCreate(
@@ -594,7 +680,7 @@ trait TopologyManagementIntegrationTest
       val partyKey =
         global_secret.keys.secret.generate_keys(PositiveInt.one, usage = SigningKeyUsage.All).head1
 
-      val partyToKeyMapping = TopologyTransaction(
+      val partyToKeyMapping = TopologyTransaction.tryCreate(
         TopologyChangeOp.Replace,
         PositiveInt.one,
         PartyToKeyMapping.tryCreate(
@@ -1153,7 +1239,7 @@ trait TopologyManagementIntegrationTest
           .generate_signing_key("test-key1", SigningKeyUsage.NamespaceOnly)
       val tx = genTx(
         participant1,
-        TopologyTransaction(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Remove,
           PositiveInt.tryCreate(1),
           NamespaceDelegation.tryCreate(participant1.namespace, key1, CanSignAllMappings),
@@ -1188,7 +1274,7 @@ trait TopologyManagementIntegrationTest
             .generate_signing_key("unauthorized-sequencer", SigningKeyUsage.ProtocolOnly)
         val tx = genTx(
           participant1,
-          TopologyTransaction(
+          TopologyTransaction.tryCreate(
             TopologyChangeOp.Replace,
             PositiveInt.tryCreate(2),
             OwnerToKeyMapping.tryCreate(sequencer1.id, NonEmpty(Seq, key)),
@@ -1250,7 +1336,10 @@ trait TopologyManagementIntegrationTest
       )
 
       participant1.keys.public
-        .upload(p2Key.toByteString(testedProtocolVersion), Some("p2-some-key"))
+        .upload(
+          p2Key.toByteString(testedProtocolVersion).valueOrFail("serializing public key"),
+          Some("p2-some-key"),
+        )
       assertThrowsAndLogsCommandFailures(
         add(force = true),
         _.shouldBeCantonErrorCode(TopologyManagerError.SecretKeyNotInStore),
@@ -1309,7 +1398,7 @@ trait TopologyManagementIntegrationTest
 
       def create(serial: Int) = genTx(
         participant1,
-        TopologyTransaction(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.tryCreate(serial),
           NamespaceDelegation.tryCreate(participant1.namespace, key1, CanSignAllMappings),
@@ -1669,13 +1758,13 @@ trait TopologyManagementIntegrationTest
       )
 
       transactions should contain theSameElementsAs List(
-        TopologyTransaction.apply(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.one,
           namespaceDelegationMapping,
           testedProtocolVersion,
         ),
-        TopologyTransaction.apply(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.one,
           partyHostingMapping,
@@ -1794,7 +1883,7 @@ trait TopologyManagementIntegrationTest
 
       // Now we expect the serial returned to be 2 (because it's the second PartyToParticipant mapping for Max)
       transactions2 should contain theSameElementsAs List(
-        TopologyTransaction.apply(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           PositiveInt.two,
           hostingTransaction2,

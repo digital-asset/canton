@@ -20,6 +20,11 @@ import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
 import com.digitalasset.canton.protocol.{LfHash, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.transaction.{
+  SynchronizerParametersState as TopologySynchronizerParametersState,
+  TopologyChangeOp,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.ShowUtil
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -114,6 +119,7 @@ object Update {
   final case class TopologyTransactionEffective(
       updateId: UpdateId,
       events: Set[TopologyTransactionEffective.TopologyEvent],
+      genericTopologyEvents: Seq[TopologyTransactionEffective.GenericTopologyEvent],
       synchronizerId: SynchronizerId,
       effectiveTime: CantonTimestamp,
   )(implicit override val traceContext: TraceContext)
@@ -165,6 +171,23 @@ object Update {
         Logging.recordTime(topologyTransactionEffective.recordTime.toLf),
         Logging.synchronizerId(topologyTransactionEffective.synchronizerId),
       )
+    }
+
+    sealed trait GenericTopologyEvent
+
+    object GenericTopologyEvent {
+      final case class SynchronizerParametersState(payload: ByteString) extends GenericTopologyEvent
+      object SynchronizerParametersState {
+
+        /** Canonical way to serialize a
+          * [[com.digitalasset.canton.topology.transaction.TopologyTransaction]] with the mapping
+          * [[com.digitalasset.canton.topology.transaction.SynchronizerParametersState]] for the
+          * indexer update.
+          */
+        def fromTopologyTransaction(
+            tx: TopologyTransaction[TopologyChangeOp.Replace, TopologySynchronizerParametersState]
+        ): SynchronizerParametersState = SynchronizerParametersState(tx.toByteStringChecked)
+      }
     }
 
     val pretty: Pretty[TopologyTransactionEffective] =

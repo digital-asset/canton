@@ -16,7 +16,6 @@ import com.digitalasset.canton.serialization.{
   ProtocolVersionedMemoizedEvidence,
 }
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -98,14 +97,13 @@ final case class SubmissionRequest private (
   def updateMaxSequencingTime(maxSequencingTime: CantonTimestamp): SubmissionRequest =
     copy(maxSequencingTime = maxSequencingTime)
 
-  /** Sets the bound for the deferred decompression of the batch's envelopes. Does not affect
-    * serialization, so the memoized bytes are preserved.
+  /** Sets the policy for the deferred decompression of the batch's envelopes.
     */
-  def withMaxBytesToDecompress(maxBytesToDecompress: MaxBytesToDecompress): SubmissionRequest =
+  def withDecompressionPolicy(decompressionPolicy: DecompressionPolicy): SubmissionRequest =
     new SubmissionRequest(
       sender,
       messageId,
-      batch.map(_.withMaxBytesToDecompress(maxBytesToDecompress)),
+      Batch.withDecompressionPolicy(batch, decompressionPolicy),
       maxSequencingTime,
       topologyTimestamp,
       aggregationRule,
@@ -209,7 +207,7 @@ final case class SubmissionRequest private (
 object SubmissionRequest
     extends VersioningCompanionContextMemoizationWithDependency[
       SubmissionRequest,
-      MaxBytesToDecompress,
+      DecompressionPolicy,
       // Recipients is a dependency because its versioning scheme needs to be aligned with this one
       // such that SubmissionRequest and Recipients can be versioned independently
       Recipients,
@@ -292,31 +290,31 @@ object SubmissionRequest
   }
 
   def fromProtoV30(
-      maxRequestSize: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       requestP: v30.SubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] =
-    fromProtoGeneric(maxRequestSize, ProtoSubmissionRequestV30(requestP))(bytes)
+    fromProtoGeneric(decompressionPolicy, ProtoSubmissionRequestV30(requestP))(bytes)
 
   def fromProtoV31(
-      maxRequestSize: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       requestP: v31.SubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] =
-    fromProtoGeneric(maxRequestSize, ProtoSubmissionRequestV31(requestP))(bytes)
+    fromProtoGeneric(decompressionPolicy, ProtoSubmissionRequestV31(requestP))(bytes)
 
   private def fromProtoGeneric(
-      maxRequestSize: MaxBytesToDecompress,
+      decompressionPolicy: DecompressionPolicy,
       protoSubmissionRequest: ProtoSubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] = {
     def batchFromProto: ParsingResult[Batch[ClosedEnvelope]] = protoSubmissionRequest match {
       case ProtoSubmissionRequestV30(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV30(maxRequestSize, _),
+          Batch.fromProtoV30(decompressionPolicy, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
       case ProtoSubmissionRequestV31(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV31(maxRequestSize, _),
+          Batch.fromProtoV31(decompressionPolicy, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )

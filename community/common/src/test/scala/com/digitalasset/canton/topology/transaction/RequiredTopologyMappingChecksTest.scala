@@ -815,7 +815,7 @@ class RequiredTopologyMappingChecksTest
         val tx = factory.mkAdd(mapping)
         // we manipulate here the signed topo tx so that we get the faulty mapping
         val invalid = tx.copy(transaction =
-          TopologyTransaction(tx.operation, tx.serial, mapping, testedProtocolVersion)
+          TopologyTransaction.tryCreate(tx.operation, tx.serial, mapping, testedProtocolVersion)
         )
         checkTransaction(checks, invalid) shouldBe Left(
           TopologyTransactionRejection.RequiredMapping.InvalidTopologyMapping(
@@ -1058,7 +1058,7 @@ class RequiredTopologyMappingChecksTest
           // this additional logic into the mapping (which is now duplicated but dropping it from the
           // parser can only be done once we are sure that here are no pathological txs in the topo state
           tx.copy(transaction =
-            TopologyTransaction(
+            TopologyTransaction.tryCreate(
               tx.operation,
               tx.serial,
               mapping(threshold, withObs = true),
@@ -1250,7 +1250,7 @@ class RequiredTopologyMappingChecksTest
             serial = PositiveInt.one,
           )
           tx.copy(transaction =
-            TopologyTransaction(
+            TopologyTransaction.tryCreate(
               tx.operation,
               tx.serial,
               mapping(threshold, observers),

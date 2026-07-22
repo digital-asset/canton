@@ -316,6 +316,7 @@ class GrpcTopologyManagerReadService(
         idFilter = None,
         namespaceFilter = Some(request.filterNamespace),
       )
+
       resultsE = transactions
         .collect {
           case (result, x: NamespaceDelegation)
@@ -326,23 +327,31 @@ class GrpcTopologyManagerReadService(
           val protoVersion =
             TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          (if (protoVersion == 30)
-             ListNamespaceDelegationResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize namespace delegations using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListNamespaceDelegationResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
+          val itemE = if (protoVersion == 30) {
+            elem.toProtoNamespaceDelegationV30.map(
+              ListNamespaceDelegationResponse.Result.Item.V30(_)
             )
-          )
-        }
+          } else {
+            s"Not supported".asLeft
+          }
 
+          itemE
+            .leftMap[RpcError](err =>
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize namespace delegations using proto version $protoVersion: $err"
+                )
+            )
+            .map(item =>
+              adminProto.ListNamespaceDelegationResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = item,
+              )
+            )
+        }
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListNamespaceDelegationResponse(results = results)
+
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -394,21 +403,26 @@ class GrpcTopologyManagerReadService(
           val protoVersion =
             TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          (if (protoVersion == 30)
-             ListOwnerToKeyMappingResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize owner to key mapping using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListOwnerToKeyMappingResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
-            )
-          )
-        }
+          val itemE = if (protoVersion == 30) {
+            elem.toProtoOwnerToKeyMappingV30.map(ListOwnerToKeyMappingResponse.Result.Item.V30(_))
+          } else {
+            s"Not supported".asLeft
+          }
 
+          itemE
+            .leftMap[RpcError](err =>
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize owner to key mappings using proto version $protoVersion: $err"
+                )
+            )
+            .map(item =>
+              adminProto.ListOwnerToKeyMappingResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = item,
+              )
+            )
+        }
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListOwnerToKeyMappingResponse(results = results)
     CantonGrpcUtil.mapErrNewEUS(ret)
@@ -430,23 +444,29 @@ class GrpcTopologyManagerReadService(
           val protoVersion =
             TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          (if (protoVersion == 30)
-             ListPartyToKeyMappingResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize party to key mappings using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListPartyToKeyMappingResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
-            )
-          )
-        }
+          val itemE = if (protoVersion == 30) {
+            elem.toProtoPartyToKeyMappingV30.map(ListPartyToKeyMappingResponse.Result.Item.V30(_))
+          } else {
+            s"Not supported".asLeft
+          }
 
+          itemE
+            .leftMap[RpcError](err =>
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize party to key mappings using proto version $protoVersion: $err"
+                )
+            )
+            .map(item =>
+              adminProto.ListPartyToKeyMappingResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = item,
+              )
+            )
+        }
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListPartyToKeyMappingResponse(results = results)
+
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -556,6 +576,7 @@ class GrpcTopologyManagerReadService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     def partyPredicate(x: PartyToParticipant) =
       x.partyId.toProtoPrimitive.startsWith(request.filterParty)
+
     def participantPredicate(x: PartyToParticipant) =
       request.filterParticipant.isEmpty || x.participantIds.exists(
         _.toProtoPrimitive.contains(request.filterParticipant)
@@ -576,23 +597,29 @@ class GrpcTopologyManagerReadService(
           val protoVersion =
             TopologyTransaction.protoVersionFor(context.representativeProtocolVersion).v
 
-          (if (protoVersion == 30)
-             ListPartyToParticipantResponse.Result.Item.V30(elem.toProto).asRight[RpcError]
-           else
-             TopologyManagerError.InternalError
-               .Unexpected(
-                 s"Cannot serialize party to participant mappings using proto version $protoVersion"
-               )
-               .asLeft).map(item =>
-            adminProto.ListPartyToParticipantResponse.Result(
-              context = Some(createBaseResult(context)),
-              item = item,
-            )
-          )
-        }
+          val itemE = if (protoVersion == 30) {
+            elem.toProtoPartyToParticipantV30.map(ListPartyToParticipantResponse.Result.Item.V30(_))
+          } else {
+            s"Not supported".asLeft
+          }
 
+          itemE
+            .leftMap[RpcError](err =>
+              TopologyManagerError.InternalError
+                .Unexpected(
+                  s"Cannot serialize party to participant mappings using proto version $protoVersion: $err"
+                )
+            )
+            .map(item =>
+              adminProto.ListPartyToParticipantResponse.Result(
+                context = Some(createBaseResult(context)),
+                item = item,
+              )
+            )
+        }
       results <- EitherT.fromEither[FutureUnlessShutdown](resultsE)
     } yield adminProto.ListPartyToParticipantResponse(results = results)
+
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
@@ -756,7 +783,7 @@ class GrpcTopologyManagerReadService(
       (out: OutputStream) => getTopologySnapshot(request, out),
       responseObserver,
       byteString => ExportTopologySnapshotResponse(byteString),
-      processingTimeout.unbounded.duration,
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 
@@ -793,7 +820,7 @@ class GrpcTopologyManagerReadService(
       (out: OutputStream) => getTopologySnapshotV2(request, out),
       responseObserver,
       byteString => ExportTopologySnapshotV2Response(byteString),
-      processingTimeout.unbounded.duration,
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 
@@ -880,7 +907,7 @@ class GrpcTopologyManagerReadService(
       (out: OutputStream) => getGenesisState(request.synchronizerStore, request.timestamp, out),
       responseObserver,
       byteString => GenesisStateResponse(byteString),
-      processingTimeout.unbounded.duration,
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 
@@ -905,7 +932,7 @@ class GrpcTopologyManagerReadService(
       (out: OutputStream) => getGenesisStateV2(request.synchronizerStore, request.timestamp, out),
       responseObserver,
       byteString => GenesisStateV2Response(byteString),
-      processingTimeout.unbounded.duration,
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 
@@ -991,7 +1018,7 @@ class GrpcTopologyManagerReadService(
         getLogicalUpgradeState(request.synchronizerStore, request.timestamp, out),
       responseObserver,
       byteString => SequencerLsuStateResponse(byteString),
-      processingTimeout.unbounded.duration,
+      processingTimeout.adminStreamOpenBound.duration,
     )
   }
 

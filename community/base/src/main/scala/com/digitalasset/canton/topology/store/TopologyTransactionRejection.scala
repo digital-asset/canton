@@ -45,6 +45,14 @@ object TopologyTransactionRejection {
           expected = Some(expected),
         )
     }
+    case object MaxSerialReached extends TopologyTransactionRejection {
+      val message = "Max serial has been reached for the transaction."
+      override def asString: String = message
+      override protected def pretty: Pretty[MaxSerialReached.type] =
+        prettyOfClass(param("message", _.message.singleQuoted))
+      override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
+        TopologyManagerError.TopologyManagerAlarm.Warn(message)
+    }
     final case class InternalError(message: String) extends TopologyTransactionRejection {
       override def asString: String = message
       override protected def pretty: Pretty[InternalError] =

@@ -61,11 +61,13 @@ object TopologySigningHelper {
               )
             )
         )
-        converted = TopologyTransaction(
-          tx.transaction.operation,
-          tx.transaction.serial,
-          tx.transaction.mapping,
-          protocolVersion,
+        converted <- EitherT.fromEither[FutureUnlessShutdown](
+          TopologyTransaction.create(
+            tx.transaction.operation,
+            tx.transaction.serial,
+            tx.transaction.mapping,
+            protocolVersion,
+          )
         )
         resigned <- SignedTopologyTransaction
           .signAndCreate(

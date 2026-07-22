@@ -9,7 +9,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecrypterTest {
   // TODO(#32393): Enable after implementing the new decryption logic.
   "A ViewMessageDecrypter version 2 (using ciphertext ID)" ignore {
-    if (testedProtocolVersion > ProtocolVersion.v35)
+    if (testedProtocolVersion >= ProtocolVersion.transparency)
       behave like viewMessageDecrypterTest()
   }
 

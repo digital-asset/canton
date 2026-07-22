@@ -83,6 +83,11 @@ class ParticipantReplicaManager(
           _ <- participantServices.ledgerApiServerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Server started")
 
+          _ <- participantServices.acsDigestProcessorManagerO.traverse(_.initializeNext())
+          _ = participantServices.acsDigestProcessorManagerO.foreach(_ =>
+            logger.info("Participant replica is becoming active: ACS digest processing started")
+          )
+
           // Start up the traffic enforcement in-process app and backend (if enabled)
           _ <- participantServices.trafficEnforcementAppContainerO.traverse(
             _.initializeNext().map(_ =>
@@ -159,6 +164,9 @@ class ParticipantReplicaManager(
             "Participant replica is becoming passive: Traffic enforcement app stopped"
           )
         }
+
+        participantServices.acsDigestProcessorManagerO.foreach(_.closeCurrent())
+        logger.info("Participant replica is becoming passive: ACS digest processing stopped")
 
         // Stop the Ledger API server
         participantServices.ledgerApiServerContainer.closeCurrent()

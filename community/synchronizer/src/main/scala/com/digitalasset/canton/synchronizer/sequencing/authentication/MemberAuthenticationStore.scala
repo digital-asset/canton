@@ -49,13 +49,13 @@ final case class StoredAuthenticationToken(
 ) extends HasExpiry
 
 class MemberAuthenticationStore(
-    maxNoncesPerMember: PositiveInt,
     maxTokensPerMember: PositiveInt,
     val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
   private implicit val hasExpiryOrdering: Ordering[HasExpiry] = Ordering.by(_.expireAt)
-  private val nonces = new AtomicReference[Map[Member, List[StoredNonce]]](Map.empty)
+  // we store exactly one nonce per member and return it for each request until it is consumed or expired
+  private val nonces = new AtomicReference[Map[Member, StoredNonce]](Map.empty)
   // note we only need to remember the tokens by member so we can invalidate them on request
   private val tokens = new TrieMap[Member, List[StoredAuthenticationToken]]()
   private val tokenLookup = new TrieMap[AuthenticationToken, StoredAuthenticationToken]()
@@ -64,38 +64,81 @@ class MemberAuthenticationStore(
     Ordering[HasExpiry],
   )
 
-  def saveNonce(nonce: StoredNonce)(implicit traceContext: TraceContext): Unit = {
-    nonces
-      .getAndUpdate(_.updatedWith(nonce.member) {
-        case Some(nonces) =>
-          Some(nonce :: nonces.take(maxNoncesPerMember.value - 1))
-        case None => Some(List(nonce))
-      })
-      .get(nonce.member)
-      .foreach { previously =>
-        if (previously.sizeIs > maxNoncesPerMember.value - 1) {
-          // leave a hint in case anyone will ever hit this.
-          logger.info(
-            s"Dropping excess nonce for ${nonce.member} as max per member is ${maxNoncesPerMember.value}"
-          )
+  // ==============================================================================================
+  // NONCE OPERATIONS
+  // ==============================================================================================
+
+  /** If a nonce exists for the member, return it. If not, generate it using the passed generation
+    * logic in the by-name parameter.
+    */
+  def fetchOrGenerateNonce(member: Member, freshNonce: => StoredNonce): StoredNonce =
+    nonces.get().get(member) match {
+      case Some(existing) => existing
+      // case where the member doesn't exist as a key in the map
+      case None =>
+        // The nonce is generated only if it doesn't already exist
+        val generated = freshNonce
+
+        val finalMap = nonces.updateAndGet { currentMap =>
+          // Check again if the member exists as a key in the map.
+          // This prevents race conditions between threads calling the
+          // method concurrently, by ensuring the insertion is done
+          // only once by the winning thread.
+          if (currentMap.contains(member)) currentMap
+          // Insert the nonce only if the member is not in the current map
+          else currentMap + (member -> generated)
         }
-      }
-    // fine to add subsequently. we only need this to avoid doing a full-pass
-    // over all tokens when we clean them up, so we eventually remove older tokens from memory
-    expiryQueue.put(nonce)
-  }
 
-  private def noneIfEmpty[T](lst: List[T]): Option[List[T]] =
-    Option.when(lst.nonEmpty)(lst)
+        val activeNonce = finalMap.getOrElse(member, generated)
 
-  def fetchAndRemoveNonce(member: Member, nonce: Nonce): Option[StoredNonce] = {
-    val cur = nonces.getAndUpdate(_.updatedWith(member) {
-      case Some(nonces) =>
-        noneIfEmpty(nonces.filter(_.nonce != nonce))
-      case None => None
+        // Only queue for expiration if the generated nonce is still the active one
+        // The additional check is to mitigate race conditions
+        // if another thread generated and saved a nonce before this one, in which
+        // case we just take the existing, active nonce and discard the generated one.
+        if (activeNonce == generated) {
+          expiryQueue.put(generated)
+        }
+
+        activeNonce
+    }
+
+  /** Matches the provided nonce with the existing unique nonce stored for the given member and
+    * returns the stored nonce if it matches. If the nonce in the store does not match the provided
+    * nonce or exist, returns None.
+    */
+  def fetchNonceIfMatches(member: Member, nonce: Nonce)(implicit
+      traceContext: TraceContext
+  ): Option[StoredNonce] =
+    nonces.get().get(member) match {
+      case Some(storedNonce) if storedNonce.nonce == nonce =>
+        Some(storedNonce)
+      case Some(storedNonce) =>
+        logger.info(s"Received the wrong nonce $nonce for member $member. Stored: $storedNonce")
+        None
+      case None =>
+        None
+    }
+
+  /** Matches the provided nonce with the existing unique nonce stored for the given member and
+    * removes it if they are equal. If the nonce in the store does not match the provided nonce or
+    * exist, changes nothing. Returns true if the nonce was removed, and false otherwise.
+    */
+  def removeNonceIfMatches(member: Member, expectedNonce: Nonce): Boolean = {
+    val oldMap = nonces.getAndUpdate(_.updatedWith(member) {
+      // remove the nonce from the store if it exists
+      case Some(stored) if stored.nonce == expectedNonce => None
+      // no match, leave as is
+      case existing => existing
     })
-    cur.get(member).flatMap(_.find(_.nonce == nonce))
+
+    // Inspect the old snapshot to see if the present thread did the removing
+    // return true if the nonce was removed, false otherwise
+    oldMap.get(member).exists(_.nonce == expectedNonce)
   }
+
+  // ==============================================================================================
+  // TOKEN OPERATIONS
+  // ==============================================================================================
 
   def saveToken(token: StoredAuthenticationToken)(implicit traceContext: TraceContext): Unit = {
     tokens
@@ -125,10 +168,6 @@ class MemberAuthenticationStore(
     expiryQueue.put(token)
   }
 
-  @VisibleForTesting
-  def fetchTokens(member: Member): Seq[StoredAuthenticationToken] =
-    tokens.getOrElse(member, List.empty)
-
   def tokenForMemberAt(
       member: Member,
       token: AuthenticationToken,
@@ -138,6 +177,10 @@ class MemberAuthenticationStore(
 
   def fetchMemberOfTokenForInvalidation(token: AuthenticationToken): Option[Member] =
     tokenLookup.get(token).map(_.member)
+
+  // ==============================================================================================
+  // EXPIRATION & INVALIDATION
+  // ==============================================================================================
 
   def expireNoncesAndTokens(timestamp: CantonTimestamp): Unit = {
     // figure out which members need clean up
@@ -155,9 +198,8 @@ class MemberAuthenticationStore(
       nonces
         .updateAndGet(_.updatedWith(member) {
           // keep the nonces that expire in the future
-          case Some(nonces) =>
-            noneIfEmpty(nonces.filter(_.expireAt > timestamp))
-          case None => None
+          case Some(nonce) if nonce.expireAt > timestamp => Some(nonce)
+          case _ => None
         })
         .discard
       // iterate over the tokens which will expire and remove them from the lookup
@@ -195,4 +237,49 @@ class MemberAuthenticationStore(
         .discard
     }
   }
+  // ==============================================================================================
+  // INTERNAL HELPERS
+  // ==============================================================================================
+
+  private def noneIfEmpty[T](lst: List[T]): Option[List[T]] =
+    Option.when(lst.nonEmpty)(lst)
+
+  // ==============================================================================================
+  // METHODS ONLY FOR TESTING
+  // ==============================================================================================
+
+  @VisibleForTesting
+  def fetchTokens(member: Member): Seq[StoredAuthenticationToken] =
+    tokens.getOrElse(member, List.empty)
+
+  /** Return whatever nonce exists in the store for the member.
+    */
+  @VisibleForTesting
+  def fetchNonce(member: Member): Option[StoredNonce] =
+    nonces.get().get(member)
+
+  /** If a nonce exists for the member, return it. If not, save the provided nonce.
+    */
+  @VisibleForTesting
+  def fetchOrSaveNonce(nonce: StoredNonce): StoredNonce = {
+    val finalNonceMap = nonces.updateAndGet { currentMap =>
+      // if there is already a nonce for the member, keep it as is
+      if (currentMap.contains(nonce.member)) currentMap
+      // if not, save the new nonce
+      else currentMap + (nonce.member -> nonce)
+    }
+    // retrieve the active nonce from the map
+    // (covers race conditions where another thread have modified the map in the meanwhile)
+    val activeNonce = finalNonceMap.getOrElse(nonce.member, nonce)
+
+    if (activeNonce == nonce) {
+      // fine to add subsequently. we only need this to avoid doing a full-pass
+      // over all tokens when we clean them up, so we eventually remove older tokens from memory
+      expiryQueue.put(nonce)
+    }
+
+    // Return the active nonce
+    activeNonce
+  }
+
 }

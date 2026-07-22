@@ -110,7 +110,7 @@ class ThrowingAcs[T <: Throwable](
       )
     )
 
-  override protected[canton] def doPrune(
+  override protected def doPrune(
       beforeAndIncluding: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit
@@ -121,7 +121,7 @@ class ThrowingAcs[T <: Throwable](
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.failed(mk("purge"))
 
-  override protected[canton] def advancePruningTimestamp(
+  override protected def advancePruningTimestamp(
       phase: PruningPhase,
       timestamp: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =

@@ -67,6 +67,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.util.TimeOfChange
+import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
@@ -172,6 +173,8 @@ final class UnassignmentProcessingStepsTest
 
   private lazy val clock = new WallClock(timeouts, loggerFactory)
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1)
+  private lazy val ledgerApiStore = mock[LedgerApiStore]
+  when(ledgerApiStore.stringInterningView).thenReturn(new StringInterningView(loggerFactory))
   private lazy val logicalPersistentState =
     new InMemoryLogicalSyncPersistentState(
       IndexedSynchronizer.tryCreate(sourceSynchronizer.unwrap, 1),
@@ -179,7 +182,7 @@ final class UnassignmentProcessingStepsTest
       indexedStringStore = indexedStringStore,
       contractStore = contractStore,
       acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
-      Eval.now(mock[LedgerApiStore]),
+      Eval.now(ledgerApiStore),
       loggerFactory,
     )
   private lazy val physicalSyncPersistentState = new InMemoryPhysicalSyncPersistentState(

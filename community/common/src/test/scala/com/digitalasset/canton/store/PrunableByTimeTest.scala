@@ -115,9 +115,7 @@ trait PrunableByTimeTest {
         )(logger)
       }
     }
-
   }
-
 }
 
 class PrunableByTimeLogicTest
@@ -153,7 +151,7 @@ class PrunableByTimeLogicTest
 
     override protected def kind: String = "fixture"
 
-    override protected[canton] def doPrune(
+    override protected def doPrune(
         limit: CantonTimestamp,
         lastPruning: Option[CantonTimestamp],
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {

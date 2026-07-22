@@ -9,7 +9,6 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.commitment.AcsDigestTrace
 import com.digitalasset.canton.participant.store.data.AcsDigestJournalData.JournalTable
 import com.digitalasset.canton.participant.store.data.DbAcsDigestJournalImplicits
 import com.digitalasset.canton.participant.store.{
@@ -21,10 +20,9 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
+import slick.jdbc.PositionedParameters
 import slick.jdbc.canton.SQLActionBuilder
-import slick.jdbc.{PositionedParameters, SetParameter}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
@@ -39,7 +37,6 @@ class DbAcsDigestJournal[K, V](
     prettyKey: K => String,
     journalTable: JournalTable,
     createJournalImplicitsF: DbStorage => DbAcsDigestJournalImplicits[K, V],
-    releaseProtocolVersion: ReleaseProtocolVersion,
 )(implicit ec: ExecutionContext)
     extends AcsDigestJournal[K, V]
     with DbStore {
@@ -49,11 +46,6 @@ class DbAcsDigestJournal[K, V](
   import DbAcsDigestJournal.*
   import storage.api.*
   import journalTable.*
-
-  implicit val setParameterAcsDigestTrace: SetParameter[AcsDigestTrace] =
-    AcsDigestTrace.getVersionedSetParameter(releaseProtocolVersion.v)
-  implicit val setParameterAcsDigestTraceO: SetParameter[Option[AcsDigestTrace]] =
-    AcsDigestTrace.getVersionedSetParameterO(releaseProtocolVersion.v)
 
   private val synchronizerIdx = indexedSynchronizer.index
 
@@ -286,7 +278,7 @@ class DbAcsDigestJournal[K, V](
       limit: Int,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
-        immutable.Iterable[AcsDigestStore.AcsDigest[K, V]],
+        immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K, V]],
         Either[PaginationTokenDone, SnapshotPaginationToken],
     )
   ] = {
@@ -306,10 +298,10 @@ class DbAcsDigestJournal[K, V](
     val query = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         sql"""
-          select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect, r.trace_data
+          select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect, r.trace_data, r.replaces_offset
           from (
             select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data,
-                   row_number() over (partition by #$keyColumnName order by change_offset desc) as rn
+                   row_number() over (partition by #$keyColumnName order by change_offset desc) as rn, replaces_offset
             from #$tableName
             where synchronizer_idx = $synchronizerIdx
               and change_offset <= $atInclusive
@@ -347,10 +339,10 @@ class DbAcsDigestJournal[K, V](
           -- recursive query's termination case
           where kb.key_id is not null
         )
-        select j.#$keyColumnName, j.change_offset, j.ts, j.#$digestColNamesInSelect, j.trace_data
+        select j.#$keyColumnName, j.change_offset, j.ts, j.#$digestColNamesInSelect, j.trace_data, j.replaces_offset
         from key_batch b
         cross join lateral (
-          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data
+          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data, replaces_offset
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
             and #$keyColumnName = b.key_id
@@ -363,7 +355,7 @@ class DbAcsDigestJournal[K, V](
 
     storage
       .query(
-        action = query.as[AcsDigestStore.AcsDigest[K, V]],
+        action = query.as[AcsDigestStore.AcsDigestUpdate[K, V]],
         operationName = functionFullName,
       )
       .map {
@@ -371,7 +363,7 @@ class DbAcsDigestJournal[K, V](
         case acsDigests =>
           val limitNumOfAcsDigests = acsDigests.dropRight(1) // O(log(N)) on Vector
           val lastQueriedKey = limitNumOfAcsDigests.lastOption
-            .map(_.key)
+            .map(_.digestUpdate.key)
             .getOrElse(
               throw new IllegalStateException(
                 s"Unexpected error in snapshot query in $tableName, to $atInclusive!"

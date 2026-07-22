@@ -247,7 +247,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           authenticate(p2pNetworkManager, otherInitialEndpointsTupled._1)
           connect(p2pNetworkManager, otherInitialEndpointsTupled._2)
           authenticate(p2pNetworkManager, otherInitialEndpointsTupled._2)
-          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+          context.extractSelfMessages().foreach(module.receive) // Simulate authenticating all nodes
 
           val authenticatedEndpoints =
             Set(otherInitialEndpointsTupled._1, otherInitialEndpointsTupled._2)
@@ -289,7 +289,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             connect(p2pNetworkManager, e)
             authenticate(p2pNetworkManager, e)
           }
-          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+          context.extractSelfMessages().foreach(module.receive) // Simulate authenticating all nodes
 
           val node = endpointToTestBftNodeId(otherInitialEndpointsTupled._1)
 
@@ -370,7 +370,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             connect(p2pNetworkManager, e)
             authenticate(p2pNetworkManager, e)
           }
-          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+          context.extractSelfMessages().foreach(module.receive) // Simulate authenticating all nodes
 
           val otherNodeEndpoint = otherInitialEndpointsTupled._1
           val otherNodeId = endpointToTestBftNodeId(otherNodeEndpoint)
@@ -461,7 +461,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             connect(p2pNetworkManager, e)
             authenticate(p2pNetworkManager, e)
           }
-          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+          context.extractSelfMessages().foreach(module.receive) // Simulate authenticating all nodes
 
           val networkMessageBody = BftOrderingMessageBody(BftOrderingMessageBody.Message.Empty)
           val p2pEndpointCaptor = ArgCaptor[P2PEndpoint]
@@ -543,7 +543,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             connect(p2pNetworkManager, e)
             authenticate(p2pNetworkManager, e)
           }
-          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+          context.extractSelfMessages().foreach(module.receive) // Simulate authenticating all nodes
 
           val possibleRecipients = Seq(
             endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
@@ -597,7 +597,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             connect(p2pNetworkManager, e)
             authenticate(p2pNetworkManager, e)
           }
-          context.extractSelfMessages().foreach(module.receive) // Authenticate all nodes
+          context.extractSelfMessages().foreach(module.receive) // Simulate authenticating all nodes
 
           val possibleRecipients = Seq(
             endpointToTestBftNodeId(otherInitialEndpointsTupled._1),
@@ -660,7 +660,9 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           }
           module.p2pEndpointsStore
             .listEndpoints()
-            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints :+ anotherEndpoint
+            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints.map(
+            _ -> None
+          ) :+ (anotherEndpoint -> None)
 
           endpointAdded shouldBe true
           p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections :+ Some(
@@ -725,7 +727,9 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
           connect(p2pNetworkManager, anotherEndpoint)
           authenticate(p2pNetworkManager, anotherEndpoint)
-          context.extractSelfMessages().foreach(module.receive) // Authenticate the endpoint
+          context
+            .extractSelfMessages()
+            .foreach(module.receive) // Simulate authenticating the endpoint
 
           var endpointAdded = false
           module.receive(
@@ -738,7 +742,9 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           context.runPipedMessages() shouldBe empty
           module.p2pEndpointsStore
             .listEndpoints()
-            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints :+ anotherEndpoint
+            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints.map(
+            _ -> None
+          ) :+ (anotherEndpoint -> None)
 
           endpointAdded shouldBe true
           state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections :+ Some(
@@ -769,7 +775,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           context.runPipedMessages() shouldBe empty
           module.p2pEndpointsStore
             .listEndpoints()
-            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints
+            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints.map(_ -> None)
 
           endpointAdded shouldBe false
           state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections
@@ -808,7 +814,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             Seq(otherInitialEndpointsTupled._2, otherInitialEndpointsTupled._3)
           module.p2pEndpointsStore
             .listEndpoints()
-            .apply() should contain theSameElementsInOrderAs remainingEndpoints
+            .apply() should contain theSameElementsInOrderAs remainingEndpoints.map(_ -> None)
           context.extractSelfMessages().foreach(module.receive) // Disconnect endpoint
           endpointRemoved shouldBe true
 
@@ -875,7 +881,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             .apply() should contain theSameElementsInOrderAs Seq(
             otherInitialEndpointsTupled._2,
             otherInitialEndpointsTupled._3,
-          )
+          ).map(_ -> None)
 
           endpointRemoved shouldBe true
 
@@ -904,7 +910,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           context.runPipedMessages() shouldBe empty
           module.p2pEndpointsStore
             .listEndpoints()
-            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints
+            .apply() should contain theSameElementsInOrderAs otherInitialEndpoints.map(_ -> None)
 
           import state.*
 
@@ -928,14 +934,14 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
         implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
 
-        var endpoints: Option[Seq[P2PEndpoint]] = None
+        var endpoints: Option[Seq[(P2PEndpoint, Option[BftNodeId])]] = None
         module.receive(
           P2PNetworkOut.Admin.ListConfiguredEndpoints(e => endpoints = Some(e))
         )
 
         context.runPipedMessages() shouldBe empty
 
-        endpoints should contain(otherInitialEndpoints)
+        endpoints should contain(otherInitialEndpoints.map(_ -> None))
       }
     }
 
@@ -969,7 +975,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         authenticate(p2pNetworkManager, yetAnotherEndpoint)
         disconnect(p2pNetworkManager, yetAnotherEndpoint)
 
-        context.extractSelfMessages().foreach(module.receive) // Authenticate
+        context.extractSelfMessages().foreach(module.receive) // Simulate authentication
 
         Table(
           "queried endpoint IDs" -> "expected status",
@@ -1230,7 +1236,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
     val bftNodeId = customNode.getOrElse(endpointToTestBftNodeId(endpoint))
     fakeClientP2PNetworkManager
       .nodeActions(endpoint.id)
-      .onSequencerId(bftNodeId, Some(endpoint))
+      .onNodeId(bftNodeId, Some(endpoint))
   }
 
   private class FakeP2PNetworkManager(

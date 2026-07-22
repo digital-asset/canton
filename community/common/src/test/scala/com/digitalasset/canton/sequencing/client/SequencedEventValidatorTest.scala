@@ -15,6 +15,7 @@ import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
 import com.digitalasset.canton.sequencing.protocol.{
   ClosedEnvelope,
   DecompressedSequencedEvent,
+  DecompressionPolicy,
   SequencedEvent,
 }
 import com.digitalasset.canton.sequencing.{MaybeCompressedSerializedEvent, SequencedSerializedEvent}
@@ -65,7 +66,7 @@ class SequencedEventValidatorTest
       import fixture.*
       val event = createEvent().futureValueUS
       val decompressed = SequencedEventValidator
-        .decompressEvent(toCompressed(event), MaxBytesToDecompress.HardcodedDefault)
+        .decompressEvent(toCompressed(event), DecompressionPolicy.HardcodedDefault)
         .value
       decompressed.timestamp shouldBe event.timestamp
     }
@@ -76,7 +77,7 @@ class SequencedEventValidatorTest
       SequencedEventValidator
         .decompressEvent(
           toCompressed(event),
-          MaxBytesToDecompress(NonNegativeInt.one),
+          DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.one)),
         )
         .left
         .value shouldBe a[DecompressionFailed]

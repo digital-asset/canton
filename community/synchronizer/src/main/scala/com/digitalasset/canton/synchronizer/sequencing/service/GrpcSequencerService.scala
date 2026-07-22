@@ -273,7 +273,7 @@ class GrpcSequencerService(
         _ = if (logEventDetails) {
           // escape hatch to log the content of the submission request for debugging purposes.
           // decoding can then be performed using
-          // SubmissionRequest.fromByteString(PV, MaxBytesToDecompress(...))(ByteString.copyFrom(Base64.getDecoder.decode(str)))
+          // SubmissionRequest.fromByteString(PV, DecompressionPolicy.forProtocolVersion(...))(ByteString.copyFrom(Base64.getDecoder.decode(str)))
           logger.info(
             s"Received sendAsync from $senderFromMetadata with payload ${java.util.Base64.getEncoder
                 .encodeToString(signedContent.content.bytes.toByteArray)}"
@@ -285,7 +285,10 @@ class GrpcSequencerService(
               SubmissionRequest
                 .fromByteString(
                   protocolVersion,
-                  MaxBytesToDecompress(maxRequestSize.value),
+                  DecompressionPolicy.forProtocolVersion(
+                    protocolVersion,
+                    MaxBytesToDecompress(maxRequestSize.value),
+                  ),
                 )
             )
             .leftMap(requestDeserializationError(_, maxRequestSize))

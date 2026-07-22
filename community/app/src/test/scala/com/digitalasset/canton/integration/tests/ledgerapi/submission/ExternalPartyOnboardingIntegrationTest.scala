@@ -229,7 +229,7 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         .allocate_external(
           daId,
           Seq(
-            TopologyTransaction(
+            TopologyTransaction.tryCreate(
               TopologyChangeOp.Replace,
               PositiveInt.one,
               PartyToParticipant.tryCreate(
@@ -275,7 +275,7 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         .head
       val partyId = PartyId.tryCreate("Alice", namespaceKey.fingerprint)
 
-      val namespaceDelegation = TopologyTransaction(
+      val namespaceDelegation = TopologyTransaction.tryCreate(
         mapping = NamespaceDelegation.tryCreate(
           Namespace(namespaceKey.fingerprint),
           namespaceKey,
@@ -286,7 +286,7 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         protocolVersion = testedProtocolVersion,
       )
 
-      val partyToParticipant = TopologyTransaction(
+      val partyToParticipant = TopologyTransaction.tryCreate(
         mapping = PartyToParticipant.tryCreate(
           partyId = partyId,
           threshold = PositiveInt.one,
@@ -298,7 +298,7 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         protocolVersion = testedProtocolVersion,
       )
 
-      val partyToKeyMapping = TopologyTransaction(
+      val partyToKeyMapping = TopologyTransaction.tryCreate(
         mapping = PartyToKeyMapping.tryCreate(
           partyId = partyId,
           threshold = PositiveInt.one,
@@ -353,7 +353,7 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         .head
       val partyId = PartyId.tryCreate("Alice", namespaceKey.fingerprint)
 
-      val namespaceDelegation = TopologyTransaction(
+      val namespaceDelegation = TopologyTransaction.tryCreate(
         mapping = NamespaceDelegation.tryCreate(
           Namespace(namespaceKey.fingerprint),
           namespaceKey,
@@ -364,7 +364,7 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
         protocolVersion = testedProtocolVersion,
       )
 
-      val partyToParticipant = TopologyTransaction(
+      val partyToParticipant = TopologyTransaction.tryCreate(
         mapping = PartyToParticipant.tryCreate(
           partyId = partyId,
           threshold = PositiveInt.one,

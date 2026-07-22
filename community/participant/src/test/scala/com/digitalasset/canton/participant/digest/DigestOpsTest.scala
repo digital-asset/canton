@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.digest
 
-import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.AcsUpdate
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.AcsUpdate
 import com.digitalasset.canton.participant.commitment.{
   AcsDigestTrace,
   SingleTrace,

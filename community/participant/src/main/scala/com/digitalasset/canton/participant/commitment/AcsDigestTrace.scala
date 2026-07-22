@@ -16,9 +16,11 @@ import com.digitalasset.canton.version.{
   HasVersionedJsonWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ReleaseProtocolVersion,
 }
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Bytes
+import slick.jdbc.SetParameter
 
 /** Contains trace data about changes that contribute to an ACS digest.
   */
@@ -49,7 +51,8 @@ object AcsDigestTrace
     SupportedProtoVersions(
       ProtoVersion(-1) -> unsupportedProtoCodec(ProtocolVersion.v34),
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.acsCommitmentRedesign,
+        // TODO(#33849) replace with the stable protocol version that introduces the feature
+        ReleaseProtocolVersion.acsCommitmentRedesignStorage.v,
         supportedProtoVersion(fromProtoV30),
         _.toProtoV30,
       ),
@@ -69,6 +72,13 @@ object AcsDigestTrace
           Left(ProtoDeserializationError.FieldNotSet("data"))
       }
       .map(AcsDigestTrace(_))
+
+  implicit val setParameterAcsDigestTrace: SetParameter[AcsDigestTrace] =
+    // TODO(#33849): replace with ReleaseProtocolversion.latest
+    AcsDigestTrace.getVersionedSetParameter(ReleaseProtocolVersion.acsCommitmentRedesignStorage.v)
+  implicit val setParameterAcsDigestTraceO: SetParameter[Option[AcsDigestTrace]] =
+    // TODO(#33849): replace with ReleaseProtocolversion.latest
+    AcsDigestTrace.getVersionedSetParameterO(ReleaseProtocolVersion.acsCommitmentRedesignStorage.v)
 
   val pretty: Pretty[AcsDigestTrace] = prettyOfParam(_.traces)
 }

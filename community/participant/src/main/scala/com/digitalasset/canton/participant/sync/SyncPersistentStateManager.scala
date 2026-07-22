@@ -101,6 +101,7 @@ trait SyncPersistentStateLookup {
     synchronizerIdForAlias(synchronizerAlias).flatMap(reassignmentStore)
 
   def acsCommitmentStore(synchronizerId: SynchronizerId): Option[AcsCommitmentStore]
+  def acsDigestStore(synchronizerId: SynchronizerId): Option[AcsDigestStore]
   def acsCommitmentStore(synchronizerAlias: SynchronizerAlias): Option[AcsCommitmentStore] =
     synchronizerIdForAlias(synchronizerAlias).flatMap(acsCommitmentStore)
 
@@ -367,6 +368,9 @@ class SyncPersistentStateManager(
 
   override def acsCommitmentStore(synchronizerId: SynchronizerId): Option[AcsCommitmentStore] =
     logicalPersistentStates.get(synchronizerId).map(_.acsCommitmentStore)
+
+  override def acsDigestStore(synchronizerId: SynchronizerId): Option[AcsDigestStore] =
+    logicalPersistentStates.get(synchronizerId).map(_.acsDigestStore)
 
   override def activeContractStore(synchronizerId: SynchronizerId): Option[ActiveContractStore] =
     logicalPersistentStates.get(synchronizerId).map(_.activeContractStore)

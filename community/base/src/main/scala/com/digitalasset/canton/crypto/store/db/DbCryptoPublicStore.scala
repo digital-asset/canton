@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto.store.db
 
 import cats.data.OptionT
+import cats.implicits.toTraverseOps
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.*
@@ -15,7 +16,7 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore, IdempotentInsert}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import slick.dbio.DBIOAction
-import slick.jdbc.{GetResult, SetParameter}
+import slick.jdbc.GetResult
 
 import scala.concurrent.ExecutionContext
 
@@ -30,11 +31,6 @@ class DbCryptoPublicStore(
 
   import storage.api.*
   import storage.converters.*
-
-  private implicit val setParameterEncryptionPublicKey: SetParameter[EncryptionPublicKey] =
-    EncryptionPublicKey.getVersionedSetParameter(releaseProtocolVersion.v)
-  private implicit val setParameterSigningPublicKey: SetParameter[SigningPublicKey] =
-    SigningPublicKey.getVersionedSetParameter(releaseProtocolVersion.v)
 
   private def queryKeys[K: GetResult](purpose: KeyPurpose): DbAction.ReadOnly[Set[K]] =
     sql"select data, name from common_crypto_public_keys where purpose = $purpose"
@@ -57,24 +53,35 @@ class DbCryptoPublicStore(
       .as[K]
       .head
 
-  private def insertKey[K <: PublicKey: SetParameter, KN <: PublicKeyWithName: GetResult](
+  private def insertKey[K <: PublicKey, KN <: PublicKeyWithName: GetResult](
       key: K,
       name: Option[KeyName],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    storage.queryAndUpdate(
-      IdempotentInsert.insertVerifyingConflicts(
-        sql"""insert into common_crypto_public_keys (key_id, purpose, data, name)
-              values (${key.id}, ${key.purpose}, $key, $name)
+    // We cannot use a `SetParameter`, because serialization of the keys can fail
+    key.toByteArrayE(releaseProtocolVersion.v) match {
+      case Right(serializedKey) =>
+        storage.queryAndUpdate(
+          IdempotentInsert.insertVerifyingConflicts(
+            sql"""insert into common_crypto_public_keys (key_id, purpose, data, name)
+              values (${key.id}, ${key.purpose}, $serializedKey, $name)
               on conflict do nothing""".asUpdate,
-        queryKey(key.id, key.purpose),
-      )(
-        existingKey => existingKey.publicKey == key && existingKey.name == name,
-        _ => s"Existing public key for ${key.id} is different than inserted key",
-      ),
-      functionFullName,
-    )
+            queryKey(key.id, key.purpose),
+          )(
+            existingKey => existingKey.publicKey == key && existingKey.name == name,
+            _ => s"Existing public key for ${key.id} is different than inserted key",
+          ),
+          functionFullName,
+        )
+
+      case Left(err) =>
+        FutureUnlessShutdown.failed(
+          new IllegalStateException(
+            s"Unable to serialize key for storage with protocol version ${releaseProtocolVersion.v}: $err"
+          )
+        )
+    }
 
   override def readSigningKey(signingKeyId: Fingerprint)(implicit
       traceContext: TraceContext
@@ -142,20 +149,36 @@ class DbCryptoPublicStore(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = replacePublicKeys(newKeys)
 
-  private def replacePublicKeys[K <: PublicKey: SetParameter](
+  private def replacePublicKeys[K <: PublicKey](
       newKeys: Seq[K]
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    storage.update_(
-      DBIOAction.sequence(newKeys.map(updateKey(_))).transactionally,
-      functionFullName,
-    )
+    // We cannot use a `SetParameter`, because serialization of the keys can fail
+    newKeys.traverse(key => key.toByteArrayE(releaseProtocolVersion.v).map((key, _))) match {
+      case Right(newKeysWithSerialization) =>
+        storage.update_(
+          DBIOAction
+            .sequence(newKeysWithSerialization.map { case (key, serializedKey) =>
+              updateKey(key, serializedKey)
+            })
+            .transactionally,
+          functionFullName,
+        )
+
+      case Left(err) =>
+        FutureUnlessShutdown.failed(
+          new IllegalStateException(
+            s"Unable to serialize key for storage with protocol version ${releaseProtocolVersion.v}: $err"
+          )
+        )
+    }
 
   // Update the contents of a key identified by its id; `purpose` and `name` remain unchanged.
   // Used for key format migrations.
-  private def updateKey[K <: PublicKey: SetParameter](
-      key: K
+  private def updateKey[K <: PublicKey](
+      key: K,
+      serializedKey: Array[Byte],
   ): DbAction.WriteOnly[Int] =
-    sqlu"""update common_crypto_public_keys set data = $key where key_id = ${key.id}"""
+    sqlu"""update common_crypto_public_keys set data = $serializedKey where key_id = ${key.id}"""
 }

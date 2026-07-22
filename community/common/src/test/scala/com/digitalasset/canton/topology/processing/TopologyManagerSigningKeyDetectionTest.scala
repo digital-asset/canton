@@ -43,7 +43,7 @@ class TopologyManagerSigningKeyDetectionTest
         loggerFactory,
       )
 
-    val dtc_uid1a = TopologyTransaction(
+    val dtc_uid1a = TopologyTransaction.tryCreate(
       Replace,
       PositiveInt.one,
       SynchronizerTrustCertificate(ParticipantId(uid1a), synchronizerId1),
@@ -156,7 +156,7 @@ class TopologyManagerSigningKeyDetectionTest
       detector
         .getValidSigningKeysForTransaction(
           ts(1),
-          TopologyTransaction(
+          TopologyTransaction.tryCreate(
             TopologyChangeOp.Replace,
             PositiveInt.one,
             ptp,
@@ -173,7 +173,7 @@ class TopologyManagerSigningKeyDetectionTest
       detector
         .getValidSigningKeysForTransaction(
           ts(1),
-          TopologyTransaction(
+          TopologyTransaction.tryCreate(
             TopologyChangeOp.Replace,
             PositiveInt.one,
             ptp,
@@ -205,7 +205,7 @@ class TopologyManagerSigningKeyDetectionTest
         )
         .futureValueUS
 
-      val otk = TopologyTransaction(
+      val otk = TopologyTransaction.tryCreate(
         Replace,
         PositiveInt.one,
         OwnerToKeyMapping.tryCreate(

@@ -25,8 +25,10 @@ fi
 
 COMMUNITY_CANTON_PROTO_PATH=$COMMUNITY_PROTO_PATH/com/digitalasset/canton
 ADMIN_API_CANTON_PROTO_PATH=$ADMIN_API_PROTO_PATH/com/digitalasset/canton
-PROTOCOL_PROTO_PATH=$COMMUNITY_CANTON_PROTO_PATH/protocol/v30
-CRYPTO_PROTO_PATH=$COMMUNITY_CANTON_PROTO_PATH/crypto/v30
+PROTOCOL_PROTO_V30_PATH=$COMMUNITY_CANTON_PROTO_PATH/protocol/v30
+PROTOCOL_PROTO_V31_PATH=$COMMUNITY_CANTON_PROTO_PATH/protocol/v31
+CRYPTO_PROTO_V30_PATH=$COMMUNITY_CANTON_PROTO_PATH/crypto/v30
+CRYPTO_PROTO_V31_PATH=$COMMUNITY_CANTON_PROTO_PATH/crypto/v31
 TOPOLOGY_ADMIN_PROTO_PATH=$COMMUNITY_CANTON_PROTO_PATH/topology/admin/v30
 ADMIN_API_TOPOLOGY_ADMIN_PROTO_PATH=$ADMIN_API_CANTON_PROTO_PATH/topology/admin/v30
 LEDGER_API_V2_PATH=$LEDGER_API_PROTO_PATH/com/daml/ledger/api/v2
@@ -99,13 +101,15 @@ generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/topology_transa
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/package_reference.proto"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/interactive/transaction/v1/interactive_submission_data.proto"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/interactive/interactive_submission_common_data.proto"
-generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_PATH/topology.proto"
+generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V30_PATH/topology.proto"
+generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V31_PATH/topology.proto"
 generate_grpc_code "$ADMIN_API_PROTO_PATH" "$ADMIN_API_TOPOLOGY_ADMIN_PROTO_PATH/common.proto"
-generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_PATH/synchronizer_parameters.proto"
+generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V30_PATH/synchronizer_parameters.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$COMMUNITY_CANTON_PROTO_PATH/version/v1/untyped_versioned_message.proto"
-generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_PATH/traffic_control_parameters.proto"
-generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_PATH/sequencing_parameters.proto"
-generate_grpc_code "$COMMUNITY_PROTO_PATH" "$CRYPTO_PROTO_PATH/crypto.proto"
+generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V30_PATH/traffic_control_parameters.proto"
+generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V30_PATH/sequencing_parameters.proto"
+generate_grpc_code "$COMMUNITY_PROTO_PATH" "$CRYPTO_PROTO_V30_PATH/crypto.proto"
+generate_grpc_code "$COMMUNITY_PROTO_PATH" "$CRYPTO_PROTO_V31_PATH/crypto.proto"
 generate_grpc_service "$ADMIN_API_PROTO_PATH" "$ADMIN_API_CANTON_PROTO_PATH/admin/health/v30/status_service.proto"
 generate_grpc_code "." "scalapb/scalapb.proto"
 generate_grpc_code "." "google/rpc/status.proto"

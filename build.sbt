@@ -454,6 +454,7 @@ lazy val `ledger-api-scala` = DamlProjects.`ledger-api-scala`
 lazy val `bindings-java` = DamlProjects.`bindings-java`
 lazy val `ledger-common-dars` = CommunityProjects.`ledger-common-dars`
 lazy val `base-errors` = CommunityProjects.`base-errors`
+lazy val `base-validation` = CommunityProjects.`base-validation`
 lazy val `daml-jwt` = DamlProjects.`daml-jwt`
 lazy val `daml-tls` = CommunityProjects.`daml-tls`
 lazy val `dam-grpc-utils` = CommunityProjects.`daml-grpc-utils`

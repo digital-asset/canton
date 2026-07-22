@@ -7,6 +7,7 @@ import com.daml.logging.entries.LoggingEntries
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.MetricsContext.withMetricLabels
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -37,6 +38,7 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
+import com.digitalasset.canton.metrics.IndexerMetrics.Labels
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.InMemoryState
@@ -1148,6 +1150,14 @@ object ParallelIndexerSubscription {
             storeTailFunction(ledgerEnd)(connection)
             metrics.indexer.ledgerEndSequentialId
               .updateValue(ledgerEnd.lastEventSeqId)
+            ledgerEnd.synchronizerIndices.foreach { case (synchronizerId, synchronizerIndex) =>
+              withMetricLabels(Labels.synchronizerId -> synchronizerId.toProtoPrimitive)(
+                implicit mc =>
+                  metrics.indexer.lastReceivedRecordTime.updateValue(
+                    synchronizerIndex.recordTime.toEpochMilli
+                  )
+              )
+            }
             logger.debug(
               s"Ledger end updated in IndexDB $synchronizerIndexesLog ${loggingContext
                   .serializeFiltered("updateOffset")}."
@@ -1294,7 +1304,8 @@ object ParallelIndexerSubscription {
         .flatMap(u.transactionInfo.blindingInfo.disclosure.get)
         .map(_.size + 1)
         .sum) * InsertWeight
-    case (_, TopologyTransactionEffective(_, events, _, _)) => (events.size + 1) * InsertWeight
+    case (_, TopologyTransactionEffective(_, events, genericEvents, _, _)) =>
+      (events.size + genericEvents.size + 1) * InsertWeight
     case (_, u: SequencedCommandRejected) => InsertWeight
     case (_, u: UnSequencedCommandRejected) => InsertWeight
     case (_, u: ReassignmentAccepted) =>

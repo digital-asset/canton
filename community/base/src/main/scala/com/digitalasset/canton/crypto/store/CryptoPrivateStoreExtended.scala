@@ -5,9 +5,10 @@ package com.digitalasset.canton.crypto.store
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
+import cats.syntax.either.*
 import cats.syntax.functor.*
-import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
+import cats.syntax.traverseFilter.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -221,10 +222,14 @@ trait CryptoPrivateStoreExtended extends CryptoPrivateStore { this: NamedLogging
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CryptoPrivateStoreError, Unit] =
     for {
+      serializedKey <- key
+        .toByteString(releaseProtocolVersion.v)
+        .leftMap(CryptoPrivateStoreError.FailedToSerializeKey(_, releaseProtocolVersion.v))
+        .toEitherT[FutureUnlessShutdown]
       _ <- writePrivateKey(
         new StoredPrivateKey(
           id = key.id,
-          data = key.toByteString(releaseProtocolVersion.v),
+          data = serializedKey,
           purpose = key.purpose,
           name = name,
           wrapperKeyId = None,
@@ -377,16 +382,21 @@ trait CryptoPrivateStoreExtended extends CryptoPrivateStore { this: NamedLogging
     for {
       storedSigningKeys <- listPrivateKeys(KeyPurpose.Signing)
       signingKeys <- signingKeysFromStored(storedSigningKeys)
-      migratedSigningKeys = signingKeys.collect {
-        case (stored, privateKey) if privateKey.migrated =>
-          new StoredPrivateKey(
-            id = privateKey.id,
-            data = privateKey.toByteString(releaseProtocolVersion.v),
-            purpose = privateKey.purpose,
-            name = stored.name,
-            wrapperKeyId = stored.wrapperKeyId,
-          )
-      }
+      migratedSigningKeys <- signingKeys
+        .filter { case (_, privateKey) => privateKey.migrated }
+        .traverse { case (stored, privateKey) =>
+          privateKey.toByteString(releaseProtocolVersion.v).map { serializedKey =>
+            new StoredPrivateKey(
+              id = privateKey.id,
+              data = serializedKey,
+              purpose = privateKey.purpose,
+              name = stored.name,
+              wrapperKeyId = stored.wrapperKeyId,
+            )
+          }
+        }
+        .leftMap(CryptoPrivateStoreError.FailedToSerializeKey(_, releaseProtocolVersion.v))
+        .toEitherT[FutureUnlessShutdown]
       _ <- replaceStoredPrivateKeys(migratedSigningKeys)
       _ = if (migratedSigningKeys.nonEmpty)
         logger.info(
@@ -464,23 +474,32 @@ trait CryptoPrivateStoreExtended extends CryptoPrivateStore { this: NamedLogging
 
     def reverseMigrateKeys[K <: PrivateKey](
         keys: Seq[(StoredPrivateKey, K)]
-    ): Seq[StoredPrivateKey] =
-      keys.mapFilter { case (stored, privateKey) =>
-        for {
-          legacyPrivateKey <- privateKey.reverseMigrate()
-        } yield new StoredPrivateKey(
-          id = legacyPrivateKey.id,
-          data = legacyPrivateKey.toByteString(releaseProtocolVersion.v),
-          purpose = legacyPrivateKey.purpose,
-          name = stored.name,
-          wrapperKeyId = stored.wrapperKeyId,
-        )
+    ): Either[CryptoPrivateStoreError, Seq[StoredPrivateKey]] =
+      keys.traverseFilter { case (stored, privateKey) =>
+        privateKey
+          .reverseMigrate()
+          .traverse(legacyPrivateKey =>
+            for {
+              serializedLegacyPrivateKey <- legacyPrivateKey
+                .toByteStringE(releaseProtocolVersion.v)
+                .leftMap(err =>
+                  CryptoPrivateStoreError
+                    .FailedToSerializeKey(s"key $legacyPrivateKey: $err", releaseProtocolVersion.v)
+                )
+            } yield new StoredPrivateKey(
+              id = legacyPrivateKey.id,
+              data = serializedLegacyPrivateKey,
+              purpose = legacyPrivateKey.purpose,
+              name = stored.name,
+              wrapperKeyId = stored.wrapperKeyId,
+            )
+          )
       }
 
     for {
       storedSigningKeys <- listPrivateKeys(KeyPurpose.Signing)
       signingKeys <- signingKeysFromStored(storedSigningKeys)
-      migratedSigningKeys = reverseMigrateKeys(signingKeys)
+      migratedSigningKeys <- reverseMigrateKeys(signingKeys).toEitherT[FutureUnlessShutdown]
       _ <- replaceStoredPrivateKeys(migratedSigningKeys)
       _ = logger.info(
         s"Reverse-migrated ${migratedSigningKeys.size} of ${storedSigningKeys.size} private keys"
@@ -488,7 +507,7 @@ trait CryptoPrivateStoreExtended extends CryptoPrivateStore { this: NamedLogging
 
       storedEncryptionKeys <- listPrivateKeys(KeyPurpose.Encryption)
       encryptionKeys <- decryptionKeyFromStored(storedEncryptionKeys)
-      migratedEncryptionKeys = reverseMigrateKeys(encryptionKeys)
+      migratedEncryptionKeys <- reverseMigrateKeys(encryptionKeys).toEitherT[FutureUnlessShutdown]
       _ <- replaceStoredPrivateKeys(migratedEncryptionKeys)
       _ = logger.info(
         s"Reverse-migrated ${migratedEncryptionKeys.size} of ${storedEncryptionKeys.size} encryption keys"

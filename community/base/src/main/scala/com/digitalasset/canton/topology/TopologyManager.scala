@@ -643,7 +643,14 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
               .Failure(actual = Some(proposed), expected = Some(next)),
           )
       }): EitherT[FutureUnlessShutdown, TopologyManagerError, PositiveInt]
-    } yield TopologyTransaction(op, theSerial, mapping, protocolVersion)
+      transaction <- EitherT.fromEither[FutureUnlessShutdown](
+        TopologyTransaction
+          .create(op, theSerial, mapping, protocolVersion)
+          .leftMap[TopologyManagerError](
+            TopologyManagerError.InternalError.Unexpected(_)
+          )
+      )
+    } yield transaction
   }
 
   private def signTransaction[Op <: TopologyChangeOp, M <: TopologyMapping](

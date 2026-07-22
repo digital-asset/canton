@@ -24,6 +24,7 @@ import com.digitalasset.canton.protocol.{
   StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.sequencing.HandlerResult
+import com.digitalasset.canton.sequencing.protocol.DecompressionPolicy
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.{PartyKind, PhysicalSynchronizerId, SynchronizerId}
@@ -85,6 +86,9 @@ trait TestEssentials
 
   protected def defaultMaxBytesToDecompress: MaxBytesToDecompress =
     BaseTest.defaultMaxBytesToDecompress
+
+  protected def defaultDecompressionPolicy: DecompressionPolicy =
+    BaseTest.defaultDecompressionPolicy
 
   protected def timeouts: ProcessingTimeout = DefaultProcessingTimeouts.testing
 
@@ -357,6 +361,8 @@ trait BaseTest
     with AppendedClues
     with TimestampHelpers
     with FutureHelpers { self =>
+
+  implicit val prettifier: Prettifier = org.scalactic.PrettyPrettifier.prettifier
 
   /** A metrics factory constructed from an OpenTelemetryOnDemandMetricsReader which allows to make
     * assertion on the content of the metrics registry.
@@ -636,6 +642,9 @@ object BaseTest {
     DynamicSynchronizerParameters.defaultMaxRequestSize.value
   )
 
+  lazy val defaultDecompressionPolicy: DecompressionPolicy =
+    DecompressionPolicy.PerEnvelope(defaultMaxBytesToDecompress)
+
   sealed trait UnsupportedExternalPartyTest
   object UnsupportedExternalPartyTest {
     // TODO(i27461): Support multi party submissions for external parties
@@ -653,11 +662,13 @@ object BaseTest {
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.forSynchronizer
 
-  def testedPartiesKind(hashingSchemeVersion: HashingSchemeVersion): PartyKind = sys.env
-    .get("CANTON_TEST_EXTERNAL_PARTIES")
-    .filter(_ == "true")
-    .map[PartyKind](_ => PartyKind.External(hashingSchemeVersion))
-    .getOrElse[PartyKind](PartyKind.Local)
+  /** True when the test run is configured for external parties. */
+  val cantonTestExternalParties: Boolean =
+    sys.env.get("CANTON_TEST_EXTERNAL_PARTIES").contains("true")
+
+  def testedPartiesKind(hashingSchemeVersion: HashingSchemeVersion): PartyKind =
+    if (cantonTestExternalParties) PartyKind.External(hashingSchemeVersion)
+    else PartyKind.Local
 
   lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
     ProtocolVersionValidation(testedProtocolVersion)

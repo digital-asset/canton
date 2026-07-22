@@ -365,25 +365,26 @@ class PartyToParticipantDeclarative(
       currentSerialO: Option[Serial],
       signingKeysWithThreshold: Option[SigningKeysWithThreshold],
       onboardingParticipants: Set[ParticipantId],
-  ): TopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant] = TopologyTransaction(
-    TopologyChangeOp.Replace,
-    serial = currentSerialO.fold(PositiveInt.one)(_.increment),
-    mapping = PartyToParticipant
-      .create(
-        partyId,
-        threshold = targetThreshold,
-        targetHosting.map { case (participant, permission) =>
-          HostingParticipant(
-            participant,
-            permission,
-            onboarding = onboardingParticipants.contains(participant),
-          )
-        }.toSeq,
-        partySigningKeysWithThreshold = signingKeysWithThreshold,
-      )
-      .value,
-    protocolVersion = psid.protocolVersion,
-  )
+  ): TopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant] =
+    TopologyTransaction.tryCreate(
+      TopologyChangeOp.Replace,
+      serial = currentSerialO.fold(PositiveInt.one)(_.increment),
+      mapping = PartyToParticipant
+        .create(
+          partyId,
+          threshold = targetThreshold,
+          targetHosting.map { case (participant, permission) =>
+            HostingParticipant(
+              participant,
+              permission,
+              onboarding = onboardingParticipants.contains(participant),
+            )
+          }.toSeq,
+          partySigningKeysWithThreshold = signingKeysWithThreshold,
+        )
+        .value,
+      protocolVersion = psid.protocolVersion,
+    )
 
   private def getOwningParticipantIdO(party: Party): Option[ParticipantId] = party match {
     case _: ExternalParty => None

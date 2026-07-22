@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.digest
 
-import com.digitalasset.canton.participant.commitment.RunningDigestProcessor.AcsUpdate
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.AcsUpdate
 import com.digitalasset.canton.participant.commitment.{SingleTrace, TracedLtHash16Blake3}
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   LocalPartyFirst,

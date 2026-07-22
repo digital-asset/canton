@@ -303,6 +303,7 @@ object SequentialWriteDaoSpec {
           ),
         )
       ),
+      genericTopologyEvents = Nil,
       synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
       effectiveTime = CantonTimestamp.now(),
     )(TraceContext.empty)

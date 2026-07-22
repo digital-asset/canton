@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.manual.acs
 
 import better.files.*
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -165,16 +166,6 @@ protected abstract class LargeAcsExportAndImportTestBase extends LargeAcsIntegra
           _.focus(_.parameters.activationFrequencyForWarnAboutConsistencyChecks)
             .replace(Long.MaxValue)
         ),
-      )
-      // Disabling LAPI verification to reduce test termination time
-      .updateTestingConfig(
-        _.focus(_.participantsWithoutLapiVerification).replace(
-          Set(
-            "participant1",
-            "participant2",
-            "participant3",
-          )
-        )
       )
 
   override protected def createContracts()(implicit
@@ -391,6 +382,7 @@ final class LargeAcsCreateContractsTest extends DumpTestSet {
 }
 
 /** The actual test */
+@AcsCommitmentTest
 final class LargeAcsExportAndImportTest extends EstablishTestSet {
   override protected def testSet: AcsTestSet =
     AcsTestSet(

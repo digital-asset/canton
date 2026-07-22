@@ -72,25 +72,28 @@ final class AllocateExternalPartyAuthIT
           synchronizer = env.synchronizer1Id.toProtoPrimitive,
           onboardingTransactions = Seq(
             AllocateExternalPartyRequest.SignedTransaction(
-              TopologyTransaction(
-                op = TopologyChangeOp.Replace,
-                serial = PositiveInt.one,
-                PartyToParticipant.tryCreate(
-                  newParty,
-                  PositiveInt.one,
-                  Seq(
-                    HostingParticipant(env.participant1.id, Confirmation),
-                    HostingParticipant(env.participant2.id, Confirmation),
+              TopologyTransaction
+                .tryCreate(
+                  op = TopologyChangeOp.Replace,
+                  serial = PositiveInt.one,
+                  PartyToParticipant.tryCreate(
+                    newParty,
+                    PositiveInt.one,
+                    Seq(
+                      HostingParticipant(env.participant1.id, Confirmation),
+                      HostingParticipant(env.participant2.id, Confirmation),
+                    ),
+                    Some(
+                      SigningKeysWithThreshold.tryCreate(
+                        NonEmpty.mk(Seq, signingKey),
+                        PositiveInt.one,
+                      )
+                    ),
                   ),
-                  Some(
-                    SigningKeysWithThreshold.tryCreate(
-                      NonEmpty.mk(Seq, signingKey),
-                      PositiveInt.one,
-                    )
-                  ),
-                ),
-                testedProtocolVersion,
-              ).toByteString,
+                  testedProtocolVersion,
+                )
+                .toByteString
+                .valueOrFail("serializing topology transaction"),
               Seq.empty,
             )
           ),

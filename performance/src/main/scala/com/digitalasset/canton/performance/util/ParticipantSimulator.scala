@@ -328,7 +328,7 @@ class ParticipantSimulator(
       otk <-
         SignedTopologyTransaction
           .signAndCreate(
-            TopologyTransaction(
+            TopologyTransaction.tryCreate(
               TopologyChangeOp.Replace,
               serial = PositiveInt.one,
               OwnerToKeyMapping.tryCreate(
@@ -348,7 +348,7 @@ class ParticipantSimulator(
       stc <-
         SignedTopologyTransaction
           .signAndCreate(
-            TopologyTransaction(
+            TopologyTransaction.tryCreate(
               TopologyChangeOp.Replace,
               serial = PositiveInt.one,
               SynchronizerTrustCertificate(
@@ -370,7 +370,7 @@ class ParticipantSimulator(
       vtp <-
         SignedTopologyTransaction
           .signAndCreate(
-            TopologyTransaction(
+            TopologyTransaction.tryCreate(
               TopologyChangeOp.Replace,
               serial = PositiveInt.one,
               VettedPackages.tryCreate(pid, packagesToVet),
@@ -433,7 +433,7 @@ class ParticipantSimulator(
   ): EitherT[FutureUnlessShutdown, String, GenericSignedTopologyTransaction] =
     SignedTopologyTransaction
       .signAndCreate(
-        TopologyTransaction(
+        TopologyTransaction.tryCreate(
           TopologyChangeOp.Replace,
           serial = PositiveInt.one,
           PartyToParticipant.tryCreate(

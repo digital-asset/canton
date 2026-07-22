@@ -16,37 +16,65 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoActorContext
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   P2PAddress,
   P2PNetworkManager,
   P2PNetworkRef,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.JitterGenerator
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.abort
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingMessage
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.retry.Jitter
 import org.apache.pekko.actor.typed.scaladsl.{ActorContext, Behaviors}
 import org.apache.pekko.actor.typed.{ActorRef, Behavior, PostStop}
 
 import java.time.{Duration, Instant}
 import java.util.UUID
+import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import scala.concurrent.duration.FiniteDuration
 
 private sealed trait PekkoP2PGrpcConnectionManagerActorMessage
+
+private sealed trait ResendablePekkoP2PGrpcConnectionManagerActorMessage
+    extends PekkoP2PGrpcConnectionManagerActorMessage {
+  private[grpc] def config: BftBlockOrdererConfig
+
+  // Note that `Jitter.full.apply` produces a timeout value between 0 and the exponential (we use
+  // base 2) as `initialValue*math.pow(base.toDouble, attempt.toDouble)`, the unit of the initial
+  // delay is important because the exp is on the non-converted value, the cap is converted to the
+  // same unit of the initial delay with ceiling, and what guarantees that the jitter does not
+  // yield 0 is the minimum delay.
+  private[grpc] lazy val jitterStream =
+    JitterGenerator(
+      Jitter.full(
+        cap = config.networkSendRetryJitterCap.underlying,
+        Jitter.randomSource(ThreadLocalRandom.current()),
+      ),
+      initialDelay = config.networkSendRetryMinimumDelay.underlying,
+      minimumDelay = config.networkSendRetryMinimumDelay.underlying,
+    )
+}
 
 /** Asks the connection-managing actor to initialize the connection without performing a Send; used
   * to create a connection eagerly rather than the first time a message is sent.
   */
-private case object Initialize extends PekkoP2PGrpcConnectionManagerActorMessage
+private final case class Initialize(
+    override val config: BftBlockOrdererConfig,
+    attemptNumber: Int,
+) extends ResendablePekkoP2PGrpcConnectionManagerActorMessage
 
 private final case class SendMessage(
+    override val config: BftBlockOrdererConfig,
     createMessage: Option[Instant] => BftOrderingMessage,
     metricsContext: MetricsContext,
     attemptNumber: Int,
     traceContext: TraceContext,
     sendInstant: Instant = Instant.now,
     maybeDelay: Option[FiniteDuration] = None,
-) extends PekkoP2PGrpcConnectionManagerActorMessage
+) extends ResendablePekkoP2PGrpcConnectionManagerActorMessage
 
 /** Closes the connection-managing actor. Sent as part of disconnecting an endpoint.
   */
@@ -56,13 +84,14 @@ final class PekkoP2PNetworkRef(
     connectionManagingActorRef: ActorRef[PekkoP2PGrpcConnectionManagerActorMessage],
     val actorName: String,
     outstandingMessages: AtomicInteger,
+    config: BftBlockOrdererConfig,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 ) extends P2PNetworkRef[BftOrderingMessage]
     with NamedLogging {
 
   outstandingMessages.incrementAndGet().discard
-  connectionManagingActorRef ! Initialize
+  connectionManagingActorRef ! Initialize(config, attemptNumber = 1)
 
   override def toString: String = this.getClass.getSimpleName + s"($actorName)"
 
@@ -72,6 +101,7 @@ final class PekkoP2PNetworkRef(
     outstandingMessages.incrementAndGet().discard
     synchronizeWithClosingSync("send-message") {
       connectionManagingActorRef ! SendMessage(
+        config,
         createMessage,
         metricsContext,
         attemptNumber = 1,
@@ -89,11 +119,9 @@ final class PekkoP2PNetworkRef(
 
 object PekkoP2PGrpcNetworking {
 
-  private val SendRetryDelay = 2.seconds
-  private val MaxAttempts = 5
-
   final class PekkoP2PGrpcNetworkManager(
       val connectionManager: P2PGrpcConnectionManager,
+      config: BftBlockOrdererConfig,
       override val timeouts: ProcessingTimeout,
       override val loggerFactory: NamedLoggerFactory,
       metrics: BftOrderingMetrics,
@@ -144,6 +172,7 @@ object PekkoP2PGrpcNetworking {
           ),
           actorName,
           outstandingMessages,
+          config,
           timeouts,
           loggerFactory,
         )
@@ -185,7 +214,7 @@ object PekkoP2PGrpcNetworking {
           // Emit actor queue latency for the message
           message match {
 
-            case SendMessage(_, metricsContext, _, _, sendInstant, maybeDelay) =>
+            case SendMessage(_, _, metricsContext, _, _, sendInstant, maybeDelay) =>
               // Emit actor queue metrics
               metrics.performance.orderingStageLatency.emitModuleQueueLatency(
                 "PekkoP2PGrpcConnectionManagingActor",
@@ -197,9 +226,9 @@ object PekkoP2PGrpcNetworking {
                 outstandingMessages.decrementAndGet(),
               )(metricsContext)
 
-            case Initialize =>
+            case Initialize(_, _) =>
               outstandingMessages.decrementAndGet()
-              logger.debug(s"Connection-managing actor $actorName received Initialize")
+              logger.debug(s"Connection-managing actor $actorName received `Initialize`")
 
             case _ =>
           }
@@ -215,48 +244,57 @@ object PekkoP2PGrpcNetworking {
             whenConnected(peerSender)
 
           case _ =>
+            val maxAttempts = config.networkSendAttempts.value
             message match {
-              case SendMessage(grpcMessage, metricsContext, attemptNumber, tc, _, _) =>
+              case sm @ SendMessage(_, grpcMessage, metricsContext, attemptNumber, tc, _, _) =>
                 implicit val traceContext: TraceContext = tc
                 val newAttemptNumber = attemptNumber + 1
-                if (newAttemptNumber <= MaxAttempts) {
-                  logger.info(
+                val delay = sm.jitterStream.next(newAttemptNumber)
+                if (newAttemptNumber <= maxAttempts) {
+                  logger.debug(
                     s"Connection-managing actor $actorName " +
-                      s"couldn't yet obtain connection for Send, retrying it in $SendRetryDelay, " +
-                      s"attempt $newAttemptNumber out of $MaxAttempts"
+                      s"couldn't yet obtain connection for `Send`, retrying it in $delay, " +
+                      s"attempt $newAttemptNumber out of $maxAttempts"
                   )
                   // Retrying after a delay due to not being connected:
                   //  record the send instant and delay to emit the actor queue latency when processing the message
-                  val delayedMessage = SendMessage(
-                    grpcMessage,
-                    metricsContext,
-                    newAttemptNumber,
-                    traceContext,
-                    sendInstant = Instant.now,
-                    maybeDelay = Some(SendRetryDelay),
-                  )
+                  val delayedMessage =
+                    sm.copy(
+                      attemptNumber = newAttemptNumber,
+                      sendInstant = Instant.now,
+                      maybeDelay = Some(delay),
+                    )
                   outstandingMessages.incrementAndGet().discard
                   context
-                    .scheduleOnce(SendRetryDelay, target = context.self, delayedMessage)
+                    .scheduleOnce(delay, target = context.self, delayedMessage)
                     .discard
                   metrics.p2p.send.sendsRetried.inc()(metricsContext)
                 } else
                   logger.info(
                     s"Connection-managing actor $actorName " +
-                      s"couldn't yet obtain connection yet for Send, no more retries left"
+                      s"couldn't yet obtain connection for `Send`, $maxAttempts retries exhausted, " +
+                      s"not retrying anymore"
                   )
 
-              case Initialize =>
+              case i @ Initialize(_, attemptNumber) =>
                 // Initialize must always be retried, since there are modules that wait for a quorum of
                 // connections to be established before being initialized. So if we stopped retrying too soon,
                 // some nodes could get stuck, which could easily happen in a network where nodes are starting
                 // up simultaneously and are not immediately reachable to one another.
-                logger.info(
+                val newAttemptNumber = attemptNumber + 1
+                val delay = i.jitterStream.next(newAttemptNumber)
+                logger.debug(
                   s"Connection-managing actor $actorName " +
-                    s"couldn't yet obtain connection for Initialize, retrying it in $SendRetryDelay"
+                    s"couldn't yet obtain connection for `Initialize`, retrying it in $delay"
                 )
                 outstandingMessages.incrementAndGet().discard
-                context.scheduleOnce(SendRetryDelay, target = context.self, message).discard
+                context
+                  .scheduleOnce(
+                    delay,
+                    target = context.self,
+                    i.copy(attemptNumber = newAttemptNumber),
+                  )
+                  .discard
                 metrics.p2p.send.sendsRetried.inc()(MetricsContext.Empty)
 
               case Close =>
@@ -283,9 +321,9 @@ object PekkoP2PGrpcNetworking {
         Behaviors
           .receiveMessage[PekkoP2PGrpcConnectionManagerActorMessage] {
 
-            case Initialize =>
+            case i: Initialize =>
               logger.info(s"Connection-managing actor $actorName initializing")
-              scheduleMessageIfNotConnectedBehavior(Initialize)((_) => ())
+              scheduleMessageIfNotConnectedBehavior(i)((_) => ())
               Behaviors.same
 
             case sendMsg: SendMessage =>
@@ -318,25 +356,27 @@ object PekkoP2PGrpcNetworking {
                       clearNetworkRefAssociations = false,
                       closeNetworkRefs = false,
                     )
+                    val maxAttempts = config.networkSendAttempts.value
                     // Retrying after a delay due to an exception:
                     //  record the send instant and delay to emit the actor queue latency when processing the message
                     val newAttemptNumber = sendMsg.attemptNumber + 1
-                    if (newAttemptNumber <= MaxAttempts) {
-                      logger.info(
+                    val delay = sendMsg.jitterStream.next(newAttemptNumber)
+                    if (newAttemptNumber <= maxAttempts) {
+                      logger.debug(
                         s"Connection-managing actor $actorName couldn't send a message to sender $peerSender, " +
-                          s"invalidating the connection and retrying in $SendRetryDelay, " +
-                          s"attempt $newAttemptNumber out of $MaxAttempts",
+                          s"invalidating the connection and retrying in $delay, " +
+                          s"attempt $newAttemptNumber out of $maxAttempts",
                         exception,
                       )
                       outstandingMessages.incrementAndGet().discard
                       pekkoActorContext
                         .scheduleOnce(
-                          SendRetryDelay,
+                          delay,
                           target = pekkoActorContext.self,
                           sendMsg.copy(
                             attemptNumber = newAttemptNumber,
                             sendInstant = Instant.now,
-                            maybeDelay = Some(SendRetryDelay),
+                            maybeDelay = Some(delay),
                           ),
                         )
                         .discard

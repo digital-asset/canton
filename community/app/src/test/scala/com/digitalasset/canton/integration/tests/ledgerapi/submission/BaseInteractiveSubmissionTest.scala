@@ -95,7 +95,7 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
       .list(synchronizerId, filterParty = party.toProtoPrimitive)
       .loneElement
     val partyToParticipantMapping = partyToParticipantTx.item
-    val removeTopologyTx = TopologyTransaction(
+    val removeTopologyTx = TopologyTransaction.tryCreate(
       TopologyChangeOp.Remove,
       partyToParticipantTx.context.serial.increment,
       partyToParticipantMapping,

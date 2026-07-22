@@ -11,7 +11,6 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -37,9 +36,11 @@ trait ClosedEnvelope extends Envelope[ByteString] {
   @VisibleForTesting
   def withRecipients(newRecipients: Recipients): ClosedEnvelope
 
-  /** Returns this envelope with the given bound used for decompression.
+  /** Returns this envelope bound to the given budget for its deferred decompression.
     */
-  def withMaxBytesToDecompress(maxBytesToDecompress: MaxBytesToDecompress): ClosedEnvelope
+  private[protocol] def withDecompressionBudget(
+      decompressionBudget: DecompressionBudget
+  ): ClosedEnvelope
 }
 
 object ClosedEnvelope {

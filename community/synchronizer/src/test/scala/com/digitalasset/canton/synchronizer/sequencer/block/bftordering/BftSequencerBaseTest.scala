@@ -14,6 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SignedMessage,
 }
 import com.digitalasset.canton.version.ProtocolVersion
+import org.scalactic.source
 import org.scalatest.Assertion
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -31,15 +32,21 @@ trait BftSequencerBaseTest extends BaseTest {
   ): Future[X] =
     x.futureUnlessShutdown().failOnShutdown(x.action)
 
-  protected final def assertLogs[A](within: => A, assertions: (LogEntry => Assertion)*): A =
-    loggerFactory.assertLogs(SuppressionRule.FullSuppression)(within, assertions*)
+  protected final def assertLogs[A](within: => A, assertions: (LogEntry => Assertion)*)(implicit
+      pos: source.Position
+  ): A =
+    loggerFactory.assertLogs(SuppressionRule.FullSuppression)(within, assertions*)(pos)
 
-  protected final def assertNoLogs[A](within: => A): A =
-    loggerFactory.assertLogs(SuppressionRule.FullSuppression)(within)
+  protected final def assertNoLogs[A](within: => A)(implicit
+      pos: source.Position
+  ): A =
+    loggerFactory.assertLogs(SuppressionRule.FullSuppression)(within)(pos)
 
-  protected final def suppressProblemLogs[A](within: => A, count: Int = 1): A = {
+  protected final def suppressProblemLogs[A](within: => A, count: Int = 1)(implicit
+      pos: source.Position
+  ): A = {
     val assertions = Seq.fill(count)((_: LogEntry) => succeed)
-    loggerFactory.assertLogs(within, assertions*)
+    loggerFactory.assertLogs(within, assertions*)(pos)
   }
 }
 

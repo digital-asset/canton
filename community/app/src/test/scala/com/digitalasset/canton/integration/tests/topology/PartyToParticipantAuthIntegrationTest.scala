@@ -1122,7 +1122,7 @@ trait PartyToParticipantAuthIntegrationTest
       serial: PositiveInt,
       topologyChangeOp: TopologyChangeOp,
   ): TopologyTransaction[TopologyChangeOp, M] =
-    TopologyTransaction(
+    TopologyTransaction.tryCreate(
       topologyChangeOp,
       serial = serial,
       mapping = mapping,
