@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.Order
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.ExternalCallPayloadDescription.{byteCount, hexPayloadSize}
 import com.digitalasset.canton.data.{ExternalCallKey, ParticipantTransactionView, ViewPosition}
@@ -18,9 +17,8 @@ import com.google.protobuf.ByteString
   * An external-call result is ''visible'' to this participant if it is recorded in one of the
   * (unblinded) views that this participant has received for validation. External-call results are
   * replay data that participate in validation. If two visible occurrences of the same external call
-  * record different outputs, a hosted confirming party must reject the transaction locally instead
-  * of approving an ambiguous result. Visible disagreements are also retained independently of
-  * hosted-party routing so callers can report suspicious recorded data.
+  * record different outputs, the recorded data is ambiguous: the transaction must be rejected
+  * rather than approved, and the disagreement is reported as suspicious recorded data.
   */
 object ExternalCallConsistencyChecker {
 
@@ -67,47 +65,11 @@ object ExternalCallConsistencyChecker {
       )
   }
 
-  /** Outcome of [[check]].
-    *
-    * @param hostedInconsistencies
-    *   Inconsistencies grouped by hosted confirming party, restricted for each party to the
-    *   occurrences that the party is responsible for checking. Grouped by party because
-    *   confirmation responses are issued on behalf of individual confirming parties: each hosted
-    *   confirming party must reject exactly the disagreements among its own occurrences.
-    * @param visibleInconsistencies
-    *   Inconsistencies across all occurrences visible to this participant, irrespective of which
-    *   parties it hosts. Used to alarm on suspicious recorded data even if this participant hosts
-    *   no affected checking party.
-    */
-  final case class Result(
-      hostedInconsistencies: Map[LfPartyId, Seq[Inconsistency]],
-      visibleInconsistencies: Seq[Inconsistency],
-  ) extends PrettyPrinting {
-    def inconsistentParties: Set[LfPartyId] = hostedInconsistencies.keySet
-
-    override protected def pretty: Pretty[Result] = prettyOfClass(
-      param("hostedInconsistencies", _.hostedInconsistencies),
-      param("visibleInconsistencies", _.visibleInconsistencies),
-    )
-  }
-
-  object Result {
-    val empty: Result = Result(Map.empty, Seq.empty)
-  }
-
-  /** An external-call result recorded in a view that this participant has received.
-    *
-    * @param checkingParties
-    *   The node-level confirming parties responsible for checking this result: the signatories and
-    *   acting parties of the exercise node that recorded the call, as determined at
-    *   transaction-tree construction. See
-    *   [[com.digitalasset.canton.data.ViewParticipantData.ViewExternalCallResult]].
-    */
+  /** An external-call result recorded in a view that this participant has received. */
   private final case class VisibleExternalCallOccurrence(
       key: ExternalCallKey,
       output: Bytes,
       occurrence: ExternalCallOccurrence,
-      checkingParties: Set[LfPartyId],
   )
 
   private implicit val orderBytes: Order[Bytes] =
@@ -158,54 +120,19 @@ object ExternalCallConsistencyChecker {
             ExternalCallKey.fromResult(externalCallResult.result),
             externalCallResult.result.output,
             occurrence,
-            externalCallResult.checkingParties,
           )
         }
       }
 
-  private def visibleInconsistencies(
-      occurrences: Seq[VisibleExternalCallOccurrence]
-  ): Seq[Inconsistency] =
-    occurrences
+  /** Returns the disagreements across all occurrences visible to this participant, sorted
+    * deterministically (by key, then outputs, then occurrences).
+    */
+  def check(views: Map[ViewPosition, ParticipantTransactionView]): Seq[Inconsistency] =
+    visibleOccurrences(views)
       .groupMap(_.key)(occurrence => occurrence.output -> occurrence.occurrence)
       .toSeq
       .flatMap { case (key, outputsAndOccurrences) =>
         inconsistencyFor(key, outputsAndOccurrences)
       }
       .sorted(orderInconsistency)
-
-  private def hostedInconsistencies(
-      occurrences: Seq[VisibleExternalCallOccurrence],
-      hostedConfirmingParties: Set[LfPartyId],
-  ): Map[LfPartyId, Seq[Inconsistency]] =
-    occurrences
-      .flatMap { occurrence =>
-        occurrence.checkingParties.intersect(hostedConfirmingParties).toSeq.map { party =>
-          (party, occurrence.key) -> (occurrence.output -> occurrence.occurrence)
-        }
-      }
-      .groupMap(_._1)(_._2)
-      .toSeq
-      .flatMap { case ((party, key), outputsAndOccurrences) =>
-        inconsistencyFor(key, outputsAndOccurrences).map(party -> _)
-      }
-      .groupMap(_._1)(_._2)
-      .view
-      .mapValues(_.sorted(orderInconsistency))
-      .toMap
-
-  /** Returns per-party inconsistencies for hosted confirming parties that check disagreeing outputs
-    * for the same external call, as well as the disagreements across all visible occurrences. See
-    * [[Result]] for how the two differ.
-    */
-  def check(
-      views: Map[ViewPosition, ParticipantTransactionView],
-      hostedConfirmingParties: Set[LfPartyId],
-  ): Result = {
-    val occurrences = visibleOccurrences(views)
-    Result(
-      hostedInconsistencies = hostedInconsistencies(occurrences, hostedConfirmingParties),
-      visibleInconsistencies = visibleInconsistencies(occurrences),
-    )
-  }
 }

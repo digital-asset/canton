@@ -83,16 +83,14 @@ class ExternalCallCheck(
     if (recordedResults.isEmpty)
       FutureUnlessShutdown.pure(Passed)
     else {
-      // Hosted parties are irrelevant for the request-level outcome: any visible disagreement
-      // rejects the request, so only the party-independent visible inconsistencies are consulted.
-      val consistency = ExternalCallConsistencyChecker.check(views, Set.empty)
+      val inconsistencies = ExternalCallConsistencyChecker.check(views)
 
       // Every visible inconsistency is alarmed: only the first one is propagated into the
       // rejection, so the confirmation-responses factory reports just that one.
-      consistency.visibleInconsistencies.foreach(alarmDisagreement(requestId, _))
+      inconsistencies.foreach(alarmDisagreement(requestId, _))
 
       // The checker sorts the inconsistencies, so the reported disagreement is deterministic.
-      consistency.visibleInconsistencies.headOption match {
+      inconsistencies.headOption match {
         case Some(inconsistency) =>
           FutureUnlessShutdown.pure(Rejected(inconsistency.description))
         case None if !runValidation =>
