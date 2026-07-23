@@ -186,20 +186,18 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           ("X-Daml-External-Function-Id", oversizedValue, "config-hash", oversizedValue),
           ("X-Daml-External-Config-Hash", "function", oversizedValue, oversizedValue),
         ).foreach { case (headerName, functionId, configHash, redactedValue) =>
-          val error = loggerFactory.suppressWarnings {
-            client
-              .call(functionId, configHash, "input", ExternalCallMode.Submission)(
-                TraceContext.empty
-              )
-              .failOnShutdown
-              .futureValue
-              .left
-              .value
-          }
+          val error = client
+            .call(functionId, configHash, "input", ExternalCallMode.Submission)(
+              TraceContext.empty
+            )
+            .failOnShutdown
+            .futureValue
+            .left
+            .value
 
           error.statusCode shouldBe 400
-          error.message should include(headerName)
-          error.message should not include redactedValue
+          // Full equality proves the rejected value does not leak.
+          error.message shouldBe s"Invalid external-call HTTP header value for $headerName"
         }
 
         requests.get shouldBe 0
@@ -302,12 +300,11 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           )
         )
 
-        loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)
-            .failOnShutdown
-            .futureValue shouldBe Right("cafe")
-        }
+        // Retries with a finite maxRetries log at INFO only; there is no warning to suppress.
+        client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)
+          .failOnShutdown
+          .futureValue shouldBe Right("cafe")
         attempts.get() shouldBe 2
       } finally {
         server.stop(0)
@@ -342,17 +339,15 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           )
         )
 
-        loggerFactory.suppressWarnings {
-          client
-            .call(
-              "function",
-              "config-hash",
-              "input",
-              ExternalCallMode.Submission,
-            )
-            .failOnShutdown
-            .futureValue shouldBe Right("cafe")
-        }
+        client
+          .call(
+            "function",
+            "config-hash",
+            "input",
+            ExternalCallMode.Submission,
+          )
+          .failOnShutdown
+          .futureValue shouldBe Right("cafe")
 
         observedIdempotencyKeys.size shouldBe 2
         observedIdempotencyKeys.get(0) should not be empty
@@ -390,12 +385,10 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           )
         )
 
-        loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)
-            .failOnShutdown
-            .futureValue shouldBe Right("cafe")
-        }
+        client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)
+          .failOnShutdown
+          .futureValue shouldBe Right("cafe")
 
         attempts.get() shouldBe 2
       } finally {
@@ -424,17 +417,15 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           )
         )
 
-        val error = loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
-        }
+        val error = client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)
+          .failOnShutdown
+          .futureValue
+          .left
+          .value
 
         error.statusCode shouldBe 503
-        error.message should include("Service unavailable")
+        error.message shouldBe "Service unavailable"
         error.message should not include "still unavailable"
         attempts.get() shouldBe 2
       } finally {
@@ -463,17 +454,15 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           )
         )
 
-        val error = loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
-        }
+        val error = client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)
+          .failOnShutdown
+          .futureValue
+          .left
+          .value
 
         error.statusCode shouldBe 401
-        error.message should include("Unauthorized - check bearer token")
+        error.message shouldBe "Unauthorized - check bearer token"
         error.message should not include "missing token"
         attempts.get() shouldBe 1
       } finally {
@@ -505,17 +494,24 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
               )
             )
 
-            val error = loggerFactory.suppressWarnings {
+            val error = loggerFactory.assertLogs(
               client
                 .call("function", "config-hash", "input", ExternalCallMode.Submission)
                 .failOnShutdown
                 .futureValue
                 .left
-                .value
-            }
+                .value,
+              { entry =>
+                entry.warningMessage should fullyMatch regex
+                  ("External call to extension 'test-extension' response body exceeded " +
+                    s"maximum size of 4 bytes: externalCallId=$uuidRegex")
+                entry.warningMessage should not include "beef00"
+              },
+            )
 
             error.statusCode shouldBe 413
-            error.message should include("exceeded maximum size of 4 bytes")
+            error.message shouldBe
+              "External call response body exceeded maximum size of 4 bytes"
             error.message should not include "beef00"
             attempts.get() shouldBe 1
           } finally {
@@ -558,16 +554,19 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           )
         )
 
-        val error = loggerFactory.suppressWarnings {
+        val error = loggerFactory.assertLogs(
           client
             .call("function", "config-hash", "input", ExternalCallMode.Submission)
             .failOnShutdown
             .futureValue
             .left
-            .value
-        }
+            .value,
+          _.warningMessage should fullyMatch regex
+            s"External call to extension 'test-extension' timed out: externalCallId=$uuidRegex",
+        )
 
         error.statusCode shouldBe 408
+        error.message shouldBe "Request timeout"
       } finally {
         releaseResponse.countDown()
         server.stop(0)
@@ -579,16 +578,20 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
         configForUnusedPort()
       )
 
-      val error = loggerFactory.suppressWarnings {
+      val error = loggerFactory.assertLogs(
         client
           .call("function", "config-hash", "input", ExternalCallMode.Submission)
           .failOnShutdown
           .futureValue
           .left
-          .value
-      }
+          .value,
+        _.warningMessage should fullyMatch regex
+          ("External call to extension 'test-extension' connection failed: " +
+            s"externalCallId=$uuidRegex"),
+      )
 
       error.statusCode shouldBe 503
+      error.message shouldBe "Connection failed"
     }
 
     "abort retry delay when the extension manager is closing" in {
@@ -658,20 +661,18 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
         )
         val client = newClient(config)
 
-        val error = loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)(
-              TraceContext.empty
-            )
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
-        }
+        val error = client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)(
+            TraceContext.empty
+          )
+          .failOnShutdown
+          .futureValue
+          .left
+          .value
 
         error.statusCode shouldBe 400
-        error.message should include("Bearer token file is empty")
-        error.message should not include tokenFile.toString
+        error.message shouldBe
+          "Invalid extension service authentication configuration: Bearer token file is empty"
       } finally {
         Files.deleteIfExists(tokenFile)
       }
@@ -692,20 +693,18 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       )
       val client = newClient(config)
 
-      val error = loggerFactory.suppressWarnings {
-        client
-          .call("function", "config-hash", "input", ExternalCallMode.Submission)(
-            TraceContext.empty
-          )
-          .failOnShutdown
-          .futureValue
-          .left
-          .value
-      }
+      val error = client
+        .call("function", "config-hash", "input", ExternalCallMode.Submission)(
+          TraceContext.empty
+        )
+        .failOnShutdown
+        .futureValue
+        .left
+        .value
 
       error.statusCode shouldBe 400
-      error.message should include("Failed to read bearer token file")
-      error.message should not include tokenFile.toString
+      error.message shouldBe
+        "Invalid extension service authentication configuration: Failed to read bearer token file"
     }
 
     "reject malformed bearer token contents without exposing the token" in {
@@ -725,21 +724,20 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
         )
         val client = newClient(config)
 
-        val error = loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)(
-              TraceContext.empty
-            )
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
-        }
+        val error = client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)(
+            TraceContext.empty
+          )
+          .failOnShutdown
+          .futureValue
+          .left
+          .value
 
         error.statusCode shouldBe 400
-        error.message should include("Bearer token file contains invalid characters")
-        error.message should not include "secret-token"
-        error.message should not include tokenFile.toString
+        // Full equality proves neither the token nor the file path leaks.
+        error.message shouldBe
+          "Invalid extension service authentication configuration: " +
+          "Bearer token file contains invalid characters"
       } finally {
         Files.deleteIfExists(tokenFile)
       }
@@ -758,21 +756,20 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
         )
         val client = newClient(config)
 
-        val error = loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)(
-              TraceContext.empty
-            )
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
-        }
+        val error = client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)(
+            TraceContext.empty
+          )
+          .failOnShutdown
+          .futureValue
+          .left
+          .value
 
         error.statusCode shouldBe 400
-        error.message should include("Bearer token file contains invalid characters")
-        error.message should not include "secret-token"
-        error.message should not include tokenFile.toString
+        // Full equality proves neither the token nor the file path leaks.
+        error.message shouldBe
+          "Invalid extension service authentication configuration: " +
+          "Bearer token file contains invalid characters"
       } finally {
         Files.deleteIfExists(tokenFile)
       }
@@ -795,21 +792,20 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
         )
         val client = newClient(config)
 
-        val error = loggerFactory.suppressWarnings {
-          client
-            .call("function", "config-hash", "input", ExternalCallMode.Submission)(
-              TraceContext.empty
-            )
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
-        }
+        val error = client
+          .call("function", "config-hash", "input", ExternalCallMode.Submission)(
+            TraceContext.empty
+          )
+          .failOnShutdown
+          .futureValue
+          .left
+          .value
 
         error.statusCode shouldBe 400
-        error.message should include("Bearer token file contains invalid characters")
-        error.message should not include "secret-token"
-        error.message should not include tokenFile.toString
+        // Full equality proves neither the token nor the file path leaks.
+        error.message shouldBe
+          "Invalid extension service authentication configuration: " +
+          "Bearer token file contains invalid characters"
       } finally {
         Files.deleteIfExists(tokenFile)
       }
@@ -845,9 +841,8 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
 
             error.statusCode shouldBe 404
             error.externalCallId shouldBe None
-            error.message should include("Extension 'missing-extension' not configured")
-            error.message should not include "first-extension"
-            error.message should not include "second-extension"
+            // Full equality proves the configured extension ids do not leak.
+            error.message shouldBe "Extension 'missing-extension' not configured"
           },
           _.warningMessage shouldBe
             "External call to extension 'missing-extension' (function 'function') failed: " +
@@ -888,17 +883,18 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
           timeouts,
         )
 
+        // The exact message proves the token file path does not leak.
+        val preflightFailure =
+          "Extension startup local preflight failed: Extension 'test-extension': " +
+            "Invalid extension service authentication configuration: Bearer token file is empty"
+
         try {
           loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.ERROR))(
-            inside(manager.initializeOnStartup().failOnShutdown.futureValue) { case Left(error) =>
-              error should include("Bearer token file is empty")
-              error should not include tokenFile.toString
-            },
+            manager.initializeOnStartup().failOnShutdown.futureValue shouldBe
+              Left(preflightFailure),
             entries =>
               inside(entries) { case Seq(entry) =>
-                entry.errorMessage should include("Extension startup local preflight failed")
-                entry.errorMessage should include("Bearer token file is empty")
-                entry.errorMessage should not include tokenFile.toString
+                entry.errorMessage shouldBe preflightFailure
               },
           )
         } finally {
@@ -916,16 +912,18 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
         timeouts,
       )
 
+      // The tail is the JDK's connection-refused message, so pin the structure via regex.
+      val validationFailureRegex =
+        "Extension startup validation failed: Extension 'test-extension': Connection failed: .*"
+
       try {
         loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.ERROR))(
           inside(manager.initializeOnStartup().failOnShutdown.futureValue) { case Left(error) =>
-            error should include("Extension startup validation failed")
-            error should include("test-extension")
+            error should fullyMatch regex validationFailureRegex
           },
           entries =>
             inside(entries) { case Seq(entry) =>
-              entry.errorMessage should include("Extension startup validation failed")
-              entry.errorMessage should include("test-extension")
+              entry.errorMessage should fullyMatch regex validationFailureRegex
             },
         )
       } finally {
@@ -933,6 +931,9 @@ class HttpExtensionServiceClientTest extends AnyWordSpec with BaseTest with HasE
       }
     }
   }
+
+  private val uuidRegex: String =
+    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
   private def newClient(config: ExtensionServiceConfig)(implicit
       ec: ExecutionContext
