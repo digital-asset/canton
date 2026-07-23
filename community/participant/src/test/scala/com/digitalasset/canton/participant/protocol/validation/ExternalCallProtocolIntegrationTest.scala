@@ -134,7 +134,7 @@ final class ExternalCallProtocolIntegrationTest
       validator: ExternalCallValidator,
       views: Map[ViewPosition, ParticipantTransactionView],
       runValidation: Boolean = true,
-  ): ExternalCallCheck.Result =
+  ): Map[ViewPosition, ExternalCallCheck.Result] =
     externalCallCheck(validator).check(requestId, views, runValidation).futureValueUS
 
   private def assertDisagreementAlarm[A](within: => A): A =
@@ -149,10 +149,10 @@ final class ExternalCallProtocolIntegrationTest
     )
 
   "ExternalCallCheck" should {
-    "pass when no view records external-call results" in {
+    "return no results when no view records external-call results" in {
       val validator = new RecordingExternalCallValidator(Map.empty)
 
-      runCheck(validator, views(Seq.empty)) shouldBe ExternalCallCheck.Passed
+      runCheck(validator, views(Seq.empty)) shouldBe Map.empty
       validator.observed shouldBe empty
     }
 
@@ -166,7 +166,10 @@ final class ExternalCallProtocolIntegrationTest
         ),
       )
 
-      result shouldBe ExternalCallCheck.Passed
+      result shouldBe Map(
+        leftViewPosition -> ExternalCallCheck.Passed,
+        rightViewPosition -> ExternalCallCheck.Passed,
+      )
       // Re-validated once for the shared semantic key.
       validator.observed shouldBe Seq(externalCallKey)
     }
@@ -191,7 +194,11 @@ final class ExternalCallProtocolIntegrationTest
           ExternalCallOccurrence(rightViewPosition, NonNegativeInt.one, NonNegativeInt.zero),
         ),
       )
-      result shouldBe ExternalCallCheck.Rejected(expectedInconsistency.description)
+      // Both views record the disagreeing call, so both are rejected.
+      result shouldBe Map(
+        leftViewPosition -> ExternalCallCheck.Rejected(expectedInconsistency.description),
+        rightViewPosition -> ExternalCallCheck.Rejected(expectedInconsistency.description),
+      )
       // Disagreeing results are not re-validated.
       validator.observed shouldBe empty
     }
@@ -218,7 +225,9 @@ final class ExternalCallProtocolIntegrationTest
         occurrences =
           Set(ExternalCallOccurrence(leftViewPosition, NonNegativeInt.zero, NonNegativeInt.zero)),
       )
-      result shouldBe ExternalCallCheck.Rejected(expectedInconsistency.description)
+      result shouldBe Map(
+        leftViewPosition -> ExternalCallCheck.Rejected(expectedInconsistency.description)
+      )
       validator.observed shouldBe Seq(externalCallKey)
     }
 
@@ -235,8 +244,10 @@ final class ExternalCallProtocolIntegrationTest
         views(leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter)))),
       )
 
-      result shouldBe ExternalCallCheck.CannotValidate(
-        "extension service is not configured"
+      result shouldBe Map(
+        leftViewPosition -> ExternalCallCheck.CannotValidate(
+          "extension service is not configured"
+        )
       )
     }
 
@@ -251,8 +262,125 @@ final class ExternalCallProtocolIntegrationTest
         runValidation = false,
       )
 
-      result shouldBe ExternalCallCheck.Passed
+      result shouldBe Map(
+        leftViewPosition -> ExternalCallCheck.Passed,
+        rightViewPosition -> ExternalCallCheck.Passed,
+      )
       validator.observed shouldBe empty
+    }
+
+    "reject every view recording a mismatched call" in {
+      val validator = new RecordingExternalCallValidator(
+        Map(
+          externalCallKey -> ExternalCallValidator.Mismatched(
+            computedOutput = otherExternalCallResult.output,
+            recordedOutput = externalCallResult.output,
+          )
+        )
+      )
+      val result = assertDisagreementAlarm {
+        runCheck(
+          validator,
+          views(
+            leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter))),
+            rightResults = Seq(externalCallViewResult(1, externalCallResult, Set(submitter))),
+          ),
+        )
+      }
+
+      val expectedInconsistency = Inconsistency(
+        externalCallKey,
+        outputs = Set(otherExternalCallResult.output, externalCallResult.output),
+        occurrences = Set(
+          ExternalCallOccurrence(leftViewPosition, NonNegativeInt.zero, NonNegativeInt.zero),
+          ExternalCallOccurrence(rightViewPosition, NonNegativeInt.one, NonNegativeInt.zero),
+        ),
+      )
+      // The mismatched call is recorded in both views, so both are rejected, after a single
+      // validator invocation for the shared semantic key.
+      result shouldBe Map(
+        leftViewPosition -> ExternalCallCheck.Rejected(expectedInconsistency.description),
+        rightViewPosition -> ExternalCallCheck.Rejected(expectedInconsistency.description),
+      )
+      validator.observed shouldBe Seq(externalCallKey)
+    }
+
+    "isolate re-validation failures to the views recording the call" in {
+      val independentCall = externalCallResult.copy(functionId = "other-function")
+      val validator = new RecordingExternalCallValidator(
+        Map(
+          externalCallKey -> ExternalCallValidator.Mismatched(
+            computedOutput = otherExternalCallResult.output,
+            recordedOutput = externalCallResult.output,
+          )
+        )
+      )
+      val result = assertDisagreementAlarm {
+        runCheck(
+          validator,
+          views(
+            leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter))),
+            rightResults = Seq(externalCallViewResult(1, independentCall, Set(submitter))),
+          ),
+        )
+      }
+
+      // Only the view recording the mismatched call is rejected; the view recording the
+      // independently validated call passes.
+      result(leftViewPosition) shouldBe a[ExternalCallCheck.Rejected]
+      result(rightViewPosition) shouldBe ExternalCallCheck.Passed
+      validator.observed should contain theSameElementsAs
+        Seq(externalCallKey, ExternalCallKey.fromResult(independentCall))
+    }
+
+    "re-validate calls unaffected by a disagreement" in {
+      val independentCall = externalCallResult.copy(functionId = "other-function")
+      val independentKey = ExternalCallKey.fromResult(independentCall)
+      val validator = new RecordingExternalCallValidator(
+        Map(
+          independentKey -> ExternalCallValidator.Mismatched(
+            computedOutput = otherExternalCallResult.output,
+            recordedOutput = independentCall.output,
+          )
+        )
+      )
+      val result = loggerFactory.assertLogs(
+        runCheck(
+          validator,
+          views(
+            leftResults = Seq(externalCallViewResult(0, externalCallResult, Set(submitter))),
+            rightResults = Seq(
+              externalCallViewResult(1, otherExternalCallResult, Set(submitter)),
+              externalCallViewResult(2, independentCall, Set(submitter)),
+            ),
+          ),
+        ),
+        // One alarm for the cross-view disagreement, one for the re-validation mismatch.
+        _.shouldBeCantonErrorCode(
+          ExternalCallValidationError.ExternalCallResultDisagreementAlarm
+        ),
+        _.shouldBeCantonErrorCode(
+          ExternalCallValidationError.ExternalCallResultDisagreementAlarm
+        ),
+      )
+
+      // The disagreeing key is not re-validated, but the independent call still is: its
+      // mismatch rejects the recording view. Both views record the disagreeing call, so both
+      // are rejected; the right view's rejection reports the disagreement, which takes
+      // precedence over its re-validation mismatch.
+      validator.observed shouldBe Seq(independentKey)
+      val expectedDisagreement = Inconsistency(
+        externalCallKey,
+        outputs = Set(externalCallResult.output, otherExternalCallResult.output),
+        occurrences = Set(
+          ExternalCallOccurrence(leftViewPosition, NonNegativeInt.zero, NonNegativeInt.zero),
+          ExternalCallOccurrence(rightViewPosition, NonNegativeInt.one, NonNegativeInt.zero),
+        ),
+      )
+      result shouldBe Map(
+        leftViewPosition -> ExternalCallCheck.Rejected(expectedDisagreement.description),
+        rightViewPosition -> ExternalCallCheck.Rejected(expectedDisagreement.description),
+      )
     }
   }
 
@@ -273,7 +401,7 @@ final class ExternalCallProtocolIntegrationTest
   }
 
   private def createResponses(
-      checkResult: ExternalCallCheck.Result,
+      checkResult: Map[ViewPosition, ExternalCallCheck.Result],
       timeValidationResultE: Either[TimeValidator.TimeCheckFailure, Unit] = Right(()),
       authorizationResult: Map[ViewPosition, String] = Map.empty,
   ): Seq[ConfirmationResponse] = {
@@ -335,35 +463,47 @@ final class ExternalCallProtocolIntegrationTest
   }
 
   "TransactionConfirmationResponsesFactory" should {
-    "reject every view on behalf of all hosted confirming parties on a rejected check" in {
-      val responses = createResponses(ExternalCallCheck.Rejected("disagreeing external call"))
-
-      responses should have size 2
-      forEvery(responses) { response =>
-        inside(response) { case ConfirmationResponse(_, reject: LocalReject, parties) =>
-          reject.isMalformed shouldBe false
-          reject.reason.message shouldBe
-            "LOCAL_VERDICT_EXTERNAL_CALL_RESULT_DISAGREEMENT(8,0): " +
-            "Rejected transaction due to inconsistent external call results: " +
-            "disagreeing external call"
-          parties shouldBe confirmers
-        }
-      }
-    }
-
-    "abstain instead of approving when the check cannot validate" in {
+    "reject exactly the views with a rejected result and approve the others" in {
       val responses = createResponses(
-        ExternalCallCheck.CannotValidate("extension service is not configured")
+        Map(leftViewPosition -> ExternalCallCheck.Rejected("disagreeing external call"))
       )
 
       responses should have size 2
-      forEvery(responses) { response =>
-        inside(response) { case ConfirmationResponse(_, abstain: LocalAbstain, parties) =>
-          abstain.reason.message shouldBe
-            "CANNOT_PERFORM_ALL_VALIDATIONS(9,0): " +
-            "Cannot perform all validations: extension service is not configured"
-          parties shouldBe confirmers
-        }
+      val leftResponse = responses.find(_.viewPositionO.contains(leftViewPosition)).value
+      inside(leftResponse) { case ConfirmationResponse(_, reject: LocalReject, parties) =>
+        reject.isMalformed shouldBe false
+        reject.reason.message shouldBe
+          "LOCAL_VERDICT_EXTERNAL_CALL_RESULT_DISAGREEMENT(8,0): " +
+          "Rejected transaction due to inconsistent external call results: " +
+          "disagreeing external call"
+        parties shouldBe confirmers
+      }
+      // The view without external-call results receives no verdict from the check.
+      val rightResponse = responses.find(_.viewPositionO.contains(rightViewPosition)).value
+      inside(rightResponse) { case ConfirmationResponse(_, LocalApprove(), parties) =>
+        parties shouldBe confirmers
+      }
+    }
+
+    "abstain instead of approving exactly the views that cannot be validated" in {
+      val responses = createResponses(
+        Map(
+          leftViewPosition ->
+            ExternalCallCheck.CannotValidate("extension service is not configured")
+        )
+      )
+
+      responses should have size 2
+      val leftResponse = responses.find(_.viewPositionO.contains(leftViewPosition)).value
+      inside(leftResponse) { case ConfirmationResponse(_, abstain: LocalAbstain, parties) =>
+        abstain.reason.message shouldBe
+          "CANNOT_PERFORM_ALL_VALIDATIONS(9,0): " +
+          "Cannot perform all validations: extension service is not configured"
+        parties shouldBe confirmers
+      }
+      val rightResponse = responses.find(_.viewPositionO.contains(rightViewPosition)).value
+      inside(rightResponse) { case ConfirmationResponse(_, LocalApprove(), parties) =>
+        parties shouldBe confirmers
       }
     }
 
@@ -372,7 +512,12 @@ final class ExternalCallProtocolIntegrationTest
       val recordTime = CantonTimestamp.Epoch.plusSeconds(10)
       val maxDelta = NonNegativeFiniteDuration.tryOfSeconds(1)
       val responses = createResponses(
-        ExternalCallCheck.CannotValidate("extension service is not configured"),
+        Map(
+          leftViewPosition ->
+            ExternalCallCheck.CannotValidate("extension service is not configured"),
+          rightViewPosition ->
+            ExternalCallCheck.CannotValidate("extension service is not configured"),
+        ),
         timeValidationResultE = Left(
           TimeValidator.LedgerTimeRecordTimeDeltaTooLargeError(ledgerTime, recordTime, maxDelta)
         ),
@@ -394,7 +539,12 @@ final class ExternalCallProtocolIntegrationTest
     "prefer a rejection from a later validation suite over the abstention" in {
       val responses = loggerFactory.assertLogs(
         createResponses(
-          ExternalCallCheck.CannotValidate("extension service is not configured"),
+          Map(
+            leftViewPosition ->
+              ExternalCallCheck.CannotValidate("extension service is not configured"),
+            rightViewPosition ->
+              ExternalCallCheck.CannotValidate("extension service is not configured"),
+          ),
           authorizationResult = Map(leftViewPosition -> "no authorization"),
         ),
         _.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.MalformedRequest),
@@ -420,7 +570,12 @@ final class ExternalCallProtocolIntegrationTest
     }
 
     "approve when the check passed" in {
-      val responses = createResponses(ExternalCallCheck.Passed)
+      val responses = createResponses(
+        Map(
+          leftViewPosition -> ExternalCallCheck.Passed,
+          rightViewPosition -> ExternalCallCheck.Passed,
+        )
+      )
 
       responses should have size 2
       forEvery(responses) { response =>

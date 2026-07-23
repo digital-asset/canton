@@ -248,15 +248,16 @@ class TransactionConfirmationResponsesFactory(
                   ).toLocalReject(protocolVersion)
                 )
 
-              // Verdicts due to the external-call check: recorded results that disagree (with
-              // each other across the request, or with the extension service on re-validation)
-              // reject the request on behalf of all hosted confirming parties; a recorded result
-              // that could not be re-validated abstains instead of approving, as the participant
-              // cannot vouch for the recorded result while the request is not provably wrong
-              // either.
+              // Verdicts due to the external-call check for THIS view: a result recorded in the
+              // view that disagrees with another visible occurrence of the same call, or with
+              // the extension service on re-validation, rejects the view; a recorded result that
+              // could not be re-validated abstains instead of approving, as the participant
+              // cannot vouch for the recorded result while the view is not provably wrong
+              // either. Views without external-call results have no entry and get no verdict
+              // from this check.
               val externalCallVerdicts =
-                externalCallCheckResult match {
-                  case ExternalCallCheck.Rejected(description) =>
+                externalCallCheckResult.get(viewPosition) match {
+                  case Some(ExternalCallCheck.Rejected(description)) =>
                     Some(
                       logged(
                         requestId,
@@ -264,14 +265,14 @@ class TransactionConfirmationResponsesFactory(
                           .Reject(description),
                       ).toLocalReject(protocolVersion)
                     )
-                  case ExternalCallCheck.CannotValidate(reason) =>
+                  case Some(ExternalCallCheck.CannotValidate(reason)) =>
                     Some(
                       logged(
                         requestId,
                         LocalAbstainError.CannotPerformAllValidations.Abstain(reason),
                       ).toLocalAbstain(protocolVersion)
                     )
-                  case ExternalCallCheck.Passed => None
+                  case Some(ExternalCallCheck.Passed) | None => None
                 }
 
               // Approve if the consistency check succeeded, reject otherwise.
