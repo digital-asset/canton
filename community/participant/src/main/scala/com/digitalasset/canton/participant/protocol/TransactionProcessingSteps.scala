@@ -926,6 +926,7 @@ class TransactionProcessingSteps(
           val checkResultF = externalCallCheck.check(
             requestId,
             participantViews,
+            ipsSnapshot,
             runValidation = malformedPayloads.isEmpty,
           )
           if (malformedPayloads.nonEmpty) {

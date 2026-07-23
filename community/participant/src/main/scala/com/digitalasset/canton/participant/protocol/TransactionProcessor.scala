@@ -132,6 +132,7 @@ class TransactionProcessor(
           loggerFactory,
         ),
         new ExternalCallCheck(
+          participantId,
           externalCallValidator,
           participantNodeParameters.general.batchingConfig.parallelism,
           loggerFactory,
