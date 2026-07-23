@@ -74,10 +74,27 @@ class GcpKms(
 
   private lazy val loggerKms = new GcpRequestResponseLogger(config.auditLogging, loggerFactory)
 
-  /* Identifies the version for all asymmetric GCP keys. Canton always opts to generate a new keys
-   * rather than adding a new version for that key.
-   */
-  private val gcpKeyversion = "1"
+  /** Resolves the GCP cryptoKey version Canton should use for the given [[KmsKeyId]]. If the
+    * key id is listed in [[KmsConfig.Gcp.keyVersionOverrides]], its mapped version is returned;
+    * otherwise [[GcpKms.defaultGcpKeyVersion]] (`"1"`) is returned, matching Canton's behavior
+    * of never adding a new version to a cryptoKey it created.
+    */
+  private def keyVersionFor(keyId: KmsKeyId): String =
+    config.keyVersionOverrides.getOrElse(keyId.unwrap, GcpKms.defaultGcpKeyVersion)
+
+  private def cryptoKeyVersionName(keyId: KmsKeyId): gcp.CryptoKeyVersionName =
+    gcp.CryptoKeyVersionName.of(
+      config.projectId,
+      config.locationId,
+      config.keyRingId,
+      keyId.unwrap,
+      keyVersionFor(keyId),
+    )
+
+  private def cryptoKeyName(keyId: KmsKeyId): gcp.CryptoKeyName =
+    // Symmetric keys: GCP picks the primary version on encrypt and recovers it from the
+    // ciphertext on decrypt, so no per-key version is needed here.
+    gcp.CryptoKeyName.of(config.projectId, config.locationId, config.keyRingId, keyId.unwrap)
 
   private val errorMessagesToRetry =
     Set(
@@ -296,14 +313,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, gcp.PublicKey] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
+    val keyVersionName = cryptoKeyVersionName(keyId)
     loggerKms.withLogging[gcp.PublicKey](
       loggerKms.getPublicKeyRequestMsg(keyId.unwrap),
       publicKey => loggerKms.getPublicKeyResponseMsg(keyId.unwrap, publicKey.getAlgorithm.name),
@@ -454,13 +464,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString6144] = {
-    val keyName =
-      gcp.CryptoKeyName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-      )
+    val keyName = cryptoKeyName(keyId)
     val encryptionAlgorithm = CryptoKeyVersionAlgorithm.GOOGLE_SYMMETRIC_ENCRYPTION
     for {
       dataEnc <- loggerKms.withLogging[ByteString](
@@ -497,13 +501,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString4096] = {
-    val keyName =
-      gcp.CryptoKeyName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-      )
+    val keyName = cryptoKeyName(keyId)
     val encryptionAlgorithm = CryptoKeyVersionAlgorithm.GOOGLE_SYMMETRIC_ENCRYPTION
     for {
       dataPlain <- loggerKms.withLogging[ByteString](
@@ -540,14 +538,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString190] = {
-    val keyName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
+    val keyName = cryptoKeyVersionName(keyId)
     for {
       encryptionAlgorithm <- convertToGcpAsymmetricEncryptionSpec(encryptionAlgorithmSpec)
         .leftMap(err => KmsDecryptError(keyId, err))
@@ -615,14 +606,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, ByteString] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
+    val keyVersionName = cryptoKeyVersionName(keyId)
     signingAlgorithmSpec match {
       case SigningAlgorithmSpec.EcDsaSha256 =>
         signingKeySpec match {
@@ -678,14 +662,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, Unit] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
+    val keyVersionName = cryptoKeyVersionName(keyId)
     loggerKms.withLogging[Unit](
       loggerKms.deleteKeyRequestMsg(keyId.unwrap),
       _ => loggerKms.deleteKeyResponseMsg(keyId.unwrap),
@@ -710,14 +687,7 @@ class GcpKms(
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, KmsError, gcp.CryptoKeyVersion] = {
-    val keyVersionName =
-      gcp.CryptoKeyVersionName.of(
-        config.projectId,
-        config.locationId,
-        config.keyRingId,
-        keyId.unwrap,
-        gcpKeyversion,
-      )
+    val keyVersionName = cryptoKeyVersionName(keyId)
     loggerKms.withLogging[gcp.CryptoKeyVersion](
       loggerKms.retrieveKeyMetadataRequestMsg(keyId.unwrap),
       keyMetadata =>
@@ -746,6 +716,13 @@ class GcpKms(
 }
 
 object GcpKms extends Kms.SupportedSchemes {
+
+  /** Default cryptoKey version used by Canton when no override is specified for a given key
+    * via [[KmsConfig.Gcp.keyVersionOverrides]]. Canton creates new cryptoKeys in GCP KMS
+    * rather than adding a new version to an existing one, so version `"1"` is always correct
+    * for Canton-generated keys.
+    */
+  private[gcp] val defaultGcpKeyVersion: String = "1"
 
   val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] =
     NonEmpty.mk(

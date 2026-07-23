@@ -110,6 +110,14 @@ object KmsConfig {
     *   retry configuration
     * @param endpointOverride
     *   the [optional] endpoint for a proxy to be used by the KMS client.
+    * @param keyVersionOverrides
+    *   per-cryptoKey overrides for the cryptoKey version that Canton should use when interacting
+    *   with that key. Each map entry is `<cryptoKey-id> -> <version>`. Keys not listed default to
+    *   version `"1"`, which matches how Canton creates new cryptoKeys (it never adds a new
+    *   version to an existing one). This is intended for cryptoKeys whose key material was
+    *   [imported into GCP KMS](https://cloud.google.com/kms/docs/importing-a-key), where each
+    *   import creates a new cryptoKey version and multiple versions can be relevant even for
+    *   asymmetric keys.
     */
   final case class Gcp(
       locationId: String,
@@ -118,6 +126,7 @@ object KmsConfig {
       auditLogging: Boolean = false,
       override val retries: RetryConfig = RetryConfig(),
       endpointOverride: Option[String] = None,
+      keyVersionOverrides: Map[String, String] = Map.empty,
   ) extends KmsConfig
 
   object Gcp {

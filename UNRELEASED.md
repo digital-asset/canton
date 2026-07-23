@@ -68,6 +68,13 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
 - `<canton-node>.replication.connection-pool.connection.client-connection-check-interval` is introduced
   that allows configuring the PostgreSQL-specific `client_connection_check_interval` parameter for DB locked connections.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
+- GCP KMS configuration gains a new `key-version-overrides` map that lets operators specify a custom
+  cryptoKey version per cryptoKey id (e.g. `key-version-overrides = { "my-imported-key" = "3" }`).
+  Previously, Canton always used version `"1"`. Keys not listed in the map continue to default to
+  version `"1"`, so existing configurations are unchanged. This is useful for cryptoKeys whose key
+  material was [imported into GCP KMS](https://cloud.google.com/kms/docs/importing-a-key), where each
+  import creates a new cryptoKey version and multiple versions can be relevant even for asymmetric
+  keys.
 - BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
 - *BREAKING*: `kms-driver-api` and `kms-driver-testing` are now published to Maven Central, and will no longer be available in Artifactory.
 - Connection pool metrics:

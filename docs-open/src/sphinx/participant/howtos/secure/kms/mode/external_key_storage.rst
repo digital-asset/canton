@@ -76,3 +76,11 @@ where `xyzKmsKeyId` is the KMS key identifier for a specific key (e.g. `KMS Key 
 .. note::
     When using `AWS cross account keys <https://docs.aws.amazon.com/kms/latest/developerguide/key-policy-modifying-external-accounts.html>`_
     the key ID can't be used, use the key `ARN` instead.
+
+.. note::
+    For GCP KMS, the key identifier is the cryptoKey id (e.g. ``my-signing-key``). By
+    default, Canton uses version ``"1"`` of the cryptoKey. If you registered a cryptoKey
+    whose key material was `imported into GCP KMS <https://cloud.google.com/kms/docs/importing-a-key>`_
+    and want to target a specific cryptoKey version, set
+    :ref:`\`\`key-version-overrides\`\` <kms_gcp_config>` on the GCP KMS config, mapping the
+    cryptoKey id to the desired version.
