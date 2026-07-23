@@ -4,11 +4,16 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
+import com.digitalasset.canton.participant.config.ExtensionServiceConfig
 import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.sun.net.httpserver.{HttpHandler, HttpServer}
 import org.scalatest.wordspec.AnyWordSpec
+
+import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets
 
 class ExtensionServiceExternalCallHandlerTest
     extends AnyWordSpec
@@ -17,6 +22,9 @@ class ExtensionServiceExternalCallHandlerTest
 
   private def emptyManager: ExtensionServiceManager =
     ExtensionServiceManager.empty(loggerFactory, ProcessingTimeout())
+
+  private val uuidRegex: String =
+    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
   "ExtensionServiceExternalCallHandler.create" should {
 
@@ -62,7 +70,7 @@ class ExtensionServiceExternalCallHandlerTest
         .failOnShutdown
         .futureValue
 
-      result.left.value.message should include("External calls not supported")
+      result.left.value.message shouldBe "External calls not supported"
     }
   }
 
@@ -102,48 +110,62 @@ class ExtensionServiceExternalCallHandlerTest
 
   "ExtensionServiceExternalCallHandler" when {
     "the error is not actionable for the client" should {
-      "reduce it to the generic client message" in {
-        val manager: ExtensionServiceManager =
-          new ExtensionServiceManager(Map.empty, loggerFactory, ProcessingTimeout()) {
-            override def handleExternalCall(
-                extensionId: String,
-                functionId: String,
-                configHash: String,
-                input: String,
-                mode: ExternalCallMode,
-            )(implicit
-                tc: TraceContext
-            ): FutureUnlessShutdown[Either[ExtensionCallError, String]] =
-              FutureUnlessShutdown.pure(
-                Left(
-                  ExtensionCallError(
-                    statusCode = 503,
-                    message = "Connection failed",
-                    externalCallId = Some("req-1"),
-                    retryable = true,
-                    clientActionable = false,
-                  )(tc)
-                )
-              )
-          }
+      "reduce it to the generic client message and log the full error" in {
+        val server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext(
+          "/",
+          (exchange => {
+            val body = "back later".getBytes(StandardCharsets.UTF_8)
+            exchange.sendResponseHeaders(503, body.length.toLong)
+            exchange.getResponseBody.write(body)
+            exchange.close()
+          }): HttpHandler,
+        )
+        server.start()
+
+        val manager = new ExtensionServiceManager(
+          Map(
+            "some-ext" -> ExtensionServiceConfig(
+              address = "127.0.0.1",
+              port = Port.tryCreate(server.getAddress.getPort),
+              maxRetries = NonNegativeInt.tryCreate(0),
+            )
+          ),
+          loggerFactory,
+          ProcessingTimeout(),
+        )
         val handler = new ExtensionServiceExternalCallHandler(manager)
 
         try {
-          val error = handler
-            .handleExternalCall(
-              "some-ext",
-              "some-func",
-              "00000000",
-              "deadbeef",
-              ExternalCallMode.Submission,
-            )
-            .failOnShutdown
-            .futureValue
-            .left
-            .value
-          error.message shouldBe
-            "External call failed (retryable = true, external call id = 'req-1')"
-        } finally manager.close()
+          val error = loggerFactory.assertLogs(
+            handler
+              .handleExternalCall(
+                "some-ext",
+                "some-func",
+                "00000000",
+                "deadbeef",
+                ExternalCallMode.Submission,
+              )
+              .failOnShutdown
+              .futureValue
+              .left
+              .value,
+            // The manager logs the full internal error; only the generic message may reach
+            // the engine and thereby the submitting client.
+            _.warningMessage should fullyMatch regex
+              ("External call to extension 'some-ext' \\(function 'some-func'\\) failed: " +
+                "ExtensionCallError\\(status code = 503, message = \"Service unavailable\", " +
+                s"external call id = '$uuidRegex', retryable = true, trace id = tid:\\)"),
+          )
+
+          error.message should fullyMatch regex
+            s"External call failed \\(retryable = true, external call id = '$uuidRegex'\\)"
+          error.message should not include "Service unavailable"
+          error.message should not include "back later"
+        } finally {
+          manager.close()
+          server.stop(0)
+        }
       }
     }
   }
