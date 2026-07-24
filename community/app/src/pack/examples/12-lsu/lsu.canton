@@ -12,8 +12,8 @@ import com.digitalasset.canton.examples.java.iou.Iou
 // -----------------------------------------------------
 // Filesystem
 val exportDirectory = File("lsu-files")
-if(exportDirectory.exists)
-    exportDirectory.delete()
+if (exportDirectory.exists)
+  exportDirectory.delete()
 exportDirectory.createDirectoryIfNotExists()
 
 // -----------------------------------------------------
@@ -32,7 +32,8 @@ bootstrap.synchronizer(
   mediators = Seq(mediator1),
   synchronizerOwners = Seq(sequencer1),
   synchronizerThreshold = PositiveInt.one,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+  staticSynchronizerParameters =
+    StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )
 
 participants.all.synchronizers.connect_local(sequencer1, alias = "da")
@@ -45,15 +46,15 @@ val bank = participant2.parties.enable("Bank")
 
 val pkgIou = participant1.packages.find_by_module("Iou").head
 val createIouCmd = ledger_api_utils.create(
-    pkgIou.packageId,
-    "Iou",
-    "Iou",
-    Map(
-      "payer" -> bank,
-      "owner" -> alice,
-      "amount" -> Map("value" -> 100.0, "currency" -> "CHF"),
-      "viewers" -> List()
-    )
+  pkgIou.packageId,
+  "Iou",
+  "Iou",
+  Map(
+    "payer" -> bank,
+    "owner" -> alice,
+    "amount" -> Map("value" -> 100.0, "currency" -> "CHF"),
+    "viewers" -> List(),
+  ),
 )
 
 participant2.ledger_api.commands.submit(Seq(bank), Seq(createIouCmd))
@@ -61,8 +62,10 @@ participant2.ledger_api.commands.submit(Seq(bank), Seq(createIouCmd))
 val currentPhysicalSynchronizerId = sequencer1.physical_synchronizer_id
 val currentSynchronizerId = sequencer1.synchronizer_id
 val currentStaticSynchronizerParameters = sequencer1.synchronizer_parameters.static.get
-val newStaticSynchronizerParameters = currentStaticSynchronizerParameters.copy(protocolVersion = ProtocolVersion.dev)
-val newPhysicalSynchronizerId = PhysicalSynchronizerId(currentSynchronizerId, newStaticSynchronizerParameters.toInternal)
+val newStaticSynchronizerParameters =
+  currentStaticSynchronizerParameters.copy(protocolVersion = ProtocolVersion.dev)
+val newPhysicalSynchronizerId =
+  PhysicalSynchronizerId(currentSynchronizerId, newStaticSynchronizerParameters.toInternal)
 
 // -----------------------------------------------------
 // Helpers methods
@@ -79,8 +82,7 @@ def writeKeysToFile(
   publicKeysWithNames.foreach { pb =>
     node.keys.secret.download_to(
       pb.id,
-      outputFile =
-        s"$exportDirectory/${pb.name.map(_.toProtoPrimitive).getOrElse("key")}.keys",
+      outputFile = s"$exportDirectory/${pb.name.map(_.toProtoPrimitive).getOrElse("key")}.keys",
     )
   }
 }
@@ -88,8 +90,7 @@ def writeKeysToFile(
 def writeAuthorizeStoreToFile(node: InstanceReference): Unit = {
   val byteString = node.topology.transactions
     .export_topology_snapshot(
-      filterMappings =
-        Seq(NamespaceDelegation.code, OwnerToKeyMapping.code, VettedPackages.code),
+      filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code, VettedPackages.code),
       filterNamespace = node.id.uid.namespace.filterString,
     )
   BinaryFileUtil.writeByteStringToFile(
@@ -119,8 +120,8 @@ def writeSynchronizerNodesDataToFiles() = {
 }
 
 def migrateNode(
-  migratedNode: InstanceReference,
-  oldNodeName: String,
+    migratedNode: InstanceReference,
+    oldNodeName: String,
 ): Unit = {
   val nodeName = migratedNode.name
 

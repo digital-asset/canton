@@ -180,7 +180,7 @@ class OutputModule[E <: Env[E]](
   }
 
   private var currentEpochNumber: EpochNumber =
-    startupState.initialEpochWeHaveLeaderSelectionStateFor
+    startupState.initialTopologyEpochNumber
   private var currentMembership: Membership = startupState.initialMembership
   private var currentEpochCryptoProvider: CryptoProvider[E] = startupState.initialCryptoProvider
   @VisibleForTesting
@@ -254,8 +254,7 @@ class OutputModule[E <: Env[E]](
             context.blockingAwait(
               store.insertBlockIfMissing(
                 OutputBlockMetadata(
-                  epochNumber =
-                    EpochNumber(startupState.initialEpochWeHaveLeaderSelectionStateFor - 1),
+                  epochNumber = EpochNumber(startupState.initialTopologyEpochNumber - 1),
                   blockNumber = BlockNumber(boundaryBlockNumber),
                   blockBftTime = previousBftTime,
                 )
@@ -465,7 +464,7 @@ class OutputModule[E <: Env[E]](
                 initialBlock.blockBftTime,
               )
             }
-          val epochMetadata =
+          val startEpochMetadata =
             context.blockingAwait(
               store.getEpoch(startEpochNumber),
               config.blockingDbReadTimeout,
@@ -473,38 +472,46 @@ class OutputModule[E <: Env[E]](
           // If an epoch's metadata was not recorded, then it had default values, so we can safely assume that
           //  the epoch could not alter the ordering topology.
           currentEpochCouldAlterOrderingTopology =
-            epochMetadata.exists(_.couldAlterOrderingTopology)
-          if (epochMetadata.isDefined)
+            startEpochMetadata.exists(_.couldAlterOrderingTopology)
+          if (startEpochMetadata.isDefined)
             setEpochMetadataStoredCache(startEpochNumber)
 
-          val initialEpochWeHaveLeaderSelectionStateFor =
-            startupState.initialEpochWeHaveLeaderSelectionStateFor
-          if (startEpochNumber < initialEpochWeHaveLeaderSelectionStateFor) {
+          val initialTopologyEpochNumber = startupState.initialTopologyEpochNumber
+          if (startEpochNumber < initialTopologyEpochNumber) {
             logger.info(
               s"Output module bootstrap: detected start epoch $startEpochNumber, which is before " +
-                s"the epoch we have leader selection state for, i.e. $initialEpochWeHaveLeaderSelectionStateFor: " +
-                "loading epoch info"
+                "the initial topology epoch number (for which we have leader selection state for), " +
+                s"i.e. $initialTopologyEpochNumber: loading epoch info"
             )
             for {
-              epochInfo <- context.blockingAwait(
+              startEpochInfo <- context.blockingAwait(
                 epochStoreReader.loadEpochInfo(startEpochNumber),
                 config.blockingDbReadTimeout,
               )
-              bootstrapTopologyActivationTime = epochInfo.topologyActivationTime
+              bootstrapTopologyActivationTime = startEpochInfo.topologyActivationTime
               _ = logger.info(
-                s"Output module bootstrap: querying restart topology at $bootstrapTopologyActivationTime for epoch $startEpochNumber " +
+                s"Output module bootstrap: querying restart topology at $bootstrapTopologyActivationTime for start epoch $startEpochNumber " +
                   s"(could alter ordering topology: $currentEpochCouldAlterOrderingTopology)"
               )
-              (orderingTopology, cryptoProvider) <- context.blockingAwait(
-                orderingTopologyProvider.getOrderingTopologyAt(
-                  activationTime = Some(bootstrapTopologyActivationTime),
-                  // Don't check for pending changes if we are restarting from the first epoch,
-                  //  since we know there can't be any, and `awaitMaxTimestamp` can be get stuck
-                  //  for the first epoch's activation time, since we haven't ticked it
-                  //  (being the first epoch).
-                  checkPendingChanges = startEpochNumber > EpochNumber.First,
-                ),
-                config.blockingDbReadTimeout,
+              (orderingTopologyUncheckedForTopologyChanges, cryptoProvider) <- context
+                .blockingAwait(
+                  orderingTopologyProvider.getOrderingTopologyAt(
+                    activationTime = Some(bootstrapTopologyActivationTime),
+                    // We avoid checking if there are pending topology changes to avoid getting stuck, which could happen
+                    //  during LSU at the first epoch (due to no tick at end of genesis epoch) or even at a later epoch
+                    //  (for similar reasons, since there's no tick that allows observing the head timestamp).
+                    //  Since we know whether the current epoch could alter the ordering topology, we then set the
+                    //  `areTherePendingCantonTopologyChanges` field of the ordering topology accordingly to
+                    //  force a topology query if needed; even though logically these 2 flags are generally
+                    //  not equivalent, as `areTherePendingCantonTopologyChanges`
+                    //  implies `currentEpochCouldAlterOrderingTopology` but not vice versa,
+                    //  since we always restart from the beginning of an epoch, in this case they are equivalent.
+                    checkPendingChanges = false,
+                  ),
+                  config.blockingDbReadTimeout,
+                )
+              orderingTopology = orderingTopologyUncheckedForTopologyChanges.copy(
+                areTherePendingCantonTopologyChanges = Some(currentEpochCouldAlterOrderingTopology)
               )
               leaderSelectionPolicyState <- context.blockingAwait(
                 store.getLeaderSelectionPolicyState(startEpochNumber),
@@ -766,12 +773,12 @@ class OutputModule[E <: Env[E]](
             //  we never insert `false` and then change it; this avoids updates
             //  and allows leveraging idempotency for easier CFT support.
             if (orderingTopology.areTherePendingCantonTopologyChanges.exists(identity)) {
-              val outputEpochMetadata =
+              val newOutputEpochMetadata =
                 OutputEpochMetadata(newEpochNumber, couldAlterOrderingTopology = true)
-              logger.debug(s"Storing $outputEpochMetadata")
-              pipeToSelf(store.insertEpochIfMissing(outputEpochMetadata)) {
+              logger.debug(s"Storing $newOutputEpochMetadata")
+              pipeToSelf(store.insertEpochIfMissing(newOutputEpochMetadata)) {
                 case Failure(exception) =>
-                  abort(s"Failed to store $outputEpochMetadata", exception)
+                  abort(s"Failed to store $newOutputEpochMetadata", exception)
                 case Success(_) =>
                   MetadataStoredForNewEpoch(
                     newEpochNumber,
@@ -1279,7 +1286,7 @@ object OutputModule {
   final case class StartupState[E <: Env[E]](
       thisNode: BftNodeId,
       initialHeightToProvide: BlockNumber,
-      initialEpochWeHaveLeaderSelectionStateFor: EpochNumber,
+      initialTopologyEpochNumber: EpochNumber,
       previousBftTimeForOnboarding: Option[CantonTimestamp],
       onboardingEpochCouldAlterOrderingTopology: Boolean,
       initialCryptoProvider: CryptoProvider[E],

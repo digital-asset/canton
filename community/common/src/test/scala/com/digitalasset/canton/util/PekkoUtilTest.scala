@@ -26,6 +26,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   RecoveringFutureQueueImpl,
   RecoveringQueueMetrics,
   ShutdownInProgress,
+  StashOfferResult,
   WithKillSwitch,
   noOpKillSwitch,
 }
@@ -2766,6 +2767,73 @@ class PekkoUtilTest
           }
         case _ =>
       }
+    }
+  }
+
+  "stashSource" should {
+    "replace stashed elements" in {
+      val (source, sink) = PekkoUtil.stashSource[Int].toMat(TestSink.probe[Int])(Keep.both).run()
+      source.isEmpty shouldBe true
+      source.offer(1) shouldBe StashOfferResult.Stashed
+      source.isEmpty shouldBe false
+      source.offer(2) shouldBe StashOfferResult.Replaced(1)
+      source.isEmpty shouldBe false
+      source.offer(3) shouldBe StashOfferResult.Replaced(2)
+      sink.request(1)
+      sink.expectNext() shouldBe 3
+      source.isEmpty shouldBe true
+      source.offer(4) shouldBe StashOfferResult.Stashed
+      source.isEmpty shouldBe false
+      source.isCompleted shouldBe false
+      source.complete()
+      source.isCompleted shouldBe true
+      sink.request(1)
+      sink.expectNext(4)
+      sink.expectComplete()
+    }
+
+    "report all dropped elements" in {
+      val (source, receivedF) =
+        PekkoUtil.stashSource[Int].throttle(10, 1.millis).toMat(Sink.seq)(Keep.both).run()
+      val count = 1000
+      val replaced = new AtomicReference[Seq[Int]](Seq.empty)
+      for (i <- 1 to count) {
+        source.offer(i) match {
+          case StashOfferResult.Stashed =>
+          case StashOfferResult.Replaced(old) =>
+            replaced.updateAndGet(old +: _).discard
+          case other => fail(s"Unexpected stash offer result: $other")
+        }
+      }
+      source.complete()
+      val received = receivedF.futureValue
+      val all = (received ++ replaced.get()).sorted
+      all shouldBe (1 to count)
+    }
+
+    "raise exception if the stash is completed twice" in {
+      val source = PekkoUtil.stashSource[Int].toMat(Sink.ignore)(Keep.left).run()
+      source.complete()
+      source.isCompleted shouldBe true
+      assertThrows[IllegalStateException](source.complete())
+    }
+
+    "raise exception if the queue is failed twice" in {
+      val ex = new RuntimeException("oops")
+      val source = PekkoUtil.stashSource[Int].toMat(Sink.ignore)(Keep.left).run()
+      source.fail(ex)
+      source.isCompleted shouldBe true
+      assertThrows[IllegalStateException](source.fail(ex))
+    }
+
+    "propagate cancellation up" in {
+      val (source, sink) = PekkoUtil.stashSource[Int].toMat(TestSink.probe[Int])(Keep.both).run()
+      source.offer(1) shouldBe StashOfferResult.Stashed
+      sink.cancel()
+      eventually() {
+        source.isCompleted shouldBe true
+      }
+      source.offer(2) shouldBe a[StashOfferResult.Failure]
     }
   }
 }

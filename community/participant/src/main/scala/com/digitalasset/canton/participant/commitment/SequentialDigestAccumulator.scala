@@ -44,10 +44,10 @@ class SequentialDigestAccumulator(
     implicit val traceContext: TraceContext = input.traceContext
     // for now use the offset as the tiebreaker
     input match {
-      case ProcessingContext(_, CheckpointFence) =>
+      case ProcessingContext(_, CheckpointFence(tpe)) =>
         acsDigestStore
-          .insertCheckpointTime(input.offset, input.recordTime)
-          .map(_ => Some(CheckpointWritten(input.timepoint)))
+          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
+          .map(_ => Some(CheckpointWritten(input.timepoint, tpe)))
 
       case ProcessingContext(_, NotCheckpointFence(_, classification)) =>
         classification match {

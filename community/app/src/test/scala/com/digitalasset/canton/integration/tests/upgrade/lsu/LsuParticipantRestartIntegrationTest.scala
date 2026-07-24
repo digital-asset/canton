@@ -22,9 +22,9 @@ import java.time.Duration
 /*
  * This test is used to test LSU works well when participants are restarted.
  */
-final class LsuRestartIntegrationTest extends LsuBase {
+final class LsuParticipantRestartIntegrationTest extends LsuBase {
 
-  override protected def testName: String = "lsu-restart"
+  override protected def testName: String = "lsu-participant-restart"
 
   registerPlugin(
     new UseBftSequencer(
@@ -79,7 +79,7 @@ final class LsuRestartIntegrationTest extends LsuBase {
       }
 
   "Logical synchronizer upgrade" should {
-    "work when participants are restarted" in { implicit env =>
+    "work when participants are restarted before and after LSU upgrade time" in { implicit env =>
       import env.*
 
       val fixture = fixtureWithDefaults()

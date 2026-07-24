@@ -28,7 +28,10 @@ private[p2p] class AddEndpointHeaderClientInterceptor(
 ) extends ClientInterceptor
     with NamedLogging {
 
-  import AddEndpointHeaderClientInterceptor.ENDPOINT_METADATA_KEY
+  import AddEndpointHeaderClientInterceptor.{
+    ENDPOINT_METADATA_KEY,
+    ENDPOINT_METADATA_KEY_DEPRECATED,
+  }
 
   override def interceptCall[ReqT, RespT](
       method: MethodDescriptor[ReqT, RespT],
@@ -42,6 +45,7 @@ private[p2p] class AddEndpointHeaderClientInterceptor(
         implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
         logger.debug(s"Adding server endpoint header to outgoing call: $peerEndpoint")
         headers.put(ENDPOINT_METADATA_KEY, peerEndpoint)
+        headers.put(ENDPOINT_METADATA_KEY_DEPRECATED, peerEndpoint)
         super.start(responseListener, headers)
       }
     }
@@ -59,6 +63,13 @@ private[bftordering] object AddEndpointHeaderClientInterceptor {
     }
 
   val ENDPOINT_METADATA_KEY: Metadata.Key[P2PEndpoint] =
+    Metadata.Key.of(
+      s"cantonbft-p2p-endpoint${Metadata.BINARY_HEADER_SUFFIX}",
+      ENDPOINT_METADATA_MARSHALLER,
+    )
+
+  // TODO(#34353): remove in >= 3.5.11
+  val ENDPOINT_METADATA_KEY_DEPRECATED: Metadata.Key[P2PEndpoint] =
     Metadata.Key.of(
       s"${classOf[P2PEndpoint].getName.replace("$", "_")}-${Metadata.BINARY_HEADER_SUFFIX}",
       ENDPOINT_METADATA_MARSHALLER,

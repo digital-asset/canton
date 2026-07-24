@@ -7,7 +7,7 @@ import com.daml.ledger.api.v2.event.Event.Event.Created
 import com.daml.ledger.api.v2.reassignment.{Reassignment, ReassignmentEvent}
 import com.daml.ledger.api.v2.trace_context.TraceContext as LedgerApiTraceContext
 import com.daml.ledger.api.v2.transaction.Transaction
-import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
+import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.client.LedgerClient
@@ -88,9 +88,9 @@ class AcsChangesReader(
           updateResponse match {
             case UpdateResponse.ProtoUpdate(protoUpdate) =>
               protoUpdate.update match {
-                case GetUpdatesResponse.Update.Transaction(transaction) =>
+                case GetUpdateResponse.Update.Transaction(transaction) =>
                   transaction.synchronizerId == synchronizerIdString
-                case GetUpdatesResponse.Update.Reassignment(reassignment) =>
+                case GetUpdateResponse.Update.Reassignment(reassignment) =>
                   reassignment.synchronizerId == synchronizerIdString
                 case _ => false
               }
@@ -179,7 +179,7 @@ object AcsChangesReader {
     updateResponse match {
       case UpdateResponse.ProtoUpdate(protoUpdate) =>
         protoUpdate.update match {
-          case GetUpdatesResponse.Update.Transaction(transaction)
+          case GetUpdateResponse.Update.Transaction(transaction)
               if transaction.events.exists(_.event.isArchived) =>
             Some(Offset.tryFromLong(transaction.offset))
           case _ => None
@@ -216,7 +216,7 @@ object AcsChangesReader {
     updateResponse match {
       case UpdateResponse.ProtoUpdate(protoUpdate) =>
         protoUpdate.update match {
-          case GetUpdatesResponse.Update.Transaction(transaction) =>
+          case GetUpdateResponse.Update.Transaction(transaction) =>
             Some(
               offset -> UpdateResponse.AcsChange(
                 acsChangeUpdateOf(
@@ -227,7 +227,7 @@ object AcsChangesReader {
                 )
               )
             )
-          case GetUpdatesResponse.Update.Reassignment(reassignment) =>
+          case GetUpdateResponse.Update.Reassignment(reassignment) =>
             Some(
               offset -> UpdateResponse.AcsChange(
                 acsChangeUpdateOf(

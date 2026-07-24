@@ -961,7 +961,7 @@ class ParticipantNodeBootstrap(
                 psidLookup = sync.activePsidForLsid _,
                 topologyClientO = lookupTopologyClient,
                 syncPersistentStateO = psid =>
-                  // TODO(#33506): This is not good, but makes LsuLateParticipantUpgradeTest and LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest green :(
+                  // TODO(#33084): This is not good, but makes LsuLateParticipantUpgradeTest and LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest green :(
                   //               In a late/manual lsu, the new psid might become active before the stores are even initialized.
                   //               That's why RepairServiceHelpers uses latestKnownPsid.
                   syncPersistentStateManager

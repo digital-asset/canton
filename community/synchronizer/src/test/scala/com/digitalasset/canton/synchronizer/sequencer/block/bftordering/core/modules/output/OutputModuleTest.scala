@@ -705,7 +705,7 @@ class OutputModuleTest
         when(
           orderingTopologyProvider.getOrderingTopologyAt(
             Some(TopologyActivationTime(aTimestamp)),
-            checkPendingChanges = true,
+            checkPendingChanges = false,
           )(traceContext)
         ).thenReturn(() => None) // We care about the call, not the result
 
@@ -746,7 +746,7 @@ class OutputModuleTest
         verify(orderedBlocksReader, times(2)).loadEpochInfo(secondEpochNumber)(traceContext)
         verify(orderingTopologyProvider).getOrderingTopologyAt(
           Some(TopologyActivationTime(aTimestamp)),
-          checkPendingChanges = true,
+          checkPendingChanges = false,
         )(traceContext)
         output.blocksRecoveredFromConsensus.nextLoadPoint shouldBe expectedLoadPoint
 
@@ -859,16 +859,18 @@ class OutputModuleTest
       when(
         orderingTopologyProvider.getOrderingTopologyAt(
           Some(TopologyActivationTime(sequencerTimestampOfEpoch)),
-          checkPendingChanges = true,
-        )
+          checkPendingChanges = false,
+        )(traceContext)
       ).thenReturn(() => Some(defaultTestMembership.orderingTopology -> oldCryptoProvider))
       when(store.getLeaderSelectionPolicyState(sequencerEpochIsAt)).thenReturn(() =>
         Some(sequencerEpochBlacklistState)
       )
+      val adjustedQueriedOrderingTopology = defaultTestMembership.orderingTopology
+        .copy(areTherePendingCantonTopologyChanges = Some(true))
       when(
         leaderSelectionInitializer.leaderSelectionPolicy(
           sequencerEpochBlacklistState,
-          defaultTestMembership.orderingTopology,
+          adjustedQueriedOrderingTopology,
         )
       )
         .thenReturn(sequencerEpochPolicy)
@@ -882,11 +884,11 @@ class OutputModuleTest
       when(outputEpochPolicy.firstBlockWeNeedToAdd).thenReturn(Some(outputBlockIsAt))
       // Leaders and blacklisted nodes are used to emit metrics, so we need to mock them.
       when(
-        sequencerEpochPolicy.getLeaders(defaultTestMembership.orderingTopology, sequencerEpochIsAt)
+        sequencerEpochPolicy.getLeaders(adjustedQueriedOrderingTopology, sequencerEpochIsAt)
       ).thenReturn(Seq(BftNodeId("node1")))
       when(
         sequencerEpochPolicy.getBlacklistedNodes(
-          defaultTestMembership.orderingTopology,
+          adjustedQueriedOrderingTopology,
           sequencerEpochIsAt,
         )
       ).thenReturn(Seq.empty)

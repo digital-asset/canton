@@ -83,7 +83,11 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   MissingSynchronizerPredecessor,
   SequencerPastUpgradeTime,
 }
-import com.digitalasset.canton.synchronizer.sequencer.store.{PayloadId, SequencerStore}
+import com.digitalasset.canton.synchronizer.sequencer.store.{
+  PayloadId,
+  SequencerMemberId,
+  SequencerStore,
+}
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.*
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   LsuTrafficState,
@@ -104,6 +108,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Backoff, Pause}
+import com.digitalasset.canton.util.signalling.LocalEventSignaller
 import com.digitalasset.canton.util.{
   EitherTUtil,
   FutureUnlessShutdownUtil,
@@ -160,7 +165,8 @@ class BlockSequencer(
       blockSequencerConfig.toDatabaseSequencerConfig,
       None,
       TotalNodeCountValues.SingleSequencerTotalNodeCount,
-      new LocalSequencerStateEventSignaller(
+      new LocalEventSignaller[SequencerMemberId, Unit](
+        "member",
         parameters.processingTimeouts,
         loggerFactory,
       ),

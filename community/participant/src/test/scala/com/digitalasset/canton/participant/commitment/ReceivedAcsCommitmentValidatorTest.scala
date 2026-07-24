@@ -33,6 +33,7 @@ import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
   CommitmentPeriod,
+  Digest,
 }
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
@@ -132,7 +133,7 @@ class ReceivedAcsCommitmentValidatorTest
     participant1.toLf,
     CommitmentPeriod
       .tryCreate(CantonTimestamp.ofEpochSecond(1), CantonTimestamp.ofEpochSecond(3)),
-    ByteString.copyFromUtf8("Good digest"),
+    Digest.hashDigest(ByteString.copyFromUtf8("Good digest")).getCryptographicEvidence,
     testedProtocolVersion,
   )
 
@@ -142,7 +143,7 @@ class ReceivedAcsCommitmentValidatorTest
     counterparticipant = participant1.toLf,
     CommitmentPeriod
       .tryCreate(CantonTimestamp.ofEpochSecond(3), CantonTimestamp.ofEpochSecond(8)),
-    ByteString.copyFromUtf8("Another digest"),
+    Digest.hashDigest(ByteString.copyFromUtf8("Another digest")).getCryptographicEvidence,
     testedProtocolVersion,
   )
   private lazy val invalidRecipientCommitment = AcsCommitment.create(
@@ -205,7 +206,7 @@ class ReceivedAcsCommitmentValidatorTest
             CantonTimestamp.ofEpochSecond(3),
             CantonTimestamp.ofEpochSecond(10).immediateSuccessor,
           ),
-        ByteString.copyFromUtf8("future period end"),
+        Digest.hashDigest(ByteString.copyFromUtf8("future period end")).getCryptographicEvidence,
         testedProtocolVersion,
       )
       val messages = NonEmpty(

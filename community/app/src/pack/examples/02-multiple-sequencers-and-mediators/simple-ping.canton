@@ -8,7 +8,8 @@ bootstrap.synchronizer(
   mediators = Seq(mediator1, mediator2),
   synchronizerOwners = Seq(sequencer1, sequencer2),
   synchronizerThreshold = PositiveInt.two,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+  staticSynchronizerParameters =
+    StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )
 
 // Connect participant1 to da using the connect macro.
@@ -37,7 +38,7 @@ participant2.synchronizers.connect("da", s"http://localhost:$daPort")
 // until the participant observes its activation on the synchronizer. As the synchronizer is configured to be
 // permissionless in this example, the approval will be granted immediately.
 utils.retry_until_true {
-    participant2.synchronizers.active("da")
+  participant2.synchronizers.active("da")
 }
 
 participant2.health.ping(participant1)

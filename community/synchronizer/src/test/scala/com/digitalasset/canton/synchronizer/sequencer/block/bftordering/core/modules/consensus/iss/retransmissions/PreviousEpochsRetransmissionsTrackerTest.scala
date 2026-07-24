@@ -86,24 +86,23 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
       .take(numberOfBlocks)
 
   "PreviousEpochsRetransmissionsTracker" should {
-    "reply with no commit certificates for epochs we have not yet completed" in {
-      val tracker =
-        new PreviousEpochsRetransmissionsTracker(howManyEpochsToKeep = 5, loggerFactory)
+    "reply with empty commit certificates for epochs we have not yet completed, " +
+      "but consider the message successfully validated" in {
+        val tracker =
+          new PreviousEpochsRetransmissionsTracker(howManyEpochsToKeep = 5, loggerFactory)
 
-      tracker.processRetransmissionsRequest(
-        ConsensusStatus.EpochStatus.create(
-          anotherId,
-          epoch0,
-          Seq(
-            inProgressSegmentStatus(Seq(true, false, false)),
-            completeSegmentStatus,
-            inViewChangeSegmentStatus(Seq(false, false, true)),
-          ),
-        )
-      ) shouldBe Left(
-        "Got a retransmission request from another for too old or future epoch 0, ignoring"
-      )
-    }
+        tracker.processRetransmissionsRequest(
+          ConsensusStatus.EpochStatus.create(
+            anotherId,
+            epoch0,
+            Seq(
+              inProgressSegmentStatus(Seq(true, false, false)),
+              completeSegmentStatus,
+              inViewChangeSegmentStatus(Seq(false, false, true)),
+            ),
+          )
+        ) shouldBe Right(Seq.empty)
+      }
 
     "retransmit commit certificates for incomplete blocks in previous epoch" in {
       val tracker =
@@ -181,9 +180,7 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
             inProgressSegmentStatus(Seq(false, true, false, false, false)),
           ),
         )
-      ) shouldBe Left(
-        "Got a retransmission request from another for too old or future epoch 0, ignoring"
-      )
+      ) shouldBe Right(Seq.empty)
     }
   }
 }

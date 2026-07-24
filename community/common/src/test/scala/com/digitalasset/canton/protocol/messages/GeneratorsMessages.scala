@@ -100,13 +100,13 @@ final class GeneratorsMessages(
       periodTo = periodFrom.add(periodDuration.duration)
       period = CommitmentPeriod.tryCreate(periodFrom, periodTo)
 
-      commitment <- byteStringArb.arbitrary
+      rawDigest <- byteStringArb.arbitrary
     } yield AcsCommitment.create(
       synchronizerId,
       sender.toLf,
       counterparticipant.toLf,
       period,
-      commitment,
+      Digest.hashDigest(rawDigest).getCryptographicEvidence,
       protocolVersion,
     )
   )

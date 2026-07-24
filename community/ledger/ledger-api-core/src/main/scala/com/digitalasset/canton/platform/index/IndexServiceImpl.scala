@@ -37,8 +37,11 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.ledger.participant.state.index.*
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse.ProtoUpdate
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse.ProtoUpdates
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.{
+  UpdateResponse,
+  UpdatesResponse,
+}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -135,7 +138,7 @@ private[index] class IndexServiceImpl(
       updateFormat: UpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
-  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdateResponse, NotUsed] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdatesResponse, NotUsed] = {
     val interfaceViewPackageUpgrade = createViewUpgradeMemoized
     val contextualizedErrorLogger = ErrorLoggingContext(logger, loggingContext)
     val isTailingStream = endInclusive.isEmpty
@@ -190,6 +193,9 @@ private[index] class IndexServiceImpl(
                 }
 
                 source
+                  .map { case (offset, update) =>
+                    (offset, UpdateResponse.expandToGetUpdatesResponse(update))
+                  }
                   .via(
                     rangeDecorator(
                       startInclusive,
@@ -211,7 +217,7 @@ private[index] class IndexServiceImpl(
           .mapError(shutdownError)
           .buffered(metrics.index.updatesBufferSize, LedgerApiStreamsBufferSize)
       }.wireTap {
-        case ProtoUpdate(protoUpdate) =>
+        case ProtoUpdates(protoUpdate) =>
           protoUpdate.update match {
             case GetUpdatesResponse.Update.Transaction(transaction) =>
               Spans.addEventToCurrentSpan(
@@ -718,7 +724,7 @@ private[index] class IndexServiceImpl(
         descendingOrder = getUpdatesPageRequest.descendingOrder,
         skipPruningChecks = skipPruningChecks,
       ).take(limit.toLong)
-        .collect { case ProtoUpdate(response) => response }
+        .collect { case ProtoUpdates(response) => response }
         .runWith(Sink.seq)(materializer)
         .map(_.flatMap(getUpdatesResponseToGetUpdateResponse))
     }
@@ -1307,8 +1313,8 @@ object IndexServiceImpl {
 
   private def updatesResponse(
       offsetCheckpoint: OffsetCheckpoint
-  ): UpdateResponse =
-    UpdateResponse.ProtoUpdate(
+  ): UpdatesResponse =
+    UpdatesResponse.ProtoUpdates(
       GetUpdatesResponse.defaultInstance.withOffsetCheckpoint(offsetCheckpoint.toApi)
     )
 

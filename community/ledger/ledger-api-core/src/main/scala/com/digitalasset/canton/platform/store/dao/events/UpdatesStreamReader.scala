@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
+import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.daml.metrics.DatabaseMetrics
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
@@ -116,14 +116,14 @@ class UpdatesStreamReader(
       .wireTap(_ match {
         case (_, ProtoUpdate(getUpdatesResponse)) =>
           getUpdatesResponse.update match {
-            case GetUpdatesResponse.Update.Transaction(value) =>
+            case GetUpdateResponse.Update.Transaction(value) =>
               val event = tracing.Event("update", TraceIdentifiers.fromTransaction(value))
               Spans.addEventToSpan(event, span)
-            case GetUpdatesResponse.Update.Reassignment(reassignment) =>
+            case GetUpdateResponse.Update.Reassignment(reassignment) =>
               val event =
                 tracing.Event("update", TraceIdentifiers.fromReassignment(reassignment))
               Spans.addEventToSpan(event, span)
-            case GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction) =>
+            case GetUpdateResponse.Update.TopologyTransaction(topologyTransaction) =>
               val event = tracing
                 .Event("update", TraceIdentifiers.fromTopologyTransaction(topologyTransaction))
               Spans.addEventToSpan(event, span)
@@ -269,8 +269,8 @@ class UpdatesStreamReader(
             )
             .map { case (offset, topologyTransaction) =>
               offset -> UpdateResponse.ProtoUpdate(
-                GetUpdatesResponse(
-                  GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction)
+                GetUpdateResponse(
+                  GetUpdateResponse.Update.TopologyTransaction(topologyTransaction)
                 ).withPrecomputedSerializedSize()
               )
             }
@@ -310,14 +310,14 @@ class UpdatesStreamReader(
           )(reverseIfDescendingOrder(descendingOrder, rawEvents))(
             convertReassignment = reassignment =>
               Offset.tryFromLong(reassignment.offset) -> UpdateResponse.ProtoUpdate(
-                GetUpdatesResponse(
-                  GetUpdatesResponse.Update.Reassignment(reassignment)
+                GetUpdateResponse(
+                  GetUpdateResponse.Update.Reassignment(reassignment)
                 ).withPrecomputedSerializedSize()
               ),
             convertTransaction = transaction =>
               Offset.tryFromLong(transaction.offset) -> UpdateResponse.ProtoUpdate(
-                GetUpdatesResponse(
-                  GetUpdatesResponse.Update.Transaction(transaction)
+                GetUpdateResponse(
+                  GetUpdateResponse.Update.Transaction(transaction)
                 ).withPrecomputedSerializedSize()
               ),
           )

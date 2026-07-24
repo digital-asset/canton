@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store.memory
 
 import cats.Eval
 import com.digitalasset.canton.InternedPartyId
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -29,12 +29,16 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
     extends AcsDigestStore
     with NamedLogging {
 
-  private val checkpointJournal = new ConcurrentSkipListMap[Offset, CantonTimestamp]()
+  private val checkpointJournal = new ConcurrentSkipListMap[Offset, Checkpoint]()
 
-  override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    FutureUnlessShutdown.pure(checkpointJournal.put(offset, timestamp).discard)
+  override def insertCheckpointTime(
+      checkpoint: Checkpoint
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    FutureUnlessShutdown.pure(
+      checkpointJournal
+        .put(checkpoint.offset, checkpoint)
+        .discard
+    )
 
   override protected def deleteCheckpointsAfter(
       fromExclusive: Offset
@@ -56,7 +60,7 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
   ): FutureUnlessShutdown[Option[Checkpoint]] =
     FutureUnlessShutdown.pure {
       Option(checkpointJournal.floorEntry(toInclusive))
-        .map(entry => (entry.getKey, entry.getValue))
+        .map(_.getValue)
     }
 
   override def firstCheckpointAfter(fromExclusive: Offset)(implicit
@@ -64,7 +68,7 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
   ): FutureUnlessShutdown[Option[Checkpoint]] =
     FutureUnlessShutdown.pure {
       Option(checkpointJournal.higherEntry(fromExclusive))
-        .map(entry => (entry.getKey, entry.getValue))
+        .map(_.getValue)
     }
 }
 

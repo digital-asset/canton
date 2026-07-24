@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.client
 import cats.data.{EitherT, Nested}
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
 import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
@@ -27,7 +28,10 @@ import scala.jdk.CollectionConverters.*
 
 /** Test implementation that stores all requests in a queue.
   */
-class TestSequencerClientSend(override protected[canton] val clock: Clock)(implicit
+class TestSequencerClientSend(
+    override protected[canton] val clock: Clock,
+    sendResultFactoryO: Option[Request => UnlessShutdown[SendResult]] = None,
+)(implicit
     val executionContext: ExecutionContext
 ) extends SequencerClientSend {
 
@@ -51,16 +55,20 @@ class TestSequencerClientSend(override protected[canton] val clock: Clock)(impli
       traceContext: TraceContext,
       metricsContext: MetricsContext,
   ): SendAsyncResult = {
-    requestsQueue.add(
-      Request(
-        batch,
-        timestamps.topologyTimestamp,
-        timestamps.maxSequencingTime,
-        messageId,
-        aggregationRule,
-        None,
-      )
+    val request = Request(
+      batch,
+      timestamps.topologyTimestamp,
+      timestamps.maxSequencingTime,
+      messageId,
+      aggregationRule,
+      None,
     )
+
+    requestsQueue.add(request)
+
+    sendResultFactoryO.foreach { sendResultFactory =>
+      callback(sendResultFactory(request))
+    }
 
     Nested(EitherT.pure(EitherTUtil.unitUS[SendAsyncClientError]))
   }

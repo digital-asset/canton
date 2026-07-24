@@ -12,7 +12,6 @@ import com.digitalasset.canton.ledger.api.validation.UpdateServiceRequestValidat
 import com.digitalasset.canton.ledger.api.{UpdateFormat, ValidationLogger}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse.ProtoUpdate
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.TracedLoggerOps.TracedLoggerOps
 import com.digitalasset.canton.logging.{
@@ -87,7 +86,7 @@ final class ApiUpdateService(
                 req.descendingOrder,
                 skipPruningChecks = false,
               )
-              .collect { case ProtoUpdate(update) =>
+              .collect { case IndexUpdateService.UpdatesResponse.ProtoUpdates(update) =>
                 update
               }
               .via(logger.enrichedDebugStream("Responding with updates.", updatesLoggable))

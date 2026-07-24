@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.util.signalling.NotificationSignal
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.OverflowStrategy
 import org.apache.pekko.stream.scaladsl.{Flow, Source}
@@ -22,7 +23,7 @@ object FetchLatestEventsFlow {
       initialState: State,
       lookup: State => FutureUnlessShutdown[(State, Seq[Out])],
       hasReachedHead: (State, Seq[Out]) => Boolean,
-  )(implicit executionContext: ExecutionContext): Flow[ReadSignal, Out, NotUsed] = {
+  )(implicit executionContext: ExecutionContext): Flow[NotificationSignal[Unit], Out, NotUsed] = {
     // i've struggled to work out a pekko-stream only way of maintaining this state.
     // we really want a `statefulFlatMapConcat` however that doesn't exist and trying to attempt
     // something similar in a custom graph is problematic. the current usage of a separate atomic reference
@@ -47,7 +48,7 @@ object FetchLatestEventsFlow {
             .onShutdown(None)
       }
 
-    Flow[ReadSignal]
+    Flow[NotificationSignal[Unit]]
       .buffer(1, OverflowStrategy.dropHead)
       .flatMapConcat(_ => fetchAllEventsUntilEmpty())
       .mapConcat(identity)

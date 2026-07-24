@@ -22,7 +22,9 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  Checkpoint,
   HashedDigest,
   LocalPartyFirst,
   ParticipantAcsDigestUpdate,
@@ -290,15 +292,16 @@ trait SequentialDigestAccumulatorTest
       val fixture = new Fixture(p1)
       import fixture.*
 
-      val targetCheckpoint = (off(17), ts(1))
+      val targetCheckpoint = Checkpoint(off(17), ts(1), ReconciliationIntervalBoundary)
 
       val checkpoint = process(
-        Timepoint(off(17))(ts(1)) -> CheckpointFence
+        targetCheckpoint.timepoint -> CheckpointFence(targetCheckpoint.checkpointType)
       ).futureValueUS.loneElement
 
       // verify that the right CheckpointWritten notification is emitted
-      checkpoint.recordTimeInclusive shouldBe ts(1)
-      checkpoint.offsetInclusive shouldBe off(17)
+      checkpoint.recordTimeInclusive shouldBe targetCheckpoint.recordTime
+      checkpoint.offsetInclusive shouldBe targetCheckpoint.offset
+      checkpoint.checkpointType shouldBe ReconciliationIntervalBoundary
 
       // verify that the checkpoint was actually written
       digestStore

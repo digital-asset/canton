@@ -68,6 +68,8 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
 - `<canton-node>.replication.connection-pool.connection.client-connection-check-interval` is introduced
   that allows configuring the PostgreSQL-specific `client_connection_check_interval` parameter for DB locked connections.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
+- `<canton-node>.replication.connection-pool.connection.max-inconclusive-read-only-checks` is introduced that allows configuring the maximum number of inconclusive
+  read-only checks before a connection is closed. The default value is 3.
 - BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
 - *BREAKING*: `kms-driver-api` and `kms-driver-testing` are now published to Maven Central, and will no longer be available in Artifactory.
 - Connection pool metrics:

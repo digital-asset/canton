@@ -32,12 +32,12 @@ import scala.collection.immutable.SortedMap
 import scala.concurrent.ExecutionContext
 
 private[participant] class HookedAcs(
-    private val acs: ActiveContractStore,
-    override protected val loggerFactory: NamedLoggerFactory,
-)(implicit
-    val ec: ExecutionContext
+    private val acs: ActiveContractStore
 ) extends ActiveContractStore {
   import HookedAcs.{noArchivePurgeAction, noCreateAddAction, noReassignmentAction}
+
+  override protected def loggerFactory: NamedLoggerFactory = acs.loggerFactoryInternal
+  override protected implicit val ec: ExecutionContext = acs.ecInternal
 
   private val nextCreateAddHook: AtomicReference[
     (Seq[(LfContractId, ReassignmentCounter, TimeOfChange)]) => FutureUnlessShutdown[Unit]

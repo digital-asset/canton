@@ -85,6 +85,8 @@ trait PrunableByTime {
   self: NamedLogging =>
 
   protected implicit val ec: ExecutionContext
+  @VisibleForTesting @inline private[canton] final def ecInternal: ExecutionContext = ec
+
   protected def kind: String
 
   /** Parameters to control prune batching

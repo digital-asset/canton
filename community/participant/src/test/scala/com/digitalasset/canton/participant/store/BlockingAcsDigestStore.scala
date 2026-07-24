@@ -5,11 +5,12 @@ package com.digitalasset.canton.participant.store
 
 import cats.Eval
 import com.digitalasset.canton.InternedPartyId
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  Checkpoint,
   HashedDigest,
   InternedParticipantId,
   RawDigest,
@@ -54,10 +55,10 @@ class BlockingAcsDigestStore(
       delegate.participantInternal,
     )
 
-  override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit
+  override def insertCheckpointTime(checkpoint: Checkpoint)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    blockAndThen(delegate.insertCheckpointTime(offset, timestamp))
+    blockAndThen(delegate.insertCheckpointTime(checkpoint))
 
   override protected def deleteCheckpointsAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
@@ -71,12 +72,12 @@ class BlockingAcsDigestStore(
 
   override def latestCheckpointUpTo(toInclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(Offset, CantonTimestamp)]] =
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
     blockAndThen(delegate.latestCheckpointUpTo(toInclusive))
 
   override def firstCheckpointAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(Offset, CantonTimestamp)]] =
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
     blockAndThen(delegate.firstCheckpointAfter(fromExclusive))
 }
 

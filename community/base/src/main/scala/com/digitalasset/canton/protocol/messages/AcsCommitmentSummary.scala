@@ -28,7 +28,7 @@ import com.google.protobuf.ByteString
 final case class AcsCommitmentSummary(
     psid: PhysicalSynchronizerId,
     commitmentTick: CantonTimestamp,
-    counterparticipants: Seq[LedgerParticipantId],
+    addressedCounterparticipants: Seq[LedgerParticipantId],
     unsentDigests: Seq[DigestForCounterparticipant],
     batchIndex: NonNegativeInt,
     lastBatch: Boolean,
@@ -51,7 +51,7 @@ final case class AcsCommitmentSummary(
     prettyOfClass(
       param("psid", _.psid),
       param("commitmentTick", _.commitmentTick),
-      param("counterparticipants", _.counterparticipants),
+      param("addressedCounterparticipants", _.addressedCounterparticipants),
       param("unsentDigests", _.unsentDigests),
       param("batchIndex", _.batchIndex),
       param("lastBatch", _.lastBatch),
@@ -60,7 +60,7 @@ final case class AcsCommitmentSummary(
   private[messages] def toProtoV32: v32.AcsCommitmentSummary = v32.AcsCommitmentSummary(
     physicalSynchronizerId = psid.toProtoPrimitive,
     commitmentTick = commitmentTick.toProtoPrimitive,
-    counterparticipants = counterparticipants,
+    addressedCounterparticipants = addressedCounterparticipants,
     unsentDigests = unsentDigests.map(_.toProtoV32),
     batchIndex = batchIndex.value,
     lastBatch = lastBatch,
@@ -82,7 +82,7 @@ object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitment
   def create(
       psid: PhysicalSynchronizerId,
       commitmentTick: CantonTimestamp,
-      counterparticipants: Seq[LedgerParticipantId],
+      addressedCounterparticipants: Seq[LedgerParticipantId],
       unsentDigests: Seq[DigestForCounterparticipant],
       batchIndex: NonNegativeInt,
       lastBatch: Boolean,
@@ -91,7 +91,7 @@ object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitment
     AcsCommitmentSummary(
       psid,
       commitmentTick,
-      counterparticipants,
+      addressedCounterparticipants,
       unsentDigests,
       batchIndex,
       lastBatch,
@@ -108,13 +108,13 @@ object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitment
       "physical_synchronizer_id",
     )
     commitmentTick <- CantonTimestamp.fromProtoPrimitive(protoMsg.commitmentTick)
-    counterparticipants <- parseRequiredNonEmpty(
+    addressedCounterparticipants <- parseRequiredNonEmpty(
       (p: String) =>
         LedgerParticipantId
           .fromString(p)
           .leftMap(ProtoDeserializationError.StringConversionError(_)),
-      "counterparticipants",
-      protoMsg.counterparticipants,
+      "addressed_counterparticipants",
+      protoMsg.addressedCounterparticipants,
     )
     unsentDigests <- protoMsg.unsentDigests.traverse(DigestForCounterparticipant.fromProtoV32)
     batchIndex <- NonNegativeInt.create(protoMsg.batchIndex).leftMap { error =>
@@ -124,7 +124,7 @@ object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitment
   } yield AcsCommitmentSummary(
     psid = psid,
     commitmentTick = commitmentTick,
-    counterparticipants = counterparticipants,
+    addressedCounterparticipants = addressedCounterparticipants,
     unsentDigests = unsentDigests,
     batchIndex = batchIndex,
     lastBatch = protoMsg.lastBatch,

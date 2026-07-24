@@ -8,13 +8,17 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
+import com.digitalasset.canton.lifecycle.{
+  FlagCloseable,
+  FutureUnlessShutdown,
+  LifeCycle,
+  RunOnClosing,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessor
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.sync.CantonSyncService.SyncServiceHandle
-import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.ConnectionListenerHandle
 import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -25,7 +29,6 @@ import com.digitalasset.canton.util.{
   FutureUnlessShutdownUtil,
   MonadUtil,
   Mutex,
-  SingleUseCell,
 }
 import org.apache.pekko.stream.Materializer
 
@@ -111,16 +114,10 @@ class AcsDigestProcessorManager(
   def stopAndRemoveAll(): Unit =
     getAllAndClear().foreach(rdp => LifeCycle.close(rdp)(logger))
 
-  override protected def onClosed(): Unit = {
+  override protected def onClosed(): Unit =
     // in practice, the digest processors should be stopped and removed via the CantonSyncService.onInternalIndexServiceUnregistered,
     // but let's leave this here for safety
     stopAndRemoveAll()
-    synchronizerConnectionListenerHandle.get.foreach(LifeCycle.close(_)(logger))
-  }
-
-  // holds a reference to the synchronizer connection listener handle to properly deregister the
-  // listener upon closing.
-  private val synchronizerConnectionListenerHandle = new SingleUseCell[ConnectionListenerHandle]()
 
   /** Subscribe to new synchronizer connections.
     */
@@ -139,7 +136,15 @@ class AcsDigestProcessorManager(
           )
         }
       }
-      synchronizerConnectionListenerHandle.putIfAbsent(handle).discard
+      runOnClose(new RunOnClosing {
+        override def name: String = "unsubscribing synchronizer connection listener"
+        override def done: Boolean = false
+        override def run()(implicit traceContext: TraceContext): Unit = handle.close()
+      })
+        // We don't want to cancel the RunOnClosing task early, and
+        // the call to runOnClose is guarded by synchronizeWithClosingSync.
+        // Therefore, the lifecycle handle can be discarded.
+        .discard
     }.onShutdown(())
 
 }

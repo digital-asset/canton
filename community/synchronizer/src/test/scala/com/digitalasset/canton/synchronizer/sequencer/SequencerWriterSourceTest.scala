@@ -39,6 +39,7 @@ import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId, SequencerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
+import com.digitalasset.canton.util.signalling.{EventSignaller, Notification, NotificationSignal}
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -76,7 +77,7 @@ final class SequencerWriterSourceTest
 
   private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
-  class MockEventSignaller extends EventSignaller {
+  class MockEventSignaller extends EventSignaller[SequencerMemberId, Unit] {
     private val listenerRef =
       new AtomicReference[Option[WriteNotification => Unit]](None)
 
@@ -89,15 +90,16 @@ final class SequencerWriterSourceTest
       () => listenerRef.set(None)
     }
 
-    override def notifyOfLocalWrite(
-        notification: WriteNotification
+    override def notify(
+        notification: Notification[SequencerMemberId],
+        signal: Unit,
     ): Unit =
       listenerRef.get().foreach(listener => listener(notification))
 
-    override def readSignalsForMember(
-        member: Member,
+    override def readSignals(
         memberId: SequencerMemberId,
-    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
+        member: String,
+    )(implicit traceContext: TraceContext): Source[NotificationSignal[Unit], NotUsed] =
       fail("shouldn't be used")
 
     override def close(): Unit = ()
@@ -506,11 +508,11 @@ final class SequencerWriterSourceTest
 
         val removeListener = eventSignaller.attachWriteListener { notification =>
           // ignore notifications for no-one as that's just our keep alives
-          if (notification != WriteNotification.NoTarget) {
+          if (notification != Notification.noTarget) {
             val newItems = items.updateAndGet(_ :+ notification)
 
             if (newItems.sizeIs == writeCount) {
-              val combined = NonEmptyUtil.fromUnsafe(newItems).reduceLeft(_ union _)
+              val combined = NonEmptyUtil.fromUnsafe(newItems).reduceLeft(Notification.union)
               promise.success(combined)
             }
           }
@@ -529,8 +531,8 @@ final class SequencerWriterSourceTest
         forAll(members) { member =>
           withClue(s"expecting notification for $member") {
             notification should matchPattern {
-              case WriteNotification.All =>
-              case WriteNotification.Members(memberIds) if memberIds.contains(member) =>
+              case Notification.All =>
+              case Notification.Keys(memberIds) if memberIds.contains(member) =>
             }
           }
         }

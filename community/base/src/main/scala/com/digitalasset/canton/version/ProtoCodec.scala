@@ -57,7 +57,12 @@ sealed trait ProtoCodec[F[_], ValueClass, Context, DeserializedValueClass, Comp,
     extends PrettyPrinting {
 
   type Deserializer =
-    (Context, OriginalByteString, DataByteString) => ParsingResult[DeserializedValueClass]
+    (
+        ProtocolVersionValidation,
+        Context,
+        OriginalByteString,
+        DataByteString,
+    ) => ParsingResult[DeserializedValueClass]
 
   def fromInclusive: RepresentativeProtocolVersion[Comp]
   def deserializer: Deserializer
@@ -90,6 +95,7 @@ class VersionedProtoCodec[
 ] private[version] (
     val fromInclusive: RepresentativeProtocolVersion[Comp],
     val deserializer: (
+        ProtocolVersionValidation,
         Context,
         OriginalByteString,
         DataByteString,
@@ -121,7 +127,7 @@ final case class UnsupportedProtoCodec[F[
   def deserializationError: ProtoDeserializationError = ProtoDeserializationError.OtherError(
     s"Cannot deserialize $valueClassName in protocol version equivalent to ${fromInclusive.representative}"
   )
-  override def deserializer: Deserializer = (_, _, _) => Left(deserializationError)
+  override def deserializer: Deserializer = (_, _, _, _) => Left(deserializationError)
   override def serializer: ValueClass => F[ByteString] = throw new UnsupportedOperationException(
     s"Cannot serialize $valueClassName in protocol version equivalent to ${fromInclusive.representative}"
   )
@@ -163,7 +169,12 @@ object VersionedProtoCodec {
   )(
       deserializer: scalapb.GeneratedMessageCompanion[
         ProtoClass
-      ] => (Context, OriginalByteString, DataByteString) => ParsingResult[DeserializedValueClass],
+      ] => (
+          ProtocolVersionValidation,
+          Context,
+          OriginalByteString,
+          DataByteString,
+      ) => ParsingResult[DeserializedValueClass],
       serializer: ValueClass => scalapb.GeneratedMessage,
       dependencySerializer: Dependency => scalapb.GeneratedMessage,
   ): VersionedProtoCodec[Id, ValueClass, Context, DeserializedValueClass, Comp, Dependency] =
@@ -188,6 +199,7 @@ object VersionedProtoCodec {
   )(
       parser: scalapb.GeneratedMessageCompanion[ProtoClass] => (
           (
+              ProtocolVersionValidation,
               Context,
               OriginalByteString,
               DataByteString,
@@ -215,6 +227,7 @@ object VersionedProtoCodec {
   )(
       parser: scalapb.GeneratedMessageCompanion[ProtoClass] => (
           (
+              ProtocolVersionValidation,
               Context,
               OriginalByteString,
               DataByteString,
@@ -234,6 +247,7 @@ object VersionedProtoCodec {
   def apply[F[_], ValueClass, Context, DeserializedValueClass, Comp: ClassTag](
       fromInclusive: RepresentativeProtocolVersion[Comp],
       deserializer: (
+          ProtocolVersionValidation,
           Context,
           OriginalByteString,
           DataByteString,
@@ -259,6 +273,7 @@ object VersionedProtoCodec {
   )(
       parser: scalapb.GeneratedMessageCompanion[ProtoClass] => (
           (
+              ProtocolVersionValidation,
               Context,
               OriginalByteString,
               DataByteString,
@@ -276,6 +291,7 @@ object VersionedProtoCodec {
   def raw[F[_], ValueClass, Context, DeserializedValueClass, Comp: ClassTag](
       fromInclusive: ProtocolVersion,
       deserializer: (
+          ProtocolVersionValidation,
           Context,
           OriginalByteString,
           DataByteString,

@@ -9,29 +9,16 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.KeyPurpose.{Encryption, Signing}
+import com.digitalasset.canton.crypto.store.*
 import com.digitalasset.canton.crypto.store.db.StoredPrivateKey
-import com.digitalasset.canton.crypto.store.{
-  CryptoPrivateStoreError,
-  CryptoPrivateStoreExtended,
-  EncryptionPrivateKeyWithName,
-  PrivateKeyWithName,
-  SigningPrivateKeyWithName,
-}
-import com.digitalasset.canton.crypto.{
-  EncryptionPrivateKey,
-  Fingerprint,
-  KeyName,
-  KeyPurpose,
-  PrivateKey,
-  SigningPrivateKey,
-}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.collection.TrieMapUtil
+import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -122,7 +109,7 @@ class InMemoryCryptoPrivateStore(
         cache: TrieMap[Fingerprint, B],
         buildKeyWithNameFunc: (A, Option[KeyName]) => B,
     ): EitherT[Future, CryptoPrivateStoreError, Unit] =
-      TrieMapUtil
+      MapsUtil
         .insertIfAbsent(
           cache,
           key.id,

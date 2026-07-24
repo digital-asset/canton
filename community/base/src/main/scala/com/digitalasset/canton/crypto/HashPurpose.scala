@@ -115,6 +115,7 @@ object HashPurpose {
   val CiphertextId = HashPurpose(64, "CiphertextId")
   val SequencerAggregatorAggregation = HashPurpose(65, "SequencerAggregatorAggregation")
   val AcsCommitmentUpdateId = HashPurpose(66, "AcsCommitmentUpdateId")
+  val AcsCommitmentSummary = HashPurpose(67, "AcsCommitmentSummary")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

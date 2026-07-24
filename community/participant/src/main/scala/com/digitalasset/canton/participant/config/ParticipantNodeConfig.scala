@@ -7,8 +7,8 @@ import cats.syntax.option.*
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.*
-import com.digitalasset.canton.config.{ReplicationConfig, *}
 import com.digitalasset.canton.http.{JsonApiConfig, JsonClientConfig}
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -440,6 +440,11 @@ final case class ParticipantNodeParameterConfig(
   * @param reinitializingJournalTombstonesBatchSize
   *   the number of digest updates in a batch during the ACS digest reinitializing process. Default
   *   is 1000.
+  * @param sender
+  *   the settings for the [[com.digitalasset.canton.participant.commitment.AcsCommitmentSender]]
+  *   class. They currently include:
+  *   - max batch size (default is 100)
+  *   - parallelism (default is 10)
   */
 final case class AcsCommitmentConfig(
     enableRunningDigestProcessor: Boolean = false,
@@ -448,7 +453,26 @@ final case class AcsCommitmentConfig(
     tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
     receivedCommitmentValidationParallelism: PositiveInt = PositiveInt.tryCreate(1),
     reinitializingJournalTombstonesBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
+    sender: AcsCommitmentSenderConfig = AcsCommitmentSenderConfig(),
 )
+
+/** Config for [[com.digitalasset.canton.participant.commitment.AcsCommitmentSender]]
+  *
+  * @param maxBatchSize
+  *   the max number of envelopes that will be put in a submission request.
+  * @param parallelism
+  *   the number of parallel threads to use when parallelism is used (at the moment signing messages
+  *   only). Default is 10.
+  */
+final case class AcsCommitmentSenderConfig(
+    maxBatchSize: PositiveInt = AcsCommitmentSenderConfig.defaultMaxBatchSize,
+    parallelism: PositiveInt = AcsCommitmentSenderConfig.defaultParallelism,
+)
+
+object AcsCommitmentSenderConfig {
+  lazy val defaultMaxBatchSize: PositiveInt = PositiveInt.tryCreate(100)
+  lazy val defaultParallelism: PositiveInt = PositiveInt.tryCreate(10)
+}
 
 /** Config for LSU.
   *

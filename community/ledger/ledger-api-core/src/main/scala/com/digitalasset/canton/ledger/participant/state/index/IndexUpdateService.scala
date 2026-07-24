@@ -12,7 +12,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.UpdateFormat
 import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.ledger.participant.state.AcsChange
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.tracing.TraceContext
@@ -33,7 +33,7 @@ trait IndexUpdateService extends LedgerEndService {
       updateFormat: UpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
-  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdateResponse, NotUsed]
+  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdatesResponse, NotUsed]
 
   def getUpdateBy(
       lookupKey: LookupKey,
@@ -53,11 +53,45 @@ trait IndexUpdateService extends LedgerEndService {
 
 object IndexUpdateService {
   sealed trait UpdateResponse extends Product with Serializable
+  sealed trait UpdatesResponse extends Product with Serializable
 
   object UpdateResponse {
-    final case class ProtoUpdate(response: GetUpdatesResponse) extends UpdateResponse
-    final case class AcsCommitment(commitment: ReceivedAcsCommitment) extends UpdateResponse
-    final case class AcsChange(change: AcsChangeUpdate) extends UpdateResponse
+    final case class ProtoUpdate(response: GetUpdateResponse) extends UpdateResponse
+    final case class AcsCommitment(commitment: ReceivedAcsCommitment)
+        extends UpdateResponse
+        with UpdatesResponse
+    final case class AcsChange(change: AcsChangeUpdate) extends UpdateResponse with UpdatesResponse
+
+    def expandToGetUpdatesResponse(response: UpdateResponse): UpdatesResponse =
+      response match {
+        case ProtoUpdate(response) =>
+          response.update match {
+            case GetUpdateResponse.Update.Empty =>
+              UpdatesResponse.ProtoUpdates(GetUpdatesResponse(GetUpdatesResponse.Update.Empty))
+            case GetUpdateResponse.Update.Transaction(value) =>
+              UpdatesResponse.ProtoUpdates(
+                GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(value))
+              )
+            case GetUpdateResponse.Update.Reassignment(value) =>
+              UpdatesResponse.ProtoUpdates(
+                GetUpdatesResponse(GetUpdatesResponse.Update.Reassignment(value))
+              )
+            case GetUpdateResponse.Update.TopologyTransaction(value) =>
+              UpdatesResponse.ProtoUpdates(
+                GetUpdatesResponse(GetUpdatesResponse.Update.TopologyTransaction(value))
+              )
+          }
+        case v: AcsCommitment => v
+        case v: AcsChange => v
+      }
+  }
+
+  object UpdatesResponse {
+    final case class ProtoUpdates(response: GetUpdatesResponse) extends UpdatesResponse
+    type AcsCommitment = UpdateResponse.AcsCommitment
+    val AcsCommitment = UpdateResponse.AcsCommitment
+    type AcsChange = UpdateResponse.AcsChange
+    val AcsChange = UpdateResponse.AcsChange
   }
 
   final case class ReceivedAcsCommitment(

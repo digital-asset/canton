@@ -5,7 +5,6 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
 import cats.syntax.option.*
-import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
@@ -29,7 +28,7 @@ final case class AcsCommitment private (
     sender: LedgerParticipantId,
     counterparticipant: LedgerParticipantId,
     period: CommitmentPeriod,
-    digest: Digest.HashedDigestType,
+    digest: Digest.DigestType,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[AcsCommitment.type],
     override val deserializedFrom: Option[ByteString],
@@ -45,7 +44,7 @@ final case class AcsCommitment private (
     sendingParticipantUid = sender,
     counterparticipantUid = counterparticipant,
     period = period.toProtoV32.some,
-    digest = Digest.hashedDigestTypeToProto(digest),
+    digest = digest,
   )
 
   override lazy val pretty: Pretty[AcsCommitment] =
@@ -87,15 +86,14 @@ object AcsCommitment extends VersioningCompanionMemoization[AcsCommitment] {
       .leftMap(ProtoDeserializationError.StringConversionError(_))
 
     period <- parseRequired(CommitmentPeriod.fromProtoV32, "period", protoMsg.period)
-
-    cmt = protoMsg.digest
-    commitment <- Digest
-      .hashedDigestTypeFromByteString(cmt)
-      .leftMap(
-        CryptoDeserializationError.apply
-      )
     rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
-  } yield AcsCommitment(synchronizerId, sender, counterparticipant, period, commitment)(
+  } yield AcsCommitment(
+    synchronizerId,
+    sender,
+    counterparticipant,
+    period,
+    protoMsg.digest,
+  )(
     rpv,
     bytes.some,
   )
@@ -113,7 +111,7 @@ object AcsCommitment extends VersioningCompanionMemoization[AcsCommitment] {
       sender,
       counterparticipant,
       period,
-      Digest.hashDigest(digest),
+      digest,
     )(
       protocolVersionRepresentativeFor(protocolVersion),
       None,

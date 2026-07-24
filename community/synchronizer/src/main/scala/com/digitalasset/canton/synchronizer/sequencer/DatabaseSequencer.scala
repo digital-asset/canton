@@ -73,6 +73,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.FutureUtil.doNotAwait
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.Pause
+import com.digitalasset.canton.util.signalling.{EventSignaller, LocalEventSignaller}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -118,7 +119,8 @@ object DatabaseSequencer {
       config,
       initialState,
       TotalNodeCountValues.SingleSequencerTotalNodeCount,
-      new LocalSequencerStateEventSignaller(
+      new LocalEventSignaller[SequencerMemberId, Unit](
+        "member",
         timeouts,
         loggerFactory,
       ),
@@ -148,7 +150,7 @@ class DatabaseSequencer(
     config: DatabaseSequencerConfig,
     initialState: Option[SequencerInitialState],
     totalNodeCount: PositiveInt,
-    eventSignaller: EventSignaller,
+    eventSignaller: EventSignaller[SequencerMemberId, Unit],
     keepAliveInterval: Option[NonNegativeFiniteDuration],
     onlineSequencerCheckConfig: Option[OnlineSequencerCheckConfig],
     override protected val timeouts: ProcessingTimeout,

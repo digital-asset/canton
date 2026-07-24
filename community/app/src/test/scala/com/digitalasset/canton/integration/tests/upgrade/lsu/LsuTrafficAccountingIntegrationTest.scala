@@ -421,7 +421,6 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
           readAs = Seq(claire),
         ),
         _.warningMessage should include("AboveTrafficLimit"),
-        _.warningMessage should include("AboveTrafficLimit"),
         _.errorMessage should include("Request failed for participant2"),
       )
 

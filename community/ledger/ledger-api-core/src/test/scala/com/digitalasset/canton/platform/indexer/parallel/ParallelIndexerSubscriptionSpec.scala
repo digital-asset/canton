@@ -116,11 +116,7 @@ class ParallelIndexerSubscriptionSpec
 
   private val someParty = DbDto.PartyEntry(
     ledger_offset = 1,
-    recorded_at = 0,
-    submission_id = null,
     party = Some(Ref.Party.assertFromString("party")),
-    typ = "accept",
-    rejection_reason = None,
     is_local = Some(true),
   )
 

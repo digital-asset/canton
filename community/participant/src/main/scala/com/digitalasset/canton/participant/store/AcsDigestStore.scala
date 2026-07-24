@@ -7,8 +7,14 @@ import cats.syntax.bifunctor.*
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.commitment.{AcsDigestTrace, Timepoint}
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{InternedPartyId, LedgerParticipantId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.ParticipantId
@@ -16,7 +22,7 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
 
-import scala.collection.immutable
+import scala.collection.{immutable, mutable}
 import scala.concurrent.ExecutionContext
 
 trait AcsDigestStore {
@@ -46,10 +52,9 @@ trait AcsDigestStore {
     * [[com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal.upsertDigestUpdates]]
     * of [[party]] or [[participant]] whose offsets are smaller than or equal to the given offset.
     */
-  def insertCheckpointTime(
-      offset: Offset,
-      timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  def insertCheckpointTime(checkpoint: Checkpoint)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
 
   /** First deletes all checkpoints that are higher than `fromExclusive`. Then deletes all digest
     * entries from [[party]] and [[participant]] whose offset is higher than `fromExclusive`.
@@ -101,8 +106,6 @@ trait AcsDigestStore {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = deleteCheckpointsUpTo(toExclusive)
 
-  final type Checkpoint = (Offset, CantonTimestamp)
-
   /** Returns the most recent checkpoint lower than or equal to `toInclusive`, if any */
   def latestCheckpointUpTo(toInclusive: Offset)(implicit
       traceContext: TraceContext
@@ -125,11 +128,12 @@ trait AcsDigestStore {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = for {
     lastCheckpointO <- latestCheckpointUpTo(Offset.MaxValue)
-    _ <- lastCheckpointO.fold(FutureUnlessShutdown.unit) { case (offsetInclusive, _) =>
-      for {
-        _ <- party.checkReplacesInvariant(offsetInclusive)
-        _ <- participant.checkReplacesInvariant(offsetInclusive)
-      } yield ()
+    _ <- lastCheckpointO.fold(FutureUnlessShutdown.unit) {
+      case Checkpoint(Timepoint(offsetInclusive), _) =>
+        for {
+          _ <- party.checkReplacesInvariant(offsetInclusive)
+          _ <- participant.checkReplacesInvariant(offsetInclusive)
+        } yield ()
     }
   } yield ()
 }
@@ -462,5 +466,122 @@ object AcsDigestStore {
         pad: ParticipantAcsDigestUpdate[InternedParticipantId],
     ): ParticipantAcsDigestUpdate[ParticipantId] =
       pad.map(stringInterning.participantId.externalize)
+  }
+
+  /** Represents a checkpoint of a certain `checkpointType` at the given `timepoint`.
+    *
+    * TODO(#34334): add index for `checkpointType` depending on the usage pattern
+    */
+  final case class Checkpoint(timepoint: Timepoint, checkpointType: CheckpointType) {
+    def offset: Offset = timepoint.offset
+    def recordTime: CantonTimestamp = timepoint.recordTime
+  }
+
+  object Checkpoint {
+    def apply(
+        offset: Offset,
+        recordTime: CantonTimestamp,
+        checkpointType: CheckpointType,
+    ): Checkpoint =
+      Checkpoint(Timepoint(offset)(recordTime), checkpointType)
+
+    implicit val checkpointGetResult: GetResult[Checkpoint] =
+      GetResult[Checkpoint] { rs =>
+        val offset = rs.<<[Offset]
+        val timestamp = rs.<<[CantonTimestamp]
+        val checkpointType = rs.<<[CheckpointType]
+        Checkpoint(Timepoint(offset)(timestamp), checkpointType)
+      }
+
+  }
+
+  /** Describes the trigger of the checkpoint.
+    *
+    * TODO(#33084): resolve int value to human readable strings in the debug view
+    */
+  final case class CheckpointType private (id: Int)
+      extends PrettyPrintingFromCompanion
+      with Product
+      with Serializable {
+    override def prettyCompanion: PrettyPrintingCompanion[CheckpointType] = CheckpointType
+  }
+
+  object CheckpointType extends PrettyPrintingCompanion[CheckpointType] {
+
+    private val ids: mutable.Map[Int, (CheckpointType, String)] =
+      mutable.TreeMap.empty[Int, (CheckpointType, String)]
+
+    protected val pretty: Pretty[CheckpointType] =
+      prettyOfString(cpt =>
+        // normally, an instance of CheckpointType must have been created via `apply` or
+        // tryFromId, both of which throw in case of inconsistencies. Therefore the getOrElse branch shouldn't actually
+        // be reached.
+        ids
+          .get(cpt.id)
+          .map(_._2)
+          .getOrElse(
+            throw new IllegalStateException(
+              s"CheckpointType with id ${cpt.id} was not created via CheckpointType.apply or CheckpointType.tryFromId."
+            )
+          )
+      )
+
+    /** Creates a new [[CheckpointType]] with a given description */
+    def apply(id: Int, description: String): CheckpointType = {
+      val checkpointType = new CheckpointType(id)
+      ids.put(id, (checkpointType, description)).foreach { oldDescription =>
+        throw new IllegalArgumentException(
+          s"requirement failed: CheckpointType with id=$id already exists for ${oldDescription._2}"
+        )
+      }
+
+      checkpointType
+    }
+
+    /** When a reconcilition interval boundary has been crossed.
+      */
+    val ReconciliationIntervalBoundary: CheckpointType =
+      CheckpointType(1, "ReconciliationIntervalBoundary")
+
+    /** When an affirmation interval boundary has been crossed.
+      */
+    val AffirmationIntervalBoundary: CheckpointType =
+      CheckpointType(2, "AffirmationIntervalBoundary")
+
+    /** When a certain number of events have been processed without writing a checkpoint.
+      */
+    val MaxEventsWithoutCheckpoint: CheckpointType = CheckpointType(3, "MaxEventsWithoutCheckpoint")
+
+    /** When the hosting relation between a party and a participant have changed.
+      */
+    val PartyHostingChange: CheckpointType = CheckpointType(4, "PartyHostingChange")
+
+    /** When a reinitialization has completed.
+      */
+    val Reinitialization: CheckpointType = CheckpointType(5, "Reinitialization")
+
+    @VisibleForTesting
+    def all: Set[CheckpointType] = ids.values.map { case (tpe, _) => tpe }.toSet
+
+    /** For constructing a checkpoint from an integer. Throws an exception in case the provided
+      * integer is not a known checkpoint type.
+      */
+    private def tryFromId(id: Int): CheckpointType =
+      ids
+        .getOrElse(
+          id,
+          throw new IllegalArgumentException(
+            s"DB value '$id' doesn't map to a known checkpoint type: $ids"
+          ),
+        )
+        ._1
+
+    implicit val checkpointTypeSetParameter: ToDbPrimitive[CheckpointType, Int] =
+      ToDbPrimitive(_.id)
+    implicit val checkpointTypeGetResult: GetResult[CheckpointType] =
+      GetResult { rs =>
+        val dbInt = rs.<<[Int]
+        tryFromId(dbInt)
+      }
   }
 }

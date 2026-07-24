@@ -9,6 +9,7 @@ import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -100,39 +101,37 @@ object BaseDigestProcessor {
     */
   sealed trait CheckpointFenceOr[+A] extends Product with Serializable {
     def map[B](f: A => B): CheckpointFenceOr[B] = this match {
-      case CheckpointFence => CheckpointFence
+      case fence: CheckpointFence => fence
       case NotCheckpointFence(topologySnapshot, value) =>
         NotCheckpointFence(topologySnapshot, f(value))
     }
 
     def getOption: Option[A] = this match {
-      case CheckpointFence => None
+      case _: CheckpointFence => None
       case NotCheckpointFence(_, x) => Some(x)
     }
 
     def traverse[F[_], B](f: A => F[B])(implicit F: Applicative[F]): F[CheckpointFenceOr[B]] =
       this match {
-        case CheckpointFence => F.pure(CheckpointFence)
+        case fence: CheckpointFence => F.pure(fence)
         case NotCheckpointFence(topologySnapshot, value) =>
           F.map(f(value))(b => NotCheckpointFence(topologySnapshot, b))
       }
 
     @VisibleForTesting
     private[commitment] def tryValue: A = this match {
-      case CheckpointFence => throw new NoSuchElementException("CheckpointFence")
+      case _: CheckpointFence => throw new NoSuchElementException("CheckpointFence")
       case NotCheckpointFence(_, value) => value
     }
 
     @VisibleForTesting
-    private[commitment] def toOption: Option[A] =
-      this match {
-        case CheckpointFence => None
-        case NotCheckpointFence(_, value) => Some(value)
-      }
+    private[commitment] def toEither: Either[CheckpointType, A] = this match {
+      case CheckpointFence(tpe) => Left(tpe)
+      case NotCheckpointFence(_, value) => Right(value)
+    }
   }
-  // TODO(#34302): add a checkpoint discriminator for the specific type of checkpoint that is being emitted
-  case object CheckpointFence extends CheckpointFenceOr[Nothing]
-  type CheckpointFence = CheckpointFence.type
+  final case class CheckpointFence(checkpointType: CheckpointType)
+      extends CheckpointFenceOr[Nothing]
 
   final case class NotCheckpointFence[+A](topologySnapshot: TopologySnapshot, value: A)
       extends CheckpointFenceOr[A]
@@ -195,11 +194,15 @@ object BaseDigestProcessor {
   /** When a checkpoint has been written, meaning that all digests up to record time and offset
     * (both inclusive) have been persisted.
     */
-  final case class CheckpointWritten(recordTimeInclusive: CantonTimestamp, offsetInclusive: Offset)
+  final case class CheckpointWritten(
+      recordTimeInclusive: CantonTimestamp,
+      offsetInclusive: Offset,
+      checkpointType: CheckpointType,
+  )
 
   object CheckpointWritten {
-    def apply(timepoint: Timepoint): CheckpointWritten =
-      CheckpointWritten(timepoint.recordTime, timepoint.offset)
+    def apply(timepoint: Timepoint, tpe: CheckpointType): CheckpointWritten =
+      CheckpointWritten(timepoint.recordTime, timepoint.offset, tpe)
   }
 
   /** Tracks changes to the hosting relationship per party.
