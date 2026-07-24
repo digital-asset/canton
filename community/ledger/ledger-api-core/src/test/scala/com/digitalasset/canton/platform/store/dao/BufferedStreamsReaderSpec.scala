@@ -103,7 +103,7 @@ class BufferedStreamsReaderSpec
         )
 
         run(
-          transactionsBuffer = inMemoryFanoutBufferWithSmallChunkSize,
+          transactionsBuffer = smallInMemoryFanoutBuffer,
           startInclusive = offset0,
           endInclusive = offset3,
           descendingOrder = false,
@@ -121,15 +121,14 @@ class BufferedStreamsReaderSpec
 
       "fetch from buffer and storage chunked with buffer filter" in new StaticTestScope {
         val filterMock = new Object
-
-        val anotherResponseForOffset1 = "(1) Response fetched from storage"
+        val anotherResponseForOffset0 = "(0) Response fetched from storage"
 
         val fetchFromPersistence = buildFetchFromPersistence(
           expectedStartInclusive = offset0,
-          expectedEndInclusive = offset1,
+          expectedEndInclusive = offset0,
           expectedDescendingOrder = false,
           expectedFilter = `filterMock`,
-          thenReturnStream = Source(Seq(offset1 -> anotherResponseForOffset1)),
+          thenReturnStream = Source(Seq(offset0 -> anotherResponseForOffset0)),
         )
 
         run(
@@ -144,7 +143,8 @@ class BufferedStreamsReaderSpec
         )
 
         streamElements should contain theSameElementsInOrderAs Seq(
-          offset1 -> anotherResponseForOffset1,
+          offset0 -> anotherResponseForOffset0,
+          offset1 -> TestUpdateId("tx-1").toHexString,
           offset2 -> TestUpdateId("tx-2").toHexString,
         )
       }

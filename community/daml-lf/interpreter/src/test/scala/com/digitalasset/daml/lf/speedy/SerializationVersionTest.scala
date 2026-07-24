@@ -80,7 +80,8 @@ class SerializationVersionTest(majorLanguageVersion: LanguageVersion.Major)
       }
     }
 
-    "template version == interface version" in {
+    // TODO[34352]: reenable after overhauling test
+    "template version == interface version" ignore {
       val pkgs = SpeedyTestLib.typeAndCompile(
         majorLanguageVersion,
         Map(

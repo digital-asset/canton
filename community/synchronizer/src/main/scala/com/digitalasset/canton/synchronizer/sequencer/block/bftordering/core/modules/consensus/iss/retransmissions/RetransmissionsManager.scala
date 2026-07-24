@@ -65,8 +65,11 @@ class RetransmissionsManager[E <: Env[E]](
     metrics: BftOrderingMetrics,
     clock: Clock,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit mc: MetricsContext)
-    extends NamedLogging {
+    // Passed only in tests
+    previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
+)(implicit
+    mc: MetricsContext
+) extends NamedLogging {
   private val signatureVerifier = new IssConsensusSignatureVerifier[E](metrics)
 
   private var currentEpoch: Option[EpochState[E]] = None
@@ -90,10 +93,13 @@ class RetransmissionsManager[E <: Env[E]](
       maxBurstFactor = PositiveDouble.tryCreate(MaxRetransmissionRequestBurstFactorPerNode),
     )
 
-  private val previousEpochsRetransmissionsTracker = new PreviousEpochsRetransmissionsTracker(
-    HowManyEpochsToKeep,
-    loggerFactory,
-  )
+  private val previousEpochsRetransmissionsTracker =
+    previousEpochsRetransmissionsTrackerO.getOrElse(
+      new PreviousEpochsRetransmissionsTracker(
+        HowManyEpochsToKeep,
+        loggerFactory,
+      )
+    )
 
   previousEpochsCommitCerts.foreach { case (epochNumber, commitCerts) =>
     previousEpochsRetransmissionsTracker.endEpoch(epochNumber, commitCerts)
@@ -197,19 +203,27 @@ class RetransmissionsManager[E <: Env[E]](
               currentEpoch.processRetransmissionsRequest(epochStatus)
             case None =>
               logger.debug(
-                s"Got a retransmission request from ${epochStatus.from} for a previous epoch ${epochStatus.epochNumber}"
+                s"Got a retransmission request from ${epochStatus.from} for a non-current epoch ${epochStatus.epochNumber}"
               )
               previousEpochsRetransmissionsTracker.processRetransmissionsRequest(
                 epochStatus
               ) match {
                 case Right(commitCertsToRetransmit) =>
-                  logger.debug(
-                    s"Retransmitting ${commitCertsToRetransmit.size} commit certificates to ${epochStatus.from}"
-                  )
-                  retransmitCommitCertificates(
-                    epochStatus.from,
-                    commitCertsToRetransmit,
-                  )
+                  if (commitCertsToRetransmit.nonEmpty) {
+                    logger.debug(
+                      s"Retransmitting ${commitCertsToRetransmit.size} commit certificates to ${epochStatus.from}"
+                    )
+                    retransmitCommitCertificates(
+                      epochStatus.from,
+                      commitCertsToRetransmit,
+                    )
+                  } else {
+                    logger.info(
+                      s"Got a retransmission request from ${epochStatus.from} for " +
+                        s"epoch ${epochStatus.epochNumber} but there are no commit certificates for it, so " +
+                        s"not acting upon it (but it's been considered for catch up purposes)"
+                    )
+                  }
                 case Left(logMsg) =>
                   logger.info(logMsg)
               }

@@ -30,9 +30,9 @@ class PreviousEpochsRetransmissionsTracker(
   ): Either[String, Seq[CommitCertificate]] =
     previousEpochs.get(epochStatus.epochNumber) match {
       case None =>
-        Left(
-          s"Got a retransmission request from ${epochStatus.from} for too old or future epoch ${epochStatus.epochNumber}, ignoring"
-        )
+        // Let validation through so that we use the message to detect if we have to catch up,
+        //  as it could be from a future epoch
+        Right(Seq.empty)
       case Some(previousEpochCommitCertificates) =>
         val segments: Seq[SegmentStatus] = epochStatus.segments
 

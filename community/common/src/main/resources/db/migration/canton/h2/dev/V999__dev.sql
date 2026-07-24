@@ -89,5 +89,79 @@ create table par_acs_running_digests_checkpoint (
   change_offset bigint not null,
   -- record time of the change_offset
   ts bigint not null,
+  checkpoint_type integer not null,
   primary key (synchronizer_idx, change_offset)
+);
+
+create table par_acs_commitment_period_outstanding (
+  synchronizer_idx integer not null,
+  -- interned participant id
+  participant_id integer not null,
+  from_exclusive bigint not null,
+  to_inclusive bigint not null,
+  expected_hashed_digest varbinary not null,
+  primary key (synchronizer_idx, participant_id, to_inclusive)
+);
+
+create index par_acs_commitment_period_outstanding_to_inclusive on par_acs_commitment_period_outstanding (
+  synchronizer_idx,
+  to_inclusive
+);
+
+create table par_acs_commitment_period_mismatch (
+  synchronizer_idx integer not null,
+  -- interned participant id
+  participant_id integer not null,
+  from_exclusive bigint not null,
+  to_inclusive bigint not null,
+  -- The offset of the first mismatching ReceivedAcsCommitment Update
+  update_offset bigint not null,
+  -- null indicates that this commitment has been unexpected
+  expected_hashed_digest varbinary,
+  primary key (synchronizer_idx, participant_id, to_inclusive)
+);
+
+create index par_acs_commitment_period_mismatch_by_hash ON par_acs_commitment_period_mismatch (
+  synchronizer_idx,
+  participant_id,
+  expected_hashed_digest,
+  to_inclusive
+);
+
+create index par_acs_commitment_period_mismatch_to_inclusive on par_acs_commitment_period_mismatch (
+  synchronizer_idx,
+  to_inclusive
+);
+
+create table par_acs_commitment_period_match (
+  synchronizer_idx integer not null,
+  -- interned participant id
+  participant_id integer not null,
+  from_exclusive bigint not null,
+  to_inclusive bigint not null,
+  -- The offset of the first matching ReceivedAcsCommitment Update
+  update_offset bigint not null,
+  primary key (synchronizer_idx, participant_id, to_inclusive)
+);
+
+create index par_acs_commitment_period_match_to_inclusive on par_acs_commitment_period_match (
+  synchronizer_idx,
+  to_inclusive
+);
+
+create table par_acs_commitment_period_watermark (
+  synchronizer_idx integer not null,
+  watermark_reconciliation bigint not null,
+  watermark_affirmation bigint not null,
+  watermark_matching bigint,
+  primary key (synchronizer_idx)
+);
+
+create table par_acs_commitment_period_pruning (
+  synchronizer_idx integer not null,
+  phase pruning_phase not null,
+  -- UTC timestamp in microseconds relative to EPOCH
+  ts bigint not null,
+  succeeded bigint null,
+  primary key (synchronizer_idx)
 );

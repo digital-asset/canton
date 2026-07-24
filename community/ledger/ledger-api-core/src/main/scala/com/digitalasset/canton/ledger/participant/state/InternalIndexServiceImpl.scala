@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.api.{
   UpdateFormat,
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -72,7 +72,7 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
         descendingOrder = false,
         skipPruningChecks = false,
       )(loggingContext)
-      .collect { case UpdateResponse.ProtoUpdate(update) =>
+      .collect { case UpdatesResponse.ProtoUpdates(update) =>
         update
       }
       .mapConcat(_.update.topologyTransaction)
@@ -105,13 +105,13 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
       )(loggingContext)
       // TODO(i34124) move this inside of update processing, and extend the internal format for topology events including the synchronizer ID filter
       .filter {
-        case UpdateResponse.ProtoUpdate(response) =>
+        case UpdatesResponse.ProtoUpdates(response) =>
           response.update.topologyTransaction.forall(
             _.synchronizerId == synchronizerId.toProtoPrimitive
           )
         case _ => true
       }
-      .mapConcat(InternalIndexService.AcsUpdateContainer.fromUpdateResponse)
+      .mapConcat(InternalIndexService.AcsUpdateContainer.fromUpdatesResponse)
   }
 
   override def acs(

@@ -19,7 +19,6 @@ import com.digitalasset.canton.platform.store.backend.Conversions.{
   participantPermissionInt,
 }
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy.DbLockMeta
-import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
 import com.digitalasset.canton.protocol.{ReassignmentId, TestUpdateId, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
@@ -123,15 +122,10 @@ private[store] object StorageBackendTestValues extends OptionValues {
       offset: Offset,
       party: Party = someParty,
       isLocal: Boolean = true,
-      reject: Boolean = false,
   ): DbDto.PartyEntry =
     DbDto.PartyEntry(
       ledger_offset = offset.unwrap,
-      recorded_at = someTime.micros,
-      submission_id = Some("submission_id"),
       party = Some(party),
-      typ = if (reject) JdbcLedgerDao.rejectType else JdbcLedgerDao.acceptType,
-      rejection_reason = Option.when(reject)("some rejection reason"),
       is_local = Some(isLocal),
     )
 

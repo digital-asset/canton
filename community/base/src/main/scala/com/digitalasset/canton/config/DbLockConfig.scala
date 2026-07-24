@@ -67,6 +67,10 @@ object DbLockConfig {
   *   Retry intervals during the initial attempts to acquire the lock.
   * @param lock
   *   Configuration of the DB locks used by the pool.
+  * @param maxInconclusiveReadOnlyChecks
+  *   Number of consecutive inconclusive (timed-out or failed) read-only checks tolerated before the
+  *   connection is considered lost. A single inconclusive check can be due to transient contention,
+  *   but a persistently inconclusive check is problematic.
   */
 final case class DbLockedConnectionConfig(
     passiveCheckPeriod: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(15),
@@ -82,6 +86,7 @@ final case class DbLockedConnectionConfig(
     initialAcquisitionMaxRetries: Int = 5,
     initialAcquisitionInterval: PositiveFiniteDuration = PositiveFiniteDuration.ofMillis(200),
     lock: DbLockConfig = DbLockConfig(),
+    maxInconclusiveReadOnlyChecks: Int = 3,
 )
 
 /** Configuration for the connection pool using DB locks.

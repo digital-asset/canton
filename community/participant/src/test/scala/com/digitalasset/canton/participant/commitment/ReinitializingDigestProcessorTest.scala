@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -18,6 +19,8 @@ import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDiges
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigestUpdate,
+  Checkpoint,
+  CheckpointType,
   HashedDigest,
   RawDigest,
 }
@@ -42,6 +45,7 @@ import org.apache.pekko.stream.scaladsl.Sink
 
 import scala.util.ChainingSyntax
 
+@AcsCommitmentTest
 class ReinitializingDigestProcessorTest
     extends BaseDigestProcessorTest
     with HasExecutionContext
@@ -375,7 +379,15 @@ class ReinitializingDigestProcessorTest
           .futureValueUS
 
         // insert checkpoint, because we want to check if the store's structure is appropriate!
-        testDigestStore.insertCheckpointTime(tp100.offset, tp100.recordTime).futureValueUS
+        testDigestStore
+          .insertCheckpointTime(
+            Checkpoint(
+              tp100.offset,
+              tp100.recordTime,
+              CheckpointType.ReconciliationIntervalBoundary,
+            )
+          )
+          .futureValueUS
         testDigestStore.checkReplacesInvariant().futureValueUS
 
         val partyBulk = testDigestStore.party
@@ -506,7 +518,7 @@ class ReinitializingDigestProcessorTest
           ),
           ProcessingContext(
             reinitAtTp,
-            CheckpointFence,
+            CheckpointFence(CheckpointType.Reinitialization),
           ),
         )
       }
@@ -605,7 +617,7 @@ class ReinitializingDigestProcessorTest
           ),
           ProcessingContext(
             requestedTimepoint,
-            CheckpointFence,
+            CheckpointFence(CheckpointType.Reinitialization),
           ),
         )
       }
@@ -676,7 +688,7 @@ class ReinitializingDigestProcessorTest
         val lastCheckpoint = testDigestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS
 
         lastCheckpoint.isDefined shouldBe true
-        lastCheckpoint.value shouldBe (off(100), ts(100))
+        lastCheckpoint.value shouldBe Checkpoint(tp(100), CheckpointType.Reinitialization)
 
         // Do we still have a valid chain of digest journals?
         testDigestStore.checkReplacesInvariant().futureValueUS

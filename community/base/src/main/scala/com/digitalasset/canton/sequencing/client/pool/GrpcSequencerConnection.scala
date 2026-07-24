@@ -97,7 +97,14 @@ class GrpcSequencerConnection(
     val sendAtMostOnce = retryPolicy(retryOnUnavailable = false)
 
     stub
-      .sendAsync(request, timeout, retryPolicy = sendAtMostOnce)
+      .sendAsync(
+        request,
+        timeout,
+        retryPolicy = sendAtMostOnce,
+        // Log at info level, as it is not known at this layer whether errors are to be expected.
+        // Callers should log at higher levels, if necessary.
+        logPolicy = CantonGrpcUtil.InfoLogPolicy,
+      )
       .leftFlatMap { connectionError =>
         maybeFailConnection(connectionError.error)
         fromConnectionError(connectionError.error, messageId).toEitherT

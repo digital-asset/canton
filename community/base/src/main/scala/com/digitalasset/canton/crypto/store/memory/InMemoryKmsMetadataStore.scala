@@ -12,7 +12,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.collection.TrieMapUtil
+import com.digitalasset.canton.util.collection.MapsUtil
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
@@ -51,7 +51,7 @@ class InMemoryKmsMetadataStore(override val loggerFactory: NamedLoggerFactory)
   override def store(
       metadata: KmsMetadataStore.KmsMetadata
   )(implicit ec: ExecutionContext, tc: TraceContext): FutureUnlessShutdown[Unit] =
-    TrieMapUtil
+    MapsUtil
       .insertIfAbsent[Fingerprint, KmsMetadata, Throwable](
         metadataStore,
         metadata.fingerprint,

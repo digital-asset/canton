@@ -586,7 +586,14 @@ class HealthReportingNodeReferenceIntegrationTestPostgres
                   "expected sequencer is not health",
                 )
               ),
-            mayContain = Seq.empty,
+            // The sequencer disconnects all members (not just the participant under test) once it
+            // becomes unhealthy, so the mediator can be caught mid-bootstrap and log this side
+            // error from its execution queue. It is not a symptom of the behaviour under test.
+            mayContain = Seq(
+              _.errorMessage should include(
+                "will not run because of failure of previous task"
+              )
+            ),
           ),
         )
 

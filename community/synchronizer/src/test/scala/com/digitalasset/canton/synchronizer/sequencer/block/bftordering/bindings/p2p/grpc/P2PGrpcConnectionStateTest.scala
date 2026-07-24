@@ -37,6 +37,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       state.connections should contain only Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId)
       state.isDefined(APeerP2PEndpoint.id) shouldBe true
       state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+      state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+      state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
       state.associateP2PEndpointIdToBftNodeId(AnotherPeerP2PEndpoint.id, APeerBftNodeId)
 
@@ -48,6 +50,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
       state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
       state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe false
+      state.isConnected(Left(AnotherPeerP2PEndpoint.id)) shouldBe false
+      state.isConnected(Right(APeerBftNodeId)) shouldBe false
     }
 
     "reject associating a P2P endpoint ID to the self BFT node ID" in {
@@ -65,6 +69,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       state.connections shouldBe empty
       state.isDefined(APeerP2PEndpoint.id) shouldBe false
       state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+      state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
     }
 
     // TODO(#34191): re-enable and complete coverage after fixing
@@ -92,6 +97,8 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       state.connections should contain only Some(APeerP2PEndpoint.id) -> Some(APeerBftNodeId)
       state.isDefined(APeerP2PEndpoint.id) shouldBe true
       state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+      state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+      state.isConnected(Right(APeerBftNodeId)) shouldBe false
     }
 
     "associate a gRPC streaming sender with a BFT node ID only if missing" in {
@@ -99,13 +106,19 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
 
       state.getSender(APeerP2PNodeAddressId) shouldBe None
 
+      state.isConnected(APeerP2PNodeAddressId) shouldBe false
+
       state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
 
       state.getSender(APeerP2PNodeAddressId) shouldBe Some(ASender)
 
+      state.isConnected(APeerP2PNodeAddressId) shouldBe true
+
       state.addSenderIfMissing(APeerBftNodeId, AnotherSender) shouldBe false
 
       state.getSender(APeerP2PNodeAddressId) shouldBe Some(ASender)
+
+      state.isConnected(APeerP2PNodeAddressId) shouldBe true
     }
 
     "associate a network ref with an address ID only if missing" in {
@@ -143,6 +156,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         alreadyPresent shouldBe false
         maybeRef1 should not be None
         checkP2PAddressState(isEndpointPresent = true, maybeRef1)
+        state.isConnected(addressId) shouldBe false
 
         state.addNetworkRefIfMissing(addressId) { () =>
           raiseAlreadyPresent()
@@ -155,6 +169,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         alreadyPresent shouldBe true
         maybeRef2 shouldBe None
         checkP2PAddressState(isEndpointPresent = true, maybeRef1)
+        state.isConnected(addressId) shouldBe false
       }
     }
 
@@ -188,11 +203,15 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
         state.isDefined(APeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
         // Unrelated connection is unaffected
         state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
         state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(APeerBftNodeId)) shouldBe false
       }
 
       "only an outgoing connection exists" in {
@@ -223,11 +242,15 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
         state.isDefined(APeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
         // Unrelated connection is unaffected
         state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
         state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isConnected(Left(AnotherPeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(AnotherPeerBftNodeId)) shouldBe false
       }
 
       "an incoming connection exists first" in {
@@ -263,11 +286,15 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref1)
         state.isDefined(APeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
         // Unrelated connection is unaffected
         state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
         state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isConnected(Left(AnotherPeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(AnotherPeerBftNodeId)) shouldBe false
       }
 
       "an outgoing connection exists first" in {
@@ -303,11 +330,15 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref2)
         state.isDefined(APeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(APeerBftNodeId)) shouldBe false
 
         // Unrelated connection is unaffected
         state.getNetworkRef(AnotherPeerBftNodeId) shouldBe None
         state.isDefined(AnotherPeerP2PEndpoint.id) shouldBe true
         state.isOutgoing(AnotherPeerP2PEndpoint.id) shouldBe true
+        state.isConnected(Left(AnotherPeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Right(AnotherPeerBftNodeId)) shouldBe false
       }
     }
 
@@ -375,6 +406,7 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
             )
 
           state.getSender(addressId) shouldBe None
+          state.isConnected(addressId) shouldBe false
 
           addressId match {
             case Right(nodeId) =>
@@ -405,11 +437,17 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.associateP2PEndpointIdToBftNodeId(AnotherPeerP2PEndpoint.id, APeerBftNodeId)
 
         state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+        state.isConnected(APeerP2PNodeAddressId) shouldBe true
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe true
+        state.isConnected(Left(AnotherPeerP2PEndpoint.id)) shouldBe true
 
         state.unassociateSenderAndReturnEndpointIds(ASender) should contain theSameElementsAs Seq(
           APeerP2PEndpoint.id,
           AnotherPeerP2PEndpoint.id,
         )
+        state.isConnected(APeerP2PNodeAddressId) shouldBe false
+        state.isConnected(Left(APeerP2PEndpoint.id)) shouldBe false
+        state.isConnected(Left(AnotherPeerP2PEndpoint.id)) shouldBe false
       }
     }
   }

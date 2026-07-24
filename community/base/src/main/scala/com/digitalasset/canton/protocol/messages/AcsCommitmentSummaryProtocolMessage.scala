@@ -3,12 +3,24 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import cats.data.EitherT
 import cats.syntax.option.*
-import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  Signature,
+  SigningKeyUsage,
+  SyncCryptoApi,
+  SyncCryptoError,
+  SynchronizerCryptoClient,
+}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -18,6 +30,8 @@ import com.digitalasset.canton.version.{
   VersionedProtoCodec,
   VersioningCompanionContext,
 }
+
+import scala.concurrent.ExecutionContext
 
 final case class AcsCommitmentSummaryProtocolMessage(
     acsCommitmentSummary: AcsCommitmentSummary,
@@ -89,4 +103,48 @@ object AcsCommitmentSummaryProtocolMessage
       )
     } yield AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signatures)
   }
+
+  // TODO(#34070) Re-use more code for signing and verifying instead of copy-pasting
+  def signAndCreate(
+      cryptoApi: SynchronizerCryptoClient,
+      acsCommitmentSummary: AcsCommitmentSummary,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, SyncCryptoError, AcsCommitmentSummaryProtocolMessage] = {
+    val hashPurpose = HashPurpose.AcsCommitmentSummary
+    val serialization = acsCommitmentSummary.getCryptographicEvidence
+
+    val hash = cryptoApi.pureCrypto.digest(hashPurpose, serialization)
+
+    for {
+      snapshot <- EitherT.liftF(cryptoApi.awaitSnapshot(acsCommitmentSummary.commitmentTick))
+      signature <- snapshot.sign(hash, SigningKeyUsage.ProtocolOnly, None)
+    } yield AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signature)
+  }
+
+  def verifySignature(
+      snapshot: SyncCryptoApi,
+      message: AcsCommitmentSummaryProtocolMessage,
+      signer: Member,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val hash = snapshot.pureCrypto.digest(
+      HashPurpose.AcsCommitmentSummary,
+      message.acsCommitmentSummary.getCryptographicEvidence,
+    )
+
+    snapshot
+      .verifySignature(hash, signer, message.signature, SigningKeyUsage.ProtocolOnly)
+      .leftMap(_.toString)
+  }
+
+  implicit val acsCommitmentSummaryProtocolMessageMessageCast
+      : ProtocolMessageContentCast[AcsCommitmentSummaryProtocolMessage] =
+    ProtocolMessageContentCast.create[AcsCommitmentSummaryProtocolMessage](name) {
+      case m: AcsCommitmentSummaryProtocolMessage => Some(m)
+      case _ => None
+    }
 }

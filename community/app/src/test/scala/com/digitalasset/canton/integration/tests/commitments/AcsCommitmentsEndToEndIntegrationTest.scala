@@ -21,6 +21,7 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFo
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  CheckpointType,
   HashedDigest,
   InternedParticipantId,
   RawDigest,
@@ -101,7 +102,7 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       }
   }
 
-  // the following test case should only run when the synchronizer actually runs with $ProtocolVersion.acsCommitmentRedesign,
+  // the following test case should only run when the synchronizer actually runs with `ProtocolVersion.acsCommitmentRedesign`,
   // because otherwise a synchronizer parameter change doesn't trigger a checkpoint
   // TODO(#33326) enable this test, once the synchronizer parametes are properly persisted in the indexer
   "synchronizer parameter changes trigger a checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign ignore {
@@ -130,16 +131,16 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       val digestStore =
         participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
 
-      // TODO(#34302): check the checkpoint for the specific checkpoint type
       eventually() {
         // in case there is no next checkpoint, .value will trigger a retry of the eventually loop
-        val (checkpointOffset, checkpointTs) =
+        val cp =
           digestStore.firstCheckpointAfter(startOffset).futureValueUS.value
 
         // if there was a checkpoint, update the offset to look for the next checkpoint
-        startOffset = checkpointOffset
+        startOffset = cp.offset
         // finally check whether we have reached the checkpoint with the expected checkpoint time
-        checkpointTs.toInstant shouldBe expectedCheckpointTime
+        cp.recordTime.toInstant shouldBe expectedCheckpointTime
+        cp.checkpointType shouldBe CheckpointType.ReconciliationIntervalBoundary
       }
   }
 

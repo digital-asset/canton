@@ -20,6 +20,8 @@ trait P2PConnectionState {
 
   def isOutgoing(p2pEndpointId: P2PEndpoint.Id): Boolean
 
+  def isConnected(p2pAddressId: P2PAddress.Id)(implicit traceContext: TraceContext): Boolean
+
   def associateP2PEndpointIdToBftNodeId(
       p2pAddress: P2PAddress
   )(implicit traceContext: TraceContext): P2PEndpointIdAssociationResult[Unit]

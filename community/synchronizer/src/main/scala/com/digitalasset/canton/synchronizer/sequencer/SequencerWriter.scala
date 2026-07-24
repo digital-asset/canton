@@ -26,7 +26,11 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriter.*
 import com.digitalasset.canton.synchronizer.sequencer.WriterStartupError.FailedToInitializeFromSnapshot
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerHealthStatus
-import com.digitalasset.canton.synchronizer.sequencer.store.{SequencerStore, SequencerWriterStore}
+import com.digitalasset.canton.synchronizer.sequencer.store.{
+  SequencerMemberId,
+  SequencerStore,
+  SequencerWriterStore,
+}
 import com.digitalasset.canton.synchronizer.sequencer.time.{
   DisasterRecoverySequencingTimeUpperBound,
   LsuSequencingBounds,
@@ -38,6 +42,7 @@ import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Pause}
+import com.digitalasset.canton.util.signalling.EventSignaller
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.*
@@ -531,7 +536,7 @@ object SequencerWriter {
       sequencerStore: SequencerStore,
       rateLimitManagerO: Option[SequencerRateLimitManager],
       clock: Clock,
-      eventSignaller: EventSignaller,
+      eventSignaller: EventSignaller[SequencerMemberId, Unit],
       protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
       blockSequencerMode: Boolean,

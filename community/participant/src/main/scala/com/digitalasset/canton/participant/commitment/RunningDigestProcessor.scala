@@ -7,13 +7,16 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   ChangedTo,
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationEvent,
+  GenericTopologyEvent,
+}
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
   ContractStakeholdersAndReassignmentCounter,
@@ -31,10 +34,15 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedL
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, LfContractId}
 import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.transaction.{
+  SynchronizerParametersState,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
@@ -51,7 +59,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   *   - contract activations/deactivations
   *   - party onboarding to or offboarding from this or a remote participant
   */
-// TODO(#33506): expose health status and metrics
+// TODO(#33084): expose health status and metrics
 class RunningDigestProcessor(
     thisParticipant: ParticipantId,
     synchronizerId: SynchronizerId,
@@ -71,33 +79,6 @@ class RunningDigestProcessor(
     with BaseDigestProcessor {
 
   private val thisLfParticipant = thisParticipant.toLf
-
-  /** Helper method to calculate the most recent reconciliation/affirmation interval tick up to and
-    * including the given record time.
-    */
-  private def mostRecentIntervalTickUpToInclusive(
-      recordTime: CantonTimestamp,
-      interval: RefinedDuration,
-  ) =
-    CantonTimestamp.assertFromLong(
-      recordTime.toMicros - (recordTime.toMicros % interval.toScala.toMicros)
-    )
-
-  /** A checkpoint is required if the reconciliation interval boundary is after or at the previously
-    * processed timestamp and before the currently processed timestamp.
-    */
-  private def determineCheckpointAtReconciliationBoundary(
-      recordTime: CantonTimestamp,
-      previouslyProcessedRecordTime: CantonTimestamp,
-      topologySnapshot: TopologySnapshot,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[CantonTimestamp]] =
-    topologySnapshot.findDynamicSynchronizerParameters().map {
-      case Right(params) =>
-        val boundary =
-          mostRecentIntervalTickUpToInclusive(recordTime, params.parameters.reconciliationInterval)
-        Option.when(previouslyProcessedRecordTime <= boundary && boundary < recordTime)(boundary)
-      case Left(error) => ErrorUtil.invalidState(error)
-    }
 
   /** Inserts a checkpointing fence into the processing pipeline in the following scenarios:
     *   - after a topology event with the same time as the event
@@ -126,26 +107,33 @@ class RunningDigestProcessor(
           val recordTime = timepoint.recordTime
           for {
             topologySnapshot <- getTopologySnapshot(Traced(recordTime))
-            crossedReconciliationIntervalBoundary <- determineCheckpointAtReconciliationBoundary(
-              recordTime = recordTime,
-              previouslyProcessedRecordTime = previousRecordTime,
-              topologySnapshot,
-            )
+            dynamicParameters <- getDynamicSynchronizerParametersOrFail(topologySnapshot)
           } yield {
             val (updatedNumEventsSinceLastCheckpoint, result) = event match {
               case InternalIndexService.AcsUpdate.AcsChangeUpdate(_) =>
                 // emit a checkpoint at the record time's predecessor after maxNumUpdatesBetweenCheckpoints events have been emitted
                 @inline def checkpointByNumProcessedEvents = Option.when(
                   numEventsSinceLastCheckpoint >= acsCommitmentConfig.maxNumUpdatesBetweenCheckpoints.unwrap
-                )(recordTime.immediatePredecessor)
+                )(
+                  (
+                    recordTime.immediatePredecessor,
+                    CheckpointFence(CheckpointType.MaxEventsWithoutCheckpoint),
+                  )
+                )
                 val offset = timepoint.offset
                 // emit a checkpoint fence after crossing a reconciliation interval boundary
+                val crossedReconciliationIntervalBoundary =
+                  determineCheckpointAtReconciliationBoundary(
+                    recordTime = recordTime,
+                    previouslyProcessedRecordTime = previousRecordTime,
+                    dynamicParameters,
+                  )
                 val maybeFence = crossedReconciliationIntervalBoundary
                   .orElse(checkpointByNumProcessedEvents)
                   .zip(offset.decrement)
-                  .map { case (checkpointRecordTime, checkpointOffset) =>
+                  .map { case ((checkpointRecordTime, checkpointFence), checkpointOffset) =>
                     val checkpointTimepoint = Timepoint(checkpointOffset)(checkpointRecordTime)
-                    ProcessingContext(checkpointTimepoint, CheckpointFence)
+                    ProcessingContext(checkpointTimepoint, checkpointFence)
                   }
 
                 val acsEvent =
@@ -158,14 +146,27 @@ class RunningDigestProcessor(
                   // otherwise increase the counter and emit just the AcsChange
                   .getOrElse((numEventsSinceLastCheckpoint + 1, acsEvent))
 
-              case InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(partyTopologyEvents, _) =>
-                // add a checkpoint fence after the topology event
-                val partyEvents = Option.when(partyTopologyEvents.nonEmpty)(
-                  NotCheckpointFence(topologySnapshot, event)
-                )
+              case InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
+                    partyTopologyEvents,
+                    newSynchronizerParamsO,
+                  ) =>
+                // only propagate the ACS update if there is a party hosting change
+                val (partyHostingChangeEvent, partyHostingChangeCheckpoint) = Option
+                  .when(partyTopologyEvents.nonEmpty)(
+                    (NotCheckpointFence(topologySnapshot, event), CheckpointType.PartyHostingChange)
+                  )
+                  .unzip
 
-                val events = partyEvents.toList :+
-                  CheckpointFence
+                val tickIntervalChangeCheckpoint =
+                  newSynchronizerParamsO.flatMap(hasTickIntervalChanged(_, dynamicParameters))
+
+                val events = partyHostingChangeEvent.toList ++
+                  // emit a checkpoint fence depending on the topology update.
+                  // A change in synchronizer parameters has higher priority than a party hosting change
+                  tickIntervalChangeCheckpoint
+                    .orElse(partyHostingChangeCheckpoint)
+                    .map(CheckpointFence(_))
+
                 // the checkpoint is emitted AFTER the topology change, so we reset the counter to 0
                 (0, events.map(context.withValue))
 
@@ -186,7 +187,7 @@ class RunningDigestProcessor(
       .flatMap { context =>
         context.traverse[Source[*, NotUsed], CheckpointFenceOr[Classification]] {
           // propagate checkpoint fences
-          case CheckpointFence => Source.single(CheckpointFence: CheckpointFenceOr[Classification])
+          case fence: CheckpointFence => Source.single(fence: CheckpointFenceOr[Classification])
           case other @ NotCheckpointFence(topoSnapshot, value) =>
             implicit val traceContext: TraceContext = context.traceContext
             value match {
@@ -492,7 +493,9 @@ class RunningDigestProcessor(
   override def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     def runPipeline(promise: Promise[Unit]) = for {
       latestCheckpointO <- acsDigestStore.latestCheckpointUpTo(Offset.MaxValue)
-      (startingOffsetO, startingRecordTimeO) = latestCheckpointO.unzip
+      (startingOffsetO, startingRecordTimeO) = latestCheckpointO
+        .map(_.timepoint.tupled)
+        .unzip
       _ <- startingOffsetO.traverse { startingOffset =>
         logger.info(
           s"Deleting ACS digest data after latest checkpoint $latestCheckpointO before starting the processing pipeline"
@@ -512,7 +515,7 @@ class RunningDigestProcessor(
         .toMat(
           Sink.foreach(cp =>
             logger.debug(
-              s"An ACS digest checkpoint was written at ${cp.recordTimeInclusive} ${cp.offsetInclusive}"
+              s"An ACS digest checkpoint ${cp.checkpointType} was written at recordTime=${cp.recordTimeInclusive}, offset=${cp.offsetInclusive}"
             )
           )
         )(Keep.both)
@@ -567,4 +570,84 @@ class RunningDigestProcessor(
   }
 
   override def toString: String = s"RunningDigestProcessor($synchronizerId)"
+
+  /** Helper method to calculate the most recent reconciliation/affirmation interval tick up to and
+    * including the given record time.
+    */
+  private def mostRecentIntervalTickUpToInclusive(
+      recordTime: CantonTimestamp,
+      interval: RefinedDuration,
+  ) =
+    CantonTimestamp.assertFromLong(
+      recordTime.toMicros - (recordTime.toMicros % interval.toScala.toMicros)
+    )
+
+  /** A checkpoint is required if the reconciliation interval boundary is after or at the previously
+    * processed timestamp and before the currently processed timestamp.
+    */
+  private def determineCheckpointAtReconciliationBoundary(
+      recordTime: CantonTimestamp,
+      previouslyProcessedRecordTime: CantonTimestamp,
+      dynamicParameters: DynamicSynchronizerParameters,
+  ): Option[(CantonTimestamp, CheckpointFence)] = {
+    val boundary =
+      mostRecentIntervalTickUpToInclusive(
+        recordTime,
+        dynamicParameters.reconciliationInterval,
+      )
+    Option.when(previouslyProcessedRecordTime <= boundary && boundary < recordTime)(
+      (boundary, CheckpointFence(CheckpointType.ReconciliationIntervalBoundary))
+    )
+  }
+
+  /** Gets the dynamic synchronizer parameters from the topology snapshot of fails with an
+    * exception. This should never really happen.
+    */
+  private def getDynamicSynchronizerParametersOrFail(topologySnapshot: TopologySnapshot)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[DynamicSynchronizerParameters] =
+    topologySnapshot
+      .findDynamicSynchronizerParameters()
+      .flatMap(
+        _.fold(
+          err => FutureUnlessShutdown.failed(new IllegalStateException(err)),
+          params => FutureUnlessShutdown.pure(params.parameters),
+        )
+      )
+
+  /** Determines whether a tick interval has changed and returns the corresponding
+    * [[com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType]].
+    * @param event
+    *   the
+    *   [[com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.GenericTopologyEvent]]
+    *   containing the synchronizer parameters topology transaction
+    * @param currentSynchronizerParams
+    *   the currently effective dynamic synchronizer parameters
+    * @return
+    *   - [[com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary]]
+    *     if the reconciliation interval has changed
+    *   - [[com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.AffirmationIntervalBoundary]]
+    *     if the reconciliation interval has changed
+    *   - `None` if no interval has changed
+    */
+  private def hasTickIntervalChanged(
+      event: GenericTopologyEvent.SynchronizerParametersState,
+      currentSynchronizerParams: DynamicSynchronizerParameters,
+  )(implicit traceContext: TraceContext): Option[CheckpointType] =
+    TopologyTransaction.fromTrustedByteString(event.payload) match {
+      case Left(error) => ErrorUtil.invalidArgument(error.message)
+      case Right(topoTx) =>
+        topoTx.selectMapping[SynchronizerParametersState] match {
+          case Some(syncParamState) =>
+            // TODO(#33084): add check for affirmation interval, once it has been introduced
+            Option.when(
+              currentSynchronizerParams.reconciliationInterval != syncParamState.mapping.parameters.reconciliationInterval
+            )(CheckpointType.ReconciliationIntervalBoundary)
+          case None =>
+            ErrorUtil.invalidArgument(
+              s"SynchronizerParametersState did not contain a the expected mapping type. Actual: $topoTx"
+            )
+        }
+    }
+
 }

@@ -363,6 +363,11 @@ object CantonGrpcUtil {
         traceContext: TraceContext
     ): Unit = error.log(logger)
   }
+  object InfoLogPolicy extends GrpcLogPolicy {
+    override def log(error: GrpcError, logger: TracedLogger)(implicit
+        traceContext: TraceContext
+    ): Unit = logger.info(error.toString)
+  }
   object SilentLogPolicy extends GrpcLogPolicy {
     def log(error: GrpcError, logger: TracedLogger)(implicit
         traceContext: TraceContext

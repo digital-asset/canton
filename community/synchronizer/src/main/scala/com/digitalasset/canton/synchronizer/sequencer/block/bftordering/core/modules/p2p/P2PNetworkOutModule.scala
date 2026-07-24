@@ -499,7 +499,13 @@ final class P2PNetworkOutModule[
             maybeP2PEndpointId,
             maybeP2PEndpointId.exists(p2pConnectionState.isOutgoing),
             maybeBftNodeId,
-            maybeP2PEndpointId.exists(connectedP2PEndpointIds.contains),
+            // TODO(#34391): handle more connectivity status changes from this module, esp. authentication actions
+            // Takes precise connectivity status from the connection state directly, but support notification-based
+            //  connectivity status for simulation testing
+            maybeP2PEndpointId.exists(connectedP2PEndpointIds.contains) ||
+              P2PAddress
+                .maybeId(maybeBftNodeId, maybeP2PEndpointId)
+                .exists(p2pConnectionState.isConnected),
             p2pEndpointIds.isEmpty || maybeP2PEndpointId.exists(p2pConnectionState.isDefined),
           )
         }

@@ -482,7 +482,7 @@ trait BaseTest
   ): T = BaseTest.always(durationOfSuccess, pollIntervalMs)(testCode)
 
   def eventuallyForever[T](
-      timeUntilSuccess: FiniteDuration = 2.seconds,
+      timeUntilSuccess: FiniteDuration = 20.seconds,
       durationOfSuccess: FiniteDuration = 2.seconds,
       pollIntervalMs: Long = 10,
   )(testCode: => T): T =

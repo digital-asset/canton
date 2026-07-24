@@ -36,6 +36,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
   AcsDigestUpdate,
+  Checkpoint,
   InternedParticipantId,
   LocalPartyFirst,
   PartyAndOrder,
@@ -484,7 +485,7 @@ class InMemoryDigestAccumulator(
     val applied = applyDigestChanges(input)
     applied
       .traverse {
-        case CheckpointFence =>
+        case CheckpointFence(_) =>
           Left(acc :+ applied)
         case other =>
           other.traverse(_.traverse {
@@ -551,10 +552,10 @@ class InMemoryDigestAccumulator(
   ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
     implicit val traceContext: TraceContext = input.traceContext
     input.value match {
-      case CheckpointFence =>
+      case CheckpointFence(tpe) =>
         implicit val executionContext = directExecutionContext
         digestStore
-          .insertCheckpointTime(input.offset, input.recordTime)
+          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
           .map((_: Unit) => input)
       case other => FutureUnlessShutdown.pure(input)
     }
@@ -568,8 +569,8 @@ class InMemoryDigestAccumulator(
           doDeregister(usages)(context.traceContext)
         }
         immutable.Iterable.empty
-      case ProcessingContext(timepoint, CheckpointFence) =>
-        immutable.Iterable(CheckpointWritten(timepoint))
+      case ProcessingContext(timepoint, CheckpointFence(tpe)) =>
+        immutable.Iterable(CheckpointWritten(timepoint, tpe))
     }
 
   private def doDeregister(

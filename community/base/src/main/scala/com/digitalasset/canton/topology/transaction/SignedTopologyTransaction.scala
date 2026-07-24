@@ -522,15 +522,15 @@ object SignedTopologyTransactions
     )
 
   def fromProtoV30(
-      expectedProtocolVersion: ProtocolVersionValidation,
+      protocolVersionValidation: ProtocolVersionValidation,
       proto: v30.SignedTopologyTransactions,
   ): ParsingResult[SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
     for {
       transactions <- proto.signedTransaction
         .traverse(
           SignedTopologyTransaction.fromByteString(
-            expectedProtocolVersion,
-            expectedProtocolVersion,
+            protocolVersionValidation,
+            protocolVersionValidation,
             _,
           )
         )

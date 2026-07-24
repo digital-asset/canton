@@ -100,11 +100,20 @@ final class InMemoryAcsCommitmentPeriodStore(
   ): FutureUnlessShutdown[MatchingWatermark] =
     FutureUnlessShutdown.pure(lock.exclusive(watermarksVar))
 
-  override def increaseWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(implicit
-      traceContext: TraceContext
+  override def increaseInsertionWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(
+      implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     withLock {
       watermarksVar = watermarksVar.bump(watermark, affirmationOnly)
+    }
+    FutureUnlessShutdown.unit
+  }
+
+  override def increaseMatcherWatermark(offset: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    withLock {
+      watermarksVar = watermarksVar.bump(offset)
     }
     FutureUnlessShutdown.unit
   }
@@ -113,7 +122,7 @@ final class InMemoryAcsCommitmentPeriodStore(
       implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     withLock {
-      val MatchingWatermark(reconciliation, affirmation) = watermarksVar
+      val MatchingWatermark(reconciliation, affirmation, _) = watermarksVar
       val (tooEarly, good) = digests.partition(_.toInclusive <= affirmation)
       if (tooEarly.nonEmpty) {
         logger.debug(s"Skip inserting outdated commitment periods: ${tooEarly
@@ -183,7 +192,7 @@ final class InMemoryAcsCommitmentPeriodStore(
           periodMap.foreach { case (_, period) =>
             ErrorUtil.requireState(
               period.fromExclusive < period.toInclusive,
-              s"Invalid period $period for participant ${stringInterning.participantId
+              s"Invalid period for participant ${stringInterning.participantId
                   .externalize(participant)}: fromExclusive ${period.fromExclusive} must be less than toInclusive ${period.toInclusive}",
             )
           }
@@ -192,7 +201,7 @@ final class InMemoryAcsCommitmentPeriodStore(
     }
 
     def checkWatermarks(): Unit = {
-      val MatchingWatermark(reconciliation, affirmation) = watermarksVar
+      val MatchingWatermark(reconciliation, affirmation, _) = watermarksVar
       ErrorUtil.requireState(
         affirmation >= reconciliation,
         s"Affirmation watermark $affirmation is below reconciliation watermark $reconciliation",
@@ -219,7 +228,7 @@ final class InMemoryAcsCommitmentPeriodStore(
         periodMap.lastOption.foreach { case (_, period) =>
           ErrorUtil.requireState(
             period.toInclusive <= affirmation,
-            s"$name period $period for participant ${stringInterning.participantId
+            s"$name period (${period.fromExclusive}, ${period.toInclusive}] for participant ${stringInterning.participantId
                 .externalize(participant)} exceeds affirmation watermark $affirmation",
           )
         }

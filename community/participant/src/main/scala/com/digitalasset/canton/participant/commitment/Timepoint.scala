@@ -11,6 +11,8 @@ final case class Timepoint(offset: Offset)(val recordTime: CantonTimestamp) exte
     param("offset", _.offset),
     param("recordTime", _.recordTime),
   )
+
+  def tupled: (Offset, CantonTimestamp) = (offset, recordTime)
 }
 
 object Timepoint {

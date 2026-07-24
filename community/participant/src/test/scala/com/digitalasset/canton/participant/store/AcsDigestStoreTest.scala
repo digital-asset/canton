@@ -4,10 +4,12 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.commitment.Timepoint
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, InternedPartyId, ProtocolVersionChecksAsyncWordSpec}
@@ -105,14 +107,14 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       key2: K,
       digest1: V,
       digest2: V,
-      offsetTime0: (Offset, CantonTimestamp),
-      offsetTime1: (Offset, CantonTimestamp),
-      offsetTime2: (Offset, CantonTimestamp),
+      offsetTime0: Timepoint,
+      offsetTime1: Timepoint,
+      offsetTime2: Timepoint,
   ): Unit = {
 
-    val (offset0, t0) = offsetTime0
-    val (offset1, t1) = offsetTime1
-    val (offset2, t2) = offsetTime2
+    val (offset0, t0) = offsetTime0.tupled
+    val (offset1, t1) = offsetTime1.tupled
+    val (offset2, t2) = offsetTime2.tupled
 
     val update1_K1T0 =
       AcsDigestUpdate(
@@ -388,8 +390,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       participantId1: InternedParticipantId,
   ): Unit = {
     val (offset0, t0) = offsetTime(PositiveLong.tryCreate(10))
-    val (offset1, t1) = offsetTime(PositiveLong.tryCreate(20))
-    val (offset2, t2) = offsetTime(PositiveLong.tryCreate(30))
+    val checkpoint1 = checkpoint(offsetTime(PositiveLong.tryCreate(20)))
+    val (offset1, t1) = checkpoint1.timepoint.tupled
+    val checkpoint2 = checkpoint(offsetTime(PositiveLong.tryCreate(30)))
+    val (offset2, t2) = checkpoint2.timepoint.tupled
 
     val rawDigest = genRawDigest(0x2c)
     val participantDigest = genParticipantDigest(rawDigest)
@@ -462,7 +466,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- store.participant.upsertDigestUpdates(List(participantUpdate1AtT1))
 
         // Verify the integrity of replaces time pointers across the updates
-        _ <- store.insertCheckpointTime(offset2, t2)
+        _ <- store.insertCheckpointTime(checkpoint2)
         _ <- store.checkReplacesInvariant()
 
         _ <- store.deleteAfter(offset1)
@@ -510,7 +514,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- store.participant.upsertDigestUpdates(List(participantUpdate1AtT1))
 
         // Verify the integrity of replaces time pointers across the updates
-        _ <- store.insertCheckpointTime(offset2, t2)
+        _ <- store.insertCheckpointTime(checkpoint2)
         _ <- store.checkReplacesInvariant()
 
         _ <- store.deleteUpTo(offset1)
@@ -544,7 +548,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       )
       for {
         _ <- pruningStore.party.upsertDigestUpdates(List(partyUpdate1AtT0))
-        _ <- pruningStore.insertCheckpointTime(offset1, t1)
+        _ <- pruningStore.insertCheckpointTime(checkpoint1)
 
         // Test global prune boundaries across sub-journals
         _ <- pruningStore.deleteAfter(offset1)
@@ -628,7 +632,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- store.participant.upsertDigestUpdates(List(brokenParticipantUpdate1AtT2))
 
         // it checks until the last checkpoint T2
-        _ <- store.insertCheckpointTime(offset2, t2)
+        _ <- store.insertCheckpointTime(checkpoint2)
         _ <- loggerFactory.assertInternalErrorAsyncUS[IllegalStateException](
           within = store.checkReplacesInvariant(),
           assertion = _.getMessage should include(
@@ -656,11 +660,11 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       (5L to 60L by 5L).map(seconds => offsetTime(PositiveLong.tryCreate(seconds))).unzip
 
     // Define 5 explicit checkpoint positions
-    val cpAtT2 = (offset(2), t(2))
-    val cpAtT4 = (offset(4), t(4))
-    val cpAtT6 = (offset(6), t(6))
-    val cpAtT8 = (offset(8), t(8))
-    val cpAtT10 = (offset(10), t(10))
+    val cpAtT2 = Checkpoint(offset(2), t(2), CheckpointType.ReconciliationIntervalBoundary)
+    val cpAtT4 = Checkpoint(offset(4), t(4), CheckpointType.AffirmationIntervalBoundary)
+    val cpAtT6 = Checkpoint(offset(6), t(6), CheckpointType.MaxEventsWithoutCheckpoint)
+    val cpAtT8 = Checkpoint(offset(8), t(8), CheckpointType.Reinitialization)
+    val cpAtT10 = Checkpoint(offset(10), t(10), CheckpointType.PartyHostingChange)
 
     val update1_K1T2 =
       AcsDigestUpdate(AcsDigest(key1, offset(2), t(2), Some(digest1), None), replacesOffset = None)
@@ -743,7 +747,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
             cpAtT6,
             cpAtT8,
             cpAtT10,
-          ).map { case (offset, ts) => testStore.insertCheckpointTime(offset, ts) }
+          ).map(testStore.insertCheckpointTime)
         )
 
       _ <- testStore.checkReplacesInvariant()
@@ -857,8 +861,9 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       for {
         _ <- upsertInsertCheckpointsInto(testStore, testJournal)
 
+        cp7 = Checkpoint(offset(7), t(7), ReconciliationIntervalBoundary)
         // 2. insert new checkpoint at update6 T7
-        _ <- testStore.insertCheckpointTime(offset(7), t(7))
+        _ <- testStore.insertCheckpointTime(cp7)
 
         // 1. Prune history up to T7 checkpoint (exclusive)
         // because the latest T6_V2 update on Key1 is a tombstone (first less than T7)
@@ -877,7 +882,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- testStore.checkReplacesInvariant()
       } yield {
         // We should keep T7 because deleteUpTo is exclusive (unless it is a tombstone)
-        firstCheckpointAfterDelete shouldBe Some((offset(7), t(7)))
+        firstCheckpointAfterDelete shouldBe Some(cp7)
 
         // we don't have anything because update 6 at T6V2 is a tombstone (inclusive)
         removedTombstoneKey1AtT6V2 shouldBe None
@@ -892,10 +897,18 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       mkStore: ExecutionContext => AcsDigestStore
   ): Unit = {
 
-    val offsetTime0 @ (offset0, t0) = offsetTime(PositiveLong.tryCreate(10))
-    val offsetTime1 @ (offset1, t1) = offsetTime(PositiveLong.tryCreate(20))
-    val offsetTime2 @ (offset2, t2) = offsetTime(PositiveLong.tryCreate(30))
-    val offsetTime3 @ (offset3, t3) = offsetTime(PositiveLong.tryCreate(40))
+    val checkpoint0 @ Checkpoint(Timepoint(offset0), _) = checkpoint(
+      offsetTime(PositiveLong.tryCreate(10))
+    )
+    val checkpoint1 @ Checkpoint(Timepoint(offset1), _) = checkpoint(
+      offsetTime(PositiveLong.tryCreate(20))
+    )
+    val checkpoint2 @ Checkpoint(Timepoint(offset2), _) = checkpoint(
+      offsetTime(PositiveLong.tryCreate(30))
+    )
+    val checkpoint3 @ Checkpoint(Timepoint(offset3), _) = checkpoint(
+      offsetTime(PositiveLong.tryCreate(40))
+    )
 
     val partyAndLocalOrderKey1 = localOrderParty(partyIndex = 1)
     val partyAndRemoteOrderKey1 = remoteOrderParty(partyIndex = 1)
@@ -959,10 +972,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           _ <- FutureUnlessShutdown
             .sequence(
               List( // Note: checkpoint T0 is not persisted
-                offsetTime1,
-                offsetTime2,
-                offsetTime3,
-              ).map { case (offset, ts) => store.insertCheckpointTime(offset, ts) }
+                checkpoint1,
+                checkpoint2,
+                checkpoint3,
+              ).map(store.insertCheckpointTime)
             )
 
           // Test exact matches
@@ -977,11 +990,11 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           emptyFloor <- store.latestCheckpointUpTo(offset0)
           emptyCeil <- store.firstCheckpointAfter(offset3)
         } yield {
-          exactFloor shouldBe Some(offsetTime3)
-          exactCeil shouldBe Some(offsetTime2)
+          exactFloor shouldBe Some(checkpoint3)
+          exactCeil shouldBe Some(checkpoint2)
 
-          midFloor shouldBe Some(offsetTime2)
-          midCeil shouldBe Some(offsetTime3)
+          midFloor shouldBe Some(checkpoint2)
+          midCeil shouldBe Some(checkpoint3)
 
           emptyFloor shouldBe None
           emptyCeil shouldBe None
@@ -998,9 +1011,9 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
             key2 = partyAndLocalOrderKey2,
             digest1 = rawDigest1,
             digest2 = rawDigest2,
-            offsetTime0,
-            offsetTime1,
-            offsetTime2,
+            checkpoint0.timepoint,
+            checkpoint1.timepoint,
+            checkpoint2.timepoint,
           )
       }
 
@@ -1011,9 +1024,9 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           key2 = participantId2,
           digest1 = participantDigest1,
           digest2 = participantDigest2,
-          offsetTime0,
-          offsetTime1,
-          offsetTime2,
+          checkpoint0.timepoint,
+          checkpoint1.timepoint,
+          checkpoint2.timepoint,
         )
       }
 
@@ -1053,10 +1066,14 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
   protected def acsDigestMultiStoresTests(
       mkStore: (ExecutionContext, IndexedSynchronizer) => AcsDigestStore
   ): Unit = {
-    val offsetTime0 @ (offset0, t0) = offsetTime(PositiveLong.tryCreate(10))
-    val offsetTime1 @ (offset1, t1) = offsetTime(PositiveLong.tryCreate(20))
-    val offsetTime2 @ (offset2, t2) = offsetTime(PositiveLong.tryCreate(30))
-    val offsetTime3 @ (offset3, t3) = offsetTime(PositiveLong.tryCreate(40))
+    val checkpoint0 = checkpoint(offsetTime(PositiveLong.tryCreate(10)))
+    val (offset0, t0) = checkpoint0.timepoint.tupled
+    val checkpoint1 = checkpoint(offsetTime(PositiveLong.tryCreate(20)))
+    val (offset1, t1) = checkpoint1.timepoint.tupled
+    val checkpoint2 = checkpoint(offsetTime(PositiveLong.tryCreate(30)))
+    val (offset2, t2) = checkpoint2.timepoint.tupled
+    val checkpoint3 = checkpoint(offsetTime(PositiveLong.tryCreate(40)))
+    val (offset3, t3) = checkpoint3.timepoint.tupled
 
     val syncA = indexedSynchronizer(synchronizerIndex = 2, name = "synchronizer-A")
     val syncB = indexedSynchronizer(synchronizerIndex = 3, name = "synchronizer-B")
@@ -1140,8 +1157,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- store.participant.upsertDigestUpdates(
           acsParticipantUpdates
         )
-        _ <- store.insertCheckpointTime(offset1, t1)
-        _ <- store.insertCheckpointTime(offset2, t2)
+        _ <- store.insertCheckpointTime(checkpoint1)
+        _ <- store.insertCheckpointTime(checkpoint2)
 
         _ <- store.checkReplacesInvariant()
 
@@ -1169,11 +1186,11 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
 
         for {
           // Insert T0,T1 into Store A
-          _ <- storeA.insertCheckpointTime(offset0, t0)
-          _ <- storeA.insertCheckpointTime(offset1, t1)
+          _ <- storeA.insertCheckpointTime(checkpoint0)
+          _ <- storeA.insertCheckpointTime(checkpoint1)
 
           // Insert T3 into Store B
-          _ <- storeB.insertCheckpointTime(offset3, t3)
+          _ <- storeB.insertCheckpointTime(checkpoint3)
 
           // Latest checkpoint at T3 (inclusive)
           latestCheckpointA_T3 <- storeA.latestCheckpointUpTo(offset3)
@@ -1186,11 +1203,11 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           firstCheckpointA_T3 <- storeA.firstCheckpointAfter(offset3)
           firstCheckpointB_T3 <- storeB.firstCheckpointAfter(offset3)
         } yield {
-          latestCheckpointA_T3 shouldBe Some(offsetTime1)
-          latestCheckpointB_T3 shouldBe Some(offsetTime3)
+          latestCheckpointA_T3 shouldBe Some(checkpoint1)
+          latestCheckpointB_T3 shouldBe Some(checkpoint3)
 
-          firstCheckpointA_T0 shouldBe Some(offsetTime1)
-          firstCheckpointB_T0 shouldBe Some(offsetTime3)
+          firstCheckpointA_T0 shouldBe Some(checkpoint1)
+          firstCheckpointB_T0 shouldBe Some(checkpoint3)
 
           firstCheckpointA_T3 shouldBe None
           firstCheckpointB_T3 shouldBe None
@@ -1246,8 +1263,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           preservedParticipantBAtT2 <- storeB.participant.lookup(participantKey, offset2)
 
         } yield {
-          checkpointA_afterRollback shouldBe Some(offsetTime1)
-          checkpointB_afterRollback shouldBe Some(offsetTime2)
+          checkpointA_afterRollback shouldBe Some(checkpoint1)
+          checkpointB_afterRollback shouldBe Some(checkpoint2)
 
           // Rollbacks must not cross-contaminate shared timelines
           rolledBackPartyAT2 shouldBe Some(partyUpdateDigestAAtT1)

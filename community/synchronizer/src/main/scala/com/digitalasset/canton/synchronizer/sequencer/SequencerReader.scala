@@ -43,6 +43,7 @@ import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.signalling.{EventSignaller, NotificationSignal}
 import com.digitalasset.canton.util.{BatchN, EitherTUtil, ErrorUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
@@ -107,7 +108,7 @@ class SequencerReader(
     config: SequencerReaderConfig,
     store: SequencerStore,
     syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
-    eventSignaller: EventSignaller,
+    eventSignaller: EventSignaller[SequencerMemberId, Unit],
     topologyClientMember: Member,
     lsuSequencingBounds: Option[LsuSequencingBounds],
     metrics: SequencerMetrics,
@@ -345,9 +346,9 @@ class SequencerReader(
         traceContext: TraceContext
     ): Source[(PreviousEventTimestamp, Sequenced[IdOrPayload]), NotUsed] =
       eventSignaller
-        .readSignalsForMember(member, registeredMember.memberId)
+        .readSignals(registeredMember.memberId, member.toString)
         // always trigger a read upon subscription
-        .prepend(Source.single(ReadSignal))
+        .prepend(Source.single(NotificationSignal.unit))
         .via(
           FetchLatestEventsFlow[
             (PreviousEventTimestamp, Sequenced[IdOrPayload]),

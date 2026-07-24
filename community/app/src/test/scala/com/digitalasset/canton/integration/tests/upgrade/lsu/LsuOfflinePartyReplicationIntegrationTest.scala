@@ -28,6 +28,7 @@ import org.scalatest.Assertion
 
 import java.time.Duration
 import scala.annotation.nowarn
+import scala.concurrent.duration.DurationInt
 
 /** Base class for tests relating to the interaction of LSU and Offline Party Replication. */
 @nowarn("msg=dead code")
@@ -152,6 +153,8 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
       fixture.newSynchronizerNodes.sequencers,
       suppressLogs = true,
       trafficTsOverride = None,
+      timeUntilSuccess = 20.seconds,
+      maxPollInterval = 5.seconds,
     )
     eventually() {
       environment.simClock.value.advance(Duration.ofSeconds(1))

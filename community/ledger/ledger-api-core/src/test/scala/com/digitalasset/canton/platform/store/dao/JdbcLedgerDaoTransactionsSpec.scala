@@ -750,7 +750,6 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       // just for having the ledger end bumped
       _ <- ledgerDao.storePartyAdded(
         endOffset,
-        None,
         Timestamp.now(),
         IndexerPartyDetails(alice, true),
       )

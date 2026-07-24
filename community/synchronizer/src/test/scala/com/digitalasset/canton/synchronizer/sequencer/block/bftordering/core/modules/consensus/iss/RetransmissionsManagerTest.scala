@@ -14,6 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.{
   EpochStatusBuilder,
+  PreviousEpochsRetransmissionsTracker,
   RetransmissionsManager,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
@@ -35,7 +36,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingTopologyInfo,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.BlockStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.{
+  BlockStatus,
+  EpochStatus,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
   ConsensusStatus,
@@ -273,15 +277,18 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         implicit val context
             : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
           new ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]]()
-        val manager = createManager(networkOut)
+
+        val previousEpochsRetransmissionsTracker = mock[PreviousEpochsRetransmissionsTracker]
+        val manager = createManager(networkOut, Some(previousEpochsRetransmissionsTracker))
 
         val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
 
-        val message = retransmissionRequest
+        when(previousEpochsRetransmissionsTracker.processRetransmissionsRequest(any[EpochStatus]))
+          .thenReturn(Left("basic validation failed"))
 
         manager.handleMessage(
           orderingTopologyInfo(cryptoProvider),
-          Consensus.RetransmissionsMessage.UnverifiedNetworkMessage(message),
+          Consensus.RetransmissionsMessage.UnverifiedNetworkMessage(retransmissionRequest),
         )
 
         // manager has not started any epochs yet, so it cannot process the request
@@ -496,7 +503,8 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   }
 
   private def createManager(
-      networkOut: ModuleRef[P2PNetworkOut.Message]
+      networkOut: ModuleRef[P2PNetworkOut.Message],
+      previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
   ): RetransmissionsManager[ProgrammableUnitTestEnv] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
     new RetransmissionsManager[ProgrammableUnitTestEnv](
@@ -507,6 +515,7 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       metrics,
       new SimClock(loggerFactory = loggerFactory),
       loggerFactory,
+      previousEpochsRetransmissionsTrackerO,
     )
   }
 }

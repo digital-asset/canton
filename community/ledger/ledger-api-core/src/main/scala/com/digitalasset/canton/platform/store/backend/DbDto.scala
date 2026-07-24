@@ -234,11 +234,7 @@ object DbDto {
 
   final case class PartyEntry(
       ledger_offset: Long,
-      recorded_at: Long,
-      submission_id: Option[String],
       party: Option[Party],
-      typ: String,
-      rejection_reason: Option[String],
       is_local: Option[Boolean],
   ) extends DbDto {
     override def provideInternedStrings(builder: StringInterningBuilder): Unit =

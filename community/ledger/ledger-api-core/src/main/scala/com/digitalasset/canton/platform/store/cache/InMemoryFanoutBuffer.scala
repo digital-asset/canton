@@ -95,6 +95,26 @@ class InMemoryFanoutBuffer(
       }),
     )
 
+  def sliceForwardWithLimit[FilterResult](
+      startInclusive: Offset,
+      endInclusive: Offset,
+      filter: TransactionLogUpdate => Option[FilterResult],
+      limit: Int,
+  ): SliceWithContinuationOffset[FilterResult] =
+    sliceInternal(
+      startInclusive,
+      endInclusive,
+      filter,
+      false,
+    ) match {
+      case None => SliceWithContinuationOffset(Vector.empty, None)
+      case Some(slice) =>
+        SliceWithContinuationOffset(
+          slice.sliceFiltered.take(limit).toVector,
+          slice.persistenceContinuationToIncl,
+        )
+    }
+
   /** Returns a slice of events from the buffer.
     *
     * @param startInclusive
@@ -107,34 +127,36 @@ class InMemoryFanoutBuffer(
     * @return
     *   A slice of the series of events as an ordered vector satisfying the input bounds.
     */
-  def slice[FilterResult](
+  def sliceForward[FilterResult](
       startInclusive: Offset,
       endInclusive: Offset,
       filter: TransactionLogUpdate => Option[FilterResult],
-  ): BufferSlice[(Offset, FilterResult)] = {
-    val vectorSnapshot = _bufferLog
+  ): SliceWithContinuationOffset[FilterResult] =
+    sliceForwardWithLimit(startInclusive, endInclusive, filter, maxBufferedChunkSize)
 
-    val bufferStartSearchResult = vectorSnapshot.view.map(_._1).search(startInclusive)
-    val bufferEndSearchResult = vectorSnapshot.view.map(_._1).search(endInclusive)
+  def sliceBackwardsWithLimit[FilterResult](
+      startInclusive: Offset,
+      endInclusive: Offset,
+      filter: TransactionLogUpdate => Option[FilterResult],
+      limit: Int,
+  ): SliceWithContinuationOffset[FilterResult] =
+    sliceInternal(
+      startInclusive = startInclusive,
+      endInclusive = endInclusive,
+      filter = filter,
+      reverseOrder = true,
+    ) match {
+      case None => SliceWithContinuationOffset(Vector.empty, None)
+      case Some(slice) =>
+        val bufferSlice = slice.sliceFiltered
+          .take(limit)
+          .toVector
 
-    val bufferStartInclusiveIdx = indexAt(bufferStartSearchResult)
-    val bufferEndExclusiveIdx = indexAfter(bufferEndSearchResult)
-
-    val bufferSlice = vectorSnapshot.slice(bufferStartInclusiveIdx, bufferEndExclusiveIdx)
-
-    bufferStartSearchResult match {
-      case InsertionPoint(0) if bufferSlice.isEmpty =>
-        BufferSlice.LastBufferChunkSuffix(
-          bufferedStartExclusive = endInclusive,
-          slice = Vector.empty,
-        )
-      case InsertionPoint(0) => lastFilteredChunk(bufferSlice, filter, maxBufferedChunkSize)
-      case InsertionPoint(_) | Found(_) =>
-        BufferSlice.Inclusive(
-          filterAndChunkSlice(bufferSlice.view, filter, maxBufferedChunkSize)
+        SliceWithContinuationOffset(
+          bufferSlice,
+          if (bufferSlice.lengthIs == limit) None else slice.persistenceContinuationToIncl,
         )
     }
-  }
 
   /** Returns a slice of events from the buffer in reverse order.
     *
@@ -147,41 +169,47 @@ class InMemoryFanoutBuffer(
     *   `maxBufferedChunkSize`-sized slices.
     * @return
     *   A slice of the series of events as a reverse ordered vector satisfying the input bounds. The
-    *   slice is FinalSlice if all the requested data was in IMFO and was returned. and PartialSlice
-    *   if some data might be outside of the IMFO or the chunk was trimmed. In such case another
-    *   call to sliceBackwards should be made, if slice non empty. If slice is empty, then
-    *   persistence fetch must be done.
+    *   slice contains information about whether there is more data tobe fetched. If continueFrom is
+    *   NoContinue, then the slice contains all the requested data, there are no more elements
+    *   neither in IMFO nor DB. If continueFrom is ContinueFromImfo, then the slice contains all the
+    *   requested data but there might be more data in IMFO (keep in mind that IMFO contents may
+    *   move forward so the next request may return empty slice with a pointer to persistence. If
+    *   continueFrom is ContinueFromPersistence, then the slice contains all the data from IMFO but
+    *   there might be more data in DB.
     */
   def sliceBackwards[FilterResult](
       startInclusive: Offset,
       endInclusive: Offset,
       filter: TransactionLogUpdate => Option[FilterResult],
-  ): BackwardBufferSlice[(Offset, FilterResult)] = {
-    val vectorSnapshot = _bufferLog
-
-    val bufferEndSearchResult = vectorSnapshot.view.map(_._1).search(endInclusive)
-    val bufferEndExclusiveIdx = indexAfter(bufferEndSearchResult)
-
-    val bufferStartSearchResult = vectorSnapshot.view.map(_._1).search(startInclusive)
-    val bufferStartInclusiveIdx = indexAt(bufferStartSearchResult)
-
-    val filteredBufferSlice = filterAndChunkSlice(
-      vectorSnapshot.slice(bufferStartInclusiveIdx, bufferEndExclusiveIdx).view.reverse,
-      filter,
-      maxBufferedChunkSize,
-    )
-
-    noTracingLogger.debug(s"Insertion point: $bufferStartSearchResult")
-    if (
-      filteredBufferSlice.sizeIs < maxBufferedChunkSize && bufferStartSearchResult != InsertionPoint(
-        0
-      )
-    ) {
-      BackwardBufferSlice.FinalSlice(filteredBufferSlice)
+  ): BackwardSlice[FilterResult] =
+    if (endInclusive < startInclusive) {
+      BackwardSlice(Vector.empty, NoContinue)
     } else {
-      BackwardBufferSlice.PartialSlice(filteredBufferSlice)
+      sliceBackwardsWithLimit(
+        startInclusive,
+        endInclusive,
+        filter,
+        maxBufferedChunkSize + 1,
+      ) match {
+        case SliceWithContinuationOffset(slice, _) if (slice.knownSize > maxBufferedChunkSize) =>
+          BackwardSlice(
+            slice.take(maxBufferedChunkSize),
+            ContinueFromImfo(
+              slice.lastOption
+                .getOrElse(
+                  throw new IllegalStateException(
+                    s"size is $maxBufferedChunkSize, lastOption must exist at this point in code"
+                  )
+                )
+                ._1
+            ),
+          )
+        case SliceWithContinuationOffset(slice, None) =>
+          BackwardSlice(slice, NoContinue)
+        case SliceWithContinuationOffset(slice, Some(continueFromPersistence)) =>
+          BackwardSlice(slice, ContinueFromPersistence(continueFromPersistence))
+      }
     }
-  }
 
   /** Lookup the accepted transaction update by transaction id. */
   def lookupTransaction(
@@ -326,6 +354,7 @@ class InMemoryFanoutBuffer(
       case txAccepted: TransactionLogUpdate.TransactionAccepted =>
         txAccepted.transactionHash.map(_.unwrap -> txAccepted)
       case _ => None
+
     }
 
   private def extractRejectionHash(
@@ -339,46 +368,59 @@ class InMemoryFanoutBuffer(
       case _ => None
     }
 
+  private def sliceInternal[FilterResult](
+      startInclusive: Offset,
+      endInclusive: Offset,
+      filter: TransactionLogUpdate => Option[FilterResult],
+      reverseOrder: Boolean,
+  ): Option[SliceBeforeLimit[FilterResult]] =
+    if (startInclusive > endInclusive) {
+      None
+    } else {
+      val vectorSnapshot = _bufferLog
+
+      val persistenceContinuationToIncl = vectorSnapshot.headOption match {
+        case Some((firstOffsetInImfo, _)) if firstOffsetInImfo <= endInclusive =>
+          if (firstOffsetInImfo <= startInclusive) None else firstOffsetInImfo.decrement
+        case _ => Some(endInclusive)
+      }
+
+      val bufferStartSearchResult = vectorSnapshot.view.map(_._1).search(startInclusive)
+      val bufferEndSearchResult = vectorSnapshot.view.map(_._1).search(endInclusive)
+
+      val bufferStartInclusiveIdx = indexAt(bufferStartSearchResult)
+      val bufferEndExclusiveIdx = indexAfter(bufferEndSearchResult)
+
+      val bufferSlice = vectorSnapshot
+        .slice(bufferStartInclusiveIdx, bufferEndExclusiveIdx)
+        .view
+      val sliceFiltered = (if (reverseOrder) bufferSlice.reverse else bufferSlice)
+        .flatMap { case (offset, tr) => filter(tr).map((offset, _)) }
+
+      Some(SliceBeforeLimit(persistenceContinuationToIncl, sliceFiltered))
+    }
 }
 
 private[platform] object InMemoryFanoutBuffer {
+  private final case class SliceBeforeLimit[FilterResult](
+      persistenceContinuationToIncl: Option[Offset],
+      sliceFiltered: View[(Offset, FilterResult)],
+  )
 
-  /** Specialized slice representation of a Vector */
-  private[platform] sealed trait BufferSlice[+Elem] extends Product with Serializable {
-    def slice: Vector[Elem]
-  }
+  private[platform] final case class SliceWithContinuationOffset[T](
+      slice: Vector[(Offset, T)],
+      checkPersistenceToIncl: Option[Offset],
+  )
 
-  object BufferSlice {
+  private[platform] final case class BackwardSlice[T](
+      slice: Vector[(Offset, T)],
+      continueFrom: ContinueFrom,
+  )
 
-    /** A slice of a vector that is inclusive (start index of the slice in the source vector is gteq
-      * to 1)
-      */
-    private[platform] final case class Inclusive[Elem](slice: Vector[Elem])
-        extends BufferSlice[Elem]
-
-    /** A slice of a vector that is a suffix of the requested window (i.e. start index of the slice
-      * in the source vector is 0)
-      */
-    private[platform] final case class LastBufferChunkSuffix[Elem](
-        bufferedStartExclusive: Offset,
-        slice: Vector[Elem],
-    ) extends BufferSlice[Elem]
-  }
-
-  private[platform] sealed trait BackwardBufferSlice[+T] {
-    def slice: Vector[T]
-  }
-
-  private[platform] object BackwardBufferSlice {
-
-    /** The returned slice does not cover the whole requested range, another request is needed. If
-      * slice.isEmpty, switch to persistence
-      */
-    final case class PartialSlice[+T](slice: Vector[T]) extends BackwardBufferSlice[T]
-
-    /** The returned slice covers the whole requested range. No further actions needed. */
-    final case class FinalSlice[+T](slice: Vector[T]) extends BackwardBufferSlice[T]
-  }
+  sealed trait ContinueFrom
+  case object NoContinue extends ContinueFrom
+  final case class ContinueFromImfo(offset: Offset) extends ContinueFrom
+  final case class ContinueFromPersistence(offset: Offset) extends ContinueFrom
 
   private[cache] final case class UnorderedException[O](first: O, second: O)
       extends RuntimeException(
@@ -396,31 +438,4 @@ private[platform] object InMemoryFanoutBuffer {
       case InsertionPoint(insertionPoint) => insertionPoint
       case Found(foundIndex) => foundIndex + 1
     }
-
-  private[cache] def filterAndChunkSlice[FilterResult](
-      sliceView: View[(Offset, TransactionLogUpdate)],
-      filter: TransactionLogUpdate => Option[FilterResult],
-      maxChunkSize: Int,
-  ): Vector[(Offset, FilterResult)] =
-    sliceView
-      .flatMap { case (offset, entry) => filter(entry).map(offset -> _) }
-      .take(maxChunkSize)
-      .toVector
-
-  @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
-  private[cache] def lastFilteredChunk[FilterResult](
-      bufferSlice: Vector[(Offset, TransactionLogUpdate)],
-      filter: TransactionLogUpdate => Option[FilterResult],
-      maxChunkSize: Int,
-  ): BufferSlice.LastBufferChunkSuffix[(Offset, FilterResult)] = {
-    val lastChunk =
-      filterAndChunkSlice(bufferSlice.view.reverse, filter, maxChunkSize + 1).reverse
-
-    if (lastChunk.isEmpty)
-      BufferSlice.LastBufferChunkSuffix(bufferSlice.head._1, Vector.empty)
-    else {
-      // We waste the first element so we can pass it as the bufferStartExclusive
-      BufferSlice.LastBufferChunkSuffix(lastChunk.head._1, lastChunk.tail)
-    }
-  }
 }

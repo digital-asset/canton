@@ -11,10 +11,6 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
-import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
-  BackwardBufferSlice,
-  BufferSlice,
-}
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import org.apache.pekko.NotUsed
@@ -121,19 +117,25 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
               )
 
               Some(bufferSlice match {
-                case BackwardBufferSlice.FinalSlice(slice) =>
+                case InMemoryFanoutBuffer.BackwardSlice(slice, InMemoryFanoutBuffer.NoContinue) =>
                   (None, toApiResponseStream(slice))
-                case BackwardBufferSlice.PartialSlice(slice @ _ :+ last) =>
-                  (last._1.decrement, toApiResponseStream(slice))
-                case BackwardBufferSlice.PartialSlice(_) => // empty vector
+                case InMemoryFanoutBuffer
+                      .BackwardSlice(slice, InMemoryFanoutBuffer.ContinueFromImfo(offset)) =>
+                  (Some(offset), toApiResponseStream(slice))
+                case InMemoryFanoutBuffer.BackwardSlice(
+                      slice,
+                      InMemoryFanoutBuffer.ContinueFromPersistence(endInclusive),
+                    ) => // empty vector
                   (
                     None,
-                    fetchFromPersistence(
-                      startInclusive = startInclusive,
-                      endInclusive = end,
-                      filter = persistenceFetchArgs,
-                      descendingOrder = true,
-                      skipPruningChecks = skipPruningChecks,
+                    toApiResponseStream(slice).concat(
+                      fetchFromPersistence(
+                        startInclusive = startInclusive,
+                        endInclusive = endInclusive,
+                        filter = persistenceFetchArgs,
+                        descendingOrder = true,
+                        skipPruningChecks = skipPruningChecks,
+                      )
                     ),
                   )
               })
@@ -148,7 +150,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
             Future {
               val bufferSlice = Timed.value(
                 bufferReaderMetrics.slice,
-                inMemoryFanoutBuffer.slice(
+                inMemoryFanoutBuffer.sliceForward(
                   startInclusive = scanFrom,
                   endInclusive = endInclusive,
                   filter = bufferFilter,
@@ -156,24 +158,28 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
               )
 
               bufferReaderMetrics.sliceSize.update(bufferSlice.slice.size)(MetricsContext.Empty)
-              bufferSlice match {
-                case BufferSlice.Inclusive(slice) =>
-                  val apiResponseSource = toApiResponseStream(slice)
+              bufferSlice.checkPersistenceToIncl match {
+                case None =>
+                  val apiResponseSource = toApiResponseStream(bufferSlice.slice)
                   val nextSliceStart =
-                    slice.lastOption.map(_._1).getOrElse(endInclusive).increment
-                  Some(nextSliceStart -> apiResponseSource)
+                    bufferSlice.slice.lastOption.map(_._1.increment)
+                  Some(nextSliceStart.getOrElse(endInclusive.increment) -> apiResponseSource)
 
-                case BufferSlice.LastBufferChunkSuffix(bufferedStartExclusive, slice) =>
+                case Some(checkPersistenceToIncl) =>
                   val sourceFromBuffer =
                     fetchFromPersistence(
                       startInclusive = scanFrom,
-                      endInclusive = bufferedStartExclusive,
+                      endInclusive = checkPersistenceToIncl,
                       filter = persistenceFetchArgs,
                       descendingOrder = false,
                       skipPruningChecks = skipPruningChecks,
                     )(loggingContext)
-                      .concat(toApiResponseStream(slice))
-                  Some(endInclusive.increment -> sourceFromBuffer)
+                      .concat(toApiResponseStream(bufferSlice.slice))
+                  Some(
+                    bufferSlice.slice.lastOption
+                      .map(offset => offset._1.increment)
+                      .getOrElse(endInclusive.increment) -> sourceFromBuffer
+                  )
               }
             }
           case _ => Future.successful(None)

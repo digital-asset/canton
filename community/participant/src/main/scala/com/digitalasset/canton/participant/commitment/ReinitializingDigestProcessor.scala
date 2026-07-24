@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.participant.commitment
 
+import cats.syntax.either.*
+import cats.syntax.parallel.*
 import cats.{Eval, Monad}
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.crypto.HashOps
@@ -20,7 +22,11 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsDigestStore
-import com.digitalasset.canton.participant.store.AcsDigestStore.{AcsDigest, AcsDigestUpdate}
+import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  AcsDigest,
+  AcsDigestUpdate,
+  CheckpointType,
+}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -173,26 +179,20 @@ final class ReinitializingDigestProcessor(
 
       }
 
-    acsUpdates.concat(Source.single(ProcessingContext(reinitializingTimepoint, CheckpointFence)))
+    acsUpdates.concat(
+      Source.single(
+        ProcessingContext(reinitializingTimepoint, CheckpointFence(CheckpointType.Reinitialization))
+      )
+    )
   }
 
   private[commitment] def writeTombstonesToJournals(
       tombstoneTimepoint: Timepoint
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    FutureUnlessShutdown
-      .sequence(
-        Seq(
-          writeTombstonesTo(acsDigestStore.party)(
-            tombstoneTimepoint,
-            writeJournalTombstonesBatchSize,
-          ),
-          writeTombstonesTo(acsDigestStore.participant)(
-            tombstoneTimepoint,
-            writeJournalTombstonesBatchSize,
-          ),
-        )
+    Seq[AcsDigestStore.DigestJournal[?, ?]](acsDigestStore.party, acsDigestStore.participant)
+      .parTraverse_(store =>
+        writeTombstonesTo(store)(tombstoneTimepoint, writeJournalTombstonesBatchSize)
       )
-      .map(_ => ())
 
   private def writeTombstonesTo[K, V](journal: AcsDigestStore.DigestJournal[K, V])(
       tombstoneTimepoint: Timepoint,
@@ -206,7 +206,7 @@ final class ReinitializingDigestProcessor(
         (acsDigests, doneOrNextToken) <- journal.snapshot(currentState, pageSize)
 
         nextStateE = doneOrNextToken.swap match {
-          case Right(_paginationTokenDone) => Right(())
+          case Right(_paginationTokenDone) => Either.unit
           case Left(token) => Left(Left(token))
         }
 

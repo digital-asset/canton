@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.topology.{
   ListNamespaceDelegationResult,
   ListOwnerToKeyMappingResult,
 }
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
   InstanceReference,
@@ -23,6 +24,7 @@ import com.digitalasset.canton.error.MediatorError.MalformedMessage
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   IsolatedEnvironments,
   TestConsoleEnvironment,
@@ -36,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   SendDecision,
   SendPolicy,
+  SendPolicyWithoutTraceContext,
 }
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
 import com.digitalasset.canton.topology.TopologyManagerError.TopologyManagerAlarm
@@ -45,11 +48,12 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignSpecificMappings,
 }
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Remove, Replace}
-import com.digitalasset.canton.topology.{Member, PartyId, QueueBasedSynchronizerOutbox}
+import com.digitalasset.canton.topology.{Member, PartyId}
 import com.digitalasset.canton.util.{ErrorUtil, MaliciousParticipantNode, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
+import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 import org.slf4j.event.Level.WARN
 
@@ -69,19 +73,32 @@ class InvalidTopologyBroadcastIntegrationTest
   var maliciousP1: MaliciousParticipantNode = _
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1.withSetup { implicit env =>
-      import env.*
-
-      participant1.synchronizers.connect_local(sequencer1, daName)
-
-      maliciousP1 = MaliciousParticipantNode(
-        participant1,
-        daId,
-        testedProtocolVersion,
-        timeouts,
-        loggerFactory,
+    EnvironmentDefinition.P1_S1M1
+      .addConfigTransforms(
+        // Aggressively shorten the retry delay to speed up this test.
+        ConfigTransforms.updateSequencerConfig("sequencer1")(
+          _.focus(_.topology.broadcastRetryDelay).replace(NonNegativeFiniteDuration.ofMillis(10))
+        ),
+        // Shorten the registration timeout a bit, but not too much,
+        // as otherwise every attempt to push topology transactions will become flaky.
+        ConfigTransforms.updateSequencerConfig("sequencer1")(
+          _.focus(_.topology.topologyTransactionRegistrationTimeout)
+            .replace(NonNegativeFiniteDuration.ofSeconds(5))
+        ),
       )
-    }
+      .withSetup { implicit env =>
+        import env.*
+
+        participant1.synchronizers.connect_local(sequencer1, daName)
+
+        maliciousP1 = MaliciousParticipantNode(
+          participant1,
+          daId,
+          testedProtocolVersion,
+          timeouts,
+          loggerFactory,
+        )
+      }
 
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
@@ -535,44 +552,39 @@ class InvalidTopologyBroadcastIntegrationTest
       val droppedBatch = new SingleUseCell[Batch[ClosedEnvelope]]
       val droppedTimeAdvancement = new AtomicReference[Option[(CantonTimestamp, Int)]](None)
       s1.setPolicy("drop topology broadcasts")(
-        SendPolicy.processTimeProofs(implicit traceContext => {
-          case r if r.messageId.unwrap.startsWith(TimeAdvanceBroadcastMessageIdPrefix) =>
-            val Some((_, retryCount)) = droppedTimeAdvancement.updateAndGet {
-              case None => Some(r.maxSequencingTime -> 0)
-              case Some((previousTime, count)) =>
-                ErrorUtil.requireState(
-                  previousTime == r.maxSequencingTime.immediatePredecessor,
-                  "dropped time advancement is not the same as retried time advancement",
-                )
-                Some(r.maxSequencingTime -> (count + 1))
-            }: @unchecked
-            if (retryCount > timeAdvancementsToDrop) SendDecision.Process
-            else SendDecision.Drop
-          case r if r.batch.allRecipients.contains(AllMembersOfSynchronizer) =>
-            droppedBatch.putIfAbsent(r.batch) match {
-              case None =>
-                // this is the first topology broadcast, so we drop it to simulate the message getting lost
-                SendDecision.Drop
-              case Some(droppedBatch) =>
-                assert(r.batch == droppedBatch, "dropped batch is not the same as retried batch")
-                SendDecision.Process
-            }
-          case _ => SendDecision.Process
-        })
+        SendPolicy.processTimeProofs(implicit traceContext =>
+          {
+            case r if r.messageId.unwrap.startsWith(TimeAdvanceBroadcastMessageIdPrefix) =>
+              val Some((_, retryCount)) = droppedTimeAdvancement.updateAndGet {
+                case None => Some(r.maxSequencingTime -> 0)
+                case Some((previousTime, count)) =>
+                  ErrorUtil.requireState(
+                    previousTime == r.maxSequencingTime.immediatePredecessor,
+                    "dropped time advancement is not the same as retried time advancement",
+                  )
+                  Some(r.maxSequencingTime -> (count + 1))
+              }: @unchecked
+              if (retryCount > timeAdvancementsToDrop) SendDecision.Process
+              else SendDecision.Drop
+            case r if r.batch.allRecipients.contains(AllMembersOfSynchronizer) =>
+              droppedBatch.putIfAbsent(r.batch) match {
+                case None =>
+                  // this is the first topology broadcast, so we drop it to simulate the message getting lost
+                  SendDecision.Drop
+                case Some(droppedBatch) =>
+                  assert(r.batch == droppedBatch, "dropped batch is not the same as retried batch")
+                  SendDecision.Process
+              }
+            case _ => SendDecision.Process
+          }: SendPolicyWithoutTraceContext
+        )
       )
 
       val beforeUpdate =
         sequencer1.topology.synchronizer_parameters.get_dynamic_synchronizer_parameters(daId)
-      loggerFactory.assertLogs(
-        SuppressionRule.forLogger[QueueBasedSynchronizerOutbox] && SuppressionRule.Level(
-          Level.WARN
-        )
-      )(
-        within = sequencer1.topology.synchronizer_parameters.propose_update(
-          daId,
-          params => params.update(maxRequestSize = params.maxRequestSize.increment.toNonNegative),
-        ),
-        _.warningMessage should include regex s"The synchronizer .* failed the following topology transactions",
+      sequencer1.topology.synchronizer_parameters.propose_update(
+        daId,
+        params => params.update(maxRequestSize = params.maxRequestSize.increment.toNonNegative),
       )
       sequencer1.topology.synchronizer_parameters
         .get_dynamic_synchronizer_parameters(daId)

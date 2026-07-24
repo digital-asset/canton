@@ -1,39 +1,34 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.synchronizer.sequencer
+package com.digitalasset.canton.util.signalling
 
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.topology.{Member, ParticipantId}
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.KillSwitches
-import org.apache.pekko.stream.scaladsl.{Keep, Sink, SinkQueueWithCancel, Source}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.scalatest.FutureOutcome
 import org.scalatest.wordspec.FixtureAsyncWordSpec
-import org.scalatest.{Assertion, FutureOutcome}
 
 import java.util.concurrent.atomic.AtomicLong
-import scala.concurrent.Future
 import scala.concurrent.duration.*
 
-class LocalSequencerStateEventSignallerTest
-    extends FixtureAsyncWordSpec
-    with BaseTest
-    with HasExecutionContext {
+class LocalEventSignallerTest extends FixtureAsyncWordSpec with BaseTest with HasExecutionContext {
 
   val alice: Member = ParticipantId("alice")
   val bob: Member = ParticipantId("bob")
-  val aliceId = SequencerMemberId(0)
-  val bobId = SequencerMemberId(1)
+  val aliceId = 0
+  val bobId = 1
 
   class Env extends FlagCloseable with NamedLogging {
-    override val timeouts = LocalSequencerStateEventSignallerTest.this.timeouts
-    protected override val loggerFactory = LocalSequencerStateEventSignallerTest.this.loggerFactory
+    override val timeouts = LocalEventSignallerTest.this.timeouts
+    protected override val loggerFactory = LocalEventSignallerTest.this.loggerFactory
     implicit val actorSystem: ActorSystem =
       PekkoUtil.createActorSystem(loggerFactory.threadName)(parallelExecutionContext)
 
@@ -45,19 +40,7 @@ class LocalSequencerStateEventSignallerTest
     val ts1 = generateTimestamp()
     val ts2 = generateTimestamp()
 
-    val signaller = new LocalSequencerStateEventSignaller(timeouts, loggerFactory)
-
-    def expectSignal(queue: SinkQueueWithCancel[ReadSignal]): Future[Assertion] =
-      queue.pull() map {
-        case None => fail("queue completed without a signal")
-        case Some(_) => succeed
-      }
-
-    def expectComplete(queue: SinkQueueWithCancel[ReadSignal]): Future[Assertion] =
-      queue.pull() map {
-        case None => succeed
-        case Some(_) => fail("received item but expected complete")
-      }
+    val signaller = new LocalEventSignaller[Int, Int]("member", timeouts, loggerFactory)
 
     override protected def onClosed(): Unit =
       LifeCycle.close(
@@ -79,14 +62,14 @@ class LocalSequencerStateEventSignallerTest
   "writer updates without subscribers don't block writer" in { env =>
     import env.*
 
-    (0 until 3001).toList.foreach(_ =>
-      signaller.notifyOfLocalWrite(WriteNotification.forMemberIds(NonEmpty(Set, aliceId)))
+    (0 until 3001).toList.foreach(i =>
+      signaller.notify(Notification.Keys(NonEmpty(Set, aliceId)), i)
     )
     for {
       // none of the previously produced signals are retained for future subscriptions
       aliceSignals <- PekkoUtil.runSupervised(
         signaller
-          .readSignalsForMember(alice, aliceId)
+          .readSignals(aliceId, alice.toString)
           .takeWithin(
             200.millis
           ) // crude wait to receive more signals if some were going to be produced
@@ -109,11 +92,7 @@ class LocalSequencerStateEventSignallerTest
         Source
           .tick(0.seconds, 100.millis, ())
           .take(numSignals.toLong)
-          .map(_ =>
-            signaller.notifyOfLocalWrite(
-              WriteNotification.forMemberIds(NonEmpty(Set, aliceId, bobId))
-            )
-          )
+          .map(_ => signaller.notify(Notification.Keys(NonEmpty(Set, aliceId, bobId)), 1))
           .toMat(Sink.ignore)(Keep.right),
         errorLogMessagePrefix = "notifier",
       )
@@ -122,7 +101,7 @@ class LocalSequencerStateEventSignallerTest
     // alice is a slow consumer
     val aliceF = PekkoUtil.runSupervised(
       signaller
-        .readSignalsForMember(alice, aliceId)
+        .readSignals(aliceId, alice.toString)
         .throttle(1, 1.second)
         .viaMat(consumerKillSwitch.flow)(Keep.left)
         .toMat(Sink.seq)(Keep.right),
@@ -133,7 +112,7 @@ class LocalSequencerStateEventSignallerTest
     val bobF =
       PekkoUtil.runSupervised(
         signaller
-          .readSignalsForMember(bob, bobId)
+          .readSignals(bobId, bob.toString)
           .viaMat(consumerKillSwitch.flow)(Keep.left)
           .toMat(Sink.seq)(Keep.right),
         errorLogMessagePrefix = "bob consumer",

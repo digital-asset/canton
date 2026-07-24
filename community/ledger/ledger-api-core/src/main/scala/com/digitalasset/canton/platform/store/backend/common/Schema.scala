@@ -308,11 +308,7 @@ private[backend] object AppendOnlySchema {
     val partyEntries: Table[DbDto.PartyEntry] =
       fieldStrategy.insert("lapi_party_entries")(
         "ledger_offset" -> fieldStrategy.bigint(_ => _.ledger_offset),
-        "recorded_at" -> fieldStrategy.bigint(_ => _.recorded_at),
-        "submission_id" -> fieldStrategy.stringOptional(_ => _.submission_id),
         "party" -> fieldStrategy.stringOptional(_ => _.party),
-        "typ" -> fieldStrategy.string(_ => _.typ),
-        "rejection_reason" -> fieldStrategy.stringOptional(_ => _.rejection_reason),
         "is_local" -> fieldStrategy.booleanOptional(_ => _.is_local),
         "party_id" -> fieldStrategy.partyOptional(_.party),
       )

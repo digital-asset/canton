@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.PromiseUnlessShutdown
@@ -23,7 +24,9 @@ import com.digitalasset.canton.participant.commitment.InMemoryDigestAccumulator.
   PartyDigestIdentifier,
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  Checkpoint,
   HashedDigest,
   LocalPartyFirst,
   ParticipantAcsDigestUpdate,
@@ -58,6 +61,7 @@ import scala.annotation.unused
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{Future, Promise}
 
+@AcsCommitmentTest
 class InMemoryDigestAccumulatorTest
     extends TestKit(ActorSystem(classOf[InMemoryDigestAccumulatorTest].getSimpleName))
     with BaseTestWordSpec
@@ -173,7 +177,8 @@ class InMemoryDigestAccumulatorTest
     )
 
   private def checkpoint(timepoint: Timepoint): ProcessingContext[CheckpointFenceOr[Nothing]] =
-    ProcessingContext(timepoint, CheckpointFence)
+    // checkpoint type was picked arbitrarily, as it doesn't change the behavior of InMemoryDigestAccumulator
+    ProcessingContext(timepoint, CheckpointFence(ReconciliationIntervalBoundary))
 
   @unused
   private def testSource: Source[
@@ -205,10 +210,10 @@ class InMemoryDigestAccumulatorTest
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue
 
-      result shouldBe Seq(CheckpointWritten(ts(1), off(1)))
+      result shouldBe Seq(CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary))
 
-      digestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS shouldBe
-        Some(off(1) -> ts(1))
+      digestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS.value shouldBe
+        Checkpoint(tp(1), ReconciliationIntervalBoundary)
 
       val partyDigest = lookupPartyDigest(alice, RemotePartyFirst).value
       val participantDigest = lookupParticipantDigest(p1).value
@@ -250,7 +255,7 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobOnboarded.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3)))
+        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
 
       val fixtureBobAlreadyHosted = new Fixture(p1)
       Source(
@@ -267,7 +272,7 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobAlreadyHosted.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3)))
+        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
 
       // All in-memory state has been evicted
       fixtureBobOnboarded.accumulator.digestsUsageCounters shouldBe empty
@@ -320,7 +325,7 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobOffboarded.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3)))
+        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
 
       val fixtureBobNotHosted = new Fixture(p1)
       Source(
@@ -337,7 +342,7 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobNotHosted.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3)))
+        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
 
       // All in-memory state has been evicted
       fixtureBobNotHosted.accumulator.digestsUsageCounters shouldBe empty
@@ -373,7 +378,7 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(4)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(4), off(4)))
+        Seq(CheckpointWritten(ts(4), off(4), ReconciliationIntervalBoundary))
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -408,7 +413,7 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3)))
+        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -453,7 +458,7 @@ class InMemoryDigestAccumulatorTest
           )
         )
         .sendNext(checkpoint(tp(2)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(2), off(2))
+      sink.expectNext() shouldBe CheckpointWritten(ts(2), off(2), ReconciliationIntervalBoundary)
 
       // the first entry doesn't replace anything
       for {
@@ -481,7 +486,7 @@ class InMemoryDigestAccumulatorTest
         // Force an intermediate checkpoint to be written so that we persist an intermediate result.
         // Such checkpoints should not happen in practice because they would corrupt crash recovery.
         .sendNext(checkpoint(tp(3)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(3), off(3))
+      sink.expectNext() shouldBe CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary)
       sink.request(1)
 
       // processing an update on a later offset should properly set replacesOffset
@@ -506,7 +511,7 @@ class InMemoryDigestAccumulatorTest
           )
         )
         .sendNext(checkpoint(tp(4)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(4), off(4))
+      sink.expectNext() shouldBe CheckpointWritten(ts(4), off(4), ReconciliationIntervalBoundary)
 
       // since the first persisted update at off(2) was just an intermediate result that got persisted,
       // another update for the same offset should retain the original replacesOffset
@@ -587,8 +592,8 @@ class InMemoryDigestAccumulatorTest
         SortedMap.from(expectedDigestUsage)
 
       storeBlockPromise.success(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1))
-      sink.expectNext() shouldBe CheckpointWritten(ts(20), off(20))
+      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary)
+      sink.expectNext() shouldBe CheckpointWritten(ts(20), off(20), ReconciliationIntervalBoundary)
 
       // All in-memory state has been evicted
       // accumulator.digestsUsageCounters shouldBe empty
@@ -702,8 +707,8 @@ class InMemoryDigestAccumulatorTest
         SortedMap.from(expectedUsages)
 
       storeBlockPromise.success(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1))
-      sink.expectNext() shouldBe CheckpointWritten(ts(5), off(5))
+      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary)
+      sink.expectNext() shouldBe CheckpointWritten(ts(5), off(5), ReconciliationIntervalBoundary)
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -889,7 +894,7 @@ class InMemoryDigestAccumulatorTest
         SortedMap.from(expectedDigestUsage)
 
       releaseP.outcome_(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(6), off(6))
+      sink.expectNext() shouldBe CheckpointWritten(ts(6), off(6), ReconciliationIntervalBoundary)
 
       source.sendComplete()
       sink.expectComplete()

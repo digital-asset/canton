@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.component
 
 import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -42,7 +42,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         skipPruningChecks = false,
       )
       val updates = updatesStream
-        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
         .runWith(Sink.seq)
         .futureValue
       updates.flatMap(
@@ -65,7 +65,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         skipPruningChecks = false,
       )
       val updates = updatesStream
-        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
         .runWith(Sink.seq)
         .futureValue
       updates.map(
@@ -101,7 +101,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       )
 
       val updates = updatesStream
-        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
         .runWith(Sink.seq)
         .futureValue
 
@@ -153,7 +153,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       )
 
       val updates = updatesStream
-        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
         .runWith(Sink.seq)
         .futureValue
 
@@ -220,7 +220,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       )
 
       val updates = updatesStream
-        .collect { case UpdateResponse.ProtoUpdate(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
         .runWith(Sink.seq)
         .futureValue
 

@@ -89,9 +89,9 @@ class GarbageCollectedShardedSequentialProcessingQueue[Ident](implicit ec: Execu
           case Some(`processingFuture`) =>
             // if the "processing queue" still contains the same future that we put in, we can remove the entry from the map
             None
-          case Some(other) =>
+          case other @ Some(_) =>
             // some other future was put into the map, retain it
-            Some(other)
+            other
           case None =>
             // the entry was already removed, nothing to do
             None

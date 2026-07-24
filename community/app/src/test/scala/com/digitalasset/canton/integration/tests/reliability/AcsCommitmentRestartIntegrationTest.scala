@@ -68,6 +68,9 @@ trait AcsCommitmentRestartIntegrationTest
         ConfigTransforms.updateCommitmentCheckpointInterval(
           PositiveDurationSeconds.ofSeconds(checkpointInterval.duration.getSeconds)
         ),
+        // Disable traffic accounting as the feature does not support restarting the ledger end
+        // performed in this test
+        ConfigTransforms.disableTrafficAccounting,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

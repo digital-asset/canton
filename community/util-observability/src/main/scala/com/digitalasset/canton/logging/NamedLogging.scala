@@ -4,6 +4,7 @@
 package com.digitalasset.canton.logging
 
 import com.digitalasset.canton.tracing.TraceContext
+import com.google.common.annotations.VisibleForTesting
 import com.typesafe.scalalogging.{CanLog, Logger}
 import org.slf4j
 import org.slf4j.helpers.NOPLogger
@@ -25,6 +26,8 @@ trait NamedLogging {
     NamedLoggingContext(loggerFactory, traceContext)
 
   protected def loggerFactory: NamedLoggerFactory
+  @VisibleForTesting
+  @inline private[canton] final def loggerFactoryInternal: NamedLoggerFactory = loggerFactory
 
   private[this] lazy val underlying: slf4j.Logger = theLogger.underlying
 

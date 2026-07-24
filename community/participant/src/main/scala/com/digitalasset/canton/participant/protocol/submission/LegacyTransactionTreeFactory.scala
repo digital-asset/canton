@@ -722,8 +722,8 @@ class LegacyTransactionTreeFactory(
         .traverse { case (gkey, keyInput) =>
           resolutionFor(gkey, keyInput).map(gkey -> _)
         }
-    } yield {
-      MapsUtil.mapDiff(viewKeyResolutionSeq.toMap, subviewKeyResolutions)
+    } yield viewKeyResolutionSeq.toMap.filter { case (key, value) =>
+      !subviewKeyResolutions.get(key).contains(value)
     }
   }
 

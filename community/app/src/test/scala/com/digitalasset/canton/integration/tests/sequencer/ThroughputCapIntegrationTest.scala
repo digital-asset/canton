@@ -61,10 +61,6 @@ class ThroughputCapIntegrationTest extends CommunityIntegrationTest with SharedE
     // fails
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       IouSyntax.createIou(participant1)(alice, alice),
-      // TODO(#33973) This should not be logged four times!
-      //   I can see at least two warnings, one info and the console error.
-      //   One warning is fine, console error is fine. Others should not be logged again.
-      _.warningMessage should include(SequencerErrors.Overloaded.id),
       _.warningMessage should include(SequencerErrors.Overloaded.id),
       _.errorMessage should include(SequencerErrors.Overloaded.id),
     )
@@ -105,8 +101,6 @@ class ThroughputCapIntegrationTest extends CommunityIntegrationTest with SharedE
         bob,
         optTimeout = Some(config.NonNegativeDuration.ofSeconds(5)),
       ),
-      // TODO(#33973) This should not be logged four times!
-      _.warningMessage should include(SequencerErrors.Overloaded.id),
       _.warningMessage should include(SequencerErrors.Overloaded.id),
       _.errorMessage should include("DEADLINE_EXCEEDED"),
     )

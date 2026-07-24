@@ -11,9 +11,12 @@ try {
 
   logger.info(s"NUCK: DAR containing keys has been uploaded")
 
-  val names = sandbox.ledger_api.packages.list().map(_.name).foreach(name => logger.info(s"NUCK: Package name: $name"))
+  val names = sandbox.ledger_api.packages
+    .list()
+    .map(_.name)
+    .foreach(name => logger.info(s"NUCK: Package name: $name"))
 
-  sandbox.ledger_api.packages.list().filter(_.name==packageName).head
+  sandbox.ledger_api.packages.list().filter(_.name == packageName).head
 
   logger.info(s"NUCK: DAR containing keys has been found in the package list")
 

@@ -826,7 +826,7 @@ object DbStorage {
       transactional: Boolean = true,
   )(
       setParams: PositionedParameters => A => Unit
-  )(implicit loggingContext: ErrorLoggingContext): DBIOAction[Array[Int], NoStream, Effect.All] =
+  )(implicit loggingContext: ErrorLoggingContext): DBIO[Array[Int]] =
     if (values.isEmpty) DBIOAction.successful(Array.empty)
     else {
       val action = SimpleJdbcAction { session =>
@@ -874,7 +874,7 @@ object DbStorage {
       transactional: Boolean = true,
   )(
       setParams: PositionedParameters => A => Unit
-  )(implicit loggingContext: ErrorLoggingContext): DBIOAction[Unit, NoStream, Effect.All] =
+  )(implicit loggingContext: ErrorLoggingContext): DBIO[Unit] =
     bulkOperation(statement, values, profile, transactional)(setParams).andThen(DbAction.unit)
 
   /* Helper methods to make usage of EitherT[DBIO,] possible without requiring type hints */

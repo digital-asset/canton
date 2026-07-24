@@ -33,7 +33,8 @@ trait IntervalOps[A] {
   def endInclusive(interval: A): Point
 
   /** Computes the remainder of `interval` when `startExclusive` to `endInclusive` are removed. This
-    * can result in 0 to 2 new intervals.
+    * can result in 0 to 2 new intervals. Only called if (`startExclusive`, `endInclusive`] overlaps
+    * with the given interval.
     */
   def split(interval: A, startExclusive: Point, endInclusive: Point): Seq[A]
 
@@ -74,24 +75,19 @@ sealed trait DisjointIntervals[A] extends PrettyPrinting with Product with Seria
   def overlappingWith(interval: A): immutable.Iterable[A] =
     overlappingWith(instance.startExclusive(interval), instance.endInclusive(interval))
 
-  def overlappingWith(startExclusive: Point, endInclusive: Point): immutable.Iterable[A] = {
-    val overlapsLeft = intervals
-      .range(startExclusive, endInclusive)
-      // `range` is inclusive on the start, so make it artificially exclusive
-      .dropWhile { case (start, _) => start <= startExclusive }
+  def overlappingWith(startExclusive: Point, endInclusive: Point): Seq[A] =
+    intervals
+      .iteratorFrom(startExclusive)
+      .dropWhile { case (end, _) => end <= startExclusive }
+      .takeWhile { case (_, interval) => instance.startExclusive(interval) < endInclusive }
       .map { case (_, interval) => interval }
-    val overlapRight = intervals.rangeFrom(endInclusive).headOption.collect {
-      case (_, ival) if instance.startExclusive(ival) < endInclusive =>
-        ival
-    }
-    overlapsLeft ++ overlapRight
-  }
+      .to(Seq)
 
   /** Removes all intervals fully covered by the given range and splits the partly covered intervals
     * so that the given range is removed from
     */
   def remove(startExclusive: Point, endInclusive: Point): DisjointIntervals.Aux[A, Point] = {
-    val overlapping = overlappingWith(startExclusive, endInclusive).toSeq
+    val overlapping = overlappingWith(startExclusive, endInclusive)
     NonEmpty.from(overlapping) match {
       case None => this
       case Some(overlappingNE) =>
