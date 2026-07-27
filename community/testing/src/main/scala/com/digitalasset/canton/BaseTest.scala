@@ -693,6 +693,7 @@ object BaseTest extends EitherValues {
   lazy val CantonTestsLF23Path: String = getResourcePath("CantonTestsLF23-1.0.0.dar")
   lazy val CantonLfDev: String = getResourcePath("CantonLfDev-1.0.0.dar")
   lazy val CantonLfV21: String = getResourcePath("CantonLfV21-1.0.0.dar")
+  lazy val CantonExternalCallPath: String = getResourcePath("CantonExternalCall-1.0.0.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
   // TODO(#25385): Deduplicate these upgrading test DARs
   lazy val FooV1Path: String = getResourcePath("foo-0.0.1.dar")
