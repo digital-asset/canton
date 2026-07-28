@@ -27,6 +27,7 @@ import com.digitalasset.canton.util.retry.RetryEither
 import com.digitalasset.canton.util.{LoggerUtil, MonadUtil, ResourceUtil}
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.configuration.FluentConfiguration
+import org.flywaydb.core.api.exception.FlywayValidateException
 import org.flywaydb.core.api.{FlywayException, MigrationInfo}
 import slick.jdbc.JdbcBackend.Database
 import slick.jdbc.hikaricp.HikariCPJdbcDataSource
@@ -68,7 +69,6 @@ class DbMigrations(
       .locations(dbConfig.buildMigrationsPaths(alphaVersionSupport)*)
       .dataSource(dataSource)
       .cleanDisabled(!dbConfig.parameters.unsafeCleanOnValidationError)
-      .cleanOnValidationError(dbConfig.parameters.unsafeCleanOnValidationError)
       .baselineOnMigrate(dbConfig.parameters.unsafeBaselineOnMigrate)
       .lockRetryCount(60)
       .placeholders(
@@ -123,11 +123,32 @@ class DbMigrations(
           val flyway = createFlyway(DbMigrations.createDataSource(db.source))
           for {
             _ <- validateRepeatableMigrations(dbConfig).toEitherT[UnlessShutdown]
-            migrationResult <- migrateDatabaseInternal(flyway)
+            migrationResult <- migrateWithOptionalClean(flyway)
           } yield migrationResult
         }
       }
     }
+
+  // Replicates the behaviour of the deprecated Flyway cleanOnValidationError flag:
+  // if unsafeCleanOnValidationError is set and migrate() throws a FlywayValidateException,
+  // clean the database and retry.
+  private def migrateWithOptionalClean(
+      flyway: Flyway
+  )(implicit traceContext: TraceContext): EitherT[UnlessShutdown, DbMigrations.Error, Unit] =
+    EitherT(migrateDatabaseInternal(flyway).value.flatMap {
+      case Left(DbMigrations.FlywayError(cause: FlywayValidateException))
+          if dbConfig.parameters.unsafeCleanOnValidationError =>
+        logger.info("Validation error during migration; cleaning database and retrying", cause)
+        Either
+          .catchOnly[FlywayException](flyway.clean())
+          .leftMap[DbMigrations.Error](DbMigrations.FlywayError.apply)
+          .fold(
+            err => UnlessShutdown.Outcome(Left(err)),
+            _ => migrateDatabaseInternal(flyway).value,
+          )
+      case other =>
+        UnlessShutdown.Outcome(other)
+    })
 
   /** Repair the database in case the migrations files changed (e.g. due to comment changes). To
     * quote the Flyway documentation:

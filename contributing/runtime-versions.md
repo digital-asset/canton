@@ -9,10 +9,10 @@ versions from our list of supported versions.
 
 All supported versions are supported.
 
-As of August 2025, it means:
-- Default: 17 (latest stable hoping for better performances)
-- Supported: 14 to 17 (Postgres 13 will be EOL in November 2025, roughly when Canton 3.4 will be released)
-- Additional nightly tests: 14, 15 and 16.
+As of June 2026, it means:
+- Default: 17 (we have not yet updated to 18 in earnest yet; should be done for 3.6)
+- Supported: 14 to 18
+- Additional nightly tests: 14, 15, 16, and 18.
 
 **Note:** When using PostgreSQL 14 on macOS, `client_connection_check_interval` must be set to `0` (disabled).
 For PostgreSQL 14, this setting requires the `POLLRDHUP` extension to the `poll` system call, which is only available on Linux.

@@ -2131,7 +2131,7 @@ object BuildCommon {
         } else {
           Def.task {
             val log = streams.value.log
-            log.info(s"No change in ${inputFile.getName}, skipping generation")
+            log.debug(s"No change in ${inputFile.getName}, skipping generation")
             val managedDir = (Test / sourceManaged).value
             (managedDir ** "*").get.filter(_.isFile)
           }

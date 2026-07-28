@@ -493,6 +493,7 @@ object EncryptedViewMessageFactory {
 
       } yield (informeeParticipants, memberEncryptionKeysIds)
 
+    @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
     def mkSessionKeyData(
         recipientGroup: RecipientGroup,
         randomnessRevocationInfo: RandomnessRevocationInfo,

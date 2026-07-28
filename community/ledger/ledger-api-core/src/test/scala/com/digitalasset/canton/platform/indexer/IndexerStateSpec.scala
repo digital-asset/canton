@@ -1250,7 +1250,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
         repairOperationF.isCompleted shouldBe false
       },
       // waiting until the next indexer is started, so shutdown comes after the IndexerState transition
-      assertion = _.find(_.infoMessage.contains("Switched to Normal Mode")).nonEmpty shouldBe true,
+      assertion = _.exists(_.infoMessage.contains("Switched to Normal Mode")) shouldBe true,
     )
 
     // as shutting down the indexer state

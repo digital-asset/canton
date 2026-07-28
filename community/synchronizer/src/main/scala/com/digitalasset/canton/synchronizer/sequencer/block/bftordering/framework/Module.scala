@@ -236,6 +236,16 @@ object P2PAddress {
   ) extends P2PAddress {
     override val maybeP2PEndpoint: Option[P2PEndpoint] = maybeCommunicatedEndpoint
   }
+
+  def maybeId(
+      maybeBftNodeId: Option[BftNodeId],
+      maybeP2PEndpointId: Option[P2PEndpoint.Id],
+  ): Option[P2PAddress.Id] =
+    (maybeBftNodeId, maybeP2PEndpointId) match {
+      case (Some(bftNodeId), _) => Some(Right(bftNodeId))
+      case (None, Some(p2pEndpointId)) => Some(Left(p2pEndpointId))
+      case (None, None) => None
+    }
 }
 
 /** An abstraction of the P2P network reference factory for deterministic simulation testing

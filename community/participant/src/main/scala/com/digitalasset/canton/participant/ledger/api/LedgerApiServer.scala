@@ -194,6 +194,7 @@ class LedgerApiServer(
         readTimeout = serverConfig.jwksCacheConfig.readTimeout.underlying,
         jwtTimestampLeeway = serverConfig.jwtTimestampLeeway,
         maxTokenLife = serverConfig.maxTokenLifetime.toMillisOrNone(),
+        autoRefreshAfter = serverConfig.jwksCacheConfig.autoRefreshAfter.underlying,
         metrics = Some(grpcApiMetrics.identityProviderConfigStore.verifierCache),
         loggerFactory = loggerFactory,
       )

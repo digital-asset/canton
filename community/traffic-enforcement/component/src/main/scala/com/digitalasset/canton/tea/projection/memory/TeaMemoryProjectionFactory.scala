@@ -20,6 +20,7 @@ import scala.concurrent.{ExecutionContext, Future}
 private[projection] class TeaMemoryProjectionFactory(
     override val loggerFactory: NamedLoggerFactory,
     store: TeaMemoryTrafficStore,
+    override val onEventCommitted: () => Unit = () => (),
 )(implicit
     ec: ExecutionContext
 ) extends TeaProjectionFactory

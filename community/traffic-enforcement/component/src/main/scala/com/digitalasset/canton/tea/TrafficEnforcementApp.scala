@@ -107,6 +107,7 @@ object TrafficEnforcementApp {
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
       clock: Clock,
+      onEventCommitted: () => Unit = () => (),
   )(implicit
       ec: ExecutionContext
   ): TrafficEnforcementApp = {
@@ -143,6 +144,7 @@ object TrafficEnforcementApp {
         config.projection,
         loggerFactory,
         timeouts,
+        onEventCommitted,
       )
 
     val service = new TrafficEnforcementService(store, clock, loggerFactory)

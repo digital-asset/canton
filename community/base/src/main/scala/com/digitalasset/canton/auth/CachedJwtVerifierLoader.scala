@@ -18,11 +18,13 @@ import com.daml.metrics.CacheMetrics
 import com.digitalasset.canton.auth.CachedJwtVerifierLoader.CacheKey
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tracing.TraceContext
 import com.github.blemale.scaffeine.Scaffeine
 
 import java.security.interfaces.{ECPublicKey, RSAPublicKey}
-import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 /** A JWK verifier loader, where the public keys are automatically fetched from the given JWKS URL.
   * The keys are then transformed into JWK Verifier
@@ -42,6 +44,11 @@ import scala.concurrent.duration.FiniteDuration
   *   Timeout for connecting to the JWKS URL.
   * @param readTimeout
   *   Timeout for reading from the JWKS URL.
+  * @param autoRefreshAfter
+  *   When greater than zero, Caffeine's refreshAfterWrite is configured so that stale entries are
+  *   refreshed asynchronously while the old value is still served. If the refresh fails, the old
+  *   value is retained until hard eviction at cacheExpiration. This provides resilience against
+  *   temporary outages. This should not be greater than cacheExpiration.
   */
 class CachedJwtVerifierLoader(
     // Large enough such that malicious users can't cycle through all keys from reasonably sized JWKS,
@@ -53,22 +60,40 @@ class CachedJwtVerifierLoader(
     jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
     maxTokenLife: Option[Long] = None,
     metrics: Option[CacheMetrics] = None,
+    autoRefreshAfter: FiniteDuration = FiniteDuration(0, "seconds"),
     override protected val loggerFactory: NamedLoggerFactory,
-) extends JwtVerifierLoader
+)(implicit val executionContext: ExecutionContext, traceContext: TraceContext)
+    extends JwtVerifierLoader
     with NamedLogging
     with AutoCloseable {
 
+  if (autoRefreshAfter > FiniteDuration(0, "seconds") && autoRefreshAfter >= cacheExpiration) {
+    logger.warn(
+      s"autoRefreshTime ($autoRefreshAfter) should be less than cacheExpiration ($cacheExpiration) " +
+        "for background refresh to be effective. Entries will be evicted before refresh triggers."
+    )
+  }
+
+  private val cacheBuilder: Scaffeine[Any, Any] = {
+    val base = Scaffeine()
+      .expireAfterWrite(cacheExpiration)
+      .maximumSize(cacheMaxSize)
+    if (autoRefreshAfter > FiniteDuration(0, "seconds")) {
+      base.refreshAfterWrite(autoRefreshAfter)
+    } else base
+  }
+
   private val cache: ScaffeineCache.TunnelledAsyncLoadingCache[Future, CacheKey, JwtVerifier] =
     ScaffeineCache.buildAsync[Future, CacheKey, JwtVerifier](
-      Scaffeine()
-        .expireAfterWrite(cacheExpiration)
-        .maximumSize(cacheMaxSize),
+      cacheBuilder,
       loader = getVerifier,
       metrics = metrics,
     )(logger, "cache")
 
   override def loadJwtVerifier(jwksUrl: JwksUrl, keyId: Option[String]): Future[JwtVerifier] =
     cache.get(CacheKey(jwksUrl, keyId))
+
+  /** Loads the verifier and logs on failure when autoRefreshTime is enabled. */
 
   private def jwkProvider(jwksUrl: JwksUrl) =
     new UrlJwkProvider(
@@ -79,8 +104,22 @@ class CachedJwtVerifierLoader(
 
   private def getVerifier(
       key: CacheKey
-  ): Future[JwtVerifier] =
-    fromDisjunction(getVerifierImpl(key))
+  ): Future[JwtVerifier] = {
+    val result = fromDisjunction(getVerifierImpl(key))
+    if (autoRefreshAfter > FiniteDuration(0, "seconds")) {
+      result.onComplete {
+        case Success(_) => ()
+        case Failure(ex) =>
+          val jwksUrl = key.jwksUrl.toURL
+          val safeUrl = s"${jwksUrl.getProtocol}://${jwksUrl.getHost}${jwksUrl.getPath}"
+          logger.warn(
+            s"Failed to load jwt verifier for JWKS URL $safeUrl (keyId=${key.keyId.getOrElse("none")})",
+            ex,
+          )
+      }
+    }
+    result
+  }
 
   @SuppressWarnings(
     Array("org.wartremover.warts.Null")
@@ -91,10 +130,10 @@ class CachedJwtVerifierLoader(
       val publicKey = jwk.getPublicKey
       publicKey match {
         case rsa: RSAPublicKey => RSA256Verifier(rsa, jwtTimestampLeeway, maxTokenLife)
-        case ec: ECPublicKey if ec.getParams.getCurve.getField.getFieldSize == 256 =>
-          ECDSAVerifier(Algorithm.ECDSA256(ec, null), jwtTimestampLeeway, maxTokenLife)
-        case ec: ECPublicKey if ec.getParams.getCurve.getField.getFieldSize == 521 =>
-          ECDSAVerifier(Algorithm.ECDSA512(ec, null), jwtTimestampLeeway, maxTokenLife)
+        case ecKey: ECPublicKey if ecKey.getParams.getCurve.getField.getFieldSize == 256 =>
+          ECDSAVerifier(Algorithm.ECDSA256(ecKey, null), jwtTimestampLeeway, maxTokenLife)
+        case ecKey: ECPublicKey if ecKey.getParams.getCurve.getField.getFieldSize == 521 =>
+          ECDSAVerifier(Algorithm.ECDSA512(ecKey, null), jwtTimestampLeeway, maxTokenLife)
         case key =>
           Left(JwtError(Symbol("getVerifier"), s"Unsupported public key format ${key.getFormat}"))
       }

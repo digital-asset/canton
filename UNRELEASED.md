@@ -15,8 +15,11 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-- Fixed an edge case that could cause deserialization of proto durations to fail
-- Fixed an issue where topology transactions with max serial where not handled properly
+- Added participant-side synchronizer connect debug logging to aid in diagnosing a rare reconnect hang.
+- Improved the resilience of the CachedJwtVerifierLoader JWK cache during temporary JWKS endpoint outages.
+  Set the `jwks-cache-config.auto-refresh-after` configuration to a positive duration below `jwks-cache-config.cache-expiration`
+  on any participant, sequencer, and mediator node `admin-api`, participant node `ledger-api`, and sequencer node `public-api`
+  to reduce the chances of cache misses and corresponding auth outages.
 
 ### Preview Features
 - preview feature
@@ -40,10 +43,6 @@ Template for a bigger topic
 #### Likeliness
 
 #### Recommendation
-
-## Bugfixes
-- Ledger JSON API `/v2/state/active-contracts-page` is now available via POST; the GET variant that expects a request body is deprecated.
-
 
 ## Compatibility
 

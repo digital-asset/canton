@@ -425,6 +425,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.ledger-api.index-service.pruning-db-lock-timeout",
         s"$base.ledger-api.index-service.contract-pruning-db-lock-timeout",
         s"$base.admin-api.max-concurrent-calls-per-connection",
+        s"$base.admin-api.jwks-cache-config.auto-refresh-after",
         s"$base.crypto.parallelism",
         s"$base.crypto.session-signing-keys",
         s"$base.ledger-api.index-service.max-lookup-limit",
@@ -432,6 +433,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.ledger-api.index-service.contract-pruning-max-retries",
         s"$base.ledger-api.interactive-submission-service.maximum-number-of-signatures-per-party",
         s"$base.ledger-api.max-concurrent-calls-per-connection",
+        s"$base.ledger-api.jwks-cache-config.auto-refresh-after",
         s"$base.ledger-api.postgres-data-source.client-connection-check-interval",
         s"$base.ledger-api.postgres-data-source.network-timeout",
         s"$base.ledger-api.state-service",
@@ -462,6 +464,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
       val base = "mediators.mediator1"
       Seq(
         s"$base.admin-api.max-concurrent-calls-per-connection",
+        s"$base.admin-api.jwks-cache-config.auto-refresh-after",
         s"$base.caching.bft-ordering-batch-cache",
         s"$base.caching.sequencer-catchup-payload-cache",
         s"$base.crypto.parallelism",
@@ -480,6 +483,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
       val base = "sequencers.sequencer1"
       Seq(
         s"$base.admin-api.max-concurrent-calls-per-connection",
+        s"$base.admin-api.jwks-cache-config.auto-refresh-after",
         s"$base.crypto.parallelism",
         s"$base.crypto.session-signing-keys",
         s"$base.declarative",
@@ -496,6 +500,7 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.parameters.enable-prevalidation",
         s"$base.parameters.enable-reject-delivered-aggregations-on-pv-35",
         s"$base.public-api.max-concurrent-calls-per-connection",
+        s"$base.public-api.jwks-cache-config.auto-refresh-after",
         s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",
         s"$base.sequencer-client.channel-flow-control-window",
         s"$base.sequencer-client.channel-max-inbound-message-size",
