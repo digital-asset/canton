@@ -3,23 +3,19 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.traverse.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 import com.google.common.annotations.VisibleForTesting
 
 // Invariant: signatories is a subset of all
 final case class Stakeholders private (all: Set[LfPartyId], signatories: Set[LfPartyId])
-    extends HasVersionedWrapper[Stakeholders]
-    with PrettyPrinting {
+    extends PrettyPrinting {
 
   val nonConfirming: Set[LfPartyId] = all -- signatories
-
-  override protected def companionObj: HasVersionedMessageCompanionCommon[Stakeholders] =
-    Stakeholders
 
   {
     val nonStakeholderSignatories = signatories -- all
@@ -40,15 +36,7 @@ final case class Stakeholders private (all: Set[LfPartyId], signatories: Set[LfP
   )
 }
 
-object Stakeholders extends HasVersionedMessageCompanion[Stakeholders] {
-  override def name: String = "Stakeholders"
-  val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v34,
-      supportedProtoVersion(v30.Stakeholders)(fromProtoV30),
-      _.toProtoV30,
-    )
-  )
+object Stakeholders {
 
   def apply(metadata: ContractMetadata): Stakeholders =
     Stakeholders(all = metadata.stakeholders, signatories = metadata.signatories)
@@ -66,13 +54,16 @@ object Stakeholders extends HasVersionedMessageCompanion[Stakeholders] {
   ): Stakeholders =
     Stakeholders(all = signatories.union(observers), signatories = signatories)
 
-  def fromProtoV30(stakeholdersP: v30.Stakeholders): ParsingResult[Stakeholders] =
+  def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      stakeholdersP: v30.Stakeholders,
+  ): ParsingResult[Stakeholders] =
     for {
-      stakeholders <- stakeholdersP.all
-        .traverse(ProtoConverter.parseLfPartyId(_, "stakeholders"))
+      stakeholders <- ProtoValidation
+        .validateThen(stakeholdersP.all, "stakeholders", pvv)(ProtoConverter.parseLfPartyId)
         .map(_.toSet)
-      signatories <- stakeholdersP.signatories
-        .traverse(ProtoConverter.parseLfPartyId(_, "signatories"))
+      signatories <- ProtoValidation
+        .validateThen(stakeholdersP.signatories, "signatories", pvv)(ProtoConverter.parseLfPartyId)
         .map(_.toSet)
 
       nonStakeholderSignatories = signatories -- stakeholders

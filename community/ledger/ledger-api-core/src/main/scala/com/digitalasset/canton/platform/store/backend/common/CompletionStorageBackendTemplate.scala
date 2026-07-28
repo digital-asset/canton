@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.store.backend.{
   RowDef,
 }
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{Party, SubmissionId, UserId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -183,8 +184,7 @@ class CompletionStorageBackendTemplate(
   }
 
   override def commandCompletions(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       userId: Option[UserId],
       parties: Set[Party],
       limit: Int,
@@ -217,8 +217,7 @@ class CompletionStorageBackendTemplate(
             WHERE
               ${QueryStrategy.offsetIsBetween(
               nonNullableColumn = "completion_offset",
-              startInclusive = startInclusive,
-              endInclusive = endInclusive,
+              offsetRange = offsetRange,
             )}
               $userClause
             ORDER BY completion_offset ASC
@@ -371,8 +370,7 @@ class CompletionStorageBackendTemplate(
   }
 
   override def commandCompletionsForRecovery(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange
   )(connection: Connection): Vector[PostPublishData] = {
     import ComposableQuery.*
     def query(columns: CompositeSql) = SQL"""
@@ -383,8 +381,7 @@ class CompletionStorageBackendTemplate(
       WHERE
         ${QueryStrategy.offsetIsBetween(
         nonNullableColumn = "completion_offset",
-        startInclusive = startInclusive,
-        endInclusive = endInclusive,
+        offsetRange = offsetRange,
       )}
       ORDER BY completion_offset ASC"""
 

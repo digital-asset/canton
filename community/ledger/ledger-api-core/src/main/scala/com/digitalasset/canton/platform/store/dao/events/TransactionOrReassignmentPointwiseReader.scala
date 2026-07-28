@@ -19,7 +19,7 @@ import com.digitalasset.canton.platform.InternalUpdateFormat
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawThinAcsDeltaEvent,
   RawThinEvent,
@@ -49,8 +49,7 @@ final class TransactionOrReassignmentPointwiseReader(
   val directEC: DirectExecutionContext = DirectExecutionContext(noTracingLogger)
 
   private def fetchRawAcsDeltaEvents(
-      firstEventSequentialId: Long,
-      lastEventSequentialId: Long,
+      eventSeqIdRange: EventSeqIdRange,
       internalUpdateFormat: InternalUpdateFormat,
   )(implicit
       loggingContext: LoggingContextWithTrace
@@ -61,7 +60,7 @@ final class TransactionOrReassignmentPointwiseReader(
       eventStorageBackend.fetchEventPayloadsAcsDelta(target =
         EventPayloadSourceForUpdatesAcsDelta.Activate
       )(
-        eventSequentialIds = IdRange(firstEventSequentialId, lastEventSequentialId),
+        eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
           .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
@@ -74,7 +73,7 @@ final class TransactionOrReassignmentPointwiseReader(
       eventStorageBackend.fetchEventPayloadsAcsDelta(target =
         EventPayloadSourceForUpdatesAcsDelta.Deactivate
       )(
-        eventSequentialIds = IdRange(firstEventSequentialId, lastEventSequentialId),
+        eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
           .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
@@ -86,8 +85,7 @@ final class TransactionOrReassignmentPointwiseReader(
   }
 
   private def fetchRawLedgerEffectsEvents(
-      firstEventSequentialId: Long,
-      lastEventSequentialId: Long,
+      eventSeqIdRange: EventSeqIdRange,
       internalUpdateFormat: InternalUpdateFormat,
   )(implicit
       loggingContext: LoggingContextWithTrace
@@ -98,7 +96,7 @@ final class TransactionOrReassignmentPointwiseReader(
       eventStorageBackend.fetchEventPayloadsLedgerEffects(target =
         EventPayloadSourceForUpdatesLedgerEffects.Activate
       )(
-        eventSequentialIds = IdRange(firstEventSequentialId, lastEventSequentialId),
+        eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
           .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
@@ -111,7 +109,7 @@ final class TransactionOrReassignmentPointwiseReader(
       eventStorageBackend.fetchEventPayloadsLedgerEffects(target =
         EventPayloadSourceForUpdatesLedgerEffects.Deactivate
       )(
-        eventSequentialIds = IdRange(firstEventSequentialId, lastEventSequentialId),
+        eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
           .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
@@ -124,7 +122,7 @@ final class TransactionOrReassignmentPointwiseReader(
       eventStorageBackend.fetchEventPayloadsLedgerEffects(target =
         EventPayloadSourceForUpdatesLedgerEffects.VariousWitnessed
       )(
-        eventSequentialIds = IdRange(firstEventSequentialId, lastEventSequentialId),
+        eventSequentialIds = eventSeqIdRange,
         requestingPartiesForTx = internalUpdateFormat.includeTransactions
           .flatMap(_.internalEventFormat.templatePartiesFilter.allFilterParties),
         requestingPartiesForReassignment = internalUpdateFormat.includeReassignments
@@ -171,17 +169,14 @@ final class TransactionOrReassignmentPointwiseReader(
       )
 
   def lookupUpdateBy(
-      eventSeqIdRange: (Long, Long),
+      eventSeqIdRange: EventSeqIdRange,
       internalUpdateFormat: InternalUpdateFormat,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetUpdateResponse]] = {
-    val (firstEventSeqId, lastEventSeqId) = eventSeqIdRange
-
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetUpdateResponse]] =
     internalUpdateFormat.includeTransactions.map(_.transactionShape) match {
       case Some(TransactionShape.AcsDelta) =>
         fetchAndFilterEvents(
           rawEvents = fetchRawAcsDeltaEvents(
-            firstEventSequentialId = firstEventSeqId,
-            lastEventSequentialId = lastEventSeqId,
+            eventSeqIdRange = eventSeqIdRange,
             internalUpdateFormat = internalUpdateFormat,
           ),
           internalUpdateFormat = internalUpdateFormat,
@@ -190,8 +185,7 @@ final class TransactionOrReassignmentPointwiseReader(
       case Some(TransactionShape.LedgerEffects) =>
         fetchAndFilterEvents(
           rawEvents = fetchRawLedgerEffectsEvents(
-            firstEventSequentialId = firstEventSeqId,
-            lastEventSequentialId = lastEventSeqId,
+            eventSeqIdRange = eventSeqIdRange,
             internalUpdateFormat = internalUpdateFormat,
           ),
           internalUpdateFormat = internalUpdateFormat,
@@ -200,8 +194,7 @@ final class TransactionOrReassignmentPointwiseReader(
       case None if internalUpdateFormat.includeReassignments.isDefined =>
         fetchAndFilterEvents(
           rawEvents = fetchRawAcsDeltaEvents(
-            firstEventSequentialId = firstEventSeqId,
-            lastEventSequentialId = lastEventSeqId,
+            eventSeqIdRange = eventSeqIdRange,
             internalUpdateFormat = internalUpdateFormat,
           ),
           internalUpdateFormat = internalUpdateFormat,
@@ -210,5 +203,4 @@ final class TransactionOrReassignmentPointwiseReader(
       case None =>
         Future.successful(None)
     }
-  }
 }

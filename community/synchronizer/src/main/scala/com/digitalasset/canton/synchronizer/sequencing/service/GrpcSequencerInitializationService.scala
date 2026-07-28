@@ -196,7 +196,7 @@ class GrpcSequencerInitializationService(
           )
           .bimap(
             msg =>
-              ProtoDeserializationFailure.Wrap(ValueDeserializationError("topology_snapshot", msg)),
+              ProtoDeserializationFailure.Wrap(ValueDeserializationError(msg, "topology_snapshot")),
             StoredTopologyTransactions(_),
           )
       )

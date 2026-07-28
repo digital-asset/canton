@@ -171,7 +171,9 @@ class TransactionViewTest
               val exercise = actionDescription.withExercise(
                 actionDescription.getExercise.withPackagePreference(Seq(unexpectedPackage))
               )
-              vpd.tryUnwrap.copy(actionDescription = ActionDescription.fromProtoV30(exercise).value)
+              vpd.tryUnwrap.copy(actionDescription =
+                ActionDescription.fromProtoV30(testedProtocolVersionValidation, exercise).value
+              )
             }(view)
 
         val subViews = TransactionSubviews(Seq(subview))(testedProtocolVersion, factory.cryptoOps)
@@ -203,7 +205,9 @@ class TransactionViewTest
                   interfaceId = Some("ifPkg:module:template"),
                 )
               )
-              vpd.tryUnwrap.copy(actionDescription = ActionDescription.fromProtoV30(fetch).value)
+              vpd.tryUnwrap.copy(actionDescription =
+                ActionDescription.fromProtoV30(testedProtocolVersionValidation, fetch).value
+              )
             }(view)
 
         val subViews = TransactionSubviews(Seq(subview))(testedProtocolVersion, factory.cryptoOps)
@@ -849,7 +853,10 @@ class TransactionViewTest
 
       "reject an external call result with negative exercise_index" in {
         ViewParticipantData.ViewExternalCallResult
-          .fromProtoV32(externalCallResultProto(exerciseIndex = -1))
+          .fromProtoV32(
+            testedProtocolVersionValidation,
+            externalCallResultProto(exerciseIndex = -1),
+          )
           .left
           .value should matchPattern {
           case ProtoDeserializationError.InvariantViolation(Some("exercise_index"), _) =>
@@ -858,7 +865,7 @@ class TransactionViewTest
 
       "reject an external call result with negative call_index" in {
         ViewParticipantData.ViewExternalCallResult
-          .fromProtoV32(externalCallResultProto(callIndex = -1))
+          .fromProtoV32(testedProtocolVersionValidation, externalCallResultProto(callIndex = -1))
           .left
           .value should matchPattern {
           case ProtoDeserializationError.InvariantViolation(Some("call_index"), _) =>

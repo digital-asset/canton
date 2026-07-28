@@ -731,4 +731,12 @@ final class GeneratorsData(
     )
   )
 
+  implicit val synchronizerPredecessor: Arbitrary[SynchronizerPredecessor] = Arbitrary(
+    for {
+      psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+      upgradeTime <- Arbitrary.arbitrary[CantonTimestamp]
+      isLateUpgrade <- Arbitrary.arbitrary[Boolean]
+    } yield SynchronizerPredecessor(psid, upgradeTime, isLateUpgrade)
+  )
+
 }

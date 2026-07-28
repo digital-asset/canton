@@ -17,6 +17,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
   AuthorizationEvent,
@@ -2784,7 +2785,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.TopologyTransactionEffective(
         updateId = updateId,
         events = events,
-        genericTopologyEvents = Nil, // TODO(i33326)
+        genericTopologyEvents = Nil,
         synchronizerId = someSynchronizerId1,
         effectiveTime = someRecordTime,
       )
@@ -2870,6 +2871,91 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           transaction_hash = None,
         )
       )
+    }
+
+    "handle TopologyTransactionEffective - SynchronizerParametersState only" in {
+      val payload = ByteString.copyFromUtf8("synchronizer-parameters")
+
+      val update = state.Update.TopologyTransactionEffective(
+        updateId = updateId,
+        events = Set.empty,
+        genericTopologyEvents = List(SynchronizerParametersState(payload)),
+        synchronizerId = someSynchronizerId1,
+        effectiveTime = someRecordTime,
+      )
+
+      val dtos = updateToDtos(update)
+
+      dtos should contain theSameElementsInOrderAs List(
+        DbDto.GenericTopologyEvent(
+          event_sequential_id = 0,
+          event_offset = someOffset.unwrap,
+          update_id = updateIdByteArray,
+          synchronizer_id = someSynchronizerId1,
+          record_time = someRecordTime.toMicros,
+          event_type = PersistentEventType.SynchronizerParameters.asInt,
+          payload = payload.toByteArray,
+          trace_context = serializedEmptyTraceContext,
+        ),
+        DbDto.TransactionMeta(
+          update_id = updateIdByteArray,
+          event_offset = someOffset.unwrap,
+          publication_time = 0,
+          record_time = someRecordTime.toMicros,
+          synchronizer_id = someSynchronizerId1,
+          event_sequential_id_first = 0,
+          event_sequential_id_last = 0,
+          transaction_hash = None,
+        ),
+      )
+    }
+
+    "handle TopologyTransactionEffective - party events and SynchronizerParametersState" in {
+      val payload = ByteString.copyFromUtf8("synchronizer-parameters")
+
+      val update = state.Update.TopologyTransactionEffective(
+        updateId = updateId,
+        events = Set[TopologyEvent](
+          PartyToParticipantAuthorization(
+            party = someParty,
+            participant = someParticipantId,
+            authorizationEvent = Added(Submission),
+          )
+        ),
+        genericTopologyEvents = List(SynchronizerParametersState(payload)),
+        synchronizerId = someSynchronizerId1,
+        effectiveTime = someRecordTime,
+      )
+
+      val dtos = updateToDtos(update)
+
+      dtos should contain(
+        DbDto.EventPartyToParticipant(
+          event_sequential_id = 0,
+          event_offset = someOffset.unwrap,
+          update_id = updateIdByteArray,
+          party_id = someParty,
+          participant_id = someParticipantId,
+          participant_permission = participantPermissionInt(Added(Submission)),
+          participant_authorization_event = authorizationEventInt(Added(Submission)),
+          synchronizer_id = someSynchronizerId1,
+          record_time = someRecordTime.toMicros,
+          trace_context = serializedEmptyTraceContext,
+        )
+      )
+      dtos should contain(
+        DbDto.GenericTopologyEvent(
+          event_sequential_id = 0,
+          event_offset = someOffset.unwrap,
+          update_id = updateIdByteArray,
+          synchronizer_id = someSynchronizerId1,
+          record_time = someRecordTime.toMicros,
+          event_type = PersistentEventType.SynchronizerParameters.asInt,
+          payload = payload.toByteArray,
+          trace_context = serializedEmptyTraceContext,
+        )
+      )
+
     }
 
     "handle SequencerIndexMoved" in {

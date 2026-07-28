@@ -14,7 +14,7 @@ import com.google.protobuf.InvalidProtocolBufferException
 
 sealed trait ProtoDeserializationError extends Product with Serializable {
   def inField(field: String): ProtoDeserializationError.ValueDeserializationError =
-    ProtoDeserializationError.ValueDeserializationError(field, message)
+    ProtoDeserializationError.ValueDeserializationError(message, field)
 
   def message: String
 }
@@ -29,8 +29,14 @@ object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
     override val message = error.message
   }
   final case class ContractDeserializationError(message: String) extends ProtoDeserializationError
-  final case class ValueDeserializationError(field: String, message: String)
-      extends ProtoDeserializationError
+  final case class ValueDeserializationError(error: String, field: Option[String] = None)
+      extends ProtoDeserializationError {
+    val message = field.fold(error)(field => s"Unable to parse value in $field: $error")
+  }
+  object ValueDeserializationError {
+    def apply(error: String, field: String): ValueDeserializationError =
+      ValueDeserializationError(error, Some(field))
+  }
   final case class StringConversionError(error: String, field: Option[String] = None)
       extends ProtoDeserializationError {
     val message = field.fold(error)(field => s"Unable to parse string in $field: $error")

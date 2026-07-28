@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.party
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -482,18 +483,22 @@ class PartyReplicationTopologyWorkflow(
             ptpHeadTxn.mapping.participants
               .exists(p => p.participantId == targetParticipantId && p.onboarding)
           ) {
-            PartyToParticipant
-              .create(
-                ptpHeadTxn.mapping.partyId,
-                ptpHeadTxn.mapping.threshold,
-                ptpHeadTxn.mapping.participants.map {
-                  case HostingParticipant(`targetParticipantId`, permission, true) =>
-                    HostingParticipant(targetParticipantId, permission, onboarding = false)
-                  case otherParticipant => otherParticipant
-                },
-                ptpHeadTxn.mapping.partySigningKeysWithThreshold,
-              )
-              .map(ptp => Some(ptp -> ptpHeadTxn.serial.increment))
+            ptpHeadTxn.serial.increment
+              .leftMap(_.message)
+              .flatMap { nextSerial =>
+                PartyToParticipant
+                  .create(
+                    ptpHeadTxn.mapping.partyId,
+                    ptpHeadTxn.mapping.threshold,
+                    ptpHeadTxn.mapping.participants.map {
+                      case HostingParticipant(`targetParticipantId`, permission, true) =>
+                        HostingParticipant(targetParticipantId, permission, onboarding = false)
+                      case otherParticipant => otherParticipant
+                    },
+                    ptpHeadTxn.mapping.partySigningKeysWithThreshold,
+                  )
+                  .map(ptp => Some(ptp -> nextSerial))
+              }
           } else Right(None)
         )
         .leftMap(err => AuthorizeClearanceError.ProposeError(err): AuthorizeClearanceError)

@@ -2206,8 +2206,8 @@ private[lf] object SBuiltinFun {
 
       def loop(
           queryResult: Either[
-            NeedKey[CSMState],
-            Either[TransactionError, (KeyMapping, CSMState)],
+            NeedKey[CSMJournal],
+            Either[TransactionError, (KeyMapping, CSMJournal)],
           ]
       ): ContU[(KeyMapping, List[SValue])] =
         queryResult match {
@@ -2244,7 +2244,7 @@ private[lf] object SBuiltinFun {
           case Right(Right((mapping, next))) =>
             for {
               payloads <- mapping.queue.toList.traverse(fetchTemplate(machine, templateId, _))
-              _ = machine.ptx = machine.ptx.copy(contractState = next)
+              _ = machine.ptx = machine.ptx.copy(csmJournal = next)
             } yield (mapping, payloads)
           case Right(Left(error)) =>
             ContU.throwError(convTxError(machine.ptx.nodes, operation.name, error))
@@ -2260,7 +2260,7 @@ private[lf] object SBuiltinFun {
           ),
         )
         _ <- ContU.from(operation.authorizeLookup(machine, cachedKey))
-        result <- loop(machine.ptx.contractState.queryNByKey(gkey, n))
+        result <- loop(machine.ptx.csmJournal.queryNByKey(gkey, n))
       } yield result
 
       resultContU.run { case (keyMapping, payloads) =>

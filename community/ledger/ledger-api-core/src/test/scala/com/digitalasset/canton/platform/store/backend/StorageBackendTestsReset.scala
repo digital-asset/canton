@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
@@ -78,6 +78,8 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       dtosWitnessedExercised(event_offset = 9L, event_sequential_id = 8L, consuming = false),
       // 10: acs commitment
       Seq(dtoAcsCommitment(offset = offset(10), eventSequentialId = 9L)),
+      // 11: dynamic synchronizer parameters
+      Seq(dtoGenericTopologyEvent(offset = offset(11), eventSequentialId = 10L)),
       // String interning
       Seq(DbDto.StringInterningDto(internalId = 10, externalString = "d|x:abc")),
     ).flatten
@@ -85,7 +87,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     // Initialize and insert some data
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
-    executeSql(updateLedgerEnd(ledgerEnd(10, 10L)))
+    executeSql(updateLedgerEnd(ledgerEnd(11, 11L)))
 
     // queries
     def identity = executeSql(backend.parameter.ledgerIdentity)
@@ -97,7 +99,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
         backend.event.fetchEventPayloadsLedgerEffects(
           EventPayloadSourceForUpdatesLedgerEffects.Activate
         )(
-          eventSequentialIds = IdRange(1L, 10L),
+          eventSequentialIds = EventSeqIdRange(1L, 1000L),
           requestingPartiesForTx = Some(Set.empty),
           requestingPartiesForReassignment = Some(Set.empty),
         )
@@ -106,7 +108,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
           backend.event.fetchEventPayloadsLedgerEffects(
             EventPayloadSourceForUpdatesLedgerEffects.Deactivate
           )(
-            eventSequentialIds = IdRange(1L, 10L),
+            eventSequentialIds = EventSeqIdRange(1L, 1000L),
             requestingPartiesForTx = Some(Set.empty),
             requestingPartiesForReassignment = Some(Set.empty),
           )
@@ -115,7 +117,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
           backend.event.fetchEventPayloadsLedgerEffects(
             EventPayloadSourceForUpdatesLedgerEffects.VariousWitnessed
           )(
-            eventSequentialIds = IdRange(1L, 10L),
+            eventSequentialIds = EventSeqIdRange(1L, 1000L),
             requestingPartiesForTx = Some(Set.empty),
             requestingPartiesForReassignment = Some(Set.empty),
           )
@@ -125,7 +127,22 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     def acsCommitments = executeSql(
       backend.event
-        .fetchAcsCommitments(IdRange(1L, 10L), someSynchronizerId, descendingOrder = false)
+        .fetchAcsCommitments(
+          EventSeqIdRange(1L, 1000L),
+          someSynchronizerId,
+          descendingOrder = false,
+        )
+    )
+
+    def dynamicSynchronizerParameters = executeSql(
+      backend.event
+        .dynamicSynchronizerParametersBatch(
+          EventSeqIdRange(1L, 1000L)
+        )
+    )
+
+    def partyToParticipantEvents = executeSql(
+      backend.event.topologyPartyEventBatch(EventSeqIdRange(1L, 1000L))
     )
 
     def stringInterningEntries = executeSql(
@@ -133,10 +150,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     val paginationInput = PaginationInput(
-      PaginationFromTo.ascending(
-        startExclusive = 0L,
-        endInclusive = 1000L,
-      ),
+      PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1L, endInclusive = 1000L)),
       limit = 1000,
     )
 
@@ -197,6 +211,8 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     parties should not be empty
     stringInterningEntries should not be empty
     acsCommitments should not be empty
+    dynamicSynchronizerParameters should not be empty
+    partyToParticipantEvents should not be empty
     activateStakeholderIds should not be empty
     activateWitnessesIds should not be empty
     deactivateStakeholderIds should not be empty
@@ -217,6 +233,8 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     parties shouldBe empty
     stringInterningEntries shouldBe empty
     acsCommitments shouldBe empty
+    dynamicSynchronizerParameters shouldBe empty
+    partyToParticipantEvents shouldBe empty
     activateStakeholderIds shouldBe empty
     activateWitnessesIds shouldBe empty
     deactivateStakeholderIds shouldBe empty

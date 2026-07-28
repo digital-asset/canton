@@ -160,19 +160,19 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
 
   "Replicate party from P1 to P2" onlyRunWith ProtocolVersion.dev in { implicit env =>
     previousSerial = partyReplications.removeHead() match {
-      case (sp, tp, iou) => replicateParty(sp, tp, iou, previousSerial.increment)()
+      case (sp, tp, iou) => replicateParty(sp, tp, iou, previousSerial.increment.value)()
     }
   }
 
   "Replicate party from P2 to P3" onlyRunWith ProtocolVersion.dev in { implicit env =>
     previousSerial = partyReplications.removeHead() match {
-      case (sp, tp, iou) => replicateParty(sp, tp, iou, previousSerial.increment)()
+      case (sp, tp, iou) => replicateParty(sp, tp, iou, previousSerial.increment.value)()
     }
   }
 
   "Replicate party from P3 to P4" onlyRunWith ProtocolVersion.dev in { implicit env =>
     previousSerial = partyReplications.removeHead() match {
-      case (sp, tp, iou) => replicateParty(sp, tp, iou, previousSerial.increment)()
+      case (sp, tp, iou) => replicateParty(sp, tp, iou, previousSerial.increment.value)()
     }
   }
 
@@ -202,7 +202,7 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
         (ptpBefore, ptpMaxThreshold) =>
           ptpMaxThreshold.threshold.unwrap shouldBe ptpBefore.participants.size,
       )
-      val serial = previousSerial.increment
+      val serial = previousSerial.increment.value
 
       replicateParty(
         sourceParticipant,

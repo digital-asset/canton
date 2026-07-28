@@ -3,136 +3,207 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.{CantonTimestamp, Counter, Offset}
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
-import com.digitalasset.canton.ledger.participant.state.{
-  ContractStakeholdersAndReassignmentCounter,
-  InternalIndexService,
+import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
+  Started,
+  Starting,
+  Stopped,
+  Stopping,
 }
-import com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigest
-import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
-import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
-import com.digitalasset.canton.topology.transaction.ParticipantAttributes
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
+import com.digitalasset.canton.participant.commitment.DigestProcessorTestBase.PromiseKillSwitch
+import com.digitalasset.canton.participant.store.AcsDigestTestBase
+import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, LfPartyId, ReassignmentCounter, ReassignmentDiscriminator}
-import com.digitalasset.daml.lf.data.Ref.Party
-import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.Source
+import com.digitalasset.canton.util.TryUtil
+import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import org.apache.pekko.stream.KillSwitch
 import org.scalatest.wordspec.AnyWordSpec
 
-import scala.collection.immutable
-import scala.language.implicitConversions
+import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.Failure
 
-trait BaseDigestProcessorTest extends AnyWordSpec with BaseTest {
+class BaseDigestProcessorTest
+    extends AnyWordSpec
+    with AcsDigestTestBase
+    with BaseTest
+    with HasExecutionContext {
 
-  import BaseDigestProcessorTest.*
+  "BaseDigestProcessor" should {
+    "not allow double start" in {
+      // promise to delay the startup of the pipeline
+      val startupPromise = PromiseUnlessShutdown.unsupervised[(KillSwitch, Future[Unit])]()
+      val proc = new TestDigestProcessor(startupPromise.futureUS)
 
-  val alice: LfPartyId = party("alice::aaa")
-  val bob: LfPartyId = party("bob::bbb")
-  val charlie: LfPartyId = party("charlie::ccc")
-
-  val p1: ParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::p1::zzz")
-  val p2: ParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::p2::yyy")
-  val p3: ParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::p3::xxx")
-  val p4: ParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::p4::www")
-  val thisParticipant: ParticipantId = p1
-
-  val ts0: CantonTimestamp = ts(0)
-  val off1: Offset = off(1)
-  val tp100: Timepoint = tp(100)
-  val tp1_0: Timepoint = Timepoint(off1)(ts0)
-}
-
-object BaseDigestProcessorTest {
-  val rc: Counter[ReassignmentDiscriminator] = ReassignmentCounter.Genesis
-
-  implicit def toAcsChangeData(
-      parties: Set[LfPartyId]
-  ): ContractStakeholdersAndReassignmentCounter =
-    ContractStakeholdersAndReassignmentCounter(parties, rc)
-  implicit class RichOffset(off: Offset) {
-    def toEpochTimestamp: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(off.positive)
-  }
-
-  def cid(i: Int): LfContractId = ExampleTransactionFactory.suffixedId(i, i)
-  def ts(i: Int): CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(i.toLong)
-  def off(i: Int): Offset = Offset.tryFromLong(i.toLong)
-  def tp(i: Int): Timepoint = Timepoint(off(i))(ts(i))
-  def tte(events: PartyToParticipantAuthorization*) =
-    InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(events.toSet, None)
-  def party(s: String): LfPartyId = LfPartyId.assertFromString(s)
-  def acsDigest[K, V](at: Int, key: K, digestO: Option[V] = None): AcsDigest[K, V] =
-    AcsDigest.empty(key, tp(at)).copy(digestO = digestO)
-
-  def partyHosting(party: LfPartyId)(participants: ParticipantId*): (LfPartyId, PartyInfo) =
-    (
-      party,
-      PartyInfo(PositiveInt.one, participants.map(_ -> ParticipantAttributes(Submission)).toMap),
-    )
-
-  def mkIndexService(
-      contractsWithStakeholders: (Offset, LfContractId, Seq[LfPartyId])*
-  ): InternalIndexService = {
-    val acs = for {
-      (offset, cid, rawStakeholders) <- contractsWithStakeholders
-      stakeholders = rawStakeholders.map(LfPartyId.assertFromString)
-      activeContract = InternalIndexService.ActiveContract(cid, stakeholders.toSet, rc)
-      stakeholder <- stakeholders
-    } yield {
-      stakeholder -> (offset, activeContract)
-    }
-    val partyToContracts = immutable.MultiDict.from(acs)
-
-    new InternalIndexService {
-      override def activeContracts(partyIds: Set[LfPartyId], validAt: Option[Offset])(implicit
-          traceContext: TraceContext
-      ): Source[GetActiveContractsResponse, NotUsed] = ???
-
-      override def topologyTransactions(partyId: LfPartyId, fromExclusive: Offset)(implicit
-          traceContext: TraceContext
-      ): Source[TopologyTransaction, NotUsed] = ???
-
-      override def acsUpdates(synchronizerId: SynchronizerId, fromExclusive: Option[Offset])(
-          implicit traceContext: TraceContext
-      ): Source[InternalIndexService.AcsUpdateContainer, NotUsed] = ???
-
-      override def acs(
-          synchronizerId: SynchronizerId,
-          activeAt: Offset,
-          stakeholders1: Set[Party],
-          stakeholders2: Set[Party],
-      )(implicit
-          traceContext: TraceContext
-      ): Source[InternalIndexService.ActiveContract, NotUsed] = {
-        val result =
-          partyToContracts.values.collect {
-            case (offset, contract)
-                if offset <= activeAt &&
-                  (stakeholders1.isEmpty || contract.stakeholders.exists(
-                    stakeholders1
-                  )) && (stakeholders2.isEmpty || contract.stakeholders.exists(stakeholders2)) =>
-              contract
-          }.toSet
-
-        Source(result)
+      val startingFuture = proc.start() // to be awaited only at the end of the test
+      proc.stateInternal should matchPattern {
+        case Starting(startingComplete) if !startingComplete.isCompleted =>
       }
 
-      override def counterParties(
-          synchronizerId: SynchronizerId,
-          activeAt: Offset,
-          party: Option[Party],
-      )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed] = Source(
-        party
-          .flatMap(partyToContracts.sets.get(_))
-          .getOrElse(partyToContracts.sets.values.flatten)
-          .flatMap { case (offset, c) => if (offset <= activeAt) c.stakeholders else Set.empty }
-          .toSet
-      )
+      // starting again returns immediately, since the actual startup process is in progress
+      proc.start().futureValueUS
+
+      val exception = new RuntimeException("failure-on-startup")
+      startupPromise.failure(exception)
+
+      startingFuture.failed.futureValueUS shouldBe exception
     }
+
+    "propagate failures while starting the pipeline" in {
+      val exception = new RuntimeException("fail-on-startup")
+      val proc = new TestDigestProcessor(FutureUnlessShutdown.failed(exception))
+
+      proc.start().failed.futureValueUS shouldBe exception
+      proc.completionFuture.failed.futureValueUS shouldBe exception
+
+      proc.stateInternal shouldBe Stopped(Failure(exception))
+
+      // stopping again should result in the same failure
+      proc.stop().failed.futureValueUS shouldBe exception
+    }
+
+    "allow stopping when there are no errors while starting" in {
+      // promise to control the startup of the pipeline
+      val startupPromise = PromiseUnlessShutdown.unsupervised[(KillSwitch, Future[Unit])]()
+      val proc = new TestDigestProcessor(startupPromise.futureUS)
+
+      val startingF = proc.start() // to be awaited only at the end of the test
+      proc.stateInternal should matchPattern { case Starting(_) => }
+      val completionFutureAfterStart = proc.completionFuture
+
+      // stop while the processor is still starting
+      val stoppingF = proc.stop() // do not wait for the stopping to complete
+      proc.stateInternal should matchPattern { case Stopping(_) => }
+      val completionFutureAfterStop = proc.completionFuture
+
+      // signal a successful startup
+      val promiseKillSwitch = new PromiseKillSwitch()
+      // the pipeline termination happens immediately and successfully after triggering the killswitch
+      startupPromise.outcome_((promiseKillSwitch, promiseKillSwitch.promise.future))
+
+      // the various futures should be completed
+      startingF.futureValueUS
+      completionFutureAfterStart.futureValueUS
+
+      stoppingF.futureValueUS
+      completionFutureAfterStop.futureValueUS
+
+      // the killswitch must have been triggered
+      promiseKillSwitch.promise.future.futureValue
+
+      proc.stateInternal shouldBe Stopped(TryUtil.unit)
+    }
+
+    "allow stopping when there are errors while starting" in {
+      // promise to delay the startup of the pipeline
+      val startupPromise = PromiseUnlessShutdown.unsupervised[(KillSwitch, Future[Unit])]()
+      val proc = new TestDigestProcessor(startupPromise.futureUS)
+
+      val startingF = proc.start() // to be awaited only at the end of the test
+      proc.stateInternal should matchPattern { case Starting(_) => }
+      val completionFutureAfterStart = proc.completionFuture
+
+      // stop while the processor is still starting up
+      val stoppingF = proc.stop()
+      proc.stateInternal should matchPattern { case Stopping(_) => }
+      val completionFutureAfterStop = proc.completionFuture
+
+      // signal a failed startup
+      val startupException = new RuntimeException("failure-while-starting")
+      startupPromise.failure(startupException)
+
+      // the various futures should be completed
+      startingF.failed.futureValueUS shouldBe startupException
+      completionFutureAfterStart.failed.futureValueUS shouldBe startupException
+
+      stoppingF.failed.futureValueUS shouldBe startupException
+      completionFutureAfterStop.failed.futureValueUS shouldBe startupException
+
+      proc.stateInternal shouldBe Stopped(Failure(startupException))
+    }
+
+    "propagate failures while running" in {
+      // promise to delay the startup of the pipeline
+      val pipelineCompletion = Promise[Unit]()
+      val killSwitch = new PromiseKillSwitch()
+      val proc =
+        new TestDigestProcessor(FutureUnlessShutdown.pure((killSwitch, pipelineCompletion.future)))
+
+      proc.start().futureValueUS
+      proc.stateInternal should matchPattern { case Started(_, _) => }
+      val completionFutureAfterStarted = proc.completionFuture
+
+      val runningFailure = new RuntimeException("failure-while-running")
+
+      // signal a successful startup
+      logger.info(s"completing pipeline with $runningFailure")
+      pipelineCompletion.failure(runningFailure)
+
+      // the various futures should be completed
+      completionFutureAfterStarted.failed.futureValueUS shouldBe runningFailure
+
+      proc.stateInternal shouldBe Stopped(Failure(runningFailure))
+
+      proc.completionFuture.failed.futureValueUS shouldBe runningFailure
+    }
+
+    "propagate failures while terminating the pipeline" in {
+      // promise to delay the startup of the pipeline
+      val pipelineCompletion = Promise[Unit]()
+      val killSwitch = new PromiseKillSwitch()
+      val proc =
+        new TestDigestProcessor(FutureUnlessShutdown.pure((killSwitch, pipelineCompletion.future)))
+
+      proc.start().futureValueUS
+      proc.stateInternal should matchPattern { case Started(_, _) => }
+      val completionFutureAfterStarted = proc.completionFuture
+
+      // stop while the processor is still starting up
+      val stoppingF = proc.stop()
+      // killswitch was triggered
+      killSwitch.promise.future.futureValue
+      proc.stateInternal should matchPattern { case Stopping(_) => }
+      val completionFutureAfterStop = proc.completionFuture
+
+      // signal a successful startup
+      val stoppingException = new RuntimeException("failure-while-starting")
+      logger.info(s"completing pipeline with $stoppingException")
+      pipelineCompletion.failure(stoppingException)
+
+      // the various futures should be completed
+      stoppingF.failed.futureValueUS shouldBe stoppingException
+      completionFutureAfterStarted.failed.futureValueUS shouldBe stoppingException
+      completionFutureAfterStop.failed.futureValueUS shouldBe stoppingException
+
+      proc.stateInternal shouldBe Stopped(Failure(stoppingException))
+    }
+
   }
+
+  class TestDigestProcessor(
+      startupResult: FutureUnlessShutdown[(KillSwitch, Future[Unit])]
+  ) extends BaseDigestProcessor {
+    override implicit protected val executionContext: ExecutionContext =
+      BaseDigestProcessorTest.this.parallelExecutionContext
+
+    // This test doesn't care about this aspect and should not access it
+    override def isReinitializingProcessor: Boolean = throw new IllegalAccessException(
+      s"the test should not have called $functionFullName"
+    )
+
+    override protected def timeouts: ProcessingTimeout = BaseDigestProcessorTest.this.timeouts
+
+    override def synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId
+
+    override protected def loggerFactory: NamedLoggerFactory =
+      BaseDigestProcessorTest.this.loggerFactory
+
+    override protected def startPipelineInternal()(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] =
+      startupResult
+  }
+
 }

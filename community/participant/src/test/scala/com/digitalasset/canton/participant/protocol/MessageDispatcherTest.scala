@@ -437,7 +437,7 @@ trait MessageDispatcherTest {
       DefaultTestIdentities.participant1.toLf,
       CommitmentPeriod
         .tryCreate(CantonTimestamp.ofEpochSecond(5), CantonTimestamp.ofEpochSecond(15)),
-      ByteString.empty,
+      Digest.hashDigest(ByteString.empty).getCryptographicEvidence,
       testedProtocolVersion,
     )
     val commitment = AcsCommitmentProtocolMessage(rawCommitment, dummySignature)

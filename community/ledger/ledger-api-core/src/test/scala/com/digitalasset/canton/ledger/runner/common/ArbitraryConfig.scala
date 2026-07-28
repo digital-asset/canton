@@ -17,7 +17,6 @@ import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSou
 import com.digitalasset.daml.lf.VersionRange
 import com.digitalasset.daml.lf.interpretation.Limits
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import io.grpc.netty.shaded.io.netty.handler.ssl.ClientAuth
 import org.scalacheck.Gen
 
@@ -69,12 +68,6 @@ object ArbitraryConfig {
     choiceAuthorizers,
     transactionInputContracts,
   )
-
-  val contractKeyUniquenessMode: Gen[ContractStateMachine.Mode] =
-    Gen.oneOf(
-      ContractStateMachine.Mode.NoKey,
-      ContractStateMachine.Mode.NUCK,
-    )
 
   val inetSocketAddress = for {
     host <- Gen.alphaStr

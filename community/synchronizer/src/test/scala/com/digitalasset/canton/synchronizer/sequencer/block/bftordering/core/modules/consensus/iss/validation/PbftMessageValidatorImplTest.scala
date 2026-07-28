@@ -9,11 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
-  DefaultEpochLength,
-  DefaultMaxBatchesPerProposal,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.{
   Epoch,
   Segment,
@@ -36,8 +32,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BlockMetadata,
   EpochInfo,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.DefaultMaxBatchesPerProposal
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  Membership,
+  SequencingParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
   Commit,
   PrePrepare,
@@ -493,7 +493,7 @@ class PbftMessageValidatorImplTest extends AnyWordSpec with BftSequencerBaseTest
         ),
       ).forEvery { (prePrepare, segment, previousMembership, currentMembership, expectedResult) =>
         implicit val metricsContext: MetricsContext = MetricsContext.Empty
-        implicit val config: BftBlockOrdererConfig = BftBlockOrdererConfig()
+        val params: SequencingParameters = SequencingParameters.Default(testedProtocolVersion)
 
         val epoch = createEpoch(
           prePrepare.blockMetadata.epochNumber,
@@ -506,6 +506,7 @@ class PbftMessageValidatorImplTest extends AnyWordSpec with BftSequencerBaseTest
             segment,
             epoch,
             SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+            params,
           )(fail(_))
 
         validator.validatePrePrepare(prePrepare) shouldBe expectedResult

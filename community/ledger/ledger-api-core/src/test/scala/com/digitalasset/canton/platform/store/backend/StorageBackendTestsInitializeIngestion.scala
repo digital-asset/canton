@@ -8,7 +8,7 @@ import anorm.SqlStringInterpolation
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.logging.SuppressingLogger
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.backend.common.{
@@ -21,6 +21,7 @@ import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
 }
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.daml.lf.data.Ref
+import com.google.protobuf.ByteString
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{Assertion, Inside}
@@ -36,6 +37,11 @@ private[backend] trait StorageBackendTestsInitializeIngestion
 
   private val signatory = Ref.Party.assertFromString("signatory")
   private val participant = api.ParticipantId(Ref.ParticipantId.assertFromString("someParticipant"))
+
+  private val payload1 =
+    ByteString.copyFromUtf8("dynamic-synchronizer-parameters-payload-1")
+  private val payload2 =
+    ByteString.copyFromUtf8("dynamic-synchronizer-parameters-payload-2")
   val dtos = Vector(
     // 1: party allocation
     dtoPartyEntry(offset(1), someParty)
@@ -143,36 +149,44 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     ),
     // 6: acs commitment (persisted, within the first ledger end)
     Seq(dtoAcsCommitment(offset(5), eventSequentialId = 8L)),
+    // 7: dynamic synchronizer parameters (persisted, within the first ledger end)
+    Seq(
+      dtoGenericTopologyEvent(
+        offset(5),
+        eventSequentialId = 9L,
+        payload = payload1,
+      )
+    ),
   ).flatten
 
   it should "delete overspill entries - events, transaction meta, completions" in {
     val dtos2 = Vector(
-      // 7: transaction with create node
+      // 8: transaction with create node
       dtosCreate(
         6L,
-        event_sequential_id = 9L,
+        event_sequential_id = 10L,
         internal_contract_id = 201,
         additional_witnesses = Set(someParty),
       )(stakeholders = Set(signatory, someParty)),
       Seq(
         dtoTransactionMeta(
           offset(6),
-          event_sequential_id_first = 9L,
-          event_sequential_id_last = 9L,
+          event_sequential_id_first = 10L,
+          event_sequential_id_last = 10L,
         ),
         dtoCompletion(offset(6)),
       ),
-      // 8: transaction with exercise node
+      // 9: transaction with exercise node
       dtosWitnessedExercised(
         7L,
-        event_sequential_id = 10L,
+        event_sequential_id = 11L,
         consuming = false,
         internal_contract_id = Some(201),
         additional_witnesses = Set(someParty),
       ),
       dtosConsumingExercise(
         7L,
-        event_sequential_id = 11L,
+        event_sequential_id = 12L,
         internal_contract_id = Some(202),
         stakeholders = Set(someParty),
         additional_witnesses = Set(someParty),
@@ -180,79 +194,92 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       Seq(
         dtoTransactionMeta(
           offset(7),
-          event_sequential_id_first = 10L,
-          event_sequential_id_last = 11L,
+          event_sequential_id_first = 11L,
+          event_sequential_id_last = 12L,
         ),
         dtoCompletion(offset(7)),
       ),
-      // 9: assign
-      dtosAssign(8L, event_sequential_id = 12, internal_contract_id = 203)(stakeholders =
+      // 10: assign
+      dtosAssign(8L, event_sequential_id = 13, internal_contract_id = 203)(stakeholders =
         Set(someParty)
       ),
-      // 10: unassign
+      // 11: unassign
       dtosUnassign(
         9L,
-        event_sequential_id = 13,
+        event_sequential_id = 14,
         internal_contract_id = Some(203),
         stakeholders = Set(someParty),
       ),
-      // 11: topology transactions
+      // 12: topology transactions
       Seq(
         dtoPartyToParticipant(
           offset(10),
-          eventSequentialId = 14,
+          eventSequentialId = 15,
           party = someParty,
           participant = participant,
         ),
         dtoPartyToParticipant(
           offset(10),
-          eventSequentialId = 15,
+          eventSequentialId = 16,
           party = someParty3,
           participant = participant,
         ),
       ),
-      // 12: acs commitment
-      Seq(dtoAcsCommitment(offset(12), eventSequentialId = 16L)),
+      // 13: acs commitment
+      Seq(dtoAcsCommitment(offset(12), eventSequentialId = 17L)),
+      // 14: dynamic synchronizer parameters
+      Seq(
+        dtoGenericTopologyEvent(
+          offset(12),
+          eventSequentialId = 18L,
+          payload = payload2,
+        )
+      ),
     ).flatten
     val allDtos = dtos1 ++ dtos2
     fixture(
       dtos1 = dtos1,
       lastOffset1 = 5L,
-      lastEventSeqId1 = 8L,
+      lastEventSeqId1 = 9L,
       dtos2 = dtos2,
       lastOffset2 = 12L,
-      lastEventSeqId2 = 16L,
+      lastEventSeqId2 = 18L,
       checkContentsBefore = () => {
         val activateEventSeqIds =
           executeSql(
             backend.event.fetchEventPayloadsAcsDelta(
               EventPayloadSourceForUpdatesAcsDelta.Activate
-            )(IdRange(1L, 100L), Some(Set.empty), None)
+            )(EventSeqIdRange(1L, 100L), Some(Set.empty), None)
           ).map(_.eventSeqId)
         val deactivateEventSeqIds = executeSql(
           backend.event.fetchEventPayloadsAcsDelta(
             EventPayloadSourceForUpdatesAcsDelta.Deactivate
-          )(IdRange(1L, 100L), Some(Set.empty), None)
+          )(EventSeqIdRange(1L, 100L), Some(Set.empty), None)
         ).map(_.eventSeqId)
         val witnessEventSeqIds = executeSql(
           backend.event.fetchEventPayloadsLedgerEffects(
             EventPayloadSourceForUpdatesLedgerEffects.VariousWitnessed
-          )(IdRange(1L, 100L), Some(Set.empty), None)
+          )(EventSeqIdRange(1L, 100L), Some(Set.empty), None)
         ).map(_.eventSeqId)
         val topologyPartyEvents =
           executeSql(
-            backend.event.topologyPartyEventBatch(IdRange(1L, 100L))
+            backend.event.topologyPartyEventBatch(EventSeqIdRange(1L, 100L))
           ).map(_.partyId)
-        activateEventSeqIds shouldBe List(1, 4, 9, 12)
-        deactivateEventSeqIds shouldBe List(3, 5, 11, 13)
-        witnessEventSeqIds shouldBe List(2, 10)
+        activateEventSeqIds shouldBe List(1, 4, 10, 13)
+        deactivateEventSeqIds shouldBe List(3, 5, 12, 14)
+        witnessEventSeqIds shouldBe List(2, 11)
         topologyPartyEvents shouldBe List(
           someParty,
           someParty2,
           someParty,
           someParty3,
         ) // not constrained by ledger end
-        acsCommitmentSeqIds() shouldBe List(8L, 16L)
+        acsCommitmentSeqIds() shouldBe List(8L, 17L)
+        dynamicSynchronizerParametersSeqIds() shouldBe List(9L, 18L)
+        dynamicSynchronizerParametersPayloads() shouldBe List(
+          payload1,
+          payload2,
+        ) // not constrained by ledger end
         fetchIdsFromTransactionMetaUpdateIds(allDtos.collect { case meta: DbDto.TransactionMeta =>
           meta.update_id
         }) shouldBe Set((1, 1), (2, 4))
@@ -264,35 +291,35 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         })
         fetchIdsCreateStakeholder() shouldBe List(
           1L,
-          9L,
+          10L,
         ) // since ledger-end does not limit the range query
-        fetchIdsCreateNonStakeholder() shouldBe List(1L, 9L)
-        fetchIdsConsumingStakeholder() shouldBe List(3L, 11L)
-        fetchIdsConsumingNonStakeholder() shouldBe List(3L, 11L)
-        fetchIdsNonConsuming() shouldBe List(2L, 10L)
-        fetchIdsAssignStakeholder() shouldBe List(4L, 12L)
-        fetchTopologyParty() shouldBe List(6, 14)
+        fetchIdsCreateNonStakeholder() shouldBe List(1L, 10L)
+        fetchIdsConsumingStakeholder() shouldBe List(3L, 12L)
+        fetchIdsConsumingNonStakeholder() shouldBe List(3L, 12L)
+        fetchIdsNonConsuming() shouldBe List(2L, 11L)
+        fetchIdsAssignStakeholder() shouldBe List(4L, 13L)
+        fetchTopologyParty() shouldBe List(6, 15)
       },
       checkContentsAfter = () => {
         val activateEventSeqIds =
           executeSql(
             backend.event.fetchEventPayloadsAcsDelta(
               EventPayloadSourceForUpdatesAcsDelta.Activate
-            )(IdRange(1L, 100L), Some(Set.empty), None)
+            )(EventSeqIdRange(1L, 100L), Some(Set.empty), None)
           ).map(_.eventSeqId)
         val deactivateEventSeqIds = executeSql(
           backend.event.fetchEventPayloadsAcsDelta(
             EventPayloadSourceForUpdatesAcsDelta.Deactivate
-          )(IdRange(1L, 100L), Some(Set.empty), None)
+          )(EventSeqIdRange(1L, 100L), Some(Set.empty), None)
         ).map(_.eventSeqId)
         val witnessEventSeqIds = executeSql(
           backend.event.fetchEventPayloadsLedgerEffects(
             EventPayloadSourceForUpdatesLedgerEffects.VariousWitnessed
-          )(IdRange(1L, 100L), Some(Set.empty), None)
+          )(EventSeqIdRange(1L, 100L), Some(Set.empty), None)
         ).map(_.eventSeqId)
         val topologyPartyEvents =
           executeSql(
-            backend.event.topologyPartyEventBatch(IdRange(1L, 100L))
+            backend.event.topologyPartyEventBatch(EventSeqIdRange(1L, 100L))
           ).map(_.partyId)
         activateEventSeqIds shouldBe List(1, 4)
         deactivateEventSeqIds shouldBe List(3, 5)
@@ -302,6 +329,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           someParty2,
         ) // not constrained by ledger end
         acsCommitmentSeqIds() shouldBe List(8L)
+        dynamicSynchronizerParametersSeqIds() shouldBe List(9L)
+        dynamicSynchronizerParametersPayloads() shouldBe List(
+          payload1
+        )
         fetchIdsFromTransactionMetaUpdateIds(allDtos.collect { case meta: DbDto.TransactionMeta =>
           meta.update_id
         }) shouldBe Set((1, 1), (2, 4))
@@ -326,7 +357,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     fixtureOverspillEntriesPriorToFirstLedgerEndUpdate(
       dtos = dtos1,
       lastOffset = 5,
-      lastEventSeqId = 7L,
+      lastEventSeqId = 9L,
       checkContentsAfter = () => {
         val contractsCreated =
           executeSql(
@@ -340,7 +371,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           )
         val topologyPartyEvents =
           executeSql(
-            backend.event.topologyPartyEventBatch(IdRange(1L, 100L))
+            backend.event.topologyPartyEventBatch(EventSeqIdRange(1L, 100L))
           ).map(_.partyId)
         contractsCreated should not contain hashCid("#101")
         contractsAssigned should not contain hashCid("#103")
@@ -372,10 +403,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
         .filteredForEventTypes(Set(PersistentEventType.NonConsumingExercise))
         .fetchPage(_)(
-          PaginationFromTo.ascending(
-            startExclusive = 0,
-            endInclusive = 1000,
-          )
+          PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1, endInclusive = 1000))
         )
     )
 
@@ -388,10 +416,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
         .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
         .fetchPage(_)(
-          PaginationFromTo.ascending(
-            startExclusive = 0,
-            endInclusive = 1000,
-          )
+          PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1, endInclusive = 1000))
         )
     )
 
@@ -404,10 +429,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
         .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
         .fetchPage(_)(
-          PaginationFromTo.ascending(
-            startExclusive = 0,
-            endInclusive = 1000,
-          )
+          PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1, endInclusive = 1000))
         )
     )
 
@@ -420,10 +442,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPage(_)(
-          PaginationFromTo.ascending(
-            startExclusive = 0,
-            endInclusive = 1000,
-          )
+          PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1, endInclusive = 1000))
         )
     )
 
@@ -436,10 +455,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
         .filteredForEventTypes(Set(PersistentEventType.Create))
         .fetchPage(_)(
-          PaginationFromTo.ascending(
-            startExclusive = 0,
-            endInclusive = 1000,
-          )
+          PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1, endInclusive = 1000))
         )
     )
 
@@ -452,10 +468,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
         .filteredForEventTypes(Set(PersistentEventType.Assign))
         .fetchPage(_)(
-          PaginationFromTo.ascending(
-            startExclusive = 0,
-            endInclusive = 1000,
-          )
+          PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1, endInclusive = 1000))
         )
     )
 
@@ -467,10 +480,8 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
         .fetchPage(_)(
           PaginationInput(
-            fromTo = PaginationFromTo.ascending(
-              startExclusive = 0,
-              endInclusive = 1000,
-            ),
+            fromTo =
+              PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1, endInclusive = 1000)),
             limit = 1000,
           )
         )
@@ -480,11 +491,25 @@ private[backend] trait StorageBackendTestsInitializeIngestion
   private def acsCommitmentSeqIds(): Vector[Long] =
     executeSql(
       backend.event.fetchAcsCommitments(
-        IdRange(1L, 100L),
+        EventSeqIdRange(1L, 100L),
         someSynchronizerId,
         descendingOrder = false,
       )
     ).map(_.eventSequentialId)
+
+  private def dynamicSynchronizerParametersSeqIds(): Vector[Long] =
+    executeSql(
+      backend.event.dynamicSynchronizerParametersBatch(
+        EventSeqIdRange(1L, 100L)
+      )
+    ).map(_.eventSequentialId)
+
+  private def dynamicSynchronizerParametersPayloads(): Vector[ByteString] =
+    executeSql(
+      backend.event.dynamicSynchronizerParametersBatch(
+        EventSeqIdRange(1L, 100L)
+      )
+    ).map(raw => ByteString.copyFrom(raw.payload))
 
   private def fetchIdsFromTransactionMetaUpdateIds(
       updateIds: Seq[Array[Byte]]
@@ -498,6 +523,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
             lookupKey = LookupKey.ByUpdateId(updateId)
           )
         )
+          .map(eventSeqIdRange => (eventSeqIdRange.startInclusive, eventSeqIdRange.endInclusive))
       }
       .flatMap(_.toList)
       .toSet
@@ -513,6 +539,7 @@ private[backend] trait StorageBackendTestsInitializeIngestion
             lookupKey = LookupKey.ByOffset(offset)
           )
         )
+          .map(eventSeqIdRange => (eventSeqIdRange.startInclusive, eventSeqIdRange.endInclusive))
       }
       .flatMap(_.toList)
       .toSet

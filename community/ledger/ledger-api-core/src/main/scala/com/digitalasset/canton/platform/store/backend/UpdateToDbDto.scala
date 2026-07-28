@@ -22,7 +22,6 @@ import com.digitalasset.canton.platform.store.backend.Conversions.{
   authorizationEventInt,
   participantPermissionInt,
 }
-import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
 import com.digitalasset.canton.platform.store.dao.events.*
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.topology.SynchronizerId
@@ -174,7 +173,6 @@ object UpdateToDbDto {
 
     val events = topologyTransaction.events.iterator.flatMap {
       case TopologyEvent.PartyToParticipantAuthorization(party, participant, authorizationEvent) =>
-        import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
         val eventPartyToParticipant = Iterator(
           DbDto.EventPartyToParticipant(
             event_sequential_id = 0, // this is filled later
@@ -194,13 +192,7 @@ object UpdateToDbDto {
           .map(_ =>
             DbDto.PartyEntry(
               ledger_offset = offset.unwrap,
-              recorded_at = topologyTransaction.recordTime.toMicros,
-              submission_id = Some(
-                PartyAllocation.TrackerKey(party, participant, authorizationEvent).submissionId
-              ),
               party = Some(party),
-              typ = JdbcLedgerDao.acceptType,
-              rejection_reason = None,
               is_local = Some(participant == participantId),
             )
           )
@@ -208,11 +200,25 @@ object UpdateToDbDto {
         eventPartyToParticipant ++ partyEntry
     }
 
+    val genericEvents = topologyTransaction.genericTopologyEvents.iterator.map {
+      case TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState(payload) =>
+        DbDto.GenericTopologyEvent(
+          event_sequential_id = 0, // this is filled later
+          event_offset = offset.unwrap,
+          update_id = topologyTransaction.updateId.toProtoPrimitive.toByteArray,
+          synchronizer_id = topologyTransaction.synchronizerId,
+          record_time = topologyTransaction.recordTime.toMicros,
+          event_type = PersistentEventType.SynchronizerParameters.asInt,
+          payload = payload.toByteArray,
+          trace_context = serializedTraceContext,
+        )
+    }
+
     // TransactionMeta DTO must come last in this sequence
     // because in a later stage the preceding events
     // will be assigned consecutive event sequential ids
     // and transaction meta is assigned sequential ids of its first and last event
-    events ++ Seq(transactionMeta)
+    events ++ genericEvents ++ Seq(transactionMeta)
   }
 
   private def receivedAcsCommitmentToDbDto(

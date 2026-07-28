@@ -58,20 +58,9 @@ private[backend] trait StorageBackendTestsParties
       dtoPartyEntry(offset(6), party("ddt"), isLocal = false),
       dtoPartyEntry(offset(7), party("ddt"), isLocal = true),
       dtoPartyEntry(offset(8), party("ddt"), isLocal = false),
-      // desired values in last record, reject coming in the middle
-      dtoPartyEntry(offset(9), party("eef"), isLocal = false),
-      dtoPartyEntry(offset(10), party("eef"), isLocal = true, reject = true),
-      dtoPartyEntry(offset(11), party("eef"), isLocal = false),
-      // desired values in middle record, reject coming last
-      dtoPartyEntry(offset(12), party("fff"), isLocal = false),
-      dtoPartyEntry(offset(13), party("fff"), isLocal = false),
-      dtoPartyEntry(offset(14), party("fff"), isLocal = true, reject = true),
       // desired values before ledger end, undesired accept after ledger end
       dtoPartyEntry(offset(15), party("ggf"), isLocal = false),
       dtoPartyEntry(offset(17), party("ggf"), isLocal = true),
-      // desired values before ledger end, undesired reject after ledger end
-      dtoPartyEntry(offset(16), party("hhf"), isLocal = false),
-      dtoPartyEntry(offset(18), party("hhf"), isLocal = true, reject = true),
     )
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
@@ -85,7 +74,7 @@ private[backend] trait StorageBackendTestsParties
       entry.isLocal shouldBe entry.party.lastOption.contains('t')
 
     val allKnownParties = executeSql(backend.party.knownParties(None, None, 10))
-    allKnownParties.length shouldBe 8
+    allKnownParties.length shouldBe 5
     allKnownParties.foreach(validateEntries)
 
     val pageOne = executeSql(backend.party.knownParties(None, None, 4))
@@ -98,12 +87,9 @@ private[backend] trait StorageBackendTestsParties
 
     val pageTwo =
       executeSql(backend.party.knownParties(Some(LfPartyId.assertFromString("ddt")), None, 10))
-    pageTwo.length shouldBe 4
+    pageTwo.length shouldBe 1
     pageTwo.foreach(validateEntries)
-    pageTwo.exists(_.party == "eef") shouldBe true
-    pageTwo.exists(_.party == "fff") shouldBe true
     pageTwo.exists(_.party == "ggf") shouldBe true
-    pageTwo.exists(_.party == "hhf") shouldBe true
   }
 
   it should "get all parties ordered by id using binary collation" in {
@@ -143,6 +129,13 @@ private[backend] trait StorageBackendTestsParties
     pageTwo.length shouldBe 3
     pageTwo
       .map(_.party) shouldBe Seq("a-", "a_", "b")
+
+    val filteredPageTwo =
+      executeSql(
+        backend.party
+          .knownParties(Some(LfPartyId.assertFromString("a")), Some(String185.tryCreate("a-")), 10)
+      )
+    filteredPageTwo.length shouldBe 1
   }
 
 }

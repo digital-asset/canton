@@ -45,6 +45,7 @@ class QueueBasedSynchronizerOutbox(
     extends SynchronizerOutbox
     with SynchronizerOutboxDispatchHelper
     with FlagCloseable {
+
   protected def awaitTransactionObserved(
       transaction: GenericSignedTopologyTransaction,
       timeout: Duration,
@@ -117,7 +118,7 @@ class QueueBasedSynchronizerOutbox(
       num: Int,
   ): FutureUnlessShutdown[Unit] = {
     ensureIdleFutureIsSet()
-    kickOffFlush()
+    kickOffFlush(numFailures = 0)
     FutureUnlessShutdown.unit
   }
 
@@ -137,25 +138,30 @@ class QueueBasedSynchronizerOutbox(
         s"Resuming dispatching, pending=$hasUnsentTransactions"
       )
       // run initial flush
-      flush(initialize = true)
+      flush(numFailures = 0, initialize = true)
     }
 
-  protected def kickOffFlush(): Unit =
+  protected def kickOffFlush(numFailures: Int): Unit =
     // It's fine to ignore shutdown because we do not await the future anyway.
     if (initialized.get()) {
       TraceContext.withNewTraceContext("flush_outbox")(implicit tc =>
         EitherTUtil.doNotAwait(
-          flush().onShutdown(Either.unit),
+          flush(numFailures).onShutdown(Either.unit),
           "synchronizer outbox flusher",
-          level = Level.WARN,
+          level =
+            // numFailures counts the number of failures that have already occurred.
+            // If flush returns a failures, the total number is numFailures + 1.
+            // Therefore, using < for the comparison.
+            if (numFailures < QueueBasedSynchronizerOutbox.NumFailuresLoggedAtInfo) Level.INFO
+            else Level.WARN,
         )
       )
     }
 
-  protected def flush(initialize: Boolean = false)(implicit
+  protected def flush(numFailures: Int, initialize: Boolean = false)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    def markDone(delayRetry: Boolean = false): Unit = {
+    def markDone(numFailures: Int): Unit = {
       isRunning.set(false)
       if (!hasUnsentTransactions) {
         idleFuture.getAndSet(None).foreach(_.trySuccess(UnlessShutdown.unit))
@@ -165,7 +171,7 @@ class QueueBasedSynchronizerOutbox(
         s"Marked flush as done. Current queue size: $queueSize. IsClosing: $isClosing"
       )
       if (hasUnsentTransactions && !isClosing) {
-        if (delayRetry) {
+        if (numFailures > 0) {
           logger.debug(s"Kick off a new delayed flush in ${topologyConfig.broadcastRetryDelay}")
           DelayUtil
             .delay(functionFullName, topologyConfig.broadcastRetryDelay.toInternal.toScala, this)
@@ -174,7 +180,7 @@ class QueueBasedSynchronizerOutbox(
                 logger.debug(
                   s"About to kick off a delayed flush scheduled ${topologyConfig.broadcastRetryDelay} ago"
                 )
-                kickOffFlush()
+                kickOffFlush(numFailures)
               } else {
                 logger.debug(
                   s"Queue-based outbox is now closing. Ignoring delayed flushed schedule ${topologyConfig.broadcastRetryDelay} ago"
@@ -183,7 +189,7 @@ class QueueBasedSynchronizerOutbox(
             }
             .discard
         } else {
-          kickOffFlush()
+          kickOffFlush(numFailures)
         }
       }
     }
@@ -255,7 +261,7 @@ class QueueBasedSynchronizerOutbox(
             FutureUnlessShutdown.lift(synchronizerOutboxQueue.completeCycle())
           )
         } yield {
-          markDone()
+          markDone(numFailures = 0)
         }
 
         EitherTUtil.onErrorOrFailureUnlessShutdown[String, Unit](
@@ -266,17 +272,17 @@ class QueueBasedSynchronizerOutbox(
             )
             logger.info(s"Requeuing and backing off due to $errorDetails")
             synchronizerOutboxQueue.requeue()
-            markDone(delayRetry = true)
+            markDone(numFailures + 1)
           },
           shutdownHandler = () => {
             logger.info(s"Requeuing and stopping due to closing/synchronizer-disconnect")
             synchronizerOutboxQueue.requeue()
-            markDone()
+            markDone(numFailures = 0)
           },
         )(ret)
       } else {
         logger.debug("Nothing pending. Marking as done.")
-        markDone()
+        markDone(numFailures = 0)
         EitherT.rightT(())
       }
     }
@@ -342,4 +348,12 @@ class QueueBasedSynchronizerOutbox(
 
       EitherT(ret)
     }
+}
+
+object QueueBasedSynchronizerOutbox {
+
+  /** Number of consecutive dispatching failures that are logged at level INFO. Further failures are
+    * logged at level WARN.
+    */
+  val NumFailuresLoggedAtInfo = 3
 }

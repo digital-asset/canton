@@ -11,6 +11,7 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -100,8 +101,7 @@ class BufferedCommandCompletionsReaderSpec
   private val neverCalledDelegate: LedgerDaoCommandCompletionsReader =
     new LedgerDaoCommandCompletionsReader {
       override def getCommandCompletions(
-          startInclusive: Offset,
-          endInclusive: Offset,
+          offsetRange: OffsetRange,
           userId: Option[Ref.UserId],
           parties: Set[Ref.Party],
       )(implicit
@@ -161,8 +161,7 @@ class BufferedCommandCompletionsReaderSpec
   ): Seq[CompletionStreamResponse] =
     reader
       .getCommandCompletions(
-        startInclusive = offset(startIdx),
-        endInclusive = offset(endIdx),
+        offsetRange = OffsetRange(startInclusive = offset(startIdx), endInclusive = offset(endIdx)),
         userId = userId,
         parties = parties,
       )

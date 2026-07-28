@@ -75,7 +75,7 @@ trait TrafficBalanceSupport extends BaseTest {
   ): PositiveInt = {
 
     val serial = serialO
-      .orElse(getTrafficForMember(member, sequencer).flatMap(_.serial).map(_.increment))
+      .orElse(getTrafficForMember(member, sequencer).flatMap(_.serial).map(_.increment.value))
       .getOrElse(PositiveInt.one)
 
     sequencer.traffic_control.set_traffic_balance(member, serial, newBalance)

@@ -504,9 +504,9 @@ sealed abstract class HasTxNodes[Tx] {
   def contractOrder: Either[TxErr, List[ContractId]] =
     contractStateMachine.map(_.contractOrder)
 
-  private[this] def contractStateMachine: Either[TxErr, NextGenContractStateMachine.LLState] =
-    foldInExecutionOrder[Either[TxErr, NextGenContractStateMachine.LLState]](
-      Right(NextGenContractStateMachine.empty(NextGenContractStateMachine.Mode.NUCK))
+  private[this] def contractStateMachine: Either[TxErr, NextGenContractStateMachine.Journal] =
+    foldInExecutionOrder[Either[TxErr, NextGenContractStateMachine.Journal]](
+      Right(NextGenContractStateMachine.empty(NextGenContractStateMachine.Mode.Key))
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),

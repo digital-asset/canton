@@ -432,7 +432,7 @@ class ContractKeySpec
 
       // TEST_EVIDENCE: Integrity: contract key behaviour (non-unique mode)
       "non-uck mode" in {
-        val contractStateMode = ContractStateMachine.Mode.NUCK
+        val contractStateMode = ContractStateMachine.Mode.Key
         forEvery(allCases) { case (name, arg) =>
           if (failures.contains(name)) {
             inside(run(engine, name, arg, contractStateMode)) {

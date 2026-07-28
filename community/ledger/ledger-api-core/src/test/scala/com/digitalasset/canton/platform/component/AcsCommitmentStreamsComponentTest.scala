@@ -440,6 +440,15 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       val rangeEnd = index.currentLedgerEnd().map(_.lastOffset)
       acsUpdatesRaw(rangeEnd, expected = 0) shouldBe empty
     }
+
+    "exclude a commitment exactly at the exclusive start offset" in {
+      val offset = ingestUpdateSync(acsCommitment(synchronizer1, payload1))
+      ingestUpdateSync(acsCommitment(synchronizer1, payload2)).discard
+
+      val acsUpdate = acsUpdatesRaw(fromExclusive = Some(offset), expected = 1).loneElement
+
+      acsUpdate shouldBe AcsUpdate.AcsCommitment(payload2)
+    }
   }
 
   "acs" should {

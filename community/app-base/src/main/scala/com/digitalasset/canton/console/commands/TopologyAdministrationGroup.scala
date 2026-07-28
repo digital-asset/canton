@@ -60,8 +60,8 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyMapping.MappingHash
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.util.{BinaryFileUtil, ErrorUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.canton.{config, networking}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -1652,13 +1652,13 @@ class TopologyAdministrationGroup(
         )
       ).map(res => (res.item, res.context.operation, res.context.serial))
 
-      val (proposedMapping, serial, ops) = if (add) {
+      val (proposedMapping, serialE, ops) = if (add) {
         // Add key to mapping with serial + 1 or create new mapping.
         maybePreviousState match {
           case None =>
             (
               OwnerToKeyMapping.create(keyOwner, publicKeys),
-              PositiveInt.one,
+              Right(PositiveInt.one),
               TopologyChangeOp.Replace,
             )
           case Some((_, TopologyChangeOp.Remove, previousSerial)) =>
@@ -1704,6 +1704,12 @@ class TopologyAdministrationGroup(
             }
         }
       }
+
+      val serial = serialE.getOrElse(
+        ErrorUtil.invalidState("OwnerToKeyMapping max serial reached")(
+          errorLoggingContext(TraceContext.empty)
+        )
+      )
 
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
@@ -1882,12 +1888,21 @@ class TopologyAdministrationGroup(
         case None =>
           (
             SeqMap.empty[ParticipantId, ParticipantPermission],
-            Some(PositiveInt.one),
+            Some(Right(PositiveInt.one)),
             PositiveInt.one,
             None,
           )
       }
-      val newSerial = if (serial.nonEmpty) serial else nextSerial
+      val newSerial =
+        if (serial.nonEmpty) serial
+        else
+          nextSerial.map(
+            _.getOrElse(
+              ErrorUtil.invalidState("PartyToParticipant max serial reached")(
+                errorLoggingContext(TraceContext.empty)
+              )
+            )
+          )
 
       val newPermissions = new PartyToParticipantComputations(loggerFactory)
         .computeNewPermissions(
@@ -2564,7 +2579,13 @@ class TopologyAdministrationGroup(
             item.limits,
             synchronize,
             store = store,
-            serial = Some(result.context.serial.increment),
+            serial = Some(
+              result.context.serial.increment.getOrElse(
+                ErrorUtil.invalidState("ParticipantSynchronizerPermissions max serial reached")(
+                  errorLoggingContext(TraceContext.empty)
+                )
+              )
+            ),
             mustFullyAuthorize = mustFullyAuthorize,
             change = TopologyChangeOp.Remove,
           )
@@ -2786,7 +2807,7 @@ class TopologyAdministrationGroup(
                 ) =>
               (serial.increment, adds)
             case None =>
-              (PositiveInt.one, adds)
+              (Right(PositiveInt.one), adds)
           }
 
           if (current0.exists(_.item.packages.toSet == newDiffPackageIds.toSet))
@@ -2798,7 +2819,13 @@ class TopologyAdministrationGroup(
               store,
               mustFullyAuthorize,
               synchronize,
-              Some(newSerial),
+              Some(
+                newSerial.getOrElse(
+                  ErrorUtil.invalidState("VettedPackages max serial reached")(
+                    errorLoggingContext(TraceContext.empty)
+                  )
+                )
+              ),
               signedBy,
               force,
             )
@@ -3021,7 +3048,7 @@ class TopologyAdministrationGroup(
             mds.observers.concat(observerAdds).diff(observerRemoves),
           )
         case None =>
-          (PositiveInt.one, PositiveInt.one, adds, observerAdds)
+          (Right(PositiveInt.one), PositiveInt.one, adds, observerAdds)
       }
 
       propose(
@@ -3034,7 +3061,13 @@ class TopologyAdministrationGroup(
         synchronize = synchronize,
         mustFullyAuthorize = mustFullyAuthorize,
         signedBy = signedBy,
-        serial = Some(serial),
+        serial = Some(
+          serial.getOrElse(
+            ErrorUtil.invalidState("Mediator synchronizer state max serial reached")(
+              errorLoggingContext(TraceContext.empty)
+            )
+          )
+        ),
       ).discard
     }
 
@@ -3143,7 +3176,13 @@ class TopologyAdministrationGroup(
         ),
         mapping = mediatorStateResult.item,
         signedBy = Seq.empty,
-        serial = Some(mediatorStateResult.context.serial.increment),
+        serial = Some(
+          mediatorStateResult.context.serial.increment.getOrElse(
+            ErrorUtil.invalidState("Mediator synchronizer state max serial reached")(
+              errorLoggingContext(TraceContext.empty)
+            )
+          )
+        ),
         change = TopologyChangeOp.Remove,
         mustFullyAuthorize = mustFullyAuthorize,
         forceChanges = ForceFlags.none,
@@ -3439,7 +3478,13 @@ class TopologyAdministrationGroup(
           Some(synchronizerStore),
           mustFullyAuthorize,
           signedBy,
-          Some(previousParameters.context.serial.increment),
+          Some(
+            previousParameters.context.serial.increment.getOrElse(
+              ErrorUtil.invalidState("SynchronizerParameters max serial reached")(
+                errorLoggingContext(TraceContext.empty)
+              )
+            )
+          ),
           synchronize,
           force,
         ).discard

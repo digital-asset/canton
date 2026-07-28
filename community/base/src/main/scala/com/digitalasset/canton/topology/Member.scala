@@ -398,7 +398,7 @@ object ParticipantId {
       case y =>
         Left(
           ProtoDeserializationError
-            .ValueDeserializationError(fieldName, s"Value $y is not of type `ParticipantId`")
+            .ValueDeserializationError(s"Value $y is not of type `ParticipantId`", fieldName)
         )
     }
 
@@ -546,7 +546,7 @@ object MediatorId {
     case _ =>
       Left(
         ProtoDeserializationError
-          .ValueDeserializationError(fieldName, s"Value `$mediatorId` is not of type MediatorId")
+          .ValueDeserializationError(s"Value `$mediatorId` is not of type MediatorId", fieldName)
       )
   }
 
@@ -590,7 +590,7 @@ object SequencerId {
       case y =>
         Left(
           ProtoDeserializationError
-            .ValueDeserializationError(fieldName, s"Value $y is not of type `SequencerId`")
+            .ValueDeserializationError(s"Value $y is not of type `SequencerId`", fieldName)
         )
     }
 }

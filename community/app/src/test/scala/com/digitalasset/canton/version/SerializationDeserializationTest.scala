@@ -201,6 +201,7 @@ final class SerializationDeserializationTest
         test(OnboardingStateForSequencer, version)
         test(OnboardingStateForSequencerV2, version)
         test(LsuTrafficState, version)
+        test(SynchronizerPredecessor, version)
 
         testContext(ViewParticipantData, (TestHash, version), version)
         // the generated recipient trees can be quite big, even they are already limited
@@ -241,7 +242,10 @@ final class SerializationDeserializationTest
           bytes =>
             SequencedEvent
               .fromTrustedByteStringCompressed(bytes)
-              .flatMap(SequencedEvent.decompress(_, defaultDecompressionPolicy)),
+              .flatMap(
+                SequencedEvent
+                  .decompress(_, ProtocolVersionValidation(version), defaultDecompressionPolicy)
+              ),
         )
         test(SignedContent, version)
         testContext(TransactionView, (TestHash, version), version)

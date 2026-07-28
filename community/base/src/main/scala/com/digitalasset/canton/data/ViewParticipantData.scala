@@ -20,6 +20,7 @@ import com.digitalasset.canton.protocol.{v30, v31, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{
   LfCommand,
@@ -476,25 +477,28 @@ object ViewParticipantData
     extends VersioningCompanionContextMemoization[ViewParticipantData, (HashOps, ProtocolVersion)] {
   override val name: String = "ViewParticipantData"
 
-  // Inline context helper
-  private def ic[C1, C2, P, R](f: (C1, C2, P) => R)(c: (C1, C2), p: P): R = {
+  // Inline context helper: forwards the negotiated pv (for content validation) alongside the
+  // deserialization context (HashOps, ProtocolVersion).
+  private def ic[C1, C2, P, R](
+      f: (ProtocolVersionValidation, C1, C2, P) => R
+  )(pvv: ProtocolVersionValidation, c: (C1, C2), p: P): R = {
     val (c1, c2) = c
-    f(c1, c2, p)
+    f(pvv, c1, c2, p)
   }
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ViewParticipantData)(
-      supportedProtoVersionMemoized(_)(ic(fromProtoV30)),
+      supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV30)),
       _.toProtoV30,
     ),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.ViewParticipantData)(
-      supportedProtoVersionMemoized(_)(ic(fromProtoV31)),
+      supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV31)),
       _.toProtoV31,
     ),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v32.ViewParticipantData
     )(
-      supportedProtoVersionMemoized(_)(ic(fromProtoV32)),
+      supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV32)),
       _.toProtoV32,
     ),
     // Temporary proto version, not backed by protobuf message used to allow
@@ -502,7 +506,7 @@ object ViewParticipantData
     ProtoVersion(33) -> VersionedProtoCodec(ProtocolVersion.dev)(
       v32.ViewParticipantData
     )(
-      supportedProtoVersionMemoized(_)(ic(fromProtoV32)),
+      supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV32)),
       _.toProtoV32,
     ),
   )
@@ -562,6 +566,7 @@ object ViewParticipantData
       .validated(protocolVersion)
 
   private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
       dataP: v30.ViewParticipantData,
@@ -581,7 +586,7 @@ object ViewParticipantData
     for {
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
-        .flatMap(ActionDescription.fromProtoV30)
+        .flatMap(ActionDescription.fromProtoV30(pvv, _))
       rollbackContext <- PathRollbackContext
         .fromProtoV30(rbContextP)
         .leftMap(_.inField("rollback_context"))
@@ -591,6 +596,7 @@ object ViewParticipantData
       )
       createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV30)
       viewParticipantData <- fromProto(
+        pvv,
         hashOps,
         Map.empty,
         actionDescription,
@@ -610,6 +616,7 @@ object ViewParticipantData
   }
 
   private def fromProtoV31(
+      pvv: ProtocolVersionValidation,
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
       dataP: v31.ViewParticipantData,
@@ -627,15 +634,18 @@ object ViewParticipantData
     ) = dataP
 
     for {
-      keyResolution <- resolvedKeysP.traverse(KeyResolutionWithMaintainers.fromProtoV31)
+      keyResolution <- resolvedKeysP.traverse(
+        KeyResolutionWithMaintainers.fromProtoV31(pvv, _)
+      )
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
-        .flatMap(ActionDescription.fromProtoV31)
+        .flatMap(ActionDescription.fromProtoV31(pvv, _))
       rollbackContext <- PathRollbackContext
         .fromProtoV30(rbContextP)
         .leftMap(_.inField("rollback_context"))
       createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV30)
       viewParticipantData <- fromProto(
+        pvv,
         hashOps,
         keyResolution.toMap,
         actionDescription,
@@ -653,6 +663,7 @@ object ViewParticipantData
   }
 
   private def fromProtoV32(
+      pvv: ProtocolVersionValidation,
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
       dataP: v32.ViewParticipantData,
@@ -671,13 +682,18 @@ object ViewParticipantData
     ) = dataP
 
     for {
-      keyResolution <- resolvedKeysP.traverse(KeyResolutionWithMaintainers.fromProtoV31)
+      keyResolution <- resolvedKeysP.traverse(
+        KeyResolutionWithMaintainers.fromProtoV31(pvv, _)
+      )
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
-        .flatMap(ActionDescription.fromProtoV31)
-      externalCallResults <- externalCallResultsP.traverse(ViewExternalCallResult.fromProtoV32)
+        .flatMap(ActionDescription.fromProtoV31(pvv, _))
+      externalCallResults <- externalCallResultsP.traverse(
+        ViewExternalCallResult.fromProtoV32(pvv, _)
+      )
       createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV31)
       viewParticipantData <- fromProto(
+        pvv,
         hashOps,
         keyResolution.toMap,
         actionDescription,
@@ -695,6 +711,7 @@ object ViewParticipantData
   }
 
   private def fromProto(
+      pvv: ProtocolVersionValidation,
       hashOps: HashOps,
       keyResolution: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       actionDescription: ActionDescription,
@@ -713,8 +730,11 @@ object ViewParticipantData
       coreInputs = coreInputsSeq.view
         .map(inputContract => inputContract.contract.contractId -> inputContract)
         .toMap
-      createdInSubviewArchivedInCore <- createdInSubviewArchivedInCoreP
-        .traverse(ProtoConverter.parseLfContractId)
+      createdInSubviewArchivedInCore <- ProtoValidation.validateThen(
+        createdInSubviewArchivedInCoreP,
+        "created_in_subview_archived_in_core",
+        pvv,
+      )(ProtoConverter.parseLfContractId)
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)
         .leftMap(_.inField("salt"))
@@ -775,11 +795,12 @@ object ViewParticipantData
 
   object ViewExternalCallResult {
     def fromProtoV32(
-        resultP: v32.ViewExternalCallResult
+        pvv: ProtocolVersionValidation,
+        resultP: v32.ViewExternalCallResult,
     ): ParsingResult[ViewExternalCallResult] = {
       val v32.ViewExternalCallResult(
-        extensionId,
-        functionId,
+        extensionIdP,
+        functionIdP,
         config,
         input,
         output,
@@ -790,8 +811,20 @@ object ViewParticipantData
       for {
         exerciseIndex <- ProtoConverter.parseNonNegativeInt("exercise_index", exerciseIndexP)
         callIndex <- ProtoConverter.parseNonNegativeInt("call_index", callIndexP)
-        checkingParties <- checkingPartiesP
-          .traverse(ProtoConverter.parseLfPartyId(_, field = "checking_parties"))
+        extensionId <- ProtoValidation.validate(
+          extensionIdP,
+          Some("extension_id"),
+          pvv,
+        )
+        functionId <- ProtoValidation.validate(
+          functionIdP,
+          Some("function_id"),
+          pvv,
+        )
+        checkingParties <- ProtoValidation
+          .validateThen(checkingPartiesP, "checking_parties", pvv)(
+            ProtoConverter.parseLfPartyId
+          )
       } yield ViewExternalCallResult(
         result = ExternalCallResult(
           extensionId = extensionId,

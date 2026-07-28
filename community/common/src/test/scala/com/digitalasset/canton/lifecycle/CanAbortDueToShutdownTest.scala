@@ -6,8 +6,9 @@ package com.digitalasset.canton.lifecycle
 import cats.data.{EitherT, Nested, OptionT}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.digitalasset.canton.util.{Checked, CheckedT}
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, ScalaFuturesWithPatience, lifecycle}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, lifecycle}
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.{EitherValues, OptionValues}
 

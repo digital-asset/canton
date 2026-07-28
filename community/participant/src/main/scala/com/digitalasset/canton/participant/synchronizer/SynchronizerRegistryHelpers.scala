@@ -68,6 +68,7 @@ import org.apache.pekko.stream.Materializer
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.util.Success
+import scala.util.chaining.scalaUtilChainingOps
 
 trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with HasCloseContext {
   this: HasFutureSupervision =>
@@ -210,6 +211,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           case _: ParticipantId => configO
           case _ => None
         }
+
+        logger.debug(s"Building sequencer client factory for $psid")
         (
           SequencerClientFactory(
             psid,
@@ -287,6 +290,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           } yield ()
         }
 
+      _ = logger.debug(s"Building sequencer client for $psid")
+
       sequencerClient <- sequencerClientFactory
         .create(
           participantId,
@@ -349,6 +354,9 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       persistentState,
       synchronizerCryptoApi,
       timeouts,
+    ).tap(synchronizerHandle =>
+      if (logger.underlying.isDebugEnabled())
+        logger.debug(s"Synchronizer handle ready for use: $synchronizerHandle")
     )
 
     synchronizerHandleET

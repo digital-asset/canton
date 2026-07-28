@@ -500,6 +500,176 @@ class SynchronizerSelectorTest
         )
     }
   }
+
+  /*
+    Automatic reassignment: the submitter only needs to be a stakeholder of the contracts that are
+    actually reassigned to the target synchronizer, not of every input contract. Contracts
+    that already reside on the target synchronizer are never reassigned and hence never checked.
+
+    Note: in this fixture the only reader/submitter is `signatory`
+    (actAs = Set(signatory), readAs = empty).
+   */
+  "SynchronizerSelector (automatic reassignment stakeholder rule)" should {
+    import SynchronizerSelectorTest.*
+    import SynchronizerSelectorTest.ForSimpleTopology.*
+    import SimpleTopology.*
+
+    // cause reported for a synchronizer discarded because a required reassignment cannot be done
+    val reassignmentFailedCause =
+      "Automatically reassigning contracts to a common synchronizer failed."
+
+    val submitterIsStakeholder =
+      Stakeholders.withSignatoriesAndObservers(Set(signatory), Set(observer))
+    val submitterNotStakeholder =
+      Stakeholders.withSignatoriesAndObservers(Set(observer), Set.empty[LfPartyId])
+
+    def select(
+        threeExercises: ThreeExercises,
+        synchronizerOfContracts: Map[LfContractId, PhysicalSynchronizerId],
+        inputContractStakeholders: Map[LfContractId, Stakeholders],
+        targetSynchronizer: PhysicalSynchronizerId,
+        connectedSynchronizers: Set[PhysicalSynchronizerId],
+    ) =
+      selectorForThreeExercises(
+        threeExercises = threeExercises,
+        connectedSynchronizers = connectedSynchronizers,
+        admissibleSynchronizers = NonEmpty.mk(Set, targetSynchronizer),
+        synchronizerOfContracts = _ =>
+          synchronizerOfContracts.map { case (coid, synchronizerId) =>
+            coid -> (synchronizerId, ContractStateStatus.Active)
+          },
+        inputContractStakeholders = inputContractStakeholders,
+      ).forMultiSynchronizer.futureValueUS.map(_.reassignments)
+
+    "reassign when the submitter is a stakeholder of the moved contract" in {
+      val threeExercises = ThreeExercises(fixtureSerializationVersion)
+
+      // c1, c2 are already on the target (acme) and the submitter is NOT a stakeholder of them.
+      // c3 is on da and must be moved to acme; the submitter IS a stakeholder of it.
+      val reassignments = select(
+        threeExercises,
+        synchronizerOfContracts = Map(
+          threeExercises.inputContract1Id -> acme,
+          threeExercises.inputContract2Id -> acme,
+          threeExercises.inputContract3Id -> da,
+        ),
+        inputContractStakeholders = Map(
+          threeExercises.inputContract1Id -> submitterNotStakeholder,
+          threeExercises.inputContract2Id -> submitterNotStakeholder,
+          threeExercises.inputContract3Id -> submitterIsStakeholder,
+        ),
+        targetSynchronizer = acme,
+        connectedSynchronizers = Set(acme, da),
+      )
+
+      // Only c3 is reassigned (da -> acme); not being a stakeholder of c1/c2 is fine.
+      reassignments.value shouldBe Map(threeExercises.inputContract3Id -> (signatory, da))
+
+    }
+
+    "reassign several contracts from different synchronizers when the submitter is a stakeholder of all moved contracts" in {
+      val threeExercises = ThreeExercises(fixtureSerializationVersion)
+
+      // c1 is already on the target (acme) and the submitter is NOT a stakeholder of it.
+      // c2 (on da) and c3 (on repair) must be moved to acme; the submitter IS a stakeholder of both.
+      val reassignments = select(
+        threeExercises,
+        synchronizerOfContracts = Map(
+          threeExercises.inputContract1Id -> acme,
+          threeExercises.inputContract2Id -> da,
+          threeExercises.inputContract3Id -> repair,
+        ),
+        inputContractStakeholders = Map(
+          threeExercises.inputContract1Id -> submitterNotStakeholder,
+          threeExercises.inputContract2Id -> submitterIsStakeholder,
+          threeExercises.inputContract3Id -> submitterIsStakeholder,
+        ),
+        targetSynchronizer = acme,
+        connectedSynchronizers = Set(acme, da, repair),
+      )
+
+      reassignments.value shouldBe Map(
+        threeExercises.inputContract2Id -> (signatory, da),
+        threeExercises.inputContract3Id -> (signatory, repair),
+      )
+    }
+
+    "not require the submitter to be a stakeholder when no contract is moved" in {
+      val threeExercises = ThreeExercises(fixtureSerializationVersion)
+
+      // All contracts already reside on the target (acme) and the submitter is a stakeholder of
+      // none of them. As nothing is moved, no stakeholder requirement applies.
+      val reassignments = select(
+        threeExercises,
+        synchronizerOfContracts = Map(
+          threeExercises.inputContract1Id -> acme,
+          threeExercises.inputContract2Id -> acme,
+          threeExercises.inputContract3Id -> acme,
+        ),
+        inputContractStakeholders = Map(
+          threeExercises.inputContract1Id -> submitterNotStakeholder,
+          threeExercises.inputContract2Id -> submitterNotStakeholder,
+          threeExercises.inputContract3Id -> submitterNotStakeholder,
+        ),
+        targetSynchronizer = acme,
+        connectedSynchronizers = Set(acme),
+      )
+
+      reassignments.value shouldBe Map.empty
+    }
+
+    "fail to reassign when the submitter is not a stakeholder of a contract that must be moved" in {
+      val threeExercises = ThreeExercises(fixtureSerializationVersion)
+
+      // c3 (on da) must be moved to the only admissible target (acme), but the submitter is NOT a
+      // stakeholder of it, so no reader can submit the reassignment and ranking fails.
+      val result = select(
+        threeExercises,
+        synchronizerOfContracts = Map(
+          threeExercises.inputContract1Id -> acme,
+          threeExercises.inputContract2Id -> acme,
+          threeExercises.inputContract3Id -> da,
+        ),
+        inputContractStakeholders = Map(
+          threeExercises.inputContract1Id -> submitterIsStakeholder,
+          threeExercises.inputContract2Id -> submitterIsStakeholder,
+          threeExercises.inputContract3Id -> submitterNotStakeholder,
+        ),
+        targetSynchronizer = acme,
+        connectedSynchronizers = Set(acme, da),
+      )
+
+      result.left.value shouldBe NoSynchronizerForSubmission.SynchronizerRankingFailed(
+        Map(acme -> reassignmentFailedCause)
+      )
+    }
+
+    "fail to reassign when the submitter is a stakeholder of only some of the moved contracts" in {
+      val threeExercises = ThreeExercises(fixtureSerializationVersion)
+
+      // Both c2 (on da) and c3 (on repair) must be moved to acme. The submitter is a stakeholder of
+      // c2 but not of c3, so being a stakeholder of only some moved contracts is not enough.
+      val result = select(
+        threeExercises,
+        synchronizerOfContracts = Map(
+          threeExercises.inputContract1Id -> acme,
+          threeExercises.inputContract2Id -> da,
+          threeExercises.inputContract3Id -> repair,
+        ),
+        inputContractStakeholders = Map(
+          threeExercises.inputContract1Id -> submitterIsStakeholder,
+          threeExercises.inputContract2Id -> submitterIsStakeholder,
+          threeExercises.inputContract3Id -> submitterNotStakeholder,
+        ),
+        targetSynchronizer = acme,
+        connectedSynchronizers = Set(acme, da, repair),
+      )
+
+      result.left.value shouldBe NoSynchronizerForSubmission.SynchronizerRankingFailed(
+        Map(acme -> reassignmentFailedCause)
+      )
+    }
+  }
 }
 
 private[routing] object SynchronizerSelectorTest {

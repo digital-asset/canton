@@ -66,7 +66,7 @@ class RecipientsTreeTest extends AnyWordSpec with BaseTest {
     "preserve the same thing" in {
 
       val serialized = t5.toProtoV30
-      val deserialized = RecipientsTree.fromProtoV30(serialized)
+      val deserialized = RecipientsTree.fromProtoV30(testedProtocolVersionValidation, serialized)
 
       deserialized shouldBe Right(t5)
     }

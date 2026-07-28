@@ -5,24 +5,30 @@ val iouAlias = "iou"
 val paintAlias = "paint"
 
 val iouSynchronizerOwner = iou_sequencer
-val iouId = bootstrap.synchronizer(
-  iouAlias,
-  sequencers = Seq(iou_sequencer),
-  mediators = Seq(iou_mediator),
-  synchronizerOwners = Seq(iouSynchronizerOwner),
-  synchronizerThreshold = PositiveInt.one,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
-).logical
+val iouId = bootstrap
+  .synchronizer(
+    iouAlias,
+    sequencers = Seq(iou_sequencer),
+    mediators = Seq(iou_mediator),
+    synchronizerOwners = Seq(iouSynchronizerOwner),
+    synchronizerThreshold = PositiveInt.one,
+    staticSynchronizerParameters =
+      StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+  )
+  .logical
 
 val paintSynchronizerOwner = paint_sequencer
-val paintId = bootstrap.synchronizer(
-  paintAlias,
-  sequencers = Seq(paint_sequencer),
-  mediators = Seq(paint_mediator),
-  synchronizerOwners = Seq(paintSynchronizerOwner),
-  synchronizerThreshold = PositiveInt.one,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
-).logical
+val paintId = bootstrap
+  .synchronizer(
+    paintAlias,
+    sequencers = Seq(paint_sequencer),
+    mediators = Seq(paint_mediator),
+    synchronizerOwners = Seq(paintSynchronizerOwner),
+    synchronizerThreshold = PositiveInt.one,
+    staticSynchronizerParameters =
+      StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+  )
+  .logical
 
 // update parameters
 // disable automatic assignments
@@ -32,12 +38,34 @@ paintSynchronizerOwner.topology.synchronizer_parameters
   .propose_update(paintId, _.update(assignmentExclusivityTimeout = 2 seconds))
 
 // enable multi-synchronizer topology feature flag for all participants for both synchronizers
-val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)
-participant1.topology.synchronizer_trust_certificates.propose(participant1, iouId, featureFlags = featureFlag)
-participant2.topology.synchronizer_trust_certificates.propose(participant2, iouId, featureFlags = featureFlag)
-participant3.topology.synchronizer_trust_certificates.propose(participant3, iouId, featureFlags = featureFlag)
-participant2.topology.synchronizer_trust_certificates.propose(participant2, paintId, featureFlags = featureFlag)
-participant3.topology.synchronizer_trust_certificates.propose(participant3, paintId, featureFlags = featureFlag)
+val featureFlag = Seq(
+  SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
+)
+participant1.topology.synchronizer_trust_certificates.propose(
+  participant1,
+  iouId,
+  featureFlags = featureFlag,
+)
+participant2.topology.synchronizer_trust_certificates.propose(
+  participant2,
+  iouId,
+  featureFlags = featureFlag,
+)
+participant3.topology.synchronizer_trust_certificates.propose(
+  participant3,
+  iouId,
+  featureFlags = featureFlag,
+)
+participant2.topology.synchronizer_trust_certificates.propose(
+  participant2,
+  paintId,
+  featureFlags = featureFlag,
+)
+participant3.topology.synchronizer_trust_certificates.propose(
+  participant3,
+  paintId,
+  featureFlags = featureFlag,
+)
 
 // connect participants to the synchronizers
 participant1.synchronizers.connect_local(iou_sequencer, alias = iouAlias)
@@ -48,13 +76,21 @@ participant3.synchronizers.connect_local(paint_sequencer, alias = paintAlias)
 
 // create the parties
 val Bank = participant1.parties.enable("Bank")
-val HouseOwner = participant2.parties.enable("House Owner", synchronizer = Some(SynchronizerAlias.tryCreate(iouAlias)))
-participant2.parties.enable("House Owner", synchronizer = Some(SynchronizerAlias.tryCreate(paintAlias)))
-val Painter = participant3.parties.enable("Painter", synchronizer = Some(SynchronizerAlias.tryCreate(iouAlias)))
+val HouseOwner = participant2.parties.enable(
+  "House Owner",
+  synchronizer = Some(SynchronizerAlias.tryCreate(iouAlias)),
+)
+participant2.parties.enable(
+  "House Owner",
+  synchronizer = Some(SynchronizerAlias.tryCreate(paintAlias)),
+)
+val Painter =
+  participant3.parties.enable("Painter", synchronizer = Some(SynchronizerAlias.tryCreate(iouAlias)))
 participant3.parties.enable("Painter", synchronizer = Some(SynchronizerAlias.tryCreate(paintAlias)))
 
 // upload the Daml model to all participants
-val darPath = Option(System.getProperty("canton-examples.dar-path")).getOrElse("dars/CantonExamples.dar")
+val darPath =
+  Option(System.getProperty("canton-examples.dar-path")).getOrElse("dars/CantonExamples.dar")
 Seq(participant1, participant2, participant3).dars.upload(darPath, synchronizerId = iouId)
 Seq(participant2, participant3).dars.upload(darPath, synchronizerId = paintId)
 
@@ -72,27 +108,34 @@ val createIouCmd = new Iou(
   Bank.toProtoPrimitive,
   HouseOwner.toProtoPrimitive,
   new Amount(JavaBigDecimal.valueOf(100.0), "USD"),
-  List.empty.asJava
+  List.empty.asJava,
 ).create.commands.asScala.toSeq
 val Seq(iouContractUnshared) = decodeAllCreated(Iou.COMPANION)(
-  participant1.ledger_api.javaapi.commands.submit(Seq(Bank), createIouCmd, synchronizerId =Some(iouId)))
+  participant1.ledger_api.javaapi.commands
+    .submit(Seq(Bank), createIouCmd, synchronizerId = Some(iouId))
+)
 // Wait until the house owner sees the IOU in the active contract store
 participant2.ledger_api.state.acs.await_active_contract(HouseOwner, iouContractUnshared.id.toLf)
 
 // The house owner adds the Painter as an observer on the IOU
-val showIouCmd = iouContractUnshared.id.exerciseShare(Painter.toProtoPrimitive).commands.asScala.toSeq
+val showIouCmd =
+  iouContractUnshared.id.exerciseShare(Painter.toProtoPrimitive).commands.asScala.toSeq
 val Seq(iouContract) = decodeAllCreated(Iou.COMPANION)(
-  participant2.ledger_api.javaapi.commands.submit(Seq(HouseOwner), showIouCmd, synchronizerId =Some(iouId)))
+  participant2.ledger_api.javaapi.commands
+    .submit(Seq(HouseOwner), showIouCmd, synchronizerId = Some(iouId))
+)
 
 // The house owner creates a paint offer using participant 2 and the Paint synchronizer
 val paintOfferCmd = new OfferToPaintHouseByOwner(
   HouseOwner.toProtoPrimitive,
   Painter.toProtoPrimitive,
   Bank.toProtoPrimitive,
-  iouContract.id
+  iouContract.id,
 ).create.commands.asScala.toSeq
 val Seq(paintOffer) = decodeAllCreated(OfferToPaintHouseByOwner.COMPANION)(
-  participant2.ledger_api.javaapi.commands.submit(Seq(HouseOwner), paintOfferCmd, synchronizerId =Some(paintId)))
+  participant2.ledger_api.javaapi.commands
+    .submit(Seq(HouseOwner), paintOfferCmd, synchronizerId = Some(paintId))
+)
 // architecture-handbook-entry-end: creation
 
 // architecture-handbook-entry-begin: accept
@@ -101,7 +144,8 @@ participant3.ledger_api.state.acs.await_active_contract(Painter, paintOffer.id.t
 
 // Painter accepts the paint offer on the IOU synchronizer
 val acceptCmd = paintOffer.id.exerciseAcceptByPainter().commands.asScala.toSeq
-val acceptTx = participant3.ledger_api.javaapi.commands.submit(Seq(Painter), acceptCmd, synchronizerId =Some(iouId))
+val acceptTx = participant3.ledger_api.javaapi.commands
+  .submit(Seq(Painter), acceptCmd, synchronizerId = Some(iouId))
 val Seq(painterIou) = decodeAllCreated(Iou.COMPANION)(acceptTx)
 val Seq(paintHouse) = decodeAllCreated(PaintHouse.COMPANION)(acceptTx)
 // architecture-handbook-entry-end: accept
@@ -111,6 +155,6 @@ val Seq(paintHouse) = decodeAllCreated(PaintHouse.COMPANION)(acceptTx)
 participant3.ledger_api.javaapi.commands.submit(
   Seq(Painter),
   painterIou.id.exerciseCall().commands.asScala.toSeq,
-  synchronizerId =Some(iouId)
+  synchronizerId = Some(iouId),
 )
 // architecture-handbook-entry-end: cash

@@ -32,7 +32,7 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
 
     "be preserved through serialization / deserialization" in {
       val proto = recipients.toProtoV30
-      val fromProto = Recipients.fromProtoV30(proto)
+      val fromProto = Recipients.fromProtoV30(testedProtocolVersionValidation, proto)
       fromProto shouldBe Right(recipients)
     }
 

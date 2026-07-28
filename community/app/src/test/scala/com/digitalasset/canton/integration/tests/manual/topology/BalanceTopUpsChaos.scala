@@ -21,14 +21,16 @@ import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.tests.manual.topology.TopologyOperations.TransactionProgress
 import com.digitalasset.canton.integration.util.OnboardsNewSequencerNode
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil
-import com.digitalasset.canton.{BaseTest, ScalaFuturesWithPatience, config}
+import com.digitalasset.canton.{BaseTest, config}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalactic.source.Position
+import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{Millis, Seconds, Span}
 
@@ -70,7 +72,7 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
   override lazy val reservations: Reservations =
     Reservations(exclusiveParticipants = Seq("participant5", "participant6"))
 
-  private class BalanceUpdater(val member: Member) extends Matchers {
+  private class BalanceUpdater(val member: Member) extends Matchers with EitherValues {
     private def fetchNextSerial(): Option[PositiveInt] = {
       val serial = activeSequencers
         .get()
@@ -84,7 +86,7 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
           throw new IllegalStateException(s"Expected traffic for member $member to be present"),
         )
         .serial
-        .map(_.increment)
+        .map(_.increment.value)
       logger.info(s"Fetched last top-up serial $serial for $member")(TraceContext.empty)
       serial
     }
@@ -112,7 +114,7 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
     ): Future[Unit] = {
       import env.*
 
-      val serial = nextTopUpSerial.getAndUpdate(_.increment)
+      val serial = nextTopUpSerial.getAndUpdate(_.increment.value)
       val topUpValue =
         topUpValueO.getOrElse(
           NonNegativeLong.tryCreate(MinimumTopUp + random.nextLong(MaximumTopUp - MinimumTopUp + 1))

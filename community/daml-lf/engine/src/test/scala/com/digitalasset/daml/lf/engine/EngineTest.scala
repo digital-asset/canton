@@ -60,13 +60,13 @@ import scala.language.implicitConversions
 
 class EngineTestCidV1 extends EngineTest(ContractIdVersion.V1)
 class EngineTestCidV2 extends EngineTest(ContractIdVersion.V2)
-class EngineTestNUCKCidV1 extends EngineTestNUCK(ContractIdVersion.V1)
-class EngineTestNUCKCidV2 extends EngineTestNUCK(ContractIdVersion.V2)
+class EngineTestKeyCidV1 extends EngineTestKey(ContractIdVersion.V1)
+class EngineTestKeyCidV2 extends EngineTestKey(ContractIdVersion.V2)
 
 class EngineTestExceptionsNoKeyCidV1 extends EngineTestExceptionsNoKey(ContractIdVersion.V1)
 class EngineTestExceptionsNoKeyCidV2 extends EngineTestExceptionsNoKey(ContractIdVersion.V2)
-class EngineTestExceptionsNUCKCidV1 extends EngineTestExceptionsNUCK(ContractIdVersion.V1)
-class EngineTestExceptionsNUCKCidV2 extends EngineTestExceptionsNUCK(ContractIdVersion.V2)
+class EngineTestExceptionsKeyCidV1 extends EngineTestExceptionsKey(ContractIdVersion.V1)
+class EngineTestExceptionsKeyCidV2 extends EngineTestExceptionsKey(ContractIdVersion.V2)
 
 @SuppressWarnings(
   Array(
@@ -1968,7 +1968,7 @@ class EngineTest(contractIdVersion: ContractIdVersion)
     "org.wartremover.warts.Product",
   )
 )
-class EngineTestNUCK(contractIdVersion: ContractIdVersion)
+class EngineTestKey(contractIdVersion: ContractIdVersion)
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
@@ -2007,7 +2007,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -2063,7 +2063,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
               seeding = seeding,
               contractIdVersion = contractIdVersion,
               interpretationConfig = InterpretationConfig.Default
-                .copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+                .copy(contractStateMode = ContractStateMachine.Mode.Key),
             )
             .consume(lookupContract, lookupPackage, lookupKey)
         }
@@ -2079,7 +2079,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -2094,7 +2094,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
         reinterpret(
           suffixStrictEngine,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
           Set(alice),
           stx.roots,
           stx,
@@ -2120,7 +2120,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           submissionSeed,
           contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(lookupContract, lookupPackage, lookupKey)
       validated match {
@@ -2170,7 +2170,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2212,7 +2212,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(lookupContract, lookupPackage, lookupKey)
 
@@ -2387,7 +2387,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2438,7 +2438,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2504,7 +2504,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           submissionSeed = seed,
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
           prefetchKeys = Seq.empty,
         )
         .consume(lookupContract, lookupPackage, lookupKey)
@@ -2538,7 +2538,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = InitialSeeding.TransactionSeed(seed),
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(PartialFunction.empty, lookupPackage, lookupKey)
 
@@ -2609,7 +2609,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = seeding,
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(
           contracts,
@@ -2674,7 +2674,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(lookupContractMap, lookupPackage, lookupKey)
 
@@ -2742,7 +2742,7 @@ class EngineTestNUCK(contractIdVersion: ContractIdVersion)
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
           interpretationConfig =
-            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
         )
         .consume(lookupContractMap, lookupPackage, lookupKey)
 
@@ -2769,10 +2769,10 @@ class EngineTestExceptionsNoKey(contractIdVersion: ContractIdVersion)
       "Exceptions-nokey.dar",
     )
 
-class EngineTestExceptionsNUCK(contractIdVersion: ContractIdVersion)
+class EngineTestExceptionsKey(contractIdVersion: ContractIdVersion)
     extends EngineTestExceptions(
       contractIdVersion,
-      ContractStateMachine.Mode.NUCK,
+      ContractStateMachine.Mode.Key,
       "Exceptions-keys.dar",
     )
 
@@ -2890,7 +2890,7 @@ class EngineTestExceptions(
       contractStateMode match {
         case Mode.NoKey =>
           run(command) shouldBe a[Right[?, ?]]
-        case Mode.NUCK =>
+        case Mode.Key =>
           inside(run(command)) {
             case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
               succeed
@@ -2919,7 +2919,7 @@ class EngineTestExceptions(
       contractStateMode match {
         case Mode.NoKey =>
           run(command) shouldBe a[Right[?, ?]]
-        case Mode.NUCK =>
+        case Mode.Key =>
           inside(run(command)) {
             case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
               succeed
@@ -2938,7 +2938,7 @@ class EngineTestExceptions(
           succeed
       }
     }
-    if (contractStateMode == ContractStateMachine.Mode.NUCK)
+    if (contractStateMode == ContractStateMachine.Mode.Key)
       "key updates in rollback node crash" in {
         val command = ApiCommand.CreateAndExercise(
           helperId.toRef,
@@ -2948,7 +2948,7 @@ class EngineTestExceptions(
         )
         run(command) shouldBe a[Left[?, ?]]
       }
-    if (contractStateMode == ContractStateMachine.Mode.NUCK)
+    if (contractStateMode == ContractStateMachine.Mode.Key)
       "key updates in try are not rolled back if no exception is thrown" in {
         val command = ApiCommand.CreateAndExercise(
           helperId.toRef,
@@ -2972,7 +2972,7 @@ class EngineTestExceptions(
             case Left(IErr(IErr.DamlException(interpretation.Error.ContractNotFound(_)), _)) =>
               succeed
           }
-        case Mode.NUCK =>
+        case Mode.Key =>
           inside(run(command)) {
             case Left(IErr(IErr.DamlException(interpretation.Error.EffectfulRollback(_)), _)) =>
               succeed
@@ -3034,7 +3034,7 @@ class EngineTestExceptions(
             meta.nodeSeeds.map(_._1.index) shouldBe ImmArray(0, 1, 3, 6)
           }
         }
-      case ContractStateMachine.Mode.NUCK =>
+      case ContractStateMachine.Mode.Key =>
         "Only create and exercise nodes end up in actionNodeSeeds" in {
 
           val command = ApiCommand.CreateAndExercise(

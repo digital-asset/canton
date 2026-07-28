@@ -17,6 +17,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import slick.jdbc.GetResult
 
 /** State of the traffic consumed by a member at a given time.
@@ -228,9 +230,16 @@ object TrafficConsumed {
         TrafficConsumed(member, ts, trafficConsumed, baseTraffic, lastConsumedCost)
       }
 
-  def fromProtoV30(trafficConsumedP: TrafficConsumedP): ParsingResult[TrafficConsumed] =
+  def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      trafficConsumedP: TrafficConsumedP,
+  ): ParsingResult[TrafficConsumed] =
     for {
-      member <- Member.fromProtoPrimitive(trafficConsumedP.member, "member")
+      member <- ProtoValidation.validateThen(
+        trafficConsumedP.member,
+        "member",
+        pvv,
+      )(Member.fromProtoPrimitive)
       extraTrafficConsumed <- ProtoConverter.parseNonNegativeLong(
         "extra_traffic_consumed",
         trafficConsumedP.extraTrafficConsumed,

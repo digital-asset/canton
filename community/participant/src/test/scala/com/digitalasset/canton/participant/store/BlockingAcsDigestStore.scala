@@ -5,15 +5,11 @@ package com.digitalasset.canton.participant.store
 
 import cats.Eval
 import com.digitalasset.canton.InternedPartyId
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  HashedDigest,
-  InternedParticipantId,
-  RawDigest,
-}
+import com.digitalasset.canton.participant.store.AcsDigestStore.{Checkpoint, InternedParticipantId}
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.tracing.TraceContext
@@ -40,24 +36,22 @@ class BlockingAcsDigestStore(
   private def blockAndThen[A](f: => FutureUnlessShutdown[A]): FutureUnlessShutdown[A] =
     blockingRef.get.flatMap(_ => f)
 
-  override protected val party_
-      : AcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId], RawDigest] =
-    new BlockingAcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId], RawDigest](
+  override protected val party_ : AcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId]] =
+    new BlockingAcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId]](
       () => blockingRef.get,
       delegate.partyInternal,
     )
 
-  override protected val participant_
-      : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] =
-    new BlockingAcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)](
+  override protected val participant_ : AcsDigestJournal[InternedParticipantId] =
+    new BlockingAcsDigestJournal[InternedParticipantId](
       () => blockingRef.get,
       delegate.participantInternal,
     )
 
-  override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit
+  override def insertCheckpointTime(checkpoint: Checkpoint)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    blockAndThen(delegate.insertCheckpointTime(offset, timestamp))
+    blockAndThen(delegate.insertCheckpointTime(checkpoint))
 
   override protected def deleteCheckpointsAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
@@ -71,39 +65,39 @@ class BlockingAcsDigestStore(
 
   override def latestCheckpointUpTo(toInclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(Offset, CantonTimestamp)]] =
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
     blockAndThen(delegate.latestCheckpointUpTo(toInclusive))
 
   override def firstCheckpointAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(Offset, CantonTimestamp)]] =
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
     blockAndThen(delegate.firstCheckpointAfter(fromExclusive))
 }
 
-class BlockingAcsDigestJournal[K, V](
+class BlockingAcsDigestJournal[K](
     getBlocking: () => FutureUnlessShutdown[Unit],
     // The pointless `private[...]` modifier suppresses the Scala compiler's worry
     // that the Token types escapes the visibility of the private modifier.
-    private[BlockingAcsDigestJournal] val delegate: AcsDigestJournal[K, V],
+    private[BlockingAcsDigestJournal] val delegate: AcsDigestJournal[K],
 )(private implicit val executionContext: ExecutionContext)
-    extends AcsDigestJournal[K, V] {
+    extends AcsDigestJournal[K] {
 
   private def blockAndThen[A](f: => FutureUnlessShutdown[A]): FutureUnlessShutdown[A] =
     getBlocking().flatMap(_ => f)
 
   override def upsertDigestUpdates(
-      digests: immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K, V]]
+      digests: immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K]]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     blockAndThen(delegate.upsertDigestUpdates(digests))
 
   override def lookup(key: K, toInclusive: AtInclusive)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K, V]]] =
+  ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K]]] =
     blockAndThen(delegate.lookup(key, toInclusive))
 
   override def bulkLookup(keys: immutable.Iterable[K], toInclusive: AtInclusive)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[K, AcsDigestStore.AcsDigestUpdate[K, V]]] =
+  ): FutureUnlessShutdown[Map[K, AcsDigestStore.AcsDigestUpdate[K]]] =
     blockAndThen(delegate.bulkLookup(keys, toInclusive))
 
   override def snapshot(
@@ -111,7 +105,7 @@ class BlockingAcsDigestJournal[K, V](
       limit: InternedParticipantId,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
-        immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K, V]],
+        immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K]],
         Either[PaginationTokenDone, SnapshotPaginationToken],
     )
   ] = blockAndThen(delegate.snapshot(tokenOrStart, limit))
@@ -126,7 +120,7 @@ class BlockingAcsDigestJournal[K, V](
       limit: InternedParticipantId,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
-        immutable.Iterable[AcsDigestStore.AcsDigest[K, V]],
+        immutable.Iterable[AcsDigestStore.AcsDigest[K]],
         Either[PaginationTokenDone, ChangesBetweenPaginationToken],
     )
   ] = blockAndThen(delegate.changesBetween(tokenOrStart, limit))

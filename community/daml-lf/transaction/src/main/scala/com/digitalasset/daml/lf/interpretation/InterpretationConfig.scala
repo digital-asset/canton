@@ -15,11 +15,11 @@ case class InterpretationConfig(
 object InterpretationConfig {
   val Default: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions = LanguageVersion.stableLfVersions,
-    contractStateMode = ContractStateMachine.Mode.NUCK,
+    contractStateMode = ContractStateMachine.Mode.Key,
   )
   val Dev: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions = LanguageVersion.allLfVersions,
-    contractStateMode = ContractStateMachine.Mode.NUCK,
+    contractStateMode = ContractStateMachine.Mode.Key,
   )
   val Legacy: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions = List(LanguageVersion.v2_1, LanguageVersion.v2_2),

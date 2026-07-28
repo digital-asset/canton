@@ -36,6 +36,10 @@ import com.digitalasset.canton.participant.ParticipantNodeBootstrap.ParticipantS
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.admin.party.{PartyReplicationEndpoints, PartyReplicator}
+import com.digitalasset.canton.participant.commitment.{
+  AcsCommitmentProcessorManager,
+  DigestProcessorFactoryImpl,
+}
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.extension.{
   ExtensionServiceExternalCallValidator,
@@ -948,7 +952,7 @@ class ParticipantNodeBootstrap(
         acsDigestProcessorEnabled =
           parameters.acsCommitments.enableRunningDigestProcessor && parameters.devVersionSupport
         acsDigestProcessorManagerO = Option.when(acsDigestProcessorEnabled)(
-          new LifeCycleContainer[AcsDigestProcessorManager](
+          new LifeCycleContainer[AcsCommitmentProcessorManager](
             "ACS digest processor manager",
             create = () => {
               val ledgerApiStore = ledgerApiIndexerContainer.asEval.flatMap(_.ledgerApiStore).value
@@ -961,7 +965,7 @@ class ParticipantNodeBootstrap(
                 psidLookup = sync.activePsidForLsid _,
                 topologyClientO = lookupTopologyClient,
                 syncPersistentStateO = psid =>
-                  // TODO(#33506): This is not good, but makes LsuLateParticipantUpgradeTest and LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest green :(
+                  // TODO(#33084): This is not good, but makes LsuLateParticipantUpgradeTest and LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest green :(
                   //               In a late/manual lsu, the new psid might become active before the stores are even initialized.
                   //               That's why RepairServiceHelpers uses latestKnownPsid.
                   syncPersistentStateManager
@@ -974,15 +978,24 @@ class ParticipantNodeBootstrap(
                 loggerFactory = loggerFactory,
               )
 
+              val digestProcessorFactory = new DigestProcessorFactoryImpl(
+                participantId,
+                topologyLookupForAcsDigestProcessing,
+                syncPersistentStateManager.acsDigestStore,
+                ledgerApiServerContainer.asEval.value.internalIndexService,
+                ledgerApiStore,
+                ledgerApiStore.stringInterningView,
+                parameters.acsCommitments,
+                enableAdditionalConsistencyChecks = parameters.enableAdditionalConsistencyChecks,
+                timeouts,
+                loggerFactory,
+              )
+
               val manager =
-                new AcsDigestProcessorManager(
-                  participantId,
-                  topologyLookupForAcsDigestProcessing,
-                  syncPersistentStateManager.acsDigestStore,
-                  ledgerApiServerContainer.asEval.value.internalIndexService,
-                  syncCryptoSignerWithSessionKeys.pureCrypto,
-                  ledgerApiStore.stringInterningView,
-                  parameters.acsCommitments,
+                new AcsCommitmentProcessorManager(
+                  digestProcessorFactory,
+                  parameters.exitOnFatalFailures,
+                  futureSupervisor,
                   timeouts,
                   loggerFactory,
                 )
@@ -992,7 +1005,11 @@ class ParticipantNodeBootstrap(
               // start digest processors for all known logical synchronizers
               MonadUtil
                 .sequentialTraverse_(syncPersistentStateManager.getAllLogical.keys.toSeq)(
-                  synchronizerId => manager.startDigestProcessorForSynchronizer(synchronizerId)
+                  synchronizerId =>
+                    manager
+                      .getOrCreate(synchronizerId)
+                      .digestProcessorManager
+                      .startRunningDigestProcessor()
                 )
                 .map(_ => manager)
             },
@@ -1251,7 +1268,7 @@ object ParticipantNodeBootstrap {
       ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer],
       startableStoppableLedgerApiDependentServices: StartableStoppableLedgerApiDependentServices,
       participantTopologyDispatcher: ParticipantTopologyDispatcher,
-      acsDigestProcessorManagerO: Option[LifeCycleContainer[AcsDigestProcessorManager]],
+      acsDigestProcessorManagerO: Option[LifeCycleContainer[AcsCommitmentProcessorManager]],
   )
 }
 

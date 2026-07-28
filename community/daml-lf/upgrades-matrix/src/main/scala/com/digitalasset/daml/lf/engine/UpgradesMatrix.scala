@@ -145,12 +145,12 @@ trait UpgradesMatrix[Err, Res, AdditionalSetup] {
 object UpgradesMatrixCasesV2Dev
     extends UpgradesMatrixCases(
       LanguageVersion.v2_dev,
-      ContractStateMachine.Mode.NUCK,
+      ContractStateMachine.Mode.Key,
     )
 object UpgradesMatrixCasesV2MaxStable
     extends UpgradesMatrixCases(
       LanguageVersion.v2_3,
-      ContractStateMachine.Mode.NUCK,
+      ContractStateMachine.Mode.Key,
     )
 
 /** Pairs of v1/v2 templates are called [[TestCase]]s and are listed in [[testCases]]. A test case

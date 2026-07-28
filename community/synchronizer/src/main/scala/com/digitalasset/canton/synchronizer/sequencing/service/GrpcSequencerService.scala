@@ -71,7 +71,7 @@ import com.digitalasset.canton.util.{
   MaxBytesToDecompress,
   RateLimiter,
 }
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Status
@@ -603,7 +603,7 @@ class GrpcSequencerService(
       val resultE = for {
         subscriptionRequest <-
           SubscriptionRequest
-            .fromProtoV30(request)
+            .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, request)
             .left
             .map(err => invalidRequest(err.toString))
         SubscriptionRequest(member, timestamp) = subscriptionRequest
@@ -803,7 +803,7 @@ class GrpcSequencerService(
 
     withServerCallStreamObserver(responseObserver) { observer =>
       TopologyStateForInitRequest
-        .fromProtoV30(requestP) match {
+        .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, requestP) match {
         case Left(parsingError) =>
           responseObserver.onError(ProtoDeserializationFailure.Wrap(parsingError).asGrpcError)
         case Right(request) =>
@@ -908,7 +908,7 @@ class GrpcSequencerService(
     EitherTUtil.toFuture(
       EitherT(
         TopologyStateForInitRequest
-          .fromProtoV30(requestP)
+          .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, requestP)
           .leftMap(x => ProtoDeserializationFailure.Wrap(x).asGrpcError)
           .traverse { request =>
             topologyStateForInitializationService

@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -40,6 +42,8 @@ object Membership {
       myId: BftNodeId,
       otherNodes: Set[BftNodeId] = Set.empty,
       sequencingParameters: Option[SequencingParameters] = None,
+      maxRequestPayloadBytes: NonNegativeInt =
+        DynamicSynchronizerParameters.defaultMaxRequestSize.value,
       leaders: Option[Seq[BftNodeId]] = None,
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
       epochLength: EpochLength = DefaultEpochLength,
@@ -50,6 +54,7 @@ object Membership {
       sequencingParameters,
       nodesTopologyInfos = nodesTopologyInfos,
       epochLength = epochLength,
+      maxRequestPayloadBytes = maxRequestPayloadBytes,
     )
     val nodes = orderingTopology.sortedNodes
     Membership(

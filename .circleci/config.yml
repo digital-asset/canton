@@ -763,7 +763,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d13720cbe1c2 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-8ec094096423 \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1121,7 +1121,7 @@ commands:
                 when: always
             - slack/status:
                 fail_only: true
-                failure_message: A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. You are on rota, so please take a look.
+                failure_message: '*[CircleCI]* A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. You are on rota, so please take a look.'
                 mentions: ${SELECTED_VOLUNTEER}
                 only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
                 webhook: << parameters.webhook_url >>

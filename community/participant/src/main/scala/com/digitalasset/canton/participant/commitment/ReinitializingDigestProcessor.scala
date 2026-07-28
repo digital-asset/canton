@@ -3,13 +3,14 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import cats.{Eval, Monad}
+import cats.syntax.functor.*
+import cats.syntax.parallel.*
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.crypto.HashOps
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
@@ -20,19 +21,22 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsDigestStore
-import com.digitalasset.canton.participant.store.AcsDigestStore.{AcsDigest, AcsDigestUpdate}
-import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  AcsDigest,
+  AcsDigestUpdate,
+  CheckpointType,
+  DigestJournal,
+}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
-import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.{Keep, Source}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 
 import scala.collection.immutable
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Used to reinitialize the ACS commitment checkpoint store, party - and participant digest
   * journals.
@@ -71,60 +75,65 @@ import scala.concurrent.ExecutionContext
   * TODO(#33422) - either add a flag to the existing `reinitialize_commitments` command or create a
   * new one (should be discussed)
   */
-final class ReinitializingDigestProcessor(
-    synchronizerId: SynchronizerId,
+class ReinitializingDigestProcessor(
     thisParticipantId: ParticipantId,
-    stringInterningEval: Eval[StringInterning],
-    indexService: InternalIndexService,
-    ledgerApiStore: LedgerApiStore,
-    acsDigestStore: AcsDigestStore,
+    override val synchronizerId: SynchronizerId,
     acsCommitmentConfig: AcsCommitmentConfig,
-    getTopologySnapshot: Traced[CantonTimestamp] => TopologySnapshot,
-    hashOps: HashOps,
+    digestAccumulator: DigestAccumulator,
+    acsDigestStore: AcsDigestStore,
+    indexService: InternalIndexService,
+    getTopologySnapshot: Traced[CantonTimestamp] => FutureUnlessShutdown[TopologySnapshot],
+    ledgerApiStore: LedgerApiStore,
+    protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit
     val executionContext: ExecutionContext,
     mat: Materializer,
-) extends NamedLogging
-    with BaseDigestProcessor {
+) extends BaseDigestProcessor {
 
   private val thisLfParticipantId: LedgerParticipantId = thisParticipantId.toLf
   private val writeJournalTombstonesBatchSize =
     acsCommitmentConfig.reinitializingJournalTombstonesBatchSize.unwrap
   private val counterpartyBatchSize = acsCommitmentConfig.counterpartyBatchSize.unwrap
-  private val tracingMode = acsCommitmentConfig.tracing
 
-  override def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = for {
-    // reinit - N: Offset, T(N): CantonTimeStamp = Ledger End
-    reinitializingTimepoint <- ledgerEndTimepointFUS()
+  override def isReinitializingProcessor: Boolean = true
 
-    // Delete potential updates in the future
-    _ <- acsDigestStore.deleteAfter(reinitializingTimepoint.offset)
+  override protected def startPipelineInternal()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] =
+    for {
+      // reinit - N: Offset, T(N): CantonTimeStamp = Ledger End
+      reinitializingTimepoint <- ledgerEndTimepointFUS()
 
-    _ <- writeTombstonesToJournals(
-      tombstoneTimepoint = reinitializingTimepoint
-    )
+      // Delete potential updates in the future
+      _ <- acsDigestStore.deleteAfter(reinitializingTimepoint.offset)
 
-    _ <-
-      PekkoUtil
+      _ <- writeTombstonesToJournals(
+        tombstoneTimepoint = reinitializingTimepoint
+      )
+      topologySnapshot <- getTopologySnapshot(Traced(reinitializingTimepoint.recordTime))
+    } yield {
+      val (ks, doneF) = PekkoUtil
         .runSupervised(
           reinitAcsUpdates(
             reinitializingTimepoint = reinitializingTimepoint,
-            topologySnapshot = getTopologySnapshot(Traced(reinitializingTimepoint.recordTime)),
-          ).via(inMemoryDigestAccumulator)
-            .toMat(PekkoUtil.sinkIgnoreFUS)(Keep.right),
+            topologySnapshot = topologySnapshot,
+          ).via(digestAccumulator.flow())
+            .toMat(Sink.ignore)(Keep.both),
           errorLogMessagePrefix = "RecomputeAndAppendNewDigestsToJournal",
         )
-  } yield ()
+      (ks, doneF.void)
+    }
 
   private[commitment] def reinitAcsUpdates(
       reinitializingTimepoint: Timepoint,
       topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
-  ): Source[ProcessingContext[CheckpointFenceOr[AcsUpdate]], NotUsed] = {
+  ): Source[ProcessingContext[CheckpointFenceOr[AcsUpdate]], KillSwitch] = {
     val acsUpdates = indexService
       .counterParties(synchronizerId, reinitializingTimepoint.offset, party = None)
+      .viaMat(KillSwitches.single)(Keep.right)
       .grouped(counterpartyBatchSize)
       .flatMap { counterparties =>
         val counterpartiesSet = counterparties.toSet
@@ -173,52 +182,33 @@ final class ReinitializingDigestProcessor(
 
       }
 
-    acsUpdates.concat(Source.single(ProcessingContext(reinitializingTimepoint, CheckpointFence)))
+    acsUpdates.concat(
+      Source.single(
+        ProcessingContext(reinitializingTimepoint, CheckpointFence(CheckpointType.Reinitialization))
+      )
+    )
   }
 
   private[commitment] def writeTombstonesToJournals(
       tombstoneTimepoint: Timepoint
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    FutureUnlessShutdown
-      .sequence(
-        Seq(
-          writeTombstonesTo(acsDigestStore.party)(
-            tombstoneTimepoint,
-            writeJournalTombstonesBatchSize,
-          ),
-          writeTombstonesTo(acsDigestStore.participant)(
-            tombstoneTimepoint,
-            writeJournalTombstonesBatchSize,
-          ),
-        )
+    Seq[AcsDigestStore.DigestJournal[?]](acsDigestStore.party, acsDigestStore.participant)
+      .parTraverse_(store =>
+        writeTombstonesTo(store)(tombstoneTimepoint, writeJournalTombstonesBatchSize)
       )
-      .map(_ => ())
 
-  private def writeTombstonesTo[K, V](journal: AcsDigestStore.DigestJournal[K, V])(
+  private def writeTombstonesTo[K](journal: AcsDigestStore.DigestJournal[K])(
       tombstoneTimepoint: Timepoint,
       pageSize: Int,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    type LoopState = Either[journal.SnapshotPaginationToken, journal.AtInclusive]
-    val initialState: LoopState = Right(tombstoneTimepoint.offset)
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    DigestJournal
+      .processSnapshotInBatchesE(journal)(tombstoneTimepoint.offset, pageSize) { acsDigests =>
+        val tombstones = createTombstonesFrom(acsDigests, tombstoneTimepoint)
+        journal.upsertDigestUpdates(tombstones)
+      }
 
-    Monad[FutureUnlessShutdown].tailRecM(initialState) { currentState =>
-      for {
-        (acsDigests, doneOrNextToken) <- journal.snapshot(currentState, pageSize)
-
-        nextStateE = doneOrNextToken.swap match {
-          case Right(_paginationTokenDone) => Right(())
-          case Left(token) => Left(Left(token))
-        }
-
-        tombstoneDigests = createTombstonesFrom(acsDigests, tombstoneTimepoint)
-
-        _ <- journal.upsertDigestUpdates(tombstoneDigests)
-      } yield nextStateE
-    }
-  }
-
-  private def createTombstonesFrom[K, V](
-      acsDigestUpdates: immutable.Iterable[AcsDigestUpdate[K, V]],
+  private def createTombstonesFrom[K](
+      acsDigestUpdates: immutable.Iterable[AcsDigestUpdate[K]],
       tombstoneTimepoint: Timepoint,
   ) =
     acsDigestUpdates.map { acsDigestUpdate =>
@@ -256,15 +246,4 @@ final class ReinitializingDigestProcessor(
         .getOrElse(ErrorUtil.invalidState("There is no suitable last offset in the Ledger"))
 
     } yield reinitTimepoint
-
-  override protected def digestAccumulator: SequentialDigestAccumulator =
-    new SequentialDigestAccumulator(
-      thisLfParticipantId,
-      acsDigestStore,
-      stringInterningEval.value,
-      hashOps,
-      tracingMode,
-      loggerFactory,
-    )
-
 }

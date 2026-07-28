@@ -45,7 +45,7 @@ class IdeLedgerGenerativeTest
             contractKeys = true,
             readOnlyRollbacks = true,
           ),
-          ContractStateMachine.Mode.NUCK,
+          ContractStateMachine.Mode.Key,
         ),
       ).foreach { case (pv, generators, csmMode) =>
         s"for $pv transactions" in {

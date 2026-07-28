@@ -51,6 +51,7 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
   * JSON API: `GET /v2/jose/jwks/synchronizer/<synchronizer-id>/party/<party-id>`
 
 ### Minor Improvements
+- The submitter does not have to be a stakeholder of all contracts during automatic reassignment, only of those that are actually reassigned to a target synchronizer. The previous check was considered too strict: it required the submitter to be a stakeholder of all involved contracts, even ones that were, for instance, disclosed contracts already on the target synchronizer.
 - The HTTP server for the Ledger JSON API is now explicitly configured with a maximum content length. A new config option `http-ledger-api.max-inbound-message-size` has been added. If not configured, the gRPC setting `ledger-api.max-inbound-message-size` will be used.
     Previously, an implicit limit of 8 MB was used, so this change should not affect existing configurations.
 - The concurrency limit interceptor `ActiveRequestInterceptor` now caches rejection responses instead of generating a new error (and thereby filling the stack trace) for each
@@ -68,6 +69,8 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
 - `<canton-node>.replication.connection-pool.connection.client-connection-check-interval` is introduced
   that allows configuring the PostgreSQL-specific `client_connection_check_interval` parameter for DB locked connections.
   This is a safety mechanism to prevent hanging connections in case of network issues. The default value is 5 seconds.
+- `<canton-node>.replication.connection-pool.connection.max-inconclusive-read-only-checks` is introduced that allows configuring the maximum number of inconclusive
+  read-only checks before a connection is closed. The default value is 3.
 - BREAKING: Removed the `protocolVersion` parameter from all `<node>.topology.<mapping>.list` console commands as it was not working properly.
 - *BREAKING*: `kms-driver-api` and `kms-driver-testing` are now published to Maven Central, and will no longer be available in Artifactory.
 - Connection pool metrics:
@@ -178,6 +181,8 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
   ```
 - The participant admin party is now exempt from the traffic enforcement balance check during submission.
 - Subview package vetting, checked at submission time, is now verified during confirmation request validation.
+- *Console BREAKING*: The `com.digitalasset.canton.config.PositiveInt.increment` method now returns an `Either[InvariantViolation, PositiveInt]` instead of a `PositiveInt`.
+  This is relevant as this class can be used in the console and scripts. Such usages must be updated to account for this change.
 
 ### Preview Features
 - preview feature

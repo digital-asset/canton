@@ -8,13 +8,18 @@ import com.daml.grpc.adapter.client.rs.BufferingSubscriptionTest.{
   MockClientCallStreamObserver,
   NoOpSubscriber,
 }
+import com.digitalasset.canton.scalatest.DefaultCantonUnitTestPatience
 import io.grpc.stub.ClientCallStreamObserver
 import org.reactivestreams.{Subscriber, Subscription}
-import org.scalatest.concurrent.Eventually.eventually
+import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpecLike
 
-class BufferingSubscriptionTest extends AnyWordSpecLike with Matchers {
+class BufferingSubscriptionTest
+    extends AnyWordSpecLike
+    with Matchers
+    with Eventually
+    with DefaultCantonUnitTestPatience {
 
   private val sequencePool = new SingleThreadExecutionSequencerPool("test")
 

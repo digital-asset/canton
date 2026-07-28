@@ -26,7 +26,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   AuthorizationEvent,
   AuthorizationLevel,
 }
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -100,9 +100,9 @@ object InternalIndexService {
 
   object AcsUpdateContainer {
 
-    def fromUpdateResponse(updateResponse: UpdateResponse): Option[AcsUpdateContainer] =
+    def fromUpdatesResponse(updateResponse: UpdatesResponse): Option[AcsUpdateContainer] =
       updateResponse match {
-        case UpdateResponse.AcsChange(acsChange) =>
+        case UpdatesResponse.AcsChange(acsChange) =>
           Some(
             AcsUpdateContainer(
               acsUpdate = AcsUpdate.AcsChangeUpdate(acsChange.acsChange),
@@ -111,7 +111,7 @@ object InternalIndexService {
               traceContext = acsChange.traceContext,
             )
           )
-        case UpdateResponse.AcsCommitment(commitment) =>
+        case UpdatesResponse.AcsCommitment(commitment) =>
           Some(
             AcsUpdateContainer(
               acsUpdate = AcsUpdate.AcsCommitment(commitment.payload),
@@ -120,7 +120,7 @@ object InternalIndexService {
               traceContext = commitment.traceContext,
             )
           )
-        case UpdateResponse.ProtoUpdate(protoUpdate) =>
+        case UpdatesResponse.ProtoUpdates(protoUpdate) =>
           protoUpdate.update match {
             case GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction) =>
               Some(

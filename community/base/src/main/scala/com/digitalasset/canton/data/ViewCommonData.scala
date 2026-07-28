@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -93,7 +94,7 @@ object ViewCommonData
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ViewCommonData)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -130,12 +131,13 @@ object ViewCommonData
       .valueOr(err => throw err)
 
   private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       hashOps: HashOps,
       viewCommonDataP: v30.ViewCommonData,
   )(bytes: ByteString): ParsingResult[ViewCommonData] =
     for {
-      informees <- viewCommonDataP.informees.traverse(informee =>
-        ProtoConverter.parseLfPartyId(informee, "informees")
+      informees <- ProtoValidation.validateThen(viewCommonDataP.informees, "informees", pvv)(
+        ProtoConverter.parseLfPartyId
       )
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", viewCommonDataP.salt)

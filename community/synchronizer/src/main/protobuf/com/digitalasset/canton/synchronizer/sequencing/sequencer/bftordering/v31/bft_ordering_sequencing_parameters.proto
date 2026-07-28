@@ -13,6 +13,8 @@ message DynamicSequencingParametersPayload {
   google.protobuf.Duration pbft_view_change_timeout = 1;
   int64 segment_length = 2;
   BlacklistLeaderSelectionPolicy blacklist_leader_selection_policy = 3;
+  int32 max_requests_in_batch = 4;
+  int32 max_batches_per_proposal = 5;
 }
 
 message BlacklistLeaderSelectionPolicy {

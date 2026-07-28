@@ -28,6 +28,10 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
       |SELECT event_sequential_id FROM lapi_events_various_witnessed
       |UNION ALL
       |SELECT event_sequential_id FROM lapi_events_party_to_participant
+      |UNION ALL
+      |SELECT event_sequential_id FROM lapi_events_generic_topology_events
+      |UNION ALL
+      |SELECT event_sequential_id FROM lapi_events_acs_commitments
       |""".stripMargin
 
   private val allSequentialIdsAndOffsets: String =
@@ -39,6 +43,10 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
        |SELECT event_sequential_id, event_offset FROM lapi_events_various_witnessed
        |UNION ALL
        |SELECT event_sequential_id, event_offset FROM lapi_events_party_to_participant
+       |UNION ALL
+       |SELECT event_sequential_id, event_offset FROM lapi_events_generic_topology_events
+       |UNION ALL
+       |SELECT event_sequential_id, event_offset FROM lapi_events_acs_commitments
        |""".stripMargin
 
   private val SqlEventSequentialIdsSummary = SQL"""
@@ -143,6 +151,10 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
        SELECT completion_offset as _offset, record_time, synchronizer_id FROM lapi_command_completions
        UNION ALL
        SELECT event_offset as _offset, record_time, synchronizer_id FROM lapi_events_party_to_participant
+       UNION ALL
+       SELECT event_offset as _offset, record_time, synchronizer_id FROM lapi_events_generic_topology_events
+       UNION ALL
+       SELECT event_offset as _offset, record_time, synchronizer_id FROM lapi_events_acs_commitments
        """.asVectorOf(
       offset("_offset") ~ long("record_time") ~ int("synchronizer_id") map {
         case offset ~ recordTimeMicros ~ internedSynchronizerId =>

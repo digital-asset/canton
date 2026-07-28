@@ -45,7 +45,6 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -165,7 +164,7 @@ private[canton] final class CantonOrderingTopologyProvider(
           nodesTopologyInfo,
           getEpochLength(sequencingParameters, sequencers),
           sequencingParameters,
-          MaxBytesToDecompress(maxRequestSize),
+          maxRequestSize,
           TopologyActivationTime(snapshot.ipsSnapshot.timestamp),
           areTherePendingCantonTopologyChanges,
         )

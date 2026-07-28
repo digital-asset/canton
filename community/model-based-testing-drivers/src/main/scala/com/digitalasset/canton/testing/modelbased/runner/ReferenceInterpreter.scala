@@ -43,7 +43,7 @@ object ReferenceInterpreter {
   /** Creates a ReferenceInterpreter by loading the universal DAR from the classpath. */
   def apply(
       loggerFactory: NamedLoggerFactory,
-      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NUCK,
+      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.Key,
   ): ReferenceInterpreter = {
     val url = getClass.getClassLoader.getResource("universal.dar")
     require(url != null, s"universal.dar not found on the classpath")

@@ -75,10 +75,16 @@ object Fingerprint {
 
   /** create fingerprint from a human readable string */
   def fromProtoPrimitive(str: String): ParsingResult[Fingerprint] =
+    fromProtoPrimitive(str, field = None)
+
+  def fromProtoPrimitive(str: String, field: String): ParsingResult[Fingerprint] =
+    fromProtoPrimitive(str, Some(field))
+
+  private def fromProtoPrimitive(str: String, field: Option[String]): ParsingResult[Fingerprint] =
     UniqueIdentifier
       .verifyValidString(str) // verify that we can represent the string as part of the UID.
-      .leftMap(ProtoDeserializationError.StringConversionError.apply(_))
-      .flatMap(String68.fromProtoPrimitive(_, "Fingerprint"))
+      .leftMap(ProtoDeserializationError.StringConversionError.apply(_, field))
+      .flatMap(String68.fromProtoPrimitive(_, field))
       .map(Fingerprint(_))
 
   private[crypto] def create(

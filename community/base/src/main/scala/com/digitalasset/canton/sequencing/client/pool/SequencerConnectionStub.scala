@@ -34,7 +34,7 @@ trait SequencerConnectionStub {
       logPolicy: CantonGrpcUtil.GrpcLogPolicy = CantonGrpcUtil.DefaultGrpcLogPolicy,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError.ConnectionError, String]
+  ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError, String]
 
   def performHandshake(
       clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],

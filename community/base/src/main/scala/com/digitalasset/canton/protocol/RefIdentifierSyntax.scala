@@ -15,7 +15,19 @@ object RefIdentifierSyntax {
 
   def fromProtoPrimitive(
       interfaceIdP: String
+  ): Either[ValueDeserializationError, Identifier] =
+    fromProtoPrimitive(interfaceIdP, field = None)
+
+  def fromProtoPrimitive(
+      interfaceIdP: String,
+      field: String,
+  ): Either[ValueDeserializationError, Identifier] =
+    fromProtoPrimitive(interfaceIdP, Some(field))
+
+  private def fromProtoPrimitive(
+      interfaceIdP: String,
+      field: Option[String],
   ): Either[ValueDeserializationError, Identifier] = Ref.Identifier
     .fromString(interfaceIdP)
-    .leftMap(err => ValueDeserializationError("identifier", err))
+    .leftMap(err => ValueDeserializationError(err, field))
 }

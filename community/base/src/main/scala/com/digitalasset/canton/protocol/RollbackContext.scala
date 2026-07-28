@@ -105,7 +105,14 @@ final case class PathRollbackContext(
         throw new IllegalStateException("Attempt to exit rollback on empty rollback context")
       )
 
-    PathRollbackContext(path.dropRight(1), lastChild.increment)
+    PathRollbackContext(
+      path.dropRight(1),
+      lastChild.increment.getOrElse(
+        throw new IllegalStateException(
+          "Attempt to exit rollback with a last child at Int.MaxValue"
+        )
+      ),
+    )
   }
 
   def rollbackScope: PathRollbackScope = PathRollbackScope(path)

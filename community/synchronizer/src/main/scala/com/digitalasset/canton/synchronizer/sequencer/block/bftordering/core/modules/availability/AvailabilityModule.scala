@@ -660,8 +660,10 @@ final class AvailabilityModule[E <: Env[E]](
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
   ): Unit = {
+    val maxBatchesPerBlockProposal =
+      activeMembership.orderingTopology.sequencingParameters.maxBatchesPerBlockProposal
     val newNextToBeProvidedToConsensus =
-      NextToBeProvidedToConsensus(forBlock, Some(config.maxBatchesPerBlockProposal))
+      NextToBeProvidedToConsensus(forBlock, Some(maxBatchesPerBlockProposal))
     val currentOrExpectedProposalRequestBlockNumber =
       disseminationProtocolState.nextToBeProvidedToConsensus.forBlock
 
@@ -1029,7 +1031,7 @@ final class AvailabilityModule[E <: Env[E]](
         logger.debug(s"$messageType: received request from $from to store batch $batchId")
         val validationStart = Instant.now
         (for {
-          _ <- validateBatch(batchId, batch, from)
+          _ <- validateRemotelyDisseminatedBatch(batchId, batch, from)
           _ <- validateDisseminationQuota(batchId, from)
         } yield batch).fold(
           { case (error, logAsWarning) =>
@@ -1322,10 +1324,8 @@ final class AvailabilityModule[E <: Env[E]](
       case Some(_) =>
         val batch = message.batch
         val from = message.from
-        validateBatch(batchId, batch, from).fold(
-          { case (error, logAsWarning) =>
-            logValidationError(error, logAsWarning)
-          },
+        validateRemotelyFetchedBatch(batchId, batch, from).fold(
+          error => logValidationError(error, logAsWarning = true),
           _ => {
             logger.debug(s"$messageType: received $batchId, persisting it")
             outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
@@ -1484,9 +1484,11 @@ final class AvailabilityModule[E <: Env[E]](
       actingOnMessageType: => String
   )(implicit traceContext: TraceContext): Unit = {
     recordStartWaitIfIdle()
+    val maxBatchesPerBlockProposal =
+      activeMembership.orderingTopology.sequencingParameters.maxBatchesPerBlockProposal
     // we tell mempool we want enough batches to fill up a proposal in order to make up for the one we just created
     // times the multiplier in order to try to disseminate-ahead batches for a following proposal
-    val atMost = config.maxBatchesPerBlockProposal * DisseminateAheadMultiplier -
+    val atMost = maxBatchesPerBlockProposal * DisseminateAheadMultiplier -
       // if we have pending batches for ordering we subtract them in order for this buffer to not grow indefinitely
       disseminationProtocolState.disseminationProgress.size
     if (atMost > 0) {
@@ -1593,7 +1595,7 @@ final class AvailabilityModule[E <: Env[E]](
   /** Validates a batch received from a remote node, returning an error message if the batch is
     * invalid and whether it should be logged as a warning.
     */
-  private def validateBatch(
+  private def validateRemotelyDisseminatedBatch(
       batchId: BatchId,
       batch: OrderingRequestBatch,
       from: BftNodeId,
@@ -1607,22 +1609,34 @@ final class AvailabilityModule[E <: Env[E]](
         },
       )
 
+      // We use this node's current topology to infer maxRequestsInBatch and maxRequestPayloadBytes used for
+      // validating batches being disseminated, instead of the topology based on the batch's epoch number, for a few reasons:
+      //  1. Keeping track of a history of ordering topology by epoch is overly complex and in some cases impossible
+      //  2. We support batches with future epoch numbers, in which case there is no available ordering topology yet
+      //  3. Gathering a quorum of validated batches that form a proof-of-availability such that each node used its most
+      //    recent topology is a good enough proof and much simpler.
+      //  4. Fetched batches do not run this validation again, so there is no risk of a changing topology between dissemination and fetching
+      //    causing a node to reject a fetched batch and get stuck.
+      topology = activeMembership.orderingTopology
+
+      maxRequestsInBatch = topology.sequencingParameters.maxRequestsInBatch
       _ <- Either.cond(
-        batch.requests.sizeIs <= config.maxRequestsInBatch.toInt,
+        batch.requests.sizeIs <= maxRequestsInBatch.toInt,
         (), {
           emitInvalidMessage(metrics, from)
           s"Batch $batchId from '$from' contains more requests (${batch.requests.size}) than allowed " +
-            s"(${config.maxRequestsInBatch}), skipping"
+            s"($maxRequestsInBatch), skipping"
         },
       )
 
+      maxRequestPayloadBytes = topology.maxRequestPayloadBytes.value
       _ <- {
         Either.cond(
-          batch.requests.map(_.value.payload).forall(_.size() <= config.maxRequestPayloadBytes),
+          batch.requests.map(_.value.payload).forall(_.size() <= maxRequestPayloadBytes),
           (), {
             emitInvalidMessage(metrics, from)
             s"Batch $batchId from '$from' contains one or more batches that exceed the maximum " +
-              s"allowed request size bytes (${config.maxRequestPayloadBytes}), skipping"
+              s"allowed request size bytes ($maxRequestPayloadBytes), skipping"
           },
         )
       }
@@ -1655,6 +1669,23 @@ final class AvailabilityModule[E <: Env[E]](
         },
       )
     } yield ()).left.map(_ -> true)
+
+  private def validateRemotelyFetchedBatch(
+      batchId: BatchId,
+      batch: OrderingRequestBatch,
+      from: BftNodeId,
+  ): Either[String, Unit] =
+    // Remotely fetched batches only need to be validated for their hash, to make sure we are getting the right payload, i.e.,
+    // the one that matches tha batch id. Otherwise, the payload being right, all the other validations have already been
+    // previously performed in a way that generated the quorum and proof-of-availability.
+    Either
+      .cond(
+        BatchId.from(batch) == batchId,
+        (), {
+          emitInvalidMessage(metrics, from)
+          s"BatchId doesn't match digest for remote batch from $from, skipping"
+        },
+      )
 
   /** Validates whether a batch received from a remote node exceeds the dissemination quota for that
     * node, returning an error message if the batch is invalid and whether it should be logged as a

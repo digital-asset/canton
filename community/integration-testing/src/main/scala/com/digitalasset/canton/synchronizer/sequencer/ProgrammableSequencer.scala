@@ -679,8 +679,6 @@ object ProgrammableSequencer {
               Some(createAndStoreProgrammableSequencer(instanceName))
             )
             // same as above, minimize the reordering that can happen
-            .focus(_.config.maxRequestsInBatch)
-            .replace(1)
             .focus(_.config.minRequestsInBatch)
             .replace(1)
       }

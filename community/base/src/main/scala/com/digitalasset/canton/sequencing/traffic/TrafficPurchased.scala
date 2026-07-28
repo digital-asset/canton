@@ -10,6 +10,8 @@ import com.digitalasset.canton.protocol.v30.TrafficPurchased as TrafficPurchased
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import slick.jdbc.{GetResult, SetParameter}
 
 /** Total traffic purchased for a member valid at a specific timestamp
@@ -66,9 +68,16 @@ object TrafficPurchased {
       pp >> balance.serial
     }
 
-  def fromProtoV30(trafficPurchasedP: TrafficPurchasedP): ParsingResult[TrafficPurchased] =
+  def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      trafficPurchasedP: TrafficPurchasedP,
+  ): ParsingResult[TrafficPurchased] =
     for {
-      member <- Member.fromProtoPrimitive(trafficPurchasedP.member, "member")
+      member <- ProtoValidation.validateThen(
+        trafficPurchasedP.member,
+        "member",
+        pvv,
+      )(Member.fromProtoPrimitive)
       serial <- ProtoConverter.parsePositiveInt("serial", trafficPurchasedP.serial)
       balance <- ProtoConverter.parseNonNegativeLong(
         "extra_traffic_purchased",

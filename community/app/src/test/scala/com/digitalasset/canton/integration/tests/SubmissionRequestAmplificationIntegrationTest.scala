@@ -428,15 +428,7 @@ abstract class SubmissionRequestAmplificationIntegrationTest
     )
 
     val metricsBefore = nodes.local.map(getAmplificationMetrics)
-    loggerFactory.assertLoggedWarningsAndErrorsSeq(
-      participant1.health.ping(participant2.id),
-      logEntries => {
-        logEntries should not be empty
-        forAll(logEntries) { logEntry =>
-          logEntry.errorMessage should include("Message rejected by send policy")
-        }
-      },
-    )
+    assertPingSucceeds(participant1, participant2)
     sequencer.resetPolicy()
 
     eventually() {

@@ -34,7 +34,8 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Channel, ClientInterceptors}
 import org.apache.pekko.stream.Materializer
@@ -62,19 +63,24 @@ class GrpcSequencerConnectionStub(
       logPolicy: CantonGrpcUtil.GrpcLogPolicy,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError.ConnectionError, String] = for {
-    apiName <- connection
+  ): EitherT[FutureUnlessShutdown, SequencerConnectionStubError, String] = for {
+    apiInfo <- connection
       .sendRequest(
         requestDescription = "get API info",
         stubFactory = apiSvcFactory,
         retryPolicy = retryPolicy,
         logPolicy = logPolicy,
         metricsContext = metricsContext.withExtraLabels("endpoint" -> "GetApiInfo"),
-      )(_.getApiInfo(v30.GetApiInfoRequest()).map(_.name))
-      .leftMap(
-        SequencerConnectionStubError.ConnectionError.apply
-      )
-  } yield apiName
+      )(_.getApiInfo(v30.GetApiInfoRequest()))
+      .leftMap[SequencerConnectionStubError](SequencerConnectionStubError.ConnectionError.apply)
+    name <- EitherT.fromEither[FutureUnlessShutdown](
+      ProtoValidation
+        .validate(apiInfo.name, Some("name"), ProtocolVersionValidation.AlwaysValidation)
+        .leftMap[SequencerConnectionStubError](err =>
+          SequencerConnectionStubError.DeserializationError(err.message)
+        )
+    )
+  } yield name
 
   override def performHandshake(
       clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
@@ -128,14 +134,22 @@ class GrpcSequencerConnectionStub(
         .leftMap(SequencerConnectionStubError.ConnectionError.apply)
 
       psid <- EitherT.fromEither[FutureUnlessShutdown](
-        PhysicalSynchronizerId
-          .fromProtoPrimitive(synchronizerIdP.physicalSynchronizerId, "physical_synchronizer_id")
+        ProtoValidation
+          .validateThen(
+            synchronizerIdP.physicalSynchronizerId,
+            "physical_synchronizer_id",
+            ProtocolVersionValidation.AlwaysValidation,
+          )(PhysicalSynchronizerId.fromProtoPrimitive)
           .leftMap(err => SequencerConnectionStubError.DeserializationError(err.message))
       )
 
       sequencerId <- EitherT.fromEither[FutureUnlessShutdown](
-        UniqueIdentifier
-          .fromProtoPrimitive(synchronizerIdP.sequencerUid, "sequencer_uid")
+        ProtoValidation
+          .validateThen(
+            synchronizerIdP.sequencerUid,
+            "sequencer_uid",
+            ProtocolVersionValidation.AlwaysValidation,
+          )(UniqueIdentifier.fromProtoPrimitive)
           .map(SequencerId(_))
           .leftMap[SequencerConnectionStubError](err =>
             SequencerConnectionStubError.DeserializationError(err.message)

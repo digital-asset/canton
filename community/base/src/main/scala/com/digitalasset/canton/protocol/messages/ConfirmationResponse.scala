@@ -4,7 +4,6 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
@@ -14,6 +13,7 @@ import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.Si
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmptyUtil.instances.*
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyF}
@@ -128,7 +128,8 @@ object ConfirmationResponse {
     GenLens[ConfirmationResponse](_.confirmingParties)
 
   def fromProtoV30(
-      confirmationResponseP: v30.ConfirmationResponse
+      pvv: ProtocolVersionValidation,
+      confirmationResponseP: v30.ConfirmationResponse,
   ): ParsingResult[ConfirmationResponse] = {
     val v30.ConfirmationResponse(
       localVerdictPO,
@@ -140,9 +141,11 @@ object ConfirmationResponse {
       localVerdict <- ProtoConverter
         .required("ConfirmationResponse.local_verdict", localVerdictPO)
         .flatMap(LocalVerdict.fromProtoV30)
-      confirmingParties <- confirmingPartiesP.traverse(
-        ProtoConverter.parseLfPartyId(_, "confirming_parties")
-      )
+      confirmingParties <- ProtoValidation.validateThen(
+        confirmingPartiesP,
+        "confirming_parties",
+        pvv,
+      )(ProtoConverter.parseLfPartyId)
       viewPositionO = viewPositionPO.map(ViewPosition.fromProtoV30)
       response <-
         ConfirmationResponse
@@ -240,7 +243,7 @@ object ConfirmationResponses extends VersioningCompanionMemoization[Confirmation
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ConfirmationResponses)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -299,7 +302,10 @@ object ConfirmationResponses extends VersioningCompanionMemoization[Confirmation
       : PTraversal[ConfirmationResponses, ConfirmationResponses, Set[LfPartyId], Set[LfPartyId]] =
     responsesUnsafe.andThen(ConfirmationResponse.confirmingPartiesUnsafe)
 
-  private def fromProtoV30(confirmationResponsesP: v30.ConfirmationResponses)(
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      confirmationResponsesP: v30.ConfirmationResponses,
+  )(
       bytes: ByteString
   ): ParsingResult[ConfirmationResponses] = {
     val v30.ConfirmationResponses(requestIdP, rootHashP, synchronizerIdP, senderP, responsesP) =
@@ -307,13 +313,16 @@ object ConfirmationResponses extends VersioningCompanionMemoization[Confirmation
     for {
       requestId <- RequestId.fromProtoPrimitive(requestIdP)
       rootHash <- RootHash.fromProtoPrimitive(rootHashP)
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      synchronizerId <- ProtoValidation.validateThen(
         synchronizerIdP,
         "physical_synchronizer_id",
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
+      sender <- ProtoValidation.validateThen(senderP, "sender", pvv)(
+        ParticipantId.fromProtoPrimitive
       )
-      sender <- ParticipantId.fromProtoPrimitive(senderP, "sender")
       responses <- ProtoConverter.parseRequiredNonEmpty(
-        ConfirmationResponse.fromProtoV30,
+        ConfirmationResponse.fromProtoV30(pvv, _),
         "responses",
         responsesP,
       )

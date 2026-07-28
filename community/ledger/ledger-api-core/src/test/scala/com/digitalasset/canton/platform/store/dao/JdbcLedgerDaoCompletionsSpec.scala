@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.data.Offset.firstOffset
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.platform.store.dao.JdbcLedgerDaoCompletionsSpec.*
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.google.rpc.status.Status as RpcStatus
@@ -33,8 +34,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       (_, response) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(tx.userId.value),
           tx.actAs.toSet,
         )
@@ -58,8 +61,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Response 1: querying as all submitters
       (_, response1) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(tx.userId.value),
           tx.actAs.toSet,
         )
@@ -67,8 +72,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Response 2: querying as a proper subset of all submitters
       (_, response2) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(tx.userId.value),
           Set(tx.actAs.head),
         )
@@ -76,8 +83,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Response 3: querying as a proper superset of all submitters
       (_, response3) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(tx.userId.value),
           tx.actAs.toSet + "UNRELATED",
         )
@@ -101,8 +110,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       (_, response) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           parties,
         )
@@ -131,8 +142,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Response 1: querying as all submitters
       (_, response1) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           parties,
         )
@@ -140,8 +153,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Response 2: querying as a proper subset of all submitters
       (_, response2) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           Set(parties.head),
         )
@@ -149,8 +164,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Response 3: querying as a proper superset of all submitters
       (_, response3) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           parties + "UNRELATED",
         )
@@ -172,8 +189,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       response <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           userId = Some(Ref.UserId.assertFromString("WRONG")),
           parties,
         )
@@ -193,16 +212,20 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       response1 <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           Set("WRONG"),
         )
         .runWith(Sink.seq)
       response2 <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           Set("WRONG1", "WRONG2", "WRONG3"),
         )
@@ -223,16 +246,20 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       response1 <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           Set("WRONG"),
         )
         .runWith(Sink.seq)
       response2 <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           Set("WRONG1", "WRONG2", "WRONG3"),
         )
@@ -253,8 +280,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       response1 <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(userId),
           Set("WRONG"),
         )
@@ -272,8 +301,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Query with userId = None should return completions regardless of user
       (_, response) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           None,
           tx.actAs.toSet,
         )
@@ -294,8 +325,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       to <- ledgerDao.lookupLedgerEnd()
       response <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           None,
           Set("WRONG_PARTY"),
         )
@@ -313,8 +346,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Query with empty parties should return completions regardless of submitter parties
       (_, response) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           Some(tx.userId.value),
           Set.empty,
         )
@@ -333,8 +368,10 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       // Query with both userId = None and empty parties should return everything
       (_, response) <- ledgerDao.completions
         .getCommandCompletions(
-          from.fold(firstOffset)(_.lastOffset.increment),
-          to.value.lastOffset,
+          OffsetRange(
+            startInclusive = from.fold(firstOffset)(_.lastOffset.increment),
+            endInclusive = to.value.lastOffset,
+          ),
           None,
           Set.empty,
         )

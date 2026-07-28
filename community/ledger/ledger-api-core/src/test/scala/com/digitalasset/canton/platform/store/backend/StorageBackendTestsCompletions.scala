@@ -7,6 +7,7 @@ import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.platform.indexer.parallel.{PostPublishData, PublishSource}
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
@@ -54,8 +55,7 @@ private[backend] trait StorageBackendTestsCompletions
       val completions0to2 = executeSql(
         backend.completion
           .commandCompletions(
-            Offset.firstOffset,
-            offset(2),
+            OffsetRange(Offset.firstOffset, offset(2)),
             Some(userId),
             Set(party),
             limit = 10,
@@ -64,8 +64,7 @@ private[backend] trait StorageBackendTestsCompletions
       val completions1to2 = executeSql(
         backend.completion
           .commandCompletions(
-            offset(2),
-            offset(2),
+            OffsetRange(offset(2), offset(2)),
             Some(userId),
             Set(party),
             limit = 10,
@@ -74,8 +73,7 @@ private[backend] trait StorageBackendTestsCompletions
       val completions0to9 = executeSql(
         backend.completion
           .commandCompletions(
-            Offset.firstOffset,
-            offset(9),
+            OffsetRange(Offset.firstOffset, offset(9)),
             Some(userId),
             Set(party),
             limit = 10,
@@ -113,8 +111,7 @@ private[backend] trait StorageBackendTestsCompletions
       val completionsNoUserFilter = executeSql(
         backend.completion
           .commandCompletions(
-            Offset.firstOffset,
-            offset(2),
+            OffsetRange(Offset.firstOffset, offset(2)),
             None,
             Set(party),
             limit = 10,
@@ -123,8 +120,7 @@ private[backend] trait StorageBackendTestsCompletions
       val completionsSomeUserFilter = executeSql(
         backend.completion
           .commandCompletions(
-            Offset.firstOffset,
-            offset(2),
+            OffsetRange(Offset.firstOffset, offset(2)),
             Some(someUserId),
             Set(party),
             limit = 10,
@@ -151,8 +147,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(1),
+          OffsetRange(Offset.firstOffset, offset(1)),
           Some(userId),
           Set(party),
           limit = 10,
@@ -181,8 +176,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(2),
+          OffsetRange(Offset.firstOffset, offset(2)),
           Some(someUserId),
           Set(party),
           limit = 10,
@@ -222,8 +216,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(2),
+          OffsetRange(Offset.firstOffset, offset(2)),
           Some(someUserId),
           Set(party),
           limit = 10,
@@ -270,8 +263,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(2),
+          OffsetRange(Offset.firstOffset, offset(2)),
           Some(someUserId),
           Set(party),
           limit = 10,
@@ -313,8 +305,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(2),
+          OffsetRange(Offset.firstOffset, offset(2)),
           Some(someUserId),
           Set(party, party2),
           limit = 10,
@@ -366,8 +357,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(2),
+          OffsetRange(Offset.firstOffset, offset(2)),
           Some(someUserId),
           Set(party),
           limit = 10,
@@ -411,8 +401,7 @@ private[backend] trait StorageBackendTestsCompletions
     val caught = intercept[IllegalArgumentException](
       executeSql(
         backend.completion.commandCompletions(
-          Offset.firstOffset,
-          offset(1),
+          OffsetRange(Offset.firstOffset, offset(1)),
           Some(someUserId),
           Set(party),
           limit = 10,
@@ -436,8 +425,7 @@ private[backend] trait StorageBackendTestsCompletions
     val caught2 = intercept[IllegalArgumentException](
       executeSql(
         backend.completion.commandCompletions(
-          offset(2),
-          offset(2),
+          OffsetRange(offset(2), offset(2)),
           Some(someUserId),
           Set(party),
           limit = 10,
@@ -498,7 +486,7 @@ private[backend] trait StorageBackendTestsCompletions
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
-      backend.completion.commandCompletionsForRecovery(offset(2), offset(10))
+      backend.completion.commandCompletionsForRecovery(OffsetRange(offset(2), offset(10)))
     ) shouldBe Vector(
       PostPublishData(
         submissionSynchronizerId = SynchronizerId.tryFromString("x::synchronizer1"),
@@ -544,8 +532,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completions = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(2),
+          OffsetRange(Offset.firstOffset, offset(2)),
           Some(someUserId),
           Set(party),
           limit = 10,
@@ -1045,14 +1032,24 @@ private[backend] trait StorageBackendTestsCompletions
     // With userId = None, both completions should be returned
     val completionsNoUser = executeSql(
       backend.completion
-        .commandCompletions(Offset.firstOffset, offset(2), None, Set(party), limit = 10)
+        .commandCompletions(
+          OffsetRange(Offset.firstOffset, offset(2)),
+          None,
+          Set(party),
+          limit = 10,
+        )
     )
     completionsNoUser should have length 2
 
     // With userId = Some(userId1), only user1's completion should be returned
     val completionsUser1 = executeSql(
       backend.completion
-        .commandCompletions(Offset.firstOffset, offset(2), Some(userId1), Set(party), limit = 10)
+        .commandCompletions(
+          OffsetRange(Offset.firstOffset, offset(2)),
+          Some(userId1),
+          Set(party),
+          limit = 10,
+        )
     )
     completionsUser1 should have length 1
     completionsUser1.head.completionResponse.completion.toList.head.userId shouldBe userId1
@@ -1074,7 +1071,12 @@ private[backend] trait StorageBackendTestsCompletions
     // With empty parties, all completions should be returned regardless of submitter
     val completionsNoParties = executeSql(
       backend.completion
-        .commandCompletions(Offset.firstOffset, offset(2), Some(someUserId), Set.empty, limit = 10)
+        .commandCompletions(
+          OffsetRange(Offset.firstOffset, offset(2)),
+          Some(someUserId),
+          Set.empty,
+          limit = 10,
+        )
     )
     completionsNoParties should have length 2
 
@@ -1082,8 +1084,7 @@ private[backend] trait StorageBackendTestsCompletions
     val completionsParty1 = executeSql(
       backend.completion
         .commandCompletions(
-          Offset.firstOffset,
-          offset(2),
+          OffsetRange(Offset.firstOffset, offset(2)),
           Some(someUserId),
           Set(party1),
           limit = 10,
@@ -1111,7 +1112,7 @@ private[backend] trait StorageBackendTestsCompletions
     // With both None/empty, all completions should be returned (admin use case)
     val allCompletions = executeSql(
       backend.completion
-        .commandCompletions(Offset.firstOffset, offset(3), None, Set.empty, limit = 10)
+        .commandCompletions(OffsetRange(Offset.firstOffset, offset(3)), None, Set.empty, limit = 10)
     )
     allCompletions should have length 3
   }

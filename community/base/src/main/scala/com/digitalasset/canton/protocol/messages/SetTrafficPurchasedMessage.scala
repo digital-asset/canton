@@ -11,6 +11,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -71,7 +72,7 @@ object SetTrafficPurchasedMessage
     ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.v34)(
       v30.SetTrafficPurchasedMessage
     )(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -87,19 +88,23 @@ object SetTrafficPurchasedMessage
     )
 
   def fromProtoV30(
-      proto: v30.SetTrafficPurchasedMessage
+      pvv: ProtocolVersionValidation,
+      proto: v30.SetTrafficPurchasedMessage,
   )(bytes: ByteString): ParsingResult[SetTrafficPurchasedMessage] =
     for {
-      member <- Member.fromProtoPrimitive(proto.member, "member")
+      member <- ProtoValidation.validateThen(proto.member, "member", pvv)(
+        Member.fromProtoPrimitive
+      )
       serial <- ProtoConverter.parsePositiveInt("serial", proto.serial)
       totalTrafficPurchased <- ProtoConverter.parseNonNegativeLong(
         "total_traffic_purchased",
         proto.totalTrafficPurchased,
       )
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      synchronizerId <- ProtoValidation.validateThen(
         proto.physicalSynchronizerId,
         "physical_synchronizer_id",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
     } yield new SetTrafficPurchasedMessage(
       member,
       serial,

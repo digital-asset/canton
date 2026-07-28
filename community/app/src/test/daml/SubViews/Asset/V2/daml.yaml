@@ -6,6 +6,8 @@ override-components:
     version: $DAML_VERSION
   codegen:
     version: $DAML_VERSION
+build-options:
+- --target=2.2
 name: sub-views-asset
 source: .
 version: 2.0.0

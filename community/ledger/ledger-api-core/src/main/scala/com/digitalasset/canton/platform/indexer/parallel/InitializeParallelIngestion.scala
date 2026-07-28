@@ -30,6 +30,7 @@ import com.digitalasset.canton.platform.store.backend.{
 }
 import com.digitalasset.canton.platform.store.cache.AchsStateCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interning.UpdatingStringInterningView
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.ShutdownInProgress
@@ -119,8 +120,10 @@ private[platform] final case class InitializeParallelIngestion(
             metrics.index.db.getPostProcessingEnd
           )(
             completionStorageBackend.commandCompletionsForRecovery(
-              startInclusive = postProcessingEndOffset.fold(Offset.firstOffset)(_.increment),
-              endInclusive = lastOffset,
+              OffsetRange(
+                startInclusive = postProcessingEndOffset.fold(Offset.firstOffset)(_.increment),
+                endInclusive = lastOffset,
+              )
             )
           )
         case None => Future.successful(Vector.empty)

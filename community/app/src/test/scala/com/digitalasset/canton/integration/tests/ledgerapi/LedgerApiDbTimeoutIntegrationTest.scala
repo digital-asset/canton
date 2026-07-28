@@ -108,11 +108,13 @@ trait LedgerApiDbTimeoutIntegrationTest
       },
       maxPollInterval = 100.millis,
     )
-    c1Active shouldBe false
-    lock.commitAndClose()
-    logger.info("C1 unlocked")
 
-    // issue exclusive lock on activate table to block insert
+    c1Active shouldBe false
+
+    // Lock the lapi_events_activate_contract before releasing the C1 lock, so the indexer's restart-triggered
+    // retry (from the row-lock timeout above) can't sneak its write in before we block it. This must happen
+    // before releasing the C1 lock below, but after the c1Active check above, since c1Active itself reads
+    // from lapi_events_activate_contract and would otherwise block on the lock we just took.
     val exclusiveAccessLockOnActivationTable = withConnectionForTest(participant1)(
       testFunction =
         SQL"LOCK TABLE lapi_events_activate_contract IN ACCESS EXCLUSIVE MODE".execute()(_).discard
@@ -120,6 +122,9 @@ trait LedgerApiDbTimeoutIntegrationTest
     logger.info(
       "lapi_events_activate_contract locked in ACCESS EXCLUSIVE MODE (preventing insert after indexer restart)"
     )
+
+    lock.commitAndClose()
+    logger.info("C1 unlocked")
 
     loggerFactory.assertEventuallyLogsSeq(
       SuppressionRule.LoggerNameContains("DbDispatcher") && SuppressionRule.Level(event.Level.ERROR)

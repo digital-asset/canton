@@ -11,7 +11,7 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawParticipantAuthorization
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.EventsTable.TransactionConversions
 import com.digitalasset.canton.tracing.TraceContext
@@ -31,17 +31,14 @@ final class TopologyTransactionPointwiseReader(
   protected val dbMetrics: metrics.index.db.type = metrics.index.db
 
   private def fetchRawTopologyEvents(
-      firstEventSequentialId: Long,
-      lastEventSequentialId: Long,
+      eventSeqIdRange: EventSeqIdRange
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Vector[RawParticipantAuthorization]] =
     dbDispatcher.executeSql(
       dbMetrics.topologyTransactionsPointwise.fetchTopologyPartyEventPayloads
     )(
-      eventStorageBackend.topologyPartyEventBatch(
-        IdRange(firstEventSequentialId, lastEventSequentialId)
-      )
+      eventStorageBackend.topologyPartyEventBatch(eventSeqIdRange)
     )
 
   private def fetchAndFilterEvents(
@@ -63,20 +60,16 @@ final class TopologyTransactionPointwiseReader(
       .flatMap(filteredEventsPruned => toResponse(filteredEventsPruned.toVector))
 
   def lookupTopologyTransaction(
-      eventSeqIdRange: (Long, Long),
+      eventSeqIdRange: EventSeqIdRange,
       topologyFormat: TopologyFormat,
   )(implicit loggingContext: LoggingContextWithTrace): Future[Option[TopologyTransaction]] = {
     // None is a party-wildcard
     val requestingParties: Option[Set[Party]] =
       topologyFormat.participantAuthorizationFormat
         .fold[Option[Set[Party]]](Some(Set.empty))(_.parties)
-    val (firstEventSeqId, lastEventSeqId) = eventSeqIdRange
 
     fetchAndFilterEvents(
-      fetchRawEvents = fetchRawTopologyEvents(
-        firstEventSequentialId = firstEventSeqId,
-        lastEventSequentialId = lastEventSeqId,
-      ),
+      fetchRawEvents = fetchRawTopologyEvents(eventSeqIdRange),
       requestingParties = requestingParties,
       toResponse = (topologyEvents: Vector[RawParticipantAuthorization]) =>
         Future.successful(

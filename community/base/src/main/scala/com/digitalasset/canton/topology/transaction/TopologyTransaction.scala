@@ -7,12 +7,16 @@ import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.PrettyInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.topology.TopologyManagerError
+import com.digitalasset.canton.topology.store.TopologyTransactionRejection
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
+import com.digitalasset.canton.topology.util.SerialUtils.EnhancedPositiveInt
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.google.common.annotations.VisibleForTesting
@@ -124,6 +128,12 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
     with PrettyPrinting
     with HasProtocolVersionedWrapperE[TopologyTransaction[TopologyChangeOp, TopologyMapping]] {
 
+  def nextSerial(implicit elc: ErrorLoggingContext): Either[TopologyManagerError, PositiveInt] =
+    serial.nextSerial
+
+  def nextSerial: Either[TopologyTransactionRejection, PositiveInt] =
+    serial.nextSerial
+
   @VisibleForTesting
   def reverse: TopologyTransaction[TopologyChangeOp, M] = {
     val next = (operation: TopologyChangeOp) match {
@@ -135,7 +145,8 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
       TopologyTransaction
         .create(
           next,
-          serial = serial.increment,
+          serial =
+            serial.increment.getOrElse(throw new IllegalStateException(s"Max serial reached")),
           mapping = mapping,
           representativeProtocolVersion,
         )

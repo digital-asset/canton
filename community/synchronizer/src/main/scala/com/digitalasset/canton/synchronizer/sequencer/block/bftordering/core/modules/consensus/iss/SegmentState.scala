@@ -70,7 +70,12 @@ class SegmentState(
   private val originalLeaderIndex = eligibleLeaders.indexOf(segment.originalLeader)
   private val epochNumber = epoch.info.number
   private val viewChangeBlockMetadata = BlockMetadata(epochNumber, segment.slotNumbers.head1)
-  private val pbftMessageValidator = new PbftMessageValidatorImpl(segment, epoch, metrics)(abort)
+  private val pbftMessageValidator = new PbftMessageValidatorImpl(
+    segment,
+    epoch,
+    metrics,
+    membership.orderingTopology.sequencingParameters,
+  )(abort)
 
   // Only one view is active at a time, starting at view=0, inViewChange=false
   // - Upon view change start, due to timeout or >= f+1 votes, increment currentView and inViewChange=true

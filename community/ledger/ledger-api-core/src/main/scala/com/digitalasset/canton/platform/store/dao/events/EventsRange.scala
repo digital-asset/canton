@@ -4,11 +4,17 @@
 package com.digitalasset.canton.platform.store.dao.events
 
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 
-// [startInclusive, endInclusive]
 final case class EventsRange(
-    startInclusiveOffset: Offset,
-    startInclusiveEventSeqId: Long,
-    endInclusiveOffset: Offset,
-    endInclusiveEventSeqId: Long,
+    offsetRange: OffsetRange,
+    eventSeqIdRange: EventSeqIdRange,
 )
+
+final case class OffsetRange(startInclusive: Offset, endInclusive: Offset) extends PrettyPrinting {
+
+  override protected def pretty: Pretty[OffsetRange] = PrettyUtil.prettyOfString(range =>
+    s"offset range [${range.startInclusive.unwrap}, ${range.endInclusive.unwrap}]"
+  )
+}

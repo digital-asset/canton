@@ -616,8 +616,8 @@ private[lf] object Speedy {
         tx,
         ptx.locationInfo(),
         zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
-        ptx.contractState.keyInputs.transform((_, v) => v.queue),
-        ptx.contractState.contractOrder,
+        ptx.csmJournal.keyInputs.transform((_, v) => v.queue),
+        ptx.csmJournal.contractOrder,
       )
     }
 

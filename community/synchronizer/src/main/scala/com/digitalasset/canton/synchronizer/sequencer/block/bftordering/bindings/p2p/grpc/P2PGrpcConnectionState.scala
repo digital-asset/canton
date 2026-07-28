@@ -82,6 +82,19 @@ final class P2PGrpcConnectionState(
   override def isOutgoing(p2pEndpointId: P2PEndpoint.Id): Boolean =
     stateRef.get().p2pEndpointIdToNetworkRef.get(p2pEndpointId).exists(_.isOutgoingConnection)
 
+  override def isConnected(p2pAddressId: P2PAddress.Id)(implicit
+      traceContext: TraceContext
+  ): Boolean = {
+    val state = stateRef.get()
+    import state.*
+    p2pAddressId match {
+      case Right(bftNodeId) =>
+        bftNodeIdToPeerSender.contains(bftNodeId)
+      case Left(p2pEndpointId) =>
+        p2pEndpointIdToBftNodeId.get(p2pEndpointId).exists(bftNodeIdToPeerSender.contains)
+    }
+  }
+
   override def getBftNodeId(p2pEndpointId: P2PEndpoint.Id): Option[BftNodeId] =
     stateRef.get().p2pEndpointIdToBftNodeId.get(p2pEndpointId)
 

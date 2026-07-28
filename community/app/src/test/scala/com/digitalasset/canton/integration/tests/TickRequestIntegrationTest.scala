@@ -160,7 +160,7 @@ sealed trait TickRequestIntegrationTest
     serials.foreach { case (participant, trafficState) =>
       sequencer1.traffic_control.set_traffic_balance(
         participant,
-        trafficState.serial.fold(PositiveInt.one)(_.increment),
+        trafficState.serial.fold(PositiveInt.one)(_.increment.value),
         newBalance,
       )
     }

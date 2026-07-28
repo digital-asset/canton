@@ -1232,11 +1232,14 @@ object TopologyStateWriteThroughCache {
         )
         (inHeadStored, prev) match {
           case (Some(cur), Some(old)) =>
-            if (!(cur.serial == old.serial || cur.serial == old.serial.increment))
+            val nextOld = old.serial.increment.getOrElse(
+              ErrorUtil.invalidState("Reached max serial")
+            )
+            if (!(cur.serial == old.serial || cur.serial == nextOld))
               errorLoggingContext.debug("GOING TO BOUNCE\n  " + tail.mkString("\n  "))
             ErrorUtil.requireState(
               // may be equal if late signature was added, otherwise must be an increment
-              cur.serial == old.serial || cur.serial == old.serial.increment,
+              cur.serial == old.serial || cur.serial == nextOld,
               s"Inconsistent head=$cur vs old=$old",
             )
           case (Some(_), None) => ()

@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 
 /** A request to receive the topology state for initialization
@@ -36,7 +37,7 @@ object TopologyStateForInitRequest extends VersioningCompanion[TopologyStateForI
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
       v30.DownloadTopologyStateForInitRequest
     )(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -48,21 +49,27 @@ object TopologyStateForInitRequest extends VersioningCompanion[TopologyStateForI
     TopologyStateForInitRequest(member)(protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV30(
-      topologyStateForInitRequestP: v30.DownloadTopologyStateForInitRequest
+      pvv: ProtocolVersionValidation,
+      topologyStateForInitRequestP: v30.DownloadTopologyStateForInitRequest,
   ): ParsingResult[TopologyStateForInitRequest] = {
     val v30.DownloadTopologyStateForInitRequest(memberP) = topologyStateForInitRequestP
     for {
-      member <- Member.fromProtoPrimitive(memberP, "member")
+      member <- ProtoValidation.validateThen(memberP, "member", pvv)(
+        Member.fromProtoPrimitive
+      )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield TopologyStateForInitRequest(member)(rpv)
   }
 
   def fromProtoV30(
-      topologyStateForInitRequestP: v30.DownloadTopologyStateForInitHashRequest
+      pvv: ProtocolVersionValidation,
+      topologyStateForInitRequestP: v30.DownloadTopologyStateForInitHashRequest,
   ): ParsingResult[TopologyStateForInitRequest] = {
     val v30.DownloadTopologyStateForInitHashRequest(memberP) = topologyStateForInitRequestP
     for {
-      member <- Member.fromProtoPrimitive(memberP, "member")
+      member <- ProtoValidation.validateThen(memberP, "member", pvv)(
+        Member.fromProtoPrimitive
+      )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield TopologyStateForInitRequest(member)(rpv)
   }

@@ -26,19 +26,14 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.util.{TimeOfChange, TimeOfRequest}
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.{
-  BaseTest,
-  HasExecutorService,
-  LfPartyId,
-  ReassignmentCounter,
-  ScalaFuturesWithPatience,
-}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId, ReassignmentCounter}
 import org.scalatest.AsyncTestSuite
 
 import scala.concurrent.ExecutionContext

@@ -48,13 +48,13 @@ object BuildCommon {
       addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")),
       addCommandAlias(
         "lint",
-        "; bufFormatCheck ; bufLintCheck ; bufWrapperValueCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck",
+        "; scalafmtCantonCheck; bufFormatCheck ; bufLintCheck ; bufWrapperValueCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck",
       ),
       addCommandAlias("scalafixCheck", s"${alsoTest("scalafix --check")}"),
       addCommandAlias(
         "format",
         // `bufLintCheck` and `bufWrapperValueCheck` violations cannot be fixed automatically -- they're here to make sure violations are caught before pushing to CI
-        "; bufFormat ; bufLintCheck ; bufWrapperValueCheck ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders ; javafmtAll",
+        "; scalafmtCanton ; bufFormat ; bufLintCheck ; bufWrapperValueCheck ; scalafixAll ; scalafmtAll ; scalafmtSbt; createLicenseHeaders ; javafmtAll",
       ),
       // To be used by CI:
       // enable coverage and compile
@@ -631,10 +631,9 @@ object BuildCommon {
   // ex: -Xplugin:/root/.cache vs -Xplugin:/home/********/.cache/
   // which makes the cache invalid. To fix this, we ignore the scalacOptions that starts with -Xplugin:.* when
   // comparing scalacOptions between the cache and the current compilation.
-  // Similarly, -P:wartremover:excluded:.* contains absolute paths (added by WartRemoverBloopFix).
   lazy val ignoreScalacOptionsWithPathsInIncrementalCompilation =
     incOptions := incOptions.value.withIgnoredScalacOptions(
-      incOptions.value.ignoredScalacOptions() ++ Seq("-Xplugin:.*", "-P:wartremover:excluded:.*")
+      incOptions.value.ignoredScalacOptions() :+ "-Xplugin:.*"
     )
 
   // applies to all app sub-projects
@@ -1018,6 +1017,7 @@ object BuildCommon {
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
         `slick-fork`,
         `kms-driver-api`,
+        `base-validation`,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1729,6 +1729,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           scalatest % Test
         ),
+        enablePublishLibrary,
       )
 
     lazy val `base-errors` = project
@@ -2057,7 +2058,6 @@ object BuildCommon {
       project
         .in(file("community/ledger/ledger-json-api"))
         .dependsOn(
-          DamlProjects.`scalatest-utils` % Test,
           DamlProjects.`timer-utils`,
           `ledger-api-core` % "compile->compile;test->test",
           `community-testing` % "test->test",
@@ -2754,6 +2754,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           cats,
           cats_law,
+          mockito_scala,
           scalacheck,
           scalatest,
           scalatestScalacheck,
@@ -2762,6 +2763,9 @@ object BuildCommon {
 
     lazy val `rs-grpc-bridge` = project
       .in(file("base/rs-grpc-bridge"))
+      .dependsOn(
+        `scalatest-utils` % Test
+      )
       .settings(
         libsScalaSettings,
         Compile / javacOptions ++= Seq("--release", "17"),
@@ -2842,8 +2846,9 @@ object BuildCommon {
       .in(file("base/resources"))
       .disablePlugins(WartRemover)
       .dependsOn(
-        `logging-entries`,
         `contextualized-logging`,
+        `logging-entries`,
+        `scalatest-utils`,
         `timer-utils`,
       )
       .settings(
@@ -2955,6 +2960,7 @@ object BuildCommon {
         `resources-pekko`,
         `rs-grpc-bridge`,
         `rs-grpc-pekko`,
+        `scalatest-utils`,
         CommunityProjects.`base-errors`,
         CommunityProjects.`util-external`,
         CommunityProjects.`util-observability`,
@@ -3114,7 +3120,6 @@ object BuildCommon {
 
     lazy val `scala-utils` = project
       .in(file("base/scala-utils"))
-      .dependsOn(`scalatest-utils` % Test)
       .settings(
         libsScalaSettings,
         enablePublishLibrary,
@@ -3372,7 +3377,6 @@ object BuildCommon {
         `scala-utils`,
         crypto,
         `logging-entries`,
-        `scalatest-utils`,
         `daml-lf-data`,
       )
       .settings()
@@ -3652,7 +3656,6 @@ object BuildCommon {
         `daml-lf-language`,
         crypto,
         `scala-utils`,
-        `scalatest-utils` % Test,
       )
 
     lazy val `daml-lf-stable-packages` = project

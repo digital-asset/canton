@@ -28,6 +28,7 @@ import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -637,7 +638,7 @@ object EncryptedSingleViewMessage
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.EncryptedViewMessage)(
-      supportedProtoVersion(_)(EncryptedSingleViewMessage.fromProto),
+      supportedProtoVersionPVV(_)(EncryptedSingleViewMessage.fromProto),
       _.toProtoV30,
     ),
     ProtoVersion(31) -> UnsupportedProtoCodec(ProtocolVersion.v35),
@@ -661,7 +662,8 @@ object EncryptedSingleViewMessage
   )(protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProto(
-      encryptedViewMessageP: v30.EncryptedViewMessage
+      pvv: ProtocolVersionValidation,
+      encryptedViewMessageP: v30.EncryptedViewMessage,
   ): ParsingResult[EncryptedSingleViewMessage[ViewType]] = {
     val v30.EncryptedViewMessage(
       viewTreeP,
@@ -688,10 +690,11 @@ object EncryptedSingleViewMessage
         "session key",
         sessionKeyLookupP,
       )
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      synchronizerId <- ProtoValidation.validateThen(
         synchronizerIdP,
         "physical_synchronizer_id",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield new EncryptedSingleViewMessage(
       signature,
@@ -845,7 +848,7 @@ object EncryptedMultipleViewsMessage
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> UnsupportedProtoCodec(ProtocolVersion.v34),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.EncryptedMultipleViewsMessage)(
-      supportedProtoVersion(_)(EncryptedMultipleViewsMessage.fromProto),
+      supportedProtoVersionPVV(_)(EncryptedMultipleViewsMessage.fromProto),
       _.toProtoV31,
     ),
   )
@@ -868,7 +871,8 @@ object EncryptedMultipleViewsMessage
   )(protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProto(
-      encryptedViewMessageP: v31.EncryptedMultipleViewsMessage
+      pvv: ProtocolVersionValidation,
+      encryptedViewMessageP: v31.EncryptedMultipleViewsMessage,
   ): ParsingResult[EncryptedMultipleViewsMessage[ViewType]] = {
     val v31.EncryptedMultipleViewsMessage(
       compressedViewTreesP,
@@ -899,10 +903,11 @@ object EncryptedMultipleViewsMessage
         "session_key_lookup",
         sessionKeyLookupP,
       )
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      synchronizerId <- ProtoValidation.validateThen(
         synchronizerIdP,
         "physical_synchronizer_id",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
     } yield new EncryptedMultipleViewsMessage(
       EncryptedMultipleViews(viewType, Encrypted.fromByteString(compressedViewTreesP)),

@@ -16,6 +16,7 @@ import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsRead
   planCompletionsByHash,
 }
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.{Party, UserId}
 import com.google.protobuf.ByteString
@@ -31,8 +32,7 @@ class BufferedCommandCompletionsReader(
 )(implicit ec: ExecutionContext) {
 
   def getCommandCompletions(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       userId: Option[UserId],
       parties: Set[Party],
   )(implicit
@@ -40,8 +40,7 @@ class BufferedCommandCompletionsReader(
   ): Source[(Offset, CompletionStreamResponse), NotUsed] =
     bufferReader
       .stream(
-        startInclusive = startInclusive,
-        endInclusive = endInclusive,
+        offsetRange = offsetRange,
         persistenceFetchArgs = userId -> parties,
         bufferFilter = filterCompletions(_, parties, userId),
         toApiResponse = (response: CompletionStreamResponse) => Future.successful(response),
@@ -227,8 +226,7 @@ object BufferedCommandCompletionsReader {
   )(implicit ec: ExecutionContext): BufferedCommandCompletionsReader = {
     val fetchCompletions = new FetchFromPersistence[CompletionsFilter, CompletionStreamResponse] {
       override def apply(
-          startInclusive: Offset,
-          endInclusive: Offset,
+          offsetRange: OffsetRange,
           descendingOrder: Boolean,
           filter: (Option[UserId], Parties),
           skipPruningChecks: Boolean,
@@ -240,8 +238,7 @@ object BufferedCommandCompletionsReader {
         val (userId, parties) = filter
         dbReader
           .getCommandCompletions(
-            startInclusive,
-            endInclusive,
+            offsetRange,
             userId,
             parties,
           )

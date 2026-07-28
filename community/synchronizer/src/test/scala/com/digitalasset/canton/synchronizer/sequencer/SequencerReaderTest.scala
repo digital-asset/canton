@@ -35,6 +35,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.util.signalling.{EventSignaller, Notification, NotificationSignal}
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -89,21 +90,21 @@ class SequencerReaderTest
   private val instanceDiscriminator = new UUID(1L, 2L)
 
   class ManualEventSignaller(implicit materializer: Materializer)
-      extends EventSignaller
+      extends EventSignaller[SequencerMemberId, Unit]
       with FlagCloseableAsync {
     private val (queue, source) = Source
-      .queue[ReadSignal](1)
+      .queue[NotificationSignal[Unit]](1)
       .buffer(1, OverflowStrategy.dropHead)
       .preMaterialize()
 
     override protected def timeouts: ProcessingTimeout = SequencerReaderTest.this.timeouts
 
-    def signalRead(): Unit = queue.offer(ReadSignal).discard[QueueOfferResult]
+    def signalRead(): Unit = queue.offer(NotificationSignal.unit).discard[QueueOfferResult]
 
-    override def readSignalsForMember(
-        member: Member,
+    override def readSignals(
         memberId: SequencerMemberId,
-    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
+        member: String,
+    )(implicit traceContext: TraceContext): Source[NotificationSignal[Unit], NotUsed] =
       source
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
@@ -112,7 +113,7 @@ class SequencerReaderTest
 
     override protected def logger: TracedLogger = SequencerReaderTest.this.logger
 
-    override def notifyOfLocalWrite(notification: WriteNotification): Unit = ()
+    override def notify(notification: Notification[SequencerMemberId], signal: Unit): Unit = ()
   }
 
   class Env extends FlagCloseableAsync {

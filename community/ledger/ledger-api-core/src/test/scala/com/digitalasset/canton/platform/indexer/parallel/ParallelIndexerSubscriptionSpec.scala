@@ -116,11 +116,7 @@ class ParallelIndexerSubscriptionSpec
 
   private val someParty = DbDto.PartyEntry(
     ledger_offset = 1,
-    recorded_at = 0,
-    submission_id = null,
     party = Some(Ref.Party.assertFromString("party")),
-    typ = "accept",
-    rejection_reason = None,
     is_local = Some(true),
   )
 
@@ -282,6 +278,17 @@ class ParallelIndexerSubscriptionSpec
     update_id = updateIdByteArray,
     synchronizer_id = someSynchronizerId,
     record_time = 1,
+    payload = emptyByteArray,
+    trace_context = serializableTraceContext,
+  )
+
+  private val someDynamicSynchronizerParameters = DbDto.GenericTopologyEvent(
+    event_sequential_id = 0,
+    event_offset = 1,
+    update_id = updateIdByteArray,
+    synchronizer_id = someSynchronizerId,
+    record_time = 1,
+    event_type = PersistentEventType.SynchronizerParameters.asInt,
     payload = emptyByteArray,
     trace_context = serializableTraceContext,
   )
@@ -561,6 +568,8 @@ class ParallelIndexerSubscriptionSpec
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
           someAcsCommitment,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
+          someDynamicSynchronizerParameters,
+          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L, None),
           someParty,
         ),
         batchSize = 3,
@@ -574,14 +583,14 @@ class ParallelIndexerSubscriptionSpec
     )
     import scala.util.chaining.*
 
-    result.ledgerEnd.lastEventSeqId shouldBe 21
+    result.ledgerEnd.lastEventSeqId shouldBe 22
     result.ledgerEnd.lastStringInterningId shouldBe 1
     result.ledgerEnd.lastPublicationTime shouldBe currentPublicationTime
     result.ledgerEnd.lastOffset shouldBe offset(2)
     result.ledgerEnd.synchronizerIndices shouldBe Map(
       someSynchronizerId -> SynchronizerIndex(None, None, CantonTimestamp.assertFromLong(10L))
     )
-    result.eventCount shouldBe 6L
+    result.eventCount shouldBe 7L
     result.distinctRawStrings shouldBe Nil
     result.batch(1).asInstanceOf[DbDto.EventActivate].event_sequential_id shouldBe 16
     result
@@ -653,10 +662,19 @@ class ParallelIndexerSubscriptionSpec
       transactionMeta.event_sequential_id_last shouldBe 21L
       transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
     }
-    result.batch(23).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
-    result.batch(23).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
-    result.batch(24).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
-    result.batch(24).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
+    result
+      .batch(22)
+      .asInstanceOf[DbDto.GenericTopologyEvent]
+      .event_sequential_id shouldBe 22
+    result.batch(23).asInstanceOf[DbDto.TransactionMeta].tap { transactionMeta =>
+      transactionMeta.event_sequential_id_first shouldBe 22L
+      transactionMeta.event_sequential_id_last shouldBe 22L
+      transactionMeta.publication_time shouldBe currentPublicationTime.toMicros
+    }
+    result.batch(25).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
+    result.batch(25).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
+    result.batch(26).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
+    result.batch(26).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
   }
 
   it should "preserve sequence id if nothing to assign" in {

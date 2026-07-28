@@ -101,12 +101,20 @@ object PartyOps {
                 partySigningKeysWithThreshold = None,
               )
             )
-            .bimap(
+            .biflatMap(
               err =>
-                ParticipantTopologyManagerError.IdentityManagerParentError(
-                  InvalidTopologyMapping.Reject(err)
+                EitherT.leftT[FutureUnlessShutdown, (Option[PositiveInt], PartyToParticipant)](
+                  ParticipantTopologyManagerError.IdentityManagerParentError(
+                    InvalidTopologyMapping.Reject(err)
+                  )
                 ),
-              ptp => (Some(existingPtpTx.serial.increment), ptp),
+              ptp =>
+                EitherT.fromEither[FutureUnlessShutdown](
+                  existingPtpTx.transaction
+                    .nextSerial(errorLoggingContext)
+                    .map[(Option[PositiveInt], PartyToParticipant)](next => (Some(next), ptp))
+                    .leftMap(ParticipantTopologyManagerError.IdentityManagerParentError(_))
+                ),
             )
 
         case multiple =>

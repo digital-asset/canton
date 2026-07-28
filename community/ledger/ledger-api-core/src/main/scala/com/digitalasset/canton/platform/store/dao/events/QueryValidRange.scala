@@ -21,8 +21,7 @@ import scala.concurrent.{ExecutionContext, Future}
 
 trait QueryValidRange {
   def withRangeNotPruned[T](
-      minOffsetInclusive: Offset,
-      maxOffsetInclusive: Offset,
+      offsetRange: OffsetRange,
       errorPruning: Offset => String,
       errorLedgerEnd: Option[Offset] => String,
   )(query: => Future[T])(implicit
@@ -58,10 +57,8 @@ final case class QueryValidRangeImpl(
     *
     * @param query
     *   query to execute
-    * @param minOffsetInclusive
-    *   minimum, inclusive offset used by the query (i.e. all fetched offsets are larger or equal)
-    * @param maxOffsetInclusive
-    *   maximum, inclusive offset used by the query (i.e. all fetched offsets are before or equal)
+    * @param offsetRange
+    *   the inclusive offset range used by the query (i.e. all fetched offsets are within it)
     * @param errorPruning
     *   function that generates a context-specific error parameterized by participant pruning offset
     * @param errorLedgerEnd
@@ -79,16 +76,52 @@ final case class QueryValidRangeImpl(
     * condition.
     */
   override def withRangeNotPruned[T](
-      minOffsetInclusive: Offset,
-      maxOffsetInclusive: Offset,
+      offsetRange: OffsetRange,
       errorPruning: Offset => String,
       errorLedgerEnd: Option[Offset] => String,
   )(query: => Future[T])(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[T] = {
-    assert(Option(maxOffsetInclusive) >= minOffsetInclusive.decrement)
+    assert(offsetRange.endInclusive >= offsetRange.startInclusive)
+    withBoundsNotViolated(
+      upperBoundInclusive = offsetRange.endInclusive,
+      prunedOffsetCheck = prunedOffset => offsetRange.startInclusive > prunedOffset,
+      errorPruning = errorPruning,
+      errorLedgerEnd = errorLedgerEnd,
+    )(query)
+  }
+
+  override def withOffsetNotBeforePruning[T](
+      offset: Offset,
+      errorPruning: Offset => String,
+      errorLedgerEnd: Option[Offset] => String,
+  )(query: => Future[T])(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[T] =
+    withBoundsNotViolated(
+      upperBoundInclusive = offset,
+      prunedOffsetCheck = prunedOffset => offset >= prunedOffset,
+      errorPruning = errorPruning,
+      errorLedgerEnd = errorLedgerEnd,
+    )(query)
+
+  /** Rejects if `upperBoundInclusive` is beyond the ledger end, otherwise runs `query` and, only
+    * afterwards (to avoid a race with a concurrent pruning operation), rejects if the pruning
+    * offset does not satisfy `prunedOffsetCheck`.
+    *
+    * @param upperBoundInclusive
+    *   the highest offset the query may access; must not be beyond the ledger end
+    * @param prunedOffsetCheck
+    *   given the participant pruning offset, whether the query did not access pruned data
+    */
+  private def withBoundsNotViolated[T](
+      upperBoundInclusive: Offset,
+      prunedOffsetCheck: Offset => Boolean,
+      errorPruning: Offset => String,
+      errorLedgerEnd: Option[Offset] => String,
+  )(query: => Future[T])(implicit loggingContext: LoggingContextWithTrace): Future[T] = {
     val ledgerEnd = ledgerEndCache().map(_.lastOffset)
-    if (Option(maxOffsetInclusive) > ledgerEnd) {
+    if (Option(upperBoundInclusive) > ledgerEnd)
       Future.failed(
         RequestValidationErrors.ParticipantDataAccessedAfterLedgerEnd
           .Reject(
@@ -99,12 +132,12 @@ final case class QueryValidRangeImpl(
           )
           .asGrpcError
       )
-    } else
+    else
       query.thereafterF(_ =>
         pruningOffsetService.pruningOffset
           .map(pruningOffsetO =>
             pruningOffsetO
-              .filter(_ >= minOffsetInclusive)
+              .filterNot(prunedOffsetCheck)
               .foreach(pruningOffsetUpToInclusive =>
                 throw RequestValidationErrors.ParticipantPrunedDataAccessed
                   .Reject(
@@ -118,22 +151,6 @@ final case class QueryValidRangeImpl(
           )
       )
   }
-
-  override def withOffsetNotBeforePruning[T](
-      offset: Offset,
-      errorPruning: Offset => String,
-      errorLedgerEnd: Option[Offset] => String,
-  )(query: => Future[T])(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[T] =
-    withRangeNotPruned(
-      // as the range not pruned forms a condition that the minOffsetInclusive is greater than the pruning offset,
-      // by setting this to the offset + 1 we ensure that the offset is greater than or equal to the pruning offset.
-      minOffsetInclusive = offset.increment,
-      maxOffsetInclusive = offset,
-      errorPruning = errorPruning,
-      errorLedgerEnd = errorLedgerEnd,
-    )(query)
 
   /** Filters out events that are at or below the participant's pruning offset.
     *

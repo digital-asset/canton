@@ -10,7 +10,7 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.CompletionStorageBackend
 import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsReader.CompletionsByHash
-import com.digitalasset.canton.platform.store.dao.events.QueryValidRange
+import com.digitalasset.canton.platform.store.dao.events.{OffsetRange, QueryValidRange}
 import com.digitalasset.canton.platform.{Party, UserId}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
@@ -38,28 +38,25 @@ private[dao] final class CommandCompletionsReader(
     Offset.tryFromLong(response.completionResponse.completion.get.offset)
 
   override def getCommandCompletions(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       userId: Option[UserId],
       parties: Set[Party],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, CompletionStreamResponse), NotUsed] = {
     val pruneSafeQuery =
-      (range: QueryRange[Offset]) =>
+      (range: OffsetRange) =>
         queryValidRange.withRangeNotPruned[Vector[CompletionStreamResponse]](
-          minOffsetInclusive = startInclusive,
-          maxOffsetInclusive = endInclusive,
+          offsetRange = range,
           errorPruning = (prunedOffset: Offset) =>
-            s"Command completions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} overlaps with pruned offset ${prunedOffset.unwrap}",
+            s"Command completions request for $offsetRange overlaps with pruned offset ${prunedOffset.unwrap}",
           errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-            s"Command completions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
+            s"Command completions request for $offsetRange is beyond ledger end offset ${ledgerEndOffset
                 .fold(0L)(_.unwrap)}",
         ) {
           dispatcher.executeSql(metrics.index.db.getCompletions)(
             storageBackend.commandCompletions(
-              startInclusive = range.startInclusive,
-              endInclusive = range.endInclusive,
+              offsetRange = range,
               userId = userId,
               parties = parties,
               limit = pageSize,
@@ -67,18 +64,16 @@ private[dao] final class CommandCompletionsReader(
           )
         }
 
-    val initialRange = new QueryRange[Offset](
-      startInclusive = startInclusive,
-      endInclusive = endInclusive,
-    )
     val source: Source[CompletionStreamResponse, NotUsed] = paginatingAsyncStream
-      .streamFromSeekPagination[QueryRange[Offset], CompletionStreamResponse](
-        startFromOffset = initialRange,
+      .streamFromSeekPagination[OffsetRange, CompletionStreamResponse](
+        startFromOffset = offsetRange,
         getOffset = (previousCompletion: CompletionStreamResponse) => {
           val lastOffset = offsetFor(previousCompletion)
-          initialRange.copy(startInclusive = lastOffset.increment)
+          Option.when(lastOffset < offsetRange.endInclusive)(
+            offsetRange.copy(startInclusive = lastOffset.increment)
+          )
         },
-      ) { (subRange: QueryRange[Offset]) =>
+      ) { (subRange: OffsetRange) =>
         pruneSafeQuery(subRange)
       }
     source.map(response => offsetFor(response) -> response.withPrecomputedSerializedSize())

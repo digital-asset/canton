@@ -122,7 +122,7 @@ object ReleaseVersion {
     Encoder.encodeString.contramap[ReleaseVersion](_.fullVersion)
 
   def fromProtoPrimitive(proto: String, fieldName: String): ParsingResult[ReleaseVersion] =
-    create(proto).leftMap(ValueDeserializationError(fieldName, _))
+    create(proto).leftMap(ValueDeserializationError(_, fieldName))
 
   // Useful for places where we need branching based on what a different node supports.
   trait Feature {

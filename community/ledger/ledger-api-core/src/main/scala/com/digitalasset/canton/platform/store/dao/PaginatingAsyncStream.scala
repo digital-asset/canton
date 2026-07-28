@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.dao.events.IdPageSizing
 import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.NotUsed
@@ -35,7 +36,8 @@ private[platform] class PaginatingAsyncStream(
     * @param startFromOffset
     *   initial offset
     * @param getOffset
-    *   function that returns a position/offset from the element of type [[T]]
+    *   function that returns the offset to continue from given the last element of a page, or
+    *   `None` when the stream should terminate (e.g. the page ended at the requested upper bound)
     * @param query
     *   a function that fetches results starting from provided offset
     * @tparam Off
@@ -43,7 +45,7 @@ private[platform] class PaginatingAsyncStream(
     * @tparam T
     *   the type of the items returned in each call
     */
-  def streamFromSeekPagination[Off, T](startFromOffset: Off, getOffset: T => Off)(
+  def streamFromSeekPagination[Off, T](startFromOffset: Off, getOffset: T => Option[Off])(
       query: Off => Future[Vector[T]]
   ): Source[T, NotUsed] =
     Source
@@ -52,7 +54,7 @@ private[platform] class PaginatingAsyncStream(
           Future.successful(None) // finished reading the whole thing
         case Some(offset) =>
           query(offset).map { result =>
-            val nextPageOffset: Option[Off] = result.lastOption.map(getOffset)
+            val nextPageOffset: Option[Off] = result.lastOption.flatMap(getOffset)
             Some((nextPageOffset, result))
           }(directEc)
       }
@@ -62,8 +64,7 @@ private[platform] class PaginatingAsyncStream(
       idStreamName: String,
       idPageSizing: IdPageSizing,
       idPageBufferSize: Int,
-      initialFromIdExclusive: Long,
-      initialEndInclusive: Long,
+      initialEventSeqIdRange: EventSeqIdRange,
       descendingOrder: Boolean,
   )(
       fetchPageDbQuery: IdPageQuery
@@ -79,38 +80,37 @@ private[platform] class PaginatingAsyncStream(
           in = paginationInput,
           f = fetchPageDbQuery.fetchPage(c),
         )(result =>
-          s"[$idStreamName] for next ID page returned: limit:${paginationInput.limit} from:${paginationInput.fromTo.fromExclusive} to:${paginationInput.fromTo.toInclusive}  #IDs:${result.ids.size}"
+          s"[$idStreamName] for next ID page returned: limit:${paginationInput.limit} range:${paginationInput.fromTo.eventSeqIdRange}  #IDs:${result.ids.size}"
         )
     val initialFromTo = PaginationFromTo.of(
-      startExclusive = initialFromIdExclusive,
-      endInclusive = initialEndInclusive,
+      eventSeqIdRange = initialEventSeqIdRange,
       descending = descendingOrder,
     )
     val initialState = IdPaginationState(
-      fromIdExclusive = initialFromTo.fromExclusive,
+      fromIdInclusive = initialFromTo.eventSeqIdRange.startInclusive,
       pageSize = idPageSizing.minPageSize,
       last = false,
     )
     Source
       .unfoldAsync[IdPaginationState, Vector[Long]](initialState) { state =>
-        executeIdQuery(
-          fetchPageQuery(
-            PaginationInput(
-              fromTo = initialFromTo.copy(
-                fromExclusive = state.fromIdExclusive
-              ),
-              limit = state.pageSize,
+        if (state.last) Future.successful(None)
+        else
+          executeIdQuery(
+            fetchPageQuery(
+              PaginationInput(
+                fromTo = initialFromTo.withStartInclusive(state.fromIdInclusive),
+                limit = state.pageSize,
+              )
             )
-          )
-        ).map(page =>
-          page.ids.lastOption.map(last =>
-            IdPaginationState(
-              fromIdExclusive = last,
-              pageSize = Math.min(state.pageSize * 4, idPageSizing.maxPageSize),
-              last = page.lastPage,
-            ) -> page.ids
-          )
-        )(directEc)
+          ).map(page =>
+            page.ids.lastOption.map(last =>
+              IdPaginationState(
+                fromIdInclusive = nextFromInclusive(last, descendingOrder),
+                pageSize = Math.min(state.pageSize * 4, idPageSizing.maxPageSize),
+                last = page.lastPage,
+              ) -> page.ids
+            )
+          )(directEc)
       }
       .buffer(idPageBufferSize, OverflowStrategy.backpressure)
       .mapConcat(identity)
@@ -120,8 +120,7 @@ private[platform] class PaginatingAsyncStream(
       idStreamName: String,
       idPageSizing: IdPageSizing,
       idPageBufferSize: Int,
-      initialFromIdExclusive: Long,
-      initialEndInclusive: Long,
+      initialEventSeqIdRange: EventSeqIdRange,
       descendingOrder: Boolean,
   )(
       fetchPageDbQuery: IdFilterPageQuery
@@ -136,8 +135,7 @@ private[platform] class PaginatingAsyncStream(
     streamIdPagesFromSeekPaginationWithIdFilter(
       idStreamName = idStreamName,
       idPageSizing = idPageSizing,
-      initialFromIdExclusive = initialFromIdExclusive,
-      initialEndInclusive = initialEndInclusive,
+      initialEventSeqIdRange = initialEventSeqIdRange,
       descendingOrder = descendingOrder,
     )(fetchPageDbQuery)(
       executeFetchBounds = executeFetchBounds,
@@ -151,8 +149,7 @@ private[platform] class PaginatingAsyncStream(
   def streamIdPagesFromSeekPaginationWithIdFilter(
       idStreamName: String,
       idPageSizing: IdPageSizing,
-      initialFromIdExclusive: Long,
-      initialEndInclusive: Long,
+      initialEventSeqIdRange: EventSeqIdRange,
       descendingOrder: Boolean,
   )(
       fetchPageDbQuery: IdFilterPageQuery
@@ -171,8 +168,8 @@ private[platform] class PaginatingAsyncStream(
           in = paginationInput,
           f = fetchPageDbQuery.fetchPageBounds(c),
         )(result =>
-          s"[$idStreamName] for next ID page bounds returned: limit:${paginationInput.limit} from:${paginationInput.fromTo.fromExclusive} to:${result
-              .map(_.fromTo.toInclusive)}"
+          s"[$idStreamName] for next ID page bounds returned: limit:${paginationInput.limit} from:${paginationInput.fromTo.eventSeqIdRange.startInclusive} to:${result
+              .map(_.fromTo.eventSeqIdRange.endInclusive)}"
         )
     def fetchPageQuery(
         paginationFromTo: PaginationFromTo
@@ -182,15 +179,14 @@ private[platform] class PaginatingAsyncStream(
           in = paginationFromTo,
           f = fetchPageDbQuery.fetchPage(c),
         )(result =>
-          s"[$idStreamName] for next ID page returned: from:${paginationFromTo.fromExclusive} to:${paginationFromTo.toInclusive} #IDs:${result.size}"
+          s"[$idStreamName] for next ID page returned: ${paginationFromTo.eventSeqIdRange} #IDs:${result.size}"
         )
     val initialFromTo = PaginationFromTo.of(
-      startExclusive = initialFromIdExclusive,
-      endInclusive = initialEndInclusive,
+      eventSeqIdRange = initialEventSeqIdRange,
       descending = descendingOrder,
     )
     val initialState = IdPaginationState(
-      fromIdExclusive = initialFromTo.fromExclusive,
+      fromIdInclusive = initialFromTo.eventSeqIdRange.startInclusive,
       pageSize = idPageSizing.minPageSize,
       last = false,
     )
@@ -198,9 +194,7 @@ private[platform] class PaginatingAsyncStream(
       .unfoldAsync[IdPaginationState, PaginationInput](initialState) { state =>
         if (state.last) Future.successful(None)
         else {
-          val fromTo = initialFromTo.copy(
-            fromExclusive = state.fromIdExclusive
-          )
+          val fromTo = initialFromTo.withStartInclusive(state.fromIdInclusive)
           executeFetchBounds(
             fetchBoundsQuery(
               PaginationInput(
@@ -211,7 +205,10 @@ private[platform] class PaginatingAsyncStream(
           ).map(
             _.map(pageBounds =>
               IdPaginationState(
-                fromIdExclusive = pageBounds.fromTo.toInclusive,
+                fromIdInclusive = nextFromInclusive(
+                  pageBounds.fromTo.eventSeqIdRange.endInclusive,
+                  descendingOrder,
+                ),
                 pageSize = Math.min(state.pageSize * 4, idPageSizing.maxPageSize),
                 last = pageBounds.lastPage,
               ) -> PaginationInput(
@@ -247,57 +244,63 @@ private[platform] class PaginatingAsyncStream(
 
 object PaginatingAsyncStream {
 
-  final case class IdPaginationState(fromIdExclusive: Long, pageSize: Int, last: Boolean)
+  final case class IdPaginationState(fromIdInclusive: Long, pageSize: Int, last: Boolean)
 
-  /** Describes bounds for generating paginated stream. The stream can be either descending or
-    * ascending.
-    * @param fromExclusive
-    *   a starting bound for the stream (a sequential id from which to look for a first element in a
-    *   direction of stream order). In case of ascending stream it's a lower bound in case of the
-    *   descending stream the upper bound of the range. In a descending stream [[fromExclusive]]
-    *   must be greather than or equal to [[toInclusive]], in an ascending one, the inequality sign
-    *   is flipped.
+  private def nextFromInclusive(lastConsumedInclusive: Long, descending: Boolean): Long =
+    if (descending) lastConsumedInclusive - 1 else lastConsumedInclusive + 1
+
+  /** Describes the bounds for generating a paginated stream. The stream can be either ascending or
+    * descending.
+    *
+    * @param eventSeqIdRange
+    *   the event sequential id range to stream, oriented in the direction of traversal:
+    *   `startInclusive` is always the first id to read and `endInclusive` the last. For an
+    *   ascending stream `startInclusive <= endInclusive`; for a descending stream the range is
+    *   flipped, so `startInclusive >= endInclusive`.
+    * @param descending
+    *   whether the stream is traversed from the highest to the lowest event sequential id.
     */
   final case class PaginationFromTo(
-      fromExclusive: Long,
-      toInclusive: Long,
+      eventSeqIdRange: EventSeqIdRange,
       descending: Boolean,
-  )
+  ) {
+
+    def withStartInclusive(id: Long): PaginationFromTo =
+      copy(eventSeqIdRange = eventSeqIdRange.copy(startInclusive = id))
+
+    def withEndInclusive(id: Long): PaginationFromTo =
+      copy(eventSeqIdRange = eventSeqIdRange.copy(endInclusive = id))
+  }
 
   object PaginationFromTo {
     def ascending(
-        startExclusive: Long,
-        endInclusive: Long,
+        eventSeqIdRange: EventSeqIdRange
     ): PaginationFromTo = {
-      assert(startExclusive <= endInclusive)
+      assert(eventSeqIdRange.startInclusive <= eventSeqIdRange.endInclusive)
       PaginationFromTo(
-        fromExclusive = startExclusive,
-        toInclusive = endInclusive,
+        eventSeqIdRange = eventSeqIdRange,
         descending = false,
       )
     }
 
     def descending(
-        startExclusive: Long,
-        endInclusive: Long,
+        eventSeqIdRange: EventSeqIdRange
     ): PaginationFromTo = {
-      assert(startExclusive <= endInclusive)
+      assert(eventSeqIdRange.startInclusive <= eventSeqIdRange.endInclusive)
       PaginationFromTo(
-        fromExclusive = endInclusive + 1, // Adjust bounds to flip inclusive/exclusive meaning
-        toInclusive = startExclusive + 1,
+        eventSeqIdRange.flipped,
         descending = true,
       )
     }
 
     def of(
-        startExclusive: Long,
-        endInclusive: Long,
+        eventSeqIdRange: EventSeqIdRange,
         descending: Boolean,
     ): PaginationFromTo =
       if (descending)
-        PaginationFromTo.descending(startExclusive, endInclusive)
+        PaginationFromTo.descending(eventSeqIdRange)
       else
-        ascending(startExclusive, endInclusive)
+        ascending(eventSeqIdRange)
   }
 
   trait IdFilterPageQuery {

@@ -7,7 +7,7 @@ import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawAcsCommitment
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.{
-  IdRange,
+  EventSeqIdRange,
   Ids,
 }
 import com.digitalasset.canton.protocol.UpdateId
@@ -75,7 +75,8 @@ private[backend] trait StorageBackendTestsAcsCommitments
     payloads.map(sanitize) should contain theSameElementsAs singleDto.map(toRaw).map(sanitize)
 
     val payloadsRange = executeSql(
-      backend.event.fetchAcsCommitments(IdRange(1L, 1L), synchronizerId1, descendingOrder = false)
+      backend.event
+        .fetchAcsCommitments(EventSeqIdRange(1L, 1L), synchronizerId1, descendingOrder = false)
     )
     payloadsRange.map(sanitize) shouldBe payloads.map(sanitize)
   }
@@ -100,7 +101,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
     val payloadsRange = executeSql(
       backend.event
         .fetchAcsCommitments(
-          IdRange(fromInclusive = 1L, toInclusive = 5L),
+          EventSeqIdRange(startInclusive = 1L, endInclusive = 5L),
           synchronizerId1,
           descendingOrder = false,
         )
@@ -110,7 +111,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
     val payloadsSingle = executeSql(
       backend.event
         .fetchAcsCommitments(
-          IdRange(fromInclusive = 1L, toInclusive = 1L),
+          EventSeqIdRange(startInclusive = 1L, endInclusive = 1L),
           synchronizerId1,
           descendingOrder = false,
         )
@@ -120,7 +121,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
     val payloadsRange2 = executeSql(
       backend.event
         .fetchAcsCommitments(
-          IdRange(fromInclusive = 1L, toInclusive = 5L),
+          EventSeqIdRange(startInclusive = 1L, endInclusive = 5L),
           synchronizerId2,
           descendingOrder = false,
         )
@@ -135,7 +136,8 @@ private[backend] trait StorageBackendTestsAcsCommitments
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 5L))
 
     val payloads = executeSql(
-      backend.event.fetchAcsCommitments(IdRange(1L, 5L), synchronizerId1, descendingOrder = false)
+      backend.event
+        .fetchAcsCommitments(EventSeqIdRange(1L, 5L), synchronizerId1, descendingOrder = false)
     )
 
     payloads.map(_.eventSequentialId) shouldBe sorted
@@ -147,7 +149,8 @@ private[backend] trait StorageBackendTestsAcsCommitments
     executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 5L))
 
     val payloads = executeSql(
-      backend.event.fetchAcsCommitments(IdRange(1L, 5L), synchronizerId1, descendingOrder = true)
+      backend.event
+        .fetchAcsCommitments(EventSeqIdRange(1L, 5L), synchronizerId1, descendingOrder = true)
     )
 
     payloads.map(_.eventSequentialId) shouldBe Vector(4L, 3L, 1L)
@@ -169,7 +172,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
     val payloadsRange = executeSql(
       backend.event
         .fetchAcsCommitments(
-          IdRange(fromInclusive = 3L, toInclusive = 4L),
+          EventSeqIdRange(startInclusive = 3L, endInclusive = 4L),
           synchronizerId2,
           descendingOrder = false,
         )
@@ -187,7 +190,7 @@ private[backend] trait StorageBackendTestsAcsCommitments
     val payloads = executeSql(
       backend.event
         .fetchAcsCommitments(
-          IdRange(fromInclusive = 1L, toInclusive = 5L),
+          EventSeqIdRange(startInclusive = 1L, endInclusive = 5L),
           unknownSynchronizerId,
           descendingOrder = false,
         )

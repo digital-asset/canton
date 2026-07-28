@@ -11,6 +11,7 @@ import com.daml.metrics.ExecutorServiceMetrics.{
 }
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
+import com.digitalasset.canton.scalatest.DefaultCantonUnitTestPatience
 import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -22,7 +23,8 @@ class ExecutorServiceMetricsSpec
     extends AnyWordSpec
     with Matchers
     with Eventually
-    with MetricValues {
+    with MetricValues
+    with DefaultCantonUnitTestPatience {
 
   private val factory = new InMemoryMetricsFactory
   private val metrics = new ExecutorServiceMetrics(factory)

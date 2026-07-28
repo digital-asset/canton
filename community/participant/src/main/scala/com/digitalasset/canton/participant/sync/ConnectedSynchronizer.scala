@@ -725,19 +725,23 @@ class ConnectedSynchronizer(
             ]
         ): EitherT[FutureUnlessShutdown, TopologyManagerError, GenericSignedTopologyTransaction] =
           synchronizeWithClosing("updating STC for feature flags auto sync")(
-            topologyManager.proposeAndAuthorize(
-              op = TopologyChangeOp.Replace,
-              mapping = existingSynchronizerTrustCertificate.mapping
-                .focus(_.featureFlags)
-                .modify(_ ++ requiredFlagsForPV),
-              serial = Some(existingSynchronizerTrustCertificate.serial.increment),
-              signingKeys = Seq.empty,
-              namespacesToSignFor = Seq.empty,
-              protocolVersion = protocolVersion,
-              expectFullAuthorization = false,
-              forceChanges = ForceFlags.none,
-              waitToBecomeEffective = None,
-            )
+            EitherT
+              .fromEither(existingSynchronizerTrustCertificate.nextSerial(errorLoggingContext))
+              .flatMap { nextSerial =>
+                topologyManager.proposeAndAuthorize(
+                  op = TopologyChangeOp.Replace,
+                  mapping = existingSynchronizerTrustCertificate.mapping
+                    .focus(_.featureFlags)
+                    .modify(_ ++ requiredFlagsForPV),
+                  serial = Some(nextSerial),
+                  signingKeys = Seq.empty,
+                  namespacesToSignFor = Seq.empty,
+                  protocolVersion = protocolVersion,
+                  expectFullAuthorization = false,
+                  forceChanges = ForceFlags.none,
+                  waitToBecomeEffective = None,
+                )
+              }
           )
 
         val result = for {

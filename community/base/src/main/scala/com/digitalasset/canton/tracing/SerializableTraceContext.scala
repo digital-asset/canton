@@ -6,6 +6,7 @@ package com.digitalasset.canton.tracing
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.v30
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedMessageCompanionCommon,
@@ -13,6 +14,7 @@ import com.digitalasset.canton.version.{
   HasVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
 }
 import com.typesafe.scalalogging.Logger
 
@@ -29,7 +31,10 @@ final case class SerializableTraceContext(traceContext: TraceContext)
 
   def toProtoV30: v30.TraceContext = {
     val w3cTraceContext = traceContext.asW3CTraceContext
-    v30.TraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
+    v30.TraceContext(
+      w3cTraceContext.map(w => w.parent),
+      w3cTraceContext.flatMap(_.state),
+    )
   }
 }
 
@@ -66,7 +71,20 @@ object SerializableTraceContext
     } yield tc
 
   def fromProtoV30(tc: v30.TraceContext): ParsingResult[SerializableTraceContext] =
-    Right(SerializableTraceContext(W3CTraceContext.toTraceContext(tc.traceparent, tc.tracestate)))
+    // Trace context is transport metadata, never consensus/ledger state, so always-on validation
+    // cannot diverge honest nodes; validate unconditionally to keep control characters out of logs.
+    for {
+      traceparent <- ProtoValidation.validate(
+        tc.traceparent,
+        Some("traceparent"),
+        ProtocolVersionValidation.AlwaysValidation,
+      )
+      tracestate <- ProtoValidation.validate(
+        tc.tracestate,
+        Some("tracestate"),
+        ProtocolVersionValidation.AlwaysValidation,
+      )
+    } yield SerializableTraceContext(W3CTraceContext.toTraceContext(traceparent, tracestate))
 
   private[tracing] def safely[A](
       logger: Logger

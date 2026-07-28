@@ -19,7 +19,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 }
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawParticipantAuthorization
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.{
-  IdRange,
+  EventSeqIdRange,
   Ids,
 }
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
@@ -105,10 +105,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         )
         .fetchPage(_)(
           PaginationInput(
-            PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 10L,
-            ),
+            PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1L, endInclusive = 10L)),
             limit = 10,
           )
         )
@@ -123,10 +120,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         )
         .fetchPage(_)(
           PaginationInput(
-            PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 10L,
-            ),
+            PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1L, endInclusive = 10L)),
             limit = 10,
           )
         )
@@ -146,10 +140,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         )
         .fetchPage(_)(
           PaginationInput(
-            PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 10L,
-            ),
+            PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1L, endInclusive = 10L)),
             limit = 10,
           )
         )
@@ -164,10 +155,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         )
         .fetchPage(_)(
           PaginationInput(
-            PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 10L,
-            ),
+            PaginationFromTo.ascending(EventSeqIdRange(startInclusive = 1L, endInclusive = 10L)),
             limit = 10,
           )
         )
@@ -188,7 +176,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
     payloadsForAll.map(sanitize) should contain theSameElementsAs singleDto.map(toRaw).map(sanitize)
 
     val payloadsForAllRange = executeSql(
-      backend.event.topologyPartyEventBatch(IdRange(1L, 1L))
+      backend.event.topologyPartyEventBatch(EventSeqIdRange(1L, 1L))
     )
     payloadsForAllRange.map(sanitize) shouldBe payloadsForAll.map(sanitize)
   }
@@ -205,7 +193,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
       .map(sanitize) should contain theSameElementsAs multipleDtos.map(toRaw).map(sanitize)
 
     val payloadsForAllRange = executeSql(
-      backend.event.topologyPartyEventBatch(IdRange(1L, 4L))
+      backend.event.topologyPartyEventBatch(EventSeqIdRange(1L, 4L))
     )
     payloadsForAllRange.map(sanitize) shouldBe payloadsForAll.map(sanitize)
   }
@@ -241,7 +229,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
             synchronizerId = synchronizerId1,
             recordTime = Timestamp.assertFromLong(1504),
           ),
-          dtoPartyToParticipant(
+          dtoGenericTopologyEvent(
             offset(2),
             2L,
             synchronizerId = synchronizerId1,
@@ -253,12 +241,24 @@ private[backend] trait StorageBackendTestsPartyToParticipant
             synchronizerId = synchronizerId1,
             recordTime = Timestamp.assertFromLong(1506),
           ),
+          dtoPartyToParticipant(
+            offset(4),
+            4L,
+            synchronizerId = synchronizerId1,
+            recordTime = Timestamp.assertFromLong(1507),
+          ),
+          dtoGenericTopologyEvent(
+            offset(5),
+            5L,
+            synchronizerId = synchronizerId1,
+            recordTime = Timestamp.assertFromLong(1508),
+          ),
         ),
         _,
       )
     )
     executeSql(
-      updateLedgerEnd(offset(3), 3L)
+      updateLedgerEnd(offset(5), 5L)
     )
     backend.stringInterningSupport.synchronizerId.internalize(synchronizerId1)
     backend.stringInterningSupport.synchronizerId.internalize(synchronizerId2)
@@ -266,9 +266,16 @@ private[backend] trait StorageBackendTestsPartyToParticipant
       backend.event
         .topologyEventOffsetPublishedOnRecordTime(
           synchronizerId1,
-          CantonTimestamp.ofEpochMicro(1505),
+          CantonTimestamp.ofEpochMicro(1506),
         )
-    ) shouldBe Some(offset(2))
+    ) shouldBe Some(offset(3))
+    executeSql(
+      backend.event
+        .topologyEventOffsetPublishedOnRecordTime(
+          synchronizerId1,
+          CantonTimestamp.ofEpochMicro(1508),
+        )
+    ) shouldBe Some(offset(5))
   }
 
   it should "be no offset (None) if there is none" in {
@@ -282,24 +289,36 @@ private[backend] trait StorageBackendTestsPartyToParticipant
             synchronizerId = synchronizerId1,
             recordTime = Timestamp.assertFromLong(1504),
           ),
-          dtoPartyToParticipant(
-            offset(3),
-            3L,
+          dtoGenericTopologyEvent(
+            offset(2),
+            2L,
             synchronizerId = synchronizerId1,
-            recordTime = Timestamp.assertFromLong(1506),
+            recordTime = Timestamp.assertFromLong(1505),
+          ),
+          dtoPartyToParticipant(
+            offset(4),
+            4L,
+            synchronizerId = synchronizerId1,
+            recordTime = Timestamp.assertFromLong(1507),
+          ),
+          dtoGenericTopologyEvent(
+            offset(5),
+            5L,
+            synchronizerId = synchronizerId1,
+            recordTime = Timestamp.assertFromLong(1508),
           ),
         ),
         _,
       )
     )
     executeSql(
-      updateLedgerEnd(offset(3), 3L)
+      updateLedgerEnd(offset(5), 5L)
     )
     executeSql(
       backend.event
         .topologyEventOffsetPublishedOnRecordTime(
           synchronizerId1,
-          CantonTimestamp.ofEpochMilli(1505),
+          CantonTimestamp.ofEpochMilli(1506),
         )
     ) shouldBe None
   }
@@ -315,30 +334,49 @@ private[backend] trait StorageBackendTestsPartyToParticipant
             synchronizerId = synchronizerId1,
             recordTime = Timestamp.assertFromLong(1504),
           ),
-          dtoPartyToParticipant(
+          dtoGenericTopologyEvent(
             offset(2),
             2L,
-            synchronizerId = synchronizerId2,
+            synchronizerId = synchronizerId1,
             recordTime = Timestamp.assertFromLong(1505),
           ),
           dtoPartyToParticipant(
             offset(3),
             3L,
-            synchronizerId = synchronizerId1,
+            synchronizerId = synchronizerId2,
             recordTime = Timestamp.assertFromLong(1506),
+          ),
+          dtoPartyToParticipant(
+            offset(4),
+            4L,
+            synchronizerId = synchronizerId1,
+            recordTime = Timestamp.assertFromLong(1507),
+          ),
+          dtoGenericTopologyEvent(
+            offset(5),
+            5L,
+            synchronizerId = synchronizerId2,
+            recordTime = Timestamp.assertFromLong(1508),
           ),
         ),
         _,
       )
     )
     executeSql(
-      updateLedgerEnd(offset(3), 3L)
+      updateLedgerEnd(offset(5), 5L)
     )
     executeSql(
       backend.event
         .topologyEventOffsetPublishedOnRecordTime(
           synchronizerId1,
-          CantonTimestamp.ofEpochMilli(1505),
+          CantonTimestamp.ofEpochMilli(1506),
+        )
+    ) shouldBe None
+    executeSql(
+      backend.event
+        .topologyEventOffsetPublishedOnRecordTime(
+          synchronizerId1,
+          CantonTimestamp.ofEpochMicro(1508),
         )
     ) shouldBe None
   }
@@ -354,7 +392,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
             synchronizerId = synchronizerId1,
             recordTime = Timestamp.assertFromLong(1504),
           ),
-          dtoPartyToParticipant(
+          dtoGenericTopologyEvent(
             offset(2),
             2L,
             synchronizerId = synchronizerId1,
@@ -363,8 +401,20 @@ private[backend] trait StorageBackendTestsPartyToParticipant
           dtoPartyToParticipant(
             offset(3),
             3L,
-            synchronizerId = synchronizerId1,
+            synchronizerId = synchronizerId2,
             recordTime = Timestamp.assertFromLong(1506),
+          ),
+          dtoPartyToParticipant(
+            offset(4),
+            4L,
+            synchronizerId = synchronizerId1,
+            recordTime = Timestamp.assertFromLong(1507),
+          ),
+          dtoGenericTopologyEvent(
+            offset(5),
+            5L,
+            synchronizerId = synchronizerId2,
+            recordTime = Timestamp.assertFromLong(1508),
           ),
         ),
         _,
@@ -377,7 +427,14 @@ private[backend] trait StorageBackendTestsPartyToParticipant
       backend.event
         .topologyEventOffsetPublishedOnRecordTime(
           synchronizerId1,
-          CantonTimestamp.ofEpochMilli(1505),
+          CantonTimestamp.ofEpochMilli(1506),
+        )
+    ) shouldBe None
+    executeSql(
+      backend.event
+        .topologyEventOffsetPublishedOnRecordTime(
+          synchronizerId1,
+          CantonTimestamp.ofEpochMilli(1508),
         )
     ) shouldBe None
   }

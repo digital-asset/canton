@@ -79,8 +79,7 @@ private[dao] final class UpdateReader(
   private val dbMetrics = metrics.index.db
 
   override def getUpdates(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean = false,
@@ -88,15 +87,19 @@ private[dao] final class UpdateReader(
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, UpdateResponse), NotUsed] = {
     val futureSource =
-      getEventSeqIdRange(startInclusive, endInclusive, skipPruningChecks = skipPruningChecks)
-        .map(queryRange =>
-          updatesStreamReader.streamUpdates(
-            queryRange = queryRange,
-            internalUpdateFormat = internalUpdateFormat,
-            descendingOrder = descendingOrder,
-            skipPruningChecks = skipPruningChecks,
-          )
-        )
+      getEventSeqIdRange(offsetRange, skipPruningChecks = skipPruningChecks)
+        .map {
+          case None =>
+            // the offset range contains no events (e.g. only offset-only updates), nothing to stream
+            Source.empty[(Offset, UpdateResponse)]
+          case Some(queryRange) =>
+            updatesStreamReader.streamUpdates(
+              queryRange = queryRange,
+              internalUpdateFormat = internalUpdateFormat,
+              descendingOrder = descendingOrder,
+              skipPruningChecks = skipPruningChecks,
+            )
+        }
     Source
       .futureSource(futureSource)
       .mapMaterializedValue((_: Future[NotUsed]) => NotUsed)
@@ -158,31 +161,26 @@ private[dao] final class UpdateReader(
     )
 
   private def getEventSeqIdRange(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       skipPruningChecks: Boolean,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[EventsRange] = {
+  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[EventsRange]] = {
     def calculateRange() = dispatcher.executeSql(dbMetrics.getEventSeqIdRange) { connection =>
-      EventsRange(
-        startInclusiveOffset = startInclusive,
-        startInclusiveEventSeqId =
-          eventStorageBackend.maxEventSequentialId(startInclusive.decrement)(connection),
-        endInclusiveOffset = endInclusive,
-        endInclusiveEventSeqId =
-          eventStorageBackend.maxEventSequentialId(Some(endInclusive))(connection),
-      )
+      eventStorageBackend
+        .eventSequentialIdRange(offsetRange)(connection)
+        .map(eventSeqIdRange =>
+          EventsRange(offsetRange = offsetRange, eventSeqIdRange = eventSeqIdRange)
+        )
     }
 
     if (skipPruningChecks) {
       calculateRange()
     } else {
       queryValidRange.withRangeNotPruned(
-        minOffsetInclusive = startInclusive,
-        maxOffsetInclusive = endInclusive,
+        offsetRange = offsetRange,
         errorPruning = (prunedOffset: Offset) =>
-          s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+          s"Transactions request for $offsetRange precedes pruned offset ${prunedOffset.unwrap}",
         errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-          s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
+          s"Transactions request for $offsetRange is beyond ledger end offset ${ledgerEndOffset
               .fold(0L)(_.unwrap)}",
       )(calculateRange())
     }

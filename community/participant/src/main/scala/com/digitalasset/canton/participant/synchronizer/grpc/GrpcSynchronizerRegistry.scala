@@ -316,6 +316,9 @@ class GrpcSynchronizerRegistry(
 
         NonEmpty.from(connectionPool.getAllSequencerIds) match {
           case Some(aliasToSequencerIdNE) =>
+            if (logger.underlying.isDebugEnabled()) {
+              logger.debug(s"Connection pool initialized: $aliasToSequencerIdNE")
+            }
             val aliasToSequencerConnection = aliasToSequencerIdNE.map { case (alias, sequencerId) =>
               val sequencerConnection = config.sequencerConnections.aliasToConnection
                 .getOrElse(alias, ErrorUtil.invalidState(s"Unknown alias: $alias"))
@@ -359,9 +362,13 @@ class GrpcSynchronizerRegistry(
         )
         .toEitherT[FutureUnlessShutdown]
 
+      _ = logger.debug(s"Crypto handshake validated against crypto config")
+
       _ <- aliasManager
         .processHandshake(config.synchronizerAlias, info.psid)
         .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
+
+      _ = logger.debug(s"${config.synchronizerAlias} maps to ${info.psid} after handshake")
 
       // create persistent state for the synchronizer if it does not exist yet
       _ <- syncPersistentStateManager
@@ -370,6 +377,8 @@ class GrpcSynchronizerRegistry(
           info.staticSynchronizerParameters,
           synchronizerPredecessor,
         )
+
+      _ = logger.debug(s"Ensured ${info.psid} persistent state")
     } yield info
 
   override def pureHandshake(

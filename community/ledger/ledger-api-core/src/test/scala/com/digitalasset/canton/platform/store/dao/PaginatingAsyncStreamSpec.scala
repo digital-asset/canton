@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdFilterPageQuery,
   IdPage,
@@ -34,20 +35,19 @@ class PaginatingAsyncStreamSpec
   it should "stream in forward order with increasing page size" in {
     val ids = (1L to 50L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      50L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 1, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 50L,
+      ids = ids,
       descendingOrder = false,
     ).map { case (result, queries) =>
       result shouldBe ids
       queries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 50), 1),
-        PaginationInput(PaginationFromTo.ascending(1, 50), 4),
-        PaginationInput(PaginationFromTo.ascending(5, 50), 16),
-        PaginationInput(PaginationFromTo.ascending(21, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(41, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(50, 50), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 50)), 1),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(2, 50)), 4),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(6, 50)), 16),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(22, 50)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(42, 50)), 20),
       )
     }
   }
@@ -55,47 +55,32 @@ class PaginatingAsyncStreamSpec
   it should "stream IDs in forward order with constant page size" in {
     val ids = (1L to 50L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 20, maxPageSize = 20),
-      0L,
-      50L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 20, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 50L,
+      ids = ids,
       descendingOrder = false,
     ).map { case (result, queries) =>
       result shouldBe ids
       queries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(20, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(40, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(50, 50), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 50)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(21, 50)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(41, 50)), 20),
       )
-    }
-  }
-
-  it should "stream empty range in forward order" in {
-    runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      0L,
-      Vector.empty,
-      descendingOrder = false,
-    ).map { case (result, queries) =>
-      result shouldBe Vector.empty
-      queries shouldBe Vector(PaginationInput(PaginationFromTo.ascending(0, 0), 1))
     }
   }
 
   it should "stream single element in forward order" in {
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 2, maxPageSize = 10),
-      0L,
-      1L,
-      Vector(1L),
+      idPageSizing = IdPageSizing(minPageSize = 2, maxPageSize = 10),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 1L,
+      ids = Vector(1L),
       descendingOrder = false,
     ).map { case (result, queries) =>
       result shouldBe Vector(1L)
       queries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 1), 2),
-        PaginationInput(PaginationFromTo.ascending(1, 1), 8),
+        PaginationInput(fromTo = PaginationFromTo.ascending(EventSeqIdRange(1, 1)), limit = 2)
       )
     }
   }
@@ -116,10 +101,10 @@ class PaginatingAsyncStreamSpec
   it should "stream forward order with id set wider than requested range" in {
     val ids = (1L to 50L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 3, maxPageSize = 5),
-      5L,
-      20L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 3, maxPageSize = 5),
+      initialFromIdInclusive = 6L,
+      initialEndInclusive = 20L,
+      ids = ids,
       descendingOrder = false,
     )
       .map { case (result, _) =>
@@ -130,10 +115,10 @@ class PaginatingAsyncStreamSpec
   it should "stream IDs in backward order when range matches id set" in {
     val ids = (1L to 100L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      100L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 1, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 100L,
+      ids = ids,
       descendingOrder = true,
     )
       .map { case (result, _) =>
@@ -144,10 +129,10 @@ class PaginatingAsyncStreamSpec
   it should "stream IDs in backward order when range is wider than id set" in {
     val ids = (10L to 50L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      100L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 1, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 100L,
+      ids = ids,
       descendingOrder = true,
     )
       .map { case (result, _) =>
@@ -155,25 +140,12 @@ class PaginatingAsyncStreamSpec
       }
   }
 
-  it should "stream empty range in backward order" in {
-    runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      0L,
-      (1L to 10L).toVector,
-      descendingOrder = true,
-    ).map { case (result, queries) =>
-      result shouldBe Vector.empty
-      queries shouldBe Vector(PaginationInput(PaginationFromTo.descending(0, 0), 1))
-    }
-  }
-
   it should "stream empty set in backward order" in {
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      1L,
-      100L,
-      Vector.empty,
+      idPageSizing = IdPageSizing(minPageSize = 1, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 100L,
+      ids = Vector.empty,
       descendingOrder = true,
     ).map { case (result, _) =>
       result shouldBe Vector.empty
@@ -183,10 +155,10 @@ class PaginatingAsyncStreamSpec
   it should "stream descending order with id set being subset requested range" in {
     val ids = (5L to 15L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 3, maxPageSize = 10),
-      0L,
-      30L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 3, maxPageSize = 10),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 30L,
+      ids = ids,
       descendingOrder = true,
     ).map { case (result, _) =>
       result shouldBe ids.reverse
@@ -196,10 +168,10 @@ class PaginatingAsyncStreamSpec
   it should "stream descending order with id set wider than requested range" in {
     val ids = (1L to 50L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 3, maxPageSize = 5),
-      5L,
-      20L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 3, maxPageSize = 5),
+      initialFromIdInclusive = 6L,
+      initialEndInclusive = 20L,
+      ids = ids,
       descendingOrder = true,
     )
       .map { case (result, _) =>
@@ -209,7 +181,7 @@ class PaginatingAsyncStreamSpec
 
   private def runStreamWithoutIdFilter(
       idPageSizing: IdPageSizing,
-      initialFromIdExclusive: Long,
+      initialFromIdInclusive: Long,
       initialEndInclusive: Long,
       ids: Vector[Long],
       descendingOrder: Boolean,
@@ -220,8 +192,7 @@ class PaginatingAsyncStreamSpec
         idStreamName = "test-stream",
         idPageSizing = idPageSizing,
         idPageBufferSize = 1,
-        initialFromIdExclusive = initialFromIdExclusive,
-        initialEndInclusive = initialEndInclusive,
+        initialEventSeqIdRange = EventSeqIdRange(initialFromIdInclusive, initialEndInclusive),
         descendingOrder = descendingOrder,
       )(new IdPageQuery {
         override def fetchPage(
@@ -236,13 +207,15 @@ class PaginatingAsyncStreamSpec
           val resultIdsPlusOne = if (descendingOrder) {
             ids
               .filter(id =>
-                id < input.fromTo.fromExclusive && id >= input.fromTo.toInclusive
-              ) // In backward query end is exclusive!
+                id <= input.fromTo.eventSeqIdRange.startInclusive && id >= input.fromTo.eventSeqIdRange.endInclusive
+              )
               .reverse
               .take(input.limit + 1)
           } else {
             ids
-              .filter(id => id > input.fromTo.fromExclusive && id <= input.fromTo.toInclusive)
+              .filter(id =>
+                id >= input.fromTo.eventSeqIdRange.startInclusive && id <= input.fromTo.eventSeqIdRange.endInclusive
+              )
               .take(input.limit + 1)
           }
           IdPage(
@@ -258,10 +231,10 @@ class PaginatingAsyncStreamSpec
   it should "stream descending order with length smaller than min page size" in {
     val ids = (1L to 50L).toVector
     runStreamWithoutIdFilter(
-      IdPageSizing(minPageSize = 4, maxPageSize = 5),
-      2L,
-      4L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 4, maxPageSize = 5),
+      initialFromIdInclusive = 3L,
+      initialEndInclusive = 4L,
+      ids = ids,
       descendingOrder = true,
     ).map { case (result, _) =>
       result shouldBe Vector(4, 3)
@@ -273,26 +246,26 @@ class PaginatingAsyncStreamSpec
   it should "stream in forward order with increasing page size" in {
     val ids = (1L to 50L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      50L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 1, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 50L,
+      ids = ids,
       descendingOrder = false,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids
       boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 50), 1),
-        PaginationInput(PaginationFromTo.ascending(1, 50), 4),
-        PaginationInput(PaginationFromTo.ascending(5, 50), 16),
-        PaginationInput(PaginationFromTo.ascending(21, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(41, 50), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 50)), 1),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(2, 50)), 4),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(6, 50)), 16),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(22, 50)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(42, 50)), 20),
       )
       pageQueries shouldBe Vector(
-        PaginationFromTo.ascending(0, 1),
-        PaginationFromTo.ascending(1, 5),
-        PaginationFromTo.ascending(5, 21),
-        PaginationFromTo.ascending(21, 41),
-        PaginationFromTo.ascending(41, 50),
+        PaginationFromTo.ascending(EventSeqIdRange(1, 1)),
+        PaginationFromTo.ascending(EventSeqIdRange(2, 5)),
+        PaginationFromTo.ascending(EventSeqIdRange(6, 21)),
+        PaginationFromTo.ascending(EventSeqIdRange(22, 41)),
+        PaginationFromTo.ascending(EventSeqIdRange(42, 50)),
       )
     }
   }
@@ -300,56 +273,40 @@ class PaginatingAsyncStreamSpec
   it should "stream IDs in forward order with constant page size" in {
     val ids = (1L to 50L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 20, maxPageSize = 20),
-      0L,
-      50L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 20, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 50L,
+      ids = ids,
       descendingOrder = false,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids
       boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(20, 50), 20),
-        PaginationInput(PaginationFromTo.ascending(40, 50), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 50)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(21, 50)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(41, 50)), 20),
       )
       pageQueries shouldBe Vector(
-        PaginationFromTo.ascending(0, 20),
-        PaginationFromTo.ascending(20, 40),
-        PaginationFromTo.ascending(40, 50),
+        PaginationFromTo.ascending(EventSeqIdRange(1, 20)),
+        PaginationFromTo.ascending(EventSeqIdRange(21, 40)),
+        PaginationFromTo.ascending(EventSeqIdRange(41, 50)),
       )
-    }
-  }
-
-  it should "stream empty range in forward order" in {
-    runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      0L,
-      Vector.empty,
-      descendingOrder = false,
-    ).map { case (result, boundQueries, pageQueries) =>
-      result shouldBe Vector.empty
-      boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 0), 1)
-      )
-      pageQueries shouldBe Vector()
     }
   }
 
   it should "stream single element in forward order" in {
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 2, maxPageSize = 10),
-      0L,
-      1L,
-      Vector(1L),
+      idPageSizing = IdPageSizing(minPageSize = 2, maxPageSize = 10),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 1L,
+      ids = Vector(1L),
       descendingOrder = false,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector(1L)
       boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 1), 2)
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 1)), 2)
       )
       pageQueries shouldBe Vector(
-        PaginationFromTo.ascending(0, 1)
+        PaginationFromTo.ascending(EventSeqIdRange(1, 1))
       )
     }
   }
@@ -357,20 +314,20 @@ class PaginatingAsyncStreamSpec
   it should "stream forward order with id set being subset requested range" in {
     val ids = (5L to 15L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 3, maxPageSize = 10),
-      0L,
-      30L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 3, maxPageSize = 10),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 30L,
+      ids = ids,
       descendingOrder = false,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids
       boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 30L), 3),
-        PaginationInput(PaginationFromTo.ascending(7, 30L), 10),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 30L)), 3),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(8, 30L)), 10),
       )
       pageQueries shouldBe Vector(
-        PaginationFromTo.ascending(0, 7),
-        PaginationFromTo.ascending(7, 30),
+        PaginationFromTo.ascending(EventSeqIdRange(1, 7)),
+        PaginationFromTo.ascending(EventSeqIdRange(8, 30)),
       )
     }
   }
@@ -378,24 +335,24 @@ class PaginatingAsyncStreamSpec
   it should "stream forward order with id set wider than requested range" in {
     val ids = (1L to 50L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 3, maxPageSize = 5),
-      5L,
-      20L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 3, maxPageSize = 5),
+      initialFromIdInclusive = 6L,
+      initialEndInclusive = 20L,
+      ids = ids,
       descendingOrder = false,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe (6 to 20)
       boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(5L, 20L), 3),
-        PaginationInput(PaginationFromTo.ascending(8L, 20L), 5),
-        PaginationInput(PaginationFromTo.ascending(13L, 20L), 5),
-        PaginationInput(PaginationFromTo.ascending(18L, 20L), 5),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(6L, 20L)), 3),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(9L, 20L)), 5),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(14L, 20L)), 5),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(19L, 20L)), 5),
       )
       pageQueries shouldBe Vector(
-        PaginationFromTo.ascending(5L, 8L),
-        PaginationFromTo.ascending(8L, 13L),
-        PaginationFromTo.ascending(13L, 18L),
-        PaginationFromTo.ascending(18L, 20L),
+        PaginationFromTo.ascending(EventSeqIdRange(6L, 8L)),
+        PaginationFromTo.ascending(EventSeqIdRange(9L, 13L)),
+        PaginationFromTo.ascending(EventSeqIdRange(14L, 18L)),
+        PaginationFromTo.ascending(EventSeqIdRange(19L, 20L)),
       )
     }
   }
@@ -403,30 +360,30 @@ class PaginatingAsyncStreamSpec
   it should "stream IDs in backward order when range matches id set" in {
     val ids = (1L to 100L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      100L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 1, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 100L,
+      ids = ids,
       descendingOrder = true,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids.reverse
       boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.descending(0L, 100L), 1),
-        PaginationInput(PaginationFromTo.descending(0L, 99L), 4),
-        PaginationInput(PaginationFromTo.descending(0L, 95L), 16),
-        PaginationInput(PaginationFromTo.descending(0L, 79L), 20),
-        PaginationInput(PaginationFromTo.descending(0L, 59L), 20),
-        PaginationInput(PaginationFromTo.descending(0L, 39L), 20),
-        PaginationInput(PaginationFromTo.descending(0L, 19L), 20),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 100L)), 1),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 99L)), 4),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 95L)), 16),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 79L)), 20),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 59L)), 20),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 39L)), 20),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 19L)), 20),
       )
       pageQueries shouldBe Vector(
-        PaginationFromTo.descending(99L, 100L),
-        PaginationFromTo.descending(95L, 99L),
-        PaginationFromTo.descending(79L, 95L),
-        PaginationFromTo.descending(59L, 79L),
-        PaginationFromTo.descending(39L, 59L),
-        PaginationFromTo.descending(19L, 39L),
-        PaginationFromTo.descending(0L, 19L),
+        PaginationFromTo.descending(EventSeqIdRange(100L, 100L)),
+        PaginationFromTo.descending(EventSeqIdRange(96L, 99L)),
+        PaginationFromTo.descending(EventSeqIdRange(80L, 95L)),
+        PaginationFromTo.descending(EventSeqIdRange(60L, 79L)),
+        PaginationFromTo.descending(EventSeqIdRange(40L, 59L)),
+        PaginationFromTo.descending(EventSeqIdRange(20L, 39L)),
+        PaginationFromTo.descending(EventSeqIdRange(1L, 19L)),
       )
     }
   }
@@ -434,39 +391,25 @@ class PaginatingAsyncStreamSpec
   it should "stream IDs in backward order when range is wider than id set" in {
     val ids = (10L to 50L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      100L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 1, maxPageSize = 20),
+      initialFromIdInclusive = 1L,
+      initialEndInclusive = 100L,
+      ids = ids,
       descendingOrder = true,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids.reverse
       boundQueries shouldBe Vector(
-        PaginationInput(PaginationFromTo.descending(0L, 100L), 1),
-        PaginationInput(PaginationFromTo.descending(0L, 49L), 4),
-        PaginationInput(PaginationFromTo.descending(0L, 45L), 16),
-        PaginationInput(PaginationFromTo.descending(0L, 29L), 20),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 100L)), 1),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 49L)), 4),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 45L)), 16),
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1L, 29L)), 20),
       )
       pageQueries shouldBe Vector(
-        PaginationFromTo.descending(49L, 100L),
-        PaginationFromTo.descending(45L, 49L),
-        PaginationFromTo.descending(29L, 45L),
-        PaginationFromTo.descending(0L, 29L),
+        PaginationFromTo.descending(EventSeqIdRange(50L, 100L)),
+        PaginationFromTo.descending(EventSeqIdRange(46L, 49L)),
+        PaginationFromTo.descending(EventSeqIdRange(30L, 45L)),
+        PaginationFromTo.descending(EventSeqIdRange(1L, 29L)),
       )
-    }
-  }
-
-  it should "stream empty range in backward order" in {
-    runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 1, maxPageSize = 20),
-      0L,
-      0L,
-      (1L to 10L).toVector,
-      descendingOrder = true,
-    ).map { case (result, boundQueries, pageQueries) =>
-      result shouldBe Vector.empty
-      boundQueries shouldBe Vector(PaginationInput(PaginationFromTo.descending(0, 0), 1))
-      pageQueries shouldBe Vector.empty
     }
   }
 
@@ -479,7 +422,9 @@ class PaginatingAsyncStreamSpec
       descendingOrder = true,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector.empty
-      boundQueries shouldBe Vector(PaginationInput(PaginationFromTo.descending(1, 100), 1))
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.descending(EventSeqIdRange(1, 100)), 1)
+      )
       pageQueries shouldBe Vector.empty
     }
   }
@@ -500,10 +445,10 @@ class PaginatingAsyncStreamSpec
   it should "stream descending order with id set wider than requested range" in {
     val ids = (1L to 50L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 3, maxPageSize = 5),
-      5L,
-      20L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 3, maxPageSize = 5),
+      initialFromIdInclusive = 6L,
+      initialEndInclusive = 20L,
+      ids = ids,
       descendingOrder = true,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe (6 to 20).reverse
@@ -513,10 +458,10 @@ class PaginatingAsyncStreamSpec
   it should "stream descending order with length smaller than min page size" in {
     val ids = (1L to 50L).toVector
     runStreamWithIdFilter(
-      IdPageSizing(minPageSize = 4, maxPageSize = 5),
-      2L,
-      4L,
-      ids,
+      idPageSizing = IdPageSizing(minPageSize = 4, maxPageSize = 5),
+      initialFromIdInclusive = 3L,
+      initialEndInclusive = 4L,
+      ids = ids,
       descendingOrder = true,
     ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector(4, 3)
@@ -525,7 +470,7 @@ class PaginatingAsyncStreamSpec
 
   private def runStreamWithIdFilter(
       idPageSizing: IdPageSizing,
-      initialFromIdExclusive: Long,
+      initialFromIdInclusive: Long,
       initialEndInclusive: Long,
       ids: Vector[Long],
       descendingOrder: Boolean,
@@ -538,8 +483,7 @@ class PaginatingAsyncStreamSpec
         idStreamName = "test-stream",
         idPageSizing = idPageSizing,
         idPageBufferSize = 1,
-        initialFromIdExclusive = initialFromIdExclusive,
-        initialEndInclusive = initialEndInclusive,
+        initialEventSeqIdRange = EventSeqIdRange(initialFromIdInclusive, initialEndInclusive),
         descendingOrder = descendingOrder,
       )(new IdFilterPageQuery {
         override def fetchPageBounds(
@@ -548,7 +492,9 @@ class PaginatingAsyncStreamSpec
           boundQueries.addOne(input)
           if (descendingOrder) {
             val unfilteredIds = ids
-              .filter(id => id < input.fromTo.fromExclusive && id >= input.fromTo.toInclusive)
+              .filter(id =>
+                id <= input.fromTo.eventSeqIdRange.startInclusive && id >= input.fromTo.eventSeqIdRange.endInclusive
+              )
               .reverse
               .take(input.limit + 1)
             val lastPage = unfilteredIds.sizeIs < input.limit + 1
@@ -557,15 +503,15 @@ class PaginatingAsyncStreamSpec
                 fromTo =
                   if (lastPage) input.fromTo
                   else
-                    input.fromTo.copy(
-                      toInclusive = last + 1
-                    ),
+                    input.fromTo.withEndInclusive(last + 1),
                 lastPage = lastPage,
               )
             )
           } else {
             val unfilteredIds = ids
-              .filter(id => id > input.fromTo.fromExclusive && id <= input.fromTo.toInclusive)
+              .filter(id =>
+                id >= input.fromTo.eventSeqIdRange.startInclusive && id <= input.fromTo.eventSeqIdRange.endInclusive
+              )
               .take(input.limit + 1)
             val lastPage = unfilteredIds.sizeIs < input.limit + 1
             unfilteredIds.lastOption.map(last =>
@@ -573,9 +519,7 @@ class PaginatingAsyncStreamSpec
                 fromTo =
                   if (lastPage) input.fromTo
                   else
-                    input.fromTo.copy(
-                      toInclusive = last - 1
-                    ),
+                    input.fromTo.withEndInclusive(last - 1),
                 lastPage = lastPage,
               )
             )
@@ -586,9 +530,9 @@ class PaginatingAsyncStreamSpec
           pageQueries.addOne(fromTo)
           val filtered = ids.filter(id =>
             if (fromTo.descending)
-              id < fromTo.fromExclusive && id >= fromTo.toInclusive
+              id <= fromTo.eventSeqIdRange.startInclusive && id >= fromTo.eventSeqIdRange.endInclusive
             else
-              id > fromTo.fromExclusive && id <= fromTo.toInclusive
+              id >= fromTo.eventSeqIdRange.startInclusive && id <= fromTo.eventSeqIdRange.endInclusive
           )
           if (fromTo.descending) filtered.reverse else filtered
         }

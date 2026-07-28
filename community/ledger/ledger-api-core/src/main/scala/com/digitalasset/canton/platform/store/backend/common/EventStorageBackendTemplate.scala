@@ -17,6 +17,7 @@ import com.digitalasset.canton.platform.store.backend.Conversions.{
   timestampFromMicros,
 }
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.*
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsAddActivationsParams,
   AchsRemoveDeactivatedParams,
@@ -40,6 +41,7 @@ import com.digitalasset.canton.platform.store.backend.{
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.dao.LedgerDaoUpdateReader.DeactivatedContractInfo
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ContractId, Party}
 import com.digitalasset.canton.protocol.ReassignmentId
@@ -391,6 +393,21 @@ object EventStorageBackendTemplate {
         RawParticipantAuthorization.apply
       )
 
+    def dynamicSynchronizerParametersEventParser(
+        stringInterning: StringInterning
+    ): RowDef[RawDynamicSynchronizerParameters] =
+      (
+        eventOffset,
+        eventSequentialId,
+        updateIdDef,
+        synchronizerId(stringInterning).map(_.toProtoPrimitive),
+        recordTime,
+        payload,
+        traceContext,
+      ).mapN(
+        RawDynamicSynchronizerParameters.apply
+      )
+
     private def synchronizerOffsetParser(
         offsetColumnName: String,
         stringInterning: StringInterning,
@@ -439,10 +456,13 @@ object EventStorageBackendTemplate {
       ).mapN(DeactivatedContractInfo.apply)
   }
 
-  val EventSequentialIdFirstLast: RowParser[(Long, Long)] =
+  val EventSequentialIdFirstLast: RowParser[EventSeqIdRange] =
     long("event_sequential_id_first") ~ long("event_sequential_id_last") map {
       case event_sequential_id_first ~ event_sequential_id_last =>
-        (event_sequential_id_first, event_sequential_id_last)
+        EventSeqIdRange(
+          startInclusive = event_sequential_id_first,
+          endInclusive = event_sequential_id_last,
+        )
     }
 
   private def filterWitnesses(
@@ -1057,6 +1077,36 @@ abstract class EventStorageBackendTemplate(
       ) - 1
   }
 
+  override def eventSequentialIdRange(offsetRange: OffsetRange)(
+      connection: Connection
+  ): Option[EventSeqIdRange] =
+    // cap the upper bound to the ledger end so that events beyond it are never considered; when
+    // there is no ledger end there are no events at all, hence an empty range
+    ledgerEndCache().map(_.lastOffset).flatMap { ledgerEndOffset =>
+      val endInclusive =
+        if (ledgerEndOffset < offsetRange.endInclusive) ledgerEndOffset
+        else offsetRange.endInclusive
+      SQL"""
+       SELECT
+          MIN(event_sequential_id_first) min_event_sequential_id_first,
+          MAX(event_sequential_id_last) max_event_sequential_id_last
+       FROM
+          lapi_update_meta
+       WHERE
+          ${QueryStrategy.offsetIsBetween(
+          "event_offset",
+          offsetRange.copy(endInclusive = endInclusive),
+        )}
+          -- skip eventless updates (topology-only / empty tx) that store first = last + 1
+          AND event_sequential_id_first <= event_sequential_id_last
+       HAVING COUNT(*) > 0
+     """.as(
+        (long("min_event_sequential_id_first") ~ long("max_event_sequential_id_last")).map {
+          case first ~ last => EventSeqIdRange(startInclusive = first, endInclusive = last)
+        }.singleOpt
+      )(connection)
+    }
+
   override def activeContractBatch(
       eventSequentialIds: Iterable[Long],
       allFilterParties: Option[Set[Party]],
@@ -1433,6 +1483,33 @@ abstract class EventStorageBackendTemplate(
         .withFetchSize(Some(fetchSize(eventSequentialIds)))
     RowDefs.partyToParticipantEventParser(stringInterning).queryMultipleRows(query)(connection)
   }
+  override def fetchDynamicSynchronizerParametersEventIds(
+      eventSequentialIds: SequentialIdBatch
+  )(connection: Connection): Vector[Long] =
+    SQL"""
+        SELECT e.event_sequential_id
+        FROM lapi_events_generic_topology_events e
+        WHERE ${queryStrategy.inBatch("e.event_sequential_id", eventSequentialIds)}
+        ORDER BY e.event_sequential_id
+        """
+      .withFetchSize(Some(fetchSize(eventSequentialIds)))
+      .asVectorOf(long("event_sequential_id"))(connection)
+
+  override def dynamicSynchronizerParametersBatch(
+      eventSequentialIds: SequentialIdBatch
+  )(connection: Connection): Vector[EventStorageBackend.RawDynamicSynchronizerParameters] = {
+    val query = (columns: CompositeSql) =>
+      SQL"""
+          SELECT $columns
+          FROM lapi_events_generic_topology_events e
+          WHERE ${queryStrategy.inBatch("e.event_sequential_id", eventSequentialIds)}
+          ORDER BY e.event_sequential_id
+          """
+        .withFetchSize(Some(fetchSize(eventSequentialIds)))
+    RowDefs
+      .dynamicSynchronizerParametersEventParser(stringInterning)
+      .queryMultipleRows(query)(connection)
+  }
 
   override def topologyEventOffsetPublishedOnRecordTime(
       synchronizerId: SynchronizerId,
@@ -1440,18 +1517,22 @@ abstract class EventStorageBackendTemplate(
   )(connection: Connection): Option[Offset] =
     stringInterning.synchronizerId
       .tryInternalize(synchronizerId)
-      .flatMap(synchronizerInternedId =>
-        RowDefs.eventOffset
-          .querySingleOptRow(columns => SQL"""
-          SELECT $columns
-          FROM lapi_events_party_to_participant
-          WHERE record_time = ${recordTime.toMicros}
-                AND synchronizer_id = $synchronizerInternedId
-          ORDER BY synchronizer_id ASC, record_time ASC
-          ${QueryStrategy.limitClause(Some(1))}
-          """)(connection)
-          .filter(offset => Option(offset) <= ledgerEndCache().map(_.lastOffset))
-      )
+      .flatMap { synchronizerInternedId =>
+        def topologyOffset(tableName: String): Option[Offset] =
+          RowDefs.eventOffset
+            .querySingleOptRow(columns => SQL"""
+              SELECT $columns
+              FROM #$tableName
+              WHERE record_time = ${recordTime.toMicros}
+                    AND synchronizer_id = $synchronizerInternedId
+              ORDER BY synchronizer_id ASC, record_time ASC
+              ${QueryStrategy.limitClause(Some(1))}
+              """)(connection)
+            .filter(offset => Option(offset) <= ledgerEndCache().map(_.lastOffset))
+
+        topologyOffset("lapi_events_party_to_participant")
+          .orElse(topologyOffset("lapi_events_generic_topology_events"))
+      }
 
   override def fetchAcsCommitments(
       eventSequentialIds: SequentialIdBatch,
@@ -1607,7 +1688,7 @@ abstract class EventStorageBackendTemplate(
 
   private def fetchSize(eventSequentialIds: SequentialIdBatch): Int =
     eventSequentialIds match {
-      case SequentialIdBatch.IdRange(fromInclusive, toInclusive) =>
+      case SequentialIdBatch.EventSeqIdRange(fromInclusive, toInclusive) =>
         Math.min(toInclusive - fromInclusive + 1, Int.MaxValue).toInt
       case SequentialIdBatch.Ids(ids) => ids.size
     }

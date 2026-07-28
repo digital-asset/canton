@@ -1,5 +1,4 @@
 # Toolchain config for the Python scripts under scripts/ (see issue #33211).
-# ruff for lint and format. The pytest config and CI gate land in a follow-up.
 
 [tool.ruff]
 # ruff is pinned once, via the nixpkgs revision in nix/sources.json (used by
@@ -15,3 +14,16 @@ target-version = "py313"
 # Leave existing quotes as-authored. The codebase is double-quote-majority and
 # flipping them adds pure noise, so this keeps the format pass minimal.
 quote-style = "preserve"
+
+[tool.pytest.ini_options]
+# Tests live inline in the scripts themselves (def test_* alongside the code),
+# so collect from every module rather than only test_*.py files.
+# NOTE: because python_files matches every *.py, pytest imports each module during
+# collection. A new script that runs code at import, has an invalid module name, or
+# imports a package missing from shell.nix will fail this gate at collection time.
+# Add such scripts to collect_ignore in conftest.py (and put shared deps in shell.nix).
+testpaths = ["ci", "canton-testing"]
+python_files = ["*.py"]
+# Only collect test_-prefixed functions, so plain helpers that happen to start
+# with "test" (e.g. testcase_key) are not mistaken for tests.
+python_functions = ["test_*"]

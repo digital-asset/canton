@@ -8,26 +8,8 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{
-  AsymmetricEncrypted,
-  CryptoKey,
-  CryptoPrivateStoreApi,
-  Encrypted,
-  EncryptionAlgorithmSpec,
-  EncryptionKeyPair,
-  EncryptionKeySpec,
-  EncryptionPrivateKey,
-  EncryptionPublicKey,
-  KeyName,
-  SigningAlgorithmSpec,
-  SigningKeyPair,
-  SigningKeySpec,
-  SigningKeyUsage,
-  SigningPrivateKey,
-  SigningPublicKey,
-  SymmetricKey,
-}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -35,14 +17,8 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.collection.TrieMapUtil
-import com.digitalasset.canton.util.{
-  ByteString190,
-  ByteString256,
-  ByteString4096,
-  ByteString6144,
-  EitherTUtil,
-}
+import com.digitalasset.canton.util.*
+import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.version.HasToByteString
 import com.google.protobuf.ByteString
 
@@ -99,7 +75,7 @@ class SymbolicKms(
       }
       kmsKeyId =
         KmsKeyId(String300.tryCreate(s"symbolic-kms-signing-key-${counter.getAndIncrement()}"))
-      _ = TrieMapUtil
+      _ = MapsUtil
         .insertIfAbsent(
           storedPrivateKeyMap,
           kmsKeyId,
@@ -109,7 +85,7 @@ class SymbolicKms(
               "Duplicate symbolic KMS signing private key: " + kmsKeyId.toString
             ),
         )
-      _ = TrieMapUtil
+      _ = MapsUtil
         .insertIfAbsent(
           storedPublicSigningKeyMap,
           kmsKeyId,
@@ -137,7 +113,7 @@ class SymbolicKms(
             s"symbolic-kms-symmetric-encryption-key-${counter.getAndIncrement()}"
           )
         )
-      _ = TrieMapUtil
+      _ = MapsUtil
         .insertIfAbsent(
           storedPrivateKeyMap,
           kmsKeyId,
@@ -177,7 +153,7 @@ class SymbolicKms(
             s"symbolic-kms-asymmetric-encryption-key-${counter.getAndIncrement()}"
           )
         )
-      _ = TrieMapUtil
+      _ = MapsUtil
         .insertIfAbsent(
           storedPrivateKeyMap,
           kmsKeyId,
@@ -187,7 +163,7 @@ class SymbolicKms(
               "Duplicate symbolic KMS encryption private key: " + kmsKeyId.toString
             ),
         )
-      _ = TrieMapUtil
+      _ = MapsUtil
         .insertIfAbsent(
           storedPublicEncryptionKeyMap,
           kmsKeyId,

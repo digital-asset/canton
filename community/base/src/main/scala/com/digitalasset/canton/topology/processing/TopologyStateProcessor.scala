@@ -304,16 +304,16 @@ class TopologyStateProcessorImpl private[processing] (
       inStore: Option[GenericSignedTopologyTransaction],
       toValidate: GenericSignedTopologyTransaction,
   ): Either[TopologyTransactionRejection, Unit] = inStore match {
-    case Some(value) if value.serial.value == Int.MaxValue =>
-      Left(TopologyTransactionRejection.Processor.MaxSerialReached)
     case Some(value) =>
-      val expected = value.serial.increment
-      Either.cond(
-        expected == toValidate.serial,
-        (),
-        TopologyTransactionRejection.Processor
-          .SerialMismatch(actual = toValidate.serial, expected = expected),
-      )
+      for {
+        expected <- value.nextSerial
+        _ <- Either.cond(
+          expected == toValidate.serial,
+          (),
+          TopologyTransactionRejection.Processor
+            .SerialMismatch(actual = toValidate.serial, expected = expected),
+        )
+      } yield ()
     // TODO(#32311): Re-enable validation that newly added proposals start with serial 1
     case None => Either.unit
   }

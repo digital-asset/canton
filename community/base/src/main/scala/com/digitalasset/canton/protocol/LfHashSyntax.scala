@@ -22,6 +22,6 @@ object LfHashSyntax {
     ): ParsingResult[LfHash] =
       LfHash
         .fromBytes(Bytes.fromByteString(bytes))
-        .leftMap(err => ValueDeserializationError(fieldName, err))
+        .leftMap(err => ValueDeserializationError(err, fieldName))
   }
 }

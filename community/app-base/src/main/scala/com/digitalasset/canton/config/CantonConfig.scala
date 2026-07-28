@@ -1449,6 +1449,10 @@ object CantonConfig {
       implicit val commitmentConfigReader: ConfigReader[AcsCommitmentConfig] = {
         implicit val commitmentTracingReader: ConfigReader[AcsDigestTracingMode] =
           deriveEnumerationReader[AcsDigestTracingMode]
+
+        implicit val senderConfigReader: ConfigReader[AcsCommitmentSenderConfig] =
+          deriveReader[AcsCommitmentSenderConfig]
+
         deriveReader[AcsCommitmentConfig]
       }
 
@@ -2207,6 +2211,10 @@ object CantonConfig {
       implicit val commitmentConfigWriter: ConfigWriter[AcsCommitmentConfig] = {
         implicit val commitmentTracingWriter: ConfigWriter[AcsDigestTracingMode] =
           deriveEnumerationWriter[AcsDigestTracingMode]
+
+        implicit val senderConfigWriter: ConfigWriter[AcsCommitmentSenderConfig] =
+          deriveWriter[AcsCommitmentSenderConfig]
+
         deriveWriter[AcsCommitmentConfig]
       }
 

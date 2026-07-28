@@ -8,10 +8,12 @@ import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionMemoization,
@@ -46,18 +48,21 @@ object AcknowledgeRequest extends VersioningCompanionMemoization[AcknowledgeRequ
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AcknowledgeRequest)(
-      supportedProtoVersionMemoized(_) { req => bytes =>
-        fromProtoV30(req)(Some(bytes))
+      supportedProtoVersionMemoizedPVV(_) { (pvv, req) => bytes =>
+        fromProtoV30(pvv, req)(Some(bytes))
       },
       _.toProtoV30,
     )
   )
 
   private def fromProtoV30(
-      reqP: v30.AcknowledgeRequest
+      pvv: ProtocolVersionValidation,
+      reqP: v30.AcknowledgeRequest,
   )(deserializedFrom: Option[ByteString]): ParsingResult[AcknowledgeRequest] =
     for {
-      member <- Member.fromProtoPrimitive(reqP.member, "member")
+      member <- ProtoValidation.validateThen(reqP.member, "member", pvv)(
+        Member.fromProtoPrimitive
+      )
       timestamp <- CantonTimestamp.fromProtoPrimitive(reqP.timestamp)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield {

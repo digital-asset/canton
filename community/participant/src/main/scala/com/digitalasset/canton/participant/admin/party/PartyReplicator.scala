@@ -679,7 +679,9 @@ final class PartyReplicator(
         (),
         s"Party $partyId is already hosted by target participant $targetParticipantId",
       )
-      expectedSerial = partyToParticipantTopologyHeadTx.serial.increment
+      expectedSerial <- EitherT.fromEither(
+        partyToParticipantTopologyHeadTx.transaction.serial.increment.leftMap(_.message)
+      )
       _ <- EitherT.cond[FutureUnlessShutdown](
         serial == expectedSerial,
         (),
@@ -792,7 +794,7 @@ final class PartyReplicator(
                       if (currentCounter <= 3 || !logger.underlying.isDebugEnabled()) Future.unit
                       else {
                         syncService.participantNodePersistentState.value.ledgerApiStore
-                          .topologyPartyEventBatch(SequentialIdBatch.IdRange(0L, 1000000L))
+                          .topologyPartyEventBatch(SequentialIdBatch.EventSeqIdRange(0L, 1000000L))
                           .map { partyAuthorizations =>
                             logger.debug(
                               s"Party events on $participantId (querying at $authorizedAt retry $currentCounter, offset $offsetO):\n${partyAuthorizations

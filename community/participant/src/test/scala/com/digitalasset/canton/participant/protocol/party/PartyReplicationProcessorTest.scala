@@ -383,7 +383,7 @@ final class PartyReplicationProcessorTest
         env =>
           import env.*
           val batchSizeTooLarge =
-            TargetParticipantAcsPersistence.contractsToRequestEachTime.increment
+            TargetParticipantAcsPersistence.contractsToRequestEachTime.increment.value
           for {
             _ <- execUntilDone(tp, "initialize tp")(_.onConnected())
             // Make the TP processor wait to prevent it from automatically requesting more contracts

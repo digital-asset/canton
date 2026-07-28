@@ -6,15 +6,11 @@ package com.digitalasset.canton.participant.store.db
 import cats.Eval
 import com.digitalasset.canton.InternedPartyId
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  HashedDigest,
-  InternedParticipantId,
-  RawDigest,
-}
+import com.digitalasset.canton.participant.store.AcsDigestStore.{Checkpoint, InternedParticipantId}
 import com.digitalasset.canton.participant.store.data.AcsDigestJournalData.JournalTable.{
   ParticipantJournalTable,
   PartyJournalTable,
@@ -49,9 +45,8 @@ class DbAcsDigestStore(
   @inline
   private def stringInterning = stringInterningEval.value
 
-  override protected val party_
-      : AcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId], RawDigest] =
-    new DbAcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId], RawDigest](
+  override protected val party_ : AcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId]] =
+    new DbAcsDigestJournal[AcsDigestStore.PartyAndOrder[InternedPartyId]](
       storage,
       indexedSynchronizer,
       loggerFactory,
@@ -60,9 +55,8 @@ class DbAcsDigestStore(
       journalTable = PartyJournalTable,
       createJournalImplicitsF = PartyJournalImplicits(_),
     )
-  override protected val participant_
-      : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] =
-    new DbAcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)](
+  override protected val participant_ : AcsDigestJournal[InternedParticipantId] =
+    new DbAcsDigestJournal[InternedParticipantId](
       storage,
       indexedSynchronizer,
       loggerFactory,
@@ -72,21 +66,23 @@ class DbAcsDigestStore(
       createJournalImplicitsF = ParticipantJournalImplicits(_),
     )
 
-  override def insertCheckpointTime(offset: Offset, timestamp: CantonTimestamp)(implicit
+  override def insertCheckpointTime(
+      checkpoint: Checkpoint
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val insertCheckpoint = storage.profile match {
       case _: DbStorage.Profile.H2 =>
-        sqlu"""merge into par_acs_running_digests_checkpoint (synchronizer_idx, change_offset, ts)
-               values ($synchronizerIdx, $offset, $timestamp)"""
+        sqlu"""merge into par_acs_running_digests_checkpoint (synchronizer_idx, change_offset, ts, checkpoint_type)
+               values ($synchronizerIdx, ${checkpoint.offset}, ${checkpoint.recordTime}, ${checkpoint.checkpointType})"""
       case _: DbStorage.Profile.Postgres =>
-        sqlu"""insert into par_acs_running_digests_checkpoint(synchronizer_idx, change_offset, ts)
-               values  ($synchronizerIdx, $offset, $timestamp)
+        sqlu"""insert into par_acs_running_digests_checkpoint(synchronizer_idx, change_offset, ts, checkpoint_type)
+               values  ($synchronizerIdx, ${checkpoint.offset}, ${checkpoint.recordTime}, ${checkpoint.checkpointType})
                on conflict (synchronizer_idx, change_offset) do nothing
           """
     }
 
-    logger.trace(s"insertCheckpointTime at $offset: $insertCheckpoint")
+    logger.trace(s"insertCheckpointTime at ${checkpoint.offset}: $insertCheckpoint")
 
     storage
       .update(
@@ -105,7 +101,7 @@ class DbAcsDigestStore(
   ): FutureUnlessShutdown[Option[Checkpoint]] = {
     val queryLatestCheckpoint =
       (sql"""
-        select change_offset, ts from par_acs_running_digests_checkpoint where
+        select change_offset, ts, checkpoint_type from par_acs_running_digests_checkpoint where
           synchronizer_idx = $synchronizerIdx and change_offset <= $toInclusive
         order by change_offset desc
         """ ++ storage.limitSql(1)).as[Checkpoint].headOption
@@ -124,7 +120,7 @@ class DbAcsDigestStore(
   ): FutureUnlessShutdown[Option[Checkpoint]] = {
     val queryFirstCheckpointAfter =
       (sql"""
-        select change_offset, ts from par_acs_running_digests_checkpoint where
+        select change_offset, ts, checkpoint_type from par_acs_running_digests_checkpoint where
           synchronizer_idx = $synchronizerIdx
           and change_offset > $fromExclusive
         order by change_offset

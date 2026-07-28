@@ -154,13 +154,11 @@ private[dao] trait JdbcLedgerDaoPartiesSpec {
   private def storePartyEntry(
       partyDetails: IndexerPartyDetails,
       offset: Offset,
-      submissionIdOpt: Option[Ref.SubmissionId] = Some(UUID.randomUUID().toString),
       recordTime: Timestamp = Timestamp.now(),
   ) =
     ledgerDao
       .storePartyAdded(
         offset,
-        submissionIdOpt,
         recordTime,
         partyDetails,
       )

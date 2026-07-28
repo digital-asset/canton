@@ -280,14 +280,14 @@ object SignedProtocolMessage
       )
 
   private def fromProtoV30(
-      expectedProtocolVersion: ProtocolVersionValidation,
+      pvv: ProtocolVersionValidation,
       signedMessageP: v30.SignedProtocolMessage,
   ): ParsingResult[SignedProtocolMessage[SignedProtocolMessageContent]] = {
     val v30.SignedProtocolMessage(signaturesP, typedMessageBytes) = signedMessageP
 
     for {
       typedMessage <- TypedSignedProtocolMessageContent
-        .fromByteStringPVV(expectedProtocolVersion, typedMessageBytes)
+        .fromByteStringPVV(pvv, typedMessageBytes)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "signatures",

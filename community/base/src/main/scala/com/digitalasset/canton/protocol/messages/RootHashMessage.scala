@@ -13,10 +13,12 @@ import com.digitalasset.canton.protocol.{RootHash, v30, v31, v32}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionContext,
@@ -106,13 +108,16 @@ object RootHashMessage
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.RootHashMessage)(
-      supportedProtoVersion(_)((deserializer, proto) => fromProtoV30(deserializer)(proto)),
+      supportedProtoVersionPVV(_)((pv, deserializer, proto) =>
+        fromProtoV30(pv, deserializer)(proto)
+      ),
       _.toProtoV30,
     )
   )
 
   def fromProtoV30[Payload <: RootHashMessagePayload](
-      payloadDeserializer: ByteString => ParsingResult[Payload]
+      pvv: ProtocolVersionValidation,
+      payloadDeserializer: ByteString => ParsingResult[Payload],
   )(
       rootHashMessageP: v30.RootHashMessage
   ): ParsingResult[RootHashMessage[Payload]] = {
@@ -126,10 +131,11 @@ object RootHashMessage
       rootHashMessageP
     for {
       rootHash <- RootHash.fromProtoPrimitive(rootHashP)
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      synchronizerId <- ProtoValidation.validateThen(
         synchronizerIdP,
         "physical_synchronizer_id",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       submissionTopologyTime <- CantonTimestamp.fromProtoPrimitive(submissionTopologyTimeP)
       payloadO <- payloadDeserializer(payloadP)
@@ -178,7 +184,7 @@ case object EmptyRootHashMessagePayload extends RootHashMessagePayload {
     Either.cond(
       bytes.isEmpty,
       EmptyRootHashMessagePayload,
-      ValueDeserializationError("payload", s"expected no payload, but found ${bytes.size} bytes"),
+      ValueDeserializationError(s"expected no payload, but found ${bytes.size} bytes", "payload"),
     )
 
   implicit val emptyRootHashMessagePayloadCast

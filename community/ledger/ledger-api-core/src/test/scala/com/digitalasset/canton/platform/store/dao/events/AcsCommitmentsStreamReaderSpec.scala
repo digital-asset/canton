@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, SuppressionRule
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.PruningOffsetService
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawAcsCommitment
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.{EventStorageBackend, LedgerEnd}
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
@@ -67,10 +68,14 @@ class AcsCommitmentsStreamReaderSpec
           .streamAcsCommitments(
             AcsCommitmentsStreamQueryParams(
               queryRange = EventsRange(
-                startInclusiveOffset = offset(6L),
-                startInclusiveEventSeqId = 6L,
-                endInclusiveOffset = offset(10L),
-                endInclusiveEventSeqId = 10L,
+                offsetRange = OffsetRange(
+                  startInclusive = offset(6L),
+                  endInclusive = offset(10L),
+                ),
+                eventSeqIdRange = EventSeqIdRange(
+                  startInclusive = 6L,
+                  endInclusive = 10L,
+                ),
               ),
               synchronizerId = synchronizerId,
               descendingOrder = false,
@@ -79,7 +84,7 @@ class AcsCommitmentsStreamReaderSpec
           )
           .runWith(Sink.seq),
         assertions = _.infoMessage should include(
-          "PARTICIPANT_DATA_ACCESSED_AFTER_LEDGER_END(9,0): ACS commitments request from 6 to 10 is beyond ledger end offset 5"
+          "PARTICIPANT_DATA_ACCESSED_AFTER_LEDGER_END(9,0): ACS commitments request for offset range [6, 10] is beyond ledger end offset 5"
         ),
       )
       .futureValue
@@ -113,10 +118,14 @@ class AcsCommitmentsStreamReaderSpec
           .streamAcsCommitments(
             AcsCommitmentsStreamQueryParams(
               queryRange = EventsRange(
-                startInclusiveOffset = offset(3L),
-                startInclusiveEventSeqId = 3L,
-                endInclusiveOffset = offset(8L),
-                endInclusiveEventSeqId = 8L,
+                offsetRange = OffsetRange(
+                  startInclusive = offset(3L),
+                  endInclusive = offset(8L),
+                ),
+                eventSeqIdRange = EventSeqIdRange(
+                  startInclusive = 3L,
+                  endInclusive = 8L,
+                ),
               ),
               synchronizerId = synchronizerId,
               descendingOrder = false,
@@ -125,7 +134,7 @@ class AcsCommitmentsStreamReaderSpec
           )
           .runWith(Sink.seq),
         assertions = _.infoMessage should include(
-          "PARTICIPANT_PRUNED_DATA_ACCESSED(9,0): ACS commitments request from 3 to 8 precedes pruned offset 6"
+          "PARTICIPANT_PRUNED_DATA_ACCESSED(9,0): ACS commitments request for offset range [3, 8] precedes pruned offset 6"
         ),
       )
       .futureValue

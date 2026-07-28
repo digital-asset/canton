@@ -3,20 +3,27 @@
 
 package com.digitalasset.canton.participant.store
 
+import cats.Monad
 import cats.syntax.bifunctor.*
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.commitment.{AcsDigestTrace, Timepoint}
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{InternedPartyId, LedgerParticipantId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.ParticipantId
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
-import slick.jdbc.GetResult
+import slick.jdbc.{GetResult, SetParameter}
 
-import scala.collection.immutable
+import scala.collection.{immutable, mutable}
 import scala.concurrent.ExecutionContext
 
 trait AcsDigestStore {
@@ -26,19 +33,18 @@ trait AcsDigestStore {
   protected implicit def executionContext: ExecutionContext
 
   /** Stores running digests per party and order as sparse journal for a given synchronizer */
-  def party: DigestJournal[PartyAndOrder[InternedPartyId], RawDigest] = party_
-  protected def party_ : AcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest]
+  def party: DigestJournal[PartyAndOrder[InternedPartyId]] = party_
+  protected def party_ : AcsDigestJournal[PartyAndOrder[InternedPartyId]]
   @VisibleForTesting @inline
-  private[store] final def partyInternal
-      : AcsDigestJournal[PartyAndOrder[InternedPartyId], RawDigest] =
+  private[store] final def partyInternal: AcsDigestJournal[PartyAndOrder[InternedPartyId]] =
     party_
 
   /** Stores running digests per counterparticipant as sparse journal for a given synchronizer */
-  def participant: DigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] = participant_
-  protected def participant_ : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)]
+  def participant: DigestJournal[InternedParticipantId] = participant_
+  protected def participant_ : AcsDigestJournal[InternedParticipantId]
   @VisibleForTesting @inline
-  private[store] final def participantInternal
-      : AcsDigestJournal[InternedParticipantId, (RawDigest, HashedDigest)] = participant_
+  private[store] final def participantInternal: AcsDigestJournal[InternedParticipantId] =
+    participant_
 
   /** Inserts the given offset as a checkpoint.
     *
@@ -46,10 +52,9 @@ trait AcsDigestStore {
     * [[com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal.upsertDigestUpdates]]
     * of [[party]] or [[participant]] whose offsets are smaller than or equal to the given offset.
     */
-  def insertCheckpointTime(
-      offset: Offset,
-      timestamp: CantonTimestamp,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  def insertCheckpointTime(checkpoint: Checkpoint)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
 
   /** First deletes all checkpoints that are higher than `fromExclusive`. Then deletes all digest
     * entries from [[party]] and [[participant]] whose offset is higher than `fromExclusive`.
@@ -101,8 +106,6 @@ trait AcsDigestStore {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = deleteCheckpointsUpTo(toExclusive)
 
-  final type Checkpoint = (Offset, CantonTimestamp)
-
   /** Returns the most recent checkpoint lower than or equal to `toInclusive`, if any */
   def latestCheckpointUpTo(toInclusive: Offset)(implicit
       traceContext: TraceContext
@@ -125,11 +128,12 @@ trait AcsDigestStore {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = for {
     lastCheckpointO <- latestCheckpointUpTo(Offset.MaxValue)
-    _ <- lastCheckpointO.fold(FutureUnlessShutdown.unit) { case (offsetInclusive, _) =>
-      for {
-        _ <- party.checkReplacesInvariant(offsetInclusive)
-        _ <- participant.checkReplacesInvariant(offsetInclusive)
-      } yield ()
+    _ <- lastCheckpointO.fold(FutureUnlessShutdown.unit) {
+      case Checkpoint(Timepoint(offsetInclusive), _) =>
+        for {
+          _ <- party.checkReplacesInvariant(offsetInclusive)
+          _ <- participant.checkReplacesInvariant(offsetInclusive)
+        } yield ()
     }
   } yield ()
 }
@@ -139,7 +143,7 @@ object AcsDigestStore {
   /** Maintains a key-value journal for keys `K` and values `V` indexed by
     * [[com.digitalasset.canton.data.Offset]] as part of an [[AcsDigestStore]].
     */
-  trait DigestJournal[K, V] {
+  trait DigestJournal[K] {
 
     /** Upserts new entries for the given keys, i.e., inserts new entries or updates existing rows.
       *
@@ -151,7 +155,7 @@ object AcsDigestStore {
       * offset of the previous entry for the key that this update replaces.
       */
     def upsertDigestUpdates(
-        digests: immutable.Iterable[AcsDigestUpdate[K, V]]
+        digests: immutable.Iterable[AcsDigestUpdate[K]]
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
     /** Returns the latest entry for the given key up to the given offset (inclusive), if any.
@@ -161,7 +165,7 @@ object AcsDigestStore {
         toInclusive: Offset,
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Option[AcsDigestUpdate[K, V]]]
+    ): FutureUnlessShutdown[Option[AcsDigestUpdate[K]]]
 
     /** Returns the latest entry for each of the given keys up to the given offset (inclusive). Keys
       * without entries do not appear in the map.
@@ -171,7 +175,7 @@ object AcsDigestStore {
         toInclusive: Offset,
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K, V]]]
+    ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K]]]
 
     /** Returns a snapshot of all entries as of a given
       * [[com.digitalasset.canton.data.Offset AtInclusive]] value. The snapshot includes the latest
@@ -191,7 +195,7 @@ object AcsDigestStore {
         traceContext: TraceContext
     ): FutureUnlessShutdown[
       (
-          immutable.Iterable[AcsDigestUpdate[K, V]],
+          immutable.Iterable[AcsDigestUpdate[K]],
           Either[PaginationTokenDone, SnapshotPaginationToken],
       )
     ]
@@ -216,7 +220,7 @@ object AcsDigestStore {
         limit: Int,
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[
       (
-          immutable.Iterable[AcsDigest[K, V]],
+          immutable.Iterable[AcsDigest[K]],
           Either[PaginationTokenDone, ChangesBetweenPaginationToken],
       )
     ]
@@ -253,6 +257,61 @@ object AcsDigestStore {
     ): FutureUnlessShutdown[Unit]
   }
 
+  object DigestJournal {
+
+    /** Processes all active digest updates from a
+      * [[com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal]] in paginated
+      * batches, starting at an inclusive offset.
+      *
+      * Uses monadic tail-recursion (`tailRecM`) to page through journal snapshots sequentially
+      * while capping memory usage and supporting an error channel via `EitherT`.
+      *
+      * @param journal
+      *   The digest journal (party or participant) to read snapshots from.
+      * @param startAtInclusive
+      *   The starting offset from which to begin reading snapshots (inclusive).
+      * @param pageSize
+      *   The maximum number of digest updates to load per paginated database query.
+      * @param processBatch
+      *   The async operation returning a [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown]]
+      *   to apply to each paginated batch of digest updates.
+      * @tparam K
+      *   The key type of the journal (e.g., `PartyAndOrder` or `InternedParticipantId`).
+      * @tparam V
+      *   The value type stored in the journal (e.g., `RawDigest` or `(RawDigest, HashedDigest)`).
+      * @tparam E
+      *   The error type handled within the `Either` error channel.
+      * @return
+      *   A [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown]] that completes with an error
+      *   or unit when all batches have been processed.
+      */
+    def processSnapshotInBatchesE[K, E](journal: AcsDigestStore.DigestJournal[K])(
+        startAtInclusive: Offset,
+        pageSize: Int,
+    )(
+        processBatch: immutable.Iterable[AcsDigestUpdate[K]] => FutureUnlessShutdown[Unit]
+    )(implicit
+        traceContext: TraceContext,
+        ec: ExecutionContext,
+    ): FutureUnlessShutdown[Unit] = {
+      type LoopState = Either[journal.SnapshotPaginationToken, journal.AtInclusive]
+      val initialState: LoopState = Right(startAtInclusive)
+
+      Monad[FutureUnlessShutdown].tailRecM[LoopState, Unit](initialState) { currentState =>
+        journal
+          .snapshot(currentState, pageSize)
+          .flatMap { case (acsDigestUpdates, doneOrNextToken) =>
+            processBatch(acsDigestUpdates).map { _ =>
+              doneOrNextToken match {
+                case Left(_paginationTokenDone) => Right(())
+                case Right(nextToken) => Left(Left(nextToken))
+              }
+            }
+          }
+      }
+    }
+  }
+
   /** This range is specifically designed to give an offset range constrain to
     * [[com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal.changesBetween]].
     */
@@ -263,11 +322,11 @@ object AcsDigestStore {
   /** Represents the running digest of the active contracts shared with a key at a given offset. The
     * digest is [[scala.None]] when the key's digest is deleted at the offset.
     */
-  final case class AcsDigest[+K, +V](
+  final case class AcsDigest[+K](
       key: K,
       offset: Offset,
       timestamp: CantonTimestamp,
-      digestO: Option[V],
+      digestO: Option[RawDigest],
       trace: Option[AcsDigestTrace],
   ) {
 
@@ -279,77 +338,78 @@ object AcsDigestStore {
       */
     def timepoint: Timepoint = Timepoint(offset)(timestamp)
 
-    def map[L](f: K => L): AcsDigest[L, V] = copy(key = f(key))
+    def map[L](f: K => L): AcsDigest[L] = copy(key = f(key))
 
-    def partitionMap[K1, K2](f: K => Either[K1, K2]): Either[AcsDigest[K1, V], AcsDigest[K2, V]] =
+    def partitionMap[K1, K2](f: K => Either[K1, K2]): Either[AcsDigest[K1], AcsDigest[K2]] =
       f(key).bimap(k1 => copy(key = k1), k2 => copy(key = k2))
-
-    def mapValue[W](f: V => W): AcsDigest[K, W] = copy(digestO = digestO.map(f))
   }
 
   trait AcsDigestCompanion {
-    def apply[K, V](
+    def apply[K](
         key: K,
         timepoint: Timepoint,
-        digestO: Option[V],
+        digestO: Option[RawDigest],
         trace: Option[AcsDigestTrace],
-    ): AcsDigest[K, V] = AcsDigest(key, timepoint.offset, timepoint.recordTime, digestO, trace)
+    ): AcsDigest[K] = AcsDigest(key, timepoint.offset, timepoint.recordTime, digestO, trace)
 
-    def empty[K, V](key: K, timepoint: Timepoint): AcsDigest[K, V] =
+    def empty[K](key: K, timepoint: Timepoint): AcsDigest[K] =
       AcsDigest(key, timepoint, None, None)
   }
   object AcsDigest extends AcsDigestCompanion {
-    implicit def getAcsDigest[K: GetResult, V](implicit
-        vO: GetResult[Option[V]]
-    ): GetResult[AcsDigestStore.AcsDigest[K, V]] = GetResult { pr =>
-      AcsDigestStore.AcsDigest(
-        pr.<<[K],
-        pr.<<[Offset],
-        pr.<<[CantonTimestamp],
-        pr.<<[Option[V]],
-        pr.<<[Option[AcsDigestTrace]],
-      )
+    implicit def getAcsDigest[K: GetResult]: GetResult[AcsDigestStore.AcsDigest[K]] = GetResult {
+      pr =>
+        val key = pr.<<[K]
+        val offset = pr.<<[Offset]
+        val timestamp = pr.<<[CantonTimestamp]
+        val digestO = pr.nextBytesOption().map(ByteString.copyFrom)
+        val trace = pr.<<[Option[AcsDigestTrace]]
+        AcsDigestStore.AcsDigest(key, offset, timestamp, digestO, trace)
     }
+
+    @SuppressWarnings(Array("org.wartremover.warts.Null"))
+    implicit def setParameterAcsDigest[K: SetParameter]: SetParameter[AcsDigestStore.AcsDigest[K]] =
+      SetParameter { (digest, pp) =>
+        pp >> digest.key
+        pp >> digest.offset
+        pp >> digest.timestamp
+        pp.setBytes(digest.digestO.map(_.toByteArray).orNull)
+        pp >> digest.trace
+      }
   }
 
   /** Represents an update to the running digest of the shared active contract for a key at a given
     * offset, together with a by-offset reference to the entry it replaces, if any.
     */
-  final case class AcsDigestUpdate[+K, +V](
-      digestUpdate: AcsDigest[K, V],
+  final case class AcsDigestUpdate[+K](
+      digestUpdate: AcsDigest[K],
       replacesOffset: Option[Offset],
   ) {
-    def map[L](f: K => L): AcsDigestUpdate[L, V] = copy(digestUpdate = digestUpdate.map(f))
+    def map[L](f: K => L): AcsDigestUpdate[L] = copy(digestUpdate = digestUpdate.map(f))
 
     def partitionMap[K1, K2](
         f: K => Either[K1, K2]
-    ): Either[AcsDigestUpdate[K1, V], AcsDigestUpdate[K2, V]] =
+    ): Either[AcsDigestUpdate[K1], AcsDigestUpdate[K2]] =
       digestUpdate
         .partitionMap(f)
         .bimap(d1 => copy(digestUpdate = d1), d2 => copy(digestUpdate = d2))
-
-    def mapValue[W](f: V => W): AcsDigestUpdate[K, W] =
-      copy(digestUpdate = digestUpdate.mapValue(f))
   }
 
   trait AcsDigestUpdateCompanion {
-    def apply[K, V](
-        digestUpdate: AcsDigest[K, V],
+    def apply[K](
+        digestUpdate: AcsDigest[K],
         replacesOffset: Option[Offset],
-    ): AcsDigestUpdate[K, V] = new AcsDigestUpdate(digestUpdate, replacesOffset)
+    ): AcsDigestUpdate[K] = new AcsDigestUpdate(digestUpdate, replacesOffset)
 
-    def empty[K, V](key: K, timepoint: Timepoint): AcsDigestUpdate[K, V] =
+    def empty[K, V](key: K, timepoint: Timepoint): AcsDigestUpdate[K] =
       AcsDigestUpdate(AcsDigest.empty(key, timepoint), None)
   }
   object AcsDigestUpdate extends AcsDigestUpdateCompanion {
-    implicit def getAcsDigestUpdate[K: GetResult, V](implicit
-        vO: GetResult[Option[V]]
-    ): GetResult[AcsDigestStore.AcsDigestUpdate[K, V]] = GetResult { pr =>
-      AcsDigestStore.AcsDigestUpdate(
-        digestUpdate = AcsDigest.getAcsDigest[K, V].apply(pr), // this uses pr in order
-        replacesOffset = pr.<<[Option[Offset]], // thus we cannot move this before getAcsDigest call
-      )
-    }
+    implicit def getAcsDigestUpdate[K: GetResult]: GetResult[AcsDigestStore.AcsDigestUpdate[K]] =
+      GetResult { pr =>
+        val digestUpdate = AcsDigest.getAcsDigest[K].apply(pr)
+        val replacesOffset = pr.<<[Option[Offset]]
+        AcsDigestStore.AcsDigestUpdate(digestUpdate, replacesOffset)
+      }
   }
 
   /** Must always be 2048 long as long as we use [[com.digitalasset.canton.crypto.LtHash16]].
@@ -385,7 +445,7 @@ object AcsDigestStore {
 
   }
 
-  type PartyAcsDigest[+Party] = AcsDigest[PartyAndOrder[Party], RawDigest]
+  type PartyAcsDigest[+Party] = AcsDigest[PartyAndOrder[Party]]
   object PartyAcsDigest extends AcsDigestCompanion {
     def internalize(
         stringInterning: StringInterning,
@@ -398,7 +458,7 @@ object AcsDigestStore {
     ): PartyAcsDigest[LfPartyId] = pad.map(_.map(stringInterning.party.externalize))
   }
 
-  type PartyAcsDigestUpdate[+Party] = AcsDigestUpdate[PartyAndOrder[Party], RawDigest]
+  type PartyAcsDigestUpdate[+Party] = AcsDigestUpdate[PartyAndOrder[Party]]
   object PartyAcsDigestUpdate extends AcsDigestUpdateCompanion {
     def internalize(
         stringInterning: StringInterning,
@@ -434,22 +494,7 @@ object AcsDigestStore {
 
   type InternedParticipantId = Int
 
-  type ParticipantAcsDigest[+Participant] = AcsDigest[Participant, (RawDigest, HashedDigest)]
-  object ParticipantAcsDigest extends AcsDigestCompanion {
-    def internalize(
-        stringInterning: StringInterning,
-        pad: ParticipantAcsDigest[ParticipantId],
-    ): ParticipantAcsDigest[InternedParticipantId] =
-      pad.map(stringInterning.participantId.internalize)
-
-    def externalize(
-        stringInterning: StringInterning,
-        pad: ParticipantAcsDigest[InternedParticipantId],
-    ): ParticipantAcsDigest[ParticipantId] = pad.map(stringInterning.participantId.externalize)
-  }
-
-  type ParticipantAcsDigestUpdate[+Participant] =
-    AcsDigestUpdate[Participant, (RawDigest, HashedDigest)]
+  type ParticipantAcsDigestUpdate[+Participant] = AcsDigestUpdate[Participant]
   object ParticipantAcsDigestUpdate {
     def internalize(
         stringInterning: StringInterning,
@@ -462,5 +507,122 @@ object AcsDigestStore {
         pad: ParticipantAcsDigestUpdate[InternedParticipantId],
     ): ParticipantAcsDigestUpdate[ParticipantId] =
       pad.map(stringInterning.participantId.externalize)
+  }
+
+  /** Represents a checkpoint of a certain `checkpointType` at the given `timepoint`.
+    *
+    * TODO(#34334): add index for `checkpointType` depending on the usage pattern
+    */
+  final case class Checkpoint(timepoint: Timepoint, checkpointType: CheckpointType) {
+    def offset: Offset = timepoint.offset
+    def recordTime: CantonTimestamp = timepoint.recordTime
+  }
+
+  object Checkpoint {
+    def apply(
+        offset: Offset,
+        recordTime: CantonTimestamp,
+        checkpointType: CheckpointType,
+    ): Checkpoint =
+      Checkpoint(Timepoint(offset)(recordTime), checkpointType)
+
+    implicit val checkpointGetResult: GetResult[Checkpoint] =
+      GetResult[Checkpoint] { rs =>
+        val offset = rs.<<[Offset]
+        val timestamp = rs.<<[CantonTimestamp]
+        val checkpointType = rs.<<[CheckpointType]
+        Checkpoint(Timepoint(offset)(timestamp), checkpointType)
+      }
+
+  }
+
+  /** Describes the trigger of the checkpoint.
+    *
+    * TODO(#33084): resolve int value to human readable strings in the debug view
+    */
+  final case class CheckpointType private (id: Int)
+      extends PrettyPrintingFromCompanion
+      with Product
+      with Serializable {
+    override def prettyCompanion: PrettyPrintingCompanion[CheckpointType] = CheckpointType
+  }
+
+  object CheckpointType extends PrettyPrintingCompanion[CheckpointType] {
+
+    private val ids: mutable.Map[Int, (CheckpointType, String)] =
+      mutable.TreeMap.empty[Int, (CheckpointType, String)]
+
+    protected val pretty: Pretty[CheckpointType] =
+      prettyOfString(cpt =>
+        // normally, an instance of CheckpointType must have been created via `apply` or
+        // tryFromId, both of which throw in case of inconsistencies. Therefore the getOrElse branch shouldn't actually
+        // be reached.
+        ids
+          .get(cpt.id)
+          .map(_._2)
+          .getOrElse(
+            throw new IllegalStateException(
+              s"CheckpointType with id ${cpt.id} was not created via CheckpointType.apply or CheckpointType.tryFromId."
+            )
+          )
+      )
+
+    /** Creates a new [[CheckpointType]] with a given description */
+    def apply(id: Int, description: String): CheckpointType = {
+      val checkpointType = new CheckpointType(id)
+      ids.put(id, (checkpointType, description)).foreach { oldDescription =>
+        throw new IllegalArgumentException(
+          s"requirement failed: CheckpointType with id=$id already exists for ${oldDescription._2}"
+        )
+      }
+
+      checkpointType
+    }
+
+    /** When a reconcilition interval boundary has been crossed.
+      */
+    val ReconciliationIntervalBoundary: CheckpointType =
+      CheckpointType(1, "ReconciliationIntervalBoundary")
+
+    /** When an affirmation interval boundary has been crossed.
+      */
+    val AffirmationIntervalBoundary: CheckpointType =
+      CheckpointType(2, "AffirmationIntervalBoundary")
+
+    /** When a certain number of events have been processed without writing a checkpoint.
+      */
+    val MaxEventsWithoutCheckpoint: CheckpointType = CheckpointType(3, "MaxEventsWithoutCheckpoint")
+
+    /** When the hosting relation between a party and a participant have changed.
+      */
+    val PartyHostingChange: CheckpointType = CheckpointType(4, "PartyHostingChange")
+
+    /** When a reinitialization has completed.
+      */
+    val Reinitialization: CheckpointType = CheckpointType(5, "Reinitialization")
+
+    @VisibleForTesting
+    def all: Set[CheckpointType] = ids.values.map { case (tpe, _) => tpe }.toSet
+
+    /** For constructing a checkpoint from an integer. Throws an exception in case the provided
+      * integer is not a known checkpoint type.
+      */
+    private def tryFromId(id: Int): CheckpointType =
+      ids
+        .getOrElse(
+          id,
+          throw new IllegalArgumentException(
+            s"DB value '$id' doesn't map to a known checkpoint type: $ids"
+          ),
+        )
+        ._1
+
+    implicit val checkpointTypeSetParameter: ToDbPrimitive[CheckpointType, Int] =
+      ToDbPrimitive(_.id)
+    implicit val checkpointTypeGetResult: GetResult[CheckpointType] =
+      GetResult { rs =>
+        val dbInt = rs.<<[Int]
+        tryFromId(dbInt)
+      }
   }
 }

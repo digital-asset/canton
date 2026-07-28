@@ -1,4 +1,2 @@
-
 println("== Config ==")
 pprint.PPrinter.BlackWhite.pprintln(consoleEnvironment.environment.config)
-

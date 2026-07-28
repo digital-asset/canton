@@ -325,7 +325,7 @@ class PartyToParticipantDeclarative(
               threshold = targetThreshold,
               store = psid,
               forceFlags = forceFlags,
-              serial = Some(currentSerialO.fold(PositiveInt.one)(_.increment)),
+              serial = Some(currentSerialO.fold(PositiveInt.one)(_.increment.value)),
               partySigningKeys = targetPartySigningKeys,
               participantsRequiringPartyToBeOnboarded = onboardingParticipants.toSeq,
             )
@@ -368,7 +368,7 @@ class PartyToParticipantDeclarative(
   ): TopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant] =
     TopologyTransaction.tryCreate(
       TopologyChangeOp.Replace,
-      serial = currentSerialO.fold(PositiveInt.one)(_.increment),
+      serial = currentSerialO.fold(PositiveInt.one)(_.increment.value),
       mapping = PartyToParticipant
         .create(
           partyId,

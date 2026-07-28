@@ -31,7 +31,10 @@ import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConf
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.{
+  EventSeqIdRange,
+  Ids,
+}
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   FatCreatedEventProperties,
   RawFatActiveContract,
@@ -195,7 +198,7 @@ class ACSReader(
       )
     }
 
-    def fetchActiveIds(initialFromIdExclusive: Long)(
+    def fetchActiveIds(initialFromIdInclusive: Long)(
         filter: DecomposedFilter
     ): Source[Long, NotUsed] =
       if (achsStateCache.get().lastPointers.lastPopulated == 0 || !achsIsValid) {
@@ -210,107 +213,120 @@ class ACSReader(
         }
         fetchActiveIdsFromFilterTables(
           achsLastInput = None,
-          initialFromIdExclusive = initialFromIdExclusive,
+          initialFromIdInclusive = initialFromIdInclusive,
         )(filter)
           .buffer(config.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
           .mapConcat(_._2)
       } else {
-        paginatingAsyncStream
-          .streamIdPagesFromSeekPaginationWithIdFilter(
-            idStreamName = s"ActiveContractIds $filter",
-            idPageSizing = idQueryPageSizing,
-            initialFromIdExclusive = initialFromIdExclusive,
-            initialEndInclusive = activeAtEventSeqId,
-            descendingOrder = false,
-          )(fetchAchsIdFilterPageQuery(filter))(
-            executeFetchBounds = f =>
-              activeIdQueriesLimiter.execute(
-                globalIdQueriesLimiter.execute(
-                  dispatcher.executeSql(metrics.index.db.getAchsIdRanges)(f)
-                )
-              ),
-            idFilterQueryParallelism = config.idFilterQueryParallelism,
-            executeFetchPage = f =>
-              activeIdQueriesLimiter.execute(
-                globalIdQueriesLimiter.execute(
-                  dispatcher.executeSql(
-                    metrics.index.db.getAchsFilteredIds
-                  )(f)
-                )
-              ),
+        EventSeqIdRange
+          .nonEmptyAscending(
+            startInclusive = initialFromIdInclusive,
+            endInclusive = activeAtEventSeqId,
           )
-          .takeWhile(_ => achsIsValid)
-          .foldConcat(Option.empty[PaginationInput]) { case (_prev, (input, ids)) =>
-            Some(input)
-          } { (achsLastInput: Option[PaginationInput]) =>
-            val resumeFrom = achsLastInput
-              .map(_.fromTo.toInclusive)
-              .getOrElse(0L)
+          .fold(Source.empty[Long]) { initialEventSeqIdRange =>
+            paginatingAsyncStream
+              .streamIdPagesFromSeekPaginationWithIdFilter(
+                idStreamName = s"ActiveContractIds $filter",
+                idPageSizing = idQueryPageSizing,
+                initialEventSeqIdRange = initialEventSeqIdRange,
+                descendingOrder = false,
+              )(fetchAchsIdFilterPageQuery(filter))(
+                executeFetchBounds = f =>
+                  activeIdQueriesLimiter.execute(
+                    globalIdQueriesLimiter.execute(
+                      dispatcher.executeSql(metrics.index.db.getAchsIdRanges)(f)
+                    )
+                  ),
+                idFilterQueryParallelism = config.idFilterQueryParallelism,
+                executeFetchPage = f =>
+                  activeIdQueriesLimiter.execute(
+                    globalIdQueriesLimiter.execute(
+                      dispatcher.executeSql(
+                        metrics.index.db.getAchsFilteredIds
+                      )(f)
+                    )
+                  ),
+              )
+              .takeWhile(_ => achsIsValid)
+              .foldConcat(Option.empty[PaginationInput]) { case (_prev, (input, ids)) =>
+                Some(input)
+              } { (achsLastInput: Option[PaginationInput]) =>
+                val resumeFrom = achsLastInput
+                  .map(_.fromTo.eventSeqIdRange.endInclusive)
+                  .getOrElse(0L)
 
-            if (!achsIsValid) {
-              val achsState = achsStateCache.get()
-              metrics.index.achsMidstreamFallbacks.inc()
-              logger.info(
-                s"ACHS stream for $filter fell back to filter tables from $resumeFrom since " +
-                  s"validAt (${achsState.validAt}) surpassed activeAtEventSeqId ($activeAtEventSeqId), "
-              )
-            } else {
-              logger.debug(
-                s"ACHS stream for $filter completed, continuing with filter tables from $resumeFrom"
-              )
-            }
-            fetchActiveIdsFromFilterTables(
-              achsLastInput = achsLastInput,
-              initialFromIdExclusive = initialFromIdExclusive,
-            )(filter)
-          }(executionContext)
-          .buffer(config.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
-          .mapConcat(_._2)
+                if (!achsIsValid) {
+                  val achsState = achsStateCache.get()
+                  metrics.index.achsMidstreamFallbacks.inc()
+                  logger.info(
+                    s"ACHS stream for $filter fell back to filter tables from $resumeFrom since " +
+                      s"validAt (${achsState.validAt}) surpassed activeAtEventSeqId ($activeAtEventSeqId), "
+                  )
+                } else {
+                  logger.debug(
+                    s"ACHS stream for $filter completed, continuing with filter tables from $resumeFrom"
+                  )
+                }
+                fetchActiveIdsFromFilterTables(
+                  achsLastInput = achsLastInput,
+                  initialFromIdInclusive = initialFromIdInclusive,
+                )(filter)
+              }(executionContext)
+              .buffer(config.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
+              .mapConcat(_._2)
+          }
       }
 
     def fetchActiveIdsFromFilterTables(
         achsLastInput: Option[PaginationInput],
-        initialFromIdExclusive: Long,
+        initialFromIdInclusive: Long,
     )(
         filter: DecomposedFilter
-    ): Source[(PaginationInput, Vector[Long]), NotUsed] =
-      paginatingAsyncStream
-        .streamIdPagesFromSeekPaginationWithIdFilter(
-          idStreamName = s"ActiveContractIds $filter",
-          idPageSizing = achsLastInput
-            .map(lastInput =>
-              idQueryPageSizing.copy(
-                minPageSize = lastInput.limit
+    ): Source[(PaginationInput, Vector[Long]), NotUsed] = {
+      val startInclusive = achsLastInput
+        .map(_.fromTo.eventSeqIdRange.endInclusive + 1)
+        .getOrElse(initialFromIdInclusive)
+      // the ACHS stream may have already caught up to activeAt
+      EventSeqIdRange
+        .nonEmptyAscending(startInclusive = startInclusive, endInclusive = activeAtEventSeqId)
+        .fold(Source.empty[(PaginationInput, Vector[Long])]) { initialEventSeqIdRange =>
+          paginatingAsyncStream
+            .streamIdPagesFromSeekPaginationWithIdFilter(
+              idStreamName = s"ActiveContractIds $filter",
+              idPageSizing = achsLastInput
+                .map(lastInput =>
+                  idQueryPageSizing.copy(
+                    minPageSize = lastInput.limit
+                  )
+                )
+                .getOrElse(idQueryPageSizing),
+              initialEventSeqIdRange = initialEventSeqIdRange,
+              descendingOrder = false,
+            )(
+              eventStorageBackend.updateStreamingQueries.fetchActiveIds(
+                stakeholderO = filter.party,
+                templateIdO = filter.templateId,
+                activeAtEventSeqId = activeAtEventSeqId,
               )
+            )(
+              executeFetchBounds = f =>
+                activeIdQueriesLimiter.execute(
+                  globalIdQueriesLimiter.execute(
+                    dispatcher.executeSql(metrics.index.db.getActiveContractIdRanges)(f)
+                  )
+                ),
+              idFilterQueryParallelism = config.idFilterQueryParallelism,
+              executeFetchPage = f =>
+                activeIdQueriesLimiter.execute(
+                  globalIdQueriesLimiter.execute(
+                    dispatcher.executeSql(
+                      metrics.index.db.getFilteredActiveContractIds
+                    )(f)
+                  )
+                ),
             )
-            .getOrElse(idQueryPageSizing),
-          initialFromIdExclusive =
-            achsLastInput.map(_.fromTo.toInclusive).getOrElse(initialFromIdExclusive),
-          initialEndInclusive = activeAtEventSeqId,
-          descendingOrder = false,
-        )(
-          eventStorageBackend.updateStreamingQueries.fetchActiveIds(
-            stakeholderO = filter.party,
-            templateIdO = filter.templateId,
-            activeAtEventSeqId = activeAtEventSeqId,
-          )
-        )(
-          executeFetchBounds = f =>
-            activeIdQueriesLimiter.execute(
-              globalIdQueriesLimiter.execute(
-                dispatcher.executeSql(metrics.index.db.getActiveContractIdRanges)(f)
-              )
-            ),
-          idFilterQueryParallelism = config.idFilterQueryParallelism,
-          executeFetchPage = f =>
-            activeIdQueriesLimiter.execute(
-              globalIdQueriesLimiter.execute(
-                dispatcher.executeSql(
-                  metrics.index.db.getFilteredActiveContractIds
-                )(f)
-              )
-            ),
-        )
+        }
+    }
 
     def withFatContracts[T](
         internalContractId: T => Long
@@ -541,10 +557,10 @@ class ACSReader(
     val inputBufferSize =
       Utils.largestSmallerOrEqualPowerOfTwo(config.maxParallelPayloadCreateQueries)
 
-    def activeContractsStream(startSequentialIdExclusive: Long) =
+    def activeContractsStream(startSequentialIdInclusive: Long) =
       limitIfNeeded(rangeInfo.limit)(
         decomposedFilters
-          .map(fetchActiveIds(startSequentialIdExclusive))
+          .map(fetchActiveIds(initialFromIdInclusive = startSequentialIdInclusive))
           .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
       )
         .batchN(
@@ -635,8 +651,10 @@ class ACSReader(
       case Some(AcsContinuationPointerIncompleteReassignments(_, _)) =>
         Source.empty
       case Some(AcsContinuationPointerActiveContracts(startSequentialIdExclusive)) =>
-        activeContractsStream(startSequentialIdExclusive)
-      case _ => activeContractsStream(0L)
+        // when the resume point is at or beyond the snapshot's last event sequential id (the client
+        // already paged through the whole active contract set), fetchActiveIds yields an empty range
+        activeContractsStream(startSequentialIdInclusive = startSequentialIdExclusive + 1L)
+      case _ => activeContractsStream(startSequentialIdInclusive = 1L)
     }
 
     activeContracts.foldConcat(0L)((count, _) => count + 1L) { (count: Long) =>
@@ -786,9 +804,9 @@ object ACSReader {
     * pins the upper bound to `lastPopulated`.
     *
     *   - `fetchPageBounds` returns `None` when `achsIsValid` is false (completing the stream). When
-    *     valid, it adjusts the input's `toInclusive` to `lastPopulated`, and on the last page, also
-    *     adjusts the returned bounds' `toInclusive` to `lastPopulated` so that the filter table
-    *     continuation starts from the correct position.
+    *     valid, it adjusts the input's `endInclusive` to `lastPopulated`, and on the last page,
+    *     also adjusts the returned bounds' `endInclusive` to `lastPopulated` so that the filter
+    *     table continuation starts from the correct position.
     *   - `fetchPage` returns an empty vector when `achsIsValid` is false, otherwise delegates to
     *     the underlying query.
     *
@@ -811,15 +829,13 @@ object ACSReader {
       else {
         val lastPopulated = getLastPopulated()
         val adjustedInput = input.copy(
-          fromTo = input.fromTo.copy(
-            // pin the upper bound to the moving target of last populated - as soon we were able to catch up, the stream completes
-            toInclusive = lastPopulated
-          )
+          // pin the upper bound to the moving target of last populated - as soon we were able to catch up, the stream completes
+          fromTo = input.fromTo.withEndInclusive(lastPopulated)
         )
         achsQuery.fetchPageBounds(connection)(adjustedInput).map { bounds =>
           if (bounds.lastPage) {
-            // on last page, pin toInclusive to lastPopulated so filter table continuation starts from here
-            bounds.copy(fromTo = bounds.fromTo.copy(toInclusive = lastPopulated))
+            // on last page, pin endInclusive to lastPopulated so filter table continuation starts from here
+            bounds.copy(fromTo = bounds.fromTo.withEndInclusive(lastPopulated))
           } else bounds
         }
       }

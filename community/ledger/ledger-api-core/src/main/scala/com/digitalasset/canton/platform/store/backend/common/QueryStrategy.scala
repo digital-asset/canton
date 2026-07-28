@@ -12,6 +12,7 @@ import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
   SqlStringInterpolation,
 }
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.util.ResourceUtil
 import com.typesafe.scalalogging.Logger
 
@@ -105,21 +106,20 @@ object QueryStrategy {
       case Some(limit) => cSQL"#$nonNullableColumn > $limit"
     }
 
-  /** Expression for `(startInclusive <= offset <= endExclusive)`
+  /** Expression for `(startInclusive <= offset <= endInclusive)`
     *
     * The offset column must only contain valid offsets (no NULLs)
     */
   def offsetIsBetween(
       nonNullableColumn: String,
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
   ): CompositeSql = {
     import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
     // Note: special casing Offset.firstOffset makes the resulting query simpler:
-    if (startInclusive == Offset.firstOffset) {
-      cSQL"#$nonNullableColumn <= $endInclusive"
+    if (offsetRange.startInclusive == Offset.firstOffset) {
+      cSQL"#$nonNullableColumn <= ${offsetRange.endInclusive}"
     } else {
-      cSQL"(#$nonNullableColumn >= $startInclusive and #$nonNullableColumn <= $endInclusive)"
+      cSQL"(#$nonNullableColumn >= ${offsetRange.startInclusive} and #$nonNullableColumn <= ${offsetRange.endInclusive})"
     }
   }
 
@@ -213,7 +213,7 @@ trait QueryStrategy {
     * or a list of numbers
     */
   def inBatch(colName: String, batch: SequentialIdBatch): CompositeSql = batch match {
-    case SequentialIdBatch.IdRange(fromInclusive, toInclusive) =>
+    case SequentialIdBatch.EventSeqIdRange(fromInclusive, toInclusive) =>
       cSQL"(#$colName >= $fromInclusive AND #$colName <= $toInclusive)"
     case SequentialIdBatch.Ids(ids) => cSQL"#$colName ${anyOf(ids)}"
   }

@@ -66,7 +66,11 @@ class SequencedEventValidatorTest
       import fixture.*
       val event = createEvent().futureValueUS
       val decompressed = SequencedEventValidator
-        .decompressEvent(toCompressed(event), DecompressionPolicy.HardcodedDefault)
+        .decompressEvent(
+          toCompressed(event),
+          testedProtocolVersionValidation,
+          DecompressionPolicy.HardcodedDefault,
+        )
         .value
       decompressed.timestamp shouldBe event.timestamp
     }
@@ -77,6 +81,7 @@ class SequencedEventValidatorTest
       SequencedEventValidator
         .decompressEvent(
           toCompressed(event),
+          testedProtocolVersionValidation,
           DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.one)),
         )
         .left

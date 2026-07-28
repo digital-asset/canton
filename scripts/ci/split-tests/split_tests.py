@@ -40,6 +40,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Regex patterns to exclude (one per argument). Uses built-in defaults when not provided.",
     )
     parser.add_argument(
+        "--include-patterns",
+        nargs="*",
+        default=None,
+        help="Regex patterns to include (one per argument). When provided, only matching tests are kept.",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Print shard distribution debug output.",
@@ -67,7 +73,21 @@ def load_test_names(test_file: str) -> List[str]:
         return [line.strip() for line in f if line.strip()]
 
 
-def filter_tests(tests: Iterable[str], exclude_patterns: Sequence[str]) -> List[str]:
+def filter_tests(
+    tests: Iterable[str],
+    exclude_patterns: Optional[Sequence[str]] = None,
+    include_patterns: Optional[Sequence[str]] = None,
+) -> List[str]:
+    if include_patterns is not None:
+        return [
+            test_name
+            for test_name in tests
+            if any(re.search(pattern, test_name) for pattern in include_patterns)
+        ]
+
+    if exclude_patterns is None:
+        exclude_patterns = DEFAULT_EXCLUDE_PATTERNS
+
     filtered: List[str] = []
     for test_name in tests:
         if any(re.search(pattern, test_name) for pattern in exclude_patterns):
@@ -165,6 +185,31 @@ def test_filter_tests_applies_regex_patterns() -> None:
     assert filtered == ["com.digitalasset.canton.integration.tests.SomeRegularSuite"]
 
 
+def test_filter_tests_applies_include_patterns() -> None:
+    tests = [
+        "com.digitalasset.canton.integration.tests.docs.snippet.DocSuite",
+        "com.digitalasset.canton.integration.tests.SomeRegularSuite",
+    ]
+    filtered = filter_tests(
+        tests,
+        include_patterns=[r"^com\.digitalasset\.canton\.integration\.tests\.docs\.snippet"],
+    )
+    assert filtered == ["com.digitalasset.canton.integration.tests.docs.snippet.DocSuite"]
+
+
+def test_filter_tests_prefers_include_patterns_when_both_are_set() -> None:
+    tests = [
+        "com.digitalasset.canton.integration.tests.docs.snippet.DocSuite",
+        "com.digitalasset.canton.integration.tests.SomeRegularSuite",
+    ]
+    filtered = filter_tests(
+        tests,
+        exclude_patterns=[r"docs\.snippet"],
+        include_patterns=[r"docs\.snippet"],
+    )
+    assert filtered == ["com.digitalasset.canton.integration.tests.docs.snippet.DocSuite"]
+
+
 def test_load_timings_returns_empty_for_missing_file() -> None:
     timings = load_timings("/tmp/does-not-exist-timings.json")
     assert timings == {}
@@ -218,6 +263,8 @@ def self_test() -> None:
     test_validate_inputs_rejects_invalid_total()
     test_validate_inputs_rejects_invalid_shard()
     test_filter_tests_applies_regex_patterns()
+    test_filter_tests_applies_include_patterns()
+    test_filter_tests_prefers_include_patterns_when_both_are_set()
     test_load_timings_returns_empty_for_missing_file()
     test_assign_to_shards_balances_largest_first()
     test_write_output_format()
@@ -233,10 +280,20 @@ def main():
     except ValueError as exc:
         raise SystemExit(f"error: {exc}")
 
+    if args.exclude_patterns is not None and args.include_patterns is not None:
+        raise SystemExit("error: use either --exclude-patterns or --include-patterns, not both")
+
+    if args.include_patterns is not None and not args.include_patterns:
+        raise SystemExit("error: --include-patterns was provided but empty")
+
     exclude_patterns = resolve_exclude_patterns(args.exclude_patterns)
 
     tests = load_test_names(args.test_file)
-    filtered = filter_tests(tests, exclude_patterns)
+    filtered = filter_tests(
+        tests,
+        exclude_patterns=exclude_patterns,
+        include_patterns=args.include_patterns,
+    )
     timings = load_timings(args.timings_file)
     items = build_weighted_items(filtered, timings, args.fallback_test_time)
     buckets, bucket_times = assign_to_shards(items, args.total)

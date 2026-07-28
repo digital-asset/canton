@@ -985,12 +985,15 @@ trait IndexComponentTest
       contractInfos = sequenced.contractInfos,
     )
 
-  protected def activeContractIds(activeAt: Long): Seq[(String, Long)] =
+  protected def activeContractIds(
+      activeAt: Long,
+      rangeInfo: AcsRangeInfo = AcsRangeInfo.empty,
+  ): Seq[(String, Long)] =
     index
       .getActiveContracts(
         eventFormat = allPartyEventFormat,
         activeAt = Some(Offset.tryFromLong(activeAt)),
-        rangeInfo = AcsRangeInfo.empty,
+        rangeInfo = rangeInfo,
       )
       .runWith(Sink.seq)
       .futureValue

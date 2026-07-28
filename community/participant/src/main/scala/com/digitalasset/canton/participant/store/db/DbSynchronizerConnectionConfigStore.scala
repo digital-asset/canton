@@ -93,7 +93,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
 
   private implicit val setParameterSynchronizerPredecessor
       : SetParameter[Option[SynchronizerPredecessor]] =
-    SynchronizerPredecessor.getVersionedSetParameterO(releaseProtocolVersion.v)
+    SynchronizerPredecessor.getVersionedSetParameterO
 
   private def filter(id: ConfigIdentifier): SQLActionBuilder = id match {
     case ConfigIdentifier.WithPsid(psid) =>

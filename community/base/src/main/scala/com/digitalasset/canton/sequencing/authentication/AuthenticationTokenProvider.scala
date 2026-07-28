@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.authentication
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.option.*
-import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config
@@ -43,7 +42,8 @@ import com.digitalasset.canton.util.retry.{
   Pause,
   RetryWithDelay,
 }
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Status, StatusRuntimeException}
 
@@ -210,8 +210,10 @@ class AuthenticationTokenProvider(
       tc: TraceContext
   ): EitherT[FutureUnlessShutdown, Status, AuthenticationTokenWithExpiry] =
     for {
-      fingerprintsValid <- fingerprintsP
-        .traverse(Fingerprint.fromProtoPrimitive)
+      fingerprintsValid <- ProtoValidation
+        .validateThen(fingerprintsP, "fingerprints", ProtocolVersionValidation.AlwaysValidation)(
+          Fingerprint.fromProtoPrimitive
+        )
         .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
         .toEitherT[FutureUnlessShutdown]
       fingerprintsNel <- NonEmpty

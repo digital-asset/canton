@@ -18,6 +18,7 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionContext2,
@@ -129,11 +130,12 @@ final case class CompressedBatch(proto: ProtoBatch) extends GenBatch[Nothing] {
     }
 
   def decompress(
-      decompressionPolicy: DecompressionPolicy
+      pvv: ProtocolVersionValidation,
+      decompressionPolicy: DecompressionPolicy,
   ): ParsingResult[Batch[ClosedEnvelope]] =
     proto match {
-      case ProtoBatchV30(wrapped) => Batch.fromProtoV30(decompressionPolicy, wrapped)
-      case ProtoBatchV31(wrapped) => Batch.fromProtoV31(decompressionPolicy, wrapped)
+      case ProtoBatchV30(wrapped) => Batch.fromProtoV30(pvv, decompressionPolicy, wrapped)
+      case ProtoBatchV31(wrapped) => Batch.fromProtoV31(pvv, decompressionPolicy, wrapped)
     }
 
   override protected def pretty: Pretty[CompressedBatch.this.type] = prettyOfClass()
@@ -150,11 +152,11 @@ object Batch
     ProtoVersion(30) -> VersionedProtoCodec(
       ProtocolVersion.v34
     )(v30.CompressedBatch)(
-      supportedProtoVersion(_)(Batch.fromProtoV30),
+      supportedProtoVersionPVV(_)(Batch.fromProtoV30),
       _.toProtoV30,
     ),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.CompressedBatch)(
-      supportedProtoVersion(_)(Batch.fromProtoV31),
+      supportedProtoVersionPVV(_)(Batch.fromProtoV31),
       _.toProtoV31,
     ),
   )
@@ -181,6 +183,7 @@ object Batch
     Batch(envelopes.toList)(protocolVersionRepresentativeFor(protocolVersion))
 
   private[protocol] def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       batchProto: v30.CompressedBatch,
   ): ParsingResult[Batch[ClosedEnvelope]] = {
@@ -193,12 +196,13 @@ object Batch
       )
       uncompressedBatchProto <- ProtoConverter.protoParser(v30.Batch.parseFrom)(uncompressed)
       v30.Batch(envelopesProto) = uncompressedBatchProto
-      envelopes <- envelopesProto.toList.traverse(ClosedUncompressedEnvelope.fromProtoV30)
+      envelopes <- envelopesProto.toList.traverse(ClosedUncompressedEnvelope.fromProtoV30(pvv, _))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield Batch[ClosedEnvelope](envelopes)(rpv)
   }
 
   private[protocol] def fromProtoV31(
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       batchProto: v31.CompressedBatch,
   ): ParsingResult[Batch[ClosedEnvelope]] = {
@@ -220,7 +224,7 @@ object Batch
       )
 
       recipientsList <- decompressedRecipientsProto.recipients.toList.traverse(
-        Recipients.fromProtoV30
+        Recipients.fromProtoV30(pvv, _)
       )
       algorithm <- CompressionAlgorithm.fromProtoV30(protoAlgorithm)
 

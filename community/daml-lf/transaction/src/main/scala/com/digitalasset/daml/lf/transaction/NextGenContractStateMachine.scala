@@ -56,12 +56,13 @@ object NeedKeyProgression {
 }
 
 /*
-  Question to ask the caller for more contracts that match a key. The caller can resume the query with more candidates
-  until it is satisfied that it has seen all matching contracts, at which point the state machine will check that the
-  provided candidates are consistent with the previous query results.
-  There are two important invariants the caller must respect
-  1. the number of return contracts should be less or equal to n
-  2. the continuation token can be [[Finish]] only if the number of returned contracts is strictly less than n
+  NeedKey asks the caller for more contracts that match a key.
+  The caller answers with candidates. It resumes the query until it has seen every matching contract.
+  When the caller stops, the state machine checks the candidates against the earlier query results.
+  The caller must respect two invariants:
+  1. it returns at most `n` contracts;
+  2. it may set the progression to `Finished` only when it returned fewer than `n`.
+     A full batch always means there may be more.
  */
 case class NeedKey[+X](
     n: Int,
@@ -149,41 +150,48 @@ object NextGenContractStateMachine {
     )
   }
 
-  sealed abstract class LLState {
+  /** The contract journal. Stateful and transaction-agnostic.
+    *
+    * It records the contract IDs and keys a transaction touches, creates, and spends, and keeps
+    * that record coherent. It answers the interpreter's contract and key queries and returns a new
+    * journal on every mutation. It never reaches into the ledger: it asks the caller for contracts,
+    * and the caller answers.
+    */
+  sealed abstract class Journal {
     private[lf] def create(
         nid: NodeId,
         cid: ContractId,
         mbKey: Option[GlobalKey],
-    ): ErrOr[LLState]
+    ): ErrOr[Journal]
 
     private[lf] def queryById(
         tmplId: Ref.TypeConId,
         cid: ContractId,
-    ): Either[NeedContract[LLState], ErrOr[LLState]]
+    ): Either[NeedContract[Journal], ErrOr[Journal]]
 
     private[lf] def queryNByKey(
         key: GlobalKey,
         n: Int,
-    ): Either[NeedKey[LLState], ErrOr[(KeyMapping, LLState)]]
+    ): Either[NeedKey[Journal], ErrOr[(KeyMapping, Journal)]]
 
     // return None if cid is unknown
     private[lf] def archive(
         tmplId: Ref.TypeConId,
         cid: ContractId,
         nid: NodeId,
-    ): Option[ErrOr[State]]
+    ): Option[ErrOr[Journal]]
 
-    private[lf] def beginTry: LLState
+    private[lf] def beginTry: Journal
 
-    private[lf] def rollbackTry: Either[Set[NodeId], LLState]
+    private[lf] def abortTry: Either[Set[NodeId], Journal]
 
-    private[lf] def endTry: LLState
+    private[lf] def endTry: Journal
 
     private[lf] def onlyQueriedById(gkey: GlobalKey): Set[ContractId]
 
     private[lf] def knownContract(cid: ContractId): Boolean
 
-    // TODO(#31848) review the interface of LLState
+    // TODO(#31848) review the interface of Journal
     //  - check if we really need those methods
     //  - check if it will be better to have lazy val for the Sets/Maps
     def knownContracts: Set[ContractId]
@@ -207,35 +215,371 @@ object NextGenContractStateMachine {
     //  TODO(#31848): remove this method
     def localContracts: immutable.VectorMap[ContractId, ?]
 
-    /** A deterministic total order over all contracts known to the state machine. The only
-      * guarantee is that if two contracts appearing in the same queryByKey result, their relative
-      * order in `contractOrder` matches their order in that query result.
+    /** A deterministic total order over all contracts known to the state machine. It gives each key
+      * a stable precedence. The only guarantee: if two contracts appear in the same `queryByKey`
+      * result, their relative order in `contractOrder` matches their order in that result. So every
+      * `queryByKey` result is a subsequence of `contractOrder`.
       */
     def contractOrder: List[ContractId]
   }
 
-  object HHState {
+  object Journal {
+
+    private[transaction] case class Impl(
+        authorizeRollback: Boolean,
+        localContracts: immutable.VectorMap[ContractId, Option[GlobalKey]],
+        override val inputContracts: Set[ContractId],
+        internalKeyInputs: Map[GlobalKey, KeyInput],
+        activeLedgerState: ActiveLedgerState,
+        rollbackStack: List[ActiveLedgerState],
+    ) extends Journal {
+
+      private def createdInThisTimeline: Map[ContractId, NodeId] =
+        activeLedgerState.createdInThisTimeline
+
+      def localKeys: Map[GlobalKey, Vector[ContractId]] =
+        activeLedgerState.localKeys
+
+      override def keyInputs: Map[GlobalKey, KeyMapping] =
+        internalKeyInputs.flatMap { case (key, keyInput) =>
+          keyInput.toKeyMapping match {
+            case KeyMapping.Unknown => List.empty
+            case mapping => List(key -> mapping)
+          }
+        }
+
+      def consumedBy: Map[ContractId, NodeId] =
+        activeLedgerState.consumedBy
+
+      def onlyQueriedById(gkey: GlobalKey): Set[ContractId] =
+        internalKeyInputs.getOrElse(gkey, KeyInput.Unknown).onlyQueriedById
+
+      def knownContract(cid: ContractId): Boolean =
+        localContracts.contains(cid) || inputContracts.contains(cid)
+
+      def knownContracts: Set[ContractId] =
+        createdInThisTimeline.keySet ++ inputContracts
+
+      def knownKeys: Set[GlobalKey] = localKeys.keySet & internalKeyInputs.keySet
+
+      def toStateMachineResult: StateMachineResult = StateMachineResult(
+        inputContractIds = inputContracts,
+        globalKeyInputs = keyInputs,
+        localKeys = localKeys,
+        consumed = consumedBy.keySet,
+      )
+
+      def create(nid: NodeId, cid: ContractId, mbKey: Option[GlobalKey]): ErrOr[Impl] =
+        Either.cond(
+          !knownContract(cid),
+          this.copy(
+            localContracts = this.localContracts.updated(cid, mbKey),
+            activeLedgerState = activeLedgerState.copy(
+              createdInThisTimeline = this.createdInThisTimeline + (cid -> nid),
+              localKeys = mbKey match {
+                case None => this.localKeys
+                case Some(key) =>
+                  this.localKeys.updated(key, cid +: this.localKeys.getOrElse(key, Vector.empty))
+              },
+            ),
+          ),
+          TransactionError.DuplicateContractId(cid),
+        )
+
+      private def continueQueryById(
+          cid: Value.ContractId
+      ): Option[GlobalKey] => ErrOr[Impl] = {
+        case None =>
+          Right(copy(inputContracts = inputContracts + cid))
+        case Some(key) =>
+          val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
+          keyInput.progression match {
+            case _: NeedKeyProgression.CanContinue =>
+              val updatedKeyInput = keyInput.copy(onlyQueriedById = keyInput.onlyQueriedById + cid)
+              Right(
+                copy(
+                  inputContracts = inputContracts + cid,
+                  internalKeyInputs = internalKeyInputs.updated(
+                    key,
+                    updatedKeyInput,
+                  ),
+                )
+              )
+            case NeedKeyProgression.Finished =>
+              Left(TransactionError.InconsistentContractKey(key))
+          }
+      }
+
+      def queryById(
+          tmplId: Ref.TypeConId,
+          cid: ContractId,
+      ): Either[NeedContract[Impl], ErrOr[Impl]] =
+        Either.cond(
+          knownContract(cid),
+          consumedBy.get(cid).map(TransactionError.AlreadyConsumed(cid, tmplId, _)).toLeft(this),
+          NeedContract(continueQueryById(cid)),
+        )
+
+      @scala.annotation.tailrec
+      private def continueQueryNByKeyWithCandidates(
+          key: GlobalKey,
+          candidates: List[ContractId],
+          inputContract: Set[ContractId],
+          queryByKey: Vector[ContractId],
+          onlyQueryById: Set[ContractId],
+          progression: NeedKeyProgression,
+          acc: KeyMappingBuilder,
+      ): Either[NeedKey[Impl], ErrOr[(KeyMapping, Impl)]] =
+        if (acc.missing == 0) {
+          Right(
+            Right(
+              acc.result -> copy(
+                inputContracts = inputContract,
+                internalKeyInputs = internalKeyInputs.updated(
+                  key,
+                  KeyInput(queryByKey, candidates, onlyQueryById, progression),
+                ),
+              )
+            )
+          )
+        } else {
+          candidates match {
+            case head :: tail =>
+              if (localContracts.contains(head))
+                // Defensive: because local contract IDs are structurally distinct from input contract IDs,
+                // this branch should be unreachable.
+                Right(Left(TransactionError.DuplicateContractId(head)))
+              else if (inputContract.contains(head) && !onlyQueryById.contains(head))
+                continueQueryNByKeyWithCandidates(
+                  key,
+                  tail,
+                  inputContract,
+                  queryByKey,
+                  onlyQueryById,
+                  progression,
+                  acc,
+                )
+              else
+                continueQueryNByKeyWithCandidates(
+                  key,
+                  tail,
+                  inputContract + head,
+                  queryByKey :+ head,
+                  onlyQueryById - head,
+                  progression,
+                  if (consumedBy.contains(head)) acc else acc :+ head,
+                )
+            case Nil =>
+              progression match {
+                case progression: NeedKeyProgression.CanContinue =>
+                  Left(
+                    NeedKey(
+                      acc.missing,
+                      progression,
+                      continueQueryNByKey(key, inputContract, queryByKey, onlyQueryById, acc),
+                    )
+                  )
+                case NeedKeyProgression.Finished =>
+                  Right(
+                    Either.cond(
+                      onlyQueryById.isEmpty,
+                      acc.result -> copy(
+                        inputContracts = inputContract,
+                        internalKeyInputs = internalKeyInputs.updated(
+                          key,
+                          KeyInput(queryByKey, candidates, onlyQueryById, progression),
+                        ),
+                      ),
+                      TransactionError.InconsistentContractKey(key),
+                    )
+                  )
+              }
+          }
+        }
+
+      private def continueQueryNByKey(
+          key: GlobalKey,
+          inputContracts: Set[ContractId],
+          queryByKey: Vector[ContractId],
+          onlyQueryById: Set[ContractId],
+          acc: KeyMappingBuilder,
+      ): (
+          View[ContractId],
+          NeedKeyProgression.HasStarted,
+      ) => Either[NeedKey[Impl], ErrOr[(KeyMapping, Impl)]] =
+        (contracts: View[ContractId], progression: NeedKeyProgression.HasStarted) =>
+          continueQueryNByKeyWithCandidates(
+            key,
+            contracts.toList,
+            inputContracts,
+            queryByKey,
+            onlyQueryById,
+            progression,
+            acc,
+          )
+
+      def activeContract(cid: ContractId): Boolean =
+        knownContract(cid) && !consumedBy.contains(cid)
+
+      private def activeKeyMapping(key: GlobalKey, n: Int): KeyMappingBuilder = {
+        val localKey = localKeys.getOrElse(key, Nil).view
+        val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
+        val cids = (localKey ++ keyInput.queriedByKey).filterNot(consumedBy.contains)
+        KeyMappingBuilder.empty(n).addWhileHasMissing(cids)
+      }
+
+      def activeKeyMapping(key: GlobalKey): KeyMapping = activeKeyMapping(key, Int.MaxValue).result
+
+      def queryNByKey(
+          key: GlobalKey,
+          n: Int,
+      ): Either[NeedKey[Impl], ErrOr[(KeyMapping, Journal)]] = {
+        if (n <= 0)
+          throw new IllegalArgumentException(s"queryNByKey: n must be strictly positive, got $n")
+        val mapping = activeKeyMapping(key, n)
+        val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
+        continueQueryNByKeyWithCandidates(
+          key,
+          keyInput.overflowPreviousQuery,
+          inputContracts,
+          keyInput.queriedByKey,
+          keyInput.onlyQueriedById,
+          keyInput.progression,
+          mapping,
+        )
+      }
+
+      def archive(tmplId: Ref.TypeConId, cid: ContractId, nid: NodeId): Option[ErrOr[Impl]] =
+        queryById(tmplId, cid).toOption.map(
+          _.map(state =>
+            state.copy(
+              activeLedgerState = state.activeLedgerState.copy(
+                consumedBy = state.activeLedgerState.consumedBy.updated(cid, nid)
+              )
+            )
+          )
+        )
+
+      def beginTry: Impl =
+        this.copy(rollbackStack = activeLedgerState :: rollbackStack)
+
+      def abortTry: Either[Set[NodeId], Impl] =
+        rollbackStack match {
+          case Nil =>
+            throw new IllegalStateException("Not inside a rollback scope")
+          case headState :: tailStack if authorizeRollback =>
+            Right(
+              this.copy(
+                activeLedgerState = headState,
+                rollbackStack = tailStack,
+              )
+            )
+          case headState :: tailStack =>
+            // locallyCreated and consumedBy increase monotonically, so can quickly check their size did not change since the last try block.
+            if (
+              activeLedgerState.createdInThisTimeline.size != headState.createdInThisTimeline.size || activeLedgerState.consumedBy.size != headState.consumedBy.size
+            ) {
+              val consumedByChanges =
+                activeLedgerState.consumedBy.view
+                  .filterKeys(consumedBy.keySet -- headState.consumedBy.keySet)
+                  .values
+                  .toSet
+
+              val locallyCreatedChanges =
+                activeLedgerState.createdInThisTimeline.view
+                  .filterKeys(
+                    activeLedgerState.createdInThisTimeline.keySet -- headState.createdInThisTimeline.keySet
+                  )
+                  .values
+                  .toSet
+
+              Left(consumedByChanges ++ locallyCreatedChanges)
+            } else {
+              Right(this.copy(rollbackStack = tailStack))
+            }
+        }
+
+      private[lf] def endTry: Impl = rollbackStack match {
+        case Nil => throw new IllegalStateException("Not inside a rollback scope")
+        case _ :: tailStack => this.copy(rollbackStack = tailStack)
+      }
+
+      override def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] =
+        activeLedgerState.consumedBy.get(cid) match {
+          case Some(nid) => Some(Left(nid)) // consumed
+          case None =>
+            if (
+              localContracts.contains(cid) && !activeLedgerState.createdInThisTimeline.contains(cid)
+            ) {
+              Some(Right(())) // inactive
+            } else {
+              None // neither
+            }
+        }
+
+      // Implementation detail (not guaranteed to be stable across versions, documented
+      // for maintenance purposes only): the current ordering is
+      //  1. Local contracts, ordered by recency (most recent first).
+      //  2. Input contracts without key, ordered by ID.
+      //  3. Input contracts with key, grouped by key (keys ordered by hash); within
+      //     each key group, contracts queried by key come first (in query order),
+      //     followed by contracts only queried by ID (ordered by ID).
+      override def contractOrder: List[ContractId] = {
+
+        // 1. Local contracts, most recent first
+        val locals = localContracts.keys.reverseIterator
+
+        // 3. Input contracts with key, grouped by key in sorted order
+        //    Computed before step 2 so we can derive the "without key" set.
+        val inputsWithKey =
+          internalKeyInputs.toArray.sortBy(_._1).toList.flatMap { case (_, keyInput) =>
+            keyInput.queriedByKey ++ keyInput.onlyQueriedById.toArray.sorted
+          }
+
+        // 2. Input contracts without key, ordered by ID
+        val inputsWithoutKey = (inputContracts -- inputsWithKey).toArray.sorted
+
+        // 3. Append input contracts with key
+        (locals ++ inputsWithoutKey ++ inputsWithKey).toList
+      }
+    }
+
+    private[transaction] case class ActiveLedgerState(
+        createdInThisTimeline: Map[ContractId, NodeId],
+        consumedBy: Map[ContractId, NodeId],
+        localKeys: Map[GlobalKey, Vector[ContractId]],
+    )
+
+  }
+
+  object Visitor {
     private case object ContinuationToken extends NeedKeyProgression.Token
     private val InProgress = NeedKeyProgression.InProgress(ContinuationToken)
   }
 
-  implicit class HHState(val llState: LLState) extends AnyVal {
+  /** The node visitor. Transaction-aware and stateless.
+    *
+    * It wraps a journal and replays one transaction node at a time. For each node it recomputes the
+    * journal's answer and demands an exact match, so submission and validation cannot disagree. It
+    * needs only contract IDs and keys, so it also runs on projected views.
+    */
+  implicit class Visitor(val journal: Journal) extends AnyVal {
 
-    import HHState.*
+    import Visitor.*
 
     def visitCreate(
         nid: NodeId,
         contractId: ContractId,
         mbKey: Option[GlobalKey],
-    ): ErrOr[LLState] =
-      llState.create(nid, contractId, mbKey)
+    ): ErrOr[Journal] =
+      journal.create(nid, contractId, mbKey)
 
     def visitFetchById(
         tmplId: Ref.TypeConId,
         contractId: ContractId,
         mbKey: Option[GlobalKey],
-    ): ErrOr[LLState] =
-      llState.queryById(tmplId, contractId) match {
+    ): ErrOr[Journal] =
+      journal.queryById(tmplId, contractId) match {
         case Left(needContract) =>
           needContract.resume(mbKey)
         case Right(result) =>
@@ -246,20 +590,20 @@ object NextGenContractStateMachine {
         key: GlobalKey,
         result: Vector[ContractId],
         exhaustive: Boolean,
-    ): ErrOr[LLState] = {
+    ): ErrOr[Journal] = {
       if (result.isEmpty && !exhaustive)
         throw new IllegalArgumentException(
           s"visitQueryByKey: result cannot be empty when exhaustive is false"
         )
       for {
         entry <-
-          llState.queryNByKey(key, if (exhaustive) result.length + 1 else result.length) match {
+          journal.queryNByKey(key, if (exhaustive) result.length + 1 else result.length) match {
             case Left(NeedKey(_, _, resume)) =>
-              val inputContracts = result.view.filterNot(llState.localContracts.contains)
+              val inputContracts = result.view.filterNot(journal.localContracts.contains)
               val either =
                 if (exhaustive)
                   resume(
-                    inputContracts ++ llState.onlyQueriedById(key),
+                    inputContracts ++ journal.onlyQueriedById(key),
                     NeedKeyProgression.Finished,
                   )
                 else
@@ -287,7 +631,7 @@ object NextGenContractStateMachine {
         contractId: ContractId,
         mbKey: Option[GlobalKey],
         byKey: Boolean,
-    ): ErrOr[LLState] =
+    ): ErrOr[Journal] =
       if (byKey)
         visitQueryByKey(mbKey.get, Vector(contractId), exhaustive = false)
       else
@@ -300,7 +644,7 @@ object NextGenContractStateMachine {
         mbKey: Option[GlobalKey],
         byKey: Boolean,
         consuming: Boolean,
-    ): ErrOr[LLState] =
+    ): ErrOr[Journal] =
       for {
         state <- this.visitFetch(tmplId, targetId, mbKey, byKey)
         state <-
@@ -317,16 +661,16 @@ object NextGenContractStateMachine {
             Right(state)
       } yield state
 
-    def handleCreate(nid: NodeId, node: Node.Create): ErrOr[LLState] =
+    def handleCreate(nid: NodeId, node: Node.Create): ErrOr[Journal] =
       visitCreate(nid, node.coid, node.gkeyOpt)
 
-    def handleFetch(node: Node.Fetch): ErrOr[LLState] =
+    def handleFetch(node: Node.Fetch): ErrOr[Journal] =
       visitFetch(node.templateId, node.coid, node.gkeyOpt, node.byKey)
 
-    def handleQueryByKey(node: Node.QueryByKey): ErrOr[LLState] =
+    def handleQueryByKey(node: Node.QueryByKey): ErrOr[Journal] =
       visitQueryByKey(node.gkey, node.result, node.exhaustive)
 
-    def handleExercise(nid: NodeId, exe: Node.Exercise): ErrOr[LLState] =
+    def handleExercise(nid: NodeId, exe: Node.Exercise): ErrOr[Journal] =
       visitExercise(
         nid,
         exe.templateId,
@@ -339,7 +683,7 @@ object NextGenContractStateMachine {
     def handleNode(
         id: NodeId,
         node: Node.Action,
-    ): ErrOr[LLState] =
+    ): ErrOr[Journal] =
       node match {
         case create: Node.Create =>
           handleCreate(id, create)
@@ -351,337 +695,12 @@ object NextGenContractStateMachine {
           handleExercise(id, exercise)
       }
 
-    def beginRollback: LLState =
-      llState.beginTry
+    def beginRollback: Journal =
+      journal.beginTry
 
-    def endRollback: Either[Set[NodeId], LLState] =
-      llState.rollbackTry
+    def endRollback: Either[Set[NodeId], Journal] =
+      journal.abortTry
   }
-
-  private[transaction] case class State(
-      authorizeRollback: Boolean,
-      localContracts: immutable.VectorMap[ContractId, Option[GlobalKey]],
-      override val inputContracts: Set[ContractId],
-      internalKeyInputs: Map[GlobalKey, KeyInput],
-      activeLedgerState: ActiveLedgerState,
-      rollbackStack: List[ActiveLedgerState],
-  ) extends LLState {
-
-    private def createdInThisTimeline: Map[ContractId, NodeId] =
-      activeLedgerState.createdInThisTimeline
-
-    def localKeys: Map[GlobalKey, Vector[ContractId]] =
-      activeLedgerState.localKeys
-
-    override def keyInputs: Map[GlobalKey, KeyMapping] =
-      internalKeyInputs.flatMap { case (key, keyInput) =>
-        keyInput.toKeyMapping match {
-          case KeyMapping.Unknown => List.empty
-          case mapping => List(key -> mapping)
-        }
-      }
-
-    def consumedBy: Map[ContractId, NodeId] =
-      activeLedgerState.consumedBy
-
-    def onlyQueriedById(gkey: GlobalKey): Set[ContractId] =
-      internalKeyInputs.getOrElse(gkey, KeyInput.Unknown).onlyQueriedById
-
-    def knownContract(cid: ContractId): Boolean =
-      localContracts.contains(cid) || inputContracts.contains(cid)
-
-    def knownContracts: Set[ContractId] =
-      createdInThisTimeline.keySet ++ inputContracts
-
-    def knownKeys: Set[GlobalKey] = localKeys.keySet & internalKeyInputs.keySet
-
-    def toStateMachineResult: StateMachineResult = StateMachineResult(
-      inputContractIds = inputContracts,
-      globalKeyInputs = keyInputs,
-      localKeys = localKeys,
-      consumed = consumedBy.keySet,
-    )
-
-    def create(nid: NodeId, cid: ContractId, mbKey: Option[GlobalKey]): ErrOr[State] =
-      Either.cond(
-        !knownContract(cid),
-        this.copy(
-          localContracts = this.localContracts.updated(cid, mbKey),
-          activeLedgerState = activeLedgerState.copy(
-            createdInThisTimeline = this.createdInThisTimeline + (cid -> nid),
-            localKeys = mbKey match {
-              case None => this.localKeys
-              case Some(key) =>
-                this.localKeys.updated(key, cid +: this.localKeys.getOrElse(key, Vector.empty))
-            },
-          ),
-        ),
-        TransactionError.DuplicateContractId(cid),
-      )
-
-    private def continueQueryById(
-        cid: Value.ContractId
-    ): Option[GlobalKey] => ErrOr[State] = {
-      case None =>
-        Right(copy(inputContracts = inputContracts + cid))
-      case Some(key) =>
-        val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
-        keyInput.progression match {
-          case _: NeedKeyProgression.CanContinue =>
-            val updatedKeyInput = keyInput.copy(onlyQueriedById = keyInput.onlyQueriedById + cid)
-            Right(
-              copy(
-                inputContracts = inputContracts + cid,
-                internalKeyInputs = internalKeyInputs.updated(
-                  key,
-                  updatedKeyInput,
-                ),
-              )
-            )
-          case NeedKeyProgression.Finished =>
-            Left(TransactionError.InconsistentContractKey(key))
-        }
-    }
-
-    def queryById(
-        tmplId: Ref.TypeConId,
-        cid: ContractId,
-    ): Either[NeedContract[State], ErrOr[State]] =
-      Either.cond(
-        knownContract(cid),
-        consumedBy.get(cid).map(TransactionError.AlreadyConsumed(cid, tmplId, _)).toLeft(this),
-        NeedContract(continueQueryById(cid)),
-      )
-
-    @scala.annotation.tailrec
-    private def continueQueryNByKeyWithCandidates(
-        key: GlobalKey,
-        candidates: List[ContractId],
-        inputContract: Set[ContractId],
-        queryByKey: Vector[ContractId],
-        onlyQueryById: Set[ContractId],
-        progression: NeedKeyProgression,
-        acc: KeyMappingBuilder,
-    ): Either[NeedKey[State], ErrOr[(KeyMapping, State)]] =
-      if (acc.missing == 0) {
-        Right(
-          Right(
-            acc.result -> copy(
-              inputContracts = inputContract,
-              internalKeyInputs = internalKeyInputs.updated(
-                key,
-                KeyInput(queryByKey, candidates, onlyQueryById, progression),
-              ),
-            )
-          )
-        )
-      } else {
-        candidates match {
-          case head :: tail =>
-            if (localContracts.contains(head))
-              // Defensive: because local contract IDs are structurally distinct from input contract IDs,
-              // this branch should be unreachable.
-              Right(Left(TransactionError.DuplicateContractId(head)))
-            else if (inputContract.contains(head) && !onlyQueryById.contains(head))
-              continueQueryNByKeyWithCandidates(
-                key,
-                tail,
-                inputContract,
-                queryByKey,
-                onlyQueryById,
-                progression,
-                acc,
-              )
-            else
-              continueQueryNByKeyWithCandidates(
-                key,
-                tail,
-                inputContract + head,
-                queryByKey :+ head,
-                onlyQueryById - head,
-                progression,
-                if (consumedBy.contains(head)) acc else acc :+ head,
-              )
-          case Nil =>
-            progression match {
-              case progression: NeedKeyProgression.CanContinue =>
-                Left(
-                  NeedKey(
-                    acc.missing,
-                    progression,
-                    continueQueryNByKey(key, inputContract, queryByKey, onlyQueryById, acc),
-                  )
-                )
-              case NeedKeyProgression.Finished =>
-                Right(
-                  Either.cond(
-                    onlyQueryById.isEmpty,
-                    acc.result -> copy(
-                      inputContracts = inputContract,
-                      internalKeyInputs = internalKeyInputs.updated(
-                        key,
-                        KeyInput(queryByKey, candidates, onlyQueryById, progression),
-                      ),
-                    ),
-                    TransactionError.InconsistentContractKey(key),
-                  )
-                )
-            }
-        }
-      }
-
-    private def continueQueryNByKey(
-        key: GlobalKey,
-        inputContracts: Set[ContractId],
-        queryByKey: Vector[ContractId],
-        onlyQueryById: Set[ContractId],
-        acc: KeyMappingBuilder,
-    ): (
-        View[ContractId],
-        NeedKeyProgression.HasStarted,
-    ) => Either[NeedKey[State], ErrOr[(KeyMapping, State)]] =
-      (contracts: View[ContractId], progression: NeedKeyProgression.HasStarted) =>
-        continueQueryNByKeyWithCandidates(
-          key,
-          contracts.toList,
-          inputContracts,
-          queryByKey,
-          onlyQueryById,
-          progression,
-          acc,
-        )
-
-    def activeContract(cid: ContractId): Boolean =
-      knownContract(cid) && !consumedBy.contains(cid)
-
-    private def activeKeyMapping(key: GlobalKey, n: Int): KeyMappingBuilder = {
-      val localKey = localKeys.getOrElse(key, Nil).view
-      val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
-      val cids = (localKey ++ keyInput.queriedByKey).filterNot(consumedBy.contains)
-      KeyMappingBuilder.empty(n).addWhileHasMissing(cids)
-    }
-
-    def activeKeyMapping(key: GlobalKey): KeyMapping = activeKeyMapping(key, Int.MaxValue).result
-
-    def queryNByKey(
-        key: GlobalKey,
-        n: Int,
-    ): Either[NeedKey[State], ErrOr[(KeyMapping, LLState)]] = {
-      if (n <= 0)
-        throw new IllegalArgumentException(s"queryNByKey: n must be strictly positive, got $n")
-      val mapping = activeKeyMapping(key, n)
-      val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
-      continueQueryNByKeyWithCandidates(
-        key,
-        keyInput.overflowPreviousQuery,
-        inputContracts,
-        keyInput.queriedByKey,
-        keyInput.onlyQueriedById,
-        keyInput.progression,
-        mapping,
-      )
-    }
-
-    def archive(tmplId: Ref.TypeConId, cid: ContractId, nid: NodeId): Option[ErrOr[State]] =
-      queryById(tmplId, cid).toOption.map(
-        _.map(state =>
-          state.copy(
-            activeLedgerState = state.activeLedgerState.copy(
-              consumedBy = state.activeLedgerState.consumedBy.updated(cid, nid)
-            )
-          )
-        )
-      )
-
-    def beginTry: State =
-      this.copy(rollbackStack = activeLedgerState :: rollbackStack)
-
-    def rollbackTry: Either[Set[NodeId], State] =
-      rollbackStack match {
-        case Nil =>
-          throw new IllegalStateException("Not inside a rollback scope")
-        case headState :: tailStack if authorizeRollback =>
-          Right(
-            this.copy(
-              activeLedgerState = headState,
-              rollbackStack = tailStack,
-            )
-          )
-        case headState :: tailStack =>
-          // locallyCreated and consumedBy increase monotonically, so can quickly check their size did not change since the last try block.
-          if (
-            activeLedgerState.createdInThisTimeline.size != headState.createdInThisTimeline.size || activeLedgerState.consumedBy.size != headState.consumedBy.size
-          ) {
-            val consumedByChanges =
-              activeLedgerState.consumedBy.view
-                .filterKeys(consumedBy.keySet -- headState.consumedBy.keySet)
-                .values
-                .toSet
-
-            val locallyCreatedChanges =
-              activeLedgerState.createdInThisTimeline.view
-                .filterKeys(
-                  activeLedgerState.createdInThisTimeline.keySet -- headState.createdInThisTimeline.keySet
-                )
-                .values
-                .toSet
-
-            Left(consumedByChanges ++ locallyCreatedChanges)
-          } else {
-            Right(this.copy(rollbackStack = tailStack))
-          }
-      }
-
-    private[lf] def endTry: State = rollbackStack match {
-      case Nil => throw new IllegalStateException("Not inside a rollback scope")
-      case _ :: tailStack => this.copy(rollbackStack = tailStack)
-    }
-
-    override def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] =
-      activeLedgerState.consumedBy.get(cid) match {
-        case Some(nid) => Some(Left(nid)) // consumed
-        case None =>
-          if (
-            localContracts.contains(cid) && !activeLedgerState.createdInThisTimeline.contains(cid)
-          ) {
-            Some(Right(())) // inactive
-          } else {
-            None // neither
-          }
-      }
-
-    // Implementation detail (not guaranteed to be stable across versions, documented
-    // for maintenance purposes only): the current ordering is
-    //  1. Local contracts, ordered by recency (most recent first).
-    //  2. Input contracts without key, ordered by ID.
-    //  3. Input contracts with key, grouped by key (keys ordered by hash); within
-    //     each key group, contracts queried by key come first (in query order),
-    //     followed by contracts only queried by ID (ordered by ID).
-    override def contractOrder: List[ContractId] = {
-
-      // 1. Local contracts, most recent first
-      val locals = localContracts.keys.reverseIterator
-
-      // 3. Input contracts with key, grouped by key in sorted order
-      //    Computed before step 2 so we can derive the "without key" set.
-      val inputsWithKey =
-        internalKeyInputs.toArray.sortBy(_._1).toList.flatMap { case (_, keyInput) =>
-          keyInput.queriedByKey ++ keyInput.onlyQueriedById.toArray.sorted
-        }
-
-      // 2. Input contracts without key, ordered by ID
-      val inputsWithoutKey = (inputContracts -- inputsWithKey).toArray.sorted
-
-      // 3. Append input contracts with key
-      (locals ++ inputsWithoutKey ++ inputsWithKey).toList
-    }
-  }
-
-  case class ActiveLedgerState(
-      createdInThisTimeline: Map[ContractId, NodeId],
-      consumedBy: Map[ContractId, NodeId],
-      localKeys: Map[GlobalKey, Vector[ContractId]],
-  )
 
   sealed abstract class Mode extends Product with Serializable
 
@@ -693,35 +712,27 @@ object NextGenContractStateMachine {
 
     /** Default mode used to configure contract state machines when in PV=dev.
       */
-    val devDefault: Mode = NUCK
+    val devDefault: Mode = Key
 
-    // Disallow ledger effects rollback
-    case object NUCK extends Mode {
-      override val toString: String = "NUCK"
-    }
+    // Ledger-effect rollback is rejected: a write inside a rolled-back scope fails the whole
+    // transaction. New behaviour.
+    case object Key extends Mode
 
-    // Allow ledger effects rollback
-    case object NoKey extends Mode {
-      override val toString: String = "NoKey"
-    }
-
-    def fromString: String => Option[Mode] = {
-      case "NUCK" => Some(NUCK)
-      case "NoKey" => Some(NoKey)
-      case _ => None
-    }
+    // Ledger-effect rollback is allowed: writes inside a rolled-back scope are undone locally.
+    // Backward-compatible.
+    case object NoKey extends Mode
   }
 
-  def empty(mode: Mode): State =
+  def empty(mode: Mode): Journal =
     empty(mode == Mode.NoKey)
 
-  def empty(authorizeRollBack: Boolean = true): State =
-    State(
+  def empty(authorizeRollBack: Boolean = true): Journal =
+    Journal.Impl(
       authorizeRollback = authorizeRollBack,
       localContracts = immutable.VectorMap.empty,
       inputContracts = Set.empty,
       internalKeyInputs = Map.empty,
-      activeLedgerState = ActiveLedgerState(
+      activeLedgerState = Journal.ActiveLedgerState(
         createdInThisTimeline = Map.empty,
         consumedBy = Map.empty,
         localKeys = Map.empty,

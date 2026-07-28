@@ -4,6 +4,7 @@
 package com.digitalasset.canton.lifecycle
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.scalatest.DefaultCantonUnitTestPatience
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
@@ -20,7 +21,13 @@ object OnShutdownRunnerTest {
   }
 }
 
-class OnShutdownRunnerTest extends AnyWordSpec with Matchers with NoTracing with Eventually {
+class OnShutdownRunnerTest
+    extends AnyWordSpec
+    with Matchers
+    with NoTracing
+    with Eventually
+    with DefaultCantonUnitTestPatience {
+
   import OnShutdownRunnerTest.*
 
   "OnShutdownRunner" should {

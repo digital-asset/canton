@@ -10,7 +10,7 @@ import com.digitalasset.canton.platform.store.backend.StorageBackendTestValues.{
   offset,
   someIdentityParams,
 }
-import com.digitalasset.canton.platform.store.dao.events.QueryValidRangeImpl
+import com.digitalasset.canton.platform.store.dao.events.{OffsetRange, QueryValidRangeImpl}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 import org.scalatest.flatspec.AnyFlatSpec
@@ -39,8 +39,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
       pruningOffsetService = backend.pruningOffsetService,
       loggerFactory = this.loggerFactory,
     ).withRangeNotPruned(
-      minOffsetInclusive = offset(3),
-      maxOffsetInclusive = offset(8),
+      OffsetRange(offset(3), offset(8)),
       errorPruning = _ => "",
       errorLedgerEnd = _ => "",
     )(Future.unit)
@@ -57,8 +56,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
       pruningOffsetService = backend.pruningOffsetService,
       loggerFactory = this.loggerFactory,
     ).withRangeNotPruned(
-      minOffsetInclusive = Offset.firstOffset,
-      maxOffsetInclusive = offset(8),
+      OffsetRange(Offset.firstOffset, offset(8)),
       errorPruning = _ => "",
       errorLedgerEnd = _ => "",
     )(Future.unit)
@@ -75,8 +73,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
       pruningOffsetService = backend.pruningOffsetService,
       loggerFactory = this.loggerFactory,
     ).withRangeNotPruned(
-      minOffsetInclusive = offset(6),
-      maxOffsetInclusive = offset(8),
+      OffsetRange(offset(6), offset(8)),
       errorPruning = _ => "",
       errorLedgerEnd = _ => "",
     )(Future.unit)
@@ -93,8 +90,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
       pruningOffsetService = backend.pruningOffsetService,
       loggerFactory = this.loggerFactory,
     ).withRangeNotPruned(
-      minOffsetInclusive = offset(4),
-      maxOffsetInclusive = offset(10),
+      OffsetRange(offset(4), offset(10)),
       errorPruning = _ => "",
       errorLedgerEnd = _ => "",
     )(Future.unit)
@@ -115,8 +111,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
           pruningOffsetService = backend.pruningOffsetService,
           loggerFactory = this.loggerFactory,
         ).withRangeNotPruned(
-          minOffsetInclusive = offset(3),
-          maxOffsetInclusive = offset(10),
+          OffsetRange(offset(3), offset(10)),
           errorPruning = pruningOffset => s"pruning issue: ${pruningOffset.unwrap}",
           errorLedgerEnd = _ => "",
         )(Future.unit),
@@ -141,8 +136,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
           pruningOffsetService = backend.pruningOffsetService,
           loggerFactory = this.loggerFactory,
         ).withRangeNotPruned(
-          minOffsetInclusive = offset(4),
-          maxOffsetInclusive = offset(11),
+          OffsetRange(offset(4), offset(11)),
           errorPruning = _ => "",
           errorLedgerEnd =
             ledgerEndOffset => s"ledger-end issue: ${ledgerEndOffset.fold(0L)(_.unwrap)}",
@@ -166,8 +160,7 @@ private[backend] trait StorageBackendTestsQueryValidRange extends Matchers with 
           pruningOffsetService = backend.pruningOffsetService,
           loggerFactory = this.loggerFactory,
         ).withRangeNotPruned(
-          minOffsetInclusive = offset(1),
-          maxOffsetInclusive = offset(1),
+          OffsetRange(offset(1), offset(1)),
           errorPruning = _ => "",
           errorLedgerEnd =
             ledgerEndOffset => s"ledger-end issue: ${ledgerEndOffset.fold(0L)(_.unwrap)}",

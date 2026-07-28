@@ -22,6 +22,7 @@ import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedM
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -146,7 +147,7 @@ object LsuSequencingTestMessageContent
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
       v30.LsuSequencingTestMessageContent
     )(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -155,17 +156,23 @@ object LsuSequencingTestMessageContent
     LsuSequencingTestMessageContent(psid, sender)(None)
 
   private[messages] def fromProtoV30(
-      message: v30.LsuSequencingTestMessageContent
+      pvv: ProtocolVersionValidation,
+      message: v30.LsuSequencingTestMessageContent,
   )(
       bytes: ByteString
   ): ParsingResult[LsuSequencingTestMessageContent] = {
     val v30.LsuSequencingTestMessageContent(synchronizerP, senderP) = message
 
     for {
-      psid <- PhysicalSynchronizerId
-        .fromProtoPrimitive(synchronizerP, "physical_synchronizer_id")
+      psid <- ProtoValidation.validateThen(
+        synchronizerP,
+        "physical_synchronizer_id",
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
 
-      sender <- Member.fromProtoPrimitive(senderP, "sender")
+      sender <- ProtoValidation.validateThen(senderP, "sender", pvv)(
+        Member.fromProtoPrimitive
+      )
     } yield LsuSequencingTestMessageContent(psid, sender)(Some(bytes))
   }
 }

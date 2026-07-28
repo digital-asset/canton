@@ -8,6 +8,8 @@ override-components:
     version: $DAML_VERSION
   codegen:
     version: $DAML_VERSION
+build-options:
+- --target=2.2
 name: foo
 data-dependencies:
 - ../../../../scala-2.13/resource_managed/test/ifoo-0.0.1.dar

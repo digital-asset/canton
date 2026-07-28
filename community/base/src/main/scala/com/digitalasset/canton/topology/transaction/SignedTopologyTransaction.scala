@@ -12,18 +12,21 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbSerializationException
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
+import com.digitalasset.canton.topology.store.TopologyTransactionRejection
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
+import com.digitalasset.canton.topology.{SynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
@@ -71,6 +74,12 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
       .keySet
     require(duplicateSigningKeys.isEmpty, s"Duplicate signing keys used: $duplicateSigningKeys")
   }
+
+  def nextSerial(implicit elc: ErrorLoggingContext): Either[TopologyManagerError, PositiveInt] =
+    transaction.nextSerial
+
+  def nextSerial: Either[TopologyTransactionRejection, PositiveInt] =
+    transaction.nextSerial
 
   def allUnvalidatedSignaturesCoveringHash: Set[TopologyTransactionSignature] =
     signatures.filter(_.coversHash(transaction.hash))
@@ -522,15 +531,15 @@ object SignedTopologyTransactions
     )
 
   def fromProtoV30(
-      expectedProtocolVersion: ProtocolVersionValidation,
+      protocolVersionValidation: ProtocolVersionValidation,
       proto: v30.SignedTopologyTransactions,
   ): ParsingResult[SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
     for {
       transactions <- proto.signedTransaction
         .traverse(
           SignedTopologyTransaction.fromByteString(
-            expectedProtocolVersion,
-            expectedProtocolVersion,
+            protocolVersionValidation,
+            protocolVersionValidation,
             _,
           )
         )

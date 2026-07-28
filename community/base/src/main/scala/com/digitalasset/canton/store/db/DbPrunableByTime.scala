@@ -28,7 +28,10 @@ trait DbPrunableByTime[Idx] extends PrunableByTime {
   /** The table name to store the pruning timestamp in. The table must define the following fields:
     *   - [[partitionColumn]] primary key
     *   - `phase` stores the [[com.digitalasset.canton.pruning.PruningPhase]]
-    *   - `ts` stores the [[com.digitalasset.canton.data.CantonTimestamp]]
+    *   - `ts` stores the [[com.digitalasset.canton.data.CantonTimestamp]] of the latest attempted
+    *     pruning call
+    *   - `succeeded` stores the [[com.digitalasset.canton.data.CantonTimestamp]] of the completed
+    *     pruning call
     */
   protected[this] def pruning_status_table: String & Singleton
 

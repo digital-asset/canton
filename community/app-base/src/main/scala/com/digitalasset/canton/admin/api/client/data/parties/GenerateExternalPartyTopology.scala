@@ -41,8 +41,8 @@ object GenerateExternalPartyTopology {
         topologyTransactions.sizeIs == positive.length,
         (),
         ProtoDeserializationError.ValueDeserializationError(
-          "topology_transactions",
           "Unexpected Remove topology transaction",
+          "topology_transactions",
         ),
       )
       multiHash <- Hash.fromProtoPrimitive(multiHashP)

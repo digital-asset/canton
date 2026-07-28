@@ -39,7 +39,16 @@ case object TransactionViewDecompositionFactory {
           throw new IllegalStateException("Attempt to exit rollback on empty rollback context")
         )
 
-      RollbackState(path.dropRight(1), lastChild.increment)
+      RollbackState(
+        path.dropRight(1),
+        lastChild.increment.getOrElse(
+          // It would take Int.Max sibling rollback nodes to reach this which will likely hit another limit before that
+          // TODO(i26565): Make sure that transaction views limits cover rollback sibling width as well
+          throw new IllegalStateException(
+            "Attempt to exit rollback with a last child at Int.MaxValue"
+          )
+        ),
+      )
     }
 
     def inRollback: Boolean = path.nonEmpty

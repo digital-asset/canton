@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
 import com.digitalasset.canton.annotations.AcsCommitmentTest
-import com.digitalasset.canton.crypto.{LtHash16Blake3, TestHash}
+import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -22,14 +22,14 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  HashedDigest,
+  Checkpoint,
   LocalPartyFirst,
   ParticipantAcsDigestUpdate,
   PartyAcsDigestUpdate,
   PartyAndOrder,
   PartyOrder,
-  RawDigest,
   RemotePartyFirst,
 }
 import com.digitalasset.canton.participant.store.db.{BaseDbAcsDigestStoreTest, DbAcsDigestStore}
@@ -87,7 +87,6 @@ trait SequentialDigestAccumulatorTest
         participant,
         digestStore,
         stringInterning,
-        TestHash,
         tracingMode,
         loggerFactory,
       )
@@ -104,7 +103,7 @@ trait SequentialDigestAccumulatorTest
     def lookupPartyDigest(
         party: LfPartyId,
         order: PartyOrder,
-    ): Option[AcsDigestStore.AcsDigestUpdate[PartyAndOrder[LfPartyId], RawDigest]] =
+    ): Option[AcsDigestStore.AcsDigestUpdate[PartyAndOrder[LfPartyId]]] =
       digestStore.party
         .lookup(
           PartyAndOrder(stringInterning.party.internalize(party), order),
@@ -115,7 +114,7 @@ trait SequentialDigestAccumulatorTest
 
     def lookupParticipantDigest(
         participant: LedgerParticipantId
-    ): Option[AcsDigestStore.AcsDigestUpdate[LedgerParticipantId, (RawDigest, HashedDigest)]] =
+    ): Option[AcsDigestStore.AcsDigestUpdate[LedgerParticipantId]] =
       digestStore.participant
         .lookup(
           stringInterning.participantId.internalize(participant),
@@ -146,7 +145,7 @@ trait SequentialDigestAccumulatorTest
       val partyDigest = lookupPartyDigest(alice, RemotePartyFirst).value
       val participantDigest = lookupParticipantDigest(p1).value
 
-      partyDigest.digestUpdate.digestO.value shouldBe participantDigest.digestUpdate.digestO.value._1
+      partyDigest.digestUpdate.digestO.value shouldBe participantDigest.digestUpdate.digestO.value
     }
 
     // given cid0 with stakeholders alice and bob,
@@ -290,15 +289,16 @@ trait SequentialDigestAccumulatorTest
       val fixture = new Fixture(p1)
       import fixture.*
 
-      val targetCheckpoint = (off(17), ts(1))
+      val targetCheckpoint = Checkpoint(off(17), ts(1), ReconciliationIntervalBoundary)
 
       val checkpoint = process(
-        Timepoint(off(17))(ts(1)) -> CheckpointFence
+        targetCheckpoint.timepoint -> CheckpointFence(targetCheckpoint.checkpointType)
       ).futureValueUS.loneElement
 
       // verify that the right CheckpointWritten notification is emitted
-      checkpoint.recordTimeInclusive shouldBe ts(1)
-      checkpoint.offsetInclusive shouldBe off(17)
+      checkpoint.recordTimeInclusive shouldBe targetCheckpoint.recordTime
+      checkpoint.offsetInclusive shouldBe targetCheckpoint.offset
+      checkpoint.checkpointType shouldBe ReconciliationIntervalBoundary
 
       // verify that the checkpoint was actually written
       digestStore
@@ -344,7 +344,7 @@ trait SequentialDigestAccumulatorTest
         )
       ).futureValueUS shouldBe empty // no checkpoints written
       LtHash16Blake3
-        .tryCreate(lookupParticipantDigest(p1).value.digestUpdate.digestO.value._1)
+        .tryCreate(lookupParticipantDigest(p1).value.digestUpdate.digestO.value)
         .isEmpty shouldBe false
 
       process(
@@ -362,7 +362,7 @@ trait SequentialDigestAccumulatorTest
         val digest = lookupParticipantDigest(participant).value
         digest.digestUpdate.offset shouldBe off(3)
         digest.replacesOffset shouldBe Some(off(2))
-        LtHash16Blake3.tryCreate(digest.digestUpdate.digestO.value._1).isEmpty shouldBe true
+        LtHash16Blake3.tryCreate(digest.digestUpdate.digestO.value).isEmpty shouldBe true
       }
 
       // check digests for parties

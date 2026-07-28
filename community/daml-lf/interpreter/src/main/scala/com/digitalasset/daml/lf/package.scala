@@ -66,5 +66,5 @@ package object speedy {
     }
   }
 
-  type CSMState = ContractStateMachine.LLState
+  type CSMJournal = ContractStateMachine.Journal
 }

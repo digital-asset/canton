@@ -7,7 +7,6 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.Signature.noSignature
 import com.digitalasset.canton.crypto.{Hash, Signature}
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType.BftSignedAvailabilityMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
@@ -24,7 +23,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.DisseminationStatus.TimestampedSend
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  Membership,
+  SequencingParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   OrderingRequestBatch,
   OrderingRequestBatchStats,
@@ -86,7 +88,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             )
           mempoolCell.get() should contain(
             Mempool.CreateLocalBatches(
-              (BftBlockOrdererConfig.DefaultMaxBatchesPerProposal * AvailabilityModule.DisseminateAheadMultiplier).toShort
+              (SequencingParameters.DefaultMaxBatchesPerProposal * AvailabilityModule.DisseminateAheadMultiplier).toShort
             )
           )
           consensusCell.get() shouldBe empty
@@ -260,7 +262,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               new ProgrammableUnitTestContext()
 
             val numberOfBatchesReadyForOrdering =
-              BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt
+              SequencingParameters.DefaultMaxBatchesPerProposal.toInt
             val batchesReadyForOrderingRange =
               0 to numberOfBatchesReadyForOrdering // both interval extremes are inclusive, i.e., 1 extra batch
             val batchIds = batchesReadyForOrderingRange
@@ -295,7 +297,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               )
             mempoolCell.get() should contain(
               Mempool.CreateLocalBatches(
-                (BftBlockOrdererConfig.DefaultMaxBatchesPerProposal * AvailabilityModule.DisseminateAheadMultiplier - numberOfBatchesReadyForOrdering - 1).toShort
+                (SequencingParameters.DefaultMaxBatchesPerProposal * AvailabilityModule.DisseminateAheadMultiplier - numberOfBatchesReadyForOrdering - 1).toShort
               )
             )
             availability.receive(
@@ -324,7 +326,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                         OrderingBlock(poas),
                       )
                   )
-                  if poas.toSet.sizeIs == BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt =>
+                  if poas.toSet.sizeIs == SequencingParameters.DefaultMaxBatchesPerProposal.toInt =>
             }
             ctx.sizeOfPipedMessages shouldBe 0
 
@@ -342,7 +344,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               )
             mempoolCell.get() should contain(
               Mempool.CreateLocalBatches(
-                (BftBlockOrdererConfig.DefaultMaxBatchesPerProposal * AvailabilityModule.DisseminateAheadMultiplier - 1).toShort
+                (SequencingParameters.DefaultMaxBatchesPerProposal * AvailabilityModule.DisseminateAheadMultiplier - 1).toShort
               )
             )
           }
@@ -358,7 +360,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             FakePipeToSelfQueueUnitTestContext(pipeToSelfQueue)
 
           val numberOfBatchesReadyForOrdering =
-            BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt * 2
+            SequencingParameters.DefaultMaxBatchesPerProposal.toInt * 2
           val batchIds =
             (0 until numberOfBatchesReadyForOrdering)
               .map(i => BatchId.createForTesting(s"batch $i"))
@@ -405,7 +407,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                         OrderingBlock(poas),
                       )
                   )
-                  if poas.toSet.sizeIs == BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt =>
+                  if poas.toSet.sizeIs == SequencingParameters.DefaultMaxBatchesPerProposal.toInt =>
             }
             pipeToSelfQueue shouldBe empty
 
@@ -502,7 +504,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
               new ProgrammableUnitTestContext()
             val numberOfBatchesReadyForOrdering =
-              BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt - 2
+              SequencingParameters.DefaultMaxBatchesPerProposal.toInt - 2
             val batchIdsWithDisseminationCompletions =
               createBatchIdsWithDisseminationCompletions(numberOfBatchesReadyForOrdering)
             disseminationProtocolState.disseminationProgress.addAll(
@@ -558,7 +560,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
               new ProgrammableUnitTestContext()
             val numberOfBatchesReadyForOrdering =
-              BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt - 2
+              SequencingParameters.DefaultMaxBatchesPerProposal.toInt - 2
             val batchIdsWithDisseminationCompletions =
               createBatchIdsWithDisseminationCompletions(numberOfBatchesReadyForOrdering)
             disseminationProtocolState.disseminationProgress.addAll(
@@ -625,7 +627,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                     Consensus.LocalAvailability
                       .ProposalCreated(BlockNumber.First, OrderingBlock(poas))
                   )
-                  if poas.toSet.sizeIs == BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt =>
+                  if poas.toSet.sizeIs == SequencingParameters.DefaultMaxBatchesPerProposal.toInt =>
             }
           }
 
@@ -1173,7 +1175,7 @@ class AvailabilityModuleConsensusProposalRequestTest
 
         val (validBatchIds, expiredBatchIds) = {
           val numberOfBatchesReadyForOrdering =
-            BftBlockOrdererConfig.DefaultMaxBatchesPerProposal.toInt
+            SequencingParameters.DefaultMaxBatchesPerProposal.toInt
           val batchIds =
             (0 until numberOfBatchesReadyForOrdering).map(i =>
               BatchId.createForTesting(s"batch $i")
@@ -1333,7 +1335,7 @@ class AvailabilityModuleConsensusProposalRequestTest
         disseminationProtocolState.nextToBeProvidedToConsensus shouldBe
           NextToBeProvidedToConsensus(
             BlockNumber(3),
-            Some(BftBlockOrdererConfig.DefaultMaxBatchesPerProposal),
+            Some(SequencingParameters.DefaultMaxBatchesPerProposal),
           )
       }
 

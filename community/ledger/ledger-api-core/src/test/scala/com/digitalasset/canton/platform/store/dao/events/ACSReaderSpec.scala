@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.dao.events
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdPage,
@@ -137,13 +138,12 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       Range(1, 70).map(_.toLong).toVector,
     ).map(
       _ shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 69), 1),
-        PaginationInput(PaginationFromTo.ascending(1, 69), 4),
-        PaginationInput(PaginationFromTo.ascending(5, 69), 16),
-        PaginationInput(PaginationFromTo.ascending(21, 69), 20),
-        PaginationInput(PaginationFromTo.ascending(41, 69), 20),
-        PaginationInput(PaginationFromTo.ascending(61, 69), 20),
-        PaginationInput(PaginationFromTo.ascending(69, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 69)), 1),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(2, 69)), 4),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(6, 69)), 16),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(22, 69)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(42, 69)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(62, 69)), 20),
       )
     )
   }
@@ -157,11 +157,10 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       Range(1, 70).map(_.toLong).toVector,
     ).map(
       _ shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 69), 20),
-        PaginationInput(PaginationFromTo.ascending(20, 69), 20),
-        PaginationInput(PaginationFromTo.ascending(40, 69), 20),
-        PaginationInput(PaginationFromTo.ascending(60, 69), 20),
-        PaginationInput(PaginationFromTo.ascending(69, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 69)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(21, 69)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(41, 69)), 20),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(61, 69)), 20),
       )
     )
   }
@@ -175,23 +174,8 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       Range(1, 6).map(_.toLong).toVector,
     ).map(
       _ shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 5), 1),
-        PaginationInput(PaginationFromTo.ascending(1, 5), 4),
-        PaginationInput(PaginationFromTo.ascending(5, 5), 16),
-      )
-    )
-  }
-
-  it should "stream empty data" in {
-    testIdSource(
-      IdPageSizing(
-        minPageSize = 1,
-        maxPageSize = 20,
-      ),
-      Vector.empty,
-    ).map(
-      _ shouldBe Vector(
-        PaginationInput(PaginationFromTo.ascending(0, 0), 1)
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(1, 5)), 1),
+        PaginationInput(PaginationFromTo.ascending(EventSeqIdRange(2, 5)), 4),
       )
     )
   }
@@ -311,15 +295,15 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
         idStreamName = "test-stream",
         idPageSizing = idQueryConfiguration,
         idPageBufferSize = 1,
-        initialFromIdExclusive = 0L,
-        initialEndInclusive = ids.lastOption.getOrElse(0),
+        initialEventSeqIdRange =
+          EventSeqIdRange(startInclusive = 1L, endInclusive = ids.lastOption.getOrElse(0)),
         descendingOrder = false,
       )(new IdPageQuery {
         override def fetchPage(connection: Connection)(input: PaginationInput): IdPage = {
           assert(!input.fromTo.descending)
           queries.addOne(input)
           val idsPlusOne = ids
-            .dropWhile(_ <= input.fromTo.fromExclusive)
+            .dropWhile(_ < input.fromTo.eventSeqIdRange.startInclusive)
             .take(input.limit + 1)
           IdPage(
             ids = idsPlusOne.take(input.limit),

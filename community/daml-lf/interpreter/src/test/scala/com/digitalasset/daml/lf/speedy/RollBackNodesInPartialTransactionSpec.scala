@@ -228,7 +228,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
   }
 
   private[this] val initialStateEffectfulRollbacksDisallowed = PartialTransaction.initial(
-    ContractStateMachine.Mode.NUCK,
+    ContractStateMachine.Mode.Key,
     InitialSeeding.TransactionSeed(transactionSeed),
     committers,
   )

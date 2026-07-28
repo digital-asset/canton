@@ -11,6 +11,7 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TemplateFilter
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
 import com.digitalasset.canton.protocol.{ExampleContractFactory, TestUpdateId}
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, Decode}
@@ -849,7 +850,11 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       parties: Set[Party],
   ): Future[Seq[(String, Int)]] =
     ledgerDao.completions
-      .getCommandCompletions(startInclusive, endInclusive, Some(userId), parties)
+      .getCommandCompletions(
+        OffsetRange(startInclusive = startInclusive, endInclusive = endInclusive),
+        Some(userId),
+        parties,
+      )
       .map(_._2.completionResponse.completion.toList.head)
       .map(c => c.commandId -> c.status.value.code)
       .runWith(Sink.seq)

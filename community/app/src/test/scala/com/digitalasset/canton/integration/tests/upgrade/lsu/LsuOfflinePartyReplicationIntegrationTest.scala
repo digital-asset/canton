@@ -20,6 +20,8 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   TestEnvironment,
 }
+import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.topology.TopologyManagerError.TopologyStoreUnknown
 import com.digitalasset.canton.topology.transaction.{HostingParticipant, ParticipantPermission}
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -28,6 +30,7 @@ import org.scalatest.Assertion
 
 import java.time.Duration
 import scala.annotation.nowarn
+import scala.concurrent.duration.DurationInt
 
 /** Base class for tests relating to the interaction of LSU and Offline Party Replication. */
 @nowarn("msg=dead code")
@@ -123,6 +126,22 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
       newSerial = fixture1.newSerial.increment.toNonNegative,
     )
 
+  protected def eventuallyParticipantHostsParty(
+      participant: ParticipantReference,
+      party: PartyId,
+      lsid: SynchronizerId,
+      onboarding: Boolean,
+  ): Assertion =
+    eventually() {
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        assertParticipantHostsParty(participant, party, lsid, onboarding),
+        LogEntry.assertLogSeq(
+          Seq.empty,
+          mayContain = Seq(_.shouldBeCantonErrorCode(TopologyStoreUnknown)),
+        ),
+      )
+    }
+
   protected def assertParticipantHostsParty(
       participant: ParticipantReference,
       party: PartyId,
@@ -152,6 +171,8 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
       fixture.newSynchronizerNodes.sequencers,
       suppressLogs = true,
       trafficTsOverride = None,
+      timeUntilSuccess = 20.seconds,
+      maxPollInterval = 5.seconds,
     )
     eventually() {
       environment.simClock.value.advance(Duration.ofSeconds(1))
@@ -306,17 +327,14 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
 
         withClue("Target reconnects and clears onboarding flag") {
           participant2.synchronizers.reconnect(daName)
-          eventually() {
-            assertParticipantHostsParty(participant2, alice, lsid, onboarding = true)
-          }
+
+          eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = true)
 
           participant1.health.ping(participant2) // Trigger synchronization
 
           awaitClearOnboardingFlag(alice, participant2, lsid, offsetAfterTargetImport)(env)
 
-          eventually() {
-            assertParticipantHostsParty(participant2, alice, lsid, onboarding = false)
-          }
+          eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = false)
         }
 
         withClue("Perform another LSU") {
@@ -390,17 +408,13 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
 
       withClue("f. Target reconnects and clears onboarding flag") {
         participant2.synchronizers.reconnect(daName)
-        eventually() {
-          assertParticipantHostsParty(participant2, alice, lsid, onboarding = true)
-        }
+        eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = true)
 
         participant1.health.ping(participant2) // Trigger synchronization
 
         awaitClearOnboardingFlag(alice, participant2, lsid, offsetAfterTargetImport)(env)
 
-        eventually() {
-          assertParticipantHostsParty(participant2, alice, lsid, onboarding = false)
-        }
+        eventuallyParticipantHostsParty(participant2, alice, lsid, onboarding = false)
       }
 
       withClue("Perform another LSU") {

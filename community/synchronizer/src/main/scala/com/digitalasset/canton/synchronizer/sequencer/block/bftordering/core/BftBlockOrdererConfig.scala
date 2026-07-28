@@ -40,10 +40,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultInitQueryTimeout,
   DefaultInitTimeout,
   DefaultMaxBatchCreationInterval,
-  DefaultMaxBatchesPerProposal,
   DefaultMaxMempoolQueueSize,
-  DefaultMaxRequestPayloadBytes,
-  DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
   DefaultNetworkSendAttempts,
   DefaultNetworkSendRetryMaximumDelay,
@@ -59,7 +56,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   P2PNetworkConfig,
   SequencerCoreSubscriptionConfig,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.util.retry
@@ -76,14 +72,9 @@ import scala.concurrent.duration.*
   * @param leaderSelectionPolicyConfigForPv34
   *   The leader selection policy to enforce in the presence of View Changes of segments (only taken
   *   into account in Protocol Version 34).
-  * @param maxRequestPayloadBytes
-  *   The maximum number of bytes allowed per individual request submitted by clients
   * @param maxMempoolQueueSize
   *   The maximum number of pending requests that will be held in the in-memory mempool. Once this
   *   queue size is reached, subsequent requests are rejected with a mempool overloaded error.
-  * @param maxRequestsInBatch
-  *   The maximum number of requests in a batch. Needs to be the same across the network for the BFT
-  *   time assumptions to hold.
   * @param minRequestsInBatch
   *   When the mempool does not create and send a batch due to other factors (see
   *   [[maxBatchCreationInterval]]), this is the number of requests that the mempool will wait for
@@ -104,9 +95,6 @@ import scala.concurrent.duration.*
   * @param availabilityMinProposalCreationDelay
   *   The minimum delay between consecutive proposal creations in the availability module. This
   *   prevents the node from creating proposals too frequently.
-  * @param maxBatchesPerBlockProposal
-  *   The maximum number of batches per block proposal (pre-prepare). Needs to be the same across
-  *   the network for the BFT time assumptions to hold.
   * @param consensusQueueMaxSize
   *   The maximum size per consensus-related queue.
   * @param consensusQueuePerNodeQuota
@@ -211,10 +199,7 @@ import scala.concurrent.duration.*
 final case class BftBlockOrdererConfig(
     segmentLengthForPv34: Option[Long] = None,
     leaderSelectionPolicyConfigForPv34: Option[BlacklistLeaderSelectionPolicyConfig] = None,
-    maxRequestPayloadBytes: Int = DefaultMaxRequestPayloadBytes,
     maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
-    // TODO(#24184) make a sequencing parameter
-    maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
     maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
     availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int =
@@ -224,8 +209,6 @@ final case class BftBlockOrdererConfig(
       DefaultAvailabilityDisseminationPatience,
     availabilityMinProposalCreationDelay: FiniteDuration =
       DefaultAvailabilityMinProposalCreationDelay,
-    // TODO(#24184) make a sequencing parameter
-    maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
     consensusQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
     consensusQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,
     consensusBlockCompletionTimeout: FiniteDuration = DefaultConsensusBlockCompletionTimeout,
@@ -257,16 +240,6 @@ final case class BftBlockOrdererConfig(
     networkSendRetryMinimumDelay: PositiveFiniteDuration = DefaultNetworkSendRetryMinimumDelay,
     networkSendRetryJitterCap: PositiveFiniteDuration = DefaultNetworkSendRetryMaximumDelay,
 ) {
-  private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
-
-  require(
-    maxRequestsPerBlock < BftTime.MaxRequestsPerBlock,
-    s"Maximum block size too big: $maxRequestsInBatch maximum requests per batch and " +
-      s"$maxBatchesPerBlockProposal maximum batches per block proposal means " +
-      s"$maxRequestsPerBlock maximum requests per block, " +
-      s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}",
-  )
-
   require(
     initTimeout.underlying >= initQueryTimeout.underlying,
     s"initTimeout $initTimeout must be >= initQueryTimeout $initQueryTimeout",
@@ -278,12 +251,9 @@ object BftBlockOrdererConfig {
   // Minimum epoch length that allows 16 nodes (i.e., the current CN load test target) to all act as consensus leaders
   val DefaultEpochLength: EpochLength = EpochLength(16)
 
-  val DefaultMaxRequestPayloadBytes: Int = 10 * 1_024 * 1_024
   val DefaultMaxMempoolQueueSize: Int = 10 * 1_024
-  val DefaultMaxRequestsInBatch: Short = 32
   val DefaultMinRequestsInBatch: Short = 3
   val DefaultMaxBatchCreationInterval: FiniteDuration = 100.milliseconds
-  val DefaultMaxBatchesPerProposal: Short = 16
   val DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning: Int = 5
   val DefaultAvailabilityMaxNonOrderedBatchesPerNode: Short = 1_000
   val DefaultAvailabilityDisseminationPatience: Option[FiniteDuration] = Some(5.seconds)

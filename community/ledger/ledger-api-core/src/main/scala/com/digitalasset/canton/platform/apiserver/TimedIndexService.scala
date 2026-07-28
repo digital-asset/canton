@@ -16,7 +16,7 @@ import com.digitalasset.canton.ledger.api.messages.update.GetUpdatesPageRequest
 import com.digitalasset.canton.ledger.api.{EventFormat, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.ledger.participant.state.index.*
-import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
+import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
@@ -68,7 +68,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       updateFormat: UpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean,
-  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdateResponse, NotUsed] =
+  )(implicit loggingContext: LoggingContextWithTrace): Source[UpdatesResponse, NotUsed] =
     Timed.source(
       metrics.services.index.updates,
       delegate.updates(

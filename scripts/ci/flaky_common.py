@@ -13,7 +13,7 @@ import datetime
 import time
 import json
 import tempfile
-from typing import Final, Optional
+from typing import Final
 from unittest.mock import patch
 
 metric_short_version = "canton.failed_test_grouped"
@@ -160,7 +160,7 @@ def run_gh_with_retries(
 
 def check_result(result):
     if result.returncode != 0:
-        print(f"### ERROR while executing gh command!")
+        print("### ERROR while executing gh command!")
         print(f"Command was {result.args}")
         print(f"stderr was {result.stderr}")
         print(f"stdout was {result.stdout}")

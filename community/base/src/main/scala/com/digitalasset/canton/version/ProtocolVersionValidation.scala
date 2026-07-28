@@ -12,7 +12,10 @@ sealed trait ProtocolVersionValidation extends Product with Serializable
 object ProtocolVersionValidation {
 
   final case class PV(pv: ProtocolVersion) extends ProtocolVersionValidation
+
   final case object NoValidation extends ProtocolVersionValidation
+
+  final case object AlwaysValidation extends ProtocolVersionValidation
 
   def apply(pv: ProtocolVersion): ProtocolVersionValidation = ProtocolVersionValidation.PV(pv)
 

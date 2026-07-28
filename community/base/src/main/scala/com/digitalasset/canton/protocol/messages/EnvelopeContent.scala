@@ -69,7 +69,10 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.InformeeMessage(messageP) =>
           InformeeMessage.fromProtoV30(context)(messageP)
         case Content.EncryptedViewMessage(messageP) =>
-          EncryptedSingleViewMessage.fromProto(messageP)
+          EncryptedSingleViewMessage.fromProto(
+            ProtocolVersionValidation.PV(expectedProtocolVersion),
+            messageP,
+          )
         case Content.UnassignmentMediatorMessage(messageP) =>
           UnassignmentMediatorMessage.fromProtoV30(
             (hashOps, Source(ProtocolVersionValidation.PV(expectedProtocolVersion)))
@@ -79,7 +82,10 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
             (hashOps, Target(expectedProtocolVersion))
           )(messageP)
         case Content.RootHashMessage(messageP) =>
-          RootHashMessage.fromProtoV30(SerializedRootHashMessagePayload.fromByteString)(messageP)
+          RootHashMessage.fromProtoV30(
+            ProtocolVersionValidation.PV(expectedProtocolVersion),
+            SerializedRootHashMessagePayload.fromByteString,
+          )(messageP)
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.LsuSequencingTestMessage(messageP) =>
@@ -101,7 +107,10 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.InformeeMessage(messageP) =>
           InformeeMessage.fromProtoV30(context)(messageP)
         case Content.EncryptedMultipleViewsMessage(messageP) =>
-          EncryptedMultipleViewsMessage.fromProto(messageP)
+          EncryptedMultipleViewsMessage.fromProto(
+            ProtocolVersionValidation.PV(expectedProtocolVersion),
+            messageP,
+          )
         case Content.UnassignmentMediatorMessage(messageP) =>
           UnassignmentMediatorMessage.fromProtoV30(
             (hashOps, Source(ProtocolVersionValidation.PV(expectedProtocolVersion)))
@@ -111,7 +120,10 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
             (hashOps, Target(expectedProtocolVersion))
           )(messageP)
         case Content.RootHashMessage(messageP) =>
-          RootHashMessage.fromProtoV30(SerializedRootHashMessagePayload.fromByteString)(messageP)
+          RootHashMessage.fromProtoV30(
+            ProtocolVersionValidation.PV(expectedProtocolVersion),
+            SerializedRootHashMessagePayload.fromByteString,
+          )(messageP)
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.AcsCommitmentProtocolMessage(messageP) =>
@@ -135,7 +147,10 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.InformeeMessage(messageP) =>
           InformeeMessage.fromProtoV30(context)(messageP)
         case Content.EncryptedMultipleViewsMessage(messageP) =>
-          EncryptedMultipleViewsMessage.fromProto(messageP)
+          EncryptedMultipleViewsMessage.fromProto(
+            ProtocolVersionValidation.PV(expectedProtocolVersion),
+            messageP,
+          )
         case Content.UnassignmentMediatorMessage(messageP) =>
           UnassignmentMediatorMessage.fromProtoV30(
             (hashOps, Source(ProtocolVersionValidation.PV(expectedProtocolVersion)))
@@ -145,7 +160,10 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
             (hashOps, Target(expectedProtocolVersion))
           )(messageP)
         case Content.RootHashMessage(messageP) =>
-          RootHashMessage.fromProtoV30(SerializedRootHashMessagePayload.fromByteString)(messageP)
+          RootHashMessage.fromProtoV30(
+            ProtocolVersionValidation.PV(expectedProtocolVersion),
+            SerializedRootHashMessagePayload.fromByteString,
+          )(messageP)
         case Content.TopologyTransactionsBroadcast(messageP) =>
           TopologyTransactionsBroadcast.fromProtoV30(expectedProtocolVersion, messageP)
         case Content.AcsCommitmentProtocolMessage(messageP) =>

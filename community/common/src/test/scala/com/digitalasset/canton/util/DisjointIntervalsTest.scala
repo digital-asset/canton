@@ -62,9 +62,8 @@ class DisjointIntervalsTest extends AnyWordSpec with BaseTest {
       disjointIntervals.remove(1, 5).intervals.values.toSeq shouldBe intervals.drop(1)
       disjointIntervals.remove(0, 6).intervals.values.toSeq shouldBe intervals.drop(1)
       disjointIntervals.remove(0, 16).intervals.values.toSeq shouldBe Seq.empty
-      disjointIntervals.remove(1, 10).intervals.values.toSeq shouldBe Seq(
-        TestInterval(12, 15, Set("third"))
-      )
+      disjointIntervals.remove(1, 10).intervals.values.toSeq shouldBe
+        Seq(TestInterval(12, 15, Set("third")))
       disjointIntervals.remove(2, 8).intervals.values.toSeq shouldBe
         Seq(
           TestInterval(1, 2, Set("first")),

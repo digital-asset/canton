@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.performance.elements
 
-import com.digitalasset.canton.ScalaFuturesWithPatience
+import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Source

@@ -148,7 +148,7 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
 
     val (sourceParticipant, targetParticipant) = (participant1, participant2)
 
-    val serial = previousSerial.increment
+    val serial = previousSerial.increment.value
 
     clue("Decentralized party owners agree to have target participant co-host the party")(
       partyOwners.foreach(

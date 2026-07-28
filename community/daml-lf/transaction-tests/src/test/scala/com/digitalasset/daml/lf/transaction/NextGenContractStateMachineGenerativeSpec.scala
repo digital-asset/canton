@@ -54,7 +54,7 @@ abstract class NextGenContractStateMachineGenerativeSpec(
 
   private def verifyQueriesMatchContractOrder(
       scenario: Concrete.Scenario,
-      state: NextGenContractStateMachine.LLState,
+      state: NextGenContractStateMachine.Journal,
   ): Either[String, Unit] =
     Try {
       val tx = scenario.ledger(1).commands.map(_.action)
@@ -207,10 +207,10 @@ object NextGenContractStateMachineGenerativeSpec {
       keyMap.get(contractId).map(toGlobalKey)
 
     def processAction(
-        state: NextGenContractStateMachine.LLState,
+        state: NextGenContractStateMachine.Journal,
         action: Concrete.Action,
-    ): Either[TransactionError, NextGenContractStateMachine.LLState] = {
-      import NextGenContractStateMachine.HHState
+    ): Either[TransactionError, NextGenContractStateMachine.Journal] = {
+      import NextGenContractStateMachine.Visitor
       action match {
         case Concrete.Create(contractId, _, _) =>
           state.visitCreate(
@@ -284,10 +284,10 @@ object NextGenContractStateMachineGenerativeSpec {
     }
 
     def processTransaction(
-        state: NextGenContractStateMachine.LLState,
+        state: NextGenContractStateMachine.Journal,
         tx: Concrete.Transaction,
-    ): Either[TransactionError, NextGenContractStateMachine.LLState] =
-      tx.foldLeft[Either[TransactionError, NextGenContractStateMachine.LLState]](
+    ): Either[TransactionError, NextGenContractStateMachine.Journal] =
+      tx.foldLeft[Either[TransactionError, NextGenContractStateMachine.Journal]](
         Right(state)
       ) {
         case (Right(s), action) => processAction(s, action)
@@ -297,7 +297,7 @@ object NextGenContractStateMachineGenerativeSpec {
 
   private def processScenario(
       scenario: Concrete.Scenario,
-      stateProp: (Concrete.Scenario, NextGenContractStateMachine.LLState) => Either[String, Unit] =
+      stateProp: (Concrete.Scenario, NextGenContractStateMachine.Journal) => Either[String, Unit] =
         (_, _) => Right(()),
   ): Either[String, Unit] = {
     val keyMap = collectKeys(scenario)

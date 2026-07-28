@@ -175,8 +175,7 @@ final class ProtobufCompatibilityReaderTest
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
       // CantonBFT blacklisting
-      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto:Previously present field "5" with name "how_long_linear_with_parameters" on message "BlacklistLeaderSelectionPolicy" was deleted.""",
-      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto:Previously present field "6" with name "how_long_exponential" on message "BlacklistLeaderSelectionPolicy" was deleted.""",
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
     ),
   )
 

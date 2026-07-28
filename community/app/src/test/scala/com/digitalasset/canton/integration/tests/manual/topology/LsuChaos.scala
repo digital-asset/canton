@@ -176,7 +176,7 @@ private[topology] class LsuChaos(
           nextSynchronizer = SynchronizerData(
             usedSince = upgradeTime,
             psid = nextPsid,
-            index = currentSynchronizer.index.increment,
+            index = currentSynchronizer.index.increment.value,
           ),
           upgradeTime = upgradeTime,
         )

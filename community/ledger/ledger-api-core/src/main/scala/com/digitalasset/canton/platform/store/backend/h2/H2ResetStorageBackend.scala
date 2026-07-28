@@ -31,6 +31,7 @@ object H2ResetStorageBackend extends ResetStorageBackend {
       truncate table lapi_party_records;
       truncate table lapi_party_record_annotations;
       truncate table lapi_events_party_to_participant;
+      truncate table lapi_events_generic_topology_events;
       truncate table lapi_string_interning;
       truncate table lapi_update_meta;
       truncate table lapi_events_acs_commitments;
