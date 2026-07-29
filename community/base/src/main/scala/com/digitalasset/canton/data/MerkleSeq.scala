@@ -89,6 +89,7 @@ final case class MerkleSeq[+M <: VersionedMerkleTree[?]](
 
   lazy val rootHashO: Option[RootHash] = rootOrEmpty.map(_.rootHash)
 
+  @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
   private[data] def doBlind(
       optimizedBlindingPolicy: PartialFunction[RootHash, BlindingCommand]
   ): MerkleSeq[M] =

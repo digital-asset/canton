@@ -640,6 +640,8 @@ class ParticipantNodeBootstrap(
                       loggerFactory = loggerFactory,
                       timeouts = timeouts,
                       clock = clock,
+                      onEventCommitted =
+                        arguments.testingConfig.trafficEnforcementProjectionEventCommitted,
                     )
                   ),
                 loggerFactory = loggerFactory,

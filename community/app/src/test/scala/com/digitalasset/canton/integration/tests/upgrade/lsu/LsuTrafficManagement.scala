@@ -30,6 +30,7 @@ import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 
 import java.time.Duration
+import scala.concurrent.duration.FiniteDuration
 
 /** This trait provides helpers for the traffic management in the context of LSU tests. The main
   * goal is to improve readability of each tests by focusing on the behavior we want to test and
@@ -137,10 +138,12 @@ private[lsu] trait LsuTrafficManagement {
       newSequencers: Seq[LocalSequencerReference],
       suppressLogs: Boolean,
       trafficTsOverride: Option[CantonTimestamp],
+      timeUntilSuccess: FiniteDuration,
+      maxPollInterval: FiniteDuration,
   ): Unit = {
     val trafficStates = if (suppressLogs) {
       loggerFactory.assertLogsUnorderedOptional(
-        eventually(retryOnTestFailuresOnly = false) {
+        eventually(timeUntilSuccess, maxPollInterval, retryOnTestFailuresOnly = false) {
           oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state(trafficTsOverride)))
         }.toMap,
         (
@@ -153,7 +156,7 @@ private[lsu] trait LsuTrafficManagement {
         ),
       )
     } else {
-      eventually(retryOnTestFailuresOnly = false) {
+      eventually(timeUntilSuccess, maxPollInterval, retryOnTestFailuresOnly = false) {
         oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state(trafficTsOverride)))
       }.toMap
     }

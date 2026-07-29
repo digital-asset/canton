@@ -36,6 +36,7 @@ private[projection] class TeaDbProjectionFactory(
     store: TeaDbTrafficStore,
     eventSource: EventSource,
     config: ProjectionConfig,
+    override val onEventCommitted: () => Unit = () => (),
 )(implicit system: ActorSystem[?])
     extends TeaProjectionFactory
     with NamedLogging {

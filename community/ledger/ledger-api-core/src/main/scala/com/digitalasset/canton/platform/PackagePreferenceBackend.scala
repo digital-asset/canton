@@ -345,6 +345,7 @@ object PackagePreferenceBackend extends HasLoggerName {
 
   // Discard packages that have an unvetted direct or transitive dependency package-id
   // pertaining to a required package-name
+  @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
   private def preserveDeeplyRequiredVetted(
       requiredPackageNames: Set[PackageName],
       candidatesForPackageName: Map[PackageName, Candidate[SortedPreferences]],
@@ -401,6 +402,7 @@ object PackagePreferenceBackend extends HasLoggerName {
 
   // TODO(#25385): Legacy behavior, only supported for backwards compatibility with Protocol Version 34.
   //               Remove once PV34 support is dropped.
+  @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
   private def preserveDeeplyVettedPV34(
       candidatesForPackageName: Map[PackageName, Candidate[SortedPreferences]],
       dependencyGraph: Map[PackageId, Set[PackageId]],

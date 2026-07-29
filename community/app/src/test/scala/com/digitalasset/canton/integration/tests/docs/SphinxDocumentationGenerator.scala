@@ -757,7 +757,6 @@ class UpgradingDocumentationIntegrationTest
     val flyway = Flyway.configure
       .locations("filesystem:" + fakeMigrationPath.toString())
       .dataSource(DbMigrations.createDataSource(database.source))
-      .cleanOnValidationError(false)
       .baselineOnMigrate(false)
       .lockRetryCount(60)
       .load()

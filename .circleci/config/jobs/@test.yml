@@ -599,6 +599,7 @@ test_ping_windows:
 test_ping_arm:
   executor: medium-arm-machine
   steps:
+    - checkout
     - attach_workspace:
         at: workspace
     - run:

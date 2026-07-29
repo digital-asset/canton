@@ -2479,6 +2479,7 @@ jobs:
     test_ping_arm:
         executor: medium-arm-machine
         steps:
+            - checkout
             - attach_workspace:
                 at: workspace
             - run:
@@ -3625,6 +3626,19 @@ workflows:
                     - gcp_kms_testing
                 name: postgres_conformance_test_16
                 postgres_version: 16
+                requires:
+                    - compile
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_18
+                postgres_version: 18
                 requires:
                     - compile
         when:

@@ -165,6 +165,17 @@ post an update in the Slack channel dedicated to the release.
 
   You can reach out to Raf or Sören for guidance.
 
+### Post-release steps (optional)
+
+Create a PR targeting the `release-line` branch that removes from `ProtobufCompatibilityTest` any protobuf exceptions
+about the previous point release, else they will lead to CI failures such as:
+
+```
+Some exceptions in `acceptedBreakingChanges` are not valid anymore. Remove them from the list.
+```
+
+This is optional and can also be done by the first person opening a PR against the release line.
+
 ## Snapshot release
 
 ### Creating a manual snapshot (Canton only)

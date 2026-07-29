@@ -143,7 +143,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       metrics,
       loggerFactory,
     )
-    val (initialEpoch, bootstrapTopologyInfo, blacklistLeaderSelectionState) =
+    val (initialTopologyEpochNumber, bootstrapTopologyInfo, blacklistLeaderSelectionState) =
       fetchBootstrapTopologyInfo(moduleSystem, leaderSelectionPolicyFactory)
 
     val thisNodeFirstKnownAt =
@@ -160,21 +160,21 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     }
     epochChecker.check(
       bootstrapTopologyInfo.thisNode,
-      initialEpoch,
+      initialTopologyEpochNumber,
       bootstrapTopologyInfo.currentMembership,
     )
 
     val onboardingEpochCouldAlterOrderingTopology =
       thisNodeFirstKnownAt
         .flatMap(_.startEpochCouldAlterOrderingTopology)
-        .exists(pendingChanges => pendingChanges)
+        .exists(identity)
     val currentMembership = bootstrapTopologyInfo.currentMembership
     val outputModuleStartupState =
       OutputModule.StartupState(
         bootstrapTopologyInfo.thisNode,
         initialHeightToProvide =
           firstBlockNumberInOnboardingEpoch.getOrElse(sequencerSubscriptionInitialBlockNumber),
-        initialEpochWeHaveLeaderSelectionStateFor = initialEpoch,
+        initialTopologyEpochNumber,
         previousBftTimeForOnboarding,
         onboardingEpochCouldAlterOrderingTopology,
         bootstrapTopologyInfo.currentCryptoProvider,
@@ -232,7 +232,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           )
           val p2pNetworkOutModule = new P2PNetworkOutModule(
             bootstrapTopologyInfo.thisNode,
-            isGenesis = initialEpoch == Bootstrap.BootstrapEpochNumber,
+            isGenesis = initialTopologyEpochNumber == Bootstrap.BootstrapEpochNumber,
             p2pNetworkOutModuleStateFactory(bootstrapTopologyInfo.currentMembership),
             random,
             clock,
@@ -255,7 +255,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           )
           new AvailabilityModule[E](
             bootstrapTopologyInfo.currentMembership,
-            initialEpoch,
+            initialTopologyEpochNumber,
             bootstrapTopologyInfo.currentCryptoProvider,
             stores.availabilityStore,
             clock,
@@ -336,7 +336,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
   ): (EpochNumber, OrderingTopologyInfo[E], BlacklistLeaderSelectionPolicyState) = {
 
     val bti @ BootstrapTopologyInfo(
-      initialEpochNumber,
+      initialTopologyEpochNumber,
       initialTopologyQueryTimestampO,
       previousTopologyQueryTimestampO,
       maybeOnboardingTopologyQueryTimestamp,
@@ -352,7 +352,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       leaderSelectionPolicyFactory.stateForInitial(
         moduleSystem,
         sequencerSnapshotAdditionalInfo,
-        initialEpochNumber,
+        initialTopologyEpochNumber,
       )
     val initialLeaders =
       leaderSelectionPolicyFactory.leadersFromState(
@@ -393,7 +393,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       )
 
     (
-      initialEpochNumber,
+      initialTopologyEpochNumber,
       OrderingTopologyInfo(
         node,
         // Use the previous topology (not containing this node) as current topology when onboarding.
@@ -551,7 +551,7 @@ object BftOrderingModuleSystemInitializer {
     *   topology ts  (start epoch)         (node active in topology)  node is active in consensus)
     * }}}
     *
-    * @param initialEpochNumber
+    * @param initialTopologyEpochNumber
     *   A start epoch number.
     * @param initialTopologyQueryTimestamp
     *   A timestamp to get an initial topology (and a crypto provider) for signing and validation.
@@ -564,7 +564,7 @@ object BftOrderingModuleSystemInitializer {
     *   requests for onboarding.
     */
   final case class BootstrapTopologyInfo(
-      initialEpochNumber: EpochNumber,
+      initialTopologyEpochNumber: EpochNumber,
       initialTopologyQueryTimestamp: Option[TopologyActivationTime],
       previousTopologyQueryTimestamp: Option[TopologyActivationTime],
       onboardingTopologyQueryTimestamp: Option[TopologyActivationTime] = None,
@@ -572,7 +572,7 @@ object BftOrderingModuleSystemInitializer {
 
     override protected def pretty: Pretty[BootstrapTopologyInfo] =
       prettyOfClass(
-        param("initialEpochNumber", _.initialEpochNumber),
+        param("initialTopologyEpochNumber", _.initialTopologyEpochNumber),
         param("initialTopologyQueryTimestamp", _.initialTopologyQueryTimestamp.map(_.value)),
         param("previousTopologyQueryTimestamp", _.previousTopologyQueryTimestamp.map(_.value)),
         param("onboardingTopologyQueryTimestamp", _.onboardingTopologyQueryTimestamp.map(_.value)),

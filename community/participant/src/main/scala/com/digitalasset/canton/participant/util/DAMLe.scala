@@ -231,6 +231,7 @@ class DAMLe(
     ReInterpretationResult,
   ] = {
 
+    @SuppressWarnings(Array("org.wartremover.warts.PartialFunctionApply"))
     def peelAwayRootLevelRollbackNode(
         tx: LfVersionedTransaction
     ): Either[Error, LfVersionedTransaction] =
