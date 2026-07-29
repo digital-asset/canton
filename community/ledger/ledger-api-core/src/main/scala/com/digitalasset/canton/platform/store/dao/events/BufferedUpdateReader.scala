@@ -44,8 +44,7 @@ private[events] class BufferedUpdateReader(
     extends LedgerDaoUpdateReader {
 
   override def getUpdates(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean = false,
@@ -57,8 +56,7 @@ private[events] class BufferedUpdateReader(
   ] =
     bufferedUpdatesReader
       .stream(
-        startInclusive = startInclusive,
-        endInclusive = endInclusive,
+        offsetRange = offsetRange,
         persistenceFetchArgs = internalUpdateFormat,
         bufferFilter = TransactionLogUpdatesConversions
           .filter(internalUpdateFormat),
@@ -113,8 +111,7 @@ private[platform] object BufferedUpdateReader {
         inMemoryFanoutBuffer = updatesBuffer,
         fetchFromPersistence = new FetchFromPersistence[InternalUpdateFormat, UpdateResponse] {
           override def apply(
-              startInclusive: Offset,
-              endInclusive: Offset,
+              offsetRange: OffsetRange,
               descendingOrder: Boolean,
               filter: InternalUpdateFormat,
               skipPruningChecks: Boolean,
@@ -123,8 +120,7 @@ private[platform] object BufferedUpdateReader {
           ): Source[(Offset, UpdateResponse), NotUsed] =
             delegate
               .getUpdates(
-                startInclusive = startInclusive,
-                endInclusive = endInclusive,
+                offsetRange = offsetRange,
                 internalUpdateFormat = filter,
                 descendingOrder = descendingOrder,
                 skipPruningChecks = skipPruningChecks,

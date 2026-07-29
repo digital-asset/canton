@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30.ExternalPartyAuthorization
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 
 final case class ExternalAuthorization(
@@ -77,42 +78,47 @@ object ExternalAuthorization
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(protoCompanion =
       v30.ExternalAuthorization
-    )(supportedProtoVersion(_)(fromProtoV30), _.toProtoV30),
+    )(supportedProtoVersionPVV(_)(fromProtoV30), _.toProtoV30),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(protoCompanion =
       v31.ExternalAuthorization
-    )(supportedProtoVersion(_)(fromProtoV31), _.toProtoV31),
+    )(supportedProtoVersionPVV(_)(fromProtoV31), _.toProtoV31),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(protoCompanion =
       v32.ExternalAuthorization
-    )(supportedProtoVersion(_)(fromProtoV32), _.toProtoV32),
+    )(supportedProtoVersionPVV(_)(fromProtoV32), _.toProtoV32),
   )
 
   private def fromProtoV30(
-      proto: v30.ExternalPartyAuthorization
+      pvv: ProtocolVersionValidation,
+      proto: v30.ExternalPartyAuthorization,
   ): ParsingResult[(PartyId, Seq[Signature])] = {
     val v30.ExternalPartyAuthorization(partyP, signaturesP) = proto
     for {
-      partyId <- PartyId.fromProtoPrimitive(partyP, "party")
+      partyId <- ProtoValidation.validateThen(partyP, "party", pvv)(
+        PartyId.fromProtoPrimitive
+      )
       partySignatures <- signaturesP.traverse(Signature.fromProtoV30)
     } yield partyId -> partySignatures
   }
 
   def fromProtoV30(
-      proto: v30.ExternalAuthorization
+      pvv: ProtocolVersionValidation,
+      proto: v30.ExternalAuthorization,
   ): ParsingResult[ExternalAuthorization] = {
     val v30.ExternalAuthorization(signaturesP, _) = proto
     for {
-      signatures <- signaturesP.traverse(fromProtoV30)
+      signatures <- signaturesP.traverse(fromProtoV30(pvv, _))
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV30(proto.hashingSchemeVersion)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ExternalAuthorization(signatures.toMap, hashingSchemeVersion, None)(rpv)
   }
 
   def fromProtoV31(
-      proto: v31.ExternalAuthorization
+      pvv: ProtocolVersionValidation,
+      proto: v31.ExternalAuthorization,
   ): ParsingResult[ExternalAuthorization] = {
     val v31.ExternalAuthorization(signaturesP, hashingSchemeVersionP, maxRecordTimeP) = proto
     for {
-      signatures <- signaturesP.traverse(fromProtoV30)
+      signatures <- signaturesP.traverse(fromProtoV30(pvv, _))
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV31(hashingSchemeVersionP)
       maxRecordTime <- maxRecordTimeP.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
@@ -120,11 +126,12 @@ object ExternalAuthorization
   }
 
   def fromProtoV32(
-      proto: v32.ExternalAuthorization
+      pvv: ProtocolVersionValidation,
+      proto: v32.ExternalAuthorization,
   ): ParsingResult[ExternalAuthorization] = {
     val v32.ExternalAuthorization(signaturesP, hashingSchemeVersionP, maxRecordTimeP) = proto
     for {
-      signatures <- signaturesP.traverse(fromProtoV30)
+      signatures <- signaturesP.traverse(fromProtoV30(pvv, _))
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV32(hashingSchemeVersionP)
       maxRecordTime <- maxRecordTimeP.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))

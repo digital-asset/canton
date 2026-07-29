@@ -8,6 +8,7 @@ import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
   KeyLookupPageQuery,
   KeyLookupPageResult,
 }
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Ref
@@ -897,8 +898,10 @@ private[backend] trait StorageBackendTestsContracts
         )
         .fetchPage(_)(
           PaginatingAsyncStream.PaginationFromTo.ascending(
-            startExclusive = 0L,
-            endInclusive = 1000L,
+            EventSeqIdRange(
+              startInclusive = 1L,
+              endInclusive = 1000L,
+            )
           )
         )
     )
@@ -1007,8 +1010,10 @@ private[backend] trait StorageBackendTestsContracts
         )
         .fetchPage(_)(
           PaginatingAsyncStream.PaginationFromTo.ascending(
-            startExclusive = 0L,
-            endInclusive = 2L,
+            EventSeqIdRange(
+              startInclusive = 1L,
+              endInclusive = 2L,
+            )
           )
         )
     )
@@ -1021,8 +1026,10 @@ private[backend] trait StorageBackendTestsContracts
         )
         .fetchPage(_)(
           PaginatingAsyncStream.PaginationFromTo.ascending(
-            startExclusive = 0L,
-            endInclusive = 4L,
+            EventSeqIdRange(
+              startInclusive = 1L,
+              endInclusive = 4L,
+            )
           )
         )
     )

@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -35,7 +35,7 @@ private[backend] trait StorageBackendTestsTimestamps extends Matchers with Stora
     val events = backend.event.fetchEventPayloadsLedgerEffects(
       EventPayloadSourceForUpdatesLedgerEffects.Deactivate
     )(
-      eventSequentialIds = IdRange(1L, 10L),
+      eventSequentialIds = EventSeqIdRange(1L, 10L),
       requestingPartiesForTx = Some(Set.empty),
       requestingPartiesForReassignment = Some(Set.empty),
     )

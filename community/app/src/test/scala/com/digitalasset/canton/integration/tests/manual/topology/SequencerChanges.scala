@@ -19,6 +19,7 @@ import com.digitalasset.canton.topology.ForceFlag
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Pause, Success}
+import org.scalatest.EitherValues
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.*
@@ -30,7 +31,8 @@ private[topology] class AddSequencer(
     override val timeouts: ProcessingTimeout,
     override val logger: TracedLogger,
 )(implicit override val ec: ExecutionContext, override val env: TestConsoleEnvironment)
-    extends TopologyChange {
+    extends TopologyChange
+    with EitherValues {
 
   import env.*
 
@@ -92,7 +94,7 @@ private[topology] class AddSequencer(
       threshold = currentSDS.item.threshold,
       active = currentSDS.item.active :+ sequencerToAdd.id,
       passive = currentSDS.item.observers,
-      serial = Some(currentSDS.context.serial.increment),
+      serial = Some(currentSDS.context.serial.increment.value),
     )
   }
 

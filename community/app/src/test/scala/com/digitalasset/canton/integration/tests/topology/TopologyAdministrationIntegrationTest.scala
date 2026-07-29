@@ -381,7 +381,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
 
     eventually() {
       val okm2 = readOkmHead()
-      okm2.context.serial shouldBe initialOkmSerial.increment
+      okm2.context.serial shouldBe initialOkmSerial.increment.value
       okm2.item.keys.toSet -- okm1.item.keys.toSet shouldBe Set(addedKey) // observe added key
     }
 
@@ -569,7 +569,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     participant1.topology.vetted_packages.propose_delta(participant1.id, store = daId, adds = adds)
 
     val newPackageIdsResult = getVettedPackages()
-    newPackageIdsResult.context.serial shouldBe startingSerial.increment
+    newPackageIdsResult.context.serial shouldBe startingSerial.increment.value
     newPackageIdsResult.item.packages should contain allElementsOf adds
     newPackageIdsResult.item.packages should contain allElementsOf VettedPackage.unbounded(
       startingPackages
@@ -584,7 +584,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     )
 
     val removedPackagesResult = getVettedPackages()
-    removedPackagesResult.context.serial shouldBe newPackageIdsResult.context.serial.increment
+    removedPackagesResult.context.serial shouldBe newPackageIdsResult.context.serial.increment.value
     removedPackagesResult.item.packages.map(
       _.packageId
     ) should contain noElementsOf startingPackages

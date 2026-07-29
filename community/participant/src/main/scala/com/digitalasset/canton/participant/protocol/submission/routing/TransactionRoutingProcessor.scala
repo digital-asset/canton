@@ -15,10 +15,7 @@ import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors
   InvalidPrescribedSynchronizerId,
   SubmissionSynchronizerNotReady,
 }
-import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.{
-  NotConnectedToAllContractSynchronizers,
-  SubmitterAlwaysStakeholder,
-}
+import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.NotConnectedToAllContractSynchronizers
 import com.digitalasset.canton.error.TransactionRoutingError.{
   MalformedInputErrors,
   RoutingInternalError,
@@ -323,36 +320,27 @@ class TransactionRoutingProcessor(
       }
     }
 
-    // Check that at least one party listed in actAs or readAs is a stakeholder so that we can reassign the contract if needed.
-    // This check is overly strict on behalf of contracts that turn out not to need to be reassigned.
-    val readerNotBeingStakeholder = contractData.filter { data =>
-      data.stakeholders.all.intersect(transactionData.readers).isEmpty
-    }
+    // Check: connected synchronizers
+    //
+    // Note: we intentionally do not require the submitter to be a stakeholder of every input
+    // contract here. The submitter only needs to be a stakeholder of the contracts that actually
+    // need to be reassigned to the target synchronizer. That requirement is enforced per-contract
+    // by SynchronizerRankComputation.findReaderThatCanReassignContract, which is only applied to
+    // contracts that are not already on the target synchronizer.
+    EitherTUtil
+      .condUnitET[FutureUnlessShutdown](
+        contractsSynchronizerNotConnected.isEmpty, {
+          val contractsAndSynchronizers: Map[String, PhysicalSynchronizerId] =
+            contractsSynchronizerNotConnected.map { contractData =>
+              contractData.id.show -> contractData.synchronizerId
+            }.toMap
 
-    for {
-      // Check: reader
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        readerNotBeingStakeholder.isEmpty,
-        SubmitterAlwaysStakeholder.Error(readerNotBeingStakeholder.map(_.id)),
+          NotConnectedToAllContractSynchronizers.Error(
+            contractsAndSynchronizers.view.mapValues(_.logical).toMap
+          )
+        },
       )
-
-      // Check: connected synchronizers
-      _ <- EitherTUtil
-        .condUnitET[FutureUnlessShutdown](
-          contractsSynchronizerNotConnected.isEmpty, {
-            val contractsAndSynchronizers: Map[String, PhysicalSynchronizerId] =
-              contractsSynchronizerNotConnected.map { contractData =>
-                contractData.id.show -> contractData.synchronizerId
-              }.toMap
-
-            NotConnectedToAllContractSynchronizers.Error(
-              contractsAndSynchronizers.view.mapValues(_.logical).toMap
-            )
-          },
-        )
-        .leftWiden[TransactionRoutingError]
-
-    } yield ()
+      .leftWiden[TransactionRoutingError]
   }
 
   private def wrapSubmissionError[T](synchronizerId: PhysicalSynchronizerId)(

@@ -9,6 +9,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -94,7 +95,11 @@ object TopologyTransactionsBroadcast
   ): ParsingResult[TopologyTransactionsBroadcast] = {
     val v30.TopologyTransactionsBroadcast(psidP, signedTopologyTransactionsP) = message
     for {
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(psidP, "physical_synchronizer_id")
+      synchronizerId <- ProtoValidation.validateThen(
+        psidP,
+        "physical_synchronizer_id",
+        ProtocolVersionValidation.PV(expectedProtocolVersion),
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
 
       signedTopologyTransactions <- ProtoConverter.parseRequired(
         SignedTopologyTransactions

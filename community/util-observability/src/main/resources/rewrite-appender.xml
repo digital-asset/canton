@@ -374,5 +374,12 @@
             <testing>true</testing>
         </rewrite>
 
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>org.apache.pekko.stream.scaladsl.RestartWithBackoffSource</logger>
+            <contains>Ledger API offset dispatcher is not running</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
    </appender>
 </included>

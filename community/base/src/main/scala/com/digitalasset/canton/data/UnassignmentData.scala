@@ -17,6 +17,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 
 /** Stores the data of an unassignment that needs to be passed from the source synchronizer to the
@@ -56,7 +57,7 @@ final case class UnassignmentData(
         reassign.counter.toProtoPrimitive,
       )
     },
-    reassigningParticipantUids = reassigningParticipants.map(_.uid.toProtoPrimitive).toSeq,
+    reassigningParticipantUids = reassigningParticipants.map(p => p.uid.toProtoPrimitive).toSeq,
     sourcePhysicalSynchronizerId = sourcePsid.unwrap.toProtoPrimitive,
     targetPhysicalSynchronizerId = targetPsid.unwrap.toProtoPrimitive,
     targetTimestamp = targetTimestamp.unwrap.toProtoTimestamp.some,
@@ -72,7 +73,7 @@ object UnassignmentData
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec
       .storage(ReleaseProtocolVersion(ProtocolVersion.v34), v30.UnassignmentData)(
-        supportedProtoVersion(_)(fromProtoV30),
+        supportedProtoVersionPVV(_)(fromProtoV30),
         _.toProtoV30,
       )
   )
@@ -90,9 +91,12 @@ object UnassignmentData
     targetTimestamp = unassignmentRequest.targetTimestamp,
   )
 
-  private def fromProtoV30(proto: v30.UnassignmentData): ParsingResult[UnassignmentData] = for {
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      proto: v30.UnassignmentData,
+  ): ParsingResult[UnassignmentData] = for {
     submitterMetadata <- ProtoConverter.parseRequired(
-      ReassignmentSubmitterMetadata.fromProtoV30,
+      ReassignmentSubmitterMetadata.fromProtoV30(pvv, _),
       "submitter_metadata",
       proto.submitterMetadata,
     )
@@ -120,21 +124,27 @@ object UnassignmentData
 
     reassigningParticipants <- proto.reassigningParticipantUids
       .traverse(uid =>
-        UniqueIdentifier.fromProtoPrimitive(uid, "reassigning_participants").map(ParticipantId(_))
+        ProtoValidation
+          .validateThen(uid, "reassigning_participants", pvv)(
+            UniqueIdentifier.fromProtoPrimitive
+          )
+          .map(ParticipantId(_))
       )
 
-    sourceSynchronizer <- PhysicalSynchronizerId
-      .fromProtoPrimitive(
+    sourceSynchronizer <- ProtoValidation
+      .validateThen(
         proto.sourcePhysicalSynchronizerId,
         "source_physical_synchronizer_id",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       .map(Source(_))
 
-    targetSynchronizer <- PhysicalSynchronizerId
-      .fromProtoPrimitive(
+    targetSynchronizer <- ProtoValidation
+      .validateThen(
         proto.targetPhysicalSynchronizerId,
         "target_physical_synchronizer_id",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       .map(Target(_))
 
     targetTimestamp <- ProtoConverter

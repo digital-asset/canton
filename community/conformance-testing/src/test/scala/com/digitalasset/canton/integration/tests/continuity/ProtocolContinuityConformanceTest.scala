@@ -136,6 +136,11 @@ trait ProtocolContinuityConformanceTest
     val env = EnvironmentDefinition.P3S1M1_Manual
       .addConfigTransforms(ConfigTransforms.clearMinimumProtocolVersion*)
       .addConfigTransforms(ConfigTransforms.dontWarnOnDeprecatedPV*)
+      .updateTestingConfig(
+        _.focus(_.participantsWithoutLapiVerification).replace(
+          Set("participant1", "participant2", "participant3")
+        )
+      )
     if (disableBinaryVersionEnforcement)
       env.addConfigTransform(
         // Once we remove PV34, we can remove this config transform!

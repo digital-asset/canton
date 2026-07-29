@@ -37,7 +37,7 @@ slack_red_main_with_volunteer:
         mentions: "${SELECTED_VOLUNTEER}"
         fail_only: true
         only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
-        failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. You are on rota, so please take a look.'
+        failure_message: '*[CircleCI]* A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. You are on rota, so please take a look.'
         webhook: << parameters.webhook_url >>
 
 # This command will send a notification to team-sdk-updates

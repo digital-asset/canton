@@ -69,6 +69,7 @@ import com.digitalasset.canton.topology.transaction.checks.{
   RequiredTopologyMappingChecks,
   TopologyMappingChecks,
 }
+import com.digitalasset.canton.topology.util.SerialUtils.EnhancedPositiveInt
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, SimpleExecutionQueue}
@@ -632,16 +633,18 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
 
         case (Some((_, _, existingSerial, _)), None) =>
           // auto-select existing+1
-          EitherT.rightT(existingSerial.increment)
+          EitherT.fromEither(existingSerial.nextSerial)
         case (Some((_, _, existingSerial, _)), Some(proposed)) =>
           // check that the proposed serial matches existing+1
-          val next = existingSerial.increment
-          EitherT.cond[FutureUnlessShutdown](
-            next == proposed,
-            next,
-            TopologyManagerError.SerialMismatch
-              .Failure(actual = Some(proposed), expected = Some(next)),
-          )
+          for {
+            next <- EitherT.fromEither(existingSerial.nextSerial(errorLoggingContext))
+            _ <- EitherT.cond[FutureUnlessShutdown](
+              next == proposed,
+              next,
+              TopologyManagerError.SerialMismatch
+                .Failure(actual = Some(proposed), expected = Some(next)): TopologyManagerError,
+            )
+          } yield next
       }): EitherT[FutureUnlessShutdown, TopologyManagerError, PositiveInt]
       transaction <- EitherT.fromEither[FutureUnlessShutdown](
         TopologyTransaction

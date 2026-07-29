@@ -10,11 +10,12 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.*
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsAddActivationsParams,
   AchsLastPointers,
@@ -34,6 +35,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
 import com.digitalasset.canton.platform.store.dao.LedgerDaoUpdateReader.DeactivatedContractInfo
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -283,8 +285,7 @@ trait PartyStorageBackend {
 
 trait CompletionStorageBackend {
   def commandCompletions(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       userId: Option[UserId],
       parties: Set[Party],
       limit: Int,
@@ -303,8 +304,7 @@ trait CompletionStorageBackend {
   )(connection: Connection): Vector[Completion]
 
   def commandCompletionsForRecovery(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange
   )(connection: Connection): Vector[PostPublishData]
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related
@@ -465,6 +465,14 @@ trait EventStorageBackend {
       connection: Connection
   ): Long
 
+  /** Returns the inclusive event sequential id range covering all events whose offset lies within
+    * the given (inclusive) offset range, or None when the offset range contains no events (for
+    * example when it spans only offset-only updates such as command rejections).
+    */
+  def eventSequentialIdRange(offsetRange: OffsetRange)(
+      connection: Connection
+  ): Option[EventSeqIdRange]
+
   def firstSynchronizerOffsetAfterOrAt(
       synchronizerId: SynchronizerId,
       afterOrAtRecordTimeInclusive: Timestamp,
@@ -502,6 +510,14 @@ trait EventStorageBackend {
   def topologyPartyEventBatch(
       eventSequentialIds: SequentialIdBatch
   )(connection: Connection): Vector[RawParticipantAuthorization]
+
+  def fetchDynamicSynchronizerParametersEventIds(
+      eventSequentialIds: SequentialIdBatch
+  )(connection: Connection): Vector[Long]
+
+  def dynamicSynchronizerParametersBatch(
+      eventSequentialIds: SequentialIdBatch
+  )(connection: Connection): Vector[RawDynamicSynchronizerParameters]
 
   def topologyEventOffsetPublishedOnRecordTime(
       synchronizerId: SynchronizerId,
@@ -864,6 +880,16 @@ object EventStorageBackend {
       traceContext: Array[Byte],
   )
 
+  final case class RawDynamicSynchronizerParameters(
+      offset: Offset,
+      eventSequentialId: Long,
+      updateId: String,
+      synchronizerId: String,
+      recordTime: Timestamp,
+      payload: Array[Byte],
+      traceContext: Array[Byte],
+  )
+
   final case class RawAcsCommitment(
       offset: Offset,
       eventSequentialId: Long,
@@ -876,7 +902,29 @@ object EventStorageBackend {
 
   sealed trait SequentialIdBatch
   object SequentialIdBatch {
-    final case class IdRange(fromInclusive: Long, toInclusive: Long) extends SequentialIdBatch
+    final case class EventSeqIdRange(startInclusive: Long, endInclusive: Long)
+        extends SequentialIdBatch
+        with PrettyPrinting {
+
+      lazy val flipped: EventSeqIdRange = EventSeqIdRange(
+        startInclusive = endInclusive,
+        endInclusive = startInclusive,
+      )
+
+      override protected def pretty: Pretty[EventSeqIdRange] = PrettyUtil.prettyOfString(range =>
+        s"event seq id range [${range.startInclusive}, ${range.endInclusive}]"
+      )
+    }
+    object EventSeqIdRange {
+
+      /** Builds a non-empty range, or `None` when the range is empty (i.e. `startInclusive` is
+        * greater than `endInclusive`). Use this to represent emptiness as `None` rather than an
+        * inverted range, so callers short-circuit uniformly.
+        */
+      def nonEmptyAscending(startInclusive: Long, endInclusive: Long): Option[EventSeqIdRange] =
+        Option.when(startInclusive <= endInclusive)(EventSeqIdRange(startInclusive, endInclusive))
+    }
+
     final case class Ids(ids: Iterable[Long]) extends SequentialIdBatch
   }
 }

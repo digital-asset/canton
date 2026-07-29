@@ -16,5 +16,6 @@ bootstrap.synchronizer(
   mediators = mediators.all,
   synchronizerOwners = sequencers.all,
   synchronizerThreshold = 1,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+  staticSynchronizerParameters =
+    StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )

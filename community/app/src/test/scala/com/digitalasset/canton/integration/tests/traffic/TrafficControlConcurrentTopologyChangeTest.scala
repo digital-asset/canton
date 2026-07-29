@@ -137,7 +137,7 @@ trait TrafficControlConcurrentTopologyChangeTest
       })
 
       val (serial, _) = getLatestSerialAndBalanceForMember(participant1)
-      val newSerial = serial.increment
+      val newSerial = serial.increment.value
       newSerial should be > PositiveInt.one
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {

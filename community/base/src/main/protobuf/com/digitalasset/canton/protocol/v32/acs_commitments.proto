@@ -41,7 +41,7 @@ message AcsCommitmentSummary {
   // The interval grid point that triggered sending the commitments
   uint64 commitment_tick = 2;
   // The counterparticipants addressed in this batch
-  repeated string counterparticipants = 3;
+  repeated string addressed_counterparticipants = 3;
   // The digests for counterparticipants that should have been included in this
   // batch, but could not be sent.
   repeated DigestForCounterparticipant unsent_digests = 4;

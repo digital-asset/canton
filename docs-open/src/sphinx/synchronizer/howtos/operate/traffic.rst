@@ -117,6 +117,7 @@ to the last traffic balance top up for that member.
     .. success:: val nextSerial = allMembersTrafficState.trafficStates(participant1).serial
       .getOrElse(PositiveNumeric.tryCreate(1))
       .increment
+      .getOrElse(throw new RuntimeException("Failed to increment serial for participant1"))
 
 
 Now we can submit a command to increase the traffic balance for ``participant1`` by ``newBalance``:

@@ -21,16 +21,16 @@ import scala.collection.immutable
 import scala.collection.immutable.TreeMap
 import scala.util.Try
 
-class InMemoryAcsDigestJournal[K, V](
+class InMemoryAcsDigestJournal[K](
     override val loggerFactory: NamedLoggerFactory,
     prettyKey: K => String,
-) extends AcsDigestJournal[K, V]
+) extends AcsDigestJournal[K]
     with NamedLogging {
   import InMemoryAcsDigestJournal.*
 
-  private val journal = TrieMap[K, TreeMap[Offset, AcsDigestUpdate[K, V]]]()
+  private val journal = TrieMap[K, TreeMap[Offset, AcsDigestUpdate[K]]]()
 
-  override def upsertDigestUpdates(digests: immutable.Iterable[AcsDigestUpdate[K, V]])(implicit
+  override def upsertDigestUpdates(digests: immutable.Iterable[AcsDigestUpdate[K]])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.pure {
@@ -46,7 +46,7 @@ class InMemoryAcsDigestJournal[K, V](
 
   override def lookup(key: K, toInclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[AcsDigestUpdate[K, V]]] = FutureUnlessShutdown.pure {
+  ): FutureUnlessShutdown[Option[AcsDigestUpdate[K]]] = FutureUnlessShutdown.pure {
     lookupInternal(key, toInclusive)
   }
 
@@ -55,7 +55,7 @@ class InMemoryAcsDigestJournal[K, V](
       toInclusive: Offset,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K, V]]] = FutureUnlessShutdown.pure {
+  ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K]]] = FutureUnlessShutdown.pure {
     keys.flatMap { key =>
       lookupInternal(key, toInclusive)
         .map(value => key -> value)
@@ -68,7 +68,7 @@ class InMemoryAcsDigestJournal[K, V](
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
         immutable.Iterable[
-          AcsDigestStore.AcsDigestUpdate[K, V]
+          AcsDigestStore.AcsDigestUpdate[K]
         ],
         Either[PaginationTokenDone, SnapshotPaginationToken],
     )
@@ -96,7 +96,7 @@ class InMemoryAcsDigestJournal[K, V](
       page -> nextToken
     )
   }
-  override type SnapshotPaginationToken = SnapshotToken[K, V]
+  override type SnapshotPaginationToken = SnapshotToken[K]
 
   override def changesBetween(
       tokenOrStart: Either[ChangesBetweenPaginationToken, ChangesBetweenOffsetRange],
@@ -104,7 +104,7 @@ class InMemoryAcsDigestJournal[K, V](
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
         immutable.Iterable[
-          AcsDigestStore.AcsDigest[K, V]
+          AcsDigestStore.AcsDigest[K]
         ],
         Either[PaginationTokenDone, ChangesBetweenPaginationToken],
     )
@@ -133,7 +133,7 @@ class InMemoryAcsDigestJournal[K, V](
       page -> nextToken
     }
   }
-  override type ChangesBetweenPaginationToken = ChangesBetweenToken[K, V]
+  override type ChangesBetweenPaginationToken = ChangesBetweenToken[K]
 
   override def checkReplacesInvariant(upToInclusive: Offset)(implicit
       traceContext: TraceContext
@@ -231,7 +231,7 @@ class InMemoryAcsDigestJournal[K, V](
     }
   }
 
-  private def lookupInternal(key: K, toInclusive: Offset): Option[AcsDigestUpdate[K, V]] =
+  private def lookupInternal(key: K, toInclusive: Offset): Option[AcsDigestUpdate[K]] =
     for {
       history <- journal.get(key)
       (_, update) <- history.rangeTo(toInclusive).lastOption
@@ -239,6 +239,6 @@ class InMemoryAcsDigestJournal[K, V](
 }
 
 object InMemoryAcsDigestJournal {
-  final case class SnapshotToken[K, V](remaining: LazyList[AcsDigestUpdate[K, V]])
-  final case class ChangesBetweenToken[K, V](remaining: LazyList[AcsDigest[K, V]])
+  final case class SnapshotToken[K](remaining: LazyList[AcsDigestUpdate[K]])
+  final case class ChangesBetweenToken[K](remaining: LazyList[AcsDigest[K]])
 }

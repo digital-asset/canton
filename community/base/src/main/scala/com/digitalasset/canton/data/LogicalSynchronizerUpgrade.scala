@@ -8,13 +8,17 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.v30.SynchronizerPredecessor as SynchronizerPredecessorProto
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.SequencedTime
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
-  HasVersionedMessageCompanion,
-  HasVersionedMessageCompanionCommon,
-  HasVersionedMessageCompanionDbHelpers,
-  HasVersionedWrapper,
+  HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
+  ProtocolVersionedCompanionDbHelpers,
+  ReleaseProtocolVersion,
+  RepresentativeProtocolVersion,
+  VersionedProtoCodec,
+  VersioningCompanion,
 }
 
 /** Information about the predecessor of a synchronizer.
@@ -27,13 +31,24 @@ import com.digitalasset.canton.version.{
   *   Whether the upgrade is considered a late upgrade, meaning the node is being upgraded to the
   *   new synchronizer via manual repair steps.
   */
-final case class SynchronizerPredecessor(
+final case class SynchronizerPredecessor private (
     psid: PhysicalSynchronizerId,
     upgradeTime: CantonTimestamp,
     isLateUpgrade: Boolean,
-) extends HasVersionedWrapper[SynchronizerPredecessor] {
-  override protected def companionObj: HasVersionedMessageCompanionCommon[SynchronizerPredecessor] =
+)(
+    override val representativeProtocolVersion: RepresentativeProtocolVersion[
+      SynchronizerPredecessor.type
+    ]
+) extends HasProtocolVersionedWrapper[SynchronizerPredecessor] {
+  @transient override protected lazy val companionObj: SynchronizerPredecessor.type =
     SynchronizerPredecessor
+
+  def copy(
+      psid: PhysicalSynchronizerId = psid,
+      upgradeTime: CantonTimestamp = upgradeTime,
+      isLateUpgrade: Boolean = isLateUpgrade,
+  ): SynchronizerPredecessor =
+    new SynchronizerPredecessor(psid, upgradeTime, isLateUpgrade)(representativeProtocolVersion)
 
   def toProtoV30: SynchronizerPredecessorProto =
     SynchronizerPredecessorProto(
@@ -44,31 +59,48 @@ final case class SynchronizerPredecessor(
 }
 
 object SynchronizerPredecessor
-    extends HasVersionedMessageCompanion[SynchronizerPredecessor]
-    with HasVersionedMessageCompanionDbHelpers[SynchronizerPredecessor] {
+    extends VersioningCompanion[SynchronizerPredecessor]
+    with ProtocolVersionedCompanionDbHelpers[SynchronizerPredecessor] {
   override def name: String = "SynchronizerPredecessor"
 
-  override def supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
-    ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v34,
-      supportedProtoVersion(SynchronizerPredecessorProto)(fromProtoV30),
+  def apply(
+      psid: PhysicalSynchronizerId,
+      upgradeTime: CantonTimestamp,
+      isLateUpgrade: Boolean,
+  ): SynchronizerPredecessor =
+    new SynchronizerPredecessor(psid, upgradeTime, isLateUpgrade)(
+      protocolVersionRepresentativeFor(psid.protocolVersion)
+    )
+
+  override val versioningTable: VersioningTable = VersioningTable(
+    ProtoVersion(30) -> VersionedProtoCodec.storage(
+      ReleaseProtocolVersion(ProtocolVersion.v34),
+      SynchronizerPredecessorProto,
+    )(
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
 
   private def fromProtoV30(
-      proto: SynchronizerPredecessorProto
+      pvv: ProtocolVersionValidation,
+      proto: SynchronizerPredecessorProto,
   ): ParsingResult[SynchronizerPredecessor] = {
     val SynchronizerPredecessorProto(psidP, upgradeTimePO, isLateUpgrade) = proto
 
     for {
-      psid <- PhysicalSynchronizerId.fromProtoPrimitive(psidP, "predecessor_physical_id")
+      psid <- ProtoValidation.validateThen(
+        psidP,
+        "predecessor_physical_id",
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       upgradeTime <- ProtoConverter.parseRequired(
         CantonTimestamp.fromProtoTimestamp,
         "upgrade_time",
         upgradeTimePO,
       )
-    } yield SynchronizerPredecessor(psid, upgradeTime, isLateUpgrade)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield new SynchronizerPredecessor(psid, upgradeTime, isLateUpgrade)(rpv)
   }
 }
 

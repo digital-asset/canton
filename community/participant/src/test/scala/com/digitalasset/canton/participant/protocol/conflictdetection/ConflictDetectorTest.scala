@@ -273,7 +273,7 @@ final class ConflictDetectorTest
 
       for {
         rawAcs <- mkAcs()
-        acs = new HookedAcs(rawAcs, loggerFactory)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         cr <- prefetchAndCheck(cd, rc, mkActivenessSet(create = Set(coid00)))
@@ -308,7 +308,7 @@ final class ConflictDetectorTest
           (coid11, tor1, active),
           (coid10, tor2, Archived),
         )
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         actSet = mkActivenessSet(
@@ -424,7 +424,7 @@ final class ConflictDetectorTest
           (coid10, tor2, active),
           (coid11, tor2, active),
         )
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         // Activeness check for the first request
@@ -534,7 +534,7 @@ final class ConflictDetectorTest
       val tor1 = TimeOfRequest(RequestCounter(1), ofEpochMilli(1))
       for {
         rawAcs <- mkAcs((coid00, tor0, active))
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         // Activeness check for the first request
@@ -632,7 +632,7 @@ final class ConflictDetectorTest
           (coid11, tor0, active),
           (coid20, tor0, active),
         )
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         // Prefetch three requests in reversed order
@@ -860,7 +860,7 @@ final class ConflictDetectorTest
 
       for {
         rawAcs <- mkAcs()
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         // Activeness check of first request
@@ -1093,7 +1093,7 @@ final class ConflictDetectorTest
           (coid01, torN1, active),
           (coid21, torN1, active),
         )
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         // Activeness check for first request
@@ -1794,7 +1794,7 @@ final class ConflictDetectorTest
           (coid01, torN1, active),
           (coid21, torN1, active),
         )
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         _ = setFetchHook(acs, cd)
@@ -1836,7 +1836,7 @@ final class ConflictDetectorTest
 
       for {
         rawAcs <- mkAcs()
-        acs = new HookedAcs(rawAcs, loggerFactory)(parallelExecutionContext)
+        acs = new HookedAcs(rawAcs)
         cd = mkCd(acs)
 
         _ = setFetchHook(acs, cd)

@@ -80,7 +80,7 @@ trait SynchronizerOwnerIntegrationTest
           newParticipants =
             aliceReplace.item.participants.map(hp => (hp.participantId, hp.permission)),
           threshold = aliceReplace.item.threshold,
-          serial = Some(aliceReplace.context.serial.increment),
+          serial = Some(aliceReplace.context.serial.increment.value),
           operation = TopologyChangeOp.Remove,
           store = daId,
         )
@@ -106,7 +106,7 @@ trait SynchronizerOwnerIntegrationTest
 
         aliceRemove.item shouldBe aliceReplace.item
         aliceRemove.context.operation shouldBe TopologyChangeOp.Remove
-        aliceRemove.context.serial shouldBe aliceReplace.context.serial.increment
+        aliceRemove.context.serial shouldBe aliceReplace.context.serial.increment.value
       }
 
       // the cycle contract should still exist, although the participant can't really do anything with it

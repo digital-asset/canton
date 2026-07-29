@@ -12,6 +12,7 @@ import com.digitalasset.canton.crypto.SigningPublicKey
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -23,7 +24,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import org.scalatest.Assertions.fail
-import org.scalatest.concurrent.ScalaFutures.convertScalaFuture
 
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
@@ -32,7 +32,8 @@ import scala.concurrent.ExecutionContext
 class TopologyStoreTestData(
     testedProtocolVersion: ProtocolVersion,
     loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext) {
+)(implicit executionContext: ExecutionContext)
+    extends ScalaFuturesWithPatience {
   def makeSignedTx[Op <: TopologyChangeOp, M <: TopologyMapping](
       mapping: M,
       op: Op = TopologyChangeOp.Replace,

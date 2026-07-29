@@ -97,7 +97,7 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
     val partyToParticipantMapping = partyToParticipantTx.item
     val removeTopologyTx = TopologyTransaction.tryCreate(
       TopologyChangeOp.Remove,
-      partyToParticipantTx.context.serial.increment,
+      partyToParticipantTx.context.serial.increment.value,
       partyToParticipantMapping,
       testedProtocolVersion,
     )

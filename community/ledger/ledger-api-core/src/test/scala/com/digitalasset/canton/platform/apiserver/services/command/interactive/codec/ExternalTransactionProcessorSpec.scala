@@ -26,7 +26,11 @@ import com.digitalasset.canton.platform.apiserver.execution.{
 import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfig
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.DefaultTestIdentities
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.version.{
+  HashingSchemeVersion,
+  LfSerializationVersionToProtocolVersions,
+  ProtocolVersion,
+}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -191,11 +195,11 @@ class ExternalTransactionProcessorSpec
 
   "ExternalTransactionProcessor" should {
     "honor the requested hashing scheme for prepared transactions" in {
-      val transaction = VersionedTransaction(
-        LfSerializationVersion.V2,
-        Map.empty,
-        ImmArray.Empty,
-      )
+      val lfSerializationVersion =
+        LfSerializationVersionToProtocolVersions.maxSerializationVersionForProtocolVersion(
+          testedProtocolVersion
+        )
+      val transaction = VersionedTransaction(lfSerializationVersion, Map.empty, ImmArray.Empty)
       val result = prepare(transaction, testedHashingSchemeVersion)
 
       result.value.hashVersion shouldBe testedHashingSchemeVersion

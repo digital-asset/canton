@@ -166,32 +166,71 @@ object ProtoConverter {
     parseString(party, field = Some(field))(LedgerParticipantId.fromString)
 
   def parseLFUserId(userId: String): ParsingResult[LedgerUserId] =
-    parseString(userId, field = None)(LedgerUserId.fromString)
+    parseLFUserId(userId, field = None)
+
+  def parseLFUserId(userId: String, field: String): ParsingResult[LedgerUserId] =
+    parseLFUserId(userId, Some(field))
+
+  private def parseLFUserId(userId: String, field: Option[String]): ParsingResult[LedgerUserId] =
+    parseString(userId, field)(LedgerUserId.fromString)
 
   def parseLFSubmissionIdO(submissionId: String): ParsingResult[Option[LedgerSubmissionId]] =
+    parseLFSubmissionIdO(submissionId, field = None)
+
+  def parseLFSubmissionIdO(
+      submissionId: String,
+      field: String,
+  ): ParsingResult[Option[LedgerSubmissionId]] =
+    parseLFSubmissionIdO(submissionId, Some(field))
+
+  private def parseLFSubmissionIdO(
+      submissionId: String,
+      field: Option[String],
+  ): ParsingResult[Option[LedgerSubmissionId]] =
     Option
-      .when(submissionId.nonEmpty)(parseLFSubmissionId(submissionId))
+      .when(submissionId.nonEmpty)(parseString(submissionId, field)(LedgerSubmissionId.fromString))
       .sequence
 
   def parseLFSubmissionId(submissionId: String): ParsingResult[LedgerSubmissionId] =
     parseString(submissionId, field = None)(LedgerSubmissionId.fromString)
 
   def parseLFWorkflowIdO(workflowId: String): ParsingResult[Option[LfWorkflowId]] =
+    parseLFWorkflowIdO(workflowId, field = None)
+
+  def parseLFWorkflowIdO(workflowId: String, field: String): ParsingResult[Option[LfWorkflowId]] =
+    parseLFWorkflowIdO(workflowId, Some(field))
+
+  private def parseLFWorkflowIdO(
+      workflowId: String,
+      field: Option[String],
+  ): ParsingResult[Option[LfWorkflowId]] =
     Option
-      .when(workflowId.nonEmpty)(parseString(workflowId, field = None)(LfWorkflowId.fromString))
+      .when(workflowId.nonEmpty)(parseString(workflowId, field)(LfWorkflowId.fromString))
       .sequence
 
   def parseLfContractId(id: String): ParsingResult[LfContractId] =
     parseString(id, field = None)(LfContractId.fromString)
 
+  def parseLfContractId(id: String, field: String): ParsingResult[LfContractId] =
+    parseString(id, Some(field))(LfContractId.fromString)
+
   def parseCommandId(id: String): ParsingResult[Ref.CommandId] =
     parseString(id, field = None)(Ref.CommandId.fromString)
+
+  def parseCommandId(id: String, field: String): ParsingResult[Ref.CommandId] =
+    parseString(id, Some(field))(Ref.CommandId.fromString)
 
   def parsePackageId(id: String): ParsingResult[Ref.PackageId] =
     parseString(id, field = None)(Ref.PackageId.fromString)
 
+  def parsePackageId(id: String, field: String): ParsingResult[Ref.PackageId] =
+    parseString(id, Some(field))(Ref.PackageId.fromString)
+
   def parsePackageName(name: String): ParsingResult[Ref.PackageName] =
     parseString(name, field = None)(Ref.PackageName.fromString)
+
+  def parsePackageName(name: String, field: String): ParsingResult[Ref.PackageName] =
+    parseString(name, Some(field))(Ref.PackageName.fromString)
 
   private def parseString[T](from: String, field: Option[String])(
       to: String => Either[String, T]
@@ -245,8 +284,17 @@ object ProtoConverter {
     override def toProtoPrimitive(uuid: UUID): String = uuid.toString
 
     override def fromProtoPrimitive(uuidP: String): Either[StringConversionError, UUID] =
+      fromProtoPrimitive(uuidP, field = None)
+
+    def fromProtoPrimitive(uuidP: String, field: String): Either[StringConversionError, UUID] =
+      fromProtoPrimitive(uuidP, Some(field))
+
+    private def fromProtoPrimitive(
+        uuidP: String,
+        field: Option[String],
+    ): Either[StringConversionError, UUID] =
       Either
         .catchOnly[IllegalArgumentException](UUID.fromString(uuidP))
-        .leftMap(err => StringConversionError(err.getMessage))
+        .leftMap(err => StringConversionError(err.getMessage, field))
   }
 }

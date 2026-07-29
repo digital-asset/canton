@@ -962,7 +962,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
         val maxSignatures =
           participant1.config.ledgerApi.interactiveSubmissionService.maximumNumberOfSignaturesPerParty
 
-        val sigs = List.fill(maxSignatures.increment.value)(
+        val sigs = List.fill(maxSignatures.increment.value.value)(
           env.global_secret.sign(
             prepared.preparedTransactionHash,
             aliceE.signingFingerprints.head1,

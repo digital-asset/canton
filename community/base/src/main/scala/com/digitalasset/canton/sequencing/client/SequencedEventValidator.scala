@@ -59,7 +59,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, MaxBytesToDecompress}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
@@ -234,7 +234,13 @@ object SequencedEventValidator extends HasLoggerName {
       // No validation means we blindly trust the sequencer, so we do not enforce a maxRequestSize
       // bound on decompression here.
       EitherT(
-        FutureUnlessShutdown.pure(decompressEvent(event, DecompressionPolicy.MaxValueUnsafe))
+        FutureUnlessShutdown.pure(
+          decompressEvent(
+            event,
+            ProtocolVersionValidation.NoValidation,
+            DecompressionPolicy.MaxValueUnsafe,
+          )
+        )
       )
     override def validateOnReconnect(
         priorEvent: Option[ProcessingSerializedEvent],
@@ -268,10 +274,11 @@ object SequencedEventValidator extends HasLoggerName {
     */
   private[client] def decompressEvent(
       event: MaybeCompressedSerializedEvent,
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
   ): Either[SequencedEventValidationError[Nothing], SequencedSerializedEvent] =
     event.signedEvent
-      .traverse(SequencedEvent.decompress(_, decompressionPolicy))
+      .traverse(SequencedEvent.decompress(_, pvv, decompressionPolicy))
       .bimap(
         err => SequencedEventValidationError.DecompressionFailed(event.timestamp, err.toString),
         signedEvent => SequencedEventWithTraceContext(signedEvent)(event.traceContext),
@@ -682,7 +689,11 @@ class SequencedEventValidatorImpl(
         .fromEither[FutureUnlessShutdown](checkNoTimestampOfSigningKey(event))
         .flatMap(_ =>
           EitherT.fromEither[FutureUnlessShutdown](
-            decompressEvent(event, DecompressionPolicy.HardcodedDefault)
+            decompressEvent(
+              event,
+              ProtocolVersionValidation.PV(psid.protocolVersion),
+              DecompressionPolicy.HardcodedDefault,
+            )
           )
         )
     } else
@@ -694,7 +705,11 @@ class SequencedEventValidatorImpl(
           decompressionPolicy(snapshot)
         )
         decompressed <- EitherT.fromEither[FutureUnlessShutdown](
-          decompressEvent(event, maxBytesToDecompress)
+          decompressEvent(
+            event,
+            ProtocolVersionValidation.PV(psid.protocolVersion),
+            maxBytesToDecompress,
+          )
         )
       } yield decompressed
 

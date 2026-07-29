@@ -527,7 +527,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
         parties = owner,
       )
     } yield {
-      assert(txs.isEmpty, "Expected no transactions")
+      assert(txs.isEmpty, s"Expected no transactions, but got $txs")
     }
   })
 
@@ -644,7 +644,42 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
     } yield {
       assert(
         transactions.isEmpty,
-        s"Reverse stream with Dummy filter should be empty.",
+        s"Reverse stream with Dummy filter should be empty. Got non-empty stream result instead: $transactions",
+      )
+    }
+  })
+
+  test(
+    "TXStreamBeginExclusiveExcludesBoundaryUpdate",
+    "An update at exactly the beginExclusive offset must not be served (regression for the off-by-one on the stream's lower sequential-id bound)",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      responseA <- ledger.submitAndWaitForTransaction(
+        ledger.submitAndWaitForTransactionRequest(party, new Dummy(party).create.commands)
+      )
+      exclusiveBoundary = responseA.getTransaction.offset
+
+      _ <- ledger.create(party, new Dummy(party))
+      end <- ledger.currentEnd()
+
+      request = ledger.getTransactionsRequestWithEnd(
+        transactionFormat = ledger.transactionFormat(Some(Seq(party))),
+        begin = exclusiveBoundary,
+        end = Some(end),
+      )
+      transactions <- ledger.transactions(request)
+    } yield {
+      assert(
+        transactions.sizeIs == 1,
+        s"Exactly one transaction should be served from exclusive offset $exclusiveBoundary, but ${transactions.size} were found at offsets: " +
+          s"${transactions.map(_.offset).mkString(", ")}",
+      )
+      transactions.foreach(tx =>
+        assert(
+          tx.offset > exclusiveBoundary,
+          s"The boundary update at offset $exclusiveBoundary must be excluded, but a transaction at offset ${tx.offset} was served.",
+        )
       )
     }
   })
@@ -762,14 +797,20 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
         page1.highestPageOffsetInclusive >= ledgerEndAfterNotDummy,
         s"highestPageOffsetInclusive range end does not cover not-dummy contract id",
       )
-      assert(
-        page1.highestPageOffsetInclusive == page2.lowestPageOffsetExclusive,
-        "page2 range is not a direct continuation of page1 range",
-      )
       assert(emptyPage.updates.isEmpty, s"Expected empty page, got ${emptyPage.updates}")
+      assertEquals(
+        "empty page should cover an empty range",
+        emptyPage.lowestPageOffsetExclusive,
+        emptyPage.highestPageOffsetInclusive,
+      )
+      assertEquals(
+        "page2 range should be a continuation of page1 range",
+        page1.highestPageOffsetInclusive,
+        page2.lowestPageOffsetExclusive,
+      )
       assert(
         page2.nextPageToken.nonEmpty,
-        s"Token at the last page should be non-empty",
+        "Token at the last page should be non-empty",
       )
       assert(
         page2.updates.loneElement.update.transaction.value.events.loneElement.getCreated.contractId == dummy3.contractId,
@@ -1076,7 +1117,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       )
       assert(
         secondPage.nextPageToken.isEmpty,
-        "The second page should not have a next page token as the contents after it are pruned",
+        s"The second page should not have a next page token as the contents after it are pruned. However, the second page token was ${secondPage.nextPageToken}",
       )
       assert(
         secondPage.lowestPageOffsetExclusive == pruningOffset,
@@ -1128,7 +1169,7 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
       compareContractIds("First page contains two elements", firstPage.updates, Seq(dummy2, dummy3))
       assert(
         firstPage.nextPageToken.isEmpty,
-        "There should not be a next page",
+        s"There should not be a next page. However, the next page token was ${firstPage.nextPageToken}",
       )
       assert(
         firstPage.lowestPageOffsetExclusive == pruningOffset,

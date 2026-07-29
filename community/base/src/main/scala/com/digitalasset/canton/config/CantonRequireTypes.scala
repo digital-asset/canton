@@ -425,8 +425,14 @@ object CantonRequireTypes {
       tryCreate(truncated, name)
     }
 
+    def fromProtoPrimitive(str: String): ParsingResult[A] =
+      fromProtoPrimitive(str, field = None)
+
     def fromProtoPrimitive(str: String, name: String): ParsingResult[A] =
-      create(str, Some(name)).leftMap(e => ProtoInvariantViolation(field = Some(name), error = e))
+      fromProtoPrimitive(str, Some(name))
+
+    def fromProtoPrimitive(str: String, field: Option[String]): ParsingResult[A] =
+      create(str, field).leftMap(e => ProtoInvariantViolation(field = field, error = e))
 
     implicit val lengthLimitedStringOrder: Order[A] =
       Order.by[A, String](_.unwrap)
@@ -507,7 +513,13 @@ object CantonRequireTypes {
       tryCreate(str.take(companion.maxLength.unwrap))
 
     def fromProtoPrimitive(str: String): ParsingResult[Wrapper] =
-      companion.fromProtoPrimitive(str, instanceName).map(factoryMethodWrapper)
+      fromProtoPrimitive(str, field = None)
+
+    def fromProtoPrimitive(str: String, field: String): ParsingResult[Wrapper] =
+      fromProtoPrimitive(str, Some(field))
+
+    private def fromProtoPrimitive(str: String, field: Option[String]): ParsingResult[Wrapper] =
+      companion.fromProtoPrimitive(str, field.getOrElse(instanceName)).map(factoryMethodWrapper)
 
     implicit val wrapperOrder: Order[Wrapper] =
       Order.by[Wrapper, String](_.unwrap)

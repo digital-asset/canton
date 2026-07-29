@@ -13,6 +13,8 @@ import com.digitalasset.canton.serialization.{DeserializationError, HasCryptogra
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ByteStringUtil, HexString}
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{LedgerTransactionId, ProtoDeserializationError, ReassignmentCounter}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -231,10 +233,22 @@ object ReassignmentId {
     create(str).valueOr(err => throw new IllegalArgumentException(err))
 
   def fromProtoPrimitive(str: String): ParsingResult[ReassignmentId] =
-    create(str).leftMap(ProtoDeserializationError.StringConversionError(_))
+    fromProtoPrimitive(str, field = None)
 
-  def fromProtoV30(reassignmentIdP: v30.ReassignmentId): ParsingResult[ReassignmentId] =
-    fromProtoPrimitive(reassignmentIdP.id)
+  def fromProtoPrimitive(str: String, field: String): ParsingResult[ReassignmentId] =
+    fromProtoPrimitive(str, Some(field))
+
+  private def fromProtoPrimitive(
+      str: String,
+      field: Option[String],
+  ): ParsingResult[ReassignmentId] =
+    create(str).leftMap(err => ProtoDeserializationError.StringConversionError(err, field))
+
+  def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      reassignmentIdP: v30.ReassignmentId,
+  ): ParsingResult[ReassignmentId] =
+    ProtoValidation.validateThen(reassignmentIdP.id, "id", pvv)(fromProtoPrimitive)
 
   def fromBytes(bytes: ByteString): Either[String, ReassignmentId] =
     if (bytes.isEmpty) Left("no ReassignmentId version")

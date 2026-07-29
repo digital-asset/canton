@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
+import com.daml.ledger.api.v2.update_service.GetUpdateResponse
 import com.daml.metrics.DatabaseMetrics
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
@@ -99,13 +99,12 @@ class UpdatesStreamReader(
     val span =
       Telemetry.Updates.createSpan(
         tracer,
-        queryRange.startInclusiveOffset,
-        queryRange.endInclusiveOffset,
+        queryRange.offsetRange,
       )(
         qualifiedNameOfCurrentFunc
       )
     logger.debug(
-      s"streamUpdates(${queryRange.startInclusiveOffset}, ${queryRange.endInclusiveOffset}, descending: $descendingOrder, $internalUpdateFormat)"
+      s"streamUpdates(${queryRange.offsetRange}, descending: $descendingOrder, $internalUpdateFormat)"
     )
     doStreamUpdates(
       queryRange = queryRange,
@@ -116,14 +115,14 @@ class UpdatesStreamReader(
       .wireTap(_ match {
         case (_, ProtoUpdate(getUpdatesResponse)) =>
           getUpdatesResponse.update match {
-            case GetUpdatesResponse.Update.Transaction(value) =>
+            case GetUpdateResponse.Update.Transaction(value) =>
               val event = tracing.Event("update", TraceIdentifiers.fromTransaction(value))
               Spans.addEventToSpan(event, span)
-            case GetUpdatesResponse.Update.Reassignment(reassignment) =>
+            case GetUpdateResponse.Update.Reassignment(reassignment) =>
               val event =
                 tracing.Event("update", TraceIdentifiers.fromReassignment(reassignment))
               Spans.addEventToSpan(event, span)
-            case GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction) =>
+            case GetUpdateResponse.Update.TopologyTransaction(topologyTransaction) =>
               val event = tracing
                 .Event("update", TraceIdentifiers.fromTopologyTransaction(topologyTransaction))
               Spans.addEventToSpan(event, span)
@@ -269,8 +268,8 @@ class UpdatesStreamReader(
             )
             .map { case (offset, topologyTransaction) =>
               offset -> UpdateResponse.ProtoUpdate(
-                GetUpdatesResponse(
-                  GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction)
+                GetUpdateResponse(
+                  GetUpdateResponse.Update.TopologyTransaction(topologyTransaction)
                 ).withPrecomputedSerializedSize()
               )
             }
@@ -310,14 +309,14 @@ class UpdatesStreamReader(
           )(reverseIfDescendingOrder(descendingOrder, rawEvents))(
             convertReassignment = reassignment =>
               Offset.tryFromLong(reassignment.offset) -> UpdateResponse.ProtoUpdate(
-                GetUpdatesResponse(
-                  GetUpdatesResponse.Update.Reassignment(reassignment)
+                GetUpdateResponse(
+                  GetUpdateResponse.Update.Reassignment(reassignment)
                 ).withPrecomputedSerializedSize()
               ),
             convertTransaction = transaction =>
               Offset.tryFromLong(transaction.offset) -> UpdateResponse.ProtoUpdate(
-                GetUpdatesResponse(
-                  GetUpdatesResponse.Update.Transaction(transaction)
+                GetUpdateResponse(
+                  GetUpdateResponse.Update.Transaction(transaction)
                 ).withPrecomputedSerializedSize()
               ),
           )
@@ -899,8 +898,7 @@ class UpdatesStreamReader(
       idStreamName = idStreamName,
       idPageSizing = idPageSizing,
       idPageBufferSize = maxPagesPerIdPagesBuffer,
-      initialFromIdExclusive = queryRange.startInclusiveEventSeqId,
-      initialEndInclusive = queryRange.endInclusiveEventSeqId,
+      initialEventSeqIdRange = queryRange.eventSeqIdRange,
       descendingOrder = descendingOrder,
     )(idPageQuery)(
       executeIdQuery = f =>
@@ -927,8 +925,7 @@ class UpdatesStreamReader(
       idStreamName = idStreamName,
       idPageSizing = idPageSizing,
       idPageBufferSize = maxPagesPerIdPagesBuffer,
-      initialFromIdExclusive = queryRange.startInclusiveEventSeqId,
-      initialEndInclusive = queryRange.endInclusiveEventSeqId,
+      initialEventSeqIdRange = queryRange.eventSeqIdRange,
       descendingOrder = descendingOrder,
     )(idFilterPageQuery)(
       executeFetchBounds = f =>
@@ -1028,12 +1025,11 @@ object UpdatesStreamReader {
     } else {
       queryValidRange
         .withRangeNotPruned(
-          minOffsetInclusive = queryRange.startInclusiveOffset,
-          maxOffsetInclusive = queryRange.endInclusiveOffset,
+          offsetRange = queryRange.offsetRange,
           errorPruning = (prunedOffset: Offset) =>
-            s"Updates request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+            s"Updates request for ${queryRange.offsetRange} precedes pruned offset ${prunedOffset.unwrap}",
           errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-            s"Updates request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} is beyond ledger end offset ${ledgerEndOffset
+            s"Updates request for ${queryRange.offsetRange} is beyond ledger end offset ${ledgerEndOffset
                 .fold(0L)(_.unwrap)}",
         )(_)
     }

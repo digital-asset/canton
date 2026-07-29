@@ -308,8 +308,8 @@ class DbLockedConnection private (
       )
       _ = logger.info("Successfully rebuilt connection")
 
-      // Schedule next health check from the current time when we have recovered
-      _ = scheduleCheckConnection(clock.now)
+      // Schedule next health check from the current time when we have recovered.
+      _ = scheduleCheckConnection(clock.now, consecutiveInconclusiveReadOnlyChecks = 0)
     } yield {
       logger.debug("Successfully finished locked connection rebuild")
     }
@@ -327,17 +327,25 @@ class DbLockedConnection private (
     connection.closeUnderlying(logLevel)
   }
 
-  private def runLockedConnectionCheck(now: CantonTimestamp): Unit = {
+  private def runLockedConnectionCheck(
+      now: CantonTimestamp,
+      consecutiveInconclusiveReadOnlyChecks: Int,
+  ): Unit = {
     import TraceContext.Implicits.Empty.*
 
     FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      synchronizeWithClosing("check-locked-connection")(checkHealth(now)),
+      synchronizeWithClosing("check-locked-connection")(
+        checkHealth(now, consecutiveInconclusiveReadOnlyChecks)
+      ),
       "check-locked-connection",
       closeContext = Some(closeContext),
     )
   }
 
-  private def scheduleCheckConnection(now: CantonTimestamp): Unit = {
+  private def scheduleCheckConnection(
+      now: CantonTimestamp,
+      consecutiveInconclusiveReadOnlyChecks: Int,
+  ): Unit = {
     // Add a jitter of 20% of the health check period to the scheduled connection check time to scatter the checks, such that they don't run at the same time
     val period = config.healthCheckPeriod.asJava
     val jitter = Duration.ofMillis(PseudoRandom.randomLong((period.toMillis * 0.2).toLong))
@@ -348,17 +356,20 @@ class DbLockedConnection private (
 
     clock
       .scheduleAtCancelledOnShutdown(
-        runLockedConnectionCheck,
+        runLockedConnectionCheck(_, consecutiveInconclusiveReadOnlyChecks),
         s"${getClass.getName}: checking connection",
         checkAt,
       )
       .discard
   }
 
-  private def checkHealth(now: CantonTimestamp)(implicit
+  private def checkHealth(now: CantonTimestamp, consecutiveInconclusiveReadOnlyChecks: Int)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    def checkLockedConnection(now: CantonTimestamp): Unit = {
+    def checkLockedConnection(
+        now: CantonTimestamp,
+        consecutiveInconclusiveReadOnlyChecks: Int,
+    ): Unit = {
       val state = stateRef.get()
       state match {
         case State.Init =>
@@ -373,16 +384,16 @@ class DbLockedConnection private (
           logger.trace(s"Checking if DB locked connection $connection and $lock is healthy at $now")
 
           // Check the health of the DB connection and that the lock was not lost
-          val isValid =
+          val connectionHealth =
             checkConnection(
               connection,
               checkReadOnly,
               config.connectionTimeout.toInternal,
-              timeouts,
+              config.healthCheckTimeout,
               logger,
-            ) && !lock.isLost
+            )
 
-          if (!isValid) {
+          def onConnectionLost(): Unit = {
             // Connection and/or lock was lost thus setting the connected state to lost
             val prevState = stateRef.getAndUpdate {
               case _: State.Connected => State.Lost
@@ -405,10 +416,27 @@ class DbLockedConnection private (
               case State.Init | State.Lost | State.Recovering | State.SetPassive =>
                 ErrorUtil.invalidState(s"Invalid state for recovery: $prevState")
             }
-          } else {
-            logger.trace("Locked connection is healthy")
-            scheduleCheckConnection(clock.now)
           }
+
+          if (lock.isLost) onConnectionLost()
+          else
+            connectionHealth match {
+              case ConnectionHealth.Healthy =>
+                logger.trace("Locked connection is healthy")
+                scheduleCheckConnection(clock.now, consecutiveInconclusiveReadOnlyChecks = 0)
+              case ConnectionHealth.Unhealthy =>
+                onConnectionLost()
+              case ConnectionHealth.Indeterminate =>
+                val consecutive = consecutiveInconclusiveReadOnlyChecks + 1
+                if (consecutive >= config.maxInconclusiveReadOnlyChecks)
+                  onConnectionLost()
+                else {
+                  // The connection is considered healthy for now; the next check is scheduled carrying forward
+                  // the number of consecutive inconclusive read-only checks observed so far.
+                  logger.trace("Locked connection is healthy")
+                  scheduleCheckConnection(clock.now, consecutive)
+                }
+            }
 
         case State.Disconnecting | State.Disconnected =>
           if (isClosing)
@@ -421,7 +449,10 @@ class DbLockedConnection private (
       }
     }
 
-    execQueue.execute(Future(checkLockedConnection(now)), "check-health")
+    execQueue.execute(
+      Future(checkLockedConnection(now, consecutiveInconclusiveReadOnlyChecks)),
+      "check-health",
+    )
   }
 
   /** Returns true if the connection is valid and the lock is held.
@@ -440,15 +471,15 @@ class DbLockedConnection private (
             connection,
             checkReadOnly,
             config.connectionTimeout.toInternal,
-            timeouts,
+            config.healthCheckTimeout,
             logger,
-          )
+          ).isValidOptimistically
         } yield hasLock && isValid
       case _ => EitherT.rightT(false)
     }
 
   // Run the initial connection check
-  runLockedConnectionCheck(clock.now)
+  runLockedConnectionCheck(clock.now, consecutiveInconclusiveReadOnlyChecks = 0)
 
   /** Returns a connection only if the connection is available and the lock has been acquired.
     *
@@ -574,19 +605,47 @@ object DbLockedConnection {
     }
   }
 
-  /** Returns true if the connection is valid. */
-  @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
+  /** The outcome of a connection health check.
+    */
+  private sealed trait ConnectionHealth extends Product with Serializable {
+
+    /** Optimistic mapping used outside the periodic health check: an inconclusive read-only check
+      * is treated as valid.
+      */
+    def isValidOptimistically: Boolean = this match {
+      case ConnectionHealth.Healthy | ConnectionHealth.Indeterminate => true
+      case ConnectionHealth.Unhealthy => false
+    }
+  }
+  private object ConnectionHealth {
+
+    /** The connection is valid and confirmed to not be read-only. */
+    case object Healthy extends ConnectionHealth
+
+    /** The connection is invalid or read-only. */
+    case object Unhealthy extends ConnectionHealth
+
+    /** The connection is valid, but the read-only check could not be completed (it timed out or
+      * failed). The state is unknown.
+      */
+    case object Indeterminate extends ConnectionHealth
+  }
+
+  /** Checks whether the connection is valid and not read-only.
+    *
+    * @param readOnlyCheckTimeout
+    *   bounds the read-only probe
+    */
   private def checkConnection(
       connection: KeepAliveConnection,
       checkReadOnly: KeepAliveConnection => EitherT[Future, String, Boolean],
       connectionTimeout: PositiveFiniteDuration,
-      timeouts: ProcessingTimeout,
+      readOnlyCheckTimeout: PositiveFiniteDurationConfig,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext,
-      executionContext: ExecutionContext,
       errorLoggingContext: ErrorLoggingContext,
-  ): Boolean =
+  ): ConnectionHealth =
     if (connection.markInUse()) {
 
       logger.trace(s"Checking if connection $connection is valid")
@@ -607,33 +666,37 @@ object DbLockedConnection {
       if (isValid) {
         logger.trace(s"Connection $connection is valid, checking if connection is read-only")
 
-        // If the connection is valid, further check that the connection is not read-only
-        val isReadOnly = Try {
-          timeouts.network.await("connection check read-only") {
-            checkReadOnly(connection).valueOr { err =>
-              logger.debug(s"Failed to check if connection is read-only: $err")
-              // Assume connection is NOT read-only, e.g., due to contention
-              false
-            }
+        // If the connection is valid, further check that the connection is not read-only.
+        // An inconclusive check (timeout or error) is reported as Indeterminate rather than healthy,
+        // so the caller can decide whether to recover.
+        Try {
+          readOnlyCheckTimeout.await("connection check read-only") {
+            checkReadOnly(connection).value
           }
-        }.recover { case _: TimeoutException =>
-          logger.debug(s"Read-only check timed out, assuming connection is not read-only")
-          false
-        }.get // Currently exceptions of the read-only check are returned as Left's and the timeout exception explicitly handled above
-
-        if (isReadOnly)
-          logger.info(s"Connection $connection is read-only")
-        else
-          logger.trace(s"Connection $connection is not read-only")
-
-        !isReadOnly
+        } match {
+          case util.Success(Right(true)) =>
+            logger.info(s"Connection $connection is read-only")
+            ConnectionHealth.Unhealthy
+          case util.Success(Right(false)) =>
+            logger.trace(s"Connection $connection is not read-only")
+            ConnectionHealth.Healthy
+          case util.Success(Left(err)) =>
+            logger.debug(s"Failed to check if connection $connection is read-only: $err")
+            ConnectionHealth.Indeterminate
+          case Failure(_: TimeoutException) =>
+            logger.debug(s"Read-only check for connection $connection timed out")
+            ConnectionHealth.Indeterminate
+          case Failure(err) =>
+            logger.debug(s"Read-only check for connection $connection failed", err)
+            ConnectionHealth.Indeterminate
+        }
       } else {
         logger.info(s"Connection $connection is NOT valid")
-        false
+        ConnectionHealth.Unhealthy
       }
     } else {
       logger.trace(s"Skip connection $connection check because the connection is in use")
-      true
+      ConnectionHealth.Healthy
     }
 
   private[resource] def awaitConnection(
@@ -830,9 +893,9 @@ object DbLockedConnection {
               newConn,
               checkReadOnly,
               connectionConfig.connectionTimeout.toInternal,
-              timeouts,
+              connectionConfig.healthCheckTimeout,
               tracedLogger,
-            ), {
+            ).isValidOptimistically, {
               // Attempt to close the new invalid connection
               newConn.closeUnderlying(Level.DEBUG)(errorLoggingContext)
               "New connection was not valid"

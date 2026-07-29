@@ -5,6 +5,7 @@ package com.digitalasset.canton.tea.projection
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.Traced
 import com.typesafe.config.{Config, ConfigFactory}
@@ -17,6 +18,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
@@ -251,6 +253,47 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
             // Every event is applied exactly once.
             eventsOf(backend, alice, t1) should have size 4
           } finally stopProjection(testKit, restarted)
+      }
+
+      // Intended to verify the RestartWithBackoffSource rule in rewrite-appender.xml
+      "log at info level" in {
+
+        // Only run with DB tests
+        if (offsetsArePersisted) {
+
+          withProjection { (testKit, backend) =>
+            val serviceName = "Ledger API offset dispatcher"
+            val thrown = new AtomicInteger(0)
+
+            val t1 = clock.now
+            val events = Seq(
+              projectionEvent(alice, 1, offset = 1L, t1)
+            )
+
+            val errorSource: Option[Long] => Source[Traced[ProjectionEvent], NotUsed] = o => {
+              recordingSourceFactory(events)(o).map { event =>
+                thrown.getAndIncrement() match {
+                  case 0 =>
+                    throw CommonErrors.ServiceNotRunning
+                      .Reject(serviceName)(errorLoggingContext)
+                      .asGrpcError
+                  case _ =>
+                    event
+                }
+              }
+            }
+
+            loggerFactory.assertLoggedWarningsAndErrorsSeq(
+              {
+                val ref = spawnProjection(testKit, backend, errorSource)
+                try {
+                  eventually()(thrown.get() shouldBe 2)
+                } finally stopProjection(testKit, ref)
+              },
+              _ shouldBe empty,
+            )
+          }
+        }
       }
     }
   }

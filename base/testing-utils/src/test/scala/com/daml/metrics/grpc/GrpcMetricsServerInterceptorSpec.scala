@@ -20,6 +20,7 @@ import com.daml.testing.utils.{
   TestResourceContext,
   TestingServerInterceptors,
 }
+import com.digitalasset.canton.scalatest.DefaultCantonUnitTestPatience
 import com.google.protobuf.ByteString
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AsyncFlatSpec
@@ -31,7 +32,8 @@ class GrpcMetricsServerInterceptorSpec
     with PekkoBeforeAndAfterAll
     with TestResourceContext
     with MetricValues
-    with Eventually {
+    with Eventually
+    with DefaultCantonUnitTestPatience {
 
   private val labelsForSimpleRequest = MetricsContext(
     Map(

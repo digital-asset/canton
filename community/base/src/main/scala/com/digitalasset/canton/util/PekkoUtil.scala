@@ -66,6 +66,8 @@ import org.apache.pekko.stream.{
   Outlet,
   QueueCompletionResult,
   QueueOfferResult,
+  SourceShape,
+  StreamDetachedException,
   Supervision,
   UniqueKillSwitch,
 }
@@ -73,6 +75,7 @@ import org.apache.pekko.{Done, NotUsed}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.{Timer, TimerTask}
+import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
@@ -1864,5 +1867,238 @@ object PekkoUtil extends HasLoggerName {
   class KillSwitchFlagCloseable(flagClosable: FlagCloseable) extends KillSwitch {
     override def shutdown(): Unit = flagClosable.close()
     override def abort(ex: Throwable): Unit = flagClosable.close()
+  }
+
+  def stashSource[T]: Source[T, StashSource[T]] = Source.fromGraph(new StashSourceStage[T]())
+
+  /** Similar to `Source.queue(1)`, but with drop-head (keep latest) semantics.
+    *
+    * The implementation follows the same logic as
+    * `org.apache.pekko.stream.impl.BoundedSourceQueueStage`, except that the `stash` plays the role
+    * of the `queue`. In fact, we could implement a `Queue`-like interface for the stash and keep
+    * the exact same implementation as `org.apache.pekko.stream.impl.BoundedSourceQueueStage`. Alas,
+    * the Pekko implementation is not parametric in the queue and so we copy everything over here.
+    */
+  private final class StashSourceStage[T]
+      extends GraphStageWithMaterializedValue[SourceShape[T], StashSource[T]] {
+    import StashSourceStage.*
+
+    private val out: Outlet[T] = Outlet[T]("StashSource.out")
+    override val shape: SourceShape[T] = SourceShape(out)
+
+    override def createLogicAndMaterializedValue(
+        inheritedAttributes: Attributes
+    ): (GraphStageLogic, StashSource[T]) = {
+
+      val state = new AtomicReference[State](Running)
+      val stash = new AtomicReference[Option[T]](None)
+
+      object Logic extends GraphStageLogic(shape) with OutHandler {
+
+        setHandler(out, this)
+        val callback = getAsyncCallback[Unit] { _ =>
+          clearNeedsActivation().discard
+          run()
+        }
+
+        override def onPull(): Unit = run()
+
+        override def onDownstreamFinish(cause: Throwable): Unit = {
+          setCompleted(Completed(StashOfferResult.Failure(cause))).discard
+          super.onDownstreamFinish(cause)
+        }
+
+        override def postStop(): Unit = {
+          // If the ActorSystem or Materializer is terminated abruptly, `postStop` may execute
+          // without previously closing the ports (fail, complete, onDownstreamFinish).
+          // So let's clean up.
+          stash.set(None)
+          val exception = new StreamDetachedException()
+          setCompleted(Completed(StashOfferResult.Failure(exception))).discard
+        }
+
+        /** Main loop of the stash. We do two volatile reads for the fast path of pushing elements
+          * from the queue to the stream: one for the state and one to poll the stash. This leads to
+          * a somewhat simple design that will quickly pick up failures from the stash interface.
+          *
+          * An even more optimized version could use a fast path in onPull to avoid reading the
+          * state for every element.
+          */
+        @tailrec
+        def run(): Unit =
+          state.get() match {
+            case Running =>
+              if (isAvailable(out)) {
+                val next = stash.getAndSet(None)
+                next match {
+                  case None =>
+                    // stash empty
+                    if (!setNeedsActivation())
+                      run() // didn't manage to set because stream has been completed in the meantime
+                    else if (stash.get.isDefined) /* && setNeedsActivation was true */ {
+                      // tricky case: new element might have been added in the meantime without callback being sent because
+                      // NeedsActivation had not yet been set
+
+                      clearNeedsActivation().discard
+                      run()
+                    } // else stash is empty && setNeedsActivation was true: waiting for next offer
+                  case Some(t) =>
+                    push(out, t) // and then: wait for pull
+                }
+              } // else: wait for pull
+
+            case Completed(StashOfferResult.StashClosed) =>
+              stash.get match {
+                case None => completeStage()
+                case Some(stashed) =>
+                  if (isAvailable(out)) {
+                    push(out, stashed)
+                    completeStage()
+                  }
+                // else: wait for pull to drain remaining elements
+              }
+            case Completed(StashOfferResult.Failure(ex)) => failStage(ex)
+            case NeedsActivation => throw new IllegalStateException // needs to be cleared before
+          }
+      }
+
+      object Mat extends StashSource[T] {
+        final override def offer(elem: T): StashOfferResult[T] = state.get() match {
+          case Running | NeedsActivation =>
+            val previous = stash.getAndSet(Some(elem))
+            // need to query state again because stage might have switched from Running -> NeedsActivation only after
+            // the last state.get but before stash.set.
+            if (state.get() == NeedsActivation)
+              // if this thread wins the race to toggle the flag, schedule async callback here
+              if (clearNeedsActivation())
+                Logic.callback.invoke(())
+
+            previous match {
+              case None => StashOfferResult.Stashed
+              case Some(prev) => StashOfferResult.Replaced(prev)
+            }
+
+          case Completed(result) => result
+        }
+
+        final override def complete(): Unit = {
+          assertNotCompleted()
+          if (setCompleted(Completed(StashOfferResult.StashClosed)))
+            Logic.callback.invoke(
+              ()
+            ) // if this thread won the completion race also schedule an async callback
+        }
+
+        final override def isCompleted: Boolean = state.get() match {
+          case _: Completed => true
+          case _ => false
+        }
+
+        final override def fail(ex: Throwable): Unit = {
+          assertNotCompleted()
+          if (setCompleted(Completed(StashOfferResult.Failure(ex))))
+            Logic.callback.invoke(
+              ()
+            ) // if this thread won the completion race also schedule an async callback
+        }
+
+        final def assertNotCompleted(): Unit =
+          if (isCompleted)
+            throw new IllegalStateException("The stash has already been completed.")
+
+        final override def isEmpty: Boolean = stash.get().isEmpty
+      }
+
+      // some state transition helpers
+      @tailrec
+      def setCompleted(completed: Completed): Boolean =
+        state.get() match {
+          case _: Completed => false
+          case x =>
+            if (!state.compareAndSet(x, completed)) setCompleted(completed)
+            else true
+        }
+
+      @tailrec
+      def clearNeedsActivation(): Boolean =
+        state.get() match {
+          case NeedsActivation =>
+            if (!state.compareAndSet(NeedsActivation, Running)) clearNeedsActivation()
+            else true
+
+          case _ => false
+        }
+      @tailrec
+      def setNeedsActivation(): Boolean =
+        state.get() match {
+          case Running =>
+            if (!state.compareAndSet(Running, NeedsActivation)) setNeedsActivation()
+            else true
+
+          case _ => false
+        }
+
+      (Logic, Mat)
+    }
+  }
+
+  private object StashSourceStage {
+    sealed trait State extends Product with Serializable
+    case object NeedsActivation extends State
+    case object Running extends State
+    final case class Completed(result: StashCompletionResult) extends State
+  }
+
+  trait StashSource[T] {
+
+    /** Returns a [[StashOfferResult]] that notifies the caller if the element could be stashed or
+      * not, or the completion status of the stash.
+      *
+      * A result of [[StashOfferResult.Stashed]] does not guarantee that an element also has been or
+      * will be processed by downstream.
+      */
+    def offer(elem: T): StashOfferResult[T]
+
+    /** Completes the stream normally.
+      */
+    def complete(): Unit
+
+    /** Returns true if the stream has been completed, either normally or with failure.
+      */
+    def isCompleted: Boolean
+
+    /** Completes the stream with a failure.
+      */
+    def fail(ex: Throwable): Unit
+
+    /** Returns whether the stash is empty.
+      */
+    def isEmpty: Boolean
+  }
+
+  /** Describes the result of offering an element to a [[StashSource]].
+    */
+  sealed trait StashOfferResult[+T] extends Product with Serializable
+
+  /** The completion result of a [[StashSource]]. */
+  sealed trait StashCompletionResult extends StashOfferResult[Nothing]
+
+  object StashOfferResult {
+
+    /** The element has been added to the empty stash. The element has been or will be passed
+      * downstream unless another offer replaces it or the stash is completed before that.
+      */
+    case object Stashed extends StashOfferResult[Nothing]
+
+    /** The element has been added to the stash that previously contained the given value. The
+      * `previous` value will not be passed downstream any more.
+      */
+    final case class Replaced[+T](previous: T) extends StashOfferResult[T]
+
+    /** The stash is failed. */
+    final case class Failure(cause: Throwable) extends StashCompletionResult
+
+    /** The stash has been completed normally. */
+    case object StashClosed extends StashCompletionResult
   }
 }

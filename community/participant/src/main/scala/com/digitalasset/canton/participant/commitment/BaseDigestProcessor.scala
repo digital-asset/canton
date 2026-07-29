@@ -3,40 +3,197 @@
 
 package com.digitalasset.canton.participant.commitment
 
+import cats.syntax.functor.*
 import cats.{Applicative, Functor}
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
+  Initial,
+  Started,
+  Starting,
+  Stopped,
+  Stopping,
+}
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.PekkoUtil.syntax.pekkoUtilSyntaxForFlowOpsFlow
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
+import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ReassignmentCounter}
 import com.google.common.annotations.VisibleForTesting
-import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.Flow
+import org.apache.pekko.stream.KillSwitch
 
-import scala.concurrent.ExecutionContext
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success, Try}
 
 trait BaseDigestProcessor extends NamedLogging {
-  import BaseDigestProcessor.*
 
-  implicit val executionContext: ExecutionContext
+  implicit protected val executionContext: ExecutionContext
 
-  // TODO(#33422) - decide later if we want to make this more general or not
-  //  so we can use here eg. a simple TestDigestAccumulator
-  protected def digestAccumulator: SequentialDigestAccumulator
+  protected def timeouts: ProcessingTimeout
 
-  protected def inMemoryDigestAccumulator(implicit
+  def synchronizerId: SynchronizerId
+
+  def isReinitializingProcessor: Boolean
+
+  protected def startPipelineInternal()(implicit
       traceContext: TraceContext
-  ): Flow[DigestAccumulator_Input, DigestAccumulator_Output, NotUsed] =
-    Flow[DigestAccumulator_Input]
-      .mapAsyncAndDrainUS(1)(digestAccumulator.process)
-      .collect { case Some(checkpointWritten) => checkpointWritten }
+  ): FutureUnlessShutdown[(KillSwitch, Future[Unit])]
 
-  def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  private val state: AtomicReference[DigestProcessorState] = new AtomicReference(
+    Initial
+  )
+
+  def isStartingOrStarted: Boolean = state.get() match {
+    case _: Starting | _: Started => true
+    case Initial | _: Stopping | _: Stopped => false
+  }
+
+  @VisibleForTesting
+  private[commitment] def stateInternal: DigestProcessorState = state.get()
+
+  /** @return
+    *   a future that completes once the processing pipeline has started up. If the processor hasn't
+    *   been started yet, or it has been
+    *   [[com.digitalasset.canton.participant.commitment.DigestProcessorState.Stopped]], or is in
+    *   the process of
+    *   [[com.digitalasset.canton.participant.commitment.DigestProcessorState.Stopping]], the
+    *   returned future is completed.
+    */
+  final def startingFuture: FutureUnlessShutdown[Unit] = state.get() match {
+    case Initial => FutureUnlessShutdown.unit
+    case Starting(startingComplete) => startingComplete.void
+    case Started(_, _) => FutureUnlessShutdown.unit
+    case Stopping(_) => FutureUnlessShutdown.unit
+    case Stopped(_) => FutureUnlessShutdown.unit
+  }
+
+  /** @return
+    *   a future that completes once the processing pipeline has completed. If the processor hasn't
+    *   been started yet, the returned future is completed. If the processor has been stopped
+    *   already, the returned future reflects the stop reason, i.e.
+    *   [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown.unit]] for an ordinary shutdown, or
+    *   a failed [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown]] if the processor was
+    *   stopped with a failure.
+    */
+  final def completionFuture: FutureUnlessShutdown[Unit] =
+    state.get() match {
+      case Initial => FutureUnlessShutdown.unit
+      case Starting(startingComplete) => startingComplete.flatMap(_.completionFuture)
+      case Started(_, completionFuture) => completionFuture
+      case Stopping(stoppingComplete) => stoppingComplete
+      case Stopped(reason) => FutureUnlessShutdown.fromTry(reason)
+    }
+
+  final def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    def runPipeline(
+        starting: Starting,
+        startingCompleted: PromiseUnlessShutdown[Started],
+    ): FutureUnlessShutdown[Unit] =
+      startPipelineInternal().thereafter {
+        case Success(Outcome((ks, pipelineCompleted))) =>
+          val completionPromise = PromiseUnlessShutdown.unsupervised[Unit]()
+          val startedState = Started(ks, completionPromise.futureUS)
+
+          if (state.compareAndSet(starting, startedState)) {
+            // If the state was successfully set to `Started`,
+            // try to update the state to `Stopped` upon completion of the pipeline.
+            pipelineCompleted.onComplete { completionResult =>
+              // The CAS is used to only update the state if the processor hasn't been explicitly stopped in the meantime.
+              state.compareAndSet(startedState, Stopped(completionResult)).discard
+            }
+          }
+
+          // `completionPromise` must be completed regardless of whether the state update was successful or not,
+          // because `completionFuture` might have been called between setting the state to `Starting` and a call to `stop`.
+          completionPromise.completeWithUS(FutureUnlessShutdown.outcomeF(pipelineCompleted)).discard
+
+          // Similarly, `startingCompleted` must be completed with the `startedState` regardless of whether the state update was successful or not,
+          // because `startingFuture` might have been called between setting the state to `Starting` and a call to `stop`.
+          startingCompleted.outcome_(startedState)
+
+        case Success(AbortedDueToShutdown) =>
+          // if `startupPipelineInternal` was aborted due to shutdown,
+          // try to set the processor's state to `Stopped`, since it hasn't started up successfully
+          state.compareAndSet(starting, Stopped(TryUtil.unit)).discard
+          startingCompleted.shutdown_()
+
+        case Failure(ex) =>
+          // startup of the processing pipeline failed, try to set the state to stopped
+          state.compareAndSet(starting, Stopped(Failure(ex))).discard
+          startingCompleted.failure(ex)
+      }.void
+
+    val startedPromise = PromiseUnlessShutdown.unsupervised[Started]()
+    val starting = Starting(startedPromise.futureUS)
+    if (state.compareAndSet(Initial, starting)) {
+      runPipeline(starting, startedPromise)
+    } else {
+      logger.info("Digest processor has already been started before.")
+      FutureUnlessShutdown.unit
+    }
+  }
+
+  final def stop(): FutureUnlessShutdown[Unit] = {
+    val stoppingCompletePromise = PromiseUnlessShutdown.unsupervised[Unit]()
+    val successfulStop = Stopped(TryUtil.unit)
+    val stoppingState = Stopping(stoppingCompletePromise.futureUS)
+
+    val prevState = state.getAndUpdate {
+      case Initial => successfulStop
+      case Starting(_) | Started(_, _) => stoppingState
+      case stoppingInProgress @ (Stopping(_) | Stopped(_)) => stoppingInProgress
+    }
+
+    prevState match {
+      case Initial =>
+        // nothing to do, the digest processor hasn't even been started yet, and it is considered stopped.
+        FutureUnlessShutdown.unit
+      case Starting(startingComplete) =>
+        stoppingCompletePromise
+          .completeWithUS(
+            startingComplete
+              .flatMap { case Started(ks, completionFuture) =>
+                ks.shutdown()
+                completionFuture
+              }
+              .thereafter {
+                case Success(_) => state.set(successfulStop)
+                case Failure(ex) => state.set(Stopped(Failure(ex)))
+              }
+          )
+          .futureUS
+      case Started(killSwitch, completionFuture) =>
+        killSwitch.shutdown()
+        stoppingCompletePromise
+          .completeWithUS(
+            completionFuture.thereafter {
+              case Success(_) =>
+                // a successful completion of the pipeline or AbortedDueToShutdown are both
+                // considered safe states and lead to a successful `Stopped` state.
+                state.set(successfulStop)
+              case Failure(ex) => state.set(Stopped(Failure(ex)))
+            }
+          )
+          .futureUS
+
+      case Stopping(stoppingComplete) =>
+        // nothing to do, the processor is already being stopped
+        stoppingComplete
+      case Stopped(reason) =>
+        // nothing to do, the processor was already stopped before
+        FutureUnlessShutdown.fromTry(reason)
+    }
+  }
 
   /** Returns a mapping between parties and the participants to which they are fully onboarded (i.e.
     * onboarding flag is false).
@@ -64,6 +221,20 @@ trait BaseDigestProcessor extends NamedLogging {
           .toMap
         onboardingCompleted
       }
+
+  override def toString: String = s"${getClass.getSimpleName}($synchronizerId)"
+}
+
+sealed trait DigestProcessorState extends Product with Serializable
+object DigestProcessorState {
+  case object Initial extends DigestProcessorState
+  final case class Starting(startingComplete: FutureUnlessShutdown[Started])
+      extends DigestProcessorState
+  final case class Started(killSwitch: KillSwitch, completionFuture: FutureUnlessShutdown[Unit])
+      extends DigestProcessorState
+  final case class Stopping(stoppingComplete: FutureUnlessShutdown[Unit])
+      extends DigestProcessorState
+  final case class Stopped(reason: Try[Unit]) extends DigestProcessorState
 }
 
 // TODO(#33422) - clean up and move here only the definitions an types that is used by all children
@@ -100,39 +271,37 @@ object BaseDigestProcessor {
     */
   sealed trait CheckpointFenceOr[+A] extends Product with Serializable {
     def map[B](f: A => B): CheckpointFenceOr[B] = this match {
-      case CheckpointFence => CheckpointFence
+      case fence: CheckpointFence => fence
       case NotCheckpointFence(topologySnapshot, value) =>
         NotCheckpointFence(topologySnapshot, f(value))
     }
 
     def getOption: Option[A] = this match {
-      case CheckpointFence => None
+      case _: CheckpointFence => None
       case NotCheckpointFence(_, x) => Some(x)
     }
 
     def traverse[F[_], B](f: A => F[B])(implicit F: Applicative[F]): F[CheckpointFenceOr[B]] =
       this match {
-        case CheckpointFence => F.pure(CheckpointFence)
+        case fence: CheckpointFence => F.pure(fence)
         case NotCheckpointFence(topologySnapshot, value) =>
           F.map(f(value))(b => NotCheckpointFence(topologySnapshot, b))
       }
 
     @VisibleForTesting
     private[commitment] def tryValue: A = this match {
-      case CheckpointFence => throw new NoSuchElementException("CheckpointFence")
+      case _: CheckpointFence => throw new NoSuchElementException("CheckpointFence")
       case NotCheckpointFence(_, value) => value
     }
 
     @VisibleForTesting
-    private[commitment] def toOption: Option[A] =
-      this match {
-        case CheckpointFence => None
-        case NotCheckpointFence(_, value) => Some(value)
-      }
+    private[commitment] def toEither: Either[CheckpointType, A] = this match {
+      case CheckpointFence(tpe) => Left(tpe)
+      case NotCheckpointFence(_, value) => Right(value)
+    }
   }
-  // TODO(#34302): add a checkpoint discriminator for the specific type of checkpoint that is being emitted
-  case object CheckpointFence extends CheckpointFenceOr[Nothing]
-  type CheckpointFence = CheckpointFence.type
+  final case class CheckpointFence(checkpointType: CheckpointType)
+      extends CheckpointFenceOr[Nothing]
 
   final case class NotCheckpointFence[+A](topologySnapshot: TopologySnapshot, value: A)
       extends CheckpointFenceOr[A]
@@ -195,11 +364,15 @@ object BaseDigestProcessor {
   /** When a checkpoint has been written, meaning that all digests up to record time and offset
     * (both inclusive) have been persisted.
     */
-  final case class CheckpointWritten(recordTimeInclusive: CantonTimestamp, offsetInclusive: Offset)
+  final case class CheckpointWritten(
+      recordTimeInclusive: CantonTimestamp,
+      offsetInclusive: Offset,
+      checkpointType: CheckpointType,
+  )
 
   object CheckpointWritten {
-    def apply(timepoint: Timepoint): CheckpointWritten =
-      CheckpointWritten(timepoint.recordTime, timepoint.offset)
+    def apply(timepoint: Timepoint, tpe: CheckpointType): CheckpointWritten =
+      CheckpointWritten(timepoint.recordTime, timepoint.offset, tpe)
   }
 
   /** Tracks changes to the hosting relationship per party.
@@ -247,4 +420,5 @@ object BaseDigestProcessor {
   object TopologyChangeTracker {
     val empty: TopologyChangeTracker = new TopologyChangeTracker(Map.empty)
   }
+
 }

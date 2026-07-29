@@ -1121,7 +1121,7 @@ class TestingOwnerWithKeys(
     mkRemove[TopologyMapping](
       tx.mapping,
       NonEmpty(Set, SigningKeys.key1),
-      tx.serial.increment,
+      tx.serial.increment.getOrElse(throw new IllegalStateException("Serial at Int.MaxValue")),
     )
 
   def mkRemove[M <: TopologyMapping: ClassTag](

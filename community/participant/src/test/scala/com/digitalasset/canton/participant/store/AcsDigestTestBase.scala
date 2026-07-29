@@ -3,50 +3,33 @@
 
 package com.digitalasset.canton.participant.store
 
-import com.daml.crypto.MessageDigestPrototype
-import com.digitalasset.canton.config.RequireTypes.PositiveLong
-import com.digitalasset.canton.crypto.LtHash16Blake3
+import cats.Eval
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  HashedDigest,
+  Checkpoint,
   InternedParticipantId,
   LocalPartyFirst,
   PartyAndOrder,
-  RawDigest,
   RemotePartyFirst,
 }
-import com.digitalasset.canton.platform.store.interning.MockStringInterning
+import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
+import com.digitalasset.canton.platform.store.interning.{MockStringInterning, StringInterning}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{BaseTest, InternedPartyId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdString
-import com.google.protobuf.ByteString
 
-import scala.util.ChainingSyntax
+import scala.concurrent.ExecutionContext
 
-trait AcsDigestTestBase extends ChainingSyntax {
+trait AcsDigestTestBase extends TestDigestUtils {
   this: BaseTest =>
 
-  protected val rawDigestByteSize = 2048
-  protected val sha256Digest = MessageDigestPrototype.Sha256.newDigest
   protected val mockStringInterning = new MockStringInterning()
 
-  protected def genRawDigest(fill: Byte): RawDigest =
-    LtHash16Blake3
-      .tryCreate(ByteString.copyFrom(Array.fill[Byte](rawDigestByteSize)(fill)))
-      .getByteString
-
-  protected def genHashedDigest(rawDigest: RawDigest): HashedDigest =
-    sha256Digest
-      .digest(rawDigest.toByteArray)
-      .pipe(ByteString.copyFrom)
-
-  protected def timestamp(epochSeconds: PositiveLong): CantonTimestamp =
-    CantonTimestamp.ofEpochSecond(epochSeconds.unwrap)
-
-  protected def offsetTime(epochSeconds: PositiveLong): (Offset, CantonTimestamp) =
-    (Offset.tryFromLong(epochSeconds.unwrap), timestamp(epochSeconds))
+  protected def checkpoint(offsetTime: (Offset, CantonTimestamp)): Checkpoint =
+    Checkpoint(offsetTime._1, offsetTime._2, ReconciliationIntervalBoundary)
 
   protected def localOrderParty(partyIndex: Int): PartyAndOrder[InternedPartyId] =
     PartyAndOrder[InternedPartyId](internedPartyId(partyIndex), order = LocalPartyFirst)
@@ -68,9 +51,6 @@ trait AcsDigestTestBase extends ChainingSyntax {
     IndexedSynchronizer.tryCreate(synchronizerId, synchronizerIndex)
   }
 
-  protected def genParticipantDigest(rawDigest: RawDigest): (RawDigest, HashedDigest) =
-    (rawDigest, genHashedDigest(rawDigest))
-
   protected def internedPartyId(partyInt: Int): InternedPartyId =
     mockStringInterning.party.internalize(LfPartyId.assertFromString(s"testParty::$partyInt"))
 
@@ -81,4 +61,9 @@ trait AcsDigestTestBase extends ChainingSyntax {
 
   protected def externalizeParticipantId(participantId: InternedParticipantId): Ref.ParticipantId =
     mockStringInterning.participantId.externalize(participantId)
+
+  def mkInMemoryDigestStore(
+      stringInterning: StringInterning = mockStringInterning
+  )(implicit ec: ExecutionContext): InMemoryAcsDigestStore =
+    InMemoryAcsDigestStore.create(Eval.now(stringInterning), loggerFactory)
 }

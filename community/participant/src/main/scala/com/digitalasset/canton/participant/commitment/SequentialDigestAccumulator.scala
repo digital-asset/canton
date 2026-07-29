@@ -4,8 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.syntax.foldable.*
-import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
-import com.digitalasset.canton.crypto.{HashOps, HashPurpose, LtHash16Blake3}
+import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -17,7 +16,11 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
+import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
+import com.google.common.annotations.VisibleForTesting
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Flow
 
 import scala.concurrent.ExecutionContext
 
@@ -32,22 +35,32 @@ class SequentialDigestAccumulator(
     thisLfParticipant: LedgerParticipantId,
     acsDigestStore: AcsDigestStore,
     stringInterning: StringInterning,
-    hashOps: HashOps,
     tracingMode: AcsDigestTracingMode,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends NamedLogging {
+    extends DigestAccumulator
+    with NamedLogging {
 
+  override def flow()(implicit traceContext: TraceContext): Flow[
+    DigestAccumulator_Input,
+    DigestAccumulator_Output,
+    NotUsed,
+  ] =
+    Flow[DigestAccumulator_Input]
+      .mapAsyncAndDrainUS(1)(process)
+      .collect { case Some(checkpointWritten) => checkpointWritten }
+
+  @VisibleForTesting
   def process(
       input: ProcessingContext[CheckpointFenceOr[Classification]]
   ): FutureUnlessShutdown[Option[CheckpointWritten]] = {
     implicit val traceContext: TraceContext = input.traceContext
     // for now use the offset as the tiebreaker
     input match {
-      case ProcessingContext(_, CheckpointFence) =>
+      case ProcessingContext(_, CheckpointFence(tpe)) =>
         acsDigestStore
-          .insertCheckpointTime(input.offset, input.recordTime)
-          .map(_ => Some(CheckpointWritten(input.timepoint)))
+          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
+          .map(_ => Some(CheckpointWritten(input.timepoint, tpe)))
 
       case ProcessingContext(_, NotCheckpointFence(_, classification)) =>
         classification match {
@@ -66,9 +79,6 @@ class SequentialDigestAccumulator(
                     partyAndOrder.map(stringInterning.party.internalize),
                     digestDelta,
                     operation,
-                  )(
-                    LtHash16Blake3.tryCreate,
-                    _.getByteString,
                   )
 
                 case DigestDelta.Participant(participant, digestDelta, operation) =>
@@ -77,18 +87,7 @@ class SequentialDigestAccumulator(
                     stringInterning.participantId.internalize(participant),
                     digestDelta,
                     operation,
-                  )(
-                    { case (digest, _hash) => LtHash16Blake3.tryCreate(digest) },
-                    digest =>
-                      (
-                        digest.getByteString,
-                        // calculate the hash of the digest
-                        hashOps
-                          .digest(HashPurpose.HashedAcsCommitment, digest.getByteString, Sha256)
-                          .getCryptographicEvidence,
-                      ),
                   )
-
               }
               .map(_ => None)
 
@@ -116,14 +115,11 @@ class SequentialDigestAccumulator(
 
   /** Generic logic for updating the digest for a party or participant.
     */
-  private def updateDigest[Key, V](journal: DigestJournal[Key, V])(
+  private def updateDigest[Key](journal: DigestJournal[Key])(
       timepoint: Timepoint,
       key: Key,
       update: TracedLtHash16Blake3,
       operation: DigestOperation,
-  )(
-      toLtHash16Blake3: V => LtHash16Blake3,
-      toV: LtHash16Blake3 => V,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val offset = timepoint.offset
     journal
@@ -147,7 +143,7 @@ class SequentialDigestAccumulator(
                 ) digest.digestUpdate.trace
                 // otherwise, clear the previous tracing data for the new digest
                 else None
-              TracedLtHash16Blake3(toLtHash16Blake3(rawDigest), trace) -> replacesOffset
+              TracedLtHash16Blake3(LtHash16Blake3.tryCreate(rawDigest), trace) -> replacesOffset
             }
             .getOrElse(TracedLtHash16Blake3.empty -> replacesOffset)
         }.unzip
@@ -170,7 +166,7 @@ class SequentialDigestAccumulator(
                 AcsDigest(
                   key,
                   timepoint,
-                  Some(toV(updatedDigest.digest)),
+                  Some(updatedDigest.digest.getByteString),
                   updatedDigest.trace,
                 ),
                 replacesOffset = existingOffsetO.flatten,
@@ -216,16 +212,6 @@ class SequentialDigestAccumulator(
             if (isAddition) tracedPartyDigest.asBulkAddition(s"onboarded $party")
             else tracedPartyDigest.asBulkRemoval(s"offboarded $party"),
           if (isAddition) DigestOperation.Add else DigestOperation.Remove,
-        )(
-          { case (digest, _hash) => LtHash16Blake3.tryCreate(digest) },
-          digest =>
-            (
-              digest.getByteString,
-              // calculate the hash of the digest
-              hashOps
-                .digest(HashPurpose.HashedAcsCommitment, digest.getByteString, Sha256)
-                .getCryptographicEvidence,
-            ),
         )
       }
     } yield ()

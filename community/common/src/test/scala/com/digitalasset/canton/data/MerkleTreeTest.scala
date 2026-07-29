@@ -215,7 +215,7 @@ object MerkleTreeTest {
       ProtoVersion(30) -> VersionedProtoCodec
         .raw[Id, VersionedAbstractLeaf, Unit, VersionedAbstractLeaf, this.type](
           ProtocolVersion.v34,
-          (_, _, bytes) => fromProto(30)(bytes),
+          (_, _, _, bytes) => fromProto(30)(bytes),
           _.getCryptographicEvidence,
         )
     )

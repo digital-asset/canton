@@ -484,7 +484,7 @@ class UpgradeTest
       Set(alice, bob),
       MachineLogger(),
       interpretationConfig = InterpretationConfig.Default.copy(
-        contractStateMode = ContractStateMachine.Mode.NUCK
+        contractStateMode = ContractStateMachine.Mode.Key
       ),
     )
 
@@ -530,7 +530,7 @@ class UpgradeTest
       MachineLogger(),
       packageResolution = packageResolution,
       interpretationConfig =
-        InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.NUCK),
+        InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.Key),
     )
   }
 

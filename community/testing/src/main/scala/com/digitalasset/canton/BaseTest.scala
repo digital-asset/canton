@@ -23,6 +23,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
 }
+import com.digitalasset.canton.scalatest.{ScalaFuturesWithPatience, ScalatestEssentials}
 import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.protocol.DecompressionPolicy
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
@@ -42,18 +43,18 @@ import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.metrics.SdkMeterProvider
 import io.opentelemetry.sdk.trace.SdkTracerProvider
-import org.mockito.{ArgumentMatchers, ArgumentMatchersSugar}
+import org.mockito.ArgumentMatchers
 import org.scalacheck.Test
 import org.scalactic.source.Position
 import org.scalactic.{Prettifier, source}
-import org.scalatest.concurrent.{Eventually, PatienceConfiguration, ScalaFutures}
+import org.scalatest.*
+import org.scalatest.concurrent.{Eventually, PatienceConfiguration}
 import org.scalatest.exceptions.TestFailedException
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.matchers.should.Matchers.*
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.time.{Millis, Seconds, Span}
 import org.scalatest.wordspec.AnyWordSpecLike
-import org.scalatest.{Assertion, *}
 import org.scalatestplus.scalacheck.CheckerAsserting
 import org.slf4j.bridge.SLF4JBridgeHandler
 import org.typelevel.discipline.Laws
@@ -66,23 +67,9 @@ import scala.reflect.ClassTag
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
-trait ScalaFuturesWithPatience extends ScalaFutures {
-
-  /** Increase default timeout when evaluating futures.
-    */
-  implicit val defaultPatience: PatienceConfig =
-    PatienceConfig(timeout = Span(5, Seconds), interval = Span(20, Millis))
-}
-
 /** Tests' essentials disaggregated from scalatest's traits.
   */
-trait TestEssentials
-    extends ScalaFuturesWithPatience
-    // There are many MockitoSugar implementations, but only this one is not deprecated and
-    // supports when, verify, ...
-    with org.mockito.MockitoSugar
-    with ArgumentMatchersSugar
-    with NamedLogging {
+trait TestEssentials extends ScalatestEssentials with NamedLogging {
 
   protected def defaultMaxBytesToDecompress: MaxBytesToDecompress =
     BaseTest.defaultMaxBytesToDecompress
@@ -482,7 +469,7 @@ trait BaseTest
   ): T = BaseTest.always(durationOfSuccess, pollIntervalMs)(testCode)
 
   def eventuallyForever[T](
-      timeUntilSuccess: FiniteDuration = 2.seconds,
+      timeUntilSuccess: FiniteDuration = 20.seconds,
       durationOfSuccess: FiniteDuration = 2.seconds,
       pollIntervalMs: Long = 10,
   )(testCode: => T): T =

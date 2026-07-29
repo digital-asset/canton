@@ -8,24 +8,28 @@ bootstrap.synchronizer(
   mediators = Seq(mediator1),
   synchronizerOwners = Seq(sequencer1, mediator1),
   synchronizerThreshold = PositiveInt.two,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
+  staticSynchronizerParameters =
+    StaticSynchronizerParameters.defaults(ProtocolVersion.forSynchronizer),
 )
 
 // connect participants to synchronizer
-Seq(participant1, participant2).foreach(_.synchronizers.connect_local(sequencer1, alias = "lostSynchronizer"))
+Seq(participant1, participant2).foreach(
+  _.synchronizers.connect_local(sequencer1, alias = "lostSynchronizer")
+)
 
 // upload the Daml model to all participants
-val darPath = Option(System.getProperty("canton-examples.dar-path")).getOrElse("dars/CantonExamples.dar")
+val darPath =
+  Option(System.getProperty("canton-examples.dar-path")).getOrElse("dars/CantonExamples.dar")
 participants.all.dars.upload(darPath)
-
 
 // setup parties
 val Alice = participant1.parties.enable("Alice")
 val Bob = participant2.parties.enable("Bob")
 
-
 utils.retry_until_true {
-    participant1.synchronizers.active("lostSynchronizer") && participant2.synchronizers.active("lostSynchronizer")
+  participant1.synchronizers.active("lostSynchronizer") && participant2.synchronizers.active(
+    "lostSynchronizer"
+  )
 }
 
 import java.math.{BigDecimal => JavaBigDecimal}
@@ -36,11 +40,15 @@ import com.digitalasset.canton.protocol.ContractIdSyntax._
 import scala.jdk.CollectionConverters._
 
 def createIou(participant: ParticipantReference, payer: PartyId, owner: PartyId, value: Int) =
-  participant.ledger_api.javaapi.commands.submit(Seq(payer), new iou.Iou(payer.toProtoPrimitive,
-                                                                         owner.toProtoPrimitive,
-                                                                         new iou.Amount(JavaBigDecimal.valueOf(value.toLong), "USD"),
-                                                                         List.empty.asJava
-                                                                        ).create.commands.asScala.toSeq)
+  participant.ledger_api.javaapi.commands.submit(
+    Seq(payer),
+    new iou.Iou(
+      payer.toProtoPrimitive,
+      owner.toProtoPrimitive,
+      new iou.Amount(JavaBigDecimal.valueOf(value.toLong), "USD"),
+      List.empty.asJava,
+    ).create.commands.asScala.toSeq,
+  )
 
 Seq(100, 120, 140).foreach { value =>
   createIou(participant1, Alice, Bob, value)

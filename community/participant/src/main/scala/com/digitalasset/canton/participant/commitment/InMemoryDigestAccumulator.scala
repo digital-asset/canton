@@ -3,8 +3,6 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import cats.Eval
-import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -36,6 +34,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
   AcsDigestUpdate,
+  Checkpoint,
   InternedParticipantId,
   LocalPartyFirst,
   PartyAndOrder,
@@ -44,7 +43,6 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   RemotePartyFirst,
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.protocol.messages.Digest
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
@@ -73,14 +71,15 @@ class InMemoryDigestAccumulator(
     thisParticipant: LedgerParticipantId,
     digestStore: AcsDigestStore,
     override protected val loggerFactory: NamedLoggerFactory,
-    stringInterningEval: Eval[StringInterning],
+    stringInterning: StringInterning,
     acsUpdateBatchSize: Int,
     digestLoadParallelism: Int,
     digestStoreParallelism: Int,
     tracingMode: AcsDigestTracingMode,
     enableConsistencyChecks: Boolean,
 )(implicit executionContext: ExecutionContext)
-    extends NamedLogging {
+    extends DigestAccumulator
+    with NamedLogging {
   import InMemoryDigestAccumulator.*
 
   private val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
@@ -162,8 +161,7 @@ class InMemoryDigestAccumulator(
     */
   private def requiredIdentifiers(
       classification: Classification
-  ): Option[immutable.Iterable[DigestIdentifier]] = {
-    val interning = stringInterningEval.value
+  ): Option[immutable.Iterable[DigestIdentifier]] =
     classification match {
       case acsUpdate: AcsUpdate =>
         val stakeholdersToParticipants = acsUpdate.stakeholders
@@ -171,11 +169,11 @@ class InMemoryDigestAccumulator(
           .flatMap { case (_, participants) => participants }
           .toSet[LedgerParticipantId]
           .map { participant =>
-            val internedParticipantId = interning.participantId.internalize(participant)
+            val internedParticipantId = stringInterning.participantId.internalize(participant)
             ParticipantDigestIdentifier(internedParticipantId)
           }
         val stakeholders = stakeholdersToParticipants.flatMap { case (stakeholder, _) =>
-          val internedStakeholder = interning.party.internalize(stakeholder)
+          val internedStakeholder = stringInterning.party.internalize(stakeholder)
           Seq(LocalPartyFirst, RemotePartyFirst).map(
             PartyDigestIdentifier(internedStakeholder, _)
           )
@@ -186,9 +184,9 @@ class InMemoryDigestAccumulator(
       case addedRemoved: PartyHostingChange =>
         val remoteParticipant = addedRemoved.participant
         val participant = ParticipantDigestIdentifier(
-          interning.participantId.internalize(remoteParticipant)
+          stringInterning.participantId.internalize(remoteParticipant)
         )
-        val internedParty = interning.party.internalize(addedRemoved.party)
+        val internedParty = stringInterning.party.internalize(addedRemoved.party)
         val partyOrder =
           if (thisParticipant < remoteParticipant) LocalPartyFirst
           else RemotePartyFirst
@@ -196,7 +194,6 @@ class InMemoryDigestAccumulator(
         val identifiers = Seq(participant, party)
         Some(identifiers)
     }
-  }
 
   private def registerAndLoadIdentifiers(
       identifiers: immutable.Iterable[DigestIdentifier],
@@ -251,10 +248,10 @@ class InMemoryDigestAccumulator(
       {
         case UnlessShutdown.Outcome((partyDigests, participantDigests)) =>
           val updatesAndAccumulatorsLoaded = toBeLoaded.map { case (identifier, accumulator) =>
-            def initializeAccumulator[K, V](
-                digests: Map[K, AcsDigestUpdate[K, V]],
+            def initializeAccumulator[K](
+                digests: Map[K, AcsDigestUpdate[K]],
                 key: K,
-            )(digestOf: V => RawDigest): Unit = {
+            ): Unit = {
               val digestUpdate = digests.getOrElse(
                 key,
                 AcsDigestStore.AcsDigestUpdate(AcsDigestStore.AcsDigest.empty(key, timepoint), None),
@@ -262,7 +259,7 @@ class InMemoryDigestAccumulator(
               val acsDigest = digestUpdate.digestUpdate
               val rawDigest = acsDigest.digestO.map { v =>
                 val snapshotTaken = SnapshotTaken(acsDigest.timepoint, digestUpdate.replacesOffset)
-                digestOf(v) -> snapshotTaken
+                v -> snapshotTaken
               }
               accumulator.initializeAccumulator(
                 rawDigest,
@@ -273,10 +270,10 @@ class InMemoryDigestAccumulator(
 
             identifier match {
               case party: PartyDigestIdentifier =>
-                initializeAccumulator(partyDigests, party.partyAndOrder)(Predef.identity)
+                initializeAccumulator(partyDigests, party.partyAndOrder)
 
               case participant: ParticipantDigestIdentifier =>
-                initializeAccumulator(participantDigests, participant.participantId)(_._1)
+                initializeAccumulator(participantDigests, participant.participantId)
             }
 
             (identifier, accumulator)
@@ -330,7 +327,6 @@ class InMemoryDigestAccumulator(
       traceChanges = tracingMode != AcsDigestTracingMode.Disabled,
     )
 
-    val stringInterning = stringInterningEval.value
     deltas.map {
       case DigestDelta.Party(partyAndOrder, digest, operation) =>
         val internedParty = stringInterning.party.internalize(partyAndOrder.party)
@@ -484,7 +480,7 @@ class InMemoryDigestAccumulator(
     val applied = applyDigestChanges(input)
     applied
       .traverse {
-        case CheckpointFence =>
+        case CheckpointFence(_) =>
           Left(acc :+ applied)
         case other =>
           other.traverse(_.traverse {
@@ -530,13 +526,7 @@ class InMemoryDigestAccumulator(
     implicit val traceContext: TraceContext = input.traceContext
     input.traverse(_.traverse(_.traverse(_.traverse { case (updates, usageCounters) =>
       val (participantUpdates, partyUpdates) = updates.partitionMap { update =>
-        update
-          .partitionMap(_.toEither)
-          .leftMap(
-            _.mapValue(rawDigest =>
-              rawDigest -> Digest.hashDigest(rawDigest).getCryptographicEvidence
-            )
-          )
+        update.partitionMap(_.toEither)
       }
       for {
         _ <- digestStore.party.upsertDigestUpdates(partyUpdates)
@@ -551,10 +541,10 @@ class InMemoryDigestAccumulator(
   ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
     implicit val traceContext: TraceContext = input.traceContext
     input.value match {
-      case CheckpointFence =>
+      case CheckpointFence(tpe) =>
         implicit val executionContext = directExecutionContext
         digestStore
-          .insertCheckpointTime(input.offset, input.recordTime)
+          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
           .map((_: Unit) => input)
       case other => FutureUnlessShutdown.pure(input)
     }
@@ -568,8 +558,8 @@ class InMemoryDigestAccumulator(
           doDeregister(usages)(context.traceContext)
         }
         immutable.Iterable.empty
-      case ProcessingContext(timepoint, CheckpointFence) =>
-        immutable.Iterable(CheckpointWritten(timepoint))
+      case ProcessingContext(timepoint, CheckpointFence(tpe)) =>
+        immutable.Iterable(CheckpointWritten(timepoint, tpe))
     }
 
   private def doDeregister(
@@ -599,8 +589,6 @@ class InMemoryDigestAccumulator(
 
     logger.debug(s"Evicted $evictionCount entries")
   }
-
-  private def stringInterning = stringInterningEval.value
 
   @VisibleForTesting
   def prettyIdentifier(identifier: DigestIdentifier): String = identifier match {
@@ -641,7 +629,7 @@ object InMemoryDigestAccumulator {
     }
   }
 
-  type DigestUpdateSnapshot = immutable.Iterable[AcsDigestUpdate[DigestIdentifier, RawDigest]]
+  type DigestUpdateSnapshot = immutable.Iterable[AcsDigestUpdate[DigestIdentifier]]
 
   type DigestUpdateContext[+A] = ProcessingContext[CheckpointFenceOr[(Classification, Option[A])]]
   type EnsurePresentOutput = DigestUpdateContext[FutureUnlessShutdown[AccumulatingDigests]]
@@ -849,7 +837,7 @@ object InMemoryDigestAccumulator {
       currentTimepointInternal = timepoint
     }
 
-    def snapshotForUpdate[K](key: K): AcsDigestUpdate[K, RawDigest] = {
+    def snapshotForUpdate[K](key: K): AcsDigestUpdate[K] = {
       val timepoint = currentTimepointInternal
       val lastSnapshot = lastSnapshotAtInternal
       val replacementOffset = lastSnapshot.flatMap { snapshotTaken =>

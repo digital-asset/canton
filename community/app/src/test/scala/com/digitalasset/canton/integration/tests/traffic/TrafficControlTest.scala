@@ -366,7 +366,6 @@ trait TrafficControlTest
         readAs = Seq(alice),
       ),
       _.warningMessage should include("AboveTrafficLimit"),
-      _.warningMessage should include("AboveTrafficLimit"),
       _.errorMessage should include("Request failed for participant1"),
     )
 

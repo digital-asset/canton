@@ -276,7 +276,7 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
     val ptpCurrent = authorizers.head.topology.party_to_participant_mappings
       .list(daId, filterParty = decentralizedParty.filterString)
       .loneElement
-    val serial = ptpCurrent.context.serial.increment
+    val serial = ptpCurrent.context.serial.increment.value
 
     authorizers.foreach(propose(_, ptpCurrent.item, serial).discard)
 

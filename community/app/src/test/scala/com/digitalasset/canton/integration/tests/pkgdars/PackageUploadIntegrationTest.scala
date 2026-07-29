@@ -494,7 +494,7 @@ trait PackageUploadIntegrationTest
       ) should contain allElementsOf mainPackages
 
       eventually() {
-        getVettingSerial shouldBe vettedPackagesSerialBefore.increment
+        getVettingSerial shouldBe vettedPackagesSerialBefore.increment.value
       }
     }
   }

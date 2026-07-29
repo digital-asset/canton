@@ -9,6 +9,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -40,6 +41,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.*
+import com.digitalasset.canton.topology.util.SerialUtils.EnhancedPositiveInt
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FailureMode, SimpleExecutionQueue}
 import com.digitalasset.canton.{LfPackageId, config}
@@ -458,7 +460,13 @@ class PackageOpsImpl(
         newVettedPackagesSet = newVettedPackages.toSet
 
         dryRun = dryRunSnapshot.isDefined
-        nextSerial = currentSerial.map(_.increment).getOrElse(PositiveInt.one)
+        nextSerial <- EitherT
+          .fromEither(
+            currentSerial
+              .traverse(_.nextSerial(errorLoggingContext))
+              .map(_.getOrElse(PositiveInt.one))
+          )
+          .leftMap(IdentityManagerParentError(_))
         nextParticipantState = ParticipantVettedPackages(
           packages = newVettedPackages,
           participantId = participantId,

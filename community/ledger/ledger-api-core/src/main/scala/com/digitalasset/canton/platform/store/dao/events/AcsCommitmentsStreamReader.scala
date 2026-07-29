@@ -12,7 +12,6 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawAcsCommitment
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
 import com.digitalasset.canton.platform.store.backend.{Conversions, EventStorageBackend}
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.AcsCommitmentsStreamReader.AcsCommitmentsStreamQueryParams
@@ -69,23 +68,17 @@ class AcsCommitmentsStreamReader(
       loggingContext: LoggingContextWithTrace
   ): Source[RawAcsCommitment, NotUsed] =
     Source
-      .single(
-        IdRange(
-          fromInclusive = queryRange.startInclusiveEventSeqId,
-          toInclusive = queryRange.endInclusiveEventSeqId,
-        )
-      )
+      .single(queryRange.eventSeqIdRange)
       // TODO(#33578) add configuration for parallelism if fetching acs commitments stays as is
       .mapAsync(parallelism = 2) { idRange =>
         payloadQueriesLimiter.execute {
           globalPayloadQueriesLimiter.execute {
             queryValidRange.withRangeNotPruned(
-              minOffsetInclusive = queryRange.startInclusiveOffset,
-              maxOffsetInclusive = queryRange.endInclusiveOffset,
+              offsetRange = queryRange.offsetRange,
               errorPruning = (prunedOffset: Offset) =>
-                s"ACS commitments request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+                s"ACS commitments request for ${queryRange.offsetRange} precedes pruned offset ${prunedOffset.unwrap}",
               errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-                s"ACS commitments request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} is beyond ledger end offset ${ledgerEndOffset
+                s"ACS commitments request for ${queryRange.offsetRange} is beyond ledger end offset ${ledgerEndOffset
                     .fold(0L)(_.unwrap)}",
             ) {
               dbDispatcher.executeSql(dbMetric)(

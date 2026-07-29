@@ -21,7 +21,7 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{LogEntry, SuppressionRule, TracedLogger}
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast.State
 import com.digitalasset.canton.time.WallClock
@@ -52,7 +52,6 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpec
-import org.slf4j.event.Level
 
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
@@ -499,7 +498,7 @@ class QueueBasedSynchronizerOutboxTest
       @nowarn val Seq(tx1) = transactions.take(1)
       @nowarn val Seq(tx2) = transactions.slice(1, 2)
 
-      lazy val action = for {
+      for {
         (target, manager, handle, client) <-
           mk(
             2,
@@ -521,10 +520,6 @@ class QueueBasedSynchronizerOutboxTest
         res2.value shouldBe a[Seq[?]]
         handle.buffer should have length 3
       }
-      loggerFactory.assertLogs(
-        action,
-        _.warningMessage should include("failed the following topology transactions"),
-      )
     }
 
     "handle dropped transactions" in {
@@ -535,7 +530,7 @@ class QueueBasedSynchronizerOutboxTest
           dropSequencedBroadcast = Iterator(true, false),
         )
         _ <- outboxConnected(manager, handle, client, target)
-        res1 <- loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.WARN))(
+        res1 <-
           push(
             manager,
             transactions.take(1),
@@ -543,18 +538,7 @@ class QueueBasedSynchronizerOutboxTest
             // * submission timeout (2s)
             // * retryDelay (1s)
             Some(NonNegativeFiniteDuration.ofSeconds(8)),
-          ),
-          LogEntry.assertLogSeq(
-            Seq(
-              (
-                _.warningMessage should include(
-                  "Did not observe transactions in target synchronizer store."
-                ),
-                "outbox times out waiting to observe topology transaction",
-              )
-            )
-          ),
-        )
+          )
       } yield {
         res1.value.map(_.transaction) shouldBe transactions.take(1)
       }

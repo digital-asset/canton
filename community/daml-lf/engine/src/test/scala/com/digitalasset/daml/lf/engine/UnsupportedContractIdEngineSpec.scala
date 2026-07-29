@@ -74,7 +74,7 @@ class UnsupportedContractIdEngineSpec
       seeding = InitialSeeding.TransactionSeed(seed),
       contractIdVersion = ContractIdVersion.V1,
       interpretationConfig = InterpretationConfig.Default.copy(
-        contractStateMode = ContractStateMachine.Mode.NUCK
+        contractStateMode = ContractStateMachine.Mode.Key
       ),
     )
   }

@@ -214,18 +214,23 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
     ProtoVersion(30) -> VersionedProtoCodec(
       ProtocolVersion.v34
     )(v30.Envelope)(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
     ProtoVersion(31) -> UnsupportedProtoCodec(ProtocolVersion.v35),
   )
 
   private[protocol] def fromProtoV30(
-      envelopeP: v30.Envelope
+      pvv: ProtocolVersionValidation,
+      envelopeP: v30.Envelope,
   ): ParsingResult[ClosedUncompressedEnvelope] = {
     val v30.Envelope(contentP, recipientsP, signaturesP) = envelopeP
     for {
-      recipients <- ProtoConverter.parseRequired(Recipients.fromProtoV30, "recipients", recipientsP)
+      recipients <- ProtoConverter.parseRequired(
+        Recipients.fromProtoV30(pvv, _),
+        "recipients",
+        recipientsP,
+      )
       signatures <- signaturesP.traverse(Signature.fromProtoV30)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       closedEnvelope = create(

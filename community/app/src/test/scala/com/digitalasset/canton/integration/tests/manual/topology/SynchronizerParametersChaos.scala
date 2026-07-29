@@ -4,13 +4,14 @@
 package com.digitalasset.canton.integration.tests.manual.topology
 
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
+import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.Mutex
-import com.digitalasset.canton.{ScalaFuturesWithPatience, config}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*

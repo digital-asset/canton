@@ -21,9 +21,8 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFo
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  HashedDigest,
+  CheckpointType,
   InternedParticipantId,
-  RawDigest,
 }
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
@@ -101,7 +100,7 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       }
   }
 
-  // the following test case should only run when the synchronizer actually runs with $ProtocolVersion.acsCommitmentRedesign,
+  // the following test case should only run when the synchronizer actually runs with `ProtocolVersion.acsCommitmentRedesign`,
   // because otherwise a synchronizer parameter change doesn't trigger a checkpoint
   // TODO(#33326) enable this test, once the synchronizer parametes are properly persisted in the indexer
   "synchronizer parameter changes trigger a checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign ignore {
@@ -130,16 +129,16 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       val digestStore =
         participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
 
-      // TODO(#34302): check the checkpoint for the specific checkpoint type
       eventually() {
         // in case there is no next checkpoint, .value will trigger a retry of the eventually loop
-        val (checkpointOffset, checkpointTs) =
+        val cp =
           digestStore.firstCheckpointAfter(startOffset).futureValueUS.value
 
         // if there was a checkpoint, update the offset to look for the next checkpoint
-        startOffset = checkpointOffset
+        startOffset = cp.offset
         // finally check whether we have reached the checkpoint with the expected checkpoint time
-        checkpointTs.toInstant shouldBe expectedCheckpointTime
+        cp.recordTime.toInstant shouldBe expectedCheckpointTime
+        cp.checkpointType shouldBe CheckpointType.ReconciliationIntervalBoundary
       }
   }
 
@@ -161,10 +160,8 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
     // the two participants must coincide
     p1sViewOfP2.digestUpdate.digestO.value shouldBe p2sViewOfP1.digestUpdate.digestO.value
 
-    LtHash16Blake3.tryCreate(
-      p1sViewOfP2.digestUpdate.digestO.value._1
-    ) should not be LtHash16Blake3.empty
-
+    LtHash16Blake3.tryCreate(p1sViewOfP2.digestUpdate.digestO.value) should not be
+      LtHash16Blake3.empty
   }
 
   private def getOffset(
@@ -180,7 +177,7 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
 
   def getDigestFor(source: LocalParticipantReference, target: ParticipantId)(implicit
       env: TestConsoleEnvironment
-  ): Option[AcsDigestStore.AcsDigestUpdate[InternedParticipantId, (RawDigest, HashedDigest)]] = {
+  ): Option[AcsDigestStore.AcsDigestUpdate[InternedParticipantId]] = {
     val si = source.underlying.value.sync.ledgerApiIndexer.asEval
       .flatMap(_.ledgerApiStore)
       .value

@@ -308,11 +308,7 @@ private[backend] object AppendOnlySchema {
     val partyEntries: Table[DbDto.PartyEntry] =
       fieldStrategy.insert("lapi_party_entries")(
         "ledger_offset" -> fieldStrategy.bigint(_ => _.ledger_offset),
-        "recorded_at" -> fieldStrategy.bigint(_ => _.recorded_at),
-        "submission_id" -> fieldStrategy.stringOptional(_ => _.submission_id),
         "party" -> fieldStrategy.stringOptional(_ => _.party),
-        "typ" -> fieldStrategy.string(_ => _.typ),
-        "rejection_reason" -> fieldStrategy.stringOptional(_ => _.rejection_reason),
         "is_local" -> fieldStrategy.booleanOptional(_ => _.is_local),
         "party_id" -> fieldStrategy.partyOptional(_.party),
       )
@@ -334,6 +330,20 @@ private[backend] object AppendOnlySchema {
           dbDto => stringInterning.synchronizerId.internalize(dbDto.synchronizer_id)
         ),
         "record_time" -> fieldStrategy.bigint(_ => _.record_time),
+        "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
+      )
+
+    val genericTopologyEvent: Table[DbDto.GenericTopologyEvent] =
+      fieldStrategy.insert("lapi_events_generic_topology_events")(
+        "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
+        "event_offset" -> fieldStrategy.bigint(_ => _.event_offset),
+        "update_id" -> fieldStrategy.bytea(_ => _.update_id),
+        "synchronizer_id" -> fieldStrategy.int(stringInterning =>
+          dbDto => stringInterning.synchronizerId.internalize(dbDto.synchronizer_id)
+        ),
+        "record_time" -> fieldStrategy.bigint(_ => _.record_time),
+        "event_type" -> fieldStrategy.smallint(_ => _.event_type),
+        "payload" -> fieldStrategy.bytea(_ => _.payload),
         "trace_context" -> fieldStrategy.bytea(_ => _.trace_context),
       )
 
@@ -413,6 +423,7 @@ private[backend] object AppendOnlySchema {
       idFilterVariousWitness.executeUpdate,
       partyEntries.executeUpdate,
       partyToParticipant.executeUpdate,
+      genericTopologyEvent.executeUpdate,
       commandCompletions.executeUpdate,
       stringInterningTable.executeUpdate,
       transactionMeta.executeUpdate,
@@ -442,6 +453,8 @@ private[backend] object AppendOnlySchema {
           idFilterVariousWitness.prepareData(collect[IdFilterVariousWitness], stringInterning),
           partyEntries.prepareData(collect[PartyEntry], stringInterning),
           partyToParticipant.prepareData(collect[EventPartyToParticipant], stringInterning),
+          genericTopologyEvent
+            .prepareData(collect[GenericTopologyEvent], stringInterning),
           commandCompletions.prepareData(collect[CommandCompletion], stringInterning),
           stringInterningTable.prepareData(collect[StringInterningDto], stringInterning),
           transactionMeta.prepareData(collect[TransactionMeta], stringInterning),

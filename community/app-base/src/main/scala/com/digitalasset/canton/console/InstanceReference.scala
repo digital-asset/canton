@@ -67,7 +67,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 import com.digitalasset.canton.time.{DelegatingSimClock, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TimeQuery
-import com.digitalasset.canton.tracing.NoTracing
+import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{SequencerAlias, config}
 import com.google.protobuf.ByteString
@@ -994,7 +994,11 @@ abstract class SequencerReference(
         val currentActive = currentMediators.item.active
         val currentObservers = currentMediators.item.observers
         val current = currentActive ++ currentObservers
-        val serial = currentMediators.context.serial.increment
+        val serial = currentMediators.context.serial.increment.getOrElse(
+          ErrorUtil.invalidState("Mediator synchronizer state max serial reached")(
+            errorLoggingContext(TraceContext.empty)
+          )
+        )
 
         val newMediators =
           (additionalActive ++ additionalObservers).filterNot(m => current.contains(m.id))
@@ -1398,6 +1402,8 @@ abstract class SequencerReference(
           sequencingParameters.pbftViewChangeTimeout,
           SegmentLength(sequencingParameters.segmentLength),
           sequencingParameters.blacklistLeaderSelectionPolicyConfig,
+          sequencingParameters.maxRequestsInBatch,
+          sequencingParameters.maxBatchesPerProposal,
         )(physical_synchronizer_id.protocolVersion)
         .toByteString
 

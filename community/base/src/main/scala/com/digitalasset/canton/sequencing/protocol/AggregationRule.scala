@@ -22,10 +22,12 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorId, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   ProtocolVersionedCompanionDbHelpers,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
@@ -559,7 +561,7 @@ object AggregationRule
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AggregationRule)(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -622,6 +624,7 @@ object AggregationRule
   override def name: String = "AggregationRule"
 
   private[canton] def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers,
       proto: v30.AggregationRule,
   ): ParsingResult[AggregationRule] = {
@@ -630,7 +633,11 @@ object AggregationRule
     if (useMemberIdsAsEligibleMembers.v) {
       for {
         eligibleMembers <- ProtoConverter.parseRequiredNonEmpty(
-          Member.fromProtoPrimitive(_, "eligible_members"),
+          (member: String) =>
+            ProtoValidation
+              .validateThen(member, "eligible_members", pvv)(
+                Member.fromProtoPrimitive
+              ),
           "eligible_members",
           eligibleMembersP,
         )
@@ -671,7 +678,13 @@ object AggregationRule
         }
 
       for {
-        recipients <- eligibleMembersP.traverse(Recipient.fromProtoPrimitive(_, "eligible_members"))
+        recipients <- ProtoValidation.validateThen(
+          eligibleMembersP,
+          "eligible_members",
+          pvv,
+        )(
+          Recipient.fromProtoPrimitive
+        )
         rule <- ruleFromRecipients(recipients.toList)
         rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       } yield AggregationRule(rule)(rpv)

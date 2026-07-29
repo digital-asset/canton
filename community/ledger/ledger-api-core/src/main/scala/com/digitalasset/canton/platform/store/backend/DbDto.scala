@@ -232,13 +232,23 @@ object DbDto {
     }
   }
 
+  final case class GenericTopologyEvent(
+      event_sequential_id: Long,
+      event_offset: Long,
+      update_id: Array[Byte],
+      synchronizer_id: SynchronizerId,
+      record_time: Long,
+      event_type: Int,
+      payload: Array[Byte],
+      trace_context: Array[Byte],
+  ) extends DbDto {
+    override def provideInternedStrings(builder: StringInterningBuilder): Unit =
+      builder.addSynchronizerId(synchronizer_id)
+  }
+
   final case class PartyEntry(
       ledger_offset: Long,
-      recorded_at: Long,
-      submission_id: Option[String],
       party: Option[Party],
-      typ: String,
-      rejection_reason: Option[String],
       is_local: Option[Boolean],
   ) extends DbDto {
     override def provideInternedStrings(builder: StringInterningBuilder): Unit =

@@ -5,9 +5,9 @@ import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.Mode
 val protocol = ProtocolVersion.forSynchronizer
 
 case class SyncDef(
-  mediator: com.digitalasset.canton.console.LocalMediatorReference,
-  sequencer: com.digitalasset.canton.console.LocalSequencerReference,
-  name: String
+    mediator: com.digitalasset.canton.console.LocalMediatorReference,
+    sequencer: com.digitalasset.canton.console.LocalSequencerReference,
+    name: String,
 )
 
 val syncDefs = mediators.local
@@ -15,13 +15,15 @@ val syncDefs = mediators.local
   .zipWithIndex
   .map { case ((m, s), i) => SyncDef(m, s, s"synchronizer-${i + 1}") }
 
-val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)
+val featureFlag = Seq(
+  SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableMultiSynchronizer
+)
 
-syncDefs.foreach{ syncDef =>
+syncDefs.foreach { syncDef =>
   val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
     syncDef.sequencer.config.crypto,
     protocol,
-    topologyChangeDelay=NonNegativeFiniteDuration.Zero
+    topologyChangeDelay = NonNegativeFiniteDuration.Zero,
   )
   val synchronizerOwners = Seq(syncDef.sequencer, syncDef.mediator)
   val synchId = bootstrap.synchronizer(
@@ -30,13 +32,17 @@ syncDefs.foreach{ syncDef =>
     Seq(syncDef.mediator),
     synchronizerOwners,
     PositiveInt.one,
-    staticSynchronizerParameters
+    staticSynchronizerParameters,
   )
 
-  participants.local.foreach(p => {
+  participants.local.foreach { p =>
     p.synchronizers.connect_local(syncDef.sequencer, syncDef.name)
-    p.topology.synchronizer_trust_certificates.propose(p, synchId.logical, featureFlags = featureFlag)
-  })
+    p.topology.synchronizer_trust_certificates.propose(
+      p,
+      synchId.logical,
+      featureFlags = featureFlag,
+    )
+  }
 }
 
 // For multisync sidebox testing participant is only connected to synchronizer-2
@@ -44,8 +50,10 @@ participants.local.filter(_.name == "sidebox").foreach { p =>
   p.synchronizers.disconnect("synchronizer-1")
 }
 
-
-participants.local.foreach{p =>
-  println(s"${p.name} listening at ports: ${p.config.ledgerApi.port.unwrap}(gRPC) and ${p.config.httpLedgerApi.port.unwrap}(HTTP)")}
+participants.local.foreach { p =>
+  println(
+    s"${p.name} listening at ports: ${p.config.ledgerApi.port.unwrap}(gRPC) and ${p.config.httpLedgerApi.port.unwrap}(HTTP)"
+  )
+}
 
 println("Canton sandbox is ready.")

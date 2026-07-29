@@ -48,7 +48,6 @@ private[platform] trait LedgerWriteDao extends ReportsHealth {
   /** Stores a party allocation or rejection thereof. */
   def storePartyAdded(
       offset: Offset,
-      submissionIdOpt: Option[SubmissionId],
       recordTime: Timestamp,
       partyDetails: IndexerPartyDetails,
   )(implicit

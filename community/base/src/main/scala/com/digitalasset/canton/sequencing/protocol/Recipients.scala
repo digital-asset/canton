@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 
 /** Recipients of a batch. Uses a list of
@@ -58,10 +59,11 @@ final case class Recipients(trees: NonEmpty[Seq[RecipientsTree]]) extends Pretty
 object Recipients {
 
   def fromProtoV30(
-      proto: v30.Recipients
+      pvv: ProtocolVersionValidation,
+      proto: v30.Recipients,
   ): ParsingResult[Recipients] =
     for {
-      trees <- proto.recipientsTree.traverse(RecipientsTree.fromProtoV30)
+      trees <- proto.recipientsTree.traverse(RecipientsTree.fromProtoV30(pvv, _))
       recipients <- NonEmpty
         .from(trees)
         .toRight(

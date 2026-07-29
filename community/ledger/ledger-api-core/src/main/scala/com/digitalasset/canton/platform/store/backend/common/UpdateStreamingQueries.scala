@@ -269,9 +269,9 @@ object UpdateStreamingQueries {
   ): CompositeSql = {
     val idBoundsSQL =
       if (paginationFromTo.descending)
-        cSQL"${paginationFromTo.toInclusive} <= filters.event_sequential_id AND filters.event_sequential_id < ${paginationFromTo.fromExclusive}"
+        cSQL"${paginationFromTo.eventSeqIdRange.endInclusive} <= filters.event_sequential_id AND filters.event_sequential_id <= ${paginationFromTo.eventSeqIdRange.startInclusive}"
       else
-        cSQL"${paginationFromTo.fromExclusive} < filters.event_sequential_id AND filters.event_sequential_id <= ${paginationFromTo.toInclusive}"
+        cSQL"${paginationFromTo.eventSeqIdRange.startInclusive} <= filters.event_sequential_id AND filters.event_sequential_id <= ${paginationFromTo.eventSeqIdRange.endInclusive}"
     val idOrderDirectionSQL = if (paginationFromTo.descending) cSQL"DESC" else cSQL"ASC"
     cSQL"""
             SELECT filters.event_sequential_id event_sequential_id
@@ -384,11 +384,11 @@ object UpdateStreamingQueries {
                   if (lastPage)
                     input.fromTo // the whole input range is returned as this is the last page
                   else
-                    input.fromTo.copy(
-                      toInclusive =
-                        // as the page queried for limit+1, the last ID represents the toExclusive now
-                        if (input.fromTo.descending) lastId + 1
-                        else lastId - 1
+                    input.fromTo.withEndInclusive(
+                      // as the page queried for limit+1, the last ID represents the exclusive end now,
+                      // so we subtract one for ascending and increase one for descending to get the inclusive end
+                      if (input.fromTo.descending) lastId + 1
+                      else lastId - 1
                     ),
                 lastPage = lastPage,
               )

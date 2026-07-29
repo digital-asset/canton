@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology
 
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
@@ -59,7 +59,7 @@ class SimulationOrderingTopologyProvider(
           }.toMap,
           segmentLength.epochLength(activeSequencerTopologyData.size.toLong),
           SequencingParameters.Default,
-          BaseTest.defaultMaxBytesToDecompress,
+          DynamicSynchronizerParameters.defaultMaxRequestSize.value,
           activationTime,
           // Switch the value deterministically so that we trigger all code paths.
           areTherePendingCantonTopologyChanges = Option.when(checkPendingChanges) {

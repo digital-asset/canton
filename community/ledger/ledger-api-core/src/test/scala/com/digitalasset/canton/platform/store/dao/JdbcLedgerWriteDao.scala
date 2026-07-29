@@ -142,7 +142,6 @@ private class JdbcLedgerWriteDao(
 
   override def storePartyAdded(
       offset: Offset,
-      submissionIdOpt: Option[SubmissionId],
       recordTime: Timestamp,
       partyDetails: IndexerPartyDetails,
   )(implicit

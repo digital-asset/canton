@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import cats.Eval
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.{InternalIndexService, SynchronizerIndex}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
@@ -18,17 +18,16 @@ import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDiges
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigestUpdate,
-  HashedDigest,
+  Checkpoint,
+  CheckpointType,
   RawDigest,
 }
-import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.participant.store.{
   AcsDigestStore,
   AcsDigestTestBase,
   PaginationTokenDone,
 }
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
-import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
 import com.digitalasset.canton.topology.{
@@ -42,19 +41,15 @@ import org.apache.pekko.stream.scaladsl.Sink
 
 import scala.util.ChainingSyntax
 
+@AcsCommitmentTest
 class ReinitializingDigestProcessorTest
-    extends BaseDigestProcessorTest
+    extends DigestProcessorTestBase
     with HasExecutionContext
     with HasActorSystem
     with ChainingSyntax
     with AcsDigestTestBase {
 
-  import BaseDigestProcessorTest.*
-
-  private def mkInMemoryDigestStore(
-      stringInterning: StringInterning = mockStringInterning
-  ) =
-    InMemoryAcsDigestStore.create(Eval.now(stringInterning), loggerFactory)
+  import DigestProcessorTestBase.*
 
   private def mkReinitializingDigestProcessor(
       reinitTimepoint: Timepoint,
@@ -99,22 +94,33 @@ class ReinitializingDigestProcessorTest
       ).thenAnswer(ledgerEndO)
       mockStore
     }
+
+    val digestAccumulator = new SequentialDigestAccumulator(
+      participant.toLf,
+      acsDigestStore,
+      mockStringInterning,
+      AcsDigestTracingMode.Disabled,
+      loggerFactory,
+    )
+
     new ReinitializingDigestProcessor(
       thisParticipantId = participant,
       synchronizerId = testSynchronizerId,
-      stringInterningEval = Eval.now(mockStringInterning),
       indexService = indexService,
       ledgerApiStore = mockLedgerApiStore,
+      digestAccumulator = digestAccumulator,
       acsDigestStore = acsDigestStore,
       acsCommitmentConfig = AcsCommitmentConfig(
         counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
         reinitializingJournalTombstonesBatchSize = writeJournalTombstonesBatchSize,
         tracing = AcsDigestTracingMode.Disabled,
       ),
-      hashOps = TestHash,
       getTopologySnapshot = ts =>
-        testingTopologyFactory.topologySnapshot(timestampOfSnapshot = ts.value),
+        FutureUnlessShutdown.pure(
+          testingTopologyFactory.topologySnapshot(timestampOfSnapshot = ts.value)
+        ),
       loggerFactory = loggerFactory,
+      timeouts = timeouts,
     )
   }
 
@@ -125,11 +131,11 @@ class ReinitializingDigestProcessorTest
 
     // participant Digest updates for testing
     val p1DigestOff100 =
-      acsDigest(100, internedP1Id, Some(genParticipantDigest(genRawDigest(0x2a))))
+      acsDigest(100, internedP1Id, Some(genRawDigest(0x2a)))
     val p1DigestOff99 =
-      acsDigest(99, internedP1Id, Some(genParticipantDigest(genRawDigest(0x3a))))
+      acsDigest(99, internedP1Id, Some(genRawDigest(0x3a)))
     val p1DigestOff98 =
-      acsDigest(98, internedP1Id, Some(genParticipantDigest(genRawDigest(0x4a))))
+      acsDigest(98, internedP1Id, Some(genRawDigest(0x4a)))
     val p1DigestTombstoneOff99 = p1DigestOff99.copy(digestO = None)
     val p1DigestTombstoneOff100 = acsDigest(100, internedP1Id, None)
 
@@ -140,10 +146,10 @@ class ReinitializingDigestProcessorTest
     val p1DigestUpdateTombstone_AtOff100 = AcsDigestUpdate(p1DigestTombstoneOff100, Some(off(99)))
 
     val p2DigestOff100 =
-      acsDigest(100, internedP2Id, Some(genParticipantDigest(genRawDigest(0x0a))))
-    val p2DigestOff99 = acsDigest(99, internedP2Id, Option.empty[(RawDigest, HashedDigest)])
+      acsDigest(100, internedP2Id, Some(genRawDigest(0x0a)))
+    val p2DigestOff99 = acsDigest(99, internedP2Id, Option.empty[RawDigest])
     val p2DigestOff98 =
-      acsDigest(98, internedP2Id, Some(genParticipantDigest(genRawDigest(0x1a))))
+      acsDigest(98, internedP2Id, Some(genRawDigest(0x1a)))
     val p2DigestTombstoneOff99 = p2DigestOff99.copy(digestO = None)
     val p2DigestTombstoneOff100 = acsDigest(100, internedP2Id, None)
 
@@ -375,7 +381,15 @@ class ReinitializingDigestProcessorTest
           .futureValueUS
 
         // insert checkpoint, because we want to check if the store's structure is appropriate!
-        testDigestStore.insertCheckpointTime(tp100.offset, tp100.recordTime).futureValueUS
+        testDigestStore
+          .insertCheckpointTime(
+            Checkpoint(
+              tp100.offset,
+              tp100.recordTime,
+              CheckpointType.ReconciliationIntervalBoundary,
+            )
+          )
+          .futureValueUS
         testDigestStore.checkReplacesInvariant().futureValueUS
 
         val partyBulk = testDigestStore.party
@@ -422,7 +436,7 @@ class ReinitializingDigestProcessorTest
         )
 
         val initialDigestUpdate = AcsDigestUpdate(
-          digestUpdate = acsDigest(1, internedP1Id, Some(genParticipantDigest(genRawDigest(0x11)))),
+          digestUpdate = acsDigest(1, internedP1Id, Some(genRawDigest(0x11))),
           replacesOffset = None,
         )
 
@@ -506,7 +520,7 @@ class ReinitializingDigestProcessorTest
           ),
           ProcessingContext(
             reinitAtTp,
-            CheckpointFence,
+            CheckpointFence(CheckpointType.Reinitialization),
           ),
         )
       }
@@ -605,7 +619,7 @@ class ReinitializingDigestProcessorTest
           ),
           ProcessingContext(
             requestedTimepoint,
-            CheckpointFence,
+            CheckpointFence(CheckpointType.Reinitialization),
           ),
         )
       }
@@ -629,6 +643,7 @@ class ReinitializingDigestProcessorTest
         )
 
         rdp.start().futureValueUS
+        rdp.completionFuture.futureValueUS
 
         val (participantDigests, participantPageToken) =
           testDigestStore.participant.snapshot(Right(tp100.offset), limit = 100).futureValueUS
@@ -672,11 +687,12 @@ class ReinitializingDigestProcessorTest
 
         // Run the whole reinitialization process
         rdp.start().futureValueUS
+        rdp.completionFuture.futureValueUS
 
         val lastCheckpoint = testDigestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS
 
         lastCheckpoint.isDefined shouldBe true
-        lastCheckpoint.value shouldBe (off(100), ts(100))
+        lastCheckpoint.value shouldBe Checkpoint(tp(100), CheckpointType.Reinitialization)
 
         // Do we still have a valid chain of digest journals?
         testDigestStore.checkReplacesInvariant().futureValueUS
@@ -802,6 +818,7 @@ class ReinitializingDigestProcessorTest
 
         // Run the whole reinitialization process
         rdp.start().futureValueUS
+        rdp.completionFuture.futureValueUS
 
         val participantDigests_At100 =
           testDigestStore.participant

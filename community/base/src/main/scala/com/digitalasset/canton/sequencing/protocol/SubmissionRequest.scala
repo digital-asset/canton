@@ -16,10 +16,12 @@ import com.digitalasset.canton.serialization.{
   ProtocolVersionedMemoizedEvidence,
 }
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionContextMemoizationWithDependency,
@@ -217,14 +219,14 @@ object SubmissionRequest
     ProtoVersion(30) -> VersionedProtoCodec.withDependency(
       ProtocolVersion.v34
     )(v30.SubmissionRequest)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30, // Serialization of SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
     ProtoVersion(31) -> VersionedProtoCodec.withDependency(
       ProtocolVersion.v35
     )(v31.SubmissionRequest)(
-      supportedProtoVersionMemoized(_)(fromProtoV31),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
       _.toProtoV31, // Serialization of SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
@@ -290,31 +292,46 @@ object SubmissionRequest
   }
 
   def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       requestP: v30.SubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] =
-    fromProtoGeneric(decompressionPolicy, ProtoSubmissionRequestV30(requestP))(bytes)
+    fromProtoGeneric(
+      pvv,
+      decompressionPolicy,
+      ProtoSubmissionRequestV30(requestP),
+    )(
+      bytes
+    )
 
   def fromProtoV31(
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       requestP: v31.SubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] =
-    fromProtoGeneric(decompressionPolicy, ProtoSubmissionRequestV31(requestP))(bytes)
+    fromProtoGeneric(
+      pvv,
+      decompressionPolicy,
+      ProtoSubmissionRequestV31(requestP),
+    )(
+      bytes
+    )
 
   private def fromProtoGeneric(
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       protoSubmissionRequest: ProtoSubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] = {
     def batchFromProto: ParsingResult[Batch[ClosedEnvelope]] = protoSubmissionRequest match {
       case ProtoSubmissionRequestV30(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV30(decompressionPolicy, _),
+          Batch.fromProtoV30(pvv, decompressionPolicy, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
       case ProtoSubmissionRequestV31(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV31(decompressionPolicy, _),
+          Batch.fromProtoV31(pvv, decompressionPolicy, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
@@ -336,7 +353,8 @@ object SubmissionRequest
           wrapped.topologyTimestamp,
           (useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers) =>
             wrapped.aggregationRule.traverse(
-              AggregationRule.fromProtoV30(useMemberIdsAsEligibleMembers, _)
+              AggregationRule
+                .fromProtoV30(pvv, useMemberIdsAsEligibleMembers, _)
             ),
           wrapped.submissionCost,
         )
@@ -348,7 +366,8 @@ object SubmissionRequest
           wrapped.topologyTimestamp,
           (useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers) =>
             wrapped.aggregationRule.traverse(
-              AggregationRule.fromProtoV30(useMemberIdsAsEligibleMembers, _)
+              AggregationRule
+                .fromProtoV30(pvv, useMemberIdsAsEligibleMembers, _)
             ),
           wrapped.submissionCost,
         )
@@ -360,8 +379,16 @@ object SubmissionRequest
     }
 
     for {
-      sender <- Member.fromProtoPrimitive(senderP, "sender")
-      messageId <- MessageId.fromProtoPrimitive(messageIdP)
+      sender <- ProtoValidation.validateThen(
+        senderP,
+        "sender",
+        pvv,
+      )(
+        Member.fromProtoPrimitive
+      )
+      messageId <- ProtoValidation.validateThen(messageIdP, "message_id", pvv)(
+        MessageId.fromProtoPrimitive
+      )
       maxSequencingTime <- CantonTimestamp.fromProtoPrimitive(maxSequencingTimeP)
       batch <- batchFromProto
       ts <- topologyTimestamp.traverse(CantonTimestamp.fromProtoPrimitive)

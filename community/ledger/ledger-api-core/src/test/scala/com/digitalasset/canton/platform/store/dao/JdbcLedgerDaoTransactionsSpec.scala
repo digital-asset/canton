@@ -14,6 +14,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties.UseOriginalViewPackageId
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.entries.LedgerEntry
 import com.digitalasset.canton.platform.store.utils.EventOps.EventOps
 import com.digitalasset.canton.platform.{
@@ -294,8 +295,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       result <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from,
-            endInclusive = to,
+            offsetRange = OffsetRange(startInclusive = from, endInclusive = to),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(Map.empty, Some(Set(alice, bob, charlie))),
               eventProjectionProperties = EventProjectionProperties(
@@ -329,8 +329,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       resultForAlice <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(Map.empty, Some(Set(alice))),
               eventProjectionProperties = EventProjectionProperties(
@@ -343,8 +345,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       resultForBob <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(Map.empty, Some(Set(bob))),
               eventProjectionProperties = EventProjectionProperties(
@@ -357,8 +361,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       resultForCharlie <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(Map.empty, Some(Set(charlie))),
               eventProjectionProperties = EventProjectionProperties(
@@ -392,8 +398,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       result <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(
                 Map(otherTemplateIdFull.toNameTypeConRef -> Some(Set(alice))),
@@ -431,8 +439,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       result <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(
                 relation = Map(
@@ -450,8 +460,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       resultPartyWildcard <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(
                 relation = Map(otherTemplateIdFull.toNameTypeConRef -> None),
@@ -501,8 +513,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       result <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(
                 relation = Map(
@@ -521,8 +535,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       resultPartyWildcard <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(
                 relation = Map(
@@ -571,8 +587,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       result <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(
                 Map(
@@ -590,8 +608,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       resultPartyWildcard <- transactionsOf(
         ledgerDao.updateReader
           .getUpdates(
-            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-            endInclusive = to.value.lastOffset,
+            offsetRange = OffsetRange(
+              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+              endInclusive = to.value.lastOffset,
+            ),
             internalUpdateFormat = updateFormat(
               filter = TemplatePartiesFilter(
                 Map(
@@ -633,8 +653,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       (offset, exercise) <- store(exerciseWithChild(firstContractId))
       result <- ledgerDao.updateReader
         .getUpdates(
-          startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-          endInclusive = offset,
+          offsetRange = OffsetRange(
+            startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+            endInclusive = offset,
+          ),
           internalUpdateFormat = updateFormat(
             filter = TemplatePartiesFilter(Map.empty, Some(exercise.actAs.toSet)),
             eventProjectionProperties = EventProjectionProperties(
@@ -670,8 +692,7 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       (offset2, create2) <- store(singleCreate)
       result <- ledgerDao.updateReader
         .getUpdates(
-          startInclusive = offset1.increment,
-          endInclusive = offset2,
+          offsetRange = OffsetRange(startInclusive = offset1.increment, endInclusive = offset2),
           internalUpdateFormat = updateFormat(
             TemplatePartiesFilter(Map.empty, Some(exercise.actAs.toSet)),
             eventProjectionProperties = EventProjectionProperties(
@@ -705,8 +726,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
 
       result <- ledgerDao.updateReader
         .getUpdates(
-          startInclusive = beginOffsetFromTheFuture.increment,
-          endInclusive = endOffsetFromTheFuture,
+          offsetRange = OffsetRange(
+            startInclusive = beginOffsetFromTheFuture.increment,
+            endInclusive = endOffsetFromTheFuture,
+          ),
           internalUpdateFormat = updateFormat(
             TemplatePartiesFilter(Map.empty, Some(Set(alice))),
             eventProjectionProperties = EventProjectionProperties(
@@ -750,7 +773,6 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       // just for having the ledger end bumped
       _ <- ledgerDao.storePartyAdded(
         endOffset,
-        None,
         Timestamp.now(),
         IndexerPartyDetails(alice, true),
       )
@@ -766,8 +788,8 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
       ).use(
         _.updateReader
           .getUpdates(
-            startInclusive = beginOffset.increment,
-            endInclusive = endOffset,
+            offsetRange =
+              OffsetRange(startInclusive = beginOffset.increment, endInclusive = endOffset),
             internalUpdateFormat = updateFormat(
               TemplatePartiesFilter(Map.empty, Some(Set(alice))),
               eventProjectionProperties = EventProjectionProperties(
@@ -815,8 +837,10 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
           to <- ledgerDao.lookupLedgerEnd()
           response <- ledgerDao.updateReader
             .getUpdates(
-              startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
-              endInclusive = to.value.lastOffset,
+              offsetRange = OffsetRange(
+                startInclusive = from.fold(Offset.firstOffset)(_.lastOffset.increment),
+                endInclusive = to.value.lastOffset,
+              ),
               internalUpdateFormat = updateFormat(
                 cp.filter,
                 EventProjectionProperties(

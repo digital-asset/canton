@@ -28,6 +28,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{DelayUtil, EitherTUtil}
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{GrpcServiceInvocationMethod, ProtoDeserializationError, config}
 import io.grpc.*
 import io.grpc.Context.CancellableContext
@@ -363,6 +365,11 @@ object CantonGrpcUtil {
         traceContext: TraceContext
     ): Unit = error.log(logger)
   }
+  object InfoLogPolicy extends GrpcLogPolicy {
+    override def log(error: GrpcError, logger: TracedLogger)(implicit
+        traceContext: TraceContext
+    ): Unit = logger.info(error.toString)
+  }
   object SilentLogPolicy extends GrpcLogPolicy {
     def log(error: GrpcError, logger: TracedLogger)(implicit
         traceContext: TraceContext
@@ -481,7 +488,12 @@ object CantonGrpcUtil {
         token = token,
       )(_.getApiInfo(GetApiInfoRequest()))
     for {
-      apiInfo <- sendF.bimap(_.toString, _.name)
+      apiInfoResponse <- sendF.leftMap(_.toString)
+      apiInfo <- EitherT.fromEither[FutureUnlessShutdown](
+        ProtoValidation
+          .validate(apiInfoResponse.name, Some("name"), ProtocolVersionValidation.AlwaysValidation)
+          .leftMap(_.message)
+      )
       _ <-
         EitherTUtil.condUnitET[FutureUnlessShutdown](
           apiInfo == expectedName,

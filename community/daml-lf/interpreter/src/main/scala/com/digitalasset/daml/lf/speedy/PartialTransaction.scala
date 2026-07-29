@@ -202,7 +202,7 @@ private[lf] object PartialTransaction {
     nodes = HashMap.empty,
     actionNodeSeeds = BackStack.empty,
     context = Context(initialSeeds, committers),
-    contractState = ContractStateMachine.empty(csmMode),
+    csmJournal = ContractStateMachine.empty(csmMode),
     actionNodeLocations = BackStack.empty,
     authorizationChecker = authorizationChecker,
     externalCallResults = HashMap.empty,
@@ -220,7 +220,7 @@ private[lf] object PartialTransaction {
   *   that only other node types do not have seeds and are not included.
   * @param context
   *   The context of what sub-transaction is being built.
-  * @param contractState
+  * @param csmJournal
   *   summarizes the changes to the contract states caused by nodes up to now
   * @param actionNodeLocations
   *   The optional locations of create/exercise/fetch/lookup nodes in pre-order. Used by
@@ -234,7 +234,7 @@ private[speedy] case class PartialTransaction(
     nodes: HashMap[NodeId, Node],
     actionNodeSeeds: BackStack[crypto.Hash],
     context: PartialTransaction.Context,
-    contractState: CSMState,
+    csmJournal: CSMJournal,
     actionNodeLocations: BackStack[Option[Location]],
     authorizationChecker: AuthorizationChecker,
     externalCallResults: HashMap[NodeId, BackStack[ExternalCallResult]],
@@ -252,7 +252,7 @@ private[speedy] case class PartialTransaction(
     }
 
   def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] =
-    contractState.consumedByOrInactive(cid)
+    csmJournal.consumedByOrInactive(cid)
 
   def nodesToString: String =
     if (nodes.isEmpty) "<empty transaction>"
@@ -393,13 +393,13 @@ private[speedy] case class PartialTransaction(
       case fa :: _ =>
         Left((ptx, IErr.FailedAuthorization(nid, fa)))
       case Nil =>
-        ptx.contractState.visitCreate(
+        ptx.csmJournal.visitCreate(
           nid,
           cid,
           createNode.gkeyOpt,
         ) match {
           case Right(next) =>
-            val nextPtx = ptx.copy(contractState = next)
+            val nextPtx = ptx.copy(csmJournal = next)
             Right((cid, nextPtx))
           case Left(err) =>
             Left(this -> convTxError(nodes, "Create", err))
@@ -436,7 +436,7 @@ private[speedy] case class PartialTransaction(
       val newContractState = assertRightKey(
         "Fetch",
         // evaluation order tests require visitFetch proceeds authorizeFetch
-        contractState.visitFetch(
+        csmJournal.visitFetch(
           contract.templateId,
           coid,
           contract.gkeyOpt,
@@ -491,7 +491,7 @@ private[speedy] case class PartialTransaction(
     val newContractState =
       assertRightKey(
         "Lookup",
-        contractState.visitQueryByKey(key.globalKey, result.queue, result.exhaustive),
+        csmJournal.visitQueryByKey(key.globalKey, result.queue, result.exhaustive),
       )
     insertLeafNode(node, keyVersion, optLocation, newContractState)
   }
@@ -548,7 +548,7 @@ private[speedy] case class PartialTransaction(
       // inactive as soon as you exercise it. therefore, mark it as consumed now.
       val newContractState = assertRightKey(
         "Exercise",
-        contractState.visitExercise(
+        csmJournal.visitExercise(
           nid,
           contract.templateId,
           targetId,
@@ -573,7 +573,7 @@ private[speedy] case class PartialTransaction(
               nextNodeIdx = nextNodeIdx + 1,
               context = Context(ec),
               actionNodeSeeds = actionNodeSeeds :+ ec.actionNodeSeed, // must push before children
-              contractState = newContractState,
+              csmJournal = newContractState,
             )
           )
       }
@@ -696,7 +696,7 @@ private[speedy] case class PartialTransaction(
     copy(
       nextNodeIdx = nextNodeIdx + 1,
       context = Context(info).copy(nextActionChildIdx = context.nextActionChildIdx),
-      contractState = contractState.beginTry,
+      csmJournal = csmJournal.beginTry,
     )
   }
 
@@ -710,7 +710,7 @@ private[speedy] case class PartialTransaction(
             children = info.parent.children :++ context.children.toImmArray,
             nextActionChildIdx = context.nextActionChildIdx,
           ),
-          contractState = contractState.endTry,
+          csmJournal = csmJournal.endTry,
         )
       case _ =>
         InternalError.runtimeException(
@@ -729,7 +729,7 @@ private[speedy] case class PartialTransaction(
         // In the case of there being no children we could drop the entire rollback node.
         // But we do that in a later normalization phase, not here.
         val rollbackNode = Node.Rollback(context.children.toImmArray)
-        contractState.endRollback match {
+        csmJournal.endRollback match {
           case Right(newState) =>
             Right(
               copy(
@@ -740,7 +740,7 @@ private[speedy] case class PartialTransaction(
                     context.nextActionChildIdx,
                   ),
                 nodes = nodes.updated(info.nodeId, rollbackNode),
-                contractState = newState,
+                csmJournal = newState,
               )
             )
           case Left(nodeIds) =>
@@ -776,7 +776,7 @@ private[speedy] case class PartialTransaction(
       node: Node.LeafOnlyAction,
       version: SerializationVersion,
       optLocation: Option[Location],
-      newContractState: CSMState,
+      newContractState: CSMJournal,
   ): PartialTransaction = {
     val _ = version
     val nid = NodeId(nextNodeIdx)
@@ -785,7 +785,7 @@ private[speedy] case class PartialTransaction(
       nextNodeIdx = nextNodeIdx + 1,
       context = context.addActionChild(nid, version),
       nodes = nodes.updated(nid, node),
-      contractState = newContractState,
+      csmJournal = newContractState,
     )
   }
 

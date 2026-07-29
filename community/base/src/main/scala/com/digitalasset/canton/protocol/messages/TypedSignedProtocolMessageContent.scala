@@ -78,7 +78,7 @@ object TypedSignedProtocolMessageContent
     new TypedSignedProtocolMessageContent(content)(None)
 
   private def fromProtoV30(
-      expectedProtocolVersion: ProtocolVersionValidation,
+      pvv: ProtocolVersionValidation,
       proto: v30.TypedSignedProtocolMessageContent,
   )(
       bytes: ByteString
@@ -88,17 +88,20 @@ object TypedSignedProtocolMessageContent
     for {
       message <- (messageBytes match {
         case Sm.ConfirmationResponses(confirmationResponsesBytes) =>
-          ConfirmationResponses.fromByteString(expectedProtocolVersion, confirmationResponsesBytes)
+          ConfirmationResponses.fromByteString(
+            pvv,
+            confirmationResponsesBytes,
+          )
         case Sm.ConfirmationResult(confirmationResultMessageBytes) =>
           ConfirmationResultMessage.fromByteString(
-            expectedProtocolVersion,
+            pvv,
             confirmationResultMessageBytes,
           )
         case Sm.AcsCommitment(acsCommitmentBytes) =>
-          LegacyAcsCommitment.fromByteString(expectedProtocolVersion, acsCommitmentBytes)
+          LegacyAcsCommitment.fromByteString(pvv, acsCommitmentBytes)
         case Sm.SetTrafficPurchased(setTrafficPurchasedBytes) =>
           SetTrafficPurchasedMessage.fromByteString(
-            expectedProtocolVersion,
+            pvv,
             setTrafficPurchasedBytes,
           )
         case Sm.Empty =>

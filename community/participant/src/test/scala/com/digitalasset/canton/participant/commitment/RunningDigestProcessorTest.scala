@@ -4,16 +4,19 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   Onboarding,
   Revoked,
 }
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationLevel,
+  GenericTopologyEvent,
+}
 import com.digitalasset.canton.ledger.participant.state.{AcsChange, InternalIndexService}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
@@ -26,14 +29,21 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   ProcessingContext,
 }
 import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
-import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.TopologyTransactionTestFactory
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
+import com.digitalasset.canton.topology.transaction.{
+  SynchronizerParametersState,
+  TopologyTransaction,
+}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, LfPartyId}
@@ -41,12 +51,13 @@ import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import scala.concurrent.duration.*
 
+@AcsCommitmentTest
 class RunningDigestProcessorTest
-    extends BaseDigestProcessorTest
+    extends DigestProcessorTestBase
     with HasExecutionContext
     with HasActorSystem {
 
-  import BaseDigestProcessorTest.*
+  import DigestProcessorTestBase.*
 
   object Factory extends TopologyTransactionTestFactory(loggerFactory, parallelExecutionContext)
 
@@ -76,6 +87,17 @@ class RunningDigestProcessorTest
       ),
     ).build()
 
+    val mockStringInterning = new MockStringInterning
+    val acsDigestStore =
+      InMemoryAcsDigestStore.create(Eval.now(mockStringInterning), loggerFactory)
+    val digestAccumulator = new SequentialDigestAccumulator(
+      participant.toLf,
+      acsDigestStore,
+      mockStringInterning,
+      AcsDigestTracingMode.Disabled,
+      loggerFactory,
+    )
+
     new RunningDigestProcessor(
       participant,
       synchronizerId = DefaultTestIdentities.synchronizerId,
@@ -85,12 +107,11 @@ class RunningDigestProcessorTest
         counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
         AcsDigestTracingMode.Disabled,
       ),
+      digestAccumulator,
+      acsDigestStore,
       indexService,
       getTopologySnapshot = ts =>
         FutureUnlessShutdown.pure(testingTopology.topologySnapshot(timestampOfSnapshot = ts.value)),
-      InMemoryAcsDigestStore.create(Eval.now(mock[StringInterning]), loggerFactory),
-      mock[StringInterning],
-      mock[HashOps],
       timeouts,
       loggerFactory,
     )
@@ -116,14 +137,14 @@ class RunningDigestProcessorTest
           )
         ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
 
-        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
-          ProcessingContext(tp1_0, None),
-          ProcessingContext(tp(2), Some(dummyAcsChange)),
-          ProcessingContext(tp(3), Some(dummyAcsChange)),
-          ProcessingContext(tp(5), Some(dummyAcsChange)),
-          ProcessingContext(tp(5), None),
-          ProcessingContext(tp(6), Some(dummyAcsChange)),
-          ProcessingContext(tp(7), Some(dummyAcsChange)),
+        result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
+          ProcessingContext(tp1_0, Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(2), Right(dummyAcsChange)),
+          ProcessingContext(tp(3), Right(dummyAcsChange)),
+          ProcessingContext(tp(5), Right(dummyAcsChange)),
+          ProcessingContext(tp(5), Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(6), Right(dummyAcsChange)),
+          ProcessingContext(tp(7), Right(dummyAcsChange)),
         )
       }
 
@@ -147,16 +168,22 @@ class RunningDigestProcessorTest
           )
         ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
 
-        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
-          ProcessingContext(tp1_0, None),
-          ProcessingContext(tp(2), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(3))(ts(2)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(3))(ts(2).immediatePredecessor), None),
-          ProcessingContext(Timepoint(off(4))(ts(2)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(5))(ts(3)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(7))(ts(5).immediatePredecessor), None),
-          ProcessingContext(Timepoint(off(8))(ts(5)), Some(dummyAcsChange)),
-          ProcessingContext(Timepoint(off(9))(ts(6)), Some(dummyAcsChange)),
+        result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
+          ProcessingContext(tp1_0, Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(2), Right(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(3))(ts(2)), Right(dummyAcsChange)),
+          ProcessingContext(
+            Timepoint(off(3))(ts(2).immediatePredecessor),
+            Left(CheckpointType.MaxEventsWithoutCheckpoint),
+          ),
+          ProcessingContext(Timepoint(off(4))(ts(2)), Right(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(5))(ts(3)), Right(dummyAcsChange)),
+          ProcessingContext(
+            Timepoint(off(7))(ts(5).immediatePredecessor),
+            Left(CheckpointType.MaxEventsWithoutCheckpoint),
+          ),
+          ProcessingContext(Timepoint(off(8))(ts(5)), Right(dummyAcsChange)),
+          ProcessingContext(Timepoint(off(9))(ts(6)), Right(dummyAcsChange)),
         )
       }
 
@@ -185,17 +212,71 @@ class RunningDigestProcessorTest
           .runWith(Sink.seq)
           .futureValue
 
-        // match on CheckpointFenceOr[InputEvent].toOption, so we don't have to match on the topology snapshot
+        // match on CheckpointFenceOr[InputEvent].toEither, so we don't have to match on the topology snapshot
         val expectedResult =
           // add a fence AFTER each input event with the same timestamp as the input event
           inputEvents.flatMap { input =>
             Seq(
-              ProcessingContext(input.timepoint, Some(input.value)),
-              ProcessingContext(input.timepoint, None),
+              ProcessingContext(input.timepoint, Right(input.value)),
+              ProcessingContext(input.timepoint, Left(CheckpointType.PartyHostingChange)),
             )
           }
 
-        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs (expectedResult)
+        result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs (expectedResult)
+      }
+
+      "emit a checkpoint fence for synchronizer parameter changes" in {
+        val dummyAcsChange =
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+        val inputEvents = Seq(
+          ProcessingContext(tp(1), dummyAcsChange),
+          ProcessingContext(
+            tp(2),
+            InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
+              Set.empty,
+              Some(
+                GenericTopologyEvent.SynchronizerParametersState(
+                  TopologyTransaction
+                    .tryCreate(
+                      Replace,
+                      PositiveInt.one,
+                      SynchronizerParametersState(
+                        DefaultTestIdentities.synchronizerId,
+                        DynamicSynchronizerParameters
+                          .defaultValues(testedProtocolVersion)
+                          // different value that what the test is set up with
+                          .update(reconciliationInterval = PositiveSeconds.tryOfHours(2)),
+                      ),
+                      testedProtocolVersion,
+                    )
+                    .toByteStringChecked
+                )
+              ),
+            ),
+          ),
+          ProcessingContext(tp(3), dummyAcsChange),
+        )
+
+        val rdp = mkRunningDigestProcessor(
+          // make sure that the checkpoint intervals do not come into play
+          maxNumUpdatesBetweenCheckpoints = PositiveInt.tryCreate(100),
+          reconciliationInterval = 1.hour,
+        )
+
+        val result = Source(inputEvents)
+          .via(rdp.checkpointing(None, TraceContext.empty))
+          .runWith(Sink.seq)
+          .futureValue
+
+        // match on CheckpointFenceOr[InputEvent].toEither, so we don't have to match on the topology snapshot
+        val expectedResult =
+          Seq(
+            ProcessingContext(tp(1), Right(dummyAcsChange)),
+            ProcessingContext(tp(2), Left(CheckpointType.ReconciliationIntervalBoundary)),
+            ProcessingContext(tp(3), Right(dummyAcsChange)),
+          )
+
+        result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs (expectedResult)
       }
 
       "respect the initial checkpoint timestamp from crash recovery when the checkpoint falls on the reconciliation boundary" in {
@@ -213,13 +294,13 @@ class RunningDigestProcessorTest
           )
         ).via(rdp.checkpointing(Some(ts(5)), TraceContext.empty)).runWith(Sink.seq).futureValue
 
-        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
+        result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
           // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
-          ProcessingContext(tp(5), None),
-          ProcessingContext(tp(6), Some(dummyAcsChange)),
-          ProcessingContext(tp(7), Some(dummyAcsChange)),
-          ProcessingContext(tp(10), None),
-          ProcessingContext(tp(11), Some(dummyAcsChange)),
+          ProcessingContext(tp(5), Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(6), Right(dummyAcsChange)),
+          ProcessingContext(tp(7), Right(dummyAcsChange)),
+          ProcessingContext(tp(10), Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(11), Right(dummyAcsChange)),
         )
       }
 
@@ -237,11 +318,11 @@ class RunningDigestProcessorTest
           )
         ).via(rdp.checkpointing(Some(ts(6)), TraceContext.empty)).runWith(Sink.seq).futureValue
 
-        result.map(_.map(_.toOption)) should contain theSameElementsInOrderAs Seq(
+        result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
           // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
-          ProcessingContext(tp(7), Some(dummyAcsChange)),
-          ProcessingContext(tp(10), None),
-          ProcessingContext(tp(11), Some(dummyAcsChange)),
+          ProcessingContext(tp(7), Right(dummyAcsChange)),
+          ProcessingContext(tp(10), Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(11), Right(dummyAcsChange)),
         )
       }
     }
@@ -251,7 +332,7 @@ class RunningDigestProcessorTest
       "pass checkpoint fences through" in {
         val rdp = mkRunningDigestProcessor()
 
-        val fence = ProcessingContext(tp1_0, CheckpointFence)
+        val fence = ProcessingContext(tp1_0, CheckpointFence(ReconciliationIntervalBoundary))
 
         val result = Source
           .single(fence)
@@ -260,7 +341,7 @@ class RunningDigestProcessorTest
           .futureValue
           .loneElement
 
-        result shouldBe ProcessingContext(tp1_0, CheckpointFence)
+        result shouldBe ProcessingContext(tp1_0, CheckpointFence(ReconciliationIntervalBoundary))
       }
 
       "handle ACS changes" in {

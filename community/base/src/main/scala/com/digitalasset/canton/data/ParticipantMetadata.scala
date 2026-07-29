@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -66,7 +67,7 @@ object ParticipantMetadata
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ParticipantMetadata)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -84,20 +85,29 @@ object ParticipantMetadata
       None,
     )
 
-  private def fromProtoV30(hashOps: HashOps, metadataP: v30.ParticipantMetadata)(
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      metadataP: v30.ParticipantMetadata,
+  )(
       bytes: ByteString
   ): ParsingResult[ParticipantMetadata] = {
     val v30.ParticipantMetadata(saltP, ledgerTimeP, preparationTimeP, workflowIdP) = metadataP
     for {
       let <- CantonTimestamp.fromProtoPrimitive(ledgerTimeP)
       preparationTime <- CantonTimestamp.fromProtoPrimitive(preparationTimeP)
-      workflowId <- workflowIdP match {
+      workflowIdStr <- ProtoValidation.validate(
+        workflowIdP,
+        Some("workflowId"),
+        pvv,
+      )
+      workflowId <- workflowIdStr match {
         case "" => Right(None)
         case wf =>
           WorkflowId
             .fromProtoPrimitive(wf)
             .map(Some(_))
-            .leftMap(ProtoDeserializationError.ValueDeserializationError("workflowId", _))
+            .leftMap(ProtoDeserializationError.ValueDeserializationError(_, "workflowId"))
       }
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)

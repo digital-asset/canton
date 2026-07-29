@@ -259,7 +259,7 @@ object IdeLedger {
   /** The initial ledger */
   def initialLedger(
       t0: Time.Timestamp,
-      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NUCK,
+      csmMode: ContractStateMachine.Mode = ContractStateMachine.Mode.Key,
   ): IdeLedger =
     IdeLedger(
       currentTime = t0,

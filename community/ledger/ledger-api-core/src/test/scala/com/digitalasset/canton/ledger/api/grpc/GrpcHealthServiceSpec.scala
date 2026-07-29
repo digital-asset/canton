@@ -8,18 +8,11 @@ import com.daml.grpc.adapter.server.rs.MockServerCallStreamObserver
 import com.daml.scalautil.Statement.discard
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.health.{
-  HealthChecks,
-  HealthStatus,
-  Healthy,
-  ReportsHealth,
-  Unhealthy,
-}
+import com.digitalasset.canton.health.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthServiceSpec.*
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse}
 import org.scalatest.concurrent.Eventually
-import org.scalatest.time.{Second, Span}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.duration.DurationInt
@@ -29,9 +22,6 @@ final class GrpcHealthServiceSpec
     with Eventually
     with PekkoBeforeAndAfterAll
     with BaseTest {
-
-  implicit override val patienceConfig: PatienceConfig =
-    PatienceConfig(timeout = scaled(Span(1, Second)))
 
   "HealthService" should {
     "report SERVING if there are no health checks" in {

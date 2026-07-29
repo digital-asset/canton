@@ -6,10 +6,14 @@ package com.digitalasset.canton.platform.component
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.PruningOffsetService
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.{
+  EventSeqIdRange,
+  Ids,
+}
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
 import com.digitalasset.canton.platform.store.dao.events.{
   EventsRange,
+  OffsetRange,
   QueryValidRange,
   UpdatesStreamReader,
 }
@@ -54,7 +58,10 @@ class UpdateStreamReaderPruningComponentTest
   private def readUpdates =
     UpdatesStreamReader
       .fetchContractPayloadsInternal(
-        queryRange = EventsRange(upd1, 1, upd4, 1000L),
+        queryRange = EventsRange(
+          offsetRange = OffsetRange(startInclusive = upd1, endInclusive = upd4),
+          eventSeqIdRange = EventSeqIdRange(startInclusive = 1, endInclusive = 1000L),
+        ),
         dbMetric = DatabaseMetrics.ForTesting("test"),
         contractStore = contractStore,
         skipPruningChecks = true,

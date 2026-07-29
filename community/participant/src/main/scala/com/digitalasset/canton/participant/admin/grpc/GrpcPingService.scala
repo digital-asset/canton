@@ -53,7 +53,7 @@ class GrpcPingService(service: PingService, val loggerFactory: NamedLoggerFactor
         )
         levels <- NonNegativeInt
           .create(levelsP)
-          .leftMap(x => ProtoDeserializationError.ValueDeserializationError("levels", x.message))
+          .leftMap(x => ProtoDeserializationError.ValueDeserializationError(x.message, "levels"))
         synchronizerId <- OptionUtil
           .emptyStringAsNone(synchronizerIdP)
           .traverse(SynchronizerId.fromProtoPrimitive(_, "synchronizer_id"))

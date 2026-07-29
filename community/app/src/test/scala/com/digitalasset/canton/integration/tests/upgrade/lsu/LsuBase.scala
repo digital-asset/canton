@@ -40,6 +40,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
 
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
+
 /** This trait provides helpers for the logical synchronizer upgrade tests. The main goal is to
   * improve readability of each tests by focusing on the behavior we want to test and make it easier
   * to write new tests.
@@ -163,6 +165,8 @@ private[lsu] trait LsuBase
       fixtureOverride: Option[Fixture] = None,
       trafficTsOverride: Option[CantonTimestamp] = None,
       suppressLogs: Boolean = true,
+      timeUntilSuccess: FiniteDuration = 20.seconds,
+      maxPollInterval: FiniteDuration = 5.seconds,
   ): Unit = {
 
     val oldSequencers: Seq[LocalSequencerReference] =
@@ -176,6 +180,8 @@ private[lsu] trait LsuBase
       newSequencers = newSequencers,
       suppressLogs = suppressLogs,
       trafficTsOverride = trafficTsOverride,
+      timeUntilSuccess = timeUntilSuccess,
+      maxPollInterval = maxPollInterval,
     )
   }
 
@@ -225,6 +231,7 @@ private[lsu] trait LsuBase
       upgradeTime: CantonTimestamp = upgradeTime,
       newPVOverride: Option[ProtocolVersion] = None,
       newSerialOverride: Option[NonNegativeInt] = None,
+      topologyChangeDelay: config.NonNegativeFiniteDuration = config.NonNegativeFiniteDuration.Zero,
   )(implicit
       env: TestConsoleEnvironment
   ): Fixture = {
@@ -240,6 +247,7 @@ private[lsu] trait LsuBase
       newPV = newPVOverride.getOrElse(DefaultNewPV),
       // increasing the serial as well, so that the test also works when running with PV=dev
       newSerial = newSerialOverride.getOrElse(currentPsid.serial.increment.toNonNegative),
+      topologyChangeDelay = topologyChangeDelay,
     )
   }
 
@@ -397,13 +405,14 @@ object LsuBase {
       newPV: ProtocolVersion,
       newSerial: NonNegativeInt,
       overridePsid: Option[PhysicalSynchronizerId] = None,
+      topologyChangeDelay: config.NonNegativeFiniteDuration = config.NonNegativeFiniteDuration.Zero,
   ) {
     val newStaticSynchronizerParameters: StaticSynchronizerParameters =
       StaticSynchronizerParameters.defaults(
         CryptoConfig(),
         newPV,
         newSerial,
-        topologyChangeDelay = config.NonNegativeFiniteDuration.Zero,
+        topologyChangeDelay,
       )
 
     val lsid: SynchronizerId = currentPsid.logical

@@ -237,7 +237,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
         readAs = readAs,
         interpretationConfig = InterpretationConfig.Default.copy(
           contractStateMode =
-            if (withKey) ContractStateMachine.Mode.NUCK
+            if (withKey) ContractStateMachine.Mode.Key
             else ContractStateMachine.Mode.NoKey
         ),
         packageResolution = packageResolution,

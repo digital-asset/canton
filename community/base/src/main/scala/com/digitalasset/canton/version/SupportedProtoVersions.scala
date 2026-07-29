@@ -30,7 +30,12 @@ final case class SupportedProtoVersions[F[
   val (higherProtoVersion, higherConverter) = converters.head1
 
   type Deserializer =
-    (Context, OriginalByteString, DataByteString) => ParsingResult[DeserializedValueClass]
+    (
+        ProtocolVersionValidation,
+        Context,
+        OriginalByteString,
+        DataByteString,
+    ) => ParsingResult[DeserializedValueClass]
 
   def converterFor(
       protocolVersion: ProtocolVersion

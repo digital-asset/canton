@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend.common
 import com.digitalasset.canton.data
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.backend.Conversions.*
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
   SqlStringInterpolation,
@@ -25,7 +26,7 @@ class UpdatePointwiseQueries(
   /** Fetches a matching event sequential id range. */
   def fetchIdsFromUpdateMeta(
       lookupKey: LookupKey
-  )(connection: Connection): Option[(Long, Long)] = {
+  )(connection: Connection): Option[EventSeqIdRange] = {
     import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
     // 1. Checking whether "event_offset <= ledgerEndOffset" is needed because during indexing
     // the events and transaction_meta tables are written to prior to the ledger end being updated.

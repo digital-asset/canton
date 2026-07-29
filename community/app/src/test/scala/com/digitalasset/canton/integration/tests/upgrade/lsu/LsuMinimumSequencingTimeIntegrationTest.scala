@@ -10,7 +10,6 @@ import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
-import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.networking.grpc.GrpcError.GrpcRequestRefusedByServer
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
 import com.digitalasset.canton.sequencing.protocol.Batch
@@ -20,7 +19,6 @@ import com.digitalasset.canton.sequencing.protocol.SendAsyncError.{
 }
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
 import com.digitalasset.canton.tracing.TraceContext
-import org.slf4j.event.Level
 
 /*
  * This test is used to test the logical synchronizer upgrade.
@@ -72,39 +70,24 @@ final class LsuMinimumSequencingTimeIntegrationTest
 
       val errorMessage =
         s"Cannot submit before or at the lower bound for sequencing time $upgradeTime; time is currently at ${environment.clock.now}"
-      loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-        {
-          sequencer2.underlying.value.sequencer.client
-            .send(Batch(Nil, testedProtocolVersion))(TraceContext.empty, MetricsContext.Empty)
-            .futureValueUS shouldBe Left(RequestRefused(SendAsyncErrorDirect(errorMessage)))
+      sequencer2.underlying.value.sequencer.client
+        .send(Batch(Nil, testedProtocolVersion))(TraceContext.empty, MetricsContext.Empty)
+        .futureValueUS shouldBe Left(RequestRefused(SendAsyncErrorDirect(errorMessage)))
 
-          mediator2.underlying.value.replicaManager.mediatorRuntime.value.mediator.sequencerClient
-            .send(Batch(Nil, testedProtocolVersion))(TraceContext.empty, MetricsContext.Empty)
-            .futureValueUS should matchPattern {
-            case Left(
-                  RequestRefused(
-                    SendAsyncErrorGrpc(GrpcRequestRefusedByServer(_, _, _, _, Some(cantonError)))
-                  )
-                )
-                if cantonError.code.id == SubmissionRequestRefused.id && cantonError.cause == errorMessage =>
-          }
-
-          // advance the clock to the minimum sequencing time
-          environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-          waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
-        },
-        LogEntry.assertLogSeq(
-          Seq(
-            (
-              entry => {
-                entry.shouldBeCantonErrorCode(SubmissionRequestRefused)
-                entry.warningMessage should include(errorMessage)
-              },
-              "submission request refused warning",
+      mediator2.underlying.value.replicaManager.mediatorRuntime.value.mediator.sequencerClient
+        .send(Batch(Nil, testedProtocolVersion))(TraceContext.empty, MetricsContext.Empty)
+        .futureValueUS should matchPattern {
+        case Left(
+              RequestRefused(
+                SendAsyncErrorGrpc(GrpcRequestRefusedByServer(_, _, _, _, Some(cantonError)))
+              )
             )
-          )
-        ),
-      )
+            if cantonError.code.id == SubmissionRequestRefused.id && cantonError.cause == errorMessage =>
+      }
+
+      // advance the clock to the minimum sequencing time
+      environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+      waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
 
       participant2.synchronizers.connect_local(sequencer2, daName)
       participant2.health.maybe_ping(participant2) should not be empty

@@ -19,6 +19,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -90,11 +91,11 @@ object SequencedEvent
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SequencedEvent)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SequencedEvent)(
-      supportedProtoVersionMemoized(_)(fromProtoV31),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
       _.toProtoV31,
     ),
   )
@@ -112,38 +113,52 @@ object SequencedEvent
   }
 
   private[sequencing] def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       sequencedEventP: v30.SequencedEvent,
   )(
       bytes: ByteString
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
     fromProtoGeneric(
+      pvv,
       ProtoSequencedEventV30(sequencedEventP),
-      decompressBatch(decompressionPolicy),
+      decompressBatch(pvv, decompressionPolicy),
     )(bytes)
 
   private[sequencing] def fromProtoV31(
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
       sequencedEventP: v31.SequencedEvent,
   )(
       bytes: ByteString
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
     fromProtoGeneric(
+      pvv,
       ProtoSequencedEventV31(sequencedEventP),
-      decompressBatch(decompressionPolicy),
+      decompressBatch(pvv, decompressionPolicy),
     )(bytes)
 
   private[sequencing] def fromProtoV30Compressed(
-      sequencedEventP: v30.SequencedEvent
+      pvv: ProtocolVersionValidation,
+      sequencedEventP: v30.SequencedEvent,
   )(bytes: ByteString): ParsingResult[SequencedEvent[CompressedBatch]] =
-    fromProtoGeneric(ProtoSequencedEventV30(sequencedEventP), pb => Right(CompressedBatch(pb)))(
+    fromProtoGeneric(
+      pvv,
+      ProtoSequencedEventV30(sequencedEventP),
+      pb => Right(CompressedBatch(pb)),
+    )(
       bytes
     )
 
   private[sequencing] def fromProtoV31Compressed(
-      sequencedEventP: v31.SequencedEvent
+      pvv: ProtocolVersionValidation,
+      sequencedEventP: v31.SequencedEvent,
   )(bytes: ByteString): ParsingResult[SequencedEvent[CompressedBatch]] =
-    fromProtoGeneric(ProtoSequencedEventV31(sequencedEventP), pb => Right(CompressedBatch(pb)))(
+    fromProtoGeneric(
+      pvv,
+      ProtoSequencedEventV31(sequencedEventP),
+      pb => Right(CompressedBatch(pb)),
+    )(
       bytes
     )
 
@@ -154,15 +169,17 @@ object SequencedEvent
     event.toProtoV31
 
   private def decompressBatch(
-      decompressionPolicy: DecompressionPolicy
+      pvv: ProtocolVersionValidation,
+      decompressionPolicy: DecompressionPolicy,
   )(proto: ProtoBatch): ParsingResult[Batch[ClosedEnvelope]] =
-    CompressedBatch(proto).decompress(decompressionPolicy)
+    CompressedBatch(proto).decompress(pvv, decompressionPolicy)
 
   /** Generic deserialization that delegates the batch decoding to `decodeBatch`. This allows either
     * eagerly decompressing the batch (see [[decompressBatch]]) or keeping it compressed (see
     * [[fromTrustedByteStringCompressed]]).
     */
   private[sequencing] def fromProtoGeneric[B <: GenBatch[?]](
+      pvv: ProtocolVersionValidation,
       protoSequencedEvent: ProtoSequencedEvent,
       decodeBatch: ProtoBatch => ParsingResult[B],
   )(
@@ -203,10 +220,11 @@ object SequencedEvent
     for {
       previousTimestamp <- previousTimestampP.traverse(CantonTimestamp.fromProtoPrimitive)
       timestamp <- CantonTimestamp.fromProtoPrimitive(tsP)
-      psid <- PhysicalSynchronizerId.fromProtoPrimitive(
+      psid <- ProtoValidation.validateThen(
         synchronizerIdP,
         "SequencedEvent.physical_synchronizer_id",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       mbBatch <- protoSequencedEvent.batch.traverse(decodeBatch)
       trafficConsumed <- trafficConsumedP.traverse(TrafficReceipt.fromProtoV30)
       // errors have an error reason, delivers have a batch
@@ -219,7 +237,9 @@ object SequencedEvent
           for {
             msgId <- ProtoConverter
               .required("DeliverError", mbMsgIdP)
-              .flatMap(MessageId.fromProtoPrimitive)
+              .flatMap(
+                ProtoValidation.validateThen(_, "message_id", pvv)(MessageId.fromProtoPrimitive)
+              )
             _ <- Either.cond(
               topologyTimestampP.isEmpty,
               (),
@@ -236,7 +256,9 @@ object SequencedEvent
         case (None, Some(batch)) =>
           for {
             topologyTimestampO <- topologyTimestampP.traverse(CantonTimestamp.fromProtoPrimitive)
-            msgIdO <- mbMsgIdP.traverse(MessageId.fromProtoPrimitive)
+            msgIdO <- ProtoValidation.validateThen(mbMsgIdP, "message_id", pvv)(
+              MessageId.fromProtoPrimitive
+            )
           } yield Deliver(
             previousTimestamp,
             timestamp,
@@ -287,10 +309,11 @@ object SequencedEvent
     */
   private[canton] def decompress(
       event: SequencedEvent[GenBatch[ClosedEnvelope]],
+      pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
     traverseBatch(event) {
-      case compressed: CompressedBatch => compressed.decompress(decompressionPolicy)
+      case compressed: CompressedBatch => compressed.decompress(pvv, decompressionPolicy)
       case batch: Batch[ClosedEnvelope] => Right(batch)
     }
 
@@ -371,11 +394,11 @@ object CompressedSequencedEvent
   // Keep in sync with SequencedEvent.versioningTable.
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SequencedEvent)(
-      supportedProtoVersionMemoized(_)(SequencedEvent.fromProtoV30Compressed),
+      supportedProtoVersionMemoizedPVV(_)(SequencedEvent.fromProtoV30Compressed),
       SequencedEvent.serializeV30,
     ),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SequencedEvent)(
-      supportedProtoVersionMemoized(_)(SequencedEvent.fromProtoV31Compressed),
+      supportedProtoVersionMemoizedPVV(_)(SequencedEvent.fromProtoV31Compressed),
       SequencedEvent.serializeV31,
     ),
   )

@@ -263,7 +263,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         .parseToByteString(proto.requestId)
         .toRight(
           ProtoDeserializationError
-            .ValueDeserializationError("request_id", s"not a hex string \"${proto.requestId}\"")
+            .ValueDeserializationError(s"not a hex string \"${proto.requestId}\"", "request_id")
         )
       requestId <- Hash.fromProtoPrimitive(requestIdBytes)
       partyId <- PartyId.fromProtoPrimitive(proto.partyId, "party_id")

@@ -31,7 +31,9 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.canton.{LedgerParticipantId, checked}
 import com.digitalasset.nonempty.NonEmpty
+import com.google.common.annotations.VisibleForTesting
 import pprint.Tree
+import slick.jdbc.GetResult
 
 import scala.collection.immutable
 
@@ -42,6 +44,8 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
   import AcsCommitmentPeriodStore.*
 
   protected def stringInterning: StringInterning
+  @VisibleForTesting @inline private[canton] final def stringInterningInternal: StringInterning =
+    stringInterning
 
   /** Returns all outstanding rows whose periods overlap with the given period for the given
     * participants.
@@ -79,15 +83,28 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
       traceContext: TraceContext
   ): FutureUnlessShutdown[immutable.Iterable[MatchedCommitmentMatchPeriod]]
 
-  /** Returns the watermarks for matching */
-  def watermarks()(implicit traceContext: TraceContext): FutureUnlessShutdown[MatchingWatermark]
+  /** Returns the watermarks. */
+  def watermarks()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[MatchingWatermark]
 
-  /** Increases the watermarks. Does nothing if the watermarks are already higher.
+  /** Increases the watermarks that separate insertion from matching. Does nothing if the watermarks
+    * are already higher.
+    *
+    * Must not execute concurrently with [[markOutstanding]].
     *
     * @param affirmationOnly
     *   If true, only the affirmation watermark is increased.
     */
-  def increaseWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(implicit
+  def increaseInsertionWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
+
+  /** Increases the watermark for the
+    * [[com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentMatcher]]. Does nothing
+    * if the watermark is already higher.
+    */
+  def increaseMatcherWatermark(offset: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
@@ -104,6 +121,8 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
     * If multiple updates for the same participant are given, the caller must ensure that the
     * periods do not overlap. The caller must also ensure that the shortened periods do not overlap
     * with any existing row.
+    *
+    * Must not execute concurrently with [[increaseInsertionWatermark]].
     */
   def markOutstanding(digests: immutable.Iterable[OutstandingCommitmentMatchPeriod])(implicit
       traceContext: TraceContext
@@ -128,7 +147,7 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
     *   - Intervals in `insertMismatchedOrUnexpected` without an expected hashed digest must be
     *     disjoint from all other intervals.
     *   - For intervals in `insertMatched` that are covered in `deleteMismatched`, the offset must
-    *     increase strictly.
+    *     increase non-strictly.
     *
     * Moreover, the deletions must correspond to the exact rows in the store.
     *
@@ -337,7 +356,7 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
         deleteMismatchedDI.overlappingWith(period.fromExclusive, period.toInclusive)
       overlapMismatched.foreach { overlap =>
         ErrorUtil.requireArgument(
-          overlap.offset < period.offset,
+          overlap.offset <= period.offset,
           s"Overlapping deleted mismatched and inserted matched periods have non-increasing offsets for ${participantId(
               participant
             )}: ${overlap.offset} vs ${period.offset}",
@@ -393,20 +412,31 @@ object AcsCommitmentPeriodStore {
   final case class MatchingWatermark(
       reconciliation: CantonTimestamp,
       affirmation: CantonTimestamp,
+      matching: Option[Offset],
   ) {
     def bump(timestamp: CantonTimestamp, affirmationOnly: Boolean): MatchingWatermark =
       if (affirmationOnly) {
         copy(affirmation = affirmation.max(timestamp))
       } else {
-        MatchingWatermark(
+        copy(
           reconciliation = reconciliation.max(timestamp),
           affirmation = affirmation.max(timestamp),
         )
       }
+
+    def bump(matching: Offset): MatchingWatermark =
+      if (this.matching.forall(_ < matching)) copy(matching = Some(matching)) else this
   }
   object MatchingWatermark {
     val initial: MatchingWatermark =
-      MatchingWatermark(CantonTimestamp.MinValue, CantonTimestamp.MinValue)
+      MatchingWatermark(CantonTimestamp.MinValue, CantonTimestamp.MinValue, None)
+
+    implicit val getResultMatchingWatermark: GetResult[MatchingWatermark] = GetResult { r =>
+      val reconciliation = r.<<[CantonTimestamp]
+      val affirmation = r.<<[CantonTimestamp]
+      val matching = r.<<[Option[Offset]]
+      MatchingWatermark(reconciliation, affirmation, matching)
+    }
   }
 
   final case class CommitmentMatchPeriod[+Digest, +Off](
@@ -423,6 +453,37 @@ object AcsCommitmentPeriodStore {
 
     override def prettyCompanion: PrettyPrintingCompanion[CommitmentMatchPeriod.this.type] =
       CommitmentMatchPeriod
+
+    /** Returns, first, the remainders of this interval when (`startExclusive`, `endInclusive`] are
+      * removed, and, second, the intersection of this interval and (`startExclusive`,
+      * `endInclusive`]. Assumes that this interval overlaps with (`startExclusive`,
+      * `endInclusive`].
+      */
+    def partition(
+        startExclusive: CantonTimestamp,
+        endInclusive: CantonTimestamp,
+    ): (Seq[CommitmentMatchPeriod[Digest, Off]], CommitmentMatchPeriod[Digest, Off]) =
+      (startExclusive > this.fromExclusive, endInclusive < this.toInclusive) match {
+        case (true, true) =>
+          // Both sides are cut off
+          val remainders =
+            Seq(this.copy(toInclusive = startExclusive), this.copy(fromExclusive = endInclusive))
+          val restricted = this.copy(fromExclusive = startExclusive, toInclusive = endInclusive)
+          remainders -> restricted
+        case (false, true) =>
+          // Right side is cut off
+          val remainder = this.copy(fromExclusive = endInclusive)
+          val restricted = this.copy(toInclusive = endInclusive)
+          Seq(remainder) -> restricted
+        case (true, false) =>
+          // Left side is cut off
+          val remainder = this.copy(toInclusive = startExclusive)
+          val restricted = this.copy(fromExclusive = startExclusive)
+          Seq(remainder) -> restricted
+        case (false, false) =>
+          // Nothing to cut off
+          Seq.empty -> this
+      }
   }
 
   /** An commitment period is outstanding when this participant has computed it and not yet
@@ -487,7 +548,7 @@ object AcsCommitmentPeriodStore {
       def prettyHashedDigest(inst: CommitmentMatchPeriod[Any, Any]): Option[Tree] =
         inst.hashedDigest match {
           case bytes: HashedDigest =>
-            val hexTruncated = HexString.toHexString(bytes, 16)
+            val hexTruncated = HexString.toHexString(bytes, 16) + "..."
             val tree = Tree.Infix(Tree.Literal("hashed digest"), "=", Tree.Literal(hexTruncated))
             Some(tree)
           case _ => None
@@ -536,13 +597,8 @@ object AcsCommitmentPeriodStore {
             startExclusive: CantonTimestamp,
             endInclusive: CantonTimestamp,
         ): Seq[CommitmentMatchPeriod[Digest, Off]] = {
-          val leftRemainder = Option.when(startExclusive > interval.fromExclusive)(
-            interval.copy(toInclusive = startExclusive)
-          )
-          val rightRemainder = Option.when(endInclusive < interval.toInclusive)(
-            interval.copy(fromExclusive = endInclusive)
-          )
-          leftRemainder.toList ++ rightRemainder.toList
+          val (outside, _) = interval.partition(startExclusive, endInclusive)
+          outside
         }
       }
 

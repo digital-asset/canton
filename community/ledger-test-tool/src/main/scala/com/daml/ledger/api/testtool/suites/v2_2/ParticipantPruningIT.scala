@@ -232,7 +232,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         RequestValidationErrors.ParticipantPrunedDataAccessed,
         Some(
           Pattern.compile(
-            s"(Transactions request from [0-9]* to [0-9]* precedes pruned offset $offsetToPruneUpTo)|(Request from [0-9]* precedes pruned offset $offsetToPruneUpTo)"
+            s"Transactions request for offset range \\[[0-9]*, [0-9]*\\] precedes pruned offset $offsetToPruneUpTo"
           )
         ),
       )
@@ -241,7 +241,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         RequestValidationErrors.ParticipantPrunedDataAccessed,
         Some(
           Pattern.compile(
-            s"(Transactions request from [0-9]* to [0-9]* precedes pruned offset $offsetToPruneUpTo)|(Request from [0-9]* precedes pruned offset $offsetToPruneUpTo)"
+            s"Transactions request for offset range \\[[0-9]*, [0-9]*\\] precedes pruned offset $offsetToPruneUpTo"
           )
         ),
       )
@@ -295,7 +295,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         RequestValidationErrors.ParticipantPrunedDataAccessed,
         Some(
           Pattern.compile(
-            s"(Transactions request from [0-9]* to [0-9]* precedes pruned offset $offsetToPruneUpTo)|(Request from [0-9]* precedes pruned offset $offsetToPruneUpTo)"
+            s"Transactions request for offset range \\[[0-9]*, [0-9]*\\] precedes pruned offset $offsetToPruneUpTo"
           )
         ),
       )
@@ -304,7 +304,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         RequestValidationErrors.ParticipantPrunedDataAccessed,
         Some(
           Pattern.compile(
-            s"(Transactions request from [0-9]* to [0-9]* precedes pruned offset $offsetToPruneUpTo)|(Request from [0-9]* precedes pruned offset $offsetToPruneUpTo)"
+            s"Transactions request for offset range \\[[0-9]*, [0-9]*\\] precedes pruned offset $offsetToPruneUpTo"
           )
         ),
       )
@@ -371,7 +371,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         RequestValidationErrors.ParticipantPrunedDataAccessed,
         Some(
           Pattern.compile(
-            s"Command completions? request from [0-9]* to [0-9]* overlaps with pruned offset $offsetToPruneUpTo"
+            s"Command completions request for offset range \\[[0-9]*, [0-9]*\\] overlaps with pruned offset $offsetToPruneUpTo"
           )
         ),
       )
@@ -380,7 +380,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
         RequestValidationErrors.ParticipantPrunedDataAccessed,
         Some(
           Pattern.compile(
-            s"Command completions? request from [0-9]* to [0-9]* overlaps with pruned offset $offsetToPruneUpTo"
+            s"Command completions request for offset range \\[[0-9]*, [0-9]*\\] overlaps with pruned offset $offsetToPruneUpTo"
           )
         ),
       )

@@ -10,6 +10,8 @@ override-components:
     version: $DAML_VERSION
   codegen:
     version: $DAML_VERSION
+build-options:
+- --target=2.2
 name: sub-views-main
 data-dependencies:
 - ../../../scala-2.13/resource_managed/test/sub-views-iface-1.0.0.dar

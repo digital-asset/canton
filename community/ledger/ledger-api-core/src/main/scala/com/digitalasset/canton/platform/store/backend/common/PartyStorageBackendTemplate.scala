@@ -43,9 +43,8 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
           #${QueryStrategy.booleanOrAggregationFunction}(is_local) is_local
         FROM lapi_party_entries
         WHERE
-          ledger_offset <= ${ledgerEnd.lastOffset} AND
+          ledger_offset <= ${ledgerEnd.lastOffset}
           $partyFilter
-          typ = 'accept'
         GROUP BY party
         ORDER BY party
         $limitClause
@@ -54,7 +53,7 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
 
   override def parties(parties: Seq[Party])(connection: Connection): List[IndexerPartyDetails] = {
     val requestedParties = parties.view.map(_.toString).toSet
-    val partyFilter = cSQL"lapi_party_entries.party in ($requestedParties) AND"
+    val partyFilter = cSQL"AND lapi_party_entries.party in ($requestedParties)"
     queryParties(partyFilter, cSQL"", connection).toList
   }
 
@@ -67,12 +66,12 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
   ): List[IndexerPartyDetails] = {
 
     val offsetPartyFilter = fromExcl match {
-      case Some(id: String) => cSQL"lapi_party_entries.party > $id AND"
+      case Some(id: String) => cSQL" AND lapi_party_entries.party > $id"
       case None => cSQL""
     }
     val partyFilter = filterString match {
       case Some(filter) =>
-        cSQL"$offsetPartyFilter lapi_party_entries.party LIKE ${filter.str + "%"} AND"
+        cSQL"$offsetPartyFilter AND lapi_party_entries.party LIKE ${filter.str + "%"}"
       case None => offsetPartyFilter
     }
     queryParties(

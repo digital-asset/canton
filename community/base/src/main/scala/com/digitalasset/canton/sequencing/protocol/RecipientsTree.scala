@@ -10,6 +10,8 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 
 /** A tree representation of the recipients for a batch. Each member receiving the batch should see
@@ -94,12 +96,15 @@ object RecipientsTree {
     RecipientsTree(group, Seq.empty)
 
   def fromProtoV30(
-      treeProto: v30.RecipientsTree
+      pvv: ProtocolVersionValidation,
+      treeProto: v30.RecipientsTree,
   ): ParsingResult[RecipientsTree] =
     for {
-      members <- treeProto.recipients.traverse(str =>
-        Recipient.fromProtoPrimitive(str, "RecipientsTreeProto.recipients")
-      )
+      members <- ProtoValidation.validateThen(
+        treeProto.recipients,
+        "RecipientsTreeProto.recipients",
+        pvv,
+      )(Recipient.fromProtoPrimitive)
       recipientsNonEmpty <- NonEmpty
         .from(members)
         .toRight(
@@ -109,7 +114,7 @@ object RecipientsTree {
           )
         )
       children = treeProto.children
-      childTrees <- children.toList.traverse(fromProtoV30)
+      childTrees <- children.toList.traverse(fromProtoV30(pvv, _))
     } yield RecipientsTree(
       recipientsNonEmpty.toSet,
       childTrees,

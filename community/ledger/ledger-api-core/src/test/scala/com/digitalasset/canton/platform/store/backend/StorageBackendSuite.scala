@@ -23,6 +23,7 @@ trait StorageBackendSuite
     with StorageBackendTestsIDPConfig
     with StorageBackendTestsPartyRecord
     with StorageBackendTestsPartyToParticipant
+    with StorageBackendTestsDynamicSynchronizerParameters
     with StorageBackendTestsAcsCommitments
     with StorageBackendTestsQueryValidRange
     with StorageBackendTestsParameters {

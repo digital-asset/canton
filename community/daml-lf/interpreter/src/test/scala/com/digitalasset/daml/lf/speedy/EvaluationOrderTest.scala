@@ -278,7 +278,7 @@ abstract class EvaluationOrderTest(languageVersion: LanguageVersion, withKey: Bo
         authorizationChecker = new AuthorizationCheckerLogger(recordingLogger),
         interpretationConfig = InterpretationConfig.Default.copy(
           contractStateMode =
-            if (withKey) ContractStateMachine.Mode.NUCK
+            if (withKey) ContractStateMachine.Mode.Key
             else ContractStateMachine.Mode.NoKey
         ),
         packageResolution = packageResolution,

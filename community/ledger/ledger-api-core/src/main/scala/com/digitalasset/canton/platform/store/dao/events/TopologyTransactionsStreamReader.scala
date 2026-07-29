@@ -81,8 +81,7 @@ class TopologyTransactionsStreamReader(
             idStreamName = s"Update IDs for topology transaction events for partyO:$partyO",
             idPageSizing = idPageSizing,
             idPageBufferSize = maxPagesPerIdPagesBuffer,
-            initialFromIdExclusive = queryRange.startInclusiveEventSeqId,
-            initialEndInclusive = queryRange.endInclusiveEventSeqId,
+            initialEventSeqIdRange = queryRange.eventSeqIdRange,
             descendingOrder = descendingOrder,
           )(idPageQuery(partyO))(
             executeIdQuery = f =>
@@ -114,12 +113,11 @@ class TopologyTransactionsStreamReader(
           payloadQueriesLimiter.execute {
             globalPayloadQueriesLimiter.execute {
               queryValidRange.withRangeNotPruned(
-                minOffsetInclusive = queryRange.startInclusiveOffset,
-                maxOffsetInclusive = queryRange.endInclusiveOffset,
+                offsetRange = queryRange.offsetRange,
                 errorPruning = (prunedOffset: Offset) =>
-                  s"Topology events request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+                  s"Topology events request for ${queryRange.offsetRange} precedes pruned offset ${prunedOffset.unwrap}",
                 errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-                  s"Topology events request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} is beyond ledger end offset ${ledgerEndOffset
+                  s"Topology events request for ${queryRange.offsetRange} is beyond ledger end offset ${ledgerEndOffset
                       .fold(0L)(_.unwrap)}",
               ) {
                 dbDispatcher.executeSql(dbMetric)(

@@ -47,7 +47,7 @@ object ConnectToSequencerChannelRequest
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.dev)(
       v30.ConnectToSequencerChannelRequest
     )(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
   )
@@ -80,13 +80,16 @@ object ConnectToSequencerChannelRequest
   }
   object Request {
     def fromProtoV30(
-        request: v30_ChannelRequest
+        pvv: ProtocolVersionValidation,
+        request: v30_ChannelRequest,
     ): ParsingResult[Request] =
       request match {
         case v30_ChannelRequest.Empty =>
           Left(ProtoDeserializationError.FieldNotSet("request"))
         case v30_ChannelRequest.Metadata(metadataP) =>
-          SequencerChannelMetadata.fromProtoV30(metadataP).map(Metadata.apply)
+          SequencerChannelMetadata
+            .fromProtoV30(pvv, metadataP)
+            .map(Metadata.apply)
         case v30_ChannelRequest.SessionKey(keyP) =>
           SequencerChannelSessionKey.fromProtoV30(keyP).map(SessionKey.apply)
         case v30_ChannelRequest.SessionKeyAcknowledgement(encrypted) =>
@@ -146,11 +149,12 @@ object ConnectToSequencerChannelRequest
     )(ConnectToSequencerChannelRequest.protocolVersionRepresentativeFor(protocolVersion))
 
   def fromProtoV30(
-      connectRequest: v30.ConnectToSequencerChannelRequest
+      pvv: ProtocolVersionValidation,
+      connectRequest: v30.ConnectToSequencerChannelRequest,
   ): ParsingResult[ConnectToSequencerChannelRequest] = {
     val v30.ConnectToSequencerChannelRequest(requestP, traceContextP) = connectRequest
     for {
-      request <- Request.fromProtoV30(requestP)
+      request <- Request.fromProtoV30(pvv, requestP)
       traceContext <- SerializableTraceContext.fromProtoV30Opt(traceContextP).map(_.unwrap)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ConnectToSequencerChannelRequest(request, traceContext)(rpv)

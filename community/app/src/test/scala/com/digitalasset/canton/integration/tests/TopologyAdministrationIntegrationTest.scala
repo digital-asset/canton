@@ -135,7 +135,7 @@ class TopologyAdministrationIntegrationTest
 
       val topologyTransaction = TopologyTransaction.tryCreate(
         storedOtkm.transaction.transaction.operation,
-        storedOtkm.transaction.transaction.serial.increment,
+        storedOtkm.transaction.transaction.serial.increment.value,
         otkmWithNewKey,
         testedProtocolVersion,
       )
@@ -315,7 +315,7 @@ class TopologyAdministrationIntegrationTest
           participant2.topology.owner_to_key_mappings.propose(
             member = existingOtk.item.member,
             keys = existingOtk.item.keys :+ signingKey,
-            serial = Some(existingOtk.context.serial.increment),
+            serial = Some(existingOtk.context.serial.increment.value),
             // explicitly only sign with the namespace key, but not the signing key
             signedBy = Seq(participant2.fingerprint),
             store = Authorized,
@@ -389,7 +389,7 @@ class TopologyAdministrationIntegrationTest
           participant2.topology.owner_to_key_mappings.propose(
             member = existingOtk.item.member,
             keys = existingOtk.item.keys :+ signingKey,
-            serial = Some(existingOtk.context.serial.increment),
+            serial = Some(existingOtk.context.serial.increment.value),
             // explicitly only sign with the namespace key, but not the signing key
             signedBy = Seq(participant2.fingerprint),
             store = daId,

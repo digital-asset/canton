@@ -7,7 +7,6 @@ import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.{
   Epoch,
   Segment,
@@ -17,7 +16,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.AvailabilityAck.ValidationError
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.ProofOfAvailability
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  OrderingTopology,
+  SequencingParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
 
 trait PbftMessageValidator {
@@ -25,9 +27,14 @@ trait PbftMessageValidator {
   def validatePrePrepare(prePrepare: PrePrepare): Either[String, Unit]
 }
 
-final class PbftMessageValidatorImpl(segment: Segment, epoch: Epoch, metrics: BftOrderingMetrics)(
+final class PbftMessageValidatorImpl(
+    segment: Segment,
+    epoch: Epoch,
+    metrics: BftOrderingMetrics,
+    sequencingParameters: SequencingParameters,
+)(
     abort: String => Nothing
-)(implicit mc: MetricsContext, config: BftBlockOrdererConfig)
+)(implicit mc: MetricsContext)
     extends PbftMessageValidator {
 
   import PbftMessageValidatorImpl.*
@@ -53,11 +60,11 @@ final class PbftMessageValidatorImpl(segment: Segment, epoch: Epoch, metrics: Bf
 
     for {
       _ <- Either.cond(
-        block.proofs.sizeIs <= config.maxBatchesPerBlockProposal.toInt,
+        block.proofs.sizeIs <= sequencingParameters.maxBatchesPerBlockProposal.toInt,
         (), {
           emitNonComplianceMetrics(prePrepare)
           s"The PrePrepare for block ${prePrepare.blockMetadata} has ${block.proofs.size} proofs of availability, " +
-            s"but it should have up to the maximum batch number per proposal of ${config.maxBatchesPerBlockProposal}; " +
+            s"but it should have up to the maximum batch number per proposal of ${sequencingParameters.maxBatchesPerBlockProposal}; " +
             "the maximum batch number per proposal should be configured with the same value across all nodes"
         },
       )

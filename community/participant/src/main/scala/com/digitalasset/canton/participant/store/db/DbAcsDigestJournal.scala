@@ -29,16 +29,16 @@ import scala.concurrent.ExecutionContext
 
 import DbStorage.Implicits.BuilderChain.*
 
-class DbAcsDigestJournal[K, V](
+class DbAcsDigestJournal[K](
     override protected val storage: DbStorage,
     indexedSynchronizer: IndexedSynchronizer,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val timeouts: ProcessingTimeout,
     prettyKey: K => String,
     journalTable: JournalTable,
-    createJournalImplicitsF: DbStorage => DbAcsDigestJournalImplicits[K, V],
+    createJournalImplicitsF: DbStorage => DbAcsDigestJournalImplicits[K],
 )(implicit ec: ExecutionContext)
-    extends AcsDigestJournal[K, V]
+    extends AcsDigestJournal[K]
     with DbStore {
 
   private val journalImplicits = createJournalImplicitsF(storage)
@@ -48,8 +48,6 @@ class DbAcsDigestJournal[K, V](
   import journalTable.*
 
   private val synchronizerIdx = indexedSynchronizer.index
-
-  private val digestColNamesInSelect = digestColumnNames.mkString(", ")
 
   override def deleteAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
@@ -105,13 +103,11 @@ class DbAcsDigestJournal[K, V](
         """
     }
 
-    val nullDigestCondition = digestColumnNames.map(col => s"$col is null").mkString(" and ")
-
     val pruneActionOnNull = sqlu"""
       delete from #$tableName
       where synchronizer_idx = $synchronizerIdx
         and change_offset < $toExclusive
-        and #$nullDigestCondition
+        and digest is null
     """
 
     logger.trace(s"Pruning historical ACS journal entries in $tableName up to $toExclusive...")
@@ -125,44 +121,35 @@ class DbAcsDigestJournal[K, V](
   }
 
   override def upsertDigestUpdates(
-      digests: immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K, V]]
+      digests: immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K]]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     def setParamsPerUpdate(
         pp: PositionedParameters
-    )(update: AcsDigestStore.AcsDigestUpdate[K, V]): Unit = {
-      val AcsDigestStore.AcsDigestUpdate(
-        AcsDigestStore.AcsDigest(key, offset, timestamp, digest, tracedChanges),
-        replacesOffset,
-      ) = update
+    )(update: AcsDigestStore.AcsDigestUpdate[K]): Unit = {
+      val AcsDigestStore.AcsDigestUpdate(digestUpdate, replacesOffset) = update
       pp >> indexedSynchronizer
-      pp >> key
-      pp >> offset
-      pp >> timestamp
-      pp >> digest
-      pp >> tracedChanges
+      pp >> digestUpdate
       pp >> replacesOffset
     }
-
-    val digestColPlaceHolders = Seq.fill(digestColumnNames.length)("?").mkString(", ")
 
     val bulkQuery = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         s"""merge into $tableName (
              synchronizer_idx, $keyColumnName,
-             change_offset, ts, $digestColNamesInSelect, trace_data, replaces_offset
+             change_offset, ts, digest, trace_data, replaces_offset
            )
            key (synchronizer_idx, $keyColumnName, change_offset)
-           values (?, ?, ?, ?, $digestColPlaceHolders, ?, ?)
+           values (?, ?, ?, ?, ?, ?, ?)
          """
 
       case _: DbStorage.Profile.Postgres =>
         s"""insert into $tableName (
                synchronizer_idx, $keyColumnName,
-               change_offset, ts, $digestColNamesInSelect, trace_data, replaces_offset             )
-             values (?, ?, ?, ?, $digestColPlaceHolders, ?, ?)
+               change_offset, ts, digest, trace_data, replaces_offset             )
+             values (?, ?, ?, ?, ?, ?, ?)
              on conflict (synchronizer_idx, $keyColumnName, change_offset)
              do update set
-               ${digestColumnNames.map(col => s"$col = excluded.$col").mkString(", ")},
+               digest = excluded.digest,
                trace_data = excluded.trace_data,
                replaces_offset = excluded.replaces_offset
          """
@@ -187,17 +174,17 @@ class DbAcsDigestJournal[K, V](
 
   override def lookup(key: K, toInclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K, V]]] = {
+  ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K]]] = {
     val lookupQuery =
       (sql"""
-        select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data, replaces_offset from #$tableName
+        select #$keyColumnName, change_offset, ts, digest, trace_data, replaces_offset from #$tableName
         where
         synchronizer_idx = $synchronizerIdx
         and #$keyColumnName = $key
         and change_offset <= $toInclusive
         order by synchronizer_idx, #$keyColumnName, change_offset desc
         """ ++ storage.limitSql(1))
-        .as[AcsDigestStore.AcsDigestUpdate[K, V]]
+        .as[AcsDigestStore.AcsDigestUpdate[K]]
         .headOption
 
     logger.trace(
@@ -212,7 +199,7 @@ class DbAcsDigestJournal[K, V](
 
   override def bulkLookup(keys: immutable.Iterable[K], toInclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[K, AcsDigestStore.AcsDigestUpdate[K, V]]] =
+  ): FutureUnlessShutdown[Map[K, AcsDigestStore.AcsDigestUpdate[K]]] =
     NonEmpty.from(keys) match {
       case None => FutureUnlessShutdown.pure(Map.empty)
       case Some(nonEmptyIterable) =>
@@ -223,10 +210,10 @@ class DbAcsDigestJournal[K, V](
           case _: DbStorage.Profile.H2 =>
             val inClause = DbStorage.toInClause(keyColumnName, nonEmptyIterable)
             sql"""
-            select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect, r.trace_data, r.replaces_offset
+            select r.#$keyColumnName, r.change_offset, r.ts, r.digest, r.trace_data, r.replaces_offset
             from (
               select
-                #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data, replaces_offset,
+                #$keyColumnName, change_offset, ts, digest, trace_data, replaces_offset,
                 row_number() over (
                   partition by #$keyColumnName
                   order by change_offset desc
@@ -241,10 +228,10 @@ class DbAcsDigestJournal[K, V](
 
           case _: DbStorage.Profile.Postgres =>
             sql"""
-            select k.target_key_id, j.change_offset, j.ts, j.#$digestColNamesInSelect, j.trace_data, j.replaces_offset
+            select k.target_key_id, j.change_offset, j.ts, j.digest, j.trace_data, j.replaces_offset
               from UNNEST($keysArray) as k(target_key_id)
               cross join lateral (
-                 select change_offset, ts, #$digestColNamesInSelect, trace_data, replaces_offset
+                 select change_offset, ts, digest, trace_data, replaces_offset
                  from #$tableName j
                  where j.synchronizer_idx = $synchronizerIdx
                    and j.#$keyColumnName = (k.target_key_id)::int
@@ -261,7 +248,7 @@ class DbAcsDigestJournal[K, V](
 
         storage
           .query(
-            action = bulkLookupQuery.as[AcsDigestStore.AcsDigestUpdate[K, V]],
+            action = bulkLookupQuery.as[AcsDigestStore.AcsDigestUpdate[K]],
             operationName = functionFullName,
           )
           .map { resultSequence =>
@@ -278,7 +265,7 @@ class DbAcsDigestJournal[K, V](
       limit: Int,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
-        immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K, V]],
+        immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K]],
         Either[PaginationTokenDone, SnapshotPaginationToken],
     )
   ] = {
@@ -298,9 +285,9 @@ class DbAcsDigestJournal[K, V](
     val query = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         sql"""
-          select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect, r.trace_data, r.replaces_offset
+          select r.#$keyColumnName, r.change_offset, r.ts, r.digest, r.trace_data, r.replaces_offset
           from (
-            select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data,
+            select #$keyColumnName, change_offset, ts, digest, trace_data,
                    row_number() over (partition by #$keyColumnName order by change_offset desc) as rn, replaces_offset
             from #$tableName
             where synchronizer_idx = $synchronizerIdx
@@ -339,10 +326,10 @@ class DbAcsDigestJournal[K, V](
           -- recursive query's termination case
           where kb.key_id is not null
         )
-        select j.#$keyColumnName, j.change_offset, j.ts, j.#$digestColNamesInSelect, j.trace_data, j.replaces_offset
+        select j.#$keyColumnName, j.change_offset, j.ts, j.digest, j.trace_data, j.replaces_offset
         from key_batch b
         cross join lateral (
-          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data, replaces_offset
+          select #$keyColumnName, change_offset, ts, digest, trace_data, replaces_offset
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
             and #$keyColumnName = b.key_id
@@ -355,7 +342,7 @@ class DbAcsDigestJournal[K, V](
 
     storage
       .query(
-        action = query.as[AcsDigestStore.AcsDigestUpdate[K, V]],
+        action = query.as[AcsDigestStore.AcsDigestUpdate[K]],
         operationName = functionFullName,
       )
       .map {
@@ -380,7 +367,7 @@ class DbAcsDigestJournal[K, V](
       limit: Int,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[
     (
-        immutable.Iterable[AcsDigestStore.AcsDigest[K, V]],
+        immutable.Iterable[AcsDigestStore.AcsDigest[K]],
         Either[PaginationTokenDone, ChangesBetweenPaginationToken],
     )
   ] = {
@@ -403,9 +390,9 @@ class DbAcsDigestJournal[K, V](
     val query = storage.profile match {
       case _: DbStorage.Profile.H2 =>
         sql"""
-        select r.#$keyColumnName, r.change_offset, r.ts, r.#$digestColNamesInSelect, r.trace_data
+        select r.#$keyColumnName, r.change_offset, r.ts, r.digest, r.trace_data
         from (
-          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data,
+          select #$keyColumnName, change_offset, ts, digest, trace_data,
                  row_number() over (partition by #$keyColumnName order by change_offset desc) as rn
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
@@ -445,10 +432,10 @@ class DbAcsDigestJournal[K, V](
           -- recursive query's termination case
           where kb.key_id is not null
         )
-        select j.#$keyColumnName, j.change_offset, j.ts, j.#$digestColNamesInSelect, j.trace_data
+        select j.#$keyColumnName, j.change_offset, j.ts, j.digest, j.trace_data
         from key_batch b
         cross join lateral (
-          select #$keyColumnName, change_offset, ts, #$digestColNamesInSelect, trace_data
+          select #$keyColumnName, change_offset, ts, digest, trace_data
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
             and #$keyColumnName = b.key_id
@@ -462,7 +449,7 @@ class DbAcsDigestJournal[K, V](
 
     storage
       .query(
-        action = query.as[AcsDigestStore.AcsDigest[K, V]],
+        action = query.as[AcsDigestStore.AcsDigest[K]],
         operationName = functionFullName,
       )
       .map {

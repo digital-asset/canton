@@ -12,6 +12,7 @@ import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
@@ -109,15 +110,15 @@ object SubmitterMetadata
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SubmitterMetadata)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SubmitterMetadata)(
-      supportedProtoVersionMemoized(_)(fromProtoV31),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
       _.toProtoV31,
     ),
     ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(v32.SubmitterMetadata)(
-      supportedProtoVersionMemoized(_)(fromProtoV32),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
     ),
   )
@@ -175,7 +176,11 @@ object SubmitterMetadata
         )
     }
 
-  private def fromProtoV30(hashOps: HashOps, metaDataP: v30.SubmitterMetadata)(
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      metaDataP: v30.SubmitterMetadata,
+  )(
       bytes: ByteString
   ): ParsingResult[SubmitterMetadata] = {
     val v30.SubmitterMetadata(
@@ -192,10 +197,10 @@ object SubmitterMetadata
 
     for {
       externalAuthorizationO <- externalAuthorizationOP.traverse(
-        ExternalAuthorization.fromProtoV30
+        ExternalAuthorization.fromProtoV30(pvv, _)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      result <- fromProto(hashOps, bytes)(
+      result <- fromProto(pvv, hashOps, bytes)(
         saltOP,
         actAsP,
         userIdP,
@@ -212,7 +217,11 @@ object SubmitterMetadata
 
   }
 
-  private def fromProtoV31(hashOps: HashOps, metaDataP: v31.SubmitterMetadata)(
+  private def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      metaDataP: v31.SubmitterMetadata,
+  )(
       bytes: ByteString
   ): ParsingResult[SubmitterMetadata] = {
     val v31.SubmitterMetadata(
@@ -229,10 +238,10 @@ object SubmitterMetadata
 
     for {
       externalAuthorizationO <- externalAuthorizationOP.traverse(
-        ExternalAuthorization.fromProtoV31
+        ExternalAuthorization.fromProtoV31(pvv, _)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-      result <- fromProto(hashOps, bytes)(
+      result <- fromProto(pvv, hashOps, bytes)(
         saltOP,
         actAsP,
         userIdP,
@@ -247,7 +256,11 @@ object SubmitterMetadata
     } yield result
   }
 
-  private def fromProtoV32(hashOps: HashOps, metaDataP: v32.SubmitterMetadata)(
+  private def fromProtoV32(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      metaDataP: v32.SubmitterMetadata,
+  )(
       bytes: ByteString
   ): ParsingResult[SubmitterMetadata] = {
     val v32.SubmitterMetadata(
@@ -264,10 +277,10 @@ object SubmitterMetadata
 
     for {
       externalAuthorizationO <- externalAuthorizationOP.traverse(
-        ExternalAuthorization.fromProtoV32
+        ExternalAuthorization.fromProtoV32(pvv, _)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
-      result <- fromProto(hashOps, bytes)(
+      result <- fromProto(pvv, hashOps, bytes)(
         saltOP,
         actAsP,
         userIdP,
@@ -282,7 +295,11 @@ object SubmitterMetadata
     } yield result
   }
 
-  private def fromProto(hashOps: HashOps, bytes: DataByteString)(
+  private def fromProto(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      bytes: DataByteString,
+  )(
       saltOP: Option[com.digitalasset.canton.crypto.v30.Salt],
       actAsP: Seq[String],
       userIdP: String,
@@ -295,28 +312,35 @@ object SubmitterMetadata
       rpv: RepresentativeProtocolVersion[SubmitterMetadata.type],
   ): ParsingResult[SubmitterMetadata] =
     for {
-      submittingParticipant <- UniqueIdentifier
-        .fromProtoPrimitive(
+      submittingParticipant <- ProtoValidation
+        .validateThen(
           submittingParticipantUidP,
           "SubmitterMetadata.submitter_participant_uid",
-        )
+          pvv,
+        )(UniqueIdentifier.fromProtoPrimitive)
         .map(ParticipantId(_))
-      actAs <- actAsP.traverse(
-        ProtoConverter
-          .parseLfPartyId(_, "act_as")
-          .leftMap(e => ProtoDeserializationError.ValueConversionError("actAs", e.message))
+      actAs <- ProtoValidation
+        .validateThen(actAsP, "act_as", pvv)(ProtoConverter.parseLfPartyId)
+      userId <- ProtoValidation.validateThen(userIdP, "userId", pvv)((s, _) =>
+        UserId
+          .fromProtoPrimitive(s)
+          .leftMap(ProtoDeserializationError.ValueConversionError("userId", _))
       )
-      userId <- UserId
-        .fromProtoPrimitive(userIdP)
-        .leftMap(ProtoDeserializationError.ValueConversionError("userId", _))
-      commandId <- CommandId
-        .fromProtoPrimitive(commandIdP)
-        .leftMap(ProtoDeserializationError.ValueConversionError("commandId", _))
+      commandId <- ProtoValidation.validateThen(commandIdP, "commandId", pvv)((s, _) =>
+        CommandId
+          .fromProtoPrimitive(s)
+          .leftMap(ProtoDeserializationError.ValueConversionError("commandId", _))
+      )
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltOP)
         .leftMap(e => ProtoDeserializationError.ValueConversionError("salt", e.message))
+      submissionIdStr <- ProtoValidation.validate(
+        submissionIdP,
+        Some("submissionId"),
+        pvv,
+      )
       submissionIdO <- Option
-        .when(submissionIdP.nonEmpty)(submissionIdP)
+        .when(submissionIdStr.nonEmpty)(submissionIdStr)
         .traverse(
           LedgerSubmissionId
             .fromString(_)

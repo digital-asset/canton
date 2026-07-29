@@ -30,6 +30,7 @@ object PersistentEventType {
   sealed abstract class TopologyTransactionPersistentEventType(override val asInt: Int)
       extends PersistentEventType
   case object PartyToParticipant extends TopologyTransactionPersistentEventType(8)
+  case object SynchronizerParameters extends TopologyTransactionPersistentEventType(9)
 
   val allEventTypes: Seq[PersistentEventType] = List(
     Create,
@@ -40,6 +41,7 @@ object PersistentEventType {
     WitnessedCreate,
     WitnessedConsumingExercise,
     PartyToParticipant,
+    SynchronizerParameters,
   )
 
   private val formIntMap: Map[Int, PersistentEventType] =
@@ -55,7 +57,7 @@ object PersistentEventType {
       ),
     )
 
-  assert(allEventTypes.sizeIs == 8)
-  assert(allEventTypes.toSet.sizeIs == 8)
-  assert(formIntMap.sizeIs == 8)
+  assert(allEventTypes.sizeIs == 9)
+  assert(allEventTypes.toSet.sizeIs == 9)
+  assert(formIntMap.sizeIs == 9)
 }

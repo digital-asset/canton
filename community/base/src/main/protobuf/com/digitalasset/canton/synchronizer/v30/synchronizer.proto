@@ -6,8 +6,11 @@ syntax = "proto3";
 package com.digitalasset.canton.synchronizer.v30;
 
 import "google/protobuf/timestamp.proto";
+import "scalapb/scalapb.proto";
 
 message SynchronizerPredecessor {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StorageProtoVersion";
+
   // Id of the predecessor.
   string predecessor_physical_id = 1;
 

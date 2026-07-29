@@ -11,11 +11,8 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
-import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer.{
-  BackwardBufferSlice,
-  BufferSlice,
-}
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
@@ -60,10 +57,8 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
   /** Serves processed and filtered events from the buffer, with fallback to persistence fetches if
     * the bounds are not within the buffer range bounds.
     *
-    * @param startInclusive
-    *   The start inclusive offset of the search range.
-    * @param endInclusive
-    *   The end inclusive offset of the search range.
+    * @param offsetRange
+    *   The inclusive offset range of the search.
     * @param persistenceFetchArgs
     *   The filter used for fetching the Ledger API stream responses from persistence.
     * @param bufferFilter
@@ -80,8 +75,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
     *   The Ledger API stream source.
     */
   def stream[BufferOut](
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       persistenceFetchArgs: PersistenceFetchArgs,
       bufferFilter: TransactionLogUpdate => Option[BufferOut],
       toApiResponse: BufferOut => Future[ApiResponse],
@@ -90,6 +84,8 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[(Offset, ApiResponse), NotUsed] = {
+    val startInclusive = offsetRange.startInclusive
+    val endInclusive = offsetRange.endInclusive
     def toApiResponseStream(
         slice: Vector[(Offset, BufferOut)]
     ): Source[(Offset, ApiResponse), NotUsed] =
@@ -121,19 +117,27 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
               )
 
               Some(bufferSlice match {
-                case BackwardBufferSlice.FinalSlice(slice) =>
+                case InMemoryFanoutBuffer.BackwardSlice(slice, InMemoryFanoutBuffer.NoContinue) =>
                   (None, toApiResponseStream(slice))
-                case BackwardBufferSlice.PartialSlice(slice @ _ :+ last) =>
-                  (last._1.decrement, toApiResponseStream(slice))
-                case BackwardBufferSlice.PartialSlice(_) => // empty vector
+                case InMemoryFanoutBuffer
+                      .BackwardSlice(slice, InMemoryFanoutBuffer.ContinueFromImfo(offset)) =>
+                  (Some(offset), toApiResponseStream(slice))
+                case InMemoryFanoutBuffer.BackwardSlice(
+                      slice,
+                      InMemoryFanoutBuffer.ContinueFromPersistence(endInclusive),
+                    ) => // empty vector
                   (
                     None,
-                    fetchFromPersistence(
-                      startInclusive = startInclusive,
-                      endInclusive = end,
-                      filter = persistenceFetchArgs,
-                      descendingOrder = true,
-                      skipPruningChecks = skipPruningChecks,
+                    toApiResponseStream(slice).concat(
+                      fetchFromPersistence(
+                        offsetRange = OffsetRange(
+                          startInclusive = startInclusive,
+                          endInclusive = endInclusive,
+                        ),
+                        filter = persistenceFetchArgs,
+                        descendingOrder = true,
+                        skipPruningChecks = skipPruningChecks,
+                      )
                     ),
                   )
               })
@@ -148,7 +152,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
             Future {
               val bufferSlice = Timed.value(
                 bufferReaderMetrics.slice,
-                inMemoryFanoutBuffer.slice(
+                inMemoryFanoutBuffer.sliceForward(
                   startInclusive = scanFrom,
                   endInclusive = endInclusive,
                   filter = bufferFilter,
@@ -156,24 +160,30 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
               )
 
               bufferReaderMetrics.sliceSize.update(bufferSlice.slice.size)(MetricsContext.Empty)
-              bufferSlice match {
-                case BufferSlice.Inclusive(slice) =>
-                  val apiResponseSource = toApiResponseStream(slice)
+              bufferSlice.checkPersistenceToIncl match {
+                case None =>
+                  val apiResponseSource = toApiResponseStream(bufferSlice.slice)
                   val nextSliceStart =
-                    slice.lastOption.map(_._1).getOrElse(endInclusive).increment
-                  Some(nextSliceStart -> apiResponseSource)
+                    bufferSlice.slice.lastOption.map(_._1.increment)
+                  Some(nextSliceStart.getOrElse(endInclusive.increment) -> apiResponseSource)
 
-                case BufferSlice.LastBufferChunkSuffix(bufferedStartExclusive, slice) =>
+                case Some(checkPersistenceToIncl) =>
                   val sourceFromBuffer =
                     fetchFromPersistence(
-                      startInclusive = scanFrom,
-                      endInclusive = bufferedStartExclusive,
+                      offsetRange = OffsetRange(
+                        startInclusive = scanFrom,
+                        endInclusive = checkPersistenceToIncl,
+                      ),
                       filter = persistenceFetchArgs,
                       descendingOrder = false,
                       skipPruningChecks = skipPruningChecks,
                     )(loggingContext)
-                      .concat(toApiResponseStream(slice))
-                  Some(endInclusive.increment -> sourceFromBuffer)
+                      .concat(toApiResponseStream(bufferSlice.slice))
+                  Some(
+                    bufferSlice.slice.lastOption
+                      .map(offset => offset._1.increment)
+                      .getOrElse(endInclusive.increment) -> sourceFromBuffer
+                  )
               }
             }
           case _ => Future.successful(None)
@@ -193,8 +203,7 @@ class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
 private[platform] object BufferedStreamsReader {
   trait FetchFromPersistence[FILTER, ApiResponse] {
     def apply(
-        startInclusive: Offset,
-        endInclusive: Offset,
+        offsetRange: OffsetRange,
         descendingOrder: Boolean,
         filter: FILTER,
         skipPruningChecks: Boolean,

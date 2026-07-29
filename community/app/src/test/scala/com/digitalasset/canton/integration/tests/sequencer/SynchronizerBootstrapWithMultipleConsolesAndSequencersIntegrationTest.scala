@@ -65,7 +65,7 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
           // add the third sequencer to the synchronizer state
           val threshold = sequencerSynchronizerState.item.threshold
           val activeSequencers = sequencerSynchronizerState.item.active :+ sequencer3.id
-          val newSerial = Some(sequencerSynchronizerState.context.serial.increment)
+          val newSerial = Some(sequencerSynchronizerState.context.serial.increment.value)
           sequencer1.topology.sequencers.propose(
             synchronizerId,
             threshold,

@@ -20,7 +20,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, config}
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
-import org.scalatest.concurrent.{Eventually, IntegrationPatience, ScalaFutures}
+import org.scalatest.concurrent.{Eventually, ScalaFutures}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.{Assertion, Succeeded}
 
@@ -33,7 +33,6 @@ class SubmissionTrackerSpec
     extends AnyFlatSpec
     with ScalaFutures
     with ErrorsAssertions
-    with IntegrationPatience
     with Eventually
     with BaseTest
     with HasExecutionContext {

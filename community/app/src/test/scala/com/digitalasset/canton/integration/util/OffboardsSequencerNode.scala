@@ -9,9 +9,9 @@ import com.digitalasset.canton.console.{
   LocalSequencerReference,
   SequencerReference,
 }
-import com.digitalasset.canton.crypto.SigningKeyUsage.{Protocol, SequencerAuthentication}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
+import com.digitalasset.canton.topology.{ForceFlag, SynchronizerId}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Inspectors.forAll
 
@@ -32,29 +32,6 @@ trait OffboardsSequencerNode {
     val synchronizerOwnersNE = NonEmpty
       .from(synchronizerOwners)
       .getOrElse(throw new IllegalArgumentException("synchronizerOwners must not be empty"))
-
-    // user-manual-entry-begin: SequencerOffboardingRemoveExclusiveKeys
-    // Remove all non-namespace exclusive keys
-    val sequencerToOffboardPubKeys =
-      sequencerToOffboard.keys.public
-        .list(filterUsage = Set(SequencerAuthentication, Protocol))
-        .map(_.publicKey)
-    val sequencerToOffboardExclusivePubKeys =
-      sequencerToOffboardPubKeys
-        .diff(
-          sequencers.all
-            .filter(_.id != sequencerToOffboard.id)
-            .flatMap(_.keys.public.list())
-            .map(_.publicKey)
-        )
-    sequencerToOffboardExclusivePubKeys.foreach { key =>
-      sequencerToOffboard.topology.owner_to_key_mappings
-        .remove_key(
-          key.fingerprint,
-          key.purpose,
-        )
-    }
-    // user-manual-entry-end: SequencerOffboardingRemoveExclusiveKeys
 
     // fetch the latest SequencerSynchronizerState mapping
     val seqState1 = sequencersOnSynchronizer.head1.topology.sequencers
@@ -92,6 +69,38 @@ trait OffboardsSequencerNode {
             .get_ordering_topology()
             .sequencerIds should not contain sequencerToOffboard.id
         }
+    }
+
+    // user-manual-entry-begin: SequencerOffboardingRemoveExclusiveKeys
+
+    // Remove the OwnerToKeyMapping of the offboarded sequencer. Once the sequencer
+    // has been removed from the synchronizer, its OTK becomes dangling and must be
+    // removed by the remaining synchronizer owners using decentralized authorization.
+    sequencersOnSynchronizer.head1.topology.owner_to_key_mappings
+      .list(store = Some(synchronizerId), filterKeyOwnerUid = sequencerToOffboard.id.filterString)
+      .headOption
+      .foreach { offboardedSequencerOtk =>
+        synchronizerOwnersNE
+          .foreach(owner =>
+            owner.topology.transactions.propose(
+              offboardedSequencerOtk.item,
+              synchronizerId,
+              change = Remove,
+              forceChanges = ForceFlag.AlienMember,
+              mustFullyAuthorize = false,
+            )
+          )
+      }
+
+    // user-manual-entry-end: SequencerOffboardingRemoveExclusiveKeys
+
+    // Verify that the OTK has been removed from the topology store.
+    BaseTest.eventually() {
+      sequencersOnSynchronizer.head1.topology.owner_to_key_mappings
+        .list(
+          store = Some(synchronizerId),
+          filterKeyOwnerUid = sequencerToOffboard.id.filterString,
+        ) should be(empty)
     }
 
     sequencerToOffboard.stop()

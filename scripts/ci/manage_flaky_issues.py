@@ -386,10 +386,8 @@ def gh_unarchive_issue(idx: str, project_item_id: str):
 def self_test():
     test_update_issue_old_format()
     test_update_issue_new_format()
-    test_update_issue_returns_consecutive_streak_info('test_job', CONSECUTIVE_FAILURES_THRESHOLD)
-    test_update_issue_returns_consecutive_streak_info(
-        'unstable_test', CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
-    )
+    test_update_issue_returns_consecutive_streak_info_stable()
+    test_update_issue_returns_consecutive_streak_info_unstable()
     test_update_issue_dedupes_shard_duplicates()
     test_report_issue_skips_slack_if_assignee()
     test_nightly_streak_detection()
@@ -643,7 +641,8 @@ def test_update_issue_new_format():
         )
 
 
-def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
+def _check_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
+    # Shared body exercised for both thresholds by the two test_* wrappers below.
     # Build exactly CONSECUTIVE_FAILURES_THRESHOLD commits: prior ones go in the body, last is current
     commits = [format(i, '040x') for i in range(threshold)]
     current = commits[-1]
@@ -750,6 +749,16 @@ def test_update_issue_returns_consecutive_streak_info(job: str, threshold: int):
     ):
         result = update_issue("42", "Flaky test", make_body(prior))
         assert result is None, "Expected None for non-consecutive commits (GHA)"
+
+
+def test_update_issue_returns_consecutive_streak_info_stable():
+    _check_update_issue_returns_consecutive_streak_info("test_job", CONSECUTIVE_FAILURES_THRESHOLD)
+
+
+def test_update_issue_returns_consecutive_streak_info_unstable():
+    _check_update_issue_returns_consecutive_streak_info(
+        "unstable_test", CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
+    )
 
 
 def test_update_issue_dedupes_shard_duplicates():

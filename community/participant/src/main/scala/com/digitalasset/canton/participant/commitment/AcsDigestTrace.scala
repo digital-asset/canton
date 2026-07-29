@@ -138,14 +138,14 @@ object SingleTrace extends PrettyUtil {
     for {
       cid <- LfContractId
         .fromBytes(Bytes.fromByteString(proto.contractId))
-        .leftMap(ProtoDeserializationError.ValueDeserializationError("contract_id", _))
+        .leftMap(ProtoDeserializationError.ValueDeserializationError(_, "contract_id"))
       rc = ReassignmentCounter(proto.reassignmentCounter)
       p1 <- LfPartyId
         .fromString(proto.party1)
-        .leftMap(ProtoDeserializationError.ValueDeserializationError("party1", _))
+        .leftMap(ProtoDeserializationError.ValueDeserializationError(_, "party1"))
       p2 <- LfPartyId
         .fromString(proto.party2)
-        .leftMap(ProtoDeserializationError.ValueDeserializationError("party2", _))
+        .leftMap(ProtoDeserializationError.ValueDeserializationError(_, "party2"))
       isActivation = proto.isActivation
     } yield SingleTrace(cid, rc, p1, p2, isActivation)
 

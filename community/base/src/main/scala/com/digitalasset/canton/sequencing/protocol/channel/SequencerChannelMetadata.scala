@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.protocol.channel
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 
 final case class SequencerChannelMetadata(
@@ -36,7 +37,7 @@ object SequencerChannelMetadata extends VersioningCompanion[SequencerChannelMeta
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.dev)(
       v30.SequencerChannelMetadata
     )(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     ),
   )
@@ -52,14 +53,25 @@ object SequencerChannelMetadata extends VersioningCompanion[SequencerChannelMeta
     )
 
   def fromProtoV30(
-      sequencerChannelMetadataP: v30.SequencerChannelMetadata
+      pvv: ProtocolVersionValidation,
+      sequencerChannelMetadataP: v30.SequencerChannelMetadata,
   ): ParsingResult[SequencerChannelMetadata] = {
     val v30.SequencerChannelMetadata(channelIdP, initiatingMemberP, receivingMemberP) =
       sequencerChannelMetadataP
     for {
-      channelId <- SequencerChannelId.fromProtoPrimitive(channelIdP)
-      initiatingMember <- Member.fromProtoPrimitive(initiatingMemberP, "initiating_member")
-      receivingMember <- Member.fromProtoPrimitive(receivingMemberP, "receiving_member")
+      channelId <- ProtoValidation.validateThen(channelIdP, "channel_id", pvv)(
+        SequencerChannelId.fromProtoPrimitive
+      )
+      initiatingMember <- ProtoValidation.validateThen(
+        initiatingMemberP,
+        "initiating_member",
+        pvv,
+      )(Member.fromProtoPrimitive)
+      receivingMember <- ProtoValidation.validateThen(
+        receivingMemberP,
+        "receiving_member",
+        pvv,
+      )(Member.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield SequencerChannelMetadata(channelId, initiatingMember, receivingMember)(rpv)
   }
@@ -72,5 +84,16 @@ final case class SequencerChannelId(channelId: String) extends AnyVal {
 
 object SequencerChannelId {
   def fromProtoPrimitive(channelId: String): ParsingResult[SequencerChannelId] =
+    fromProtoPrimitive(channelId, field = None)
+
+  def fromProtoPrimitive(channelId: String, field: String): ParsingResult[SequencerChannelId] =
+    fromProtoPrimitive(channelId, Some(field))
+
+  private def fromProtoPrimitive(
+      channelId: String,
+      field: Option[String],
+  ): ParsingResult[SequencerChannelId] = {
+    val _ = field
     Right(SequencerChannelId(channelId))
+  }
 }

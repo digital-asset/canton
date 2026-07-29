@@ -72,7 +72,11 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
         compressedEnvelopes = protoBatch.compressedEnvelopes ++ protoBatch.compressedEnvelopes
       )
 
-      Batch.fromProtoV31(DecompressionPolicy.HardcodedDefault, invalidProtoBatch) shouldBe Left(
+      Batch.fromProtoV31(
+        testedProtocolVersionValidation,
+        DecompressionPolicy.HardcodedDefault,
+        invalidProtoBatch,
+      ) shouldBe Left(
         InvariantViolation(
           None,
           "The number of recipients is different from the number of envelopes.",
@@ -87,6 +91,7 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       def decompressAll(limit: Int) =
         Batch
           .fromProtoV31(
+            testedProtocolVersionValidation,
             DecompressionPolicy.Cumulative(MaxBytesToDecompress(NonNegativeInt.tryCreate(limit))),
             protoBatch,
           )
@@ -107,6 +112,7 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       // Not cumulative: each envelope is bounded on its own, so the two together are accepted.
       Batch
         .fromProtoV31(
+          testedProtocolVersionValidation,
           DecompressionPolicy.PerEnvelope(
             MaxBytesToDecompress(NonNegativeInt.tryCreate(perEnvelopeSize))
           ),
@@ -124,6 +130,7 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       // v30 gzips the whole batch as one blob, so the bound applies to all envelopes at once.
       Batch
         .fromProtoV30(
+          testedProtocolVersionValidation,
           DecompressionPolicy.PerEnvelope(
             MaxBytesToDecompress(NonNegativeInt.tryCreate(perEnvelopeSize))
           ),
@@ -133,7 +140,11 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
         .value shouldBe a[ProtoDeserializationError.MaxBytesToDecompressExceeded]
 
       Batch
-        .fromProtoV30(DecompressionPolicy.MaxValueUnsafe, protoBatch)
+        .fromProtoV30(
+          testedProtocolVersionValidation,
+          DecompressionPolicy.MaxValueUnsafe,
+          protoBatch,
+        )
         .value
         .envelopes should have size 2
     }
@@ -145,7 +156,11 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       def rebindAndDecompressAll(limit: Int) =
         // fromProtoV31 leaves the envelopes compressed, so the decompression bound can still be replaced afterwards.
         Batch
-          .fromProtoV31(DecompressionPolicy.MaxValueUnsafe, protoBatch)
+          .fromProtoV31(
+            testedProtocolVersionValidation,
+            DecompressionPolicy.MaxValueUnsafe,
+            protoBatch,
+          )
           .map(
             Batch.withDecompressionPolicy(
               _,
@@ -166,6 +181,7 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
 
       val parsed = Batch
         .fromProtoV31(
+          testedProtocolVersionValidation,
           DecompressionPolicy.Cumulative(
             MaxBytesToDecompress(NonNegativeInt.tryCreate(2 * perEnvelopeSize))
           ),

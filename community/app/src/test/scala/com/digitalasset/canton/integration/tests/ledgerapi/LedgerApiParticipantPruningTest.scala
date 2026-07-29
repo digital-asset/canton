@@ -330,7 +330,7 @@ trait LedgerApiParticipantPruningTest
       ),
       _.commandFailureMessage should include regex
         s"GrpcRequestRefusedByServer: FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Transactions " +
-        s"request from ${offsetInMiddleOfPrunedHistory + 1} to .* precedes pruned offset $pruningOffset",
+        s"request for offset range \\[${offsetInMiddleOfPrunedHistory + 1}, .*\\] precedes pruned offset $pruningOffset",
     )
 
     loggerFactory.assertLogs(
@@ -345,7 +345,7 @@ trait LedgerApiParticipantPruningTest
       ),
       _.commandFailureMessage should include regex
         s"GrpcRequestRefusedByServer: FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Transactions " +
-        s"request from ${offsetInMiddleOfPrunedHistory + 1} to .* precedes pruned offset $pruningOffset",
+        s"request for offset range \\[${offsetInMiddleOfPrunedHistory + 1}, .*\\] precedes pruned offset $pruningOffset",
     )
 
     loggerFactory.assertLogs(
@@ -360,7 +360,7 @@ trait LedgerApiParticipantPruningTest
       logEntry => {
         logEntry.commandFailureMessage should include regex
           s"GrpcRequestRefusedByServer: FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Command " +
-          s"completions request from ${offsetInMiddleOfPrunedHistory + 1} to .* overlaps with pruned offset $pruningOffset"
+          s"completions request for offset range \\[${offsetInMiddleOfPrunedHistory + 1}, .*\\] overlaps with pruned offset $pruningOffset"
       },
     )
 
@@ -514,7 +514,7 @@ trait LedgerApiParticipantPruningTest
         ),
         _.commandFailureMessage should include regex
           s"GrpcRequestRefusedByServer: FAILED_PRECONDITION/PARTICIPANT_PRUNED_DATA_ACCESSED\\(9,.*\\): Transactions " +
-          s"request from ${offsetInMiddleOfPrunedHistory + 1} to .* precedes pruned offset $pruningOffset",
+          s"request for offset range \\[${offsetInMiddleOfPrunedHistory + 1}, .*\\] precedes pruned offset $pruningOffset",
       )
   }
 

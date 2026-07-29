@@ -18,6 +18,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsReader.CompletionsByHash
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
@@ -28,8 +29,7 @@ import scala.concurrent.Future
 
 private[platform] trait LedgerDaoUpdateReader {
   def getUpdates(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       internalUpdateFormat: InternalUpdateFormat,
       descendingOrder: Boolean,
       skipPruningChecks: Boolean = false,
@@ -62,8 +62,7 @@ object LedgerDaoUpdateReader {
 
 private[platform] trait LedgerDaoCommandCompletionsReader {
   def getCommandCompletions(
-      startInclusive: Offset,
-      endInclusive: Offset,
+      offsetRange: OffsetRange,
       userId: Option[UserId],
       parties: Set[Party],
   )(implicit

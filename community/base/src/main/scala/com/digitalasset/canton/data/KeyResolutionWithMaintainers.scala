@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.data
 
-import cats.implicits.toTraverseOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.ContractIdSyntax.LfContractIdSyntax
 import com.digitalasset.canton.protocol.{GlobalKeySerialization, LfContractId, LfGlobalKey, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{LfPartyId, LfVersioned}
 
 final case class KeyResolutionWithMaintainers(
@@ -34,16 +35,24 @@ object KeyResolutionWithMaintainers {
     )
 
   def fromProtoV31(
-      resolutionP: v31.ViewParticipantData.KeyResolutionWithMaintainers
+      pvv: ProtocolVersionValidation,
+      resolutionP: v31.ViewParticipantData.KeyResolutionWithMaintainers,
   ): ParsingResult[(LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers])] = {
     val v31.ViewParticipantData.KeyResolutionWithMaintainers(keyP, maintainersP, contractIdsP) =
       resolutionP
     for {
       key <- ProtoConverter
         .required("KeyResolutionWithMaintainers.key", keyP)
-        .flatMap(GlobalKeySerialization.fromProtoV31)
-      contractIds <- contractIdsP.traverse(ProtoConverter.parseLfContractId)
-      maintainers <- maintainersP.traverse(ProtoConverter.parseLfPartyId(_, "maintainers"))
+        .flatMap(GlobalKeySerialization.fromProtoV31(pvv, _))
+      contractIds <- ProtoValidation
+        .validateThen(contractIdsP, "contract_ids", pvv)(
+          ProtoConverter.parseLfContractId
+        )
+      maintainers <- ProtoValidation.validateThen(
+        maintainersP,
+        "maintainers",
+        pvv,
+      )(ProtoConverter.parseLfPartyId)
     } yield (
       key.unversioned,
       LfVersioned(

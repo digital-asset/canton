@@ -8,9 +8,9 @@ import com.daml.resources.FailingResourceOwner.{
   TriedToReleaseAFailedResource,
 }
 import com.daml.resources.Resource as AbstractResource
+import com.digitalasset.canton.scalatest.DefaultCantonUnitTestPatience
 import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.time.{Seconds, Span}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.CompletableFuture.completedFuture
@@ -27,9 +27,11 @@ import scala.concurrent.duration.{Duration, DurationInt}
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success}
 
-final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventually {
-
-  override implicit def patienceConfig: PatienceConfig = PatienceConfig(scaled(Span(20, Seconds)))
+final class ResourceOwnerSpec
+    extends AsyncWordSpec
+    with Matchers
+    with Eventually
+    with DefaultCantonUnitTestPatience {
 
   private type Resource[+T] = AbstractResource[TestContext, T]
   private val Resource = new ResourceFactories[TestContext]

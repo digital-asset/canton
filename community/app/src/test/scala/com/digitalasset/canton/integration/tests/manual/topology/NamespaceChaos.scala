@@ -129,7 +129,7 @@ private[topology] trait NamespaceChaos extends TopologyOperations with Matchers 
                           decentralizedNamespace = updatedNamespace,
                           store = sequencerToConnectTo.synchronizer_id,
                           signedBy = Seq(existingOwner.fingerprint),
-                          serial = Some(serial.increment),
+                          serial = Some(serial.increment.value),
                         )
                     )
                   )
@@ -214,7 +214,7 @@ private[topology] trait NamespaceChaos extends TopologyOperations with Matchers 
                           decentralizedNamespace = updatedNamespace,
                           store = sequencerToConnectTo.synchronizer_id,
                           signedBy = Seq(existingOwner.fingerprint),
-                          serial = Some(serial.increment),
+                          serial = Some(serial.increment.value),
                         )
                     )
                   )
@@ -291,7 +291,7 @@ private[topology] trait NamespaceChaos extends TopologyOperations with Matchers 
                         decentralizedNamespace = updatedNamespace,
                         store = sequencerToConnectTo.synchronizer_id,
                         signedBy = Seq(existingOwner.fingerprint),
-                        serial = Some(serial.increment),
+                        serial = Some(serial.increment.value),
                       )
                   )
                 )

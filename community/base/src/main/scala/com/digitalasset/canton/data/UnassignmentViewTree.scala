@@ -23,6 +23,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -176,7 +177,7 @@ final case class UnassignmentCommonData private (
       stakeholders = Some(stakeholders.toProtoV30),
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
       submitterMetadata = Some(submitterMetadata.toProtoV30),
-      reassigningParticipantUids = reassigningParticipants.toSeq.map(_.uid.toProtoPrimitive),
+      reassigningParticipantUids = reassigningParticipants.toSeq.map(p => p.uid.toProtoPrimitive),
     )
 
   override protected[this] def toByteStringUnmemoized: ByteString =
@@ -204,7 +205,7 @@ object UnassignmentCommonData
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.UnassignmentCommonData)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -229,6 +230,7 @@ object UnassignmentCommonData
   )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.value), None)
 
   private[this] def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       hashOps: HashOps,
       unassignmentCommonDataP: v30.UnassignmentCommonData,
   )(
@@ -246,8 +248,12 @@ object UnassignmentCommonData
 
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV30, "salt", saltP)
-      sourceSynchronizerId <- PhysicalSynchronizerId
-        .fromProtoPrimitive(sourceSynchronizerP, "source_physical_synchronizer_id")
+      sourceSynchronizerId <- ProtoValidation
+        .validateThen(
+          sourceSynchronizerP,
+          "source_physical_synchronizer_id",
+          pvv,
+        )(PhysicalSynchronizerId.fromProtoPrimitive)
         .map(Source(_))
       sourceMediatorGroup <- ProtoConverter.parseNonNegativeInt(
         "source_mediator_group",
@@ -255,20 +261,24 @@ object UnassignmentCommonData
       )
 
       stakeholders <- ProtoConverter.parseRequired(
-        Stakeholders.fromProtoV30,
+        Stakeholders.fromProtoV30(pvv, _),
         "stakeholders",
         stakeholdersP,
       )
       reassigningParticipants <- reassigningParticipantUidsP.traverse(uid =>
-        UniqueIdentifier
-          .fromProtoPrimitive(uid, "reassigning_participant_uids")
+        ProtoValidation
+          .validateThen(uid, "reassigning_participant_uids", pvv)(
+            UniqueIdentifier.fromProtoPrimitive
+          )
           .map(ParticipantId(_))
       )
 
-      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP)
+      uuid <- ProtoValidation.validateThen(uuidP, "uuid", pvv)(
+        ProtoConverter.UuidConverter.fromProtoPrimitive
+      )
       submitterMetadata <- ProtoConverter
         .required("submitter_metadata", submitterMetadataPO)
-        .flatMap(ReassignmentSubmitterMetadata.fromProtoV30)
+        .flatMap(ReassignmentSubmitterMetadata.fromProtoV30(pvv, _))
 
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield UnassignmentCommonData(
@@ -348,7 +358,7 @@ object UnassignmentView extends VersioningCompanionContextMemoization[Unassignme
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.UnassignmentView)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -367,7 +377,11 @@ object UnassignmentView extends VersioningCompanionContextMemoization[Unassignme
       targetTimestamp,
     )(hashOps, protocolVersionRepresentativeFor(sourceProtocolVersion.unwrap), None)
 
-  private[this] def fromProtoV30(hashOps: HashOps, unassignmentViewP: v30.UnassignmentView)(
+  private[this] def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      unassignmentViewP: v30.UnassignmentView,
+  )(
       bytes: ByteString
   ): ParsingResult[UnassignmentView] = {
     val v30.UnassignmentView(
@@ -379,10 +393,11 @@ object UnassignmentView extends VersioningCompanionContextMemoization[Unassignme
 
     for {
       salt <- ProtoConverter.parseRequired(Salt.fromProtoV30, "salt", saltP)
-      targetSynchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      targetSynchronizerId <- ProtoValidation.validateThen(
         targetSynchronizerIdP,
         "targetPhysicalSynchronizerId",
-      )
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
       targetTimestamp <- CantonTimestamp.fromProtoPrimitive(targetTimestampP)
       contracts <- contractsP
         .traverse { case v30.ActiveContract(contractP, reassignmentCounterP) =>

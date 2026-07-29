@@ -9,10 +9,9 @@ import cats.syntax.option.*
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine.{
-  HHState,
-  LLState,
-  State,
+  Journal,
   StateMachineResult,
+  Visitor,
 }
 import com.digitalasset.daml.lf.transaction.TransactionError.{
   AlreadyConsumed,
@@ -333,7 +332,7 @@ class NextGenContractStateMachineSpec
   def contractKeyInputs[Tx](
       tx: HasTxNodes[Tx]
   ): Either[TransactionError, Map[GlobalKey, Vector[V.ContractId]]] =
-    tx.foldInExecutionOrder[Either[TransactionError, NextGenContractStateMachine.LLState]](
+    tx.foldInExecutionOrder[Either[TransactionError, NextGenContractStateMachine.Journal]](
       Right(NextGenContractStateMachine.empty())
     )(
       exerciseBegin = (acc, nid, exe) =>
@@ -656,8 +655,8 @@ class NextGenContractStateMachineSpec
 
   // TODO(#31454)
   // remove workaround
-  def rollbackTryForTesting(s: LLState): ErrOr[LLState] =
-    s.rollbackTry.left.map(_ => EffectfulRollback(Set.empty))
+  def rollbackTryForTesting(s: Journal): ErrOr[Journal] =
+    s.abortTry.left.map(_ => EffectfulRollback(Set.empty))
 
   def ignoreUnitTest(unitTest: UnitTest): Unit =
     unitTest.description - {
@@ -695,7 +694,7 @@ class NextGenContractStateMachineSpec
           }
           unitTest.transaction.foreach { tx =>
             "HH" in {
-              val hhResult = walkTransactionOnHHState(tx, mode).map(_.toStateMachineResult)
+              val hhResult = walkTransactionOnVisitor(tx, mode).map(_.toStateMachineResult)
               compareResult(hhResult, expectedResult)
             }
           }
@@ -704,11 +703,11 @@ class NextGenContractStateMachineSpec
     }
   }
 
-  def walkTransactionOnHHState[Tx](
+  def walkTransactionOnVisitor[Tx](
       tx: HasTxNodes[Tx],
-      mode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.NUCK,
-  ): ErrOr[LLState] =
-    tx.foldInExecutionOrder[ErrOr[LLState]](
+      mode: NextGenContractStateMachine.Mode = NextGenContractStateMachine.Mode.Key,
+  ): ErrOr[Journal] =
+    tx.foldInExecutionOrder[ErrOr[Journal]](
       Right(NextGenContractStateMachine.empty(mode))
     )(
       exerciseBegin = (acc, nid, exe) =>
@@ -764,8 +763,8 @@ class NextGenContractStateMachineSpec
       key: GlobalKey,
       n: Int,
       replyToNeedsKeyWith: Seq[V.ContractId],
-      state: LLState,
-  ): ErrOr[LLState] = {
+      state: Journal,
+  ): ErrOr[Journal] = {
     assert(
       replyToNeedsKeyWith.size < n,
       s"Finished passed but replyToNeedsKeyWith.size (${replyToNeedsKeyWith.size}) >= n ($n). " +
@@ -822,7 +821,7 @@ class NextGenContractStateMachineSpec
         description = s"beginTry and endTry",
         interaction = s =>
           for {
-            s <- Right(s.beginTry): ErrOr[LLState]
+            s <- Right(s.beginTry): ErrOr[Journal]
             s <- Right(s.endTry)
           } yield s,
         expected = Right(StateMachineResult.empty),
@@ -979,7 +978,7 @@ class NextGenContractStateMachineSpec
           } yield s,
         transaction = mkRollbackTx(mkCreate(id)),
         expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-          NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+          NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
           NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
         ),
       )
@@ -1007,7 +1006,7 @@ class NextGenContractStateMachineSpec
           mkCreate(id2, key.some),
         ),
         expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-          NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+          NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
           NextGenContractStateMachine.Mode.NoKey -> Right(
             StateMachineResult.emptyWith(
               localKeys = Map(key.gkey -> Vector(id2))
@@ -1181,7 +1180,7 @@ class NextGenContractStateMachineSpec
             ),
           ),
           expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(
               StateMachineResult.emptyWith(
                 localKeys =
@@ -1255,7 +1254,7 @@ class NextGenContractStateMachineSpec
             mkCreate(id, optkey),
           ),
           expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Left(DuplicateContractId(id)),
           ),
         )
@@ -1321,7 +1320,7 @@ class NextGenContractStateMachineSpec
             )
           ),
           expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
           ),
         )
@@ -1353,7 +1352,7 @@ class NextGenContractStateMachineSpec
           mkExercise(id, consuming = true, key = None, byKey = false),
         ),
         expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-          NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+          NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
           NextGenContractStateMachine.Mode.NoKey -> Right(
             StateMachineResult.emptyWith(
               consumed = Set[V.ContractId](id)
@@ -1409,7 +1408,7 @@ class NextGenContractStateMachineSpec
             }
             s <- s
               .queryById(tmplIdWithKey, id)
-              .getOrElse(fail("unexpected NeedContract on second queryById")): ErrOr[LLState]
+              .getOrElse(fail("unexpected NeedContract on second queryById")): ErrOr[Journal]
           } yield s,
         expected = Right(
           StateMachineResult.emptyWith(
@@ -1437,7 +1436,7 @@ class NextGenContractStateMachineSpec
               s <- s.create(NodeId(0), id, optkey)
               s <- s
                 .queryById(getTmplId(optkey), id)
-                .getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+                .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
             } yield s,
           expected = Right(
             StateMachineResult.emptyWith(
@@ -1495,7 +1494,7 @@ class NextGenContractStateMachineSpec
             s <- s.archive(tmplIdWithKey, id, NodeId(1)).get
             s <- s
               .queryById(tmplIdWithKey, id)
-              .getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+              .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
           } yield s,
         transaction = mkTx(
           mkCreate(id, key.some),
@@ -1589,7 +1588,7 @@ class NextGenContractStateMachineSpec
             s <- rollbackTryForTesting(s)
             s <- s
               .queryById(tmplIdWithKey, id)
-              .getOrElse(fail("unexpected NeedContract after rollback")): ErrOr[LLState]
+              .getOrElse(fail("unexpected NeedContract after rollback")): ErrOr[Journal]
           } yield s,
         expected = Right(
           StateMachineResult.emptyWith(
@@ -1647,7 +1646,7 @@ class NextGenContractStateMachineSpec
             s <- s.archive(tmplIdWithKey, id, NodeId(0)).get
             s <- s
               .queryById(tmplIdWithKey, id)
-              .getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+              .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
           } yield s,
         transaction = mkTx(
           mkExercise(id, consuming = true, key = key.some, byKey = false),
@@ -1674,7 +1673,7 @@ class NextGenContractStateMachineSpec
               s <- s.archive(getTmplId(optkey), id, NodeId(1)).get
               s <- s
                 .queryById(getTmplId(optkey), id)
-                .getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+                .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
             } yield s,
           transaction = mkTx(
             mkCreate(id, optkey),
@@ -1708,7 +1707,7 @@ class NextGenContractStateMachineSpec
               s <- Right(s.endTry)
               s <- s
                 .queryById(getTmplId(optkey), id)
-                .getOrElse(fail("unexpected NeedContract")): ErrOr[State]
+                .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
             } yield s,
           expected = Left(AlreadyConsumed(id, getTmplId(optkey), NodeId(1))),
         )
@@ -1736,7 +1735,7 @@ class NextGenContractStateMachineSpec
               s <- rollbackTryForTesting(s)
               s <- s
                 .queryById(getTmplId(optkey), id)
-                .getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+                .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
             } yield s,
           transaction = mkTx(
             mkCreate(id, optkey),
@@ -1747,7 +1746,7 @@ class NextGenContractStateMachineSpec
             mkFetch(id, optkey, byKey = false),
           ),
           expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(
               StateMachineResult.emptyWith(
                 localKeys =
@@ -1781,7 +1780,7 @@ class NextGenContractStateMachineSpec
               s <- rollbackTryForTesting(s)
               s <- s
                 .queryById(getTmplId(optkey), id)
-                .getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+                .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
             } yield s,
           transaction = mkTx(
             mkRollbackTx(
@@ -1792,7 +1791,7 @@ class NextGenContractStateMachineSpec
             mkFetch(id, optkey, byKey = false),
           ),
           expected = Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-            NextGenContractStateMachine.Mode.NUCK -> Left(EffectfulRollback(Set.empty)),
+            NextGenContractStateMachine.Mode.Key -> Left(EffectfulRollback(Set.empty)),
             NextGenContractStateMachine.Mode.NoKey -> Right(StateMachineResult.empty),
           ),
         )
@@ -2138,7 +2137,7 @@ class NextGenContractStateMachineSpec
             result <- s
               .queryNByKey(key, 2)
               .getOrElse(fail("unexpected NeedKeys on second queryNByKey")): ErrOr[
-              (KeyMapping, LLState)
+              (KeyMapping, Journal)
             ]
             (mp, s) = result
             _ = mp.queue shouldBe ids.take(2)
@@ -2177,7 +2176,7 @@ class NextGenContractStateMachineSpec
             result <- s
               .queryNByKey(key, 1)
               .getOrElse(fail("unexpected NeedKeys after rollback")): ErrOr[
-              (KeyMapping, LLState)
+              (KeyMapping, Journal)
             ]
             (mp, s) = result
             _ = mp.queue shouldBe Vector(id)
@@ -2277,7 +2276,7 @@ class NextGenContractStateMachineSpec
           description = s"create then querybykey",
           interaction = s =>
             for {
-              s <- ids.foldLeftM[ErrOr, LLState](s) { (s, id) =>
+              s <- ids.foldLeftM[ErrOr, Journal](s) { (s, id) =>
                 s.create(NodeId(0), id, key.some)
               }
               s <- s.queryNByKey(key, n) match {
@@ -2286,7 +2285,7 @@ class NextGenContractStateMachineSpec
                     result <- errOrResult
                     (mp, s) = result
                     _ = mp.queue shouldBe ids.reverse.take(n).take(ids.size)
-                  } yield s.asInstanceOf[State]
+                  } yield s
                 case Left(nk) if n > ids.size =>
                   nk.n shouldBe (n - ids.size)
                   val Right(errOrResult) =
@@ -2491,22 +2490,22 @@ class NextGenContractStateMachineSpec
                     s" (n = $n2)",
                 interaction = s =>
                   for {
-                    s <- ids.foldLeft[ErrOr[LLState]](Right(s)) { (acc, id) =>
+                    s <- ids.foldLeft[ErrOr[Journal]](Right(s)) { (acc, id) =>
                       acc.flatMap(_.create(freshNodeId(), id, key.some))
                     }
                     result <- s
                       .queryNByKey(key, n)
                       .getOrElse(fail("unexpected NeedContract")): ErrOr[
-                      (KeyMapping, LLState)
+                      (KeyMapping, Journal)
                     ]
                     (km1, s) = result
-                    s <- toArchive.foldLeft[ErrOr[LLState]](Right(s)) { (acc, id) =>
+                    s <- toArchive.foldLeft[ErrOr[Journal]](Right(s)) { (acc, id) =>
                       acc.flatMap(_.archive(tmplIdWithKey, id, freshNodeId()).get)
                     }
                     result <- s
                       .queryNByKey(key, n2)
                       .getOrElse(fail("unexpected NeedContract")): ErrOr[
-                      (KeyMapping, LLState)
+                      (KeyMapping, Journal)
                     ]
                     (km2, s) = result
                     _ = km1.queue.filterNot(toArchiveSet) shouldBe km2.queue
@@ -2674,7 +2673,7 @@ class NextGenContractStateMachineSpec
             }
             s <- s
               .queryById(tmplIdWithKey, id)
-              .getOrElse(fail("unexpected NeedContract")): ErrOr[LLState]
+              .getOrElse(fail("unexpected NeedContract")): ErrOr[Journal]
           } yield s,
         transaction = mkTx(
           mkQueryByKey(Vector(id), key, exhaustive = true),
@@ -2772,7 +2771,7 @@ class NextGenContractStateMachineSpec
 
       "empty transaction" in {
         val tx = mkTx()
-        walkTransactionOnHHState(tx).map(_.contractOrder) shouldBe Right(Nil)
+        walkTransactionOnVisitor(tx).map(_.contractOrder) shouldBe Right(Nil)
       }
 
       "transaction with only creates" in {
@@ -2781,7 +2780,7 @@ class NextGenContractStateMachineSpec
           mkCreate(cid(2)),
           mkCreate(cid(3)),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder
           allContractIds(tx).foreach(c => order should contain(c))
           order.toSet shouldBe allContractIds(tx)
@@ -2794,7 +2793,7 @@ class NextGenContractStateMachineSpec
           mkFetch(cid(2)),
           mkFetch(cid(3)),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder
           allContractIds(tx).foreach(c => order should contain(c))
           order.toSet shouldBe allContractIds(tx)
@@ -2809,7 +2808,7 @@ class NextGenContractStateMachineSpec
           mkFetch(cid(2)),
           mkQueryByKey(Vector(cid(3)), key2, exhaustive = false),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder
           allContractIds(tx).foreach(c => order should contain(c))
           order.toSet shouldBe allContractIds(tx)
@@ -2823,7 +2822,7 @@ class NextGenContractStateMachineSpec
           mkQueryByKey(Vector(cid(2), cid(3)), key1, exhaustive = false),
           mkFetch(cid(4)),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder
           val expected = Set(cid(1), cid(2), cid(3), cid(4))
           order.toSet shouldBe expected
@@ -2840,7 +2839,7 @@ class NextGenContractStateMachineSpec
         val tx = mkTx(
           mkQueryByKey(Vector(cid(3), cid(1), cid(2)), key1, exhaustive = false)
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder.zipWithIndex.toMap
           // The relative order of cid(3), cid(1), cid(2) must be preserved
           val idx3 = order(cid(3))
@@ -2858,7 +2857,7 @@ class NextGenContractStateMachineSpec
           mkQueryByKey(Vector(cid(2), cid(1)), key1, exhaustive = false),
           mkQueryByKey(Vector(cid(4), cid(3)), key2, exhaustive = false),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder.zipWithIndex.toMap
 
           // Within key1: cid(2) before cid(1)
@@ -2875,7 +2874,7 @@ class NextGenContractStateMachineSpec
           mkFetch(cid(1)),
           mkQueryByKey(Vector(cid(2)), key1, exhaustive = false),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder.zipWithIndex.toMap
           // cid(1) has no key, cid(2) has a key -> cid(1) should come first
           order(cid(1)) should be < order(cid(2))
@@ -2891,7 +2890,7 @@ class NextGenContractStateMachineSpec
           mkFetch(cid(5)),
           mkQueryByKey(Vector(cid(4)), key1, exhaustive = false),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder
           // Keyless inputs should all come before keyed input
           order.indexOf(cid(3)) should be < order.indexOf(cid(4))
@@ -2910,7 +2909,7 @@ class NextGenContractStateMachineSpec
           mkCreate(cid(2)),
           mkQueryByKey(Vector(cid(3)), key1, exhaustive = false),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder.zipWithIndex.toMap
           // Local contract cid(2) should appear before input contracts cid(1) and cid(3)
           order(cid(2)) should be < order(cid(1))
@@ -2924,7 +2923,7 @@ class NextGenContractStateMachineSpec
           mkCreate(cid(2)),
           mkCreate(cid(3)),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder.zipWithIndex.toMap
           // Most recent first: cid(3) before cid(2) before cid(1)
           order(cid(3)) should be < order(cid(2))
@@ -2939,7 +2938,7 @@ class NextGenContractStateMachineSpec
           mkFetch(cid(1), key = Some(key1), byKey = false),
           mkQueryByKey(Vector(cid(2)), key1, exhaustive = false),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder.zipWithIndex.toMap
           // Both cid(1) and cid(2) have key1.
           // In the key group: queriedByKey (cid(2)) comes first, then onlyQueriedById (cid(1))
@@ -2953,7 +2952,7 @@ class NextGenContractStateMachineSpec
           mkFetch(cid(1)),
           mkQueryByKey(Vector.empty, key1, exhaustive = true),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder
           order should contain(cid(1))
           order.size shouldBe 1
@@ -2966,7 +2965,7 @@ class NextGenContractStateMachineSpec
           mkFetch(cid(1), key = Some(key1), byKey = false),
           mkQueryByKey(Vector(cid(1)), key1, exhaustive = false),
         )
-        inside(walkTransactionOnHHState(tx)) { case Right(s) =>
+        inside(walkTransactionOnVisitor(tx)) { case Right(s) =>
           val order = s.contractOrder
           order.size shouldBe order.toSet.size
           order should contain(cid(1))
@@ -2977,7 +2976,7 @@ class NextGenContractStateMachineSpec
 
   case class UnitTest(
       description: String,
-      interaction: Option[LLState => ErrOr[LLState]],
+      interaction: Option[Journal => ErrOr[Journal]],
       expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
       // when both an interaction and transaction are supplied, evaluating the set transactino should lead to the same
       // expected result. Note that there is no 1-to-1 mapping between interactions and transactions.
@@ -2987,7 +2986,7 @@ class NextGenContractStateMachineSpec
   object UnitTest {
     def apply(
         description: String,
-        interaction: LLState => Either[TransactionError, LLState],
+        interaction: Journal => Either[TransactionError, Journal],
         expected: OptStateMachineResult,
         transaction: HasTxNodes[?],
     ): UnitTest =
@@ -2995,21 +2994,21 @@ class NextGenContractStateMachineSpec
 
     def apply(
         description: String,
-        interaction: LLState => Either[TransactionError, LLState],
+        interaction: Journal => Either[TransactionError, Journal],
         expected: OptStateMachineResult,
     ): UnitTest =
       UnitTest(description, Some(interaction), allModesMap(expected))
 
     def apply(
         description: String,
-        interaction: LLState => Either[TransactionError, LLState],
+        interaction: Journal => Either[TransactionError, Journal],
         expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
     ): UnitTest =
       UnitTest(description, Some(interaction), expected)
 
     def apply(
         description: String,
-        interaction: LLState => Either[TransactionError, LLState],
+        interaction: Journal => Either[TransactionError, Journal],
         expected: Map[NextGenContractStateMachine.Mode, OptStateMachineResult],
         transaction: HasTxNodes[?],
     ): UnitTest =
@@ -3024,7 +3023,7 @@ class NextGenContractStateMachineSpec
 
     def allModesMap(expected: OptStateMachineResult) =
       Map[NextGenContractStateMachine.Mode, OptStateMachineResult](
-        NextGenContractStateMachine.Mode.NUCK -> expected,
+        NextGenContractStateMachine.Mode.Key -> expected,
         NextGenContractStateMachine.Mode.NoKey -> expected,
       )
   }

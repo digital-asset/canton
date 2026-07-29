@@ -11,6 +11,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
@@ -74,7 +75,7 @@ object CommonMetadata
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.CommonMetadata)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -92,20 +93,29 @@ object CommonMetadata
       None,
     )
 
-  private def fromProtoV30(hashOps: HashOps, metaDataP: v30.CommonMetadata)(
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      hashOps: HashOps,
+      metaDataP: v30.CommonMetadata,
+  )(
       bytes: ByteString
   ): ParsingResult[CommonMetadata] = {
     val v30.CommonMetadata(saltP, synchronizerIdP, uuidP, mediatorP) = metaDataP
     for {
-      synchronizerId <- PhysicalSynchronizerId
-        .fromProtoPrimitive(synchronizerIdP, "physical_synchronizer_id")
+      synchronizerId <- ProtoValidation.validateThen(
+        synchronizerIdP,
+        "physical_synchronizer_id",
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
 
       mediatorGroup <- ProtoConverter.parseNonNegativeInt("mediator", mediatorP)
       mediatorGroupRecipient = MediatorGroupRecipient.apply(mediatorGroup)
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)
         .leftMap(_.inField("salt"))
-      uuid <- ProtoConverter.UuidConverter.fromProtoPrimitive(uuidP).leftMap(_.inField("uuid"))
+      uuid <- ProtoValidation.validateThen(uuidP, "uuid", pvv)(
+        ProtoConverter.UuidConverter.fromProtoPrimitive
+      )
     } yield CommonMetadata(synchronizerId, mediatorGroupRecipient, salt, uuid)(
       hashOps,
       Some(bytes),

@@ -128,7 +128,7 @@ def main(dry_run: bool) -> None:
     for issue in issues:
         number = issue["number"]
         title = issue["title"]
-        labels = {l["name"] for l in issue.get("labels", {}).get("nodes", [])}
+        labels = {label["name"] for label in issue.get("labels", {}).get("nodes", [])}
         skip_matches = labels & SKIP_LABELS
         if skip_matches:
             print(f"  #{number} {title}: has label(s) {sorted(skip_matches)}, skipping")

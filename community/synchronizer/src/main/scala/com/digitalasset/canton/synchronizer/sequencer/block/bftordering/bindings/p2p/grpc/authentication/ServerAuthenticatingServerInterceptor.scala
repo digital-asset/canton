@@ -67,7 +67,11 @@ private[bftordering] class ServerAuthenticatingServerInterceptor(
       next: ServerCallHandler[ReqT, RespT],
   ): ServerCall.Listener[ReqT] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    Option(requestHeaders.get(AddEndpointHeaderClientInterceptor.ENDPOINT_METADATA_KEY)) match {
+    Option(requestHeaders.get(AddEndpointHeaderClientInterceptor.ENDPOINT_METADATA_KEY)).orElse(
+      Option(
+        requestHeaders.get(AddEndpointHeaderClientInterceptor.ENDPOINT_METADATA_KEY_DEPRECATED)
+      )
+    ) match {
       case Some(endpoint) =>
         logger.debug(s"Found endpoint header and adding it to the gRPC server context: $endpoint")
         implicit val executor: Executor = (command: Runnable) => ec.execute(command)

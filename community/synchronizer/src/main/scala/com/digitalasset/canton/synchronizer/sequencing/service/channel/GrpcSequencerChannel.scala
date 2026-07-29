@@ -19,7 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencing.service.CloseNotification
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.util.{LoggerUtil, SingleUseCell}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
 import io.grpc.{Status, StatusRuntimeException}
 import org.slf4j.event.Level
@@ -194,7 +194,7 @@ private[channel] abstract class UninitializedGrpcSequencerChannel(
                   .bimap(err => (err.message, Status.INVALID_ARGUMENT), _.unwrap)
               request <-
                 ConnectToSequencerChannelRequest
-                  .fromProtoV30(requestP)
+                  .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, requestP)
                   .leftMap(err => (err.toString, Status.INVALID_ARGUMENT))
               metadata <- request.request match {
                 case ConnectToSequencerChannelRequest.Metadata(metadata) =>

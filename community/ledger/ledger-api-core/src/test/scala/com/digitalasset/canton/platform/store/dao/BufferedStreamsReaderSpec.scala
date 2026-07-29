@@ -11,6 +11,7 @@ import com.digitalasset.canton.platform.store.OffsetGen.offset
 import com.digitalasset.canton.platform.store.cache.InMemoryFanoutBuffer
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReader.FetchFromPersistence
 import com.digitalasset.canton.platform.store.dao.BufferedStreamsReaderSpec.*
+import com.digitalasset.canton.platform.store.dao.events.OffsetRange
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.topology.SynchronizerId
@@ -103,7 +104,7 @@ class BufferedStreamsReaderSpec
         )
 
         run(
-          transactionsBuffer = inMemoryFanoutBufferWithSmallChunkSize,
+          transactionsBuffer = smallInMemoryFanoutBuffer,
           startInclusive = offset0,
           endInclusive = offset3,
           descendingOrder = false,
@@ -121,15 +122,14 @@ class BufferedStreamsReaderSpec
 
       "fetch from buffer and storage chunked with buffer filter" in new StaticTestScope {
         val filterMock = new Object
-
-        val anotherResponseForOffset1 = "(1) Response fetched from storage"
+        val anotherResponseForOffset0 = "(0) Response fetched from storage"
 
         val fetchFromPersistence = buildFetchFromPersistence(
           expectedStartInclusive = offset0,
-          expectedEndInclusive = offset1,
+          expectedEndInclusive = offset0,
           expectedDescendingOrder = false,
           expectedFilter = `filterMock`,
-          thenReturnStream = Source(Seq(offset1 -> anotherResponseForOffset1)),
+          thenReturnStream = Source(Seq(offset0 -> anotherResponseForOffset0)),
         )
 
         run(
@@ -144,7 +144,8 @@ class BufferedStreamsReaderSpec
         )
 
         streamElements should contain theSameElementsInOrderAs Seq(
-          offset1 -> anotherResponseForOffset1,
+          offset0 -> anotherResponseForOffset0,
+          offset1 -> TestUpdateId("tx-1").toHexString,
           offset2 -> TestUpdateId("tx-2").toHexString,
         )
       }
@@ -413,15 +414,14 @@ object BufferedStreamsReaderSpec {
 
       private val failingPersistenceFetch = new FetchFromPersistence[Object, String] {
         override def apply(
-            startInclusive: Offset,
-            endInclusive: Offset,
+            offsetRange: OffsetRange,
             descendingOrder: Boolean,
             filter: Object,
             skipPruningChecks: Boolean,
         )(implicit
             loggingContext: LoggingContextWithTrace
         ): Source[(Offset, String), NotUsed] = fail(
-          s"Unexpected call to fetch from persistence startInclusive=$startInclusive, endInclusive=$endInclusive, descendingOrder=$descendingOrder"
+          s"Unexpected call to fetch from persistence offsetRange=$offsetRange, descendingOrder=$descendingOrder"
         )
       }
 
@@ -445,8 +445,7 @@ object BufferedStreamsReaderSpec {
           loggerFactory,
         )(executorService)
           .stream[TransactionLogUpdate.TransactionAccepted](
-            startInclusive = startInclusive,
-            endInclusive = endInclusive,
+            offsetRange = OffsetRange(startInclusive = startInclusive, endInclusive = endInclusive),
             persistenceFetchArgs = persistenceFetchArgs,
             bufferFilter = bufferSliceFilter,
             toApiResponse = tx => Future.successful(tx.updateId),
@@ -465,15 +464,20 @@ object BufferedStreamsReaderSpec {
       ): FetchFromPersistence[Object, String] =
         new FetchFromPersistence[Object, String] {
           override def apply(
-              startInclusive: Offset,
-              endInclusive: Offset,
+              offsetRange: OffsetRange,
               descendingOrder: Boolean,
               filter: Object,
               skipPruningChecks: Boolean,
           )(implicit
               loggingContext: LoggingContextWithTrace
           ): Source[(Offset, String), NotUsed] =
-            (startInclusive, endInclusive, filter, descendingOrder, skipPruningChecks) match {
+            (
+              offsetRange.startInclusive,
+              offsetRange.endInclusive,
+              filter,
+              descendingOrder,
+              skipPruningChecks,
+            ) match {
               case (
                     `expectedStartInclusive`,
                     `expectedEndInclusive`,
@@ -497,14 +501,15 @@ object BufferedStreamsReaderSpec {
 
       private val fetchFromPersistence = new FetchFromPersistence[Object, String] {
         override def apply(
-            startInclusive: Offset,
-            endInclusive: Offset,
+            offsetRange: OffsetRange,
             descendingOrder: Boolean,
             filter: Object,
             skipPruningChecks: Boolean,
         )(implicit
             loggingContext: LoggingContextWithTrace
-        ): Source[(Offset, String), NotUsed] =
+        ): Source[(Offset, String), NotUsed] = {
+          val startInclusive = offsetRange.startInclusive
+          val endInclusive = offsetRange.endInclusive
           if (startInclusive > endInclusive) fail("startExclusive after endInclusive")
           else if (endInclusive > offset(ledgerEndIndex))
             fail("endInclusive after ledgerEnd")
@@ -521,6 +526,7 @@ object BufferedStreamsReaderSpec {
               .reverse
               .map { case (o, tx) => o -> tx.updateId }
               .pipe(Source(_))
+        }
       }
 
       private val streamReader = new BufferedStreamsReader[Object, String](
@@ -572,8 +578,10 @@ object BufferedStreamsReaderSpec {
 
         val assertReadStream = streamReader
           .stream[TransactionLogUpdate.TransactionAccepted](
-            startInclusive = offset(startInclusiveIdx.toLong),
-            endInclusive = offset(endInclusiveIdx.toLong),
+            offsetRange = OffsetRange(
+              startInclusive = offset(startInclusiveIdx.toLong),
+              endInclusive = offset(endInclusiveIdx.toLong),
+            ),
             persistenceFetchArgs = new Object, // Not used
             bufferFilter = noFilterBufferSlice, // Do not filter
             toApiResponse = tx => Future.successful(tx.updateId),

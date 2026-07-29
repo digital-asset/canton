@@ -1133,7 +1133,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           case s
               if s.health.status.successOption.exists(_.admin.acceptsAdminChanges) &&
                 // TODO(#15987): Remove the Try when block sequencers support scheduled pruning
-                util.Try(s.pruning.get_schedule().discard).isSuccess =>
+                scala.util.Try(s.pruning.get_schedule().discard).isSuccess =>
             s.name -> s.pruning
         }
         ++ env.mediators.all.collect { case m if m.health.active => m.name -> m.pruning }).toMap

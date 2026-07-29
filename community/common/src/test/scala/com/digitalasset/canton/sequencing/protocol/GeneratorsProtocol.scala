@@ -208,6 +208,10 @@ final class GeneratorsProtocol(
     } yield SubscriptionRequest.apply(member, timestamp, protocolVersion)
   )
 
+  implicit val sequencerChannelId: Arbitrary[SequencerChannelId] = Arbitrary(
+    Gen.alphaNumStr.filter(_.nonEmpty).map(SequencerChannelId.apply)
+  )
+
   implicit val sequencerChannelMetadataArb: Arbitrary[SequencerChannelMetadata] =
     Arbitrary(
       for {

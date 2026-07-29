@@ -19,10 +19,12 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionMemoization,
@@ -101,7 +103,7 @@ object LegacyAcsCommitment extends VersioningCompanionMemoization[LegacyAcsCommi
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AcsCommitment)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -145,25 +147,31 @@ object LegacyAcsCommitment extends VersioningCompanionMemoization[LegacyAcsCommi
       None,
     ) {}
 
-  private def fromProtoV30(protoMsg: v30.AcsCommitment)(
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      protoMsg: v30.AcsCommitment,
+  )(
       bytes: ByteString
   ): ParsingResult[LegacyAcsCommitment] =
     for {
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(
+      synchronizerId <- ProtoValidation.validateThen(
         protoMsg.physicalSynchronizerId,
         "AcsCommitment.physical_synchronizer_id",
-      )
-      sender <- UniqueIdentifier
-        .fromProtoPrimitive(
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
+      sender <- ProtoValidation
+        .validateThen(
           protoMsg.sendingParticipantUid,
           "AcsCommitment.sending_participant_uid",
-        )
+          pvv,
+        )(UniqueIdentifier.fromProtoPrimitive)
         .map(ParticipantId(_))
-      counterParticipant <- UniqueIdentifier
-        .fromProtoPrimitive(
+      counterParticipant <- ProtoValidation
+        .validateThen(
           protoMsg.counterParticipantUid,
           "AcsCommitment.counter_participant_uid",
-        )
+          pvv,
+        )(UniqueIdentifier.fromProtoPrimitive)
         .map(ParticipantId(_))
       fromExclusive <- CantonTimestampSecond.fromProtoPrimitive(
         "from_exclusive",

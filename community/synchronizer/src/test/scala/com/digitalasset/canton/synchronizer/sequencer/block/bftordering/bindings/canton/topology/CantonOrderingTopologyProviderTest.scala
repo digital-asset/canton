@@ -270,7 +270,7 @@ class CantonOrderingTopologyProviderTest
                     someSequencerIds.size.toLong
                   )
                   orderingTopology.sequencingParameters.blacklistLeaderSelectionPolicyConfig shouldBe expectedLeaderSelectionPolicy
-                  orderingTopology.maxBytesToDecompress shouldBe defaultMaxBytesToDecompress
+                  orderingTopology.maxRequestPayloadBytes shouldBe DynamicSynchronizerParameters.defaultMaxRequestSize.value
                 }
           }
       }
