@@ -4,6 +4,8 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.metrics.DatabaseMetrics
+import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
+import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
@@ -31,13 +33,14 @@ import com.digitalasset.canton.logging.{
   SuppressionRule,
   TracedLogger,
 }
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.metrics.{LedgerApiServerHistograms, LedgerApiServerMetrics}
 import com.digitalasset.canton.participant.store.PersistedContractInstance
 import com.digitalasset.canton.platform.indexer.ha.TestConnection
 import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.{
   ActivationRef,
   Batch,
   SynCon,
+  UnresolvedDeactivationReferenceException,
   ZeroLedgerEnd,
 }
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
@@ -98,6 +101,7 @@ class ParallelIndexerSubscriptionSpec
     extends AnyFlatSpec
     with ScalaFutures
     with Matchers
+    with MetricValues
     with HasExecutionContext
     with NamedLogging {
 
@@ -1247,10 +1251,8 @@ class ParallelIndexerSubscriptionSpec
     )
   }
 
-  it should "report warning, but succeed, if activation is missing" in {
-    loggerFactory.assertLogs(
-      LoggerNameContains("ParallelIndexerSubscription") && SuppressionRule.Level(Level.WARN)
-    )(
+  it should "report error and fail, if activation is missing" in {
+    loggerFactory.assertInternalError[IllegalStateException](
       ParallelIndexerSubscription
         .refillMissingDeactivatedActivations(LedgerApiServerMetrics.ForTesting, logger)(
           Batch(
@@ -1276,18 +1278,9 @@ class ParallelIndexerSubscriptionSpec
             usedInternalContractIds = Set.empty,
             contractStateEvents = Vector.empty,
           )
-        )
-        .batch should contain theSameElementsInOrderAs Vector(
-        someEventDeactivate.copy(
-          synchronizer_id = someSynchronizerId2,
-          contract_id = hashCid("A"),
-          deactivated_event_sequential_id = None,
-          internal_contract_id = None,
-          event_type = 3,
-        )
-      ),
-      _.warningMessage should include(
-        s"Activation is missing for a deactivation for deactivated event with type:ConsumingExercise offset:1 nodeId:1 for synchronizerId:$someSynchronizerId2 contractId:${hashCid("A")}."
+        ),
+      _.getMessage should include(
+        s"Programming error: activation was not resolved for deactivated event with type:ConsumingExercise offset:1 nodeId:1 for synchronizerId:$someSynchronizerId2 contractId:${hashCid("A")}; dbPrepare must fail the batch when a deactivation reference cannot be computed."
       ),
     )
   }
@@ -1334,6 +1327,7 @@ class ParallelIndexerSubscriptionSpec
         @unused _connection: Connection
     ): Map[(SynchronizerId, Long), Long] = Map(
       (someSynchronizerId, 5L) -> 2L,
+      (someSynchronizerId, 7L) -> 3L,
       (someSynchronizerId2, 15L) -> 4L,
     )
 
@@ -1365,7 +1359,7 @@ class ParallelIndexerSubscriptionSpec
       offsetsUpdates = Vector.empty,
       missingDeactivatedActivations = Map(
         SynCon(someSynchronizerId, hashCid("#1")) -> None,
-        SynCon(someSynchronizerId, hashCid("#2")) -> None, // not in last activations
+        SynCon(someSynchronizerId, hashCid("#2")) -> None,
         SynCon(someSynchronizerId2, hashCid("#3")) -> None,
       ),
       eventCount = 0L,
@@ -1374,10 +1368,13 @@ class ParallelIndexerSubscriptionSpec
       contractStateEvents = Vector.empty,
     )
 
+    val invalidated = mutable.ArrayBuffer.empty[Long]
+
     val outBatchF = ParallelIndexerSubscription.dbPrepare(
       lastActivations,
       mockDbDispatcher(new TestConnection),
       resolveInternalContractIds,
+      ids => invalidated ++= ids,
       executionContext,
       metrics,
       logger,
@@ -1396,7 +1393,7 @@ class ParallelIndexerSubscriptionSpec
         offsetsUpdates = Vector.empty,
         missingDeactivatedActivations = Map(
           SynCon(someSynchronizerId, hashCid("#1")) -> Some(ActivationRef(2L, 5L)),
-          SynCon(someSynchronizerId, hashCid("#2")) -> None,
+          SynCon(someSynchronizerId, hashCid("#2")) -> Some(ActivationRef(3L, 7L)),
           SynCon(someSynchronizerId2, hashCid("#3")) -> Some(ActivationRef(4L, 15L)),
         ),
         eventCount = 0L,
@@ -1404,6 +1401,79 @@ class ParallelIndexerSubscriptionSpec
         usedInternalContractIds = Set.empty,
         contractStateEvents = Vector.empty,
       )
+
+    invalidated shouldBe empty
+  }
+
+  it should "invalidate cached contracts and fail the batch if an activation cannot be resolved" in {
+    def lastActivations(@unused _synchronizerContracts: Iterable[(SynchronizerId, Long)])(
+        @unused _connection: Connection
+    ): Map[(SynchronizerId, Long), Long] = Map(
+      (someSynchronizerId, 5L) -> 2L
+    )
+
+    def resolveInternalContractIds(@unused _tc: TraceContext)(
+        @unused _contractIds: Iterable[ContractId]
+    ): Future[Map[ContractId, Long]] = Future.successful {
+      Map(
+        hashCid("#1") -> 5L,
+        hashCid("#2") -> 7L, // resolvable internal contract ID, but no activation found
+      )
+    }
+
+    val invalidated = mutable.ArrayBuffer.empty[Long]
+    val testMetrics = new LedgerApiServerMetrics(
+      new LedgerApiServerHistograms(MetricName("test"))(new HistogramInventory),
+      new InMemoryMetricsFactory,
+    )
+
+    val inBatch = Batch(
+      ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
+      batchTraceContext = TraceContext.empty,
+      batch = Vector(someEventActivate),
+      batchSize = 1,
+      offsetsUpdates = Vector.empty,
+      // the log assertions below rely on insertion-order iteration, which Scala Maps only
+      // guarantee for up to 4 entries
+      missingDeactivatedActivations = Map(
+        SynCon(someSynchronizerId, hashCid("#1")) -> None,
+        SynCon(someSynchronizerId, hashCid("#2")) -> None,
+        SynCon(someSynchronizerId, hashCid("#3")) -> None, // no internal contract ID either
+      ),
+      eventCount = 0L,
+      distinctRawStrings = Nil,
+      usedInternalContractIds = Set.empty,
+      contractStateEvents = Vector.empty,
+    )
+
+    loggerFactory.assertLogs(
+      LoggerNameContains("ParallelIndexerSubscription") && SuppressionRule.LevelAndAbove(
+        Level.WARN
+      )
+    )(
+      ParallelIndexerSubscription
+        .dbPrepare(
+          lastActivations,
+          mockDbDispatcher(new TestConnection),
+          resolveInternalContractIds,
+          ids => invalidated ++= ids,
+          executionContext,
+          testMetrics,
+          logger,
+        )(inBatch)
+        .failed
+        .futureValue shouldBe a[UnresolvedDeactivationReferenceException],
+      _.warningMessage should include(
+        s"internal_contract_id for contract ID:${hashCid("#3")} not found"
+      ),
+      _.errorMessage should (include(
+        "Could not resolve the activation for 2 deactivation(s)"
+      ) and include(s"${hashCid("#2")}") and include(s"${hashCid("#3")}")),
+    )
+
+    // only #2 resolved to an internal contract ID whose cached mapping can be invalidated
+    invalidated should contain theSameElementsAs Seq(7L)
+    testMetrics.indexer.indexerRestartDueToUnresolvedDeactivation.value shouldBe 1
   }
 
   behavior of "batcher"
@@ -1574,25 +1644,20 @@ class ParallelIndexerSubscriptionSpec
     result.contractStateEvents shouldBe Vector.empty
   }
 
-  it should "skip deactivations that, after refillMissingDeactivatedActivations, still have no deactivated_event_sequential_id" in {
-    // A deactivation that arrived without an activation ref AND whose lookup was registered as
-    // "no activation found" (Some(None)) is refilled to keep deactivated_event_sequential_id = None.
-    // buildContractStateEvents must skip such deactivations.
-    val skippedContractId = hashCid("skipped-no-ref")
+  it should "fail on deactivations that, after refillMissingDeactivatedActivations, still have no deactivated_event_sequential_id" in {
+    // A deactivation without an activation reference must never be persisted: it would be
+    // invisible to all activeness queries, so the deactivated contract would stay in the
+    // Ledger API ACS permanently. dbPrepare fails the batch before this point; reaching
+    // batcher with an unresolved deactivation is an invariant violation.
+    val unresolvedContractId = hashCid("unresolved-no-ref")
     val deactivateWithoutRef = someEventDeactivate.copy(
       event_type = PersistentEventType.ConsumingExercise.asInt,
       event_sequential_id = 20L,
       deactivated_event_sequential_id = None,
-      contract_id = skippedContractId,
-    )
-    val createActivate = someEventActivate.copy(
-      event_type = PersistentEventType.Create.asInt,
-      event_sequential_id = 21L,
-      notPersistedContractId = hashCid("create"),
-      notPersistedContractKey = None,
+      contract_id = unresolvedContractId,
     )
 
-    val result = loggerFactory.assertLogs(
+    loggerFactory.assertInternalError[IllegalStateException](
       ParallelIndexerSubscription.batcher(
         batchF = _ => "ignored",
         logger = logger,
@@ -1601,11 +1666,11 @@ class ParallelIndexerSubscriptionSpec
         Batch(
           ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
           batchTraceContext = TraceContext.empty,
-          batch = Vector(deactivateWithoutRef, createActivate),
-          batchSize = 2,
+          batch = Vector(deactivateWithoutRef),
+          batchSize = 1,
           offsetsUpdates = offsetsAndUpdates,
           missingDeactivatedActivations = Map(
-            SynCon(deactivateWithoutRef.synchronizer_id, skippedContractId) -> None
+            SynCon(deactivateWithoutRef.synchronizer_id, unresolvedContractId) -> None
           ),
           eventCount = 0L,
           distinctRawStrings = Nil,
@@ -1613,17 +1678,9 @@ class ParallelIndexerSubscriptionSpec
           contractStateEvents = Vector.empty,
         )
       ),
-      _.warningMessage should include("Activation is missing for a deactivation"),
-    )
-
-    // Only the activation produces a ContractStateEvent; the deactivation is skipped.
-    result.contractStateEvents shouldBe Vector(
-      ContractStateEvent.Activated(
-        contractId = createActivate.notPersistedContractId,
-        globalKey = None,
-        eventSequentialId = createActivate.event_sequential_id,
-        isInitial = true,
-      )
+      _.getMessage should include(
+        "Programming error: activation was not resolved for"
+      ),
     )
   }
 
@@ -3140,6 +3197,9 @@ class ParallelIndexerSubscriptionSpec
       }
 
     override def contractsPruned(internalContractIds: Iterable[Long]): Unit =
+      fail("should not be used")
+
+    override def invalidateCachedContracts(internalContractIds: Iterable[Long]): Unit =
       fail("should not be used")
   }
 }

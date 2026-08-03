@@ -223,6 +223,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
             lastActivations = contractStorageBackend.lastActivations,
             dbDispatcher = dbDispatcher,
             resolveInternalContractIds = resolveInternalContractIdsF,
+            invalidateCachedContracts = contractStore.invalidateCachedContracts,
             logger = logger,
             metrics = metrics,
             executionContext = executionContext,
@@ -919,6 +920,7 @@ object ParallelIndexerSubscription {
       resolveInternalContractIds: TraceContext => Iterable[ContractId] => Future[
         Map[ContractId, Long]
       ],
+      invalidateCachedContracts: Iterable[Long] => Unit,
       executionContext: ExecutionContext,
       metrics: LedgerApiServerMetrics,
       logger: TracedLogger,
@@ -973,6 +975,35 @@ object ParallelIndexerSubscription {
                   )
             )
             .toMap
+        unresolvedDeactivations =
+          updatedMissingDeactivatedActivations.view.collect { case (synCon, None) =>
+            synCon
+          }.toVector
+        _ =
+          if (unresolvedDeactivations.nonEmpty) {
+            // A deactivation without an activation reference would be persisted with
+            // deactivated_event_sequential_id = NULL, making it invisible to all activeness
+            // queries: the deactivated contract would remain in the Ledger API ACS forever.
+            // Fail the batch instead, so the indexer restarts and retries. The retry converges
+            // when the failure was transient, e.g. a stale cached contract mapping (invalidated
+            // below) or a ledger-end-cache window. A persistent failure keeps the indexer
+            // restarting, which is deliberate: an unresolvable activation reference means the
+            // index database is inconsistent, and a loud stall is preferable to persisting the
+            // corruption.
+            invalidateCachedContracts(
+              unresolvedDeactivations.flatMap(synCon =>
+                resolvedInternalContractIds.get(synCon.contractId)
+              )
+            )
+            logger.error(
+              s"Could not resolve the activation for ${unresolvedDeactivations.size} deactivation(s) of contracts (first 10 shown) ${unresolvedDeactivations
+                  .take(10)
+                  .map(synCon => s"${synCon.contractId} on synchronizer ${synCon.synchronizerId}")
+                  .mkString("[", ", ", "]")}. Restarting indexer to retry. If this error repeats for the same contracts, the index database may be inconsistent: run the index database integrity check."
+            )
+            metrics.indexer.indexerRestartDueToUnresolvedDeactivation.inc()
+            throw new UnresolvedDeactivationReferenceException()
+          }
       } yield batch.copy(
         missingDeactivatedActivations = updatedMissingDeactivatedActivations
       )
@@ -995,10 +1026,9 @@ object ParallelIndexerSubscription {
           )(ErrorLoggingContext.fromTracedLogger(logger)(batch.batchTraceContext))
 
         case Some(None) =>
-          logger.warn(
-            s"Activation is missing for a deactivation for $marker."
-          )(batch.batchTraceContext)
-          dbDto.withActivationRef(None)
+          ErrorUtil.invalidState(
+            s"Programming error: activation was not resolved for $marker; dbPrepare must fail the batch when a deactivation reference cannot be computed."
+          )(ErrorLoggingContext.fromTracedLogger(logger)(batch.batchTraceContext))
 
         case Some(Some(deactivationReference)) =>
           dbDto.withActivationRef(Some(deactivationReference))
@@ -1056,6 +1086,8 @@ object ParallelIndexerSubscription {
           )
         )
       case deactivate: DbDto.EventDeactivate =>
+        // A missing activation reference cannot occur here: refillMissingDeactivatedActivations
+        // fails the batch first, so the Option.map is defensive only.
         deactivate.deactivated_event_sequential_id.map { deactivatedEventSequentialId =>
           ContractStateEvent.Deactivated(
             contractId = deactivate.contract_id,
@@ -1320,6 +1352,11 @@ object ParallelIndexerSubscription {
   class ReferencedContractNotFoundException
       extends RuntimeException(
         "Restarting indexer due to attempt to store events relying on missing internal contract IDs."
+      )
+
+  class UnresolvedDeactivationReferenceException
+      extends RuntimeException(
+        "Restarting indexer due to failure to resolve the activation reference of a deactivation event."
       )
 }
 

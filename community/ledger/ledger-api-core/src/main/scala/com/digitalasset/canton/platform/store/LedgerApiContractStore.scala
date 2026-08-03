@@ -39,6 +39,8 @@ trait LedgerApiContractStore {
   ): Future[Map[LfContractId, Long]]
 
   def contractsPruned(internalContractIds: Iterable[Long]): Unit
+
+  def invalidateCachedContracts(internalContractIds: Iterable[Long]): Unit
 }
 
 final case class LedgerApiContractStoreImpl(
@@ -109,6 +111,9 @@ final case class LedgerApiContractStoreImpl(
 
   override def contractsPruned(internalContractIds: Iterable[Long]): Unit =
     participantContractStore.contractsPruned(internalContractIds)
+
+  override def invalidateCachedContracts(internalContractIds: Iterable[Long]): Unit =
+    participantContractStore.invalidateCachedContracts(internalContractIds)
 
   private def failOnShutdown[T](f: FutureUnlessShutdown[T])(implicit
       errorLoggingContext: ErrorLoggingContext

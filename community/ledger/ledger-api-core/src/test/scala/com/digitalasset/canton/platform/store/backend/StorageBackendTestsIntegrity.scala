@@ -757,7 +757,8 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
         deactivated_event_sequential_id = Some(6L),
         internal_contract_id = Some(1L),
       ),
-      dtosConsumingExercise( // deactivated_event_sequential_id is NULL - not reported
+      dtosConsumingExercise( // NULL deactivated_event_sequential_id - reported by the
+        // missing-activation-reference check, but the stray-deactivation check fires first here
         event_offset = 6,
         event_sequential_id = 6L,
         deactivated_event_sequential_id = None,
@@ -915,6 +916,58 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
 
     failure.getMessage should include(
       "some events in deactivate have not been pruned, offsets (first 10 shown) [2]"
+    )
+  }
+
+  it should "report deactivation events without an activation reference below the ledger end" in {
+    val updates = Vector(
+      dtosConsumingExercise( // NULL activation reference below the ledger end - reported
+        event_offset = 2,
+        event_sequential_id = 2L,
+        deactivated_event_sequential_id = None,
+      ),
+      dtosConsumingExercise( // NULL activation reference beyond the ledger end - not reported
+        event_offset = 100,
+        event_sequential_id = 100L,
+        deactivated_event_sequential_id = None,
+      ),
+    ).flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(updates, _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    // using inMemoryCantonStore = true to skip the par_contracts check
+    val failure = intercept[RuntimeException](
+      executeSql(backend.integrity.verifyIntegrity(inMemoryCantonStore = true))
+    )
+
+    failure.getMessage should include(
+      "some deactivation events have no activation reference, so the contracts they deactivated stay visible as active, event_sequential_id-s with offsets (first 10 shown) [(2,2)]"
+    )
+  }
+
+  it should "report deactivation events without an activation reference at the pruning point" in {
+    val updates = Vector(
+      dtosConsumingExercise( // NULL activation reference at exactly the pruning point - reported
+        event_offset = 2,
+        event_sequential_id = 2L,
+        deactivated_event_sequential_id = None,
+      )
+    ).flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(backend.parameter.updatePrunedUptoInclusive(offset(2)))
+    executeSql(ingest(updates, _))
+    executeSql(updateLedgerEnd(offset(2), 2L))
+
+    // using inMemoryCantonStore = true to skip the par_contracts check
+    val failure = intercept[RuntimeException](
+      executeSql(backend.integrity.verifyIntegrity(inMemoryCantonStore = true))
+    )
+
+    failure.getMessage should include(
+      "some deactivation events have no activation reference, so the contracts they deactivated stay visible as active, event_sequential_id-s with offsets (first 10 shown) [(2,2)]"
     )
   }
 

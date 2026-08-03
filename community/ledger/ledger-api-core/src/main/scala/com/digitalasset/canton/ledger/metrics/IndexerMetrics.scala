@@ -135,6 +135,23 @@ class IndexerMetrics(
     )
   )
 
+  // Number of times the Indexer needed to restart because the activation reference of a
+  // deactivation event could not be resolved
+  val indexerRestartDueToUnresolvedDeactivation: Counter = factory.counter(
+    MetricInfo(
+      prefix :+ "indexer_restart_due_to_unresolved_deactivation",
+      summary =
+        "Number of times the Indexer needed to restart due to an unresolvable deactivation reference.",
+      description =
+        """A deactivation event whose activation reference cannot be resolved would be persisted
+          |with a NULL activation reference, making it invisible to activeness queries and leaving
+          |the deactivated contract in the Ledger API ACS permanently. The indexer restarts and
+          |retries instead, and does not progress while the failure persists. A steadily
+          |increasing value therefore means the indexer is stalled and needs investigation.""",
+      qualification = MetricQualification.Errors,
+    )
+  )
+
   val ingestionBlockedByPruningDuration: Timer =
     factory.timer(histograms.ingestionBlockedByPruningDuration.info)
 
