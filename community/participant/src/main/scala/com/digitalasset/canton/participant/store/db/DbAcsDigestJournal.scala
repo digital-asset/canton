@@ -237,7 +237,7 @@ class DbAcsDigestJournal[K](
                    and j.#$keyColumnName = (k.target_key_id)::int
                    and j.change_offset <= $toInclusive
                  order by j.synchronizer_idx, j.#$keyColumnName, j.change_offset desc
-                 limit 1
+                 #${storage.limit(1)}
               ) as j
             """
         }

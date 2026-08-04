@@ -36,10 +36,13 @@ import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.FiniteDuration
 
-private sealed trait PekkoP2PGrpcConnectionManagerActorMessage
+private sealed trait PekkoP2PGrpcConnectionManagerActorMessage {
+  def traceContext: TraceContext
+}
 
 private sealed trait ResendablePekkoP2PGrpcConnectionManagerActorMessage
     extends PekkoP2PGrpcConnectionManagerActorMessage {
+
   private[grpc] def config: BftBlockOrdererConfig
 
   // Note that `Jitter.full.apply` produces a timeout value between 0 and the exponential (we use
@@ -64,6 +67,7 @@ private sealed trait ResendablePekkoP2PGrpcConnectionManagerActorMessage
 private final case class Initialize(
     override val config: BftBlockOrdererConfig,
     attemptNumber: Int,
+    override val traceContext: TraceContext,
 ) extends ResendablePekkoP2PGrpcConnectionManagerActorMessage
 
 private final case class SendMessage(
@@ -71,14 +75,15 @@ private final case class SendMessage(
     createMessage: Option[Instant] => BftOrderingMessage,
     metricsContext: MetricsContext,
     attemptNumber: Int,
-    traceContext: TraceContext,
+    override val traceContext: TraceContext,
     sendInstant: Instant = Instant.now,
     maybeDelay: Option[FiniteDuration] = None,
 ) extends ResendablePekkoP2PGrpcConnectionManagerActorMessage
 
 /** Closes the connection-managing actor. Sent as part of disconnecting an endpoint.
   */
-private case object Close extends PekkoP2PGrpcConnectionManagerActorMessage
+private final case class Close(override val traceContext: TraceContext)
+    extends PekkoP2PGrpcConnectionManagerActorMessage
 
 final class PekkoP2PNetworkRef(
     connectionManagingActorRef: ActorRef[PekkoP2PGrpcConnectionManagerActorMessage],
@@ -87,11 +92,12 @@ final class PekkoP2PNetworkRef(
     config: BftBlockOrdererConfig,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
-) extends P2PNetworkRef[BftOrderingMessage]
+)(implicit val traceContext: TraceContext)
+    extends P2PNetworkRef[BftOrderingMessage]
     with NamedLogging {
 
   outstandingMessages.incrementAndGet().discard
-  connectionManagingActorRef ! Initialize(config, attemptNumber = 1)
+  connectionManagingActorRef ! Initialize(config, attemptNumber = 1, traceContext)
 
   override def toString: String = this.getClass.getSimpleName + s"($actorName)"
 
@@ -111,9 +117,8 @@ final class PekkoP2PNetworkRef(
   }
 
   override def onClosed(): Unit = {
-    implicit val traceContext: TraceContext = TraceContext.empty
     logger.debug(s"Sending Close message to connection managing actor for ref $this")
-    connectionManagingActorRef ! Close
+    connectionManagingActorRef ! Close(traceContext)
   }
 }
 
@@ -125,7 +130,8 @@ object PekkoP2PGrpcNetworking {
       override val timeouts: ProcessingTimeout,
       override val loggerFactory: NamedLoggerFactory,
       metrics: BftOrderingMetrics,
-  ) extends P2PNetworkManager[PekkoModuleSystem.PekkoEnv, BftOrderingMessage]
+  )(implicit traceContext: TraceContext)
+      extends P2PNetworkManager[PekkoModuleSystem.PekkoEnv, BftOrderingMessage]
       with NamedLogging {
 
     override def createNetworkRef[ActorContextT](
@@ -181,7 +187,7 @@ object PekkoP2PGrpcNetworking {
     }
 
     override def onClosed(): Unit = {
-      logger.info("Closing P2P gRPC network manager")(TraceContext.empty)
+      logger.info("Closing P2P gRPC network manager")
       connectionManager.close()
     }
 
@@ -209,7 +215,6 @@ object PekkoP2PGrpcNetworking {
             PekkoP2PGrpcConnectionManagerActorMessage
           ]
       ): Unit = {
-
         def emitModuleQueueStats(): Unit =
           // Emit actor queue latency for the message
           message match {
@@ -226,14 +231,18 @@ object PekkoP2PGrpcNetworking {
                 outstandingMessages.decrementAndGet(),
               )(metricsContext)
 
-            case Initialize(_, _) =>
+            case Initialize(_, _, traceContext) =>
               outstandingMessages.decrementAndGet()
-              logger.debug(s"Connection-managing actor $actorName received `Initialize`")
+              logger.debug(s"Connection-managing actor $actorName received `Initialize`")(
+                message.traceContext
+              )
 
             case _ =>
           }
 
         emitModuleQueueStats()
+
+        implicit val traceContext: TraceContext = message.traceContext
 
         connectionManager.getPeerSenderOrStartConnection(p2pAddress) match {
 
@@ -246,8 +255,7 @@ object PekkoP2PGrpcNetworking {
           case _ =>
             val maxAttempts = config.networkSendAttempts.value
             message match {
-              case sm @ SendMessage(_, grpcMessage, metricsContext, attemptNumber, tc, _, _) =>
-                implicit val traceContext: TraceContext = tc
+              case sm @ SendMessage(_, grpcMessage, metricsContext, attemptNumber, _, _, _) =>
                 val newAttemptNumber = attemptNumber + 1
                 val delay = sm.jitterStream.next(newAttemptNumber)
                 if (newAttemptNumber <= maxAttempts) {
@@ -276,7 +284,7 @@ object PekkoP2PGrpcNetworking {
                       s"not retrying anymore"
                   )
 
-              case i @ Initialize(_, attemptNumber) =>
+              case i @ Initialize(_, attemptNumber, _) =>
                 // Initialize must always be retried, since there are modules that wait for a quorum of
                 // connections to be established before being initialized. So if we stopped retrying too soon,
                 // some nodes could get stuck, which could easily happen in a network where nodes are starting
@@ -297,7 +305,8 @@ object PekkoP2PGrpcNetworking {
                   .discard
                 metrics.p2p.send.sendsRetried.inc()(MetricsContext.Empty)
 
-              case Close =>
+              case Close(tc) =>
+                implicit val traceContext: TraceContext = tc
                 abort(
                   logger,
                   s"Connection-managing actor $actorName is unexpectedly processing " +
@@ -307,7 +316,9 @@ object PekkoP2PGrpcNetworking {
         }
       }
 
-      def closeBehavior(): Behavior[PekkoP2PGrpcConnectionManagerActorMessage] = {
+      def createCloseBehavior()(implicit
+          traceContext: TraceContext
+      ): Behavior[PekkoP2PGrpcConnectionManagerActorMessage] = {
         logger.info(s"Closing connection-managing actor $actorName")
         connectionManager.shutdownConnection(
           p2pAddress.id,
@@ -391,15 +402,16 @@ object PekkoP2PGrpcNetworking {
               }
               Behaviors.same
 
-            case Close =>
+            case Close(tc) =>
+              implicit val traceContext: TraceContext = tc
               logger.info(
                 s"Connection-managing actor $actorName is stopping, closing"
               )
-              closeBehavior()
+              createCloseBehavior()
           }
           .receiveSignal { case (_, PostStop) =>
             logger.info(s"Connection-managing actor $actorName stopped, closing")
-            closeBehavior()
+            createCloseBehavior()
           }
       }
     }

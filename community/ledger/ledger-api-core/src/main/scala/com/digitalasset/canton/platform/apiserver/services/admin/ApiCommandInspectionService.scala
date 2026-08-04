@@ -15,7 +15,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
-import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.tracing.TraceContextGrpc
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -27,13 +27,6 @@ class ApiCommandInspectionService(
 ) extends CommandInspectionServiceGrpc.CommandInspectionService
     with StreamingServiceLifecycleManagement
     with NamedLogging {
-
-  protected implicit val errorLoggingContext: ErrorLoggingContext =
-    ErrorLoggingContext(
-      logger,
-      loggerFactory.properties,
-      TraceContext.empty,
-    )
 
   override def getCommandStatus(
       request: GetCommandStatusRequest

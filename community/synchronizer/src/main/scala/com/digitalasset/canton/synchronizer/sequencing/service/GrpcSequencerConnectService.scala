@@ -47,6 +47,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.grpc.{Status, StatusRuntimeException}
 
@@ -142,22 +143,31 @@ class GrpcSequencerConnectService(
     }
 
     mapErrorEither(
-      HandshakeValidator
-        .clientIsCompatible(
-          serverProtocolVersion,
-          request.clientProtocolVersions,
-          request.minimumProtocolVersion,
-          OptionUtil.emptyStringAsNone(request.clientVersion),
-          disableReleaseVersionHandshakeCheck,
-        )
-        .tap(reportHandshakeStatus)
-        .map { _ =>
-          HandshakeResponse(
-            serverProtocolVersion.toProtoPrimitive,
-            HandshakeResponse.Value
-              .Success(SequencerConnect.HandshakeResponse.Success()),
+      for {
+        clientVersion <- ProtoValidation
+          .validate(
+            request.clientVersion,
+            Some("client_version"),
+            ProtocolVersionValidation.AlwaysValidation,
           )
-        }
+          .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+        response <- HandshakeValidator
+          .clientIsCompatible(
+            serverProtocolVersion,
+            request.clientProtocolVersions,
+            request.minimumProtocolVersion,
+            OptionUtil.emptyStringAsNone(clientVersion),
+            disableReleaseVersionHandshakeCheck,
+          )
+          .tap(reportHandshakeStatus)
+          .map { _ =>
+            HandshakeResponse(
+              serverProtocolVersion.toProtoPrimitive,
+              HandshakeResponse.Value
+                .Success(SequencerConnect.HandshakeResponse.Success()),
+            )
+          }
+      } yield response
     )
   }
 

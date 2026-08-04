@@ -259,7 +259,7 @@ final class DbStorageMulti private (
     // Slick by default closes first the executor and then the source, which does not work here.
     val clockCloseable = if (closeClock) Seq(clock) else Seq.empty
     val otherCloseables = Seq(generalDb, writeConnectionPool, writeDbExecutor)
-    LifeCycle.close((clockCloseable ++ otherCloseables)*)(logger)
+    LifeCycle.close(clockCloseable ++ otherCloseables)(logger)
   }
 
   def setPassive()(implicit

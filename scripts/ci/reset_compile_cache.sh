@@ -18,7 +18,7 @@ if [ -f "$FORCE_RECOMPILE_FILE" ]; then
   fi
 fi
 
-if [[ "$RESET_REQUESTED" == "true" || "$BRANCH_FORCE_RESET" == "true" ]]; then
+if [[ "$RESET_REQUESTED" == "true" && "$BRANCH_FORCE_RESET" == "true" ]]; then
   echo "Resetting classes... wiping target folders."
   find . -type d -name target -exec rm -rf {} \;
   echo "needs_network_restore=false" >> "$GITHUB_OUTPUT"

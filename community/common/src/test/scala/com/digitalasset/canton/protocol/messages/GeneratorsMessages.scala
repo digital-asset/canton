@@ -116,7 +116,7 @@ final class GeneratorsMessages(
       digest <- byteStringArb.arbitrary
       counterparticipant <- Arbitrary.arbitrary[ParticipantId]
     } yield DigestForCounterparticipant(
-      Digest.hashDigest(digest),
+      Digest.hashDigest(digest).getCryptographicEvidence,
       counterparticipant.toLf,
     )
   )

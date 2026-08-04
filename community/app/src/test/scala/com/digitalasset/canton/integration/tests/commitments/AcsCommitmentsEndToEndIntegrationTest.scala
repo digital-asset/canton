@@ -23,9 +23,10 @@ import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   CheckpointType,
   InternedParticipantId,
+  allCheckpointsFilter,
 }
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.syntax.all.*
 import org.slf4j.event.Level
 
@@ -41,8 +42,9 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
       .addConfigTransforms(ConfigTransforms.enableNewAcsDigestProcessorPipeline)
+      .addConfigTransforms(ConfigTransforms.disableOldAcsCommitmentProcessor)
 
-  "the digest processor creates digests for counterparticipants" onlyRunWithOrGreaterThan ReleaseProtocolVersion.acsCommitmentRedesignStorage.v in {
+  "the digest processor creates digests for counterparticipants" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
     implicit env =>
       import env.*
 
@@ -132,7 +134,7 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       eventually() {
         // in case there is no next checkpoint, .value will trigger a retry of the eventually loop
         val cp =
-          digestStore.firstCheckpointAfter(startOffset).futureValueUS.value
+          digestStore.firstCheckpointAfter(startOffset, allCheckpointsFilter).futureValueUS.value
 
         // if there was a checkpoint, update the offset to look for the next checkpoint
         startOffset = cp.offset

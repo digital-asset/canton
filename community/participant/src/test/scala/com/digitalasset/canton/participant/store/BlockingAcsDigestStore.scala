@@ -9,10 +9,15 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.store.AcsDigestStore.{Checkpoint, InternedParticipantId}
+import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  Checkpoint,
+  CheckpointType,
+  InternedParticipantId,
+}
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable
@@ -63,15 +68,21 @@ class BlockingAcsDigestStore(
   ): FutureUnlessShutdown[Unit] =
     blockAndThen(delegate.deleteCheckpointsUpToInternal(toExclusive))
 
-  override def latestCheckpointUpTo(toInclusive: Offset)(implicit
+  override def latestCheckpointUpTo(
+      toInclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]] =
-    blockAndThen(delegate.latestCheckpointUpTo(toInclusive))
+    blockAndThen(delegate.latestCheckpointUpTo(toInclusive, checkpointTypes))
 
-  override def firstCheckpointAfter(fromExclusive: Offset)(implicit
+  override def firstCheckpointAfter(
+      fromExclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]] =
-    blockAndThen(delegate.firstCheckpointAfter(fromExclusive))
+    blockAndThen(delegate.firstCheckpointAfter(fromExclusive, checkpointTypes))
 }
 
 class BlockingAcsDigestJournal[K](

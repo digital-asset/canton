@@ -267,6 +267,7 @@ class SequencerNodeBootstrap(
         storage,
         sequencerId,
         arguments.parameterConfig,
+        config.publicApi,
         arguments.futureSupervisor,
         loggerFactory,
       )(config.sequencer, config.parameters.producePostOrderingTopologyTicks)

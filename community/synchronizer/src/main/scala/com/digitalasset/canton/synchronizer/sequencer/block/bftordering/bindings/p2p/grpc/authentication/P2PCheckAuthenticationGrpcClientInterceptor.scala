@@ -9,11 +9,12 @@ import com.digitalasset.canton.synchronizer.sequencing.authentication.{
   MemberAuthenticator,
 }
 import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.canton.tracing.TraceContextGrpc.TraceContextOptionsKey
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.*
 import io.grpc.ForwardingClientCall.SimpleForwardingClientCall
 
-private[p2p] class AuthenticateServerClientInterceptor(
+private[p2p] class P2PCheckAuthenticationGrpcClientInterceptor(
     memberAuthenticationService: MemberAuthenticationService,
     onAuthenticationSuccess: SequencerId => Unit,
     onAuthenticationFailure: Throwable => Unit,
@@ -21,13 +22,16 @@ private[p2p] class AuthenticateServerClientInterceptor(
 ) extends ClientInterceptor
     with NamedLogging {
 
-  import AuthenticateServerClientInterceptor.*
+  import P2PCheckAuthenticationGrpcClientInterceptor.*
 
   override def interceptCall[ReqT, RespT](
       method: MethodDescriptor[ReqT, RespT],
       callOptions: CallOptions,
       next: Channel,
-  ): ClientCall[ReqT, RespT] =
+  ): ClientCall[ReqT, RespT] = {
+    val tcOpts = Option(callOptions.getOption(TraceContextOptionsKey))
+    implicit val traceContext: TraceContext = tcOpts.getOrElse(TraceContextGrpc.fromGrpcContext)
+
     new AuthenticateServerSingleForwardingCall[ReqT, RespT](
       memberAuthenticationService,
       onAuthenticationSuccess,
@@ -37,9 +41,10 @@ private[p2p] class AuthenticateServerClientInterceptor(
       next,
       loggerFactory,
     )
+  }
 }
 
-object AuthenticateServerClientInterceptor {
+object P2PCheckAuthenticationGrpcClientInterceptor {
 
   private class AuthenticateServerSingleForwardingCall[ReqT, RespT](
       memberAuthenticationService: MemberAuthenticationService,
@@ -49,7 +54,8 @@ object AuthenticateServerClientInterceptor {
       callOptions: CallOptions,
       next: Channel,
       override val loggerFactory: NamedLoggerFactory,
-  ) extends SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions))
+  )(implicit traceContext: TraceContext)
+      extends SimpleForwardingClientCall[ReqT, RespT](next.newCall(method, callOptions))
       with NamedLogging {
 
     override def start(
@@ -76,11 +82,11 @@ object AuthenticateServerClientInterceptor {
       clientCall: ClientCall[ReqT, RespT],
       responseListenerDelegate: ClientCall.Listener[RespT],
       override val loggerFactory: NamedLoggerFactory,
-  ) extends ClientCall.Listener[RespT]
+  )(implicit traceContext: TraceContext)
+      extends ClientCall.Listener[RespT]
       with NamedLogging {
 
-    override def onHeaders(headers: Metadata): Unit = {
-      implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    override def onHeaders(headers: Metadata): Unit =
       MemberAuthenticator
         .extractAuthenticationCredentials(headers)
         .fold {
@@ -122,7 +128,6 @@ object AuthenticateServerClientInterceptor {
               clientCall.cancel(errorMessage, exception)
           }
         }
-    }
 
     private def unauthenticatedException(msg: String) =
       Status.UNAUTHENTICATED.withDescription(msg).asException()

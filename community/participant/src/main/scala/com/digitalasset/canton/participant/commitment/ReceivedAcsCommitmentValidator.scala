@@ -224,7 +224,7 @@ object ReceivedAcsCommitments
   ): ParsingResult[ReceivedAcsCommitments] =
     for {
       messages <- ProtoConverter.parseRequiredNonEmpty(
-        AcsCommitmentProtocolMessage.fromTrustedByteStringPVV,
+        AcsCommitmentProtocolMessage.fromTrustedByteString,
         "commitment",
         proto.commitment,
       )

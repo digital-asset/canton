@@ -38,6 +38,7 @@ class LocalEventSignaller[K, S](
     extends EventSignaller[K, S]
     with FlagCloseableAsync
     with NamedLogging {
+  import LocalEventSignaller.*
 
   private val stashesByKey =
     new TrieMap[
@@ -49,7 +50,7 @@ class LocalEventSignaller[K, S](
       // The actual set behind this mutable.Set interface is thread-safe.
       // The TraceContext carried along is from the `readSignals` call,
       // to correlate later errors with the initial request.
-      mutable.Set[Traced[StashSource[NotificationSignal[S]]]],
+      mutable.Set[Labelled[Traced[StashSource[NotificationSignal[S]]]]],
     ]()
 
   override def notify(
@@ -64,28 +65,30 @@ class LocalEventSignaller[K, S](
     }
 
     keysToNotify.foreach { case (k, stashes) =>
-      stashes.foreach { traceStash =>
-        traceStash.value.offer(NotificationSignal(signal)) match {
+      stashes.foreach { labelledTracedStash =>
+        labelledTracedStash.value.value.offer(NotificationSignal(signal)) match {
           case StashOfferResult.Stashed =>
           // happy case
           case StashOfferResult.Replaced(_) =>
           // nothing to do, the stash is just full and the previous pending signal has been replaced by `signal`.
           case StashOfferResult.StashClosed =>
             // the stash was closed, so let's remove the entry
-            stashes.remove(traceStash).discard
+            stashes.remove(labelledTracedStash).discard
           case StashOfferResult.Failure(ex) =>
+            implicit val traceContext: TraceContext = labelledTracedStash.value.traceContext
+            val label = labelledTracedStash.label
             ex match {
               case NoMoreElementsNeeded | StageWasCompleted =>
                 logger.info(
-                  s"Not stashing notification for $keyName $k, because subscription was closed."
-                )(traceStash.traceContext)
+                  s"Not stashing notification for $keyName $label, because subscription was closed."
+                )
               case _ =>
                 logger.info(
-                  s"Unable to stash signal for $keyName $k, because the stash failed with an error.",
+                  s"Unable to stash signal for $keyName $label, because the stash failed with an error.",
                   ex,
-                )(traceStash.traceContext)
+                )
             }
-            stashes.remove(traceStash).discard
+            stashes.remove(labelledTracedStash).discard
         }
       }
       if (stashes.isEmpty) {
@@ -108,10 +111,12 @@ class LocalEventSignaller[K, S](
           // create a concurrent set based on ConcurrentHashMap, but use the scala api for it
           _.orElse(
             Some(
-              ConcurrentHashMap.newKeySet[Traced[StashSource[NotificationSignal[S]]]]().asScala
+              ConcurrentHashMap
+                .newKeySet[Labelled[Traced[StashSource[NotificationSignal[S]]]]]()
+                .asScala
             )
           )
-            .map(_.addOne(Traced(stash)(traceContext)))
+            .map(_.addOne(Labelled(Traced(stash)(traceContext))(prettyK)))
         )
         .discard
     )
@@ -134,13 +139,13 @@ class LocalEventSignaller[K, S](
   protected override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     val closables = stashesByKey.flatMap { case (k, stashes) =>
       stashes
-        .filter(!_.value.isCompleted)
+        .filter(!_.value.value.isCompleted)
         .map(q =>
           SyncCloseable(
-            s"stashes.complete($keyName=$k)",
-            Try(q.value.complete()).forFailed(ex =>
-              logger.info(s"Error while completing the stash for $keyName $k", ex)(
-                q.traceContext
+            s"stashes.complete($keyName=${q.label})",
+            Try(q.value.value.complete()).forFailed(ex =>
+              logger.info(s"Error while completing the stash for $keyName ${q.label}", ex)(
+                q.value.traceContext
               )
             ),
           )
@@ -149,4 +154,8 @@ class LocalEventSignaller[K, S](
     stashesByKey.clear()
     closables
   }
+}
+
+object LocalEventSignaller {
+  private final case class Labelled[A](value: A)(val label: String)
 }

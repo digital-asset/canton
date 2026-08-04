@@ -29,7 +29,6 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{LfCommand, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
@@ -344,7 +343,7 @@ class DAMLe(
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
     def handleExternalCall(
         externalCallKey: ExternalCallKey,
-        resume: Either[ResultNeedExternalCall.Error, String] => Result[A],
+        resume: Either[Result.Need.ExternalCall.Error, String] => Result.Step[A],
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
       externalCallReplayData().outputFor(externalCallKey) match {
         case None =>
@@ -354,116 +353,126 @@ class DAMLe(
           logger.debug(
             s"Replaying recorded external call result for extension=${externalCallKey.extensionId}, function=${externalCallKey.functionId}"
           )
-          handleResultInternal(resume(Right(storedOutput.toHexString)))
+          drive(resume(Right(storedOutput.toHexString)))
       }
 
-    def handleResultInternal(
-        result: Result[A]
-    ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
-
-      @tailrec
-      def iterateOverInterrupts(
-          continue: () => Result[A]
-      ): Either[EngineAborted, Result[A]] =
-        continue() match {
-          case ResultInterruption(continue, _) =>
-            getEngineAbortStatus().reasonO match {
-              case Some(reason) =>
-                logger.warn(s"Aborting engine computation, reason = $reason")
-                Left(EngineAborted(reason))
-              case None => iterateOverInterrupts(continue)
-            }
-
-          case otherResult => Right(otherResult)
-        }
-
-      result match {
-        case ResultNeedPackage(packageId, resume) =>
-          resolvePackage
-            .resolve(
-              packageId,
-              PackageResolver.crashOnMissingPackage(topologySnapshot, participantId, ledgerTime),
-            )
-            .transformWithHandledAborted {
-              case Success(pkg) =>
-                handleResultInternal(resume(pkg))
-              case Failure(ex) =>
-                logger.error(s"Package resolution failed for [$packageId]", ex)
-                FutureUnlessShutdown.failed(ex)
-            }
-        case ResultDone(completedResult) => FutureUnlessShutdown.pure(Right(completedResult))
-
-        case ResultNeedKey(key, n, mbToken, resume) =>
-          val keyContracts = mbToken match {
-            case NeedKeyProgression.Unstarted => contractLookup.lookupKey(key).toVector
-            case NeedKeyProgression.InProgress(ContinuationToken(rest)) => rest
-            case _ => throw new IllegalStateException("unexpected continuation token")
-          }
-          val (result, rest) = keyContracts.splitAt(n)
-          val hasStarted: NeedKeyProgression.HasStarted =
-            if (rest.nonEmpty) NeedKeyProgression.InProgress(ContinuationToken(rest))
-            else NeedKeyProgression.Finished
-          FutureUnlessShutdown
-            .pure(result)
-            .flatMap { r =>
-              val entries = r.map { contract =>
-                CantonContractIdVersion.extractCantonContractIdVersion(contract.contractId) match {
-                  case Right(version) =>
-                    ResultNeedKey.Response.AuthenticableFatContractInstance(
-                      contract,
-                      version.contractHashingMethod,
-                      hash => contractAuthenticator(contract, hash).isRight,
-                    )
-                  case Left(_) =>
-                    ResultNeedKey.Response.UnsupportedContractIdVersion(contract.contractId)
-                }
+    @tailrec
+    def iterateOverInterrupts(step: Result.Step[A]): Either[EngineAborted, Result.Step[A]] =
+      step match {
+        case im: Result.Step.Impure[x, A] =>
+          im.fx match {
+            case Result.Need.Interruption(_) =>
+              getEngineAbortStatus().reasonO match {
+                case Some(reason) =>
+                  logger.warn(s"Aborting engine computation, reason = $reason")
+                  Left(EngineAborted(reason))
+                case None => iterateOverInterrupts(im.resume(()))
               }
-              handleResultInternal(resume(ResultNeedKey.Response(entries, hasStarted)))
-            }
-
-        case ResultNeedContract(acoid, resume) =>
-          val response: Response =
-            CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
-              case Right(version) =>
-                contractLookup.lookupInst(acoid) match {
-                  case Some(contract) =>
-                    Response.ContractFound(
-                      contract,
-                      version.contractHashingMethod,
-                      hash => contractAuthenticator(contract, hash).isRight,
-                    )
-                  case None => Response.ContractNotFound
-                }
-              case Left(_) =>
-                Response.UnsupportedContractIdVersion
-            }
-          FutureUnlessShutdown
-            .pure(response)
-            .flatMap(r => handleResultInternal(resume(r)))
-
-        case ResultError(err) => FutureUnlessShutdown.pure(Left(EngineError(err)))
-        case ResultInterruption(continue, _) =>
-          // Run the interruption loop asynchronously to avoid blocking the calling thread.
-          // Using a `Future` as a trampoline also makes the recursive call to `handleResult` stack safe.
-          FutureUnlessShutdown.pure(iterateOverInterrupts(continue)).flatMap {
-            case Left(abort) => FutureUnlessShutdown.pure(Left(abort))
-            case Right(result) => handleResultInternal(result)
+            case _ => Right(step)
           }
-        case ResultPrefetch(_, _, resume) =>
-          // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
-          handleResultInternal(resume())
-        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
-          val externalCallKey = ExternalCallKey(
-            extensionId,
-            functionId,
-            configHash,
-            input,
-          )
-          handleExternalCall(externalCallKey, resume)
+        case _ => Right(step)
       }
-    }
 
-    handleResultInternal(result)
+    def drive(step: Result.Step[A]): FutureUnlessShutdown[Either[ReinterpretationError, A]] =
+      step match {
+        case Result.Step.Pure(completedResult) =>
+          FutureUnlessShutdown.pure(Right(completedResult))
+
+        case Result.Step.Error(err) => FutureUnlessShutdown.pure(Left(EngineError(err)))
+
+        case im: Result.Step.Impure[x, A] =>
+          im.fx match {
+            case Result.Need.Package(packageId) =>
+              resolvePackage
+                .resolve(
+                  packageId,
+                  PackageResolver
+                    .crashOnMissingPackage(topologySnapshot, participantId, ledgerTime),
+                )
+                .transformWithHandledAborted {
+                  case Success(pkg) =>
+                    drive(im.resume(pkg))
+                  case Failure(ex) =>
+                    logger.error(s"Package resolution failed for [$packageId]", ex)
+                    FutureUnlessShutdown.failed(ex)
+                }
+
+            case Result.Need.Key(key, n, mbToken) =>
+              val keyContracts = mbToken match {
+                case NeedKeyProgression.Unstarted => contractLookup.lookupKey(key).toVector
+                case NeedKeyProgression.InProgress(ContinuationToken(rest)) => rest
+                case _ => throw new IllegalStateException("unexpected continuation token")
+              }
+              val (result, rest) = keyContracts.splitAt(n)
+              val hasStarted: NeedKeyProgression.HasStarted =
+                if (rest.nonEmpty) NeedKeyProgression.InProgress(ContinuationToken(rest))
+                else NeedKeyProgression.Finished
+              FutureUnlessShutdown
+                .pure(result)
+                .flatMap { r =>
+                  val entries = r.map { contract =>
+                    CantonContractIdVersion.extractCantonContractIdVersion(
+                      contract.contractId
+                    ) match {
+                      case Right(version) =>
+                        Result.Need.Key.Response.AuthenticableFatContractInstance(
+                          contract,
+                          version.contractHashingMethod,
+                          hash => contractAuthenticator(contract, hash).isRight,
+                        )
+                      case Left(_) =>
+                        Result.Need.Key.Response.UnsupportedContractIdVersion(
+                          contract.contractId
+                        )
+                    }
+                  }
+                  drive(im.resume(Result.Need.Key.Response(entries, hasStarted)))
+                }
+
+            case Result.Need.Contract(acoid) =>
+              val response: Result.Need.Contract.Response =
+                CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
+                  case Right(version) =>
+                    contractLookup.lookupInst(acoid) match {
+                      case Some(contract) =>
+                        Result.Need.Contract.Found(
+                          contract,
+                          version.contractHashingMethod,
+                          hash => contractAuthenticator(contract, hash).isRight,
+                        )
+                      case None => Result.Need.Contract.NotFound
+                    }
+                  case Left(_) =>
+                    Result.Need.Contract.UnsupportedIdVersion
+                }
+              FutureUnlessShutdown
+                .pure(response)
+                .flatMap(r => drive(im.resume(r)))
+
+            case Result.Need.Interruption(_) =>
+              // Run the interruption loop asynchronously to avoid blocking the calling thread.
+              // Using a `Future` as a trampoline also makes the recursive call to `drive` stack safe.
+              FutureUnlessShutdown.pure(iterateOverInterrupts(im.resume(()))).flatMap {
+                case Left(abort) => FutureUnlessShutdown.pure(Left(abort))
+                case Right(next) => drive(next)
+              }
+
+            case Result.Need.Prefetch(_, _) =>
+              // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
+              drive(im.resume(()))
+
+            case Result.Need.ExternalCall(extensionId, functionId, configHash, input) =>
+              val externalCallKey = ExternalCallKey(
+                extensionId,
+                functionId,
+                configHash,
+                input,
+              )
+              handleExternalCall(externalCallKey, im.resume)
+          }
+      }
+
+    drive(result.start)
   }
 
 }

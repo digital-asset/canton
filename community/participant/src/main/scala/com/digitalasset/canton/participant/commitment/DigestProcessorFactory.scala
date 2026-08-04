@@ -6,9 +6,10 @@ package com.digitalasset.canton.participant.commitment
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
-import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.store.{AcsCommitmentPeriodStore, AcsDigestStore}
 import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -22,7 +23,8 @@ import scala.concurrent.ExecutionContext
   */
 trait DigestProcessorFactory {
   def createRunningDigestProcessor(
-      synchronizerId: SynchronizerId
+      synchronizerId: SynchronizerId,
+      tickSignaller: TickSignaller,
   )(implicit traceContext: TraceContext): BaseDigestProcessor
 
   def createReinitializingDigestProcessor(
@@ -34,6 +36,7 @@ class DigestProcessorFactoryImpl(
     participantId: ParticipantId,
     topologyLookup: TopologyLookup,
     acsDigestStoreLookup: SynchronizerId => Option[AcsDigestStore],
+    acsCommitmentPeriodStoreLookup: SynchronizerId => Option[AcsCommitmentPeriodStore],
     internalIndexService: InternalIndexService,
     ledgerApiStore: LedgerApiStore,
     stringInterning: StringInterning,
@@ -72,10 +75,14 @@ class DigestProcessorFactoryImpl(
     }
 
   def createRunningDigestProcessor(
-      synchronizerId: SynchronizerId
+      synchronizerId: SynchronizerId,
+      tickSignaller: TickSignaller,
   )(implicit traceContext: TraceContext): RunningDigestProcessor = {
     val acsDigestStore = acsDigestStoreLookup(synchronizerId).getOrElse(
       ErrorUtil.invalidState("AcsDigestStore not initialized")
+    )
+    val acsCommitmentPeriodStore = acsCommitmentPeriodStoreLookup(synchronizerId).getOrElse(
+      ErrorUtil.invalidState("AcsCommitmentPeriodStore not initialized")
     )
     val loggerFactoryWithSynchronizer =
       loggerFactory.append("synchronizer", synchronizerId.toString)
@@ -88,6 +95,7 @@ class DigestProcessorFactoryImpl(
       acsCommitmentConfig,
       digestAccumulator,
       acsDigestStore,
+      tickSignaller,
       internalIndexService,
       getTopologySnapshot = tracedTimestamp =>
         EitherTUtil.toFutureUnlessShutdown(
@@ -98,6 +106,9 @@ class DigestProcessorFactoryImpl(
             // TODO(#33084): cleanup error types
             .leftMap(_.asGrpcError)
         ),
+      enableAdditionalConsistencyChecks = enableAdditionalConsistencyChecks,
+      periodWriter =
+        new AcsCommitmentPeriodWriter(acsDigestStore, acsCommitmentPeriodStore, loggerFactory),
       timeouts,
       loggerFactoryWithSynchronizer,
     )
@@ -113,6 +124,7 @@ class DigestProcessorFactoryImpl(
       loggerFactory.append("synchronizer", synchronizerId.toString)
 
     val digestAccumulator = createDigestAccumulator(acsDigestStore, loggerFactoryWithSynchronizer)
+
     new ReinitializingDigestProcessor(
       participantId,
       synchronizerId,

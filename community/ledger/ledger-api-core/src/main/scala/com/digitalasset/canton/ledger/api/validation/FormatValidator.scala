@@ -88,7 +88,10 @@ object FormatValidator {
       participantAuthorizationPartiesO <- validateOptional(
         protoTopologyFormat.includeParticipantAuthorizationEvents
       )(validate)
-    } yield TopologyFormat(participantAuthorizationPartiesO)
+    } yield TopologyFormat(
+      participantAuthorizationFormat = participantAuthorizationPartiesO,
+      synchronizerId = None,
+    )
 
   def validate(protoTransactionShape: ProtoTransactionShape)(implicit
       errorLoggingContext: ErrorLoggingContext

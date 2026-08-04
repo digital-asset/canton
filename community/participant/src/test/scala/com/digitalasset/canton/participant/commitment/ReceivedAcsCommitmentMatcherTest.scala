@@ -83,7 +83,7 @@ class ReceivedAcsCommitmentMatcherTest
     val matcher: ReceivedAcsCommitmentMatcher =
       new ReceivedAcsCommitmentMatcher(
         store,
-        Eval.now(stringInterning),
+        stringInterning,
         loggerFactory,
         PositiveInt.tryCreate(1000),
       )
@@ -159,11 +159,10 @@ class ReceivedAcsCommitmentMatcherTest
         CommitmentMatchPeriod.outstanding(intern(p2), ts(20), ts(30), "P2:20-30"),
       )
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(30), affirmationOnly = false).futureValueUS
 
       val updateContainer = mkAcsUpdateContainer(p2, ts(2), ts(25), "P2:12-20", off(17), ts(42))
 
-      Source(Seq(updateContainer)).via(matcher.flow).runWith(Sink.ignore).futureValue
+      Source(Seq(updateContainer)).via(matcher.pipeline).runWith(Sink.ignore).futureValue
 
       store
         .lookupOutstanding(Seq(intern(p2) -> cp(ts(1), ts(30))))
@@ -183,7 +182,7 @@ class ReceivedAcsCommitmentMatcherTest
         .lookupMatched(Seq(intern(p2) -> cp(ts(1), ts(30))))
         .futureValueUS should contain theSameElementsAs
         Seq(CommitmentMatchPeriod.matched(intern(p2), ts(12), ts(20), off(17)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(17))
+      store.watermark().futureValueUS.matching shouldBe Some(off(17))
     }
 
     "process matching after mismatching commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -192,11 +191,10 @@ class ReceivedAcsCommitmentMatcherTest
 
       val outstanding = Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(1), ts(10), "P2:1-10"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(10), affirmationOnly = false).futureValueUS
 
       val mismatch = mkAcsUpdateContainer(p2, ts(1), ts(8), "P2:1-8", off(13), ts(11))
       val `match` = mkAcsUpdateContainer(p2, ts(2), ts(8), "P2:1-10", off(14), ts(12))
-      Source(Seq(mismatch, `match`)).via(matcher.flow).runWith(Sink.ignore).futureValue
+      Source(Seq(mismatch, `match`)).via(matcher.pipeline).runWith(Sink.ignore).futureValue
       store
         .lookupMismatchedOrUnexpected(Seq(intern(p2) -> cp(ts(1), ts(10))))
         .futureValueUS should contain theSameElementsAs
@@ -205,7 +203,7 @@ class ReceivedAcsCommitmentMatcherTest
         .lookupMatched(Seq(intern(p2) -> cp(ts(1), ts(10))))
         .futureValueUS should contain theSameElementsAs
         Seq(CommitmentMatchPeriod.matched(intern(p2), ts(2), ts(8), off(14)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(14))
+      store.watermark().futureValueUS.matching shouldBe Some(off(14))
     }
 
     "ignore parse errors" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -214,7 +212,6 @@ class ReceivedAcsCommitmentMatcherTest
 
       val outstanding = Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(2), ts(3), "P2:2-3"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(30), affirmationOnly = false).futureValueUS
 
       val badPayload = ByteString.copyFromUtf8("this is garbage")
       val badUpdateContainer = InternalIndexService.AcsUpdateContainer(
@@ -226,7 +223,7 @@ class ReceivedAcsCommitmentMatcherTest
       val goodUpdateContainer = mkAcsUpdateContainer(p2, ts(2), ts(3), "P2:2-3", off(13), ts(11))
       loggerFactory.assertLogs(
         Source(Seq(badUpdateContainer, goodUpdateContainer))
-          .via(matcher.flow)
+          .via(matcher.pipeline)
           .runWith(Sink.ignore)
           .futureValue,
         _.warningMessage should include(
@@ -237,7 +234,7 @@ class ReceivedAcsCommitmentMatcherTest
         .lookupMatched(Seq(intern(p2) -> cp(ts(2), ts(3))))
         .futureValueUS should contain theSameElementsAs
         Seq(CommitmentMatchPeriod.matched(intern(p2), ts(2), ts(3), off(13)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(13))
+      store.watermark().futureValueUS.matching shouldBe Some(off(13))
     }
 
     // TODO(#34324) Change this so that they are not ignored
@@ -245,11 +242,9 @@ class ReceivedAcsCommitmentMatcherTest
       val fixture = new Fixture(p1)
       import fixture.*
 
-      store.increaseInsertionWatermark(ts(10), affirmationOnly = false).futureValueUS
-
       val unexpected = mkAcsUpdateContainer(p2, ts(2), ts(3), "P2:2-3", off(1), ts(4))
-      Source(Seq(unexpected)).via(matcher.flow).runWith(Sink.ignore).futureValue
-      store.watermarks().futureValueUS.matching shouldBe Some(off(1))
+      Source(Seq(unexpected)).via(matcher.pipeline).runWith(Sink.ignore).futureValue
+      store.watermark().futureValueUS.matching shouldBe Some(off(1))
     }
 
     "handle multiple envelopes in the same container" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -261,7 +256,6 @@ class ReceivedAcsCommitmentMatcherTest
         CommitmentMatchPeriod.outstanding(intern(p3), ts(10), ts(20), "P3:10-20"),
       )
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(20), affirmationOnly = false).futureValueUS
 
       val mismatchP2 = AcsCommitment.create(
         synchronizerId.toPhysical,
@@ -303,9 +297,9 @@ class ReceivedAcsCommitmentMatcherTest
         off(23),
         traceContext,
       )
-      Source(Seq(container)).via(matcher.flow).runWith(Sink.ignore).futureValue
+      Source(Seq(container)).via(matcher.pipeline).runWith(Sink.ignore).futureValue
 
-      store.watermarks().futureValueUS.matching shouldBe Some(off(23))
+      store.watermark().futureValueUS.matching shouldBe Some(off(23))
       store
         .lookupMatched(Seq(intern(p2) -> cp(ts(1), ts(10)), intern(p3) -> cp(ts(10), ts(20))))
         .futureValueUS should contain theSameElementsAs
@@ -325,7 +319,6 @@ class ReceivedAcsCommitmentMatcherTest
 
       val outstanding = Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(1), ts(20), "P2:1-20"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(20), affirmationOnly = false).futureValueUS
 
       val updates = Seq(
         mkAcsUpdateContainer(p2, ts(1), ts(10), "P2:1-20", off(10), ts(11)),
@@ -333,7 +326,7 @@ class ReceivedAcsCommitmentMatcherTest
         mkAcsUpdateContainer(p2, ts(1), ts(20), "P2:1-20", off(12), ts(13)),
         mkAcsUpdateContainer(p2, ts(1), ts(20), "P2:1-20", off(13), ts(14)),
       )
-      Source(updates).via(matcher.flow).runWith(Sink.ignore).futureValue
+      Source(updates).via(matcher.pipeline).runWith(Sink.ignore).futureValue
 
       store.lookupOutstanding(Seq(intern(p2) -> cp(ts(1), ts(20)))).futureValueUS shouldBe empty
       store
@@ -343,7 +336,7 @@ class ReceivedAcsCommitmentMatcherTest
           CommitmentMatchPeriod.matched(intern(p2), ts(1), ts(10), off(10)),
           CommitmentMatchPeriod.matched(intern(p2), ts(10), ts(20), off(12)),
         )
-      store.watermarks().futureValueUS.matching shouldBe Some(off(13))
+      store.watermark().futureValueUS.matching shouldBe Some(off(13))
     }
 
     "correctly process many queued commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -355,16 +348,15 @@ class ReceivedAcsCommitmentMatcherTest
       val outstanding =
         Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(0), ts(count), "P2:all"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(count), affirmationOnly = false).futureValueUS
 
       val updates =
         (1L to count).map(i => mkAcsUpdateContainer(p2, ts(0), ts(i), "P2:all", off(i), ts(i + 1)))
-      Source(updates).via(matcher.flow).runWith(Sink.ignore).futureValue
+      Source(updates).via(matcher.pipeline).runWith(Sink.ignore).futureValue
       store
         .lookupMatched(Seq(intern(p2) -> cp(ts(0), ts(count))))
         .futureValueUS should contain theSameElementsAs
         (1L to count).map(i => CommitmentMatchPeriod.matched(intern(p2), ts(i - 1), ts(i), off(i)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(count))
+      store.watermark().futureValueUS.matching shouldBe Some(off(count))
     }
 
     "process commitments from different participants concurrently and sequentially per participant" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -385,7 +377,6 @@ class ReceivedAcsCommitmentMatcherTest
         )
       }
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(10), affirmationOnly = false).futureValueUS
 
       val updates = participants.flatMap { case (sender, i) =>
         val first = Fixture.mkAcsUpdateContainer(
@@ -438,12 +429,12 @@ class ReceivedAcsCommitmentMatcherTest
       val matcher =
         new ReceivedAcsCommitmentMatcher(
           slowStore,
-          Eval.now(stringInterning),
+          stringInterning,
           loggerFactory,
           PositiveInt.tryCreate(10),
         )
 
-      val fut = Source(updates).via(matcher.flow).runWith(Sink.ignore)
+      val fut = Source(updates).via(matcher.pipeline).runWith(Sink.ignore)
       always() {
         fut.isCompleted shouldBe false
         calls.get should be <= participants.size
@@ -473,7 +464,7 @@ class ReceivedAcsCommitmentMatcherTest
         Seq(first, second)
       }
       store.lookupMatched(periods).futureValueUS should contain theSameElementsAs expected
-      store.watermarks().futureValueUS.matching shouldBe Some(off(updates.size.toLong))
+      store.watermark().futureValueUS.matching shouldBe Some(off(updates.size.toLong))
     }
   }
 

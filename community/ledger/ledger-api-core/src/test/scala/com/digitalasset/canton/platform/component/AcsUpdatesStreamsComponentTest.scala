@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.component
 
 import com.digitalasset.canton.ReassignmentCounter
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdate
@@ -31,7 +32,9 @@ import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
-trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentTest {
+import scala.concurrent.Promise
+
+trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest {
 
   private val nextRecordTime = new SingleStepIncreasingRecordTime
 
@@ -82,7 +85,9 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       synchronizerId: SynchronizerId,
       fromExclusive: Option[Offset],
   ): Source[InternalIndexService.AcsUpdateContainer, NotUsed] =
-    internalIndexService.acsUpdates(synchronizerId, fromExclusive)
+    internalIndexService
+      .acsUpdates(synchronizerId, fromExclusive)
+      .filter(_.acsUpdate != AcsUpdate.OffsetCheckpoint)
 
   private def counterPartiesOf(
       synchronizerId: SynchronizerId,
@@ -122,6 +127,23 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       recordTime = nextRecordTime(),
       payload = payload,
       updateId = TestUpdateId("ReceivedAcsCommitment"),
+    )
+
+  private def topologyTx(
+      synchronizerId: SynchronizerId
+  ): TopologyTransactionEffective =
+    TopologyTransactionEffective(
+      updateId = randomUpdateId,
+      events = Set(
+        PartyToParticipantAuthorization(
+          party = Ref.Party.assertFromString("partyX"),
+          participant = Ref.ParticipantId.assertFromString("participant"),
+          authorizationEvent = Onboarding(AuthorizationLevel.Observation),
+        )
+      ),
+      genericTopologyEvents = Nil, // TODO(i33326)
+      synchronizerId = synchronizerId,
+      effectiveTime = nextRecordTime(),
     )
 
   "acsUpdates" should {
@@ -296,7 +318,6 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       )
     }
 
-    // TODO(i34124) move the test from the end here, remove this
     "ignore updates from a different synchronizer" in {
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
@@ -305,14 +326,37 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       ).discard
 
       // A create on synchronizer1 which must be the first update observed.
-      val (create, contract) = createTx(Set(dsoParty, alice))
-      ingestUpdates(create -> Vector(contract))
+      val (create1, contract1) = createTx(Set(dsoParty, alice))
+      val (create2, contract2) = createTx(Set(dsoParty, alice), synchronizerId = synchronizer2)
+      val (assign1, contract3) = sequencedAssign(nextRecordTime(), Set(dsoParty, alice), 1L)
+      val (assign2, contract4) = sequencedAssign(
+        recordTime = nextRecordTime(),
+        stakeholders = Set(dsoParty, alice),
+        reassignmentCounter = 1L,
+        sourceSynchronizerId = synchronizer1,
+        targetSynchronizerId = synchronizer2,
+      )
+      val topo1 = topologyTx(synchronizer1)
+      val topo2 = topologyTx(synchronizer2)
+      val acsCommitment1 = acsCommitment(synchronizer1, payload1)
+      val acsCommitment2 = acsCommitment(synchronizer2, payload2)
+      ingestUpdates(
+        create1 -> Vector(contract1),
+        create2 -> Vector(contract2),
+        assign1 -> Vector(contract3),
+        assign2 -> Vector(contract4),
+        topo1 -> Vector.empty,
+        topo2 -> Vector.empty,
+        acsCommitment2 -> Vector.empty,
+        acsCommitment1 -> Vector.empty,
+      )
 
-      val acsUpdates = acsUpdatesRaw(rangeStart, expected = 1)
-
-      // Only the activation is observed: the foreign-synchronizer commitment was ignored.
-      val acsChange = asAcsChange(acsUpdates.loneElement)
-      acsChange.activations.keySet should contain(contract.contractId)
+      acsUpdateContainers(rangeStart, expected = 4).map(_.synchronizerTime) shouldBe List(
+        create1.recordTime,
+        assign1.recordTime,
+        topo1.recordTime,
+        acsCommitment1.recordTime,
+      )
     }
 
     "emit an activation with the assigned reassignment counter for a reassignment" in {
@@ -448,6 +492,93 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       val acsUpdate = acsUpdatesRaw(fromExclusive = Some(offset), expected = 1).loneElement
 
       acsUpdate shouldBe AcsUpdate.AcsCommitment(payload2)
+    }
+
+    "interleave offset checkpoints once the stream has caught up with the ledger end" in {
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
+      val (recordTime, create, contract) =
+        createTxWithRecordTime(synchronizer1, Set(dsoParty, alice))
+      val lastOffset = ingestUpdates(create -> Vector(contract))
+
+      val elements = internalIndexService
+        .acsUpdates(synchronizerId = synchronizer1, fromExclusive = rangeStart)
+        .takeWhile(
+          element =>
+            !(element.acsUpdate == AcsUpdate.OffsetCheckpoint && element.offset == lastOffset),
+          inclusive = true,
+        )
+        .runWith(Sink.seq)
+        .futureValue
+
+      val checkpointAtLedgerEnd = elements.last
+      checkpointAtLedgerEnd.acsUpdate shouldBe AcsUpdate.OffsetCheckpoint
+      checkpointAtLedgerEnd.offset shouldBe lastOffset
+      // the checkpoint carries the record time of the last update of this synchronizer
+      checkpointAtLedgerEnd.synchronizerTime shouldBe recordTime
+
+      // the checkpoints do not swallow the actual ACS update, which still precedes the checkpoint
+      val acsChanges = elements.filter(_.acsUpdate != AcsUpdate.OffsetCheckpoint)
+      val acsChange = asAcsChange(acsChanges.loneElement.acsUpdate)
+      acsChange.activations.keySet should contain(contract.contractId)
+    }
+
+    "only emit checkpoints carrying a time of the stream's synchronizer" in {
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
+      val commitment1 = acsCommitment(synchronizer1, payload1)
+      val commitment2 = acsCommitment(synchronizer2, payload2)
+      val lastOffset = ingestUpdates(
+        commitment1 -> Vector.empty,
+        commitment2 -> Vector.empty,
+      )
+      val recordTime1 = commitment1.recordTime
+      recordTime1 should be < commitment2.recordTime
+
+      val checkpoints = internalIndexService
+        .acsUpdates(synchronizerId = synchronizer1, fromExclusive = rangeStart)
+        .filter(_.acsUpdate == AcsUpdate.OffsetCheckpoint)
+        .takeWhile(_.offset < lastOffset, inclusive = true)
+        .runWith(Sink.seq)
+        .futureValue
+
+      // the stream is a tailing one, so it must have produced at least the checkpoint at the ledger end
+      val lastCheckpoint = checkpoints.lastOption.value
+      lastCheckpoint.offset shouldBe lastOffset
+      lastCheckpoint.synchronizerTime shouldBe recordTime1
+
+      forAll(checkpoints)(_.synchronizerTime should be <= recordTime1)
+    }
+
+    "emit checkpoints repeatedly while the stream's synchronizer is idle" in {
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
+
+      // only synchronizer1 progresses, the stream below reads the idle synchronizer2
+      val commitment1 =
+        acsCommitment(synchronizer1, ByteString.copyFromUtf8("repeated-checkpoint-1"))
+      val offset1 = ingestUpdateSync(commitment1)
+
+      val firstCheckpointEmitted = Promise[Unit]()
+      val elementsF = internalIndexService
+        .acsUpdates(synchronizerId = synchronizer2, fromExclusive = rangeStart)
+        .filter(_.offset >= offset1)
+        .map { element =>
+          firstCheckpointEmitted.trySuccess(()).discard
+          element
+        }
+        .take(2)
+        .runWith(Sink.seq)
+
+      // The second update is ingested only once the first checkpoint has been emitted
+      firstCheckpointEmitted.future.futureValue
+
+      val commitment2 =
+        acsCommitment(synchronizer1, ByteString.copyFromUtf8("repeated-checkpoint-2"))
+      val offset2 = ingestUpdateSync(commitment2)
+
+      val elements = elementsF.futureValue
+
+      forAll(elements)(_.acsUpdate shouldBe AcsUpdate.OffsetCheckpoint)
+      elements.map(_.offset) shouldBe Seq(offset1, offset2)
+      elements.map(_.synchronizerTime).distinct.loneElement should be < commitment1.recordTime
     }
   }
 
@@ -642,13 +773,37 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
     }
 
     "return no contracts for a synchronizer without active contracts" in {
-      val (create, contract) = createTx(Set(dsoParty, alice))
+      val (create, contract) =
+        createTx(stakeholders = Set(dsoParty, alice), synchronizerId = synchronizer3)
       ingestUpdates(create -> Vector(contract))
+
+      val archive = archives(
+        recordTime = nextRecordTime,
+        argumentLength = 8,
+        resultLength = 8,
+        synchronizerId = synchronizer3,
+      )(Seq(contract.inst.toCreateNode))
+      ingestUpdates(archive -> Vector.empty)
+
       val activeAt = index.currentLedgerEnd().value.lastOffset
 
       index
         .acs(
-          synchronizerId = synchronizer2,
+          synchronizerId = synchronizer3,
+          activeAt = activeAt,
+          stakeholders1 = Set(alice.value),
+          stakeholders2 = Set.empty,
+        )
+        .runWith(Sink.seq)
+        .futureValue shouldBe empty
+    }
+
+    "return no contracts for an unknown synchronizer" in {
+      val activeAt = index.currentLedgerEnd().value.lastOffset
+
+      index
+        .acs(
+          synchronizerId = SynchronizerId.tryFromString("x::synchronizer42"),
           activeAt = activeAt,
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set.empty,
@@ -754,7 +909,7 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
       ingestUpdates(create -> Vector(contract))
       val activeAt = index.currentLedgerEnd().value.lastOffset
 
-      counterPartiesOf(synchronizer2, activeAt, Some(alice.value))
+      counterPartiesOf(synchronizer3, activeAt, Some(alice.value))
         .runWith(Sink.seq)
         .futureValue shouldBe empty
     }
@@ -827,101 +982,50 @@ trait AcsCommitmentStreamsComponentTest extends AnyWordSpec with IndexComponentT
         .futureValue shouldBe empty
     }
   }
-
-  // TODO(i34124) move this test in the right place, and fix the tests so that they are interdependent (currently adding one test is cumbersome as the state changes break other tests coming after)
-  "ignore updates from a different synchronizer" in {
-    val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
-
-    ingestUpdateSync(
-      acsCommitment(synchronizer2, ByteString.copyFromUtf8("other-synchronizer-commitment"))
-    ).discard
-
-    // A create on synchronizer1 which must be the first update observed.
-    val (create1, contract1) = createTx(Set(dsoParty, alice))
-    val (create2, contract2) = createTx(Set(dsoParty, alice), synchronizerId = synchronizer2)
-    val (assign1, contract3) = sequencedAssign(nextRecordTime(), Set(dsoParty, alice), 1L)
-    val (assign2, contract4) = sequencedAssign(
-      recordTime = nextRecordTime(),
-      stakeholders = Set(dsoParty, alice),
-      reassignmentCounter = 1L,
-      sourceSynchronizerId = synchronizer1,
-      targetSynchronizerId = synchronizer2,
-    )
-    // TODO(i34124) extract to factory function + DRY
-    val topo1 = TopologyTransactionEffective(
-      updateId = randomUpdateId,
-      events = List(
-        PartyToParticipantAuthorization(
-          party = Ref.Party.assertFromString("partyX"),
-          participant = Ref.ParticipantId.assertFromString("participant"),
-          authorizationEvent = Onboarding(AuthorizationLevel.Observation),
-        )
-      ).toSet,
-      genericTopologyEvents = Nil, // TODO(i33326)
-      synchronizerId = synchronizer1,
-      effectiveTime = nextRecordTime(),
-    )
-    val topo2 = TopologyTransactionEffective(
-      updateId = randomUpdateId,
-      events = List(
-        PartyToParticipantAuthorization(
-          party = Ref.Party.assertFromString("partyX"),
-          participant = Ref.ParticipantId.assertFromString("participant"),
-          authorizationEvent = Onboarding(AuthorizationLevel.Observation),
-        )
-      ).toSet,
-      genericTopologyEvents = Nil, // TODO(i33326)
-      synchronizerId = synchronizer2,
-      effectiveTime = nextRecordTime(),
-    )
-    val acsCommitment1 = acsCommitment(synchronizer1, payload1)
-    val acsCommitment2 = acsCommitment(synchronizer2, payload2)
-    ingestUpdates(
-      create1 -> Vector(contract1),
-      create2 -> Vector(contract2),
-      assign1 -> Vector(contract3),
-      assign2 -> Vector(contract4),
-      topo1 -> Vector.empty,
-      topo2 -> Vector.empty,
-      acsCommitment2 -> Vector.empty,
-      acsCommitment1 -> Vector.empty,
-    )
-
-    acsUpdateContainers(rangeStart, expected = 4).map(_.synchronizerTime) shouldBe List(
-      create1.recordTime,
-      assign1.recordTime,
-      topo1.recordTime,
-      acsCommitment1.recordTime,
-    )
-  }
 }
 
-final class AcsCommitmentStreamsComponentTestCachesDisabledH2
-    extends AcsCommitmentStreamsComponentTest {
+object AcsUpdatesStreamsComponentTest {
+
+  def indexServiceConfig(
+      maxTransactionsInMemoryFanOutBufferSize: Int =
+        IndexServiceConfig.DefaultMaxTransactionsInMemoryFanOutBufferSize
+  ): IndexServiceConfig =
+    IndexServiceConfig(
+      maxTransactionsInMemoryFanOutBufferSize = maxTransactionsInMemoryFanOutBufferSize,
+      offsetCheckpointCacheUpdateInterval = NonNegativeFiniteDuration.ofMillis(100),
+      idleStreamOffsetCheckpointTimeout = NonNegativeFiniteDuration.ofMillis(500),
+    )
+}
+
+final class AcsUpdatesStreamsComponentTestCachesDisabledH2 extends AcsUpdatesStreamsComponentTest {
   override protected def serviceParams: ServiceParams =
-    super.serviceParams
-      .copy(indexServiceConfig = IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0))
+    super.serviceParams.copy(indexServiceConfig =
+      AcsUpdatesStreamsComponentTest.indexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0)
+    )
 }
 
-final class AcsCommitmentStreamsComponentTestCachesDisabledPostgres
-    extends AcsCommitmentStreamsComponentTest
+final class AcsUpdatesStreamsComponentTestCachesDisabledPostgres
+    extends AcsUpdatesStreamsComponentTest
+    with IndexComponentTest.WithPostgres {
+  override protected def serviceParams: ServiceParams =
+    super.serviceParams.copy(indexServiceConfig =
+      AcsUpdatesStreamsComponentTest.indexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0)
+    )
+}
+
+final class AcsUpdatesStreamsComponentTestTinyBuffersPostgres
+    extends AcsUpdatesStreamsComponentTest
+    with IndexComponentTest.WithPostgres {
+  override protected def serviceParams: ServiceParams =
+    super.serviceParams.copy(indexServiceConfig =
+      AcsUpdatesStreamsComponentTest.indexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 3)
+    )
+}
+
+final class AcsUpdatesStreamsComponentTestDefaultPostgres
+    extends AcsUpdatesStreamsComponentTest
     with IndexComponentTest.WithPostgres {
   override protected def serviceParams: ServiceParams =
     super.serviceParams
-      .copy(indexServiceConfig = IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 0))
-}
-
-final class AcsCommitmentStreamsComponentTestTinyBuffersPostgres
-    extends AcsCommitmentStreamsComponentTest
-    with IndexComponentTest.WithPostgres {
-  override protected def serviceParams: ServiceParams =
-    super.serviceParams
-      .copy(indexServiceConfig = IndexServiceConfig(maxTransactionsInMemoryFanOutBufferSize = 3))
-}
-
-final class AcsCommitmentStreamsComponentTestDefaultPostgres
-    extends AcsCommitmentStreamsComponentTest
-    with IndexComponentTest.WithPostgres {
-  override protected def serviceParams: ServiceParams =
-    super.serviceParams.copy(indexServiceConfig = IndexServiceConfig())
+      .copy(indexServiceConfig = AcsUpdatesStreamsComponentTest.indexServiceConfig())
 }

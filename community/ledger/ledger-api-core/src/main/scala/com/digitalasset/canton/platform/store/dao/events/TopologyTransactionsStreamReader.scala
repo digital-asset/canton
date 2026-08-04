@@ -28,6 +28,7 @@ import com.digitalasset.canton.platform.store.utils.{
   ConcurrencyLimiter,
   QueueBasedConcurrencyLimiter,
 }
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Attributes
@@ -144,6 +145,7 @@ class TopologyTransactionsStreamReader(
         dbMetric = dbMetrics.topologyTransactionsStream.fetchTopologyPartyEventPayloads,
         payloadDbQuery = eventStorageBackend.topologyPartyEventBatch,
       )
+        .filter(rawEvent => synchronizerId.forall(_.toProtoPrimitive == rawEvent.synchronizerId))
 
     UpdateReader
       .groupContiguous(payloads)(by = _.updateId)
@@ -159,6 +161,7 @@ object TopologyTransactionsStreamReader {
       payloadQueriesLimiter: ConcurrencyLimiter,
       idPageSizing: IdPageSizing,
       participantAuthorizationFormat: ParticipantAuthorizationFormat,
+      synchronizerId: Option[SynchronizerId],
       maxParallelIdQueries: Int,
       maxPagesPerIdPagesBuffer: Int,
       maxPayloadsPerPayloadsPage: Int,

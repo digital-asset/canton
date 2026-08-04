@@ -1,5 +1,15 @@
 # CI scripts
 
+## TLDR
+
+- **Who gets pinged, and why.** Two alerts @-mention people, both resolving the on-duty name from the rota Google sheet via `select_rota.py` and matching a Slack ID in `roster_people.json`:
+  - **Flaky/nightly alert** (`alert_slack.py`), when the same test fails on several consecutive commits on a tracked branch:
+    - a **flaky streak** pings the **Flaky Canton** rotation (two people),
+    - a **broken nightly** pings the **CI rota**.
+  - **Red-main alert** (`slack_red_main_with_volunteer`), when a job fails on `main`: it pings the rota mapped to that job, so a red **blackduck** job pings the **Release & Blackduck** rota and everything else pings the **CI rota**.
+- **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
+- **Weekly Slack topics.** A separate scheduled workflow, `update_rota_topics.yml`, runs every Monday and rewrites the team channel topics from the same rota sheet, so each channel topic always names the current on-duty person.
+
 ## Flaky test notification system
 
 The flaky-test notification system tracks test failures across CI runs.
@@ -15,7 +25,7 @@ It is split into four focused scripts that pass data via JSON artifacts in a sha
 | `alert_slack.py` | post the Slack summary for any streaks |
 
 Shared code (CI-env detection, the `gh` wrapper, formatting, project/field config, the JSON contracts) lives in `flaky_common.py`.
-Each script also runs its own inline self-tests on startup and supports `--self-test` to run them and exit.
+Each script carries its own inline self-tests, runnable with `--self-test`, which runs them and exits.
 
 It is invoked via the `collect_failing_test_data_and_send_to_datadog` CircleCI command (and the GitHub Actions composite action of the same name), which runs `report_failing_tests.py` after every test job, always, even on failure.
 
@@ -80,29 +90,52 @@ All `gh` API calls are wrapped in `run_gh_with_retries`, which retries up to 3 t
 | `GITHUB_FLAKY_TEST_TOKEN`                    | GitHub issue create/edit (needs project scope) |
 | `SLACK_BOT_QA_NOTIFICATIONS`                 | Posting the Slack alert                        |
 | `SLACK_CHANNEL_ID_TEAM_CANTON_NOTIFICATIONS` | Target channel for the alert                   |
+| `GCLOUD_SHEETS_SA_KEY`                       | Reading the rota sheet to @-mention the person on duty in the alert (the service account must be a Viewer on the sheet). If unset or unreadable, the alert falls back to `fallback_pool` in `roster_people.json` |
 
-### Running locally
+The rota lookup also honors an optional `ROTA_SHEET_ID` variable to point at a different sheet, defaulting to the roster sheet baked into `select_rota.py`.
 
-Each step runs its own self-tests on startup.
-Run just the self-tests (no real work, no env needed) with `--self-test`.
-To run them for the whole pipeline:
+## Rota Slack channel topics
 
-```sh
-python3 ./scripts/ci/report_failing_tests.py --self-test
-```
+`update_rota_topics.py` keeps three channel topics in sync with the people on duty this week, reading the same [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) and roster (`roster_people.json`) as `select_rota.py`:
 
-To run the full pipeline (parse → datadog → issues → slack), reading `./test-reports`:
+| Channel | Rotations shown |
+|---|---|
+| `#team-canton` | L3 and L4 support duty |
+| `#team-canton-ci` | CI rota and Release & Blackduck rota |
+| `#team-canton-flaky-tests` | flaky rota (1 or 2 Canton people plus 1 SDK person) |
 
-```sh
-python3 ./scripts/ci/report_failing_tests.py
-```
+The date in each topic is the current week's Monday. It is refreshed every week even when the person on duty is unchanged, so the topic always reflects the running week.
 
-To pass a single failure name directly (e.g. the sbt-crash path, or manual testing of the Datadog path):
+By default the script is a **dry run**: it logs the topics it would set and writes nothing. Pass `--apply` to call `conversations.setTopic`. Any slot that cannot be resolved (unreadable sheet, missing header, unknown name, absent week) falls back to a `(nobody on rota)` placeholder, so a topic is always composed and set rather than skipped, and never renders as a broken mention. A run with any placeholder still exits non-zero so the degraded state is noticed.
 
-```sh
-DATADOG_API_KEY=... CIRCLE_SHA1=... CIRCLE_BUILD_URL=... CIRCLE_JOB=... CIRCLE_NODE_INDEX=... \
-  python3 ./scripts/ci/report_failing_tests.py MyFlakyTest
-```
+Whenever a rotation cannot be resolved, the script also direct-messages the usual suspects (the roster's `fallback_pool`, override with the `ROTA_TOPICS_ADMIN_SLACK_ID` variable) asking them to fix the rota sheet. Like the topic writes, the DMs are only sent in apply mode.
 
-Individual steps can also be run on their own.
-They exchange data via JSON files under `FLAKY_ARTIFACT_DIR` (default: a CI temp dir), overridable with `--failing-tests-json` / `--streaks-json`.
+It runs weekly via the `Update rota Slack topics` GitHub Actions workflow (`.github/workflows/update_rota_topics.yml`). Scheduled runs stay in dry-run mode until the bot scope and channel membership are settled. Tick the `apply` box on a manual dispatch (or later flip the scheduled step to pass `--apply`) to start writing topics.
+
+### Running it manually
+
+To trigger a run off-schedule, for example to apply topics right after fixing the sheet or to preview a dry run:
+
+- **From the GitHub UI:** open the [Update rota Slack topics workflow](https://github.com/DACH-NY/canton/actions/workflows/update_rota_topics.yml), click **Run workflow**, pick the `main` branch, tick **Actually set the Slack topics** for a real write or leave it unchecked for a dry run, then click **Run workflow**.
+- **From the `gh` CLI:**
+
+  ```sh
+  # dry run (logs only, writes nothing)
+  gh workflow run "Update rota Slack topics" --ref main
+
+  # actually set the topics
+  gh workflow run "Update rota Slack topics" --ref main -f apply=true
+  ```
+
+`workflow_dispatch` runs the workflow definition from the branch you pick, so use `main` unless you are deliberately testing a change to the workflow on another branch.
+
+### Required secrets and variables
+
+| Name | Kind | Used for |
+|---|---|---|
+| `GCLOUD_SHEETS_SA_KEY` | secret | Reading the rota sheet (SA must be a Viewer on it) |
+| `SLACK_BOT_QA_NOTIFICATIONS` | secret | Setting the topics and sending the fix-me DM (bot needs `channels:manage` for public channels or `groups:write` for private ones plus `chat:write`, and must be a member of each channel) |
+| `SLACK_CHANNEL_ID_TEAM_CANTON` | variable | Target channel id |
+| `SLACK_CHANNEL_ID_TEAM_CANTON_CI` | variable | Target channel id |
+| `SLACK_CHANNEL_ID_TEAM_CANTON_FLAKY_TESTS` | variable | Target channel id |
+| `ROTA_TOPICS_ADMIN_SLACK_ID` | variable | Optional comma-separated Slack ids to DM when a rotation cannot be resolved (defaults to the roster's `fallback_pool`, the usual suspects) |

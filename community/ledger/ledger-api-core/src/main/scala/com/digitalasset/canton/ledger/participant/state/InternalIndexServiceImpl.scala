@@ -63,7 +63,8 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
                 ParticipantAuthorizationFormat(
                   parties = Some(Set(partyId))
                 )
-              )
+              ),
+              synchronizerId = None,
             )
           ),
           includeAcsCommitments = None,
@@ -88,7 +89,8 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
       includeReassignments = None,
       includeTopologyEvents = Some(
         TopologyFormat(
-          participantAuthorizationFormat = Some(ParticipantAuthorizationFormat(parties = None))
+          participantAuthorizationFormat = Some(ParticipantAuthorizationFormat(parties = None)),
+          synchronizerId = Some(synchronizerId),
         )
       ),
       includeAcsCommitments = Some(synchronizerId),
@@ -103,15 +105,7 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
         descendingOrder = false,
         skipPruningChecks = false,
       )(loggingContext)
-      // TODO(i34124) move this inside of update processing, and extend the internal format for topology events including the synchronizer ID filter
-      .filter {
-        case UpdatesResponse.ProtoUpdates(response) =>
-          response.update.topologyTransaction.forall(
-            _.synchronizerId == synchronizerId.toProtoPrimitive
-          )
-        case _ => true
-      }
-      .mapConcat(InternalIndexService.AcsUpdateContainer.fromUpdatesResponse)
+      .mapConcat(InternalIndexService.AcsUpdateContainer.fromUpdatesResponse(synchronizerId))
   }
 
   override def acs(

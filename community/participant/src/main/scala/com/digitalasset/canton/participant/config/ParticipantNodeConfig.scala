@@ -40,7 +40,8 @@ import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVers
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens.*
 
-import scala.concurrent.duration.DurationInt
+import java.util.concurrent.TimeUnit
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 /** Base for all participant configs - both local and remote */
 trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
@@ -425,6 +426,9 @@ final case class ParticipantNodeParameterConfig(
   *
   * @param enableRunningDigestProcessor
   *   whether the new ACS digest processor should be enabled or not. Default is false.
+  * @param disableOldAcsCommitmentProcessor
+  *   whether the old ACS commitment processor should be disabled or not for protocol versions >=
+  *   [[com.digitalasset.canton.version.ProtocolVersion.acsCommitmentRedesign]]. Default is false.
   * @param maxNumUpdatesBetweenCheckpoints
   *   the maximum number of acs updates after which a checkpoint should be written.
   * @param counterpartyBatchSize
@@ -454,19 +458,25 @@ final case class ParticipantNodeParameterConfig(
   *   the maximum number of concurrent reads for loading digests. Default is 8.
   * @param digestStoreParallelism
   *   the maximum number of concurrent writes for persisting digests. Default is 8.
+  * @param matchingParallelism
+  *   the maximum number of parallel processing of received ACS commitments for matching against
+  *   locally computed commitments. Default is 20.
   */
 final case class AcsCommitmentConfig(
     enableRunningDigestProcessor: Boolean = false,
+    disableOldAcsCommitmentProcessor: Boolean = false,
     maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(10_000),
     counterpartyBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
     receivedCommitmentValidationParallelism: PositiveInt = PositiveInt.tryCreate(1),
     reinitializingJournalTombstonesBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     sender: AcsCommitmentSenderConfig = AcsCommitmentSenderConfig(),
+    periodStore: AcsCommitmentPeriodConfig = AcsCommitmentPeriodConfig(),
     useSequentialDigestAccumulator: Boolean = true,
     maxNumLoadedDigests: PositiveInt = PositiveInt.tryCreate(1000),
     digestLoadParallelism: PositiveInt = PositiveInt.tryCreate(8),
     digestStoreParallelism: PositiveInt = PositiveInt.tryCreate(8),
+    matchingParallelism: PositiveInt = PositiveInt.tryCreate(20),
 )
 
 /** Config for [[com.digitalasset.canton.participant.commitment.AcsCommitmentSender]]
@@ -480,11 +490,22 @@ final case class AcsCommitmentConfig(
 final case class AcsCommitmentSenderConfig(
     maxBatchSize: PositiveInt = AcsCommitmentSenderConfig.defaultMaxBatchSize,
     parallelism: PositiveInt = AcsCommitmentSenderConfig.defaultParallelism,
+    maxRetryDelay: config.NonNegativeFiniteDuration = AcsCommitmentSenderConfig.defaultMaxRetryDelay,
 )
 
 object AcsCommitmentSenderConfig {
   lazy val defaultMaxBatchSize: PositiveInt = PositiveInt.tryCreate(100)
   lazy val defaultParallelism: PositiveInt = PositiveInt.tryCreate(10)
+  lazy val defaultMaxRetryDelay: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(FiniteDuration(10, TimeUnit.SECONDS))
+}
+
+final case class AcsCommitmentPeriodConfig(
+    writerPageSize: PositiveInt = AcsCommitmentPeriodConfig.defaultWriterPageSize
+)
+
+object AcsCommitmentPeriodConfig {
+  lazy val defaultWriterPageSize: PositiveInt = PositiveInt.tryCreate(100)
 }
 
 /** Config for LSU.

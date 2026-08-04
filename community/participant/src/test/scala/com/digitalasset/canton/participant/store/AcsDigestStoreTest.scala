@@ -9,10 +9,14 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.commitment.Timepoint
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
-import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.{
+  PartyHostingChange,
+  ReconciliationIntervalBoundary,
+}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, InternedPartyId, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.collection.immutable
@@ -793,7 +797,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         // Roll back the entire store to the middle checkpoint at T6
         _ <- testStore.deleteAfter(offset(6))
 
-        lastCheckpointAfterDelete <- testStore.latestCheckpointUpTo(offset(6))
+        lastCheckpointAfterDelete <- testStore.latestCheckpointUpTo(offset(6), allCheckpointsFilter)
 
         // Verify that entries beyond checkpoint at t6 (update4 through update10) are completely wiped out
         checkKey1AtT11 <- testJournal.lookup(key1, offset(11))
@@ -824,7 +828,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- testStore.deleteUpTo(offset(6))
 
         // 2. Check first checkpoint after the prune
-        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(offset(0))
+        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(
+          offset(0),
+          allCheckpointsFilter,
+        )
 
         // 3. Query historical windows to check if the operation safely preserved active frontier references
         preservedHistoryKey1AtT6 <- testJournal.lookup(key1, offset(6))
@@ -870,7 +877,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- testStore.deleteUpTo(offset(7))
 
         // 2. Check first checkpoint after T0
-        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(offset(0))
+        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(
+          offset(0),
+          allCheckpointsFilter,
+        )
 
         // 3. Because deleteUpTo is exclusive for T7 and lookup is inclusive
         // we can verify if the tombstone is gone at T6_V2
@@ -904,10 +914,12 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       offsetTime(PositiveLong.tryCreate(20))
     )
     val checkpoint2 @ Checkpoint(Timepoint(offset2), _) = checkpoint(
-      offsetTime(PositiveLong.tryCreate(30))
+      offsetTime(PositiveLong.tryCreate(30)),
+      CheckpointType.AffirmationIntervalBoundary,
     )
     val checkpoint3 @ Checkpoint(Timepoint(offset3), _) = checkpoint(
-      offsetTime(PositiveLong.tryCreate(40))
+      offsetTime(PositiveLong.tryCreate(40)),
+      CheckpointType.Reinitialization,
     )
 
     val partyAndLocalOrderKey1 = localOrderParty(partyIndex = 1)
@@ -934,11 +946,21 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         val emptyStore = mkStore(executionContext)
 
         for {
-          firstAfterT0 <- emptyStore.firstCheckpointAfter(offset0)
-          latestUpToT2 <- emptyStore.latestCheckpointUpTo(offset2)
+          firstAfterT0 <- emptyStore.firstCheckpointAfter(offset0, allCheckpointsFilter)
+          firstAfterT0Reinit <- emptyStore.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, CheckpointType.Reinitialization)),
+          )
+          latestUpToT2 <- emptyStore.latestCheckpointUpTo(offset2, allCheckpointsFilter)
+          latestUpToT2Party <- emptyStore.latestCheckpointUpTo(
+            offset2,
+            Some(NonEmpty(Set, CheckpointType.PartyHostingChange)),
+          )
         } yield {
           firstAfterT0 shouldEqual None
+          firstAfterT0Reinit shouldEqual None
           latestUpToT2 shouldEqual None
+          latestUpToT2Party shouldEqual None
         }
       }
 
@@ -979,16 +1001,53 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
             )
 
           // Test exact matches
-          exactFloor <- store.latestCheckpointUpTo(offset3)
-          exactCeil <- store.firstCheckpointAfter(offset1)
+          exactFloor <- store.latestCheckpointUpTo(offset3, allCheckpointsFilter)
+          exactCeil <- store.firstCheckpointAfter(offset1, allCheckpointsFilter)
 
           // Test intermediate boundaries
-          midFloor <- store.latestCheckpointUpTo(offset2)
-          midCeil <- store.firstCheckpointAfter(offset2)
+          midFloor <- store.latestCheckpointUpTo(offset2, allCheckpointsFilter)
+          midCeil <- store.firstCheckpointAfter(offset2, allCheckpointsFilter)
 
           // Test empty lookups
-          emptyFloor <- store.latestCheckpointUpTo(offset0)
-          emptyCeil <- store.firstCheckpointAfter(offset3)
+          emptyFloor <- store.latestCheckpointUpTo(offset0, allCheckpointsFilter)
+          emptyCeil <- store.firstCheckpointAfter(offset3, allCheckpointsFilter)
+
+          // Test filtering
+          filterFloorExact <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, checkpoint3.checkpointType)),
+          )
+          filterCeilExact <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, checkpoint1.checkpointType)),
+          )
+
+          filterFloorSkip <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, checkpoint2.checkpointType)),
+          )
+          filterCeilSkip <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, checkpoint2.checkpointType)),
+          )
+
+          filterFloorEmpty <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, CheckpointType.MaxEventsWithoutCheckpoint)),
+          )
+          filterCeilEmpty <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, CheckpointType.MaxEventsWithoutCheckpoint)),
+          )
+
+          filterFloorMultiple <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, checkpoint1.checkpointType, checkpoint2.checkpointType)),
+          )
+          filterCeilMultiple <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, checkpoint2.checkpointType, checkpoint3.checkpointType)),
+          )
         } yield {
           exactFloor shouldBe Some(checkpoint3)
           exactCeil shouldBe Some(checkpoint2)
@@ -998,6 +1057,39 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
 
           emptyFloor shouldBe None
           emptyCeil shouldBe None
+
+          filterFloorExact shouldBe Some(checkpoint3)
+          filterCeilExact shouldBe Some(checkpoint1)
+
+          filterFloorSkip shouldBe Some(checkpoint2)
+          filterCeilSkip shouldBe Some(checkpoint2)
+
+          filterFloorEmpty shouldBe None
+          filterCeilEmpty shouldBe None
+
+          filterFloorMultiple shouldBe Some(checkpoint2)
+          filterCeilMultiple shouldBe Some(checkpoint2)
+        }
+      }
+
+      "allow overwriting checkpoints" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
+        val store = mkStore(executionContext)
+
+        val partyHostingChange = Checkpoint(Timepoint(off(10))(ts(8)), PartyHostingChange)
+        val reconciliationCheckpoint =
+          Checkpoint(Timepoint(off(10))(ts(9)), ReconciliationIntervalBoundary)
+
+        for {
+          _ <- store.insertCheckpointTime(partyHostingChange)
+          originalCheckpoint <- store.latestCheckpointUpTo(Offset.MaxValue, checkpointTypes = None)
+          _ <- store.insertCheckpointTime(reconciliationCheckpoint)
+          replacementCheckpoint <- store.latestCheckpointUpTo(
+            Offset.MaxValue,
+            checkpointTypes = None,
+          )
+        } yield {
+          originalCheckpoint.value shouldBe partyHostingChange
+          replacementCheckpoint.value shouldBe reconciliationCheckpoint
         }
       }
     }
@@ -1184,15 +1276,15 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           _ <- storeB.insertCheckpointTime(checkpoint3)
 
           // Latest checkpoint at T3 (inclusive)
-          latestCheckpointA_T3 <- storeA.latestCheckpointUpTo(offset3)
-          latestCheckpointB_T3 <- storeB.latestCheckpointUpTo(offset3)
+          latestCheckpointA_T3 <- storeA.latestCheckpointUpTo(offset3, allCheckpointsFilter)
+          latestCheckpointB_T3 <- storeB.latestCheckpointUpTo(offset3, allCheckpointsFilter)
 
           // First checkpoint after T0 (exclusive)
-          firstCheckpointA_T0 <- storeA.firstCheckpointAfter(offset0)
-          firstCheckpointB_T0 <- storeB.firstCheckpointAfter(offset0)
+          firstCheckpointA_T0 <- storeA.firstCheckpointAfter(offset0, allCheckpointsFilter)
+          firstCheckpointB_T0 <- storeB.firstCheckpointAfter(offset0, allCheckpointsFilter)
 
-          firstCheckpointA_T3 <- storeA.firstCheckpointAfter(offset3)
-          firstCheckpointB_T3 <- storeB.firstCheckpointAfter(offset3)
+          firstCheckpointA_T3 <- storeA.firstCheckpointAfter(offset3, allCheckpointsFilter)
+          firstCheckpointB_T3 <- storeB.firstCheckpointAfter(offset3, allCheckpointsFilter)
         } yield {
           latestCheckpointA_T3 shouldBe Some(checkpoint1)
           latestCheckpointB_T3 shouldBe Some(checkpoint3)
@@ -1244,8 +1336,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           // We wipe out T2 on Store A. Store B must remain unaffected.
           _ <- storeA.deleteAfter(offset1)
 
-          checkpointA_afterRollback <- storeA.latestCheckpointUpTo(offset2)
-          checkpointB_afterRollback <- storeB.latestCheckpointUpTo(offset2)
+          checkpointA_afterRollback <- storeA.latestCheckpointUpTo(offset2, allCheckpointsFilter)
+          checkpointB_afterRollback <- storeB.latestCheckpointUpTo(offset2, allCheckpointsFilter)
 
           rolledBackPartyAT2 <- storeA.party.lookup(partyKey, offset2)
           rolledBackParticipantAT2 <- storeA.participant.lookup(participantKey, offset2)

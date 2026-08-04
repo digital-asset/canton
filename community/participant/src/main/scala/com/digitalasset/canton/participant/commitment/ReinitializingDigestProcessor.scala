@@ -70,8 +70,6 @@ import scala.concurrent.{ExecutionContext, Future}
   * TODO(#33422) - Disaster Recovery Notes: For DR, we either need stable order of ACS stream, to
   * continue where we left off or solve it in another way
   *
-  * TODO(#33422) - Handle shutdown correctly
-  *
   * TODO(#33422) - either add a flag to the existing `reinitialize_commitments` command or create a
   * new one (should be discussed)
   */
@@ -119,6 +117,7 @@ class ReinitializingDigestProcessor(
             reinitializingTimepoint = reinitializingTimepoint,
             topologySnapshot = topologySnapshot,
           ).via(digestAccumulator.flow())
+            .mapAsyncAndDrainUS(1)(cp => writeCheckpoint(acsDigestStore)(cp))
             .toMat(Sink.ignore)(Keep.both),
           errorLogMessagePrefix = "RecomputeAndAppendNewDigestsToJournal",
         )

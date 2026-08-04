@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   Checkpoint,
   CheckpointType,
   RawDigest,
+  allCheckpointsFilter,
 }
 import com.digitalasset.canton.participant.store.{
   AcsDigestStore,
@@ -689,7 +690,8 @@ class ReinitializingDigestProcessorTest
         rdp.start().futureValueUS
         rdp.completionFuture.futureValueUS
 
-        val lastCheckpoint = testDigestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS
+        val lastCheckpoint =
+          testDigestStore.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter).futureValueUS
 
         lastCheckpoint.isDefined shouldBe true
         lastCheckpoint.value shouldBe Checkpoint(tp(100), CheckpointType.Reinitialization)

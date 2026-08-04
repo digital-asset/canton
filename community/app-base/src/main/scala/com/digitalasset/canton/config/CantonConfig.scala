@@ -1453,6 +1453,9 @@ object CantonConfig {
         implicit val senderConfigReader: ConfigReader[AcsCommitmentSenderConfig] =
           deriveReader[AcsCommitmentSenderConfig]
 
+        implicit val periodWriterConfigReader: ConfigReader[AcsCommitmentPeriodConfig] =
+          deriveReader[AcsCommitmentPeriodConfig]
+
         deriveReader[AcsCommitmentConfig]
       }
 
@@ -2214,6 +2217,9 @@ object CantonConfig {
 
         implicit val senderConfigWriter: ConfigWriter[AcsCommitmentSenderConfig] =
           deriveWriter[AcsCommitmentSenderConfig]
+
+        implicit val periodWriterConfigWriter: ConfigWriter[AcsCommitmentPeriodConfig] =
+          deriveWriter[AcsCommitmentPeriodConfig]
 
         deriveWriter[AcsCommitmentConfig]
       }

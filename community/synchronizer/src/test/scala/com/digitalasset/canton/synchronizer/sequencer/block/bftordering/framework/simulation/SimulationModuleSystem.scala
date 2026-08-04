@@ -169,16 +169,18 @@ object SimulationModuleSystem {
 
     override def futureContext: FutureContext[SimulationEnv] = SimulationFutureContext
 
-    override def abort(): Nothing =
+    override def abort()(implicit traceContext: TraceContext): Nothing =
       fail("Simulation failed in call to abort")
 
-    override def abort(msg: String): Nothing =
+    override def abort(msg: String)(implicit traceContext: TraceContext): Nothing =
       fail(s"Simulation failed in call to abort: $msg")
 
-    override def abort(failure: Throwable): Nothing =
+    override def abort(failure: Throwable)(implicit traceContext: TraceContext): Nothing =
       fail(failure)
 
-    override def blockingAwait[X](future: SimulationFuture[X], duration: FiniteDuration): X = future
+    override def blockingAwait[X](future: SimulationFuture[X], duration: FiniteDuration)(implicit
+        traceContext: TraceContext
+    ): X = future
       .resolveValue()
       .fold(abort(_), identity)
   }
@@ -246,7 +248,9 @@ object SimulationModuleSystem {
 
     override def newModuleRef[NewModuleMessageT](
         moduleName: ModuleName
-    )(moduleNameForMetrics: String = moduleName.name): SimulationModuleRef[NewModuleMessageT] =
+    )(moduleNameForMetrics: String = moduleName.name)(implicit
+        traceContext: TraceContext
+    ): SimulationModuleRef[NewModuleMessageT] =
       SimulationModuleRef(moduleName, collector)
 
     override def setModule[NewModuleMessageT](
@@ -260,7 +264,7 @@ object SimulationModuleSystem {
     ): Unit =
       addSetBehaviorEvent(collector, to, module, ready = true, traceContext)
 
-    override def stop(onStop: () => Unit): Unit =
+    override def stop(onStop: () => Unit)(implicit traceContext: TraceContext): Unit =
       collector.addInternalEvent(to, ModuleControl.Stop(onStop))
 
     override def withNewTraceContext[A](fn: TraceContext => A): A =
@@ -278,7 +282,9 @@ object SimulationModuleSystem {
 
     override def newModuleRef[NewModuleMessageT](
         moduleName: ModuleName
-    )(moduleNameForMetrics: String = moduleName.name): SimulationModuleRef[NewModuleMessageT] =
+    )(moduleNameForMetrics: String = moduleName.name)(implicit
+        traceContext: TraceContext
+    ): SimulationModuleRef[NewModuleMessageT] =
       unsupportedForClientModules()
 
     override def setModule[NewModuleMessageT](
@@ -307,7 +313,7 @@ object SimulationModuleSystem {
     ): Unit =
       unsupportedForClientModules()
 
-    override def stop(onStop: () => Unit): Unit =
+    override def stop(onStop: () => Unit)(implicit traceContext: TraceContext): Unit =
       unsupportedForClientModules()
 
     override def withNewTraceContext[A](fn: TraceContext => A): A = fn(
@@ -329,7 +335,9 @@ object SimulationModuleSystem {
 
     override def newModuleRef[NewModuleMessageT](
         moduleName: ModuleName
-    )(moduleNameForMetrics: String = moduleName.name): SimulationModuleRef[NewModuleMessageT] =
+    )(moduleNameForMetrics: String = moduleName.name)(implicit
+        traceContext: TraceContext
+    ): SimulationModuleRef[NewModuleMessageT] =
       SimulationModuleRef(moduleName, collector)
 
     override def setModule[NewModuleMessageT](
@@ -358,7 +366,8 @@ object SimulationModuleSystem {
         traceContext: TraceContext
     ): Unit = unsupportedForSystem()
 
-    override def stop(onStop: () => Unit): Unit = unsupportedForSystem()
+    override def stop(onStop: () => Unit)(implicit traceContext: TraceContext): Unit =
+      unsupportedForSystem()
 
     override def withNewTraceContext[A](fn: TraceContext => A): A = unsupportedForSystem()
 

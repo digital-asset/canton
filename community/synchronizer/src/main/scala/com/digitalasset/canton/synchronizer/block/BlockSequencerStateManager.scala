@@ -947,7 +947,7 @@ class BlockSequencerStateManager(
       .getOrElse(SortedMap.empty[CantonTimestamp, Traced[Promise[Unit]]])
       .get(ackTimestamp)
       .foreach(_.withTraceContext { implicit traceContext => promise =>
-        promise.failure(error.asGrpcError)
+        promise.failure(error.toGrpcError)
       })
   }
 

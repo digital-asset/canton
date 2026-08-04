@@ -7,11 +7,14 @@ import cats.Eval
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
-import com.digitalasset.canton.crypto.SyncCryptoApi
+import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.lifecycle.UnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.commitment.AcsCommitmentSender.RetryStrategy
 import com.digitalasset.canton.participant.config.AcsCommitmentSenderConfig
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
@@ -20,8 +23,19 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   InternedParticipantId,
   RawDigest,
 }
-import com.digitalasset.canton.participant.store.db.{BaseDbAcsDigestStoreTest, DbAcsDigestStore}
-import com.digitalasset.canton.participant.store.{AcsDigestStore, TestDigestUtils}
+import com.digitalasset.canton.participant.store.db.{
+  DbAcsCommitmentSenderWatermarkStore,
+  DbAcsDigestStore,
+}
+import com.digitalasset.canton.participant.store.memory.{
+  InMemoryAcsCommitmentSenderWatermarkStore,
+  InMemoryAcsDigestStore,
+}
+import com.digitalasset.canton.participant.store.{
+  AcsCommitmentSenderWatermarkStore,
+  AcsDigestStore,
+  TestDigestUtils,
+}
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.TestSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
@@ -31,13 +45,22 @@ import com.digitalasset.canton.protocol.messages.{
   AcsCommitmentSummaryProtocolMessage,
   CommitmentPeriod,
   DefaultOpenEnvelope,
+  DigestForCounterparticipant,
   ProtocolMessage,
 }
+import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.client.TestSequencerClientSend.Request
 import com.digitalasset.canton.sequencing.client.{SendResult, TestSequencerClientSend}
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
+import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
+  Deliver,
+  DeliverError,
+  MessageId,
+  SequencerErrors,
+}
 import com.digitalasset.canton.store.IndexedSynchronizer
-import com.digitalasset.canton.store.db.{DbTest, PostgresTest}
+import com.digitalasset.canton.store.db.DbTest
+import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   participant1,
   participant2,
@@ -47,56 +70,46 @@ import com.digitalasset.canton.topology.DefaultTestIdentities.{
 }
 import com.digitalasset.canton.topology.transaction.{ParticipantAttributes, ParticipantPermission}
 import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory, TestingTopology}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.canton.{
+  BaseTest,
+  HasActorSystem,
+  HasExecutionContext,
+  ProtocolVersionChecksAsyncWordSpec,
+}
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
+
+import java.util.concurrent.TimeUnit
+import scala.concurrent.duration.FiniteDuration
 
 trait AcsCommitmentSenderTest
     extends AsyncWordSpec
     with BaseTest
     with HasExecutionContext
+    with HasActorSystem
     with ProtocolVersionChecksAsyncWordSpec {
   import AcsCommitmentSenderTest.*
 
   implicit val mc: MetricsContext = MetricsContext.Empty
 
-  private val topology = TestingTopology.from(
-    Set(psid),
-    participants = Map(
-      participant1 -> ParticipantAttributes(
-        ParticipantPermission.Submission
-      ),
-      participant2 -> ParticipantAttributes(
-        ParticipantPermission.Submission
-      ),
-      participant3 -> ParticipantAttributes(
-        ParticipantPermission.Submission
-      ),
-    ),
-  )
-
-  private val sendOffset = offset3
   private val sendTimestamp = t3
+  private val sendTimepoint = Timepoint(offset3)(sendTimestamp)
 
-  private val cryptoApi = {
-    val identityFactory = TestingIdentityFactory(
-      topology,
-      loggerFactory,
-      dynamicSynchronizerParameters = initialSynchronizerParameters,
-    )
-    identityFactory.forOwnerAndSynchronizer(participant1, psid)
-  }
-  private val syncCryptoApi = cryptoApi.snapshot(t3).futureValueUS
+  private val defaultCryptoApi = mkCryptoApi(allParticipantsTopology, loggerFactory)
+  private val defaultSyncCryptoApi = defaultCryptoApi.snapshot(t3).futureValueUS
 
   "AcsCommitmentSender" should {
     "send the expected messages when all messages fit in one batch" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
-      val (store, sender) = mkStoreAndSender(sequencerClient)
+      val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient)
 
-      store.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+      digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
 
-      sender.sendAcsCommitments(sendOffset, sendTimestamp).futureValueUS
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
 
       val requests = sequencerClient.requests.toSeq
       requests.length shouldBe 1
@@ -105,8 +118,11 @@ trait AcsCommitmentSenderTest
       val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
       val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
 
-      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
-      assertCommitmentSummaryMessageValidSignature(syncCryptoApi, acsCommitmentSummaryMessage)
+      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(defaultSyncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        defaultSyncCryptoApi,
+        acsCommitmentSummaryMessage,
+      )
 
       acsCommitments shouldBe List(
         acsCommitmentP2,
@@ -118,15 +134,21 @@ trait AcsCommitmentSenderTest
         participants = Seq(participant2, participant3, participant4),
         commitmentTick = sendTimestamp,
       )
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
     }
 
     "skip the updates with empty digests and send messages for the rest" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
-      val (store, sender) = mkStoreAndSender(sequencerClient)
+      val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient)
 
-      store.participant.upsertDigestUpdates(Seq(updateP2Empty, updateP3, updateP4)).futureValueUS
+      digestStore.participant
+        .upsertDigestUpdates(Seq(updateP2Empty, updateP3, updateP4))
+        .futureValueUS
 
-      sender.sendAcsCommitments(sendOffset, sendTimestamp).futureValueUS
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
 
       val requests = sequencerClient.requests.toSeq
       requests.length shouldBe 1
@@ -135,8 +157,11 @@ trait AcsCommitmentSenderTest
       val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
       val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
 
-      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
-      assertCommitmentSummaryMessageValidSignature(syncCryptoApi, acsCommitmentSummaryMessage)
+      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(defaultSyncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        defaultSyncCryptoApi,
+        acsCommitmentSummaryMessage,
+      )
 
       acsCommitments shouldBe List(
         acsCommitmentP3,
@@ -147,41 +172,98 @@ trait AcsCommitmentSenderTest
         participants = Seq(participant3, participant4),
         commitmentTick = sendTimestamp,
       )
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
+    }
+
+    "skip the updates for inactive participants and include them in unsent digests" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
+      val cryptoApi = mkCryptoApi(
+        mkTopology(
+          Seq(participant1, participant4) // Not including participants 2 and 3 on purpose
+        ),
+        loggerFactory,
+      )
+      val syncCryptoApi = cryptoApi.snapshot(t3).futureValueUS
+      val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient, cryptoApi)
+
+      digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
+
+      val requests = sequencerClient.requests.toSeq
+      requests.length shouldBe 1
+
+      val request = requests.head
+      val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
+      val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
+
+      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        syncCryptoApi,
+        acsCommitmentSummaryMessage,
+      )
+
+      acsCommitments shouldBe List(
+        acsCommitmentP4
+      )
+
+      acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
+        participants = Seq(participant4),
+        commitmentTick = sendTimestamp,
+        unsentDigests = Seq(
+          DigestForCounterparticipant(hashedDigest0, participant2.toLf),
+          DigestForCounterparticipant(hashedDigest1, participant3.toLf),
+        ),
+      )
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
     }
 
     "send nothing if all updates have empty digests" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
-      val (store, sender) = mkStoreAndSender(sequencerClient)
+      val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient)
 
-      store.participant
+      digestStore.participant
         .upsertDigestUpdates(Seq(updateP2Empty, updateP3Empty, updateP4Empty))
         .futureValueUS
 
-      sender.sendAcsCommitments(sendOffset, sendTimestamp).futureValueUS
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
 
       val requests = sequencerClient.requests.toSeq
       requests.length shouldBe 0
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
     }
 
     "send nothing if snapshot contains no updates" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
-      val (_, sender) = mkStoreAndSender(sequencerClient)
+      val (_, watermarkStore, sender) = mkStoresAndSender(sequencerClient)
 
-      sender.sendAcsCommitments(sendOffset, sendTimestamp).futureValueUS
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
 
       val requests = sequencerClient.requests.toSeq
-
       requests.length shouldBe 0
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
     }
 
     "send the expected messages when messages are split into multiple batches" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
-      val (store, sender) =
-        mkStoreAndSender(sequencerClient, snapshotLimit = PositiveInt.tryCreate(2))
+      val (digestStore, watermarkStore, sender) =
+        mkStoresAndSender(sequencerClient, maxBatchSize = PositiveInt.tryCreate(2))
 
-      store.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+      digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
 
-      sender.sendAcsCommitments(sendOffset, sendTimestamp).futureValueUS
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
 
       val requests = sequencerClient.requests.toSeq
       requests.length shouldBe 2
@@ -192,8 +274,11 @@ trait AcsCommitmentSenderTest
       val (acsCommitmentMessages1, acsCommitmentSummaryMessage1) = splitMessages(request1.batch)
       val acsCommitments1 = acsCommitmentMessages1.map(_.acsCommitment)
 
-      acsCommitmentMessages1.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
-      assertCommitmentSummaryMessageValidSignature(syncCryptoApi, acsCommitmentSummaryMessage1)
+      acsCommitmentMessages1.foreach(assertCommitmentMessageValidSignature(defaultSyncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        defaultSyncCryptoApi,
+        acsCommitmentSummaryMessage1,
+      )
 
       acsCommitments1 shouldBe List(
         acsCommitmentP2,
@@ -210,8 +295,11 @@ trait AcsCommitmentSenderTest
       val (acsCommitmentMessages2, acsCommitmentSummaryMessage2) = splitMessages(request2.batch)
       val acsCommitments2 = acsCommitmentMessages2.map(_.acsCommitment)
 
-      acsCommitmentMessages2.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
-      assertCommitmentSummaryMessageValidSignature(syncCryptoApi, acsCommitmentSummaryMessage2)
+      acsCommitmentMessages2.foreach(assertCommitmentMessageValidSignature(defaultSyncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        defaultSyncCryptoApi,
+        acsCommitmentSummaryMessage2,
+      )
 
       acsCommitments2 shouldBe List(
         acsCommitmentP4
@@ -223,69 +311,195 @@ trait AcsCommitmentSenderTest
         batchIndex = NonNegativeInt.one,
         lastBatch = true,
       )
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
+    }
+
+    "not try to send the next batch if sending the first batch fails with a non-retriable error" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val sequencerClient =
+        new TestSequencerClientSend(wallClock, nonRetriableErrorSendResultFactory.some)
+      val (digestStore, watermarkStore, sender) =
+        mkStoresAndSender(sequencerClient, maxBatchSize = PositiveInt.tryCreate(2))
+
+      digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
+
+      val requests = sequencerClient.requests.toSeq
+      requests.length shouldBe 1
+
+      val request = requests.head
+      val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
+      val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
+
+      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(defaultSyncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        defaultSyncCryptoApi,
+        acsCommitmentSummaryMessage,
+      )
+
+      acsCommitments shouldBe List(
+        acsCommitmentP2,
+        acsCommitmentP3,
+      )
+
+      acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
+        participants = Seq(participant2, participant3),
+        commitmentTick = sendTimestamp,
+        batchIndex = NonNegativeInt.zero,
+        lastBatch = false,
+      )
+
+      assertWatermarkValue(watermarkStore, None)
+    }
+
+    "keep attempting to send messages when getting retriable errors" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val sendResultFactory = consecutiveSendResultsFactory(
+        Seq(
+          timeoutSendResultFactory,
+          timeoutSendResultFactory,
+          successfulSendResultFactory,
+        )
+      )
+      val sequencerClient = new TestSequencerClientSend(wallClock, sendResultFactory.some)
+      val (digestStore, watermarkStore, sender) = mkStoresAndSender(sequencerClient)
+
+      digestStore.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
+
+      val requests = sequencerClient.requests.toSeq
+      requests.length shouldBe 3 // Failed attempts are also recorded
+
+      val request = requests.last
+      val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
+      val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
+
+      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(defaultSyncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        defaultSyncCryptoApi,
+        acsCommitmentSummaryMessage,
+      )
+
+      acsCommitments shouldBe List(
+        acsCommitmentP2,
+        acsCommitmentP3,
+        acsCommitmentP4,
+      )
+
+      acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
+        participants = Seq(participant2, participant3, participant4),
+        commitmentTick = sendTimestamp,
+      )
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
+    }
+
+    "not increase the batch index if all digests in the batch are empty" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
+      val (digestStore, watermarkStore, sender) =
+        mkStoresAndSender(sequencerClient, maxBatchSize = PositiveInt.tryCreate(2))
+
+      digestStore.participant
+        .upsertDigestUpdates(Seq(updateP2Empty, updateP3Empty, updateP4))
+        .futureValueUS
+
+      assertWatermarkValue(watermarkStore, None)
+
+      sender.sendAcsCommitments(sendTimepoint).futureValueUS
+
+      val requests = sequencerClient.requests.toSeq
+      requests.length shouldBe 1
+
+      val request = requests.head
+      val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
+      val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
+
+      acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(defaultSyncCryptoApi, _))
+      assertCommitmentSummaryMessageValidSignature(
+        defaultSyncCryptoApi,
+        acsCommitmentSummaryMessage,
+      )
+
+      acsCommitments shouldBe List(acsCommitmentP4)
+
+      acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
+        participants = Seq(participant4),
+        commitmentTick = sendTimestamp,
+        batchIndex = NonNegativeInt.zero,
+        lastBatch = true,
+      )
+
+      assertWatermarkValue(watermarkStore, sendTimepoint.some)
     }
   }
 
-  "not try to send the next batch if sending the first batch fails" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
-    val sequencerClient = new TestSequencerClientSend(wallClock, timeoutSendResultFactory.some)
-    val (store, sender) =
-      mkStoreAndSender(sequencerClient, snapshotLimit = PositiveInt.tryCreate(2))
+  "Retry delay calculation" should {
+    val originalDelay = FiniteDuration(2, TimeUnit.SECONDS)
+    val maxDelay = FiniteDuration(10, TimeUnit.SECONDS)
 
-    store.participant.upsertDigestUpdates(Seq(updateP2, updateP3, updateP4)).futureValueUS
+    "return None if there is no base delay" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val retryStrategy = RetryStrategy(retryDelay = None)
 
-    sender.sendAcsCommitments(sendOffset, sendTimestamp).futureValueUS
+      AcsCommitmentSender.calculateFinalRetryDelay(
+        retryStrategy,
+        NonNegativeInt.two,
+        maxDelay,
+      ) shouldBe None
+    }
 
-    val requests = sequencerClient.requests.toSeq
-    requests.length shouldBe 1
+    "return original delay if exponential backoff is disabled" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val retryStrategy =
+        RetryStrategy(retryDelay = originalDelay.some, useExponentialBackoff = false)
 
-    val request = requests.head
-    val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
-    val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
+      AcsCommitmentSender.calculateFinalRetryDelay(
+        retryStrategy,
+        NonNegativeInt.two,
+        maxDelay,
+      ) shouldBe originalDelay.some
+    }
 
-    acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
-    assertCommitmentSummaryMessageValidSignature(syncCryptoApi, acsCommitmentSummaryMessage)
+    "return increased delay within the limit if exponential backoff is enabled" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val retryStrategy =
+        RetryStrategy(retryDelay = originalDelay.some, useExponentialBackoff = true)
 
-    acsCommitments shouldBe List(
-      acsCommitmentP2,
-      acsCommitmentP3,
-    )
+      AcsCommitmentSender.calculateFinalRetryDelay(
+        retryStrategy,
+        NonNegativeInt.zero,
+        maxDelay,
+      ) shouldBe originalDelay.some
 
-    acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
-      participants = Seq(participant2, participant3),
-      commitmentTick = sendTimestamp,
-      batchIndex = NonNegativeInt.zero,
-      lastBatch = false,
-    )
+      AcsCommitmentSender.calculateFinalRetryDelay(
+        retryStrategy,
+        NonNegativeInt.one,
+        maxDelay,
+      ) shouldBe (originalDelay * 2).some
+
+      AcsCommitmentSender.calculateFinalRetryDelay(
+        retryStrategy,
+        NonNegativeInt.two,
+        maxDelay,
+      ) shouldBe (originalDelay * 4).some
+
+      AcsCommitmentSender.calculateFinalRetryDelay(
+        retryStrategy,
+        NonNegativeInt.three,
+        maxDelay,
+      ) shouldBe maxDelay.some
+    }
   }
 
-  "not increase the batch index if all digests in the batch are empty" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
-    val sequencerClient = new TestSequencerClientSend(wallClock, timeoutSendResultFactory.some)
-    val (store, sender) =
-      mkStoreAndSender(sequencerClient, snapshotLimit = PositiveInt.tryCreate(2))
-
-    store.participant.upsertDigestUpdates(Seq(updateP2Empty, updateP3Empty, updateP4)).futureValueUS
-
-    sender.sendAcsCommitments(sendOffset, sendTimestamp).futureValueUS
-
-    val requests = sequencerClient.requests.toSeq
-    requests.length shouldBe 1
-
-    val request = requests.head
-    val (acsCommitmentMessages, acsCommitmentSummaryMessage) = splitMessages(request.batch)
-    val acsCommitments = acsCommitmentMessages.map(_.acsCommitment)
-
-    acsCommitmentMessages.foreach(assertCommitmentMessageValidSignature(syncCryptoApi, _))
-    assertCommitmentSummaryMessageValidSignature(syncCryptoApi, acsCommitmentSummaryMessage)
-
-    acsCommitments shouldBe List(acsCommitmentP4)
-
-    acsCommitmentSummaryMessage.acsCommitmentSummary shouldBe mkAcsCommitmentSummary(
-      participants = Seq(participant4),
-      commitmentTick = sendTimestamp,
-      batchIndex = NonNegativeInt.zero,
-      lastBatch = true,
+  private def assertWatermarkValue(
+      watermarkStore: AcsCommitmentSenderWatermarkStore,
+      expectedTimestamp: Option[Timepoint],
+  )(implicit traceContext: TraceContext): Assertion =
+    watermarkStore.lookupWatermark().futureValueUS.map(_.tupled) shouldBe expectedTimestamp.map(
+      _.tupled
     )
-  }
 
   private def assertCommitmentMessageValidSignature(
       syncCryptoApi: SyncCryptoApi,
@@ -305,32 +519,39 @@ trait AcsCommitmentSenderTest
       .futureValueUS
       .isRight shouldBe true
 
-  private def mkStoreAndSender(
+  private def mkStoresAndSender(
       sequencerClient: TestSequencerClientSend,
-      snapshotLimit: PositiveInt = AcsCommitmentSenderConfig.defaultMaxBatchSize,
+      cryptoApi: SynchronizerCryptoClient = defaultCryptoApi,
+      maxBatchSize: PositiveInt = AcsCommitmentSenderConfig.defaultMaxBatchSize,
   ): (
       AcsDigestStore,
+      AcsCommitmentSenderWatermarkStore,
       AcsCommitmentSender,
   ) = {
-    val digestStore = mkDigestStore()
+    val (digestStore, watermarkStore) = mkStores()
 
     (
       digestStore,
+      watermarkStore,
       new AcsCommitmentSender(
         digestStore = digestStore,
         cryptoApi = cryptoApi,
         sequencerClient = sequencerClient,
+        watermarkStore = watermarkStore,
+        loggerFactory = loggerFactory,
+        timeouts = timeouts,
+        clock = new WallClock(timeouts, loggerFactory),
         stringInterningEval = Eval.now(mockStringInterning),
         synchronizerId = psid,
         participantId = participant1,
         config = AcsCommitmentSenderConfig(
-          maxBatchSize = snapshotLimit
+          maxBatchSize = maxBatchSize
         ),
       ),
     )
   }
 
-  protected def mkDigestStore(): AcsDigestStore
+  protected def mkStores(): (AcsDigestStore, AcsCommitmentSenderWatermarkStore)
 }
 
 object AcsCommitmentSenderTest extends TestDigestUtils {
@@ -384,6 +605,30 @@ object AcsCommitmentSenderTest extends TestDigestUtils {
     toInclusive = t3,
   )
 
+  private def mkTopology(activeParticipants: Seq[ParticipantId]): TestingTopology =
+    TestingTopology.from(
+      Set(psid),
+      participants =
+        activeParticipants.map(_ -> ParticipantAttributes(ParticipantPermission.Submission)).toMap,
+    )
+
+  private def mkCryptoApi(
+      topology: TestingTopology,
+      loggerFactory: NamedLoggerFactory,
+  ): SynchronizerCryptoClient = {
+    val identityFactory = TestingIdentityFactory(
+      topology,
+      loggerFactory,
+      dynamicSynchronizerParameters = initialSynchronizerParameters,
+    )
+
+    identityFactory.forOwnerAndSynchronizer(participant1, psid)
+  }
+
+  private lazy val allParticipantsTopology = mkTopology(
+    Seq(participant1, participant2, participant3, participant4)
+  )
+
   private def mkDigestUpdate(
       participantId: ParticipantId,
       digest0: Option[RawDigest],
@@ -422,11 +667,12 @@ object AcsCommitmentSenderTest extends TestDigestUtils {
       commitmentTick: CantonTimestamp,
       batchIndex: NonNegativeInt = NonNegativeInt.zero,
       lastBatch: Boolean = true,
+      unsentDigests: Seq[DigestForCounterparticipant] = Seq.empty,
   ) = AcsCommitmentSummary.create(
     psid = psid,
     commitmentTick = commitmentTick,
     addressedCounterparticipants = participants.map(_.toLf),
-    unsentDigests = Seq.empty,
+    unsentDigests = unsentDigests,
     batchIndex = batchIndex,
     lastBatch = lastBatch,
     protocolVersion = ProtocolVersion.dev,
@@ -465,38 +711,87 @@ object AcsCommitmentSenderTest extends TestDigestUtils {
     )
   }
 
+  private def consecutiveSendResultsFactory(
+      sendResults: Seq[Request => UnlessShutdown[SendResult]]
+  ): Request => UnlessShutdown[SendResult] = {
+    var index = 0
+
+    { request =>
+      val result = sendResults(index)(request)
+
+      index += 1
+
+      result
+    }
+  }
+
   private lazy val timeoutSendResultFactory: Request => UnlessShutdown[SendResult] = { request =>
     UnlessShutdown.Outcome(
       SendResult.Timeout(request.maxSequencingTime)
     )
   }
+
+  private lazy val nonRetriableErrorSendResultFactory: Request => UnlessShutdown[SendResult] = {
+    request =>
+      UnlessShutdown.Outcome(
+        SendResult.Error(
+          DeliverError.create(
+            previousTimestamp = None,
+            timestamp = request.maxSequencingTime,
+            synchronizerId = psid,
+            messageId = MessageId.randomMessageId(),
+            sequencerError = SequencerErrors.SenderUnknown("Sender Unknown"),
+            trafficReceipt = None,
+          )
+        )
+      )
+  }
 }
 
-trait AcsCommitmentSenderTestDb extends AcsCommitmentSenderTest with BaseDbAcsDigestStoreTest {
+trait AcsCommitmentSenderTestDb extends AcsCommitmentSenderTest {
   self: DbTest =>
 
   import AcsCommitmentSenderTest.*
 
-  override protected def mkDigestStore(): AcsDigestStore = new DbAcsDigestStore(
-    indexedSynchronizer = defaultSync,
-    Eval.now(mockStringInterning),
-    storage,
-    loggerFactory,
-    timeouts,
+  override protected def mkStores(): (AcsDigestStore, AcsCommitmentSenderWatermarkStore) = (
+    new DbAcsDigestStore(
+      indexedSynchronizer = defaultSync,
+      Eval.now(mockStringInterning),
+      storage,
+      loggerFactory,
+      timeouts,
+    ),
+    new DbAcsCommitmentSenderWatermarkStore(storage, timeouts, loggerFactory, defaultSync),
   )
+
+  override def cleanDb(
+      storage: DbStorage
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    import storage.api.*
+    storage.update(
+      DBIO.seq(
+        sqlu"truncate table par_acs_participant_running_digest",
+        sqlu"truncate table par_acs_commitment_sender_watermark",
+      ),
+      functionFullName,
+    )
+  }
 }
 
-@AcsCommitmentTest
-class AcsCommitmentSenderTestPostgres extends AcsCommitmentSenderTestDb with PostgresTest
-
+//@AcsCommitmentTest
+//class AcsCommitmentSenderTestPostgres extends AcsCommitmentSenderTestDb with PostgresTest
+//
 //@AcsCommitmentTest
 //class AcsCommitmentSenderTestH2 extends AcsCommitmentSenderTestDb with H2Test
 
-//@AcsCommitmentTest
-//class AcsCommitmentSenderTestInMemory extends AcsCommitmentSenderTest {
-//  import AcsCommitmentSenderTest.*
-//
-//  override protected def mkDigestStore(): AcsDigestStore = InMemoryAcsDigestStore
-//    .create(Eval.now(mockStringInterning), loggerFactory)
-//
-//}
+@AcsCommitmentTest
+class AcsCommitmentSenderTestInMemory extends AcsCommitmentSenderTest {
+
+  import AcsCommitmentSenderTest.*
+
+  override protected def mkStores(): (AcsDigestStore, AcsCommitmentSenderWatermarkStore) = (
+    (InMemoryAcsDigestStore
+      .create(Eval.now(mockStringInterning), loggerFactory)),
+    new InMemoryAcsCommitmentSenderWatermarkStore(loggerFactory),
+  )
+}

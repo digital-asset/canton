@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import com.daml.ledger.api.v2.offset_checkpoint
 import com.daml.ledger.api.v2.state_service.{GetActiveContractsResponse, ParticipantPermission}
 import com.daml.ledger.api.v2.topology_transaction.{TopologyEvent, TopologyTransaction}
 import com.daml.ledger.api.v2.trace_context.TraceContext as LedgerApiTraceContext
@@ -100,7 +101,9 @@ object InternalIndexService {
 
   object AcsUpdateContainer {
 
-    def fromUpdatesResponse(updateResponse: UpdatesResponse): Option[AcsUpdateContainer] =
+    def fromUpdatesResponse(
+        synchronizerId: SynchronizerId
+    )(updateResponse: UpdatesResponse): Option[AcsUpdateContainer] =
       updateResponse match {
         case UpdatesResponse.AcsChange(acsChange) =>
           Some(
@@ -135,9 +138,34 @@ object InternalIndexService {
                   traceContext = topologyTransaction.traceContext,
                 )
               )
+            case GetUpdatesResponse.Update.OffsetCheckpoint(checkpoint) =>
+              offsetCheckpointContainer(synchronizerId, checkpoint)
             case _ => None
           }
       }
+
+    private def offsetCheckpointContainer(
+        synchronizerId: SynchronizerId,
+        checkpoint: offset_checkpoint.OffsetCheckpoint,
+    ): Option[AcsUpdateContainer] =
+      for {
+        synchronizerTime <- checkpoint.synchronizerTimes
+          .find(_.synchronizerId == synchronizerId.toProtoPrimitive)
+        recordTime <- synchronizerTime.recordTime
+      } yield AcsUpdateContainer(
+        acsUpdate = AcsUpdate.OffsetCheckpoint,
+        synchronizerTime = CantonTimestamp
+          .fromProtoTimestamp(recordTime)
+          .fold(
+            err =>
+              throw new IllegalStateException(
+                s"Could not parse offset checkpoint record time: $err"
+              ),
+            identity,
+          ),
+        offset = Offset.tryFromLong(checkpoint.offset),
+        traceContext = TraceContext.empty,
+      )
 
     private def topologyAcsUpdateContainer(
         acsUpdate: AcsUpdate,
@@ -237,6 +265,8 @@ object InternalIndexService {
     final case class AcsChangeUpdate(
         acsChange: AcsChange
     ) extends AcsUpdate
+
+    case object OffsetCheckpoint extends AcsUpdate
   }
 
   final case class ActiveContract(

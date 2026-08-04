@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   CheckpointFenceOr,
-  CheckpointWritten,
+  CheckpointToBeWritten,
   Classification,
   DigestAccumulator_Input,
   NotCheckpointFence,
@@ -34,7 +34,6 @@ import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
   AcsDigestUpdate,
-  Checkpoint,
   InternedParticipantId,
   LocalPartyFirst,
   PartyAndOrder,
@@ -90,7 +89,8 @@ class InMemoryDigestAccumulator(
 
   def flow()(implicit
       traceContext: TraceContext
-  ): Flow[DigestAccumulator_Input, CheckpointWritten, NotUsed] = flowInternal()
+  ): Flow[DigestAccumulator_Input, CheckpointToBeWritten, NotUsed] =
+    flowInternal()
 
   @VisibleForTesting
   def flowInternal(
@@ -104,7 +104,7 @@ class InMemoryDigestAccumulator(
         None,
   )(implicit
       traceContext: TraceContext
-  ): Flow[DigestAccumulator_Input, CheckpointWritten, NotUsed] =
+  ): Flow[DigestAccumulator_Input, CheckpointToBeWritten, NotUsed] =
     Flow[DigestAccumulator_Input]
       .map(ensurePresent)
       .withBlocker(computeDigestBlocker)(directExecutionContext)
@@ -131,10 +131,6 @@ class InMemoryDigestAccumulator(
       .withBlocker(storeBlocker)(directExecutionContext)
       .async
       .mapAsyncAndDrainUS(parallelism = digestStoreParallelism)(persistDigestUpdates)
-      .mapAsyncAndDrainUS(
-        // Checkpoints must be written sequentially!
-        parallelism = 1
-      )(persistCheckpoint)
       .mapConcat(deregister)
 
   /** Finds all the
@@ -535,23 +531,10 @@ class InMemoryDigestAccumulator(
     })))
   }
 
-  /** Persists checkpoints to the store. */
-  private def persistCheckpoint(
-      input: PersistDigestUpdatesOutput
-  ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
-    implicit val traceContext: TraceContext = input.traceContext
-    input.value match {
-      case CheckpointFence(tpe) =>
-        implicit val executionContext = directExecutionContext
-        digestStore
-          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
-          .map((_: Unit) => input)
-      case other => FutureUnlessShutdown.pure(input)
-    }
-  }
-
   /** Deregisters the usages from [[digests]] and evicts unused accumulators. */
-  private def deregister(input: PersistDigestUpdatesOutput): immutable.Iterable[CheckpointWritten] =
+  private def deregister(
+      input: PersistDigestUpdatesOutput
+  ): immutable.Iterable[CheckpointToBeWritten] =
     input match {
       case context @ ProcessingContext(_, NotCheckpointFence(_, (_, usagesO))) =>
         usagesO.foreach { usages =>
@@ -559,7 +542,7 @@ class InMemoryDigestAccumulator(
         }
         immutable.Iterable.empty
       case ProcessingContext(timepoint, CheckpointFence(tpe)) =>
-        immutable.Iterable(CheckpointWritten(timepoint, tpe))
+        immutable.Iterable(CheckpointToBeWritten(timepoint, tpe))
     }
 
   private def doDeregister(

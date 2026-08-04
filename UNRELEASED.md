@@ -50,7 +50,24 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
   * gRPC: `JoseService.GetJwks`
   * JSON API: `GET /v2/jose/jwks/synchronizer/<synchronizer-id>/party/<party-id>`
 
+### Removal of the legacy JSON API endpoints and fields
+
+*BREAKING*: The Ledger JSON API has been cleaned up of endpoints and fields pertaining to streaming queries
+that have been deprecated since 3.4 and announced for removal in 3.5:
+
+- `POST /v2/commands/submit-and-wait-for-transaction-tree` has been removed. Use
+  `POST /v2/commands/submit-and-wait-for-transaction` with `transactionFormat.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+  instead. Note that the response carries a flat `transaction.events` array rather than a `transactionTree.eventsById` map.
+- `(WebSocket) GET /v2/updates` and `POST /v2/updates` no longer accept the `filter` and `verbose` fields. `updateFormat` is now required.
+- `(WebSocket) GET /v2/state/active-contracts` and `POST /v2/state/active-contracts` no longer accept the `filter` and `verbose` fields.
+  `eventFormat` is now required.
+
+The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, `JsTransactionTree` and
+`JsSubmitAndWaitForTransactionTreeResponse` schemas have been dropped from the OpenAPI and AsyncAPI definitions.
+
 ### Minor Improvements
+- Security. The HTTP server now rejects too deeply nested json structures. The check uses the same values as the already existing gRPC check for nested daml records. This means
+    that the Ledger JSON API client may now observe an error from HTTP (BadRequest) where previously the `INVALID_ARGUMENT/COMMAND_PREPROCESSING_FAILED` or  `INVALID_ARGUMENT/VALUE_NESTING` error was returned.
 - The submitter does not have to be a stakeholder of all contracts during automatic reassignment, only of those that are actually reassigned to a target synchronizer. The previous check was considered too strict: it required the submitter to be a stakeholder of all involved contracts, even ones that were, for instance, disclosed contracts already on the target synchronizer.
 - The HTTP server for the Ledger JSON API is now explicitly configured with a maximum content length. A new config option `http-ledger-api.max-inbound-message-size` has been added. If not configured, the gRPC setting `ledger-api.max-inbound-message-size` will be used.
     Previously, an implicit limit of 8 MB was used, so this change should not affect existing configurations.
@@ -77,6 +94,9 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
     - Add a `psid` label, populated if it is provided when connecting. This should be the case starting from the second connection to a synchronizer, or upon LSU.
     - Close the `connection-health` and `subscription-health` metrics associated to the `psid` when the pool is closed, instead of closing all the existing ones when the pool is started.
 - Updated com.google.protobuf libs from 3.25.5 --> 3.25.9
+- Updated com.google.cloud:google-cloud-kms from 2.63.0 --> 2.97.0 and google-cloud-storage from
+  2.50.0 --> 2.70.0. These require com.google.protobuf libs 4.x, which are now used (4.35.1)
+  instead of 3.25.9.
 - A call to `AcknowledgeSigned` with a timestamp before the upgrade time returns immediately, without any acknowledgement being done.
 - (Potentially) *BREAKING*: Aggregatable submissions are now rejected eagerly to preserve bandwidth.
   This means that the submission error code `SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT` may now also

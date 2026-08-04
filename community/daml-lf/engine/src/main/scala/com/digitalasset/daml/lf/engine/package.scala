@@ -5,6 +5,8 @@ package com.digitalasset.daml.lf
 
 package object engine {
 
+  type Result[A] = Result.T[A]
+
   type Enricher = refinement.Enricher
   val Enricher: refinement.Enricher.type = refinement.Enricher
 

@@ -711,9 +711,10 @@ class IndexComponentLoadTest
     ),
     includeTopologyEvents = Some(
       TopologyFormat(
-        Some(
+        participantAuthorizationFormat = Some(
           ParticipantAuthorizationFormat(None)
-        )
+        ),
+        synchronizerId = None,
       )
     ),
     includeAcsCommitments = None,

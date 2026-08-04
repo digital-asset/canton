@@ -14,6 +14,7 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SimpleExecutionQueue
@@ -24,6 +25,7 @@ import scala.concurrent.ExecutionContext
 class DigestProcessorManager(
     synchronizerId: SynchronizerId,
     digestProcessorFactory: DigestProcessorFactory,
+    tickSignaller: TickSignaller,
     exitOnFatalFailures: Boolean,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
@@ -58,7 +60,8 @@ class DigestProcessorManager(
         val oldProc = currentProcessorRef.get()
         for {
           _ <- oldProc.traverse_(stopProcessorIgnoringShutdown)
-          rdp = digestProcessorFactory.createRunningDigestProcessor(synchronizerId)
+          rdp = digestProcessorFactory
+            .createRunningDigestProcessor(synchronizerId, tickSignaller)
           _ = currentProcessorRef.set(Some(rdp))
           _ <- rdp.start()
         } yield ()

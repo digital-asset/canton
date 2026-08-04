@@ -107,7 +107,7 @@ final class GrpcParticipantRepairService(
     } yield ()
 
     res.fold(
-      err => Future.failed(err.asGrpcError),
+      err => Future.failed(err.toGrpcError),
       _ => Future.successful(PurgeContractsResponse()),
     )
   }
@@ -434,7 +434,7 @@ final class GrpcParticipantRepairService(
     EitherTUtil
       .toFutureUnlessShutdown(
         result.bimap(
-          _.asGrpcError,
+          _.toGrpcError,
           _ => ChangeAssignationResponse(),
         )
       )

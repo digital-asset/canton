@@ -14,7 +14,6 @@ import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
-  ProtocolVersionValidation,
   ReleaseProtocolVersion,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
@@ -82,7 +81,7 @@ object PendingOnboardingTransactions extends VersioningCompanion[PendingOnboardi
   ): ParsingResult[PendingOnboardingTransactions] =
     for {
       transactions <- proto.transactions.traverse(
-        SignedTopologyTransaction.fromTrustedByteString(ProtocolVersionValidation.NoValidation)
+        SignedTopologyTransaction.fromTrustedByteString
       )
       transactionsNE <- NonEmpty
         .from(transactions)

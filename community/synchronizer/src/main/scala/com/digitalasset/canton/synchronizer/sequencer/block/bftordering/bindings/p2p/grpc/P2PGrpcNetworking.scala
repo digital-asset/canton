@@ -62,7 +62,7 @@ object P2PGrpcNetworking {
         Id.unapply(this).compare(Id.unapply(that))
 
       override protected def pretty: Pretty[Id] =
-        prettyOfClass(param("url", _.url.doubleQuoted), param("tls", _.transportSecurity))
+        prettyOfClassWithName("P2PUrl")(unnamedParam(_.url.doubleQuoted))
     }
 
     def fromEndpointConfig(

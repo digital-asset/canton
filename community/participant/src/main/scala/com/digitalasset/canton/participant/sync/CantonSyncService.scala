@@ -1663,7 +1663,7 @@ class CantonSyncService(
       participantNodePersistentState.value,
     )
 
-    LifeCycle.close(instances*)(logger)
+    LifeCycle.close(instances)(logger)
   }
 
   override def toString: String = s"CantonSyncService($participantId)"

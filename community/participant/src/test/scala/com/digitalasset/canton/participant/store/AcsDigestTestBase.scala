@@ -8,12 +8,16 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   Checkpoint,
+  CheckpointType,
   InternedParticipantId,
   LocalPartyFirst,
   PartyAndOrder,
   RemotePartyFirst,
 }
-import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
+import com.digitalasset.canton.participant.store.memory.{
+  InMemoryAcsCommitmentPeriodStore,
+  InMemoryAcsDigestStore,
+}
 import com.digitalasset.canton.platform.store.interning.{MockStringInterning, StringInterning}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.SynchronizerId
@@ -28,8 +32,11 @@ trait AcsDigestTestBase extends TestDigestUtils {
 
   protected val mockStringInterning = new MockStringInterning()
 
-  protected def checkpoint(offsetTime: (Offset, CantonTimestamp)): Checkpoint =
-    Checkpoint(offsetTime._1, offsetTime._2, ReconciliationIntervalBoundary)
+  protected def checkpoint(
+      offsetTime: (Offset, CantonTimestamp),
+      checkpointType: CheckpointType = ReconciliationIntervalBoundary,
+  ): Checkpoint =
+    Checkpoint(offsetTime._1, offsetTime._2, checkpointType)
 
   protected def localOrderParty(partyIndex: Int): PartyAndOrder[InternedPartyId] =
     PartyAndOrder[InternedPartyId](internedPartyId(partyIndex), order = LocalPartyFirst)
@@ -66,4 +73,13 @@ trait AcsDigestTestBase extends TestDigestUtils {
       stringInterning: StringInterning = mockStringInterning
   )(implicit ec: ExecutionContext): InMemoryAcsDigestStore =
     InMemoryAcsDigestStore.create(Eval.now(stringInterning), loggerFactory)
+
+  def mkInMemoryPeriodStore(
+      stringInterning: StringInterning = mockStringInterning
+  )(implicit ec: ExecutionContext): InMemoryAcsCommitmentPeriodStore =
+    new InMemoryAcsCommitmentPeriodStore(
+      Eval.now(stringInterning),
+      loggerFactory,
+      enableConsistencyChecks = true,
+    )
 }

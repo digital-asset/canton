@@ -422,7 +422,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
   override def onClosed(): Unit = {
     val instances = lock.exclusive(trackedSubscriptions.toSeq)
-    LifeCycle.close(instances*)(logger)
+    LifeCycle.close(instances)(logger)
     super.onClosed()
   }
 

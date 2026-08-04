@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import cats.Eval
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
@@ -24,7 +23,7 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.canton.{LedgerParticipantId, checked}
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.Flow
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, Source}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
@@ -37,7 +36,7 @@ import scala.concurrent.ExecutionContext
   */
 class ReceivedAcsCommitmentMatcher(
     store: AcsCommitmentPeriodStore,
-    stringInterningEval: Eval[StringInterning],
+    stringInterning: StringInterning,
     override protected val loggerFactory: NamedLoggerFactory,
     parallelProcessingLimit: PositiveInt,
 )(implicit executionContext: ExecutionContext)
@@ -47,7 +46,7 @@ class ReceivedAcsCommitmentMatcher(
   private val queue: ShardedSequentialProcessingQueue[LedgerParticipantId] =
     new GarbageCollectedShardedSequentialProcessingQueue[LedgerParticipantId]
 
-  def flow(implicit traceContext: TraceContext): Flow[
+  def pipeline(implicit traceContext: TraceContext): Flow[
     InternalIndexService.AcsUpdateContainer,
     Unit,
     NotUsed,
@@ -82,6 +81,7 @@ class ReceivedAcsCommitmentMatcher(
 
       case _: InternalIndexService.AcsUpdate.AcsChangeUpdate => Seq.empty
       case _: InternalIndexService.AcsUpdate.EffectiveTopologyUpdate => Seq.empty
+      case InternalIndexService.AcsUpdate.OffsetCheckpoint => Seq.empty
     }
   }
 
@@ -164,11 +164,8 @@ class ReceivedAcsCommitmentMatcher(
   private def persistWatermark(offset: TracedMany[Offset]): FutureUnlessShutdown[Unit] = {
     implicit val batchTraceContext: TraceContext =
       TraceContext.ofBatch("persist-watermark-matching")(offset.traceContexts)(logger)
-    store.increaseMatcherWatermark(offset.value)
+    store.increaseWatermark(offset.value)
   }
-
-  private def stringInterning: StringInterning = stringInterningEval.value
-
 }
 
 object ReceivedAcsCommitmentMatcher {
@@ -179,4 +176,10 @@ object ReceivedAcsCommitmentMatcher {
       lastEnvelopeInBatch: Boolean,
   )(implicit val traceContext: TraceContext)
 
+  def synchronizationFlow[Mat](
+      source: Source[Offset, Mat]
+  ): Flow[InternalIndexService.AcsUpdateContainer, InternalIndexService.AcsUpdateContainer, Mat] =
+    Flow[InternalIndexService.AcsUpdateContainer].gateKeeperMat(source.conflate(_ max _))(_.offset)(
+      Keep.right
+    )
 }

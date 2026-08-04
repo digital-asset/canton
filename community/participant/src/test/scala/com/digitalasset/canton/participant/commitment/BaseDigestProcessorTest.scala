@@ -4,9 +4,12 @@
 package com.digitalasset.canton.participant.commitment
 
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointToBeWritten
 import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Started,
   Starting,
@@ -14,6 +17,10 @@ import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Stopping,
 }
 import com.digitalasset.canton.participant.commitment.DigestProcessorTestBase.PromiseKillSwitch
+import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  CheckpointType,
+  allCheckpointsFilter,
+}
 import com.digitalasset.canton.participant.store.AcsDigestTestBase
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -25,6 +32,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Failure
 
+@AcsCommitmentTest
 class BaseDigestProcessorTest
     extends AnyWordSpec
     with AcsDigestTestBase
@@ -144,7 +152,9 @@ class BaseDigestProcessorTest
       // the various futures should be completed
       completionFutureAfterStarted.failed.futureValueUS shouldBe runningFailure
 
-      proc.stateInternal shouldBe Stopped(Failure(runningFailure))
+      eventually() {
+        proc.stateInternal shouldBe Stopped(Failure(runningFailure))
+      }
 
       proc.completionFuture.failed.futureValueUS shouldBe runningFailure
     }
@@ -178,6 +188,25 @@ class BaseDigestProcessorTest
       completionFutureAfterStop.failed.futureValueUS shouldBe stoppingException
 
       proc.stateInternal shouldBe Stopped(Failure(stoppingException))
+    }
+
+    "write checkpoint successfully via writeCheckpointFUS" in {
+      val pipelineCompletion = Promise[Unit]()
+      val killSwitch = new PromiseKillSwitch()
+      val proc =
+        new TestDigestProcessor(FutureUnlessShutdown.pure((killSwitch, pipelineCompletion.future)))
+      val timepoint = tp(1)
+      val cpToBeWritten =
+        CheckpointToBeWritten(timepoint, CheckpointType.MaxEventsWithoutCheckpoint)
+
+      val acsDigestStore = mkInMemoryDigestStore()
+      proc.writeCheckpoint(acsDigestStore)(cpToBeWritten).futureValueUS
+
+      // Verify that it was actually written to the store
+      val latest =
+        acsDigestStore.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter).futureValueUS
+      latest.value.timepoint shouldBe timepoint
+      latest.value.checkpointType shouldBe CheckpointType.MaxEventsWithoutCheckpoint
     }
 
   }

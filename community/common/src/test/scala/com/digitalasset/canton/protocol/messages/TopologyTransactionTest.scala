@@ -118,7 +118,9 @@ class TopologyTransactionTest
         .value
       // we don't need to check that inverse direction of serialization, because topology transactions are memoized,
       // therefore we only need to be able to serialize to the new format
-      NamespaceDelegation.fromProtoV30(rootDelegationProto).value shouldBe rootFromScala
+      NamespaceDelegation
+        .fromProtoV30(testedProtocolVersionValidation, rootDelegationProto)
+        .value shouldBe rootFromScala
 
       val protoTx = mkProtoTransaction(rootDelegationProto)
       val scalaTxFromBytes = TopologyTransaction
@@ -147,7 +149,9 @@ class TopologyTransactionTest
         .value
       // we don't need to check that inverse direction of serialization, because topology transactions are memoized,
       // therefore we only need to be able to serialize to the new format
-      NamespaceDelegation.fromProtoV30(nonRootDelegationProto).value shouldBe nonRootFromScala
+      NamespaceDelegation
+        .fromProtoV30(testedProtocolVersionValidation, nonRootDelegationProto)
+        .value shouldBe nonRootFromScala
 
       // Test case: is_root_delegation=false, restriction=non-empty <=> CanSignSpecificMappings
       Seq(
@@ -178,7 +182,7 @@ class TopologyTransactionTest
           )
           .value
         NamespaceDelegation
-          .fromProtoV30(restrictedDelegationProto)
+          .fromProtoV30(testedProtocolVersionValidation, restrictedDelegationProto)
           .value shouldBe restrictedFromScala
         restrictedFromScala.toProtoNamespaceDelegationV30.valueOrFail(
           "serializing transaction"

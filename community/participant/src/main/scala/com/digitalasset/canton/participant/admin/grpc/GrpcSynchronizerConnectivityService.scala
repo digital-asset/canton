@@ -316,11 +316,11 @@ class GrpcSynchronizerConnectivityService(
       )
       expectedProtocolVersion = config.psid
         .map(psid => ProtocolVersionValidation(psid.protocolVersion))
-        .getOrElse(ProtocolVersionValidation.NoValidation)
+        .getOrElse(ProtocolVersionValidation.AlwaysValidation)
 
       onboardingTransactions <- EitherT.fromEither[FutureUnlessShutdown](
         onboardingTransactionsPO
-          .traverse(SignedTopologyTransaction.fromByteStringPVV(expectedProtocolVersion, _))
+          .traverse(SignedTopologyTransaction.fromByteString(expectedProtocolVersion, _))
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       _ = logger.info(show"Registering new synchronizer $config")
@@ -366,13 +366,13 @@ class GrpcSynchronizerConnectivityService(
         validation <- EitherT.fromEither[FutureUnlessShutdown](
           parseSequencerConnectionValidation(sequencerConnectionValidationPO)
         )
-        expectedProtocolVersion = config.psid
+        protocolVersionValidation = config.psid
           .map(psid => ProtocolVersionValidation(psid.protocolVersion))
-          .getOrElse(ProtocolVersionValidation.NoValidation)
+          .getOrElse(ProtocolVersionValidation.AlwaysValidation)
 
         onboardingTransactions <- EitherT.fromEither[FutureUnlessShutdown](
           onboardingTransactionsPO
-            .traverse(SignedTopologyTransaction.fromByteStringPVV(expectedProtocolVersion, _))
+            .traverse(SignedTopologyTransaction.fromByteString(protocolVersionValidation, _))
             .leftMap(ProtoDeserializationFailure.Wrap(_))
         )
         _ = logger.info(show"Registering new synchronizer $config")

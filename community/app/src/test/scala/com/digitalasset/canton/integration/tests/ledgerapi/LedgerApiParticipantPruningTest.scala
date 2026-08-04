@@ -59,7 +59,6 @@ trait LedgerApiParticipantPruningTest
     with SharedEnvironment
     with DbLockingSupport
     with HasCycleUtils {
-  import scala.language.reflectiveCalls
 
   private val transactionTolerance = NonNegativeFiniteDuration.ofSeconds(2)
   private val largeTransactionBatchSize: Int = 100

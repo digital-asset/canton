@@ -763,7 +763,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-8ec094096423 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-ba38d305c56f \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1098,21 +1098,41 @@ commands:
             - run:
                 command: |
                     FIXED="<< parameters.fixed_volunteer >>"
+                    # The usual suspects to ping when no live rota person can be selected. Mirrors the
+                    # fallback_pool in scripts/ci/roster_people.json (Thibault Bene, Soren Bleikertz,
+                    # Rafael Guglielmetti), inlined here because the no-checkout path below has no repo
+                    # to read that file from.
+                    USUAL_SUSPECTS="U0AHRL04HPV,U276HDDB6,U020XUXADCP"
+                    # Choosing a volunteer must never fail this step. It runs with
+                    # `when: always` on an already-red build, and some jobs invoke it from a
+                    # working directory that has no repo checkout (no .ci/nix-exec, no
+                    # scripts/), so guard on the files actually being present and treat every
+                    # selection path as best-effort, degrading to the usual suspects below.
                     if [ -n "$FIXED" ]; then
                       SELECTED_VOLUNTEER="$FIXED"
-                    elif command -v nix-shell >/dev/null 2>&1; then
-                      SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB")
-                    else
-                      # Machine executors (e.g. test_ping_arm) have no nix, so nix-exec cannot run.
-                      # select_rota.py needs cryptography to sign the Google auth JWT; install it
-                      # best-effort so we still ping the live rota person. If the install fails the
+                    elif [ -x .ci/nix-exec ] && command -v nix-shell >/dev/null 2>&1; then
+                      # Nix executors: run through the nix wrapper so select_rota.py gets its deps.
+                      SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB" || true)
+                    elif [ -f scripts/ci/select_rota.py ]; then
+                      # Machine executors (e.g. test_ping_arm) have no nix, so run python3 directly.
+                      # select_rota.py needs cryptography to sign the Google auth JWT, so install it
+                      # best-effort and still ping the live rota person. If the install fails the
                       # script degrades to its deterministic roster fallback rather than breaking.
-                      # The plain install covers older pip; the retry adds --break-system-packages
+                      # The plain install covers older pip, and the retry adds --break-system-packages
                       # (pip 23+) for images that mark the system Python externally managed (PEP 668).
                       python3 -m pip install -q --user cryptography \
                         || python3 -m pip install -q --user --break-system-packages cryptography \
-                        || echo "warning: cryptography install failed; select_rota will use its roster fallback" >&2
-                      SELECTED_VOLUNTEER=$(python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB")
+                        || echo "warning: cryptography install failed, select_rota will use its roster fallback" >&2
+                      SELECTED_VOLUNTEER=$(python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB" || true)
+                    else
+                      echo "warning: no repo checkout in $(pwd), falling back to the usual suspects" >&2
+                      SELECTED_VOLUNTEER=""
+                    fi
+
+                    # Never ping nobody on a red build: if nothing was selected (no checkout, or
+                    # select_rota errored above), fall back to the usual suspects.
+                    if [ -z "$SELECTED_VOLUNTEER" ]; then
+                      SELECTED_VOLUNTEER="$USUAL_SUSPECTS"
                     fi
 
                     echo "$SELECTED_VOLUNTEER"
@@ -2402,8 +2422,6 @@ jobs:
                 is_manual: << parameters.is_manual >>
                 is_nightly_workflow: << parameters.is_nightly_workflow >>
             - publish_release_on_s3
-            - publish_release_on_artifactory:
-                nightly_release: << parameters.is_nightly_workflow >>
             - publish_release_on_oci_registry:
                 nightly_release: << parameters.is_nightly_workflow >>
             - when:

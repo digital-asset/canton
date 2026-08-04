@@ -160,6 +160,10 @@ create table par_acs_running_digests_checkpoint (
     primary key (synchronizer_idx, change_offset)
 );
 
+create index par_acs_running_digests_checkpoint_by_type
+    on par_acs_running_digests_checkpoint (synchronizer_idx, checkpoint_type, change_offset)
+    include (ts);
+
 create or replace view debug.par_acs_running_digests_checkpoint as
 select
     debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
@@ -227,9 +231,7 @@ create index par_acs_commitment_period_match_to_inclusive on par_acs_commitment_
 
 create table par_acs_commitment_period_watermark (
   synchronizer_idx integer not null,
-  watermark_reconciliation bigint not null,
-  watermark_affirmation bigint not null,
-  watermark_matching bigint,
+  watermark_matching bigint not null,
   primary key (synchronizer_idx)
 );
 
@@ -239,6 +241,13 @@ create table par_acs_commitment_period_pruning (
   -- UTC timestamp in microseconds relative to EPOCH
   ts bigint not null,
   succeeded bigint null,
+  primary key (synchronizer_idx)
+);
+
+create table par_acs_commitment_sender_watermark (
+  synchronizer_idx integer not null,
+  watermark_offset bigint not null,
+  watermark_timestamp bigint not null,
   primary key (synchronizer_idx)
 );
 
@@ -273,8 +282,6 @@ from par_acs_commitment_period_match;
 create or replace view debug.par_acs_commitment_period_watermark as
 select
     debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
-    debug.canton_timestamp(watermark_reconciliation) as watermark_reconciliation,
-    debug.canton_timestamp(watermark_affirmation) as watermark_affirmation,
     watermark_matching
 from par_acs_commitment_period_watermark;
 
@@ -285,3 +292,10 @@ select
     debug.canton_timestamp(ts) as ts,
     debug.canton_timestamp(succeeded) as succeeded
 from par_acs_commitment_period_pruning;
+
+create or replace view debug.par_acs_commitment_sender_watermark as
+select
+    debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
+    watermark_offset,
+    debug.canton_timestamp(watermark_timestamp) as watermark_timestamp
+from par_acs_commitment_sender_watermark;

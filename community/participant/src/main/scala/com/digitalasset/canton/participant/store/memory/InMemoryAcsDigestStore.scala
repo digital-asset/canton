@@ -13,6 +13,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.participant.store.{AcsDigestJournal, AcsDigestStore}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.ConcurrentSkipListMap
@@ -52,20 +53,39 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
     checkpointJournal.headMap(toExclusive, isInclusive).clear()
   }
 
-  override def latestCheckpointUpTo(toInclusive: Offset)(implicit
+  override def latestCheckpointUpTo(
+      toInclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]] =
     FutureUnlessShutdown.pure {
-      Option(checkpointJournal.floorEntry(toInclusive))
-        .map(_.getValue)
+      import scala.jdk.OptionConverters.*
+      checkpointJournal
+        .headMap(toInclusive, true)
+        .descendingMap()
+        .values()
+        .stream
+        .filter(checkpoint => checkpointTypes.forall(_.contains(checkpoint.checkpointType)))
+        .findFirst()
+        .toScala
     }
 
-  override def firstCheckpointAfter(fromExclusive: Offset)(implicit
+  override def firstCheckpointAfter(
+      fromExclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]] =
     FutureUnlessShutdown.pure {
-      Option(checkpointJournal.higherEntry(fromExclusive))
-        .map(_.getValue)
+      import scala.jdk.OptionConverters.*
+      checkpointJournal
+        .tailMap(fromExclusive, false)
+        .values()
+        .stream
+        .filter(checkpoint => checkpointTypes.forall(_.contains(checkpoint.checkpointType)))
+        .findFirst()
+        .toScala
     }
 }
 

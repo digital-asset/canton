@@ -13,6 +13,7 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.synchronizer.block.BlockSequencerStateManager
 import com.digitalasset.canton.synchronizer.block.data.SequencerBlockStore
 import com.digitalasset.canton.synchronizer.block.update.BlockProcessingParameters
+import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.TestingInterceptor
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
@@ -43,6 +44,7 @@ import scala.concurrent.ExecutionContextExecutor
 
 class BftSequencerFactory(
     config: BftBlockOrdererConfig,
+    publicApi: PublicServerConfig,
     blockSequencerConfig: BlockSequencerConfig,
     producePostOrderingTopologyTicks: Boolean,
     health: Option[SequencerHealthConfig],
@@ -89,6 +91,7 @@ class BftSequencerFactory(
     val initialHeight = initialBlockHeight.getOrElse(0L)
     new BftBlockOrderer(
       config,
+      publicApi,
       storage,
       cryptoApi,
       sequencerId,

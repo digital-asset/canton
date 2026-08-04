@@ -111,7 +111,7 @@ final class SerializationDeserializationTest
 
         if (version >= ProtocolVersion.v36) {
           test(AcsCommitment, version)
-          testContext(AcsCommitmentProtocolMessage, ProtocolVersionValidation.PV(version), version)
+          test(AcsCommitmentProtocolMessage, version)
 
           test(AcsCommitmentSummary, version)
           testContext(AcsCommitmentSummaryProtocolMessage, version, version)
@@ -126,12 +126,8 @@ final class SerializationDeserializationTest
         test(LsuSequencingTestMessageContent, version)
         test(Verdict, version)
         test(ConfirmationResponses, version)
-        testContext(
-          TypedSignedProtocolMessageContent,
-          ProtocolVersionValidation.PV(version),
-          version,
-        )
-        testContext(SignedProtocolMessage, ProtocolVersionValidation.PV(version), version)
+        test(TypedSignedProtocolMessageContent, version)
+        test(SignedProtocolMessage, version)
         test(ProtocolSymmetricKey, version)
         test(LocalVerdict, version)
         testContext(
@@ -195,8 +191,8 @@ final class SerializationDeserializationTest
 
         test(TopologyTransaction, version)
         testContext(TopologyTransactionsBroadcast, version, version)
-        testContext(SignedTopologyTransaction, ProtocolVersionValidation(version), version)
-        testContext(SignedTopologyTransactions, ProtocolVersionValidation(version), version)
+        test(SignedTopologyTransaction, version)
+        test(SignedTopologyTransactions, version)
         testContext(SequencerSnapshot, version, version)
         test(OnboardingStateForSequencer, version)
         test(OnboardingStateForSequencerV2, version)

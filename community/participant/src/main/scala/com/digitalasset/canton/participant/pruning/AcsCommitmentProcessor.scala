@@ -2913,7 +2913,6 @@ object AcsCommitmentProcessor extends HasLoggerName {
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[AcsCommitmentProcessor] = {
-
     implicit val loggingContext: NamedLoggingContext =
       NamedLoggingContext(loggerFactory, traceContext)
 
@@ -2946,7 +2945,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
 
     // Ensure that the initialization runs first. We don't care about initialization having
     // completed by the time we return - only that it runs first.
-    val executed = for {
+    val executed: FutureUnlessShutdown[AcsCommitmentProcessor] = for {
       initialState <- loadInitialState()
     } yield {
       val (endOfLastProcessedPeriod, runningCommitments) = initialState

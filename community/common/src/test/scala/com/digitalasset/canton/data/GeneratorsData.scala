@@ -4,6 +4,7 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.functor.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{GeneratorsCrypto, Salt, TestHash}
 import com.digitalasset.canton.data.ActionDescription.{
@@ -11,6 +12,7 @@ import com.digitalasset.canton.data.ActionDescription.{
   ExerciseActionDescription,
   FetchActionDescription,
 }
+import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.MerkleTree.VersionedMerkleTree
 import com.digitalasset.canton.data.ViewPosition.{MerklePathElement, MerkleSeqIndex}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -25,6 +27,7 @@ import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{CreationTime, ExternalCallResult}
 import com.digitalasset.daml.lf.value.Value.ValueInt64
 import magnolify.scalacheck.auto.*
+import org.scalacheck.cats.implicits.genInstances
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.EitherValues.*
 
@@ -690,13 +693,20 @@ final class GeneratorsData(
         .apply(Seq(transactionViewWithEmptySubview))(protocolVersion, hashOps)
       subviewHashes = subviews.trySubviewHashes
       pureCrypto = ExampleTransactionFactory.pureCrypto
-      // TODO(#32393): test the (de)serialization of a LightTransactionTree with ciphertextIDs instead of view hashes
-      subviewReferencesAndKeys = subviewHashes.map { viewHash =>
-        SubviewReferenceAndKey(
-          ByViewHash(viewHash),
-          pureCrypto.generateSecureRandomness(pureCrypto.defaultSymmetricKeyScheme.keySizeInBytes),
+      subviewReferencesAndKeys <-
+        (if (protocolVersion < ProtocolVersion.transparency)
+           Gen.const(subviewHashes.map(ByViewHash(_)).toList)
+         else
+           subviewHashes.toList.traverse(_ => Arbitrary.arbitrary[ByCiphertextId])).map(
+          _.map { reference =>
+            LightTransactionViewTree.SubviewReferenceAndKey(
+              reference,
+              pureCrypto.generateSecureRandomness(
+                pureCrypto.defaultSymmetricKeyScheme.keySizeInBytes
+              ),
+            )
+          }.toSeq
         )
-      }
     } yield {
       unblindedSubviewHashesForLightTransactionTree = subviewReferencesAndKeys
       TransactionView.tryCreate(hashOps)(

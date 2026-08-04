@@ -1217,25 +1217,15 @@ private[sync] class SynchronizerConnectionsManager(
             syncEphemeralStateFactory
               .createFromPersistent(
                 persistent,
+                synchronizerHandle,
                 synchronizerCrypto,
                 ledgerApiIndexer.asEval,
                 participantNodePersistentState.map(_.contractStore),
                 participantNodeEphemeralState,
-                synchronizerConnectionConfig.predecessor,
-                () => {
-                  val tracker = SynchronizerTimeTracker(
-                    synchronizerConnectionConfig.config.timeTracker,
-                    clock,
-                    synchronizerHandle.sequencerClient,
-                    timeouts,
-                    synchronizerLoggerFactory,
-                  )
-                  synchronizerHandle.topologyClient.setSynchronizerTimeTracker(tracker)
-                  tracker
-                },
                 promiseUSFactory,
                 connectedSynchronizerMetrics,
                 parameters.cachingConfigs.sessionEncryptionKeyCache,
+                synchronizerConnectionConfig,
                 onboardingClearanceScheduler,
                 participantId,
                 synchronizerLoggerFactory,
@@ -1321,9 +1311,18 @@ private[sync] class SynchronizerConnectionsManager(
             connectedSynchronizer.sequencerClient.getConnectionPoolHealthStatus
           )
 
-          _ = acsCommitmentProcessorHealth.set(
-            connectedSynchronizer.acsCommitmentProcessor.healthComponent
-          )
+          _ = connectedSynchronizer.acsCommitmentProcessorO match {
+            case Some(acsCommitmentProcessor) =>
+              acsCommitmentProcessorHealth.set(acsCommitmentProcessor.healthComponent)
+            case None =>
+              acsCommitmentProcessorHealth.set(
+                new com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent(
+                  AcsCommitmentProcessor.healthName,
+                  logger,
+                )
+              )
+          }
+
           _ = connectedSynchronizer.resolveUnhealthy()
 
           _ = connectedSynchronizers.tryAdd(connectedSynchronizer)
@@ -1675,7 +1674,7 @@ private[sync] class SynchronizerConnectionsManager(
       acsCommitmentProcessorHealth,
     )
 
-    LifeCycle.close(instances*)(logger)
+    LifeCycle.close(instances)(logger)
   }
 
   override def toString: String = s"SynchronizerConnectionsManager($participantId)"

@@ -1030,7 +1030,7 @@ object TopologyAdminCommands {
       ): Either[String, Seq[GenericSignedTopologyTransaction]] =
         response.transactions
           .traverse(tx =>
-            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.NoValidation, tx)
+            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
           )
           .leftMap(_.message)
     }
@@ -1065,7 +1065,7 @@ object TopologyAdminCommands {
             for {
               parsedTopologyTransaction <-
                 TopologyTransaction
-                  .fromByteString(ProtocolVersionValidation.NoValidation, serializedTransaction)
+                  .fromByteString(ProtocolVersionValidation.AlwaysValidation, serializedTransaction)
                   .leftMap(_.message)
               // We don't really need the hash from the response here because we can re-build it from the deserialized
               // topology transaction. But users of the API without access to this code wouldn't be able to do that,
@@ -1156,7 +1156,7 @@ object TopologyAdminCommands {
         .flatMap(
           SignedTopologyTransaction
             .fromProtoV30(
-              ProtocolVersionValidation.NoValidation,
+              ProtocolVersionValidation.AlwaysValidation,
               _,
             )
             .leftMap(_.message)
@@ -1230,7 +1230,7 @@ object TopologyAdminCommands {
         .toRight("no transaction in response")
         .flatMap(
           SignedTopologyTransaction
-            .fromProtoV30(ProtocolVersionValidation.NoValidation, _)
+            .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _)
             .leftMap(_.message)
             .flatMap(tx =>
               tx.selectMapping[M]

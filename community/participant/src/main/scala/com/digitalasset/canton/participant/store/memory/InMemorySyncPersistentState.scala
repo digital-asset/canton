@@ -15,6 +15,8 @@ import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.{
+  AcsCommitmentPeriodStore,
+  AcsCommitmentSenderWatermarkStore,
   AcsCounterParticipantConfigStore,
   AcsInspection,
   ContractStore,
@@ -70,6 +72,16 @@ class InMemoryLogicalSyncPersistentState(
     loggerFactory,
   )
 
+  override val acsCommitmentPeriodStore: AcsCommitmentPeriodStore =
+    new InMemoryAcsCommitmentPeriodStore(
+      ledgerApiStore.map(_.stringInterningView),
+      loggerFactory,
+      enableAdditionalConsistencyChecks,
+    )
+
+  override val acsCommitmentSenderWatermarkStore: AcsCommitmentSenderWatermarkStore =
+    new InMemoryAcsCommitmentSenderWatermarkStore(loggerFactory)
+
   override val acsInspection: AcsInspection =
     new AcsInspection(
       synchronizerIdx.synchronizerId,
@@ -109,11 +121,12 @@ class InMemoryPhysicalSyncPersistentState(
 
   override val pureCryptoApi: CryptoPureApi = crypto.pureCrypto
 
-  val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory, timeouts)
-  val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-  val connectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
-  val sendTrackerStore = new InMemorySendTrackerStore()
-  val submissionTrackerStore = new InMemorySubmissionTrackerStore(psid, loggerFactory, timeouts)
+  override val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory, timeouts)
+  override val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
+  override val connectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
+  override val sendTrackerStore = new InMemorySendTrackerStore()
+  override val submissionTrackerStore =
+    new InMemorySubmissionTrackerStore(psid, loggerFactory, timeouts)
 
   override val topologyStore =
     new InMemoryTopologyStore(

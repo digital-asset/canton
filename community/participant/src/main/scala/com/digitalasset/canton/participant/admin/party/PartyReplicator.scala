@@ -51,13 +51,24 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStore}
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
+  ParticipantPermission,
   PartyToParticipant,
+  SignedTopologyTransaction,
   TopologyChangeOp,
   TopologyMapping,
+  TopologyTransaction,
+  TopologyTransactionSignature,
 }
-import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  ForceFlags,
+  ParticipantId,
+  PartyId,
+  SequencerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{
   EitherTUtil,
@@ -477,6 +488,169 @@ final class PartyReplicator(
       )
     } yield partyToParticipantTopologyHeadTx.validFrom
   }
+
+  private[admin] def generatePartyTopologyUpdate(
+      partyId: PartyId,
+      synchronizerId: SynchronizerId,
+      targetParticipantId: ParticipantId,
+      permission: ParticipantPermission,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, TopologyTransaction[Replace, PartyToParticipant]] =
+    executionQueue.executeEUS(
+      for {
+        connectedSynchronizer <- EitherT.fromEither[FutureUnlessShutdown](
+          syncService
+            .readyConnectedSynchronizerById(synchronizerId)
+            .toRight(s"Unknown synchronizer $synchronizerId")
+        )
+
+        topologyStore = connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore
+        headTx <- topologyWorkflow.partyToParticipantTopologyHead(partyId, topologyStore)
+
+        currentParticipants = headTx.mapping.participants
+        _ <- EitherT.cond[FutureUnlessShutdown](
+          !currentParticipants.exists(_.participantId == targetParticipantId),
+          (),
+          s"Target participant $targetParticipantId is already hosting party $partyId",
+        )
+
+        newParticipants = currentParticipants :+ HostingParticipant(
+          targetParticipantId,
+          permission,
+          onboarding = true,
+        )
+
+        newMapping <- EitherT.fromEither[FutureUnlessShutdown](
+          PartyToParticipant.create(
+            partyId = headTx.mapping.partyId,
+            threshold = headTx.mapping.threshold,
+            participants = newParticipants,
+            partySigningKeysWithThreshold = headTx.mapping.partySigningKeysWithThreshold,
+          )
+        )
+
+        nextSerial <- EitherT.fromEither[FutureUnlessShutdown](
+          headTx.serial.increment.leftMap(_.message)
+        )
+        protocolVersion = connectedSynchronizer.staticSynchronizerParameters.protocolVersion
+        newTx <- EitherT.fromEither(
+          TopologyTransaction.create(
+            op = TopologyChangeOp.Replace,
+            serial = nextSerial,
+            mapping = newMapping,
+            protocolVersion = protocolVersion,
+          )
+        )
+      } yield newTx,
+      s"generate topology update for $partyId to $targetParticipantId",
+    )
+
+  private[admin] def authorizePartyUpdate(
+      synchronizerId: SynchronizerId,
+      transaction: TopologyTransaction[TopologyChangeOp.Replace, PartyToParticipant],
+      signatures: Seq[TopologyTransactionSignature],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+    executionQueue.executeEUS(
+      for {
+        psid <- EitherT.fromOption[FutureUnlessShutdown](
+          syncService.activePsidForLsid(synchronizerId),
+          s"Node is not connected to synchronizer $synchronizerId",
+        )
+
+        participantId = syncService.participantId
+
+        onboardingParticipants = transaction.mapping.participants.filter(_.onboarding)
+        _ <- EitherT.cond[FutureUnlessShutdown](
+          onboardingParticipants.nonEmpty,
+          (),
+          s"The topology transaction must contain at least one onboarding participant.",
+        )
+        targetParticipantIds = onboardingParticipants.map(_.participantId).toSet
+
+        connectedSynchronizer <- EitherT.fromEither[FutureUnlessShutdown](
+          syncService
+            .readyConnectedSynchronizerById(synchronizerId)
+            .toRight(s"Unknown synchronizer $synchronizerId")
+        )
+
+        partyId = transaction.mapping.partyId
+        topologyStore = connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore
+        headTx <- topologyWorkflow.partyToParticipantTopologyHead(partyId, topologyStore)
+
+        alreadyHosted = targetParticipantIds.filter(targetId =>
+          headTx.mapping.participants.exists(p => p.participantId == targetId && !p.onboarding)
+        )
+        _ <- EitherT.cond[FutureUnlessShutdown](
+          alreadyHosted.isEmpty,
+          (),
+          s"Party $partyId is already hosted on the target participant(s): ${alreadyHosted.mkString(", ")}.",
+        )
+
+        topologyManager <- EitherT.fromOption[FutureUnlessShutdown](
+          syncService.lookupTopologyManager(psid),
+          s"Topology manager not found for synchronizer $synchronizerId",
+        )
+
+        // Delegate to Topology Manager (No assumptions about internal vs. external or full authorization)
+        _ <- NonEmpty.from(signatures.toSet) match {
+          case Some(signaturesNE) =>
+            for {
+              signedTx <- EitherT.fromEither[FutureUnlessShutdown](
+                SignedTopologyTransaction
+                  .create(
+                    transaction,
+                    signaturesNE,
+                    isProposal = true,
+                    psid.protocolVersion,
+                  )
+                  .leftMap(_.toString)
+              )
+
+              // Extend the signature with the participant's own key if applicable
+              extendedTx <- topologyManager
+                .extendSignature(
+                  signedTx,
+                  signingKeys = Seq.empty,
+                  namespacesToSignFor = Seq.empty,
+                  forceFlags = ForceFlags.none,
+                )
+                .leftMap(error => s"Failed to append participant signature: $error")
+
+              // Submit the transaction. By using expectFullAuthorization = false, we let
+              // the TopologyStateProcessor automatically evaluate if the combined signatures
+              // satisfy the authorization requirements and strip the proposal flag if they do.
+              _ <- topologyManager
+                .add(
+                  Seq(extendedTx),
+                  forceChanges = ForceFlags.none,
+                  expectFullAuthorization = false,
+                )
+                .leftMap(error => s"Topology manager rejected the transaction: $error")
+            } yield ()
+
+          case None =>
+            topologyManager
+              .proposeAndAuthorize(
+                op = transaction.operation,
+                mapping = transaction.mapping,
+                serial = Some(transaction.serial),
+                signingKeys = Seq.empty,
+                namespacesToSignFor = Seq.empty,
+                protocolVersion = psid.protocolVersion,
+                expectFullAuthorization = false,
+                forceChanges = ForceFlags.none,
+                waitToBecomeEffective = None,
+              )
+              .leftMap(err => s"Failed to propose and authorize topology transaction: $err")
+              .map(_ => ())
+        }
+
+      } yield {
+        logger.info(s"Authorized party update for $partyId on participant $participantId")
+      },
+      "authorize party update",
+    )
 
   private[admin] def initializeDamlAdminWorkflow(workflow: PartyReplicationAdminWorkflow): Unit =
     damlAdminWorkflowO.putIfAbsent(workflow).discard
@@ -1565,7 +1739,7 @@ final class PartyReplicator(
 
     // Close the execution queue first to prevent activity and races wrt partyReplications.
     LifeCycle.close(
-      (executionQueue +: topologyWorkflow +: getProcessors :+ partyReplicationStateManager)*
+      executionQueue +: topologyWorkflow +: getProcessors :+ partyReplicationStateManager
     )(logger)
   }
 }
