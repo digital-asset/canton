@@ -527,12 +527,12 @@ class AvailabilityModuleDisseminationTest
           initialEpochNumber = initialEpochNumber,
         )
 
-      loggerFactory.assertLogs(
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
         availability.receive(
           RemoteDissemination.RemoteBatch.create(ABatchId, ABatch, from = Node1)
         ),
         log => {
-          log.level shouldBe Level.WARN
+          log.level shouldBe Level.INFO
           log.message should include regex
             """Batch BatchId\([^)]+\) from 'node1' contains an expired batch at epoch number 0 which is 500 epochs or more older than last known epoch 501, skipping"""
         },
@@ -543,13 +543,13 @@ class AvailabilityModuleDisseminationTest
         EpochNumber(initialEpochNumber + OrderingRequestBatch.BatchValidityDurationEpochs * 2),
       )
 
-      loggerFactory.assertLogs(
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
         availability.receive(
           RemoteDissemination.RemoteBatch
             .create(BatchId.from(tooFarInTheFutureBatch), tooFarInTheFutureBatch, from = Node1)
         ),
         log => {
-          log.level shouldBe Level.WARN
+          log.level shouldBe Level.INFO
           log.message should include regex
             """Batch BatchId\([^)]+\) from 'node1' contains a batch whose epoch number 1501 is too far in the future compared to last known epoch 501, skipping"""
         },

@@ -469,6 +469,7 @@ object BuildCommon {
     case PathList("okhttp3", _ @_*) => MergeStrategy.first
     // h2 and opentelemetry-runtime-telemetry both provide native-image reflect-config.json, discard both as we don't use native-image
     case PathList("META-INF", "native-image", "reflect-config.json") => MergeStrategy.discard
+    case PathList("org", "publicsuffix", "list", "effective_tld_names.dat") => MergeStrategy.first
     case path if path.endsWith("/OSGI-INF/MANIFEST.MF") => MergeStrategy.first
     case x => oldStrategy(x)
   }

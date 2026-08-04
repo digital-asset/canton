@@ -41,7 +41,7 @@ object Dependencies {
   lazy val ammonite_version = "3.0.1"
   lazy val apispec_version = "0.11.7"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.44.3"
+  lazy val aws_version = "2.49.4"
   lazy val better_files_version = "3.9.2"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"

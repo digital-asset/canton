@@ -1,0 +1,1 @@
+create index idx_seq_block_height_latest_event_ts on seq_block_height (latest_event_ts);

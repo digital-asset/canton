@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability
 
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{Fingerprint, Hash, Signature, SignatureFormat}
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -40,6 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Membership,
   MessageAuthorizer,
   OrderingTopology,
+  SequencingParameters,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   CompleteBlockData,
@@ -59,6 +61,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 }
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, Traced}
+import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 
@@ -358,7 +361,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
   protected val ANextToBeProvidedToConsensus =
     NextToBeProvidedToConsensus(
       BlockNumber.First,
-      Some(BftBlockOrdererConfig.DefaultMaxBatchesPerProposal),
+      Some(SequencingParameters.DefaultMaxBatchesPerProposal),
     )
 
   protected implicit val fakeTimerIgnoringUnitTestContext
@@ -377,9 +380,9 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       otherNodes: Set[BftNodeId] = Set.empty,
       otherNodesCustomKeys: Map[BftNodeId, BftKeyId] = Map.empty,
       initialEpochNumber: EpochNumber = EpochNumber.First,
-      maxRequestPayloadBytes: Int = BftBlockOrdererConfig.DefaultMaxRequestPayloadBytes,
-      maxRequestsInBatch: Short = BftBlockOrdererConfig.DefaultMaxRequestsInBatch,
-      maxBatchesPerProposal: Short = BftBlockOrdererConfig.DefaultMaxBatchesPerProposal,
+      maxRequestPayloadBytes: Int = MaxBytesToDecompress.HardcodedDefault.limit.value,
+      maxRequestsInBatch: Short = SequencingParameters.DefaultMaxRequestsInBatch,
+      maxBatchesPerProposal: Short = SequencingParameters.DefaultMaxBatchesPerProposal,
       maxNonOrderedBatchesPerNode: Short =
         BftBlockOrdererConfig.DefaultAvailabilityMaxNonOrderedBatchesPerNode,
       mempool: ModuleRef[Mempool.Message] = fakeIgnoringModule,
@@ -410,6 +413,13 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
         Membership.forTesting(
           myId,
           otherNodes,
+          sequencingParameters = Some(
+            SequencingParameters.create(
+              maxRequestsInBatch = maxRequestsInBatch,
+              maxBatchesPerBlockProposal = maxBatchesPerProposal,
+            )
+          ),
+          maxRequestPayloadBytes = NonNegativeInt.tryCreate(maxRequestPayloadBytes),
           nodesTopologyInfos = otherNodesCustomKeys.map { case (nodeId, keyId) =>
             nodeId -> NodeTopologyInfo(Set(keyId))
           },
@@ -431,9 +441,6 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       outputFetchProtocolState,
     )(messageAuthorizer, jitterConstructor)(
       new BftBlockOrdererConfig(
-        maxRequestPayloadBytes = maxRequestPayloadBytes,
-        maxRequestsInBatch = maxRequestsInBatch,
-        maxBatchesPerBlockProposal = maxBatchesPerProposal,
         outputFetchTimeout = BftBlockOrdererConfig.DefaultOutputFetchTimeout,
         availabilityMaxNonOrderedBatchesPerNode = maxNonOrderedBatchesPerNode,
       ),

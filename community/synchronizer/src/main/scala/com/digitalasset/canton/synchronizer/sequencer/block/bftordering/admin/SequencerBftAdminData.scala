@@ -427,12 +427,16 @@ object SequencerBftAdminData {
       pbftViewChangeTimeout: PositiveFiniteDuration,
       segmentLength: PositiveLong,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
+      maxRequestsInBatch: Short,
+      maxBatchesPerProposal: Short,
   ) extends PrettyPrinting {
     override protected def pretty: Pretty[SequencingParameters] =
       prettyOfClass(
         param("pbftViewChangeTimeout", _.pbftViewChangeTimeout),
         param("segmentLength", _.segmentLength),
         param("blacklistLeaderSelectionPolicyConfig", _.blacklistLeaderSelectionPolicyConfig),
+        param("maxRequestsInBatch", _.maxRequestsInBatch.toInt),
+        param("maxBatchesPerProposal", _.maxBatchesPerProposal.toInt),
       )
   }
   object SequencingParameters {
@@ -441,6 +445,8 @@ object SequencerBftAdminData {
         topologySequencingParameters.pbftViewChangeTimeout,
         topologySequencingParameters.segmentLength.length,
         topologySequencingParameters.blacklistLeaderSelectionPolicyConfig,
+        topologySequencingParameters.maxRequestsInBatch,
+        topologySequencingParameters.maxBatchesPerBlockProposal,
       )
   }
 }

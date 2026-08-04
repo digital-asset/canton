@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.WriteReadiness
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Mempool,
@@ -32,6 +33,7 @@ import MempoolModuleMetrics.{emitRequestStats, emitStateStats}
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 class MempoolModule[E <: Env[E]](
     config: MempoolModuleConfig,
+    initialOrderingTopology: OrderingTopology,
     mempoolState: MempoolState,
     metrics: BftOrderingMetrics,
     override val availability: ModuleRef[Availability.Message[E]],
@@ -41,6 +43,8 @@ class MempoolModule[E <: Env[E]](
     extends Mempool[E] {
 
   private type IngressLabelOutcome = metrics.ingress.labels.outcome.values.OutcomeValue
+
+  private var currentOrderingTopology: OrderingTopology = initialOrderingTopology
 
   override def receiveInternal(message: Mempool.Message)(implicit
       context: E#ActorContextT[Mempool.Message],
@@ -102,10 +106,10 @@ class MempoolModule[E <: Env[E]](
             metrics.ingress.labels.outcome.values.InvalidTag
           } else {
             val payloadSize = orderingRequest.payload.size()
-            if (payloadSize > config.maxRequestPayloadBytes) {
+            if (payloadSize > currentOrderingTopology.maxRequestPayloadBytes.value) {
               val rejectionMessage =
                 s"Mempool received client request of size $payloadSize " +
-                  s"but it exceeds the maximum (${config.maxRequestPayloadBytes}), rejecting"
+                  s"but it exceeds the maximum (${currentOrderingTopology.maxRequestPayloadBytes.value}), rejecting"
               logger.warn(rejectionMessage)
               from.foreach(_.asyncSend(SequencerNode.RequestRejected(rejectionMessage)))
               span.setStatus(StatusCode.ERROR, "max_request_size_exceeded"); span.end()
@@ -132,7 +136,7 @@ class MempoolModule[E <: Env[E]](
       case Mempool.CreateLocalBatches(atMost) =>
         logger.debug(
           s"$messageType: mempool received batch request from local availability " +
-            s"(maxRequestsInBatch: ${config.maxRequestsInBatch})"
+            s"(maxRequestsInBatch: ${currentOrderingTopology.sequencingParameters.maxRequestsInBatch})"
         )
 
         // whenever availability asks for a specific amount of batches,
@@ -147,6 +151,7 @@ class MempoolModule[E <: Env[E]](
       case upd @ Mempool.P2PConnectivityUpdate(membership, authenticatedCountIncludingSelf) =>
         logger.debug(s"$messageType: mempool received a topology and/or connectivity update $upd")
         weakQuorum = membership.orderingTopology.weakQuorum
+        currentOrderingTopology = membership.orderingTopology
         authenticatedCount = authenticatedCountIncludingSelf
         isBlacklisted = membership.blacklistedNodes.contains(membership.myId)
 
@@ -163,7 +168,7 @@ class MempoolModule[E <: Env[E]](
       // Internal
       case Mempool.MempoolBatchCreationClockTick =>
         logger.trace(
-          s"Mempool received batch creation clock tick (maxRequestsInBatch: ${config.maxRequestsInBatch})"
+          s"Mempool received batch creation clock tick (maxRequestsInBatch: ${currentOrderingTopology.sequencingParameters.maxRequestsInBatch})"
         )
         createAndSendBatches()
         scheduleMempoolBatchCreationClockTick()
@@ -190,7 +195,11 @@ class MempoolModule[E <: Env[E]](
     }
 
   private def createAndSendBatch()(implicit context: E#ActorContextT[Mempool.Message]): Unit = {
-    val requestsAndSpans = dequeueN(mempoolState.receivedOrderRequests, config.maxRequestsInBatch)
+    val requestsAndSpans =
+      dequeueN(
+        mempoolState.receivedOrderRequests,
+        currentOrderingTopology.sequencingParameters.maxRequestsInBatch,
+      )
     val batchCreationInstant = Instant.now
     locally {
       val requests = requestsAndSpans.map(_._1.tx)

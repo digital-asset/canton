@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
@@ -14,7 +16,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -41,7 +42,7 @@ final case class OrderingTopology(
     nodesTopologyInfo: Map[BftNodeId, NodeTopologyInfo],
     epochLength: EpochLength,
     sequencingParameters: SequencingParameters,
-    maxBytesToDecompress: MaxBytesToDecompress,
+    maxRequestPayloadBytes: NonNegativeInt,
     activationTime: TopologyActivationTime,
     areTherePendingCantonTopologyChanges: Option[Boolean],
 ) extends MessageAuthorizer
@@ -83,7 +84,7 @@ final case class OrderingTopology(
         _.nodesTopologyInfo.map { case (node, info) => node.doubleQuoted -> info },
       ),
       param("sequencingParameters", _.sequencingParameters),
-      param("maxBytesToDecompress", _.maxBytesToDecompress.limit),
+      param("maxRequestPayloadBytes", _.maxRequestPayloadBytes),
       param(
         "areTherePendingCantonTopologyChanges",
         _.areTherePendingCantonTopologyChanges,
@@ -112,6 +113,9 @@ object OrderingTopology {
       areTherePendingCantonTopologyChanges: Option[Boolean] = Some(false),
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
       epochLength: EpochLength = DefaultEpochLength,
+      // No decompression bound needed: test-only constructor.
+      maxRequestPayloadBytes: NonNegativeInt =
+        DynamicSynchronizerParameters.defaultMaxRequestSize.value,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): OrderingTopology =
     OrderingTopology(
       nodes.view.map { node =>
@@ -125,7 +129,7 @@ object OrderingTopology {
       epochLength,
       sequencingParameters.getOrElse(SequencingParameters.Default),
       // TODO(i10428) Move this method under BftSequencerBaseTest so we can reuse defaultMaxBytesToDecompress
-      MaxBytesToDecompress.MaxValueUnsafe,
+      maxRequestPayloadBytes,
       activationTime,
       areTherePendingCantonTopologyChanges,
     )

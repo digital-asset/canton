@@ -30,7 +30,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SequencingParameters,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 
 import java.io.File
@@ -84,7 +83,7 @@ class FixedFileBasedOrderingTopologyProvider(
       },
       segmentLength.epochLength(1 + standaloneConfig.peers.size.toLong),
       SequencingParameters.Default,
-      MaxBytesToDecompress(DynamicSynchronizerParameters.defaultMaxRequestSize.value),
+      DynamicSynchronizerParameters.defaultMaxRequestSize.value,
       ConventionalBootstrapTopologyActivationTime,
       areTherePendingCantonTopologyChanges = Some(false),
     )

@@ -1398,6 +1398,8 @@ abstract class SequencerReference(
           sequencingParameters.pbftViewChangeTimeout,
           SegmentLength(sequencingParameters.segmentLength),
           sequencingParameters.blacklistLeaderSelectionPolicyConfig,
+          sequencingParameters.maxRequestsInBatch,
+          sequencingParameters.maxBatchesPerProposal,
         )(physical_synchronizer_id.protocolVersion)
         .toByteString
 

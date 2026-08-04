@@ -7,8 +7,6 @@ import scala.concurrent.duration.FiniteDuration
 
 final case class MempoolModuleConfig(
     maxQueueSize: Int,
-    maxRequestPayloadBytes: Int,
-    maxRequestsInBatch: Short,
     minRequestsInBatch: Short,
     maxBatchCreationInterval: FiniteDuration,
     checkTags: Boolean = true,

@@ -16,9 +16,12 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.logging.SuppressionRule.{Level, LoggerNameContains}
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.{PartyId, TopologyManagerError}
 import com.digitalasset.canton.version.ProtocolVersion
+import org.slf4j.event
 
 import java.time.Duration
 import scala.annotation.nowarn
@@ -193,6 +196,11 @@ final class LsuCancellationIntegrationTest extends LsuBase {
         _.shouldBeCantonErrorCode(SequencerError.NoLsuAnnounced),
       )
 
+      // Psid connection is expected to be marked Inactive for the cancelled LSU
+      val connectionStore = participant1.underlying.value.sync.synchronizerConnectionConfigStore
+      val cancelledLsuConnection = connectionStore.get(fixture1.newPsid).value
+      cancelledLsuConnection.status shouldBe SynchronizerConnectionConfigStore.Inactive
+
       sequencer2.stop()
       mediator2.stop()
 
@@ -256,6 +264,46 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       participant1.topology.party_to_participant_mappings
         .list(fixture2.newPsid, filterParty = bob.filterString)
         .loneElement
+
+      clue("second LSU should complete") {
+        eventually() {
+          environment.simClock.foreach(_.advance(Duration.ofSeconds(1)))
+          participants.all.forall(_.synchronizers.is_connected(fixture2.newPsid)) shouldBe true
+          participants.all.forall(_.synchronizers.is_connected(fixture2.currentPsid)) shouldBe false
+        }
+      }
+
+      clue(s"ping should work on ${fixture2.newPsid}") {
+        participant1.health.ping(participant1)
+      }
+
+      // We test for a buggy state in the synchronizer connection store that could happen in the past
+      val connectionStore = participant1.underlying.value.sync.synchronizerConnectionConfigStore
+      val cancelledLsuConnection = connectionStore.get(fixture1.newPsid).value
+      cancelledLsuConnection.status shouldBe SynchronizerConnectionConfigStore.Inactive
+      connectionStore
+        .setStatus(
+          cancelledLsuConnection.config.synchronizerAlias,
+          cancelledLsuConnection.configuredPsid,
+          SynchronizerConnectionConfigStore.LsuTarget,
+        )
+        .futureValueUS
+        .value
+
+      clue("participant restart with stale LSU state should work") {
+        participant1.stop()
+        loggerFactory.assertLogsSeq(
+          Level(event.Level.INFO) && LoggerNameContains("CantonSyncService")
+        )(
+          participant1.start(),
+          forExactly(1, _)(_.message should include("Cleaning up stale unfinished LSU")),
+        )
+        participant1.synchronizers.reconnect_all()
+      }
+
+      clue(s"ping should work on ${fixture2.newPsid} after the restart") {
+        participant1.health.ping(participant1)
+      }
     }
   }
 }

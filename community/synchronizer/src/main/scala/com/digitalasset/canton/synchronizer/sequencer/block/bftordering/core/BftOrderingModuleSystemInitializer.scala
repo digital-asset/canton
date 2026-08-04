@@ -190,14 +190,13 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         mempool = { availabilityRef =>
           val cfg = MempoolModuleConfig(
             config.maxMempoolQueueSize,
-            config.maxRequestPayloadBytes,
-            config.maxRequestsInBatch,
             config.minRequestsInBatch,
             config.maxBatchCreationInterval,
             checkTags = config.standalone.isEmpty,
           )
           new MempoolModule(
             cfg,
+            bootstrapTopologyInfo.currentTopology,
             new MempoolState(currentMembership.orderingTopology.weakQuorum),
             metrics,
             availabilityRef,

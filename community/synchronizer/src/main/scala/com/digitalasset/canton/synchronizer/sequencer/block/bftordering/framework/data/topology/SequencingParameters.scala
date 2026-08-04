@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
@@ -29,16 +30,46 @@ import com.digitalasset.canton.version.{
 
 import java.time.Duration
 
+/** @param pbftViewChangeTimeout
+  * @param segmentLength
+  * @param blacklistLeaderSelectionPolicyConfig
+  * @param maxRequestsInBatch
+  *   The maximum number of requests in a batch. Needs to be the same across the network for the BFT
+  *   time assumptions to hold.
+  * @param maxBatchesPerBlockProposal
+  *   The maximum number of batches per block proposal (pre-prepare). Needs to be the same across
+  *   the network for the BFT time assumptions to hold.
+  */
 final case class SequencingParameters private (
     pbftViewChangeTimeout: PositiveFiniteDuration,
     segmentLength: SegmentLength,
     blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
+    maxRequestsInBatch: Short,
+    maxBatchesPerBlockProposal: Short,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       topology.SequencingParameters.type
     ]
 ) extends PrettyPrinting
     with HasProtocolVersionedWrapper[SequencingParameters] {
+
+  private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
+  require(
+    maxRequestsPerBlock < BftTime.MaxRequestsPerBlock,
+    s"Maximum block size too big: $maxRequestsInBatch maximum requests per batch and " +
+      s"$maxBatchesPerBlockProposal maximum batches per block proposal means " +
+      s"$maxRequestsPerBlock maximum requests per block, " +
+      s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}",
+  )
+  require(
+    maxRequestsInBatch <= 32,
+    s"Max request in batch too big: $maxRequestsInBatch exceeds maximum allowed of 32",
+  )
+  require(
+    maxBatchesPerBlockProposal <= 31,
+    s"Max batches per block proposal too big: $maxBatchesPerBlockProposal exceeds maximum allowed of 31",
+  )
+
   override protected val companionObj: SequencingParameters.type = SequencingParameters
 
   override protected def pretty: Pretty[SequencingParameters.this.type] =
@@ -53,11 +84,15 @@ final case class SequencingParameters private (
       segmentLength: SegmentLength = this.segmentLength,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
         this.blacklistLeaderSelectionPolicyConfig,
+      maxRequestsInBatch: Short = this.maxRequestsInBatch,
+      maxBatchesPerBlockProposal: Short = this.maxBatchesPerBlockProposal,
   ): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout = pbftViewChangeTimeout,
       segmentLength = segmentLength,
       blacklistLeaderSelectionPolicyConfig = blacklistLeaderSelectionPolicyConfig,
+      maxRequestsInBatch = maxRequestsInBatch,
+      maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
     )(representativeProtocolVersion)
 
   def toProto30: v30.DynamicSequencingParametersPayload = v30.DynamicSequencingParametersPayload(
@@ -68,6 +103,8 @@ final case class SequencingParameters private (
     Option(pbftViewChangeTimeout.toProtoPrimitive),
     segmentLength.length.value,
     Option(blacklistLeaderSelectionPolicyConfig.toProto),
+    maxRequestsInBatch.toInt,
+    maxBatchesPerBlockProposal.toInt,
   )
 }
 
@@ -101,11 +138,15 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
     )
 
   val DefaultSegmentLength: SegmentLength = SegmentLength(PositiveLong.tryCreate(10L))
+  val DefaultMaxRequestsInBatch: Short = 32
+  val DefaultMaxBatchesPerProposal: Short = 16
   def Default(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       DefaultPbftViewChangeTimeout,
       DefaultSegmentLength,
       DefaultLeaderSelectionPolicyConfig,
+      DefaultMaxRequestsInBatch,
+      DefaultMaxBatchesPerProposal,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -114,6 +155,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultPbftViewChangeTimeout,
       DefaultSegmentLength,
       NoBlacklistingLeaderSelectionPolicyConfig,
+      DefaultMaxRequestsInBatch,
+      DefaultMaxBatchesPerProposal,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -130,6 +173,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       pbftViewChangeTimeout,
       DefaultSegmentLength,
       DefaultLeaderSelectionPolicyConfig,
+      DefaultMaxRequestsInBatch,
+      DefaultMaxBatchesPerProposal,
     )(rpv)
 
   def fromProto31(
@@ -151,10 +196,20 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
           .flatMap(
             BlacklistLeaderSelectionPolicyConfig.fromProto
           )
+      maxRequestsInBatch = {
+        if (proto.maxRequestsInBatch == 0L) DefaultMaxRequestsInBatch
+        else proto.maxRequestsInBatch.toShort
+      }
+      maxBatchesPerProposal = {
+        if (proto.maxBatchesPerProposal == 0L) DefaultMaxBatchesPerProposal
+        else proto.maxBatchesPerProposal.toShort
+      }
     } yield SequencingParameters(
       pbftViewChangeTimeout,
       segmentLength,
       blacklistLeaderSelectionPolicyConfig,
+      maxRequestsInBatch,
+      maxBatchesPerProposal,
     )(rpv)
 
   override def name: String = "SequencingParameters"
@@ -182,11 +237,15 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       segmentLength: SegmentLength = DefaultSegmentLength,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
         DefaultLeaderSelectionPolicyConfig,
+      maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
+      maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout,
       segmentLength,
       blacklistLeaderSelectionPolicyConfig,
+      maxRequestsInBatch,
+      maxBatchesPerBlockProposal,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )

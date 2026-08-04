@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   P2PServerConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import org.scalatest.wordspec.AnyWordSpec
 
 class BftBlockOrdererTest extends AnyWordSpec with BaseTest {
@@ -42,10 +43,10 @@ class BftBlockOrdererTest extends AnyWordSpec with BaseTest {
                 s"$maxBatchesPerProposal maximum batches per block proposal means " +
                 s"$maxRequestsPerBlock maximum requests per block, " +
                 s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}"
-            the[IllegalArgumentException] thrownBy BftBlockOrdererConfig(
+            the[IllegalArgumentException] thrownBy SequencingParameters.create(
               maxRequestsInBatch = maxRequestsInBatch.toShort,
               maxBatchesPerBlockProposal = maxBatchesPerProposal.toShort,
-            ) should have message expectedMessage
+            )(testedProtocolVersion) should have message expectedMessage
           }
         }
       }
