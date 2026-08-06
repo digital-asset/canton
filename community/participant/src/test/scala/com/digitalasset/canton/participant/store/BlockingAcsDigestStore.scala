@@ -9,10 +9,15 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.store.AcsDigestStore.{Checkpoint, InternedParticipantId}
+import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  Checkpoint,
+  CheckpointType,
+  InternedParticipantId,
+}
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.nonempty.NonEmpty
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable
@@ -63,15 +68,23 @@ class BlockingAcsDigestStore(
   ): FutureUnlessShutdown[Unit] =
     blockAndThen(delegate.deleteCheckpointsUpToInternal(toExclusive))
 
-  override def latestCheckpointUpTo(toInclusive: Offset)(implicit
+  override def latestCheckpointUpTo(
+      toInclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]] =
-    blockAndThen(delegate.latestCheckpointUpTo(toInclusive))
+    blockAndThen(delegate.latestCheckpointUpTo(toInclusive, checkpointTypes))
 
-  override def firstCheckpointAfter(fromExclusive: Offset)(implicit
+  override def firstCheckpointAfter(
+      fromExclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]] =
-    blockAndThen(delegate.firstCheckpointAfter(fromExclusive))
+    blockAndThen(delegate.firstCheckpointAfter(fromExclusive, checkpointTypes))
+
+  override def close(): Unit = delegate.close()
 }
 
 class BlockingAcsDigestJournal[K](
@@ -79,7 +92,7 @@ class BlockingAcsDigestJournal[K](
     // The pointless `private[...]` modifier suppresses the Scala compiler's worry
     // that the Token types escapes the visibility of the private modifier.
     private[BlockingAcsDigestJournal] val delegate: AcsDigestJournal[K],
-)(private implicit val executionContext: ExecutionContext)
+)(implicit override protected val executionContext: ExecutionContext)
     extends AcsDigestJournal[K] {
 
   private def blockAndThen[A](f: => FutureUnlessShutdown[A]): FutureUnlessShutdown[A] =
@@ -95,10 +108,10 @@ class BlockingAcsDigestJournal[K](
   ): FutureUnlessShutdown[Option[AcsDigestStore.AcsDigestUpdate[K]]] =
     blockAndThen(delegate.lookup(key, toInclusive))
 
-  override def bulkLookup(keys: immutable.Iterable[K], toInclusive: AtInclusive)(implicit
+  override def bulkLookup(keysUptoInclusive: immutable.Iterable[(K, Offset)])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[K, AcsDigestStore.AcsDigestUpdate[K]]] =
-    blockAndThen(delegate.bulkLookup(keys, toInclusive))
+  ): FutureUnlessShutdown[Map[(K, Offset), AcsDigestStore.AcsDigestUpdate[K]]] =
+    blockAndThen(delegate.bulkLookup(keysUptoInclusive))
 
   override def snapshot(
       tokenOrStart: Either[SnapshotPaginationToken, AtInclusive],
@@ -133,9 +146,11 @@ class BlockingAcsDigestJournal[K](
 
   override def deleteUpTo(toExclusive: AtInclusive)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = delegate.deleteUpTo(toExclusive)
+  ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.deleteUpTo(toExclusive))
 
   override def checkReplacesInvariant(upToInclusive: AtInclusive)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.checkReplacesInvariant(upToInclusive))
+
+  override def close(): Unit = delegate.close()
 }

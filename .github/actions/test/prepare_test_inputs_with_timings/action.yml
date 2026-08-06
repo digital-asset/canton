@@ -1,0 +1,43 @@
+name: Prepare Test Inputs With Timings
+description: Download test artifact and restore historical timings for the current job
+
+inputs:
+  timings-artifact-name:
+    description: Name of the timings artifact to restore
+    required: true
+  timings-path:
+    description: Destination path for the downloaded timings artifact
+    required: false
+    default: .timings
+  github-token:
+    description: GitHub token used to download artifacts from previous runs
+    required: true
+
+outputs:
+  previous-timings-run-id:
+    description: Run id of the previous workflow run that published timings
+    value: ${{ steps.previous_timings.outputs.run-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Download test file
+      uses: actions/download-artifact@v7
+      with:
+        name: test-full-class-names
+        path: .
+
+    - name: Resolve previous timings artifact run
+      id: previous_timings
+      uses: ./.github/actions/utils/resolve_previous_artifact_run
+      with:
+        artifact-name: ${{ inputs.timings-artifact-name }}
+
+    - name: Download timings
+      if: always() && steps.previous_timings.outputs.run-id != ''
+      uses: actions/download-artifact@v7
+      with:
+        name: ${{ inputs.timings-artifact-name }}
+        path: ${{ inputs.timings-path }}
+        run-id: ${{ steps.previous_timings.outputs.run-id }}
+        github-token: ${{ inputs.github-token }}

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.manual.acs
 
 import better.files.*
-import com.digitalasset.canton.annotations.AcsCommitmentTest
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -17,76 +17,96 @@ import com.digitalasset.canton.integration.tests.acs.LargeAcsIntegrationTestBase
 import com.digitalasset.canton.integration.tests.acs.LargeAcsIntegrationTestBase.AcsTestSet
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.PartyToParticipantDeclarative
+import com.digitalasset.canton.logging.NodeLoggingUtil
 import com.digitalasset.canton.participant.admin.data.ContractImportMode
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.transaction.ParticipantPermission as PP
-import com.digitalasset.canton.util.SingleUseCell
+import com.digitalasset.canton.util.FutureInstances.parallelFuture
+import com.digitalasset.canton.util.{MonadUtil, SingleUseCell}
 import monocle.Monocle.toAppliedFocusOps
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
+import org.scalatest.time.{Minutes, Span}
 
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
 
-/** Given a large active contract set (ACS), we want to test the ACS export and import.
+/** Tests the export and import of a large Active Contract Set (ACS).
   *
-  * IMPORTANT: This does NOT implement a proper offline party replication as this is NOT the test
-  * focus.
+  * IMPORTANT: This does NOT implement a proper offline party replication, as that is not the focus
+  * of this test.
   *
-  * The tooling also allows to generate "temporary contracts": these are contracts that are created
-  * and archived immediately (and thus don't show up in the ACS snapshot). This is useful to check
-  * how such archived but not-yet pruned contracts impact performance of the export. Hence, it is
-  * important to disable (background pruning).
+  * The tooling supports generating "temporary contracts" - contracts that are created and archived
+  * immediately (and thus do not appear in the ACS snapshot). This is useful for measuring how
+  * archived, not-yet-pruned contracts impact export performance. Therefore, background pruning is
+  * explicitly disabled in this environment.
   *
-  * Raison d'être – Have this test code readily available in the repository for on-demand
-  * performance investigations. Thus, we're not so much interested in actually creating a large ACS
-  * and asserting a particular performance target; executed regularly on CI.
+  * Raison d'être: Maintain readily available test code in the repository for on-demand performance
+  * investigations. We are not aiming to assert a specific performance target in a regular CI
+  * pipeline; rather, this provides a sandbox for bulk ACS operations.
   *
   * Test setup:
-  *   - Topology: 3 Participants (P1, P2, P3) with a single mediator and a single sequencer
-  *   - P1 hosts party Bank, P2 hosts party Owner-0, ..., Owner-19
-  *   - Bank creates a specified number of active IOU contracts with the owners
-  *   - Bank authorizes to be hosted on P3
-  *   - P1 exports Bank's ACS to a file
-  *   - P3 imports Bank's ACS from the file
+  *   - Topology: 3 Participants (P1, P2, P3) with a single mediator and a single sequencer.
+  *   - P1 hosts party `Bank`; P2 hosts parties `Owner-0` through `Owner-19`.
+  *   - `Bank` creates a specified number of active IOU contracts with the owners.
+  *   - `Bank` is subsequently authorized to be hosted on P3.
+  *   - P1 exports `Bank`'s ACS to a file.
+  *   - P3 imports `Bank`'s ACS from the file.
   *
-  * Above is implemented by [[LargeAcsExportAndImportTest]].
+  * The core execution flow is implemented by [[LargeAcsExportAndImportTest]].
   *
-  * Creating a large ACS is time-consuming. There's a commented-out test,
-  * `LargeAcsCreateContractsTest`, that creates active contracts as specified by
-  * [[AcsTestSet.acsSize]], and then dumps the nodes' persisted state as database dump files. When
-  * dump files are present for a [[AcsTestSet.name]], then the [[LargeAcsExportAndImportTest]]
-  * restores them at the beginning of its test execution. This allows for faster, repeated test
-  * executions. Without dump files, the test creates the active contracts as required by
-  * [[AcsTestSet.acsSize]]. – That's being executed on CI.
+  * Generating a massive ACS from scratch is time-consuming. To accelerate repeated test executions,
+  * you can use [[LargeAcsCreateContractsTest]] to pre-generate the contracts (based on
+  * [[AcsTestSet.acsSize]]) and persist the nodes' states as database dump files. When dump files
+  * exist for a given [[AcsTestSet.name]], [[LargeAcsExportAndImportTest]] will bypass contract
+  * creation and restore the database from these dumps instead. Without existing dumps, the test
+  * defaults to creating the contracts from scratch (which is how it executes in CI).
   *
-  * Hint: For testing with an ACS size of 10'000 active contracts or larger, you definitively want
-  * to use a previously created database dump of the test network. Some example creation times
-  * (developer notebook):
-  *   - 1s for 1000 active contracts
-  *   - 72s (1min 12s) for 10_000
-  *   - 437s (7min 17s) for 100_000
-  *   - 817s (13min 37s) for 200_000
-  *   - 1229s (20min 29s) for 300_000
-  *   - extrapolation: T ≈ 0.00404 * N + 17.5, where N = desired number of active contracts and T is
-  *     in seconds
+  * Hint: For testing with an ACS size of 10,000 active contracts or larger, you definitively want
+  * to use a previously created database dump of the test network.
   *
-  * Empirically, the software starts to misbehave / expose issues starting at 100'000 or more active
-  * contracts.
-  *
-  * Some example times (developer notebook) as reference:
+  * Example generation times (developer notebook, 28 Jul 2026):
   * {{{
-  * ACS size | dump restore [s] | acs_export [s] |           acs_import [s] |
-  * 1000     |               17 |            0.1 |                        1 |
-  * 10_000   |               21 |            0.7 |                        6 |
-  * 100_000  |               42 |              4 |                      111 |
-  * 150_000  |               53 |              7 |                      126 |
-  * 200_000  |               65 |              9 |                      142 |
-  * 300_000  |               87 |             15 |                      174 |
-  * N        |                  |                |   T ≈ 0.00059 * N + 18.5 |
+  * Contract size |             create [s] |            DB dump [s] |
+  *          1000 |                     22 |                     11 |
+  *        10_000 |                     31 |                     13 |
+  *       100_000 |                    102 |                     33 |
+  *       150_000 |                    121 |                     41 |
+  *       200_000 |                    158 |                     48 |
+  *       250_000 |                    206 |                     60 |
+  *       300_000 |                    222 |                     68 |
+  *       400_000 |                    281 |                     87 |
+  *       500_000 |                    349 |                    102 |
+  *     1_000_000 |                    767 |                    193 |
+  *             N | T ≈ 0.00073 * N + 12.8 | T ≈ 0.00018 * N + 12.8 |
+  * }}}
+  *
+  * Example execution times (developer notebook, 28 Jul 2026):
+  * {{{
+  *  ACS size | dump restore [s] | acs_export [s] | acs_import [s] | reconnect [s] |
+  *    10_000 |               25 |              1 |              2 |             1 |
+  *   100_000 |               40 |              5 |              6 |            10 |
+  *   150_000 |               40 |              5 |              9 |            22 |
+  *   200_000 |               43 |              9 |             14 |            43 |
+  *   250_000 |               47 |              8 |             14 |            57 |
+  *   300_000 |               51 |             10 |             17 |            75 |
+  *   400_000 |               62 |             13 |             22 |           118 |
+  *   500_000 |               68 |             17 |             26 |           162 |
+  * 1_000_000 |              106 |             35 |             54 |           762 |
+  *
+  * Approximations:
+  *   dump restore: T ≈ 0.000079 * N + 28.0
+  *     acs_export: T ≈ 0.000034 * N + 0.5
+  *     acs_import: T ≈ 0.000052 * N + 1.4
+  *      reconnect: T ≈ 7.6e-10 * N^2 (Exhibits O(N^2) complexity)
   * }}}
   */
 protected abstract class LargeAcsExportAndImportTestBase extends LargeAcsIntegrationTestBase {
+
+  val numThreads = Threading.detectNumberOfThreads(noTracingLogger)
+
   // TODO(#27707) - Remove when ACS commitments consider the onboarding flag
   // A party replication is involved, and we want to minimize the risk of warnings related to acs commitment mismatches
   override protected val reconciliationInterval = PositiveSeconds.tryOfDays(365 * 10)
@@ -110,6 +130,9 @@ protected abstract class LargeAcsExportAndImportTestBase extends LargeAcsIntegra
   override protected val baseEnvironmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S1M1_Manual
       .addConfigTransforms(ConfigTransforms.allDefaultsButGloballyUniquePorts*)
+      .addConfigTransforms(
+        ConfigTransforms.disableAdditionalConsistencyChecks
+      )
       .addConfigTransforms(
         // Hard-coded ports ensure connectivity across node restarts. To save time,
         // participants are restored from database dumps which contain persisted
@@ -167,6 +190,16 @@ protected abstract class LargeAcsExportAndImportTestBase extends LargeAcsIntegra
             .replace(Long.MaxValue)
         ),
       )
+      // Disabling LAPI verification to reduce test termination time
+      .updateTestingConfig(
+        _.focus(_.participantsWithoutLapiVerification).replace(
+          Set(
+            "participant1",
+            "participant2",
+            "participant3",
+          )
+        )
+      )
 
   override protected def createContracts()(implicit
       env: TestConsoleEnvironment
@@ -180,46 +213,61 @@ protected abstract class LargeAcsExportAndImportTestBase extends LargeAcsIntegra
 
     // Create contracts
     val contractsDataset = Range.inclusive(1, testSet.acsSize.value)
-    val batches = contractsDataset.grouped(testSet.creationBatchSize.value).toList
-    val batchesCount = batches.size
+    val batchesCount =
+      Math.ceil(contractsDataset.size.toDouble / testSet.creationBatchSize.value).toInt
     val temporaryContractsPerBatch =
       Math.ceil(testSet.temporaryContracts.value.toDouble / batchesCount).toInt
 
     // Round-robin on the owners
     val ownerIdx = new AtomicInteger(0)
 
-    batches.foreach { batch =>
-      val start = System.nanoTime()
-      val iousCommands = batch.map { amount =>
-        val owner = owners(ownerIdx.getAndIncrement() % ownersCount)
+    val parallelism = numThreads
+    val chunkSize = testSet.creationBatchSize
 
-        IouSyntax.testIou(bank, owner, amount.toDouble).create.commands.loneElement
-      }
-      participant1.ledger_api.javaapi.commands.submit(Seq(bank), iousCommands)
-      val ledgerEnd = participant1.ledger_api.state.end()
-      val end = System.nanoTime()
-      logger.info(
-        s"Batch: ${batch.head} to ${batch.head + testSet.creationBatchSize.value} took ${TimeUnit.NANOSECONDS
-            .toMillis(end - start)}ms and ledger end = $ledgerEnd"
-      )
-
-      // Temporary contracts
-      if (temporaryContractsPerBatch > 0) {
-        val temporaryContractsCreateCmds =
-          Seq.fill(temporaryContractsPerBatch)(100.0).map { amount =>
+    val processBatch = { (batch: Seq[Int]) =>
+      Future {
+        scala.concurrent.blocking {
+          val start = System.nanoTime()
+          val iousCommands = batch.map { amount =>
             val owner = owners(ownerIdx.getAndIncrement() % ownersCount)
-            IouSyntax.testIou(bank, owner, amount).create.commands.loneElement
+            IouSyntax.testIou(bank, owner, amount.toDouble).create.commands.loneElement
           }
-        val chip = JavaDecodeUtil.decodeAllCreated(M.iou.Iou.COMPANION)(
-          participant1.ledger_api.javaapi.commands
-            .submit(Seq(bank), temporaryContractsCreateCmds)
-        )
 
-        val archiveCmds = chip.map(_.id.exerciseArchive().commands().loneElement)
+          participant1.ledger_api.javaapi.commands.submit(Seq(bank), iousCommands)
 
-        participant1.ledger_api.javaapi.commands.submit(Seq(bank), archiveCmds)
+          // Temporary contracts
+          if (temporaryContractsPerBatch > 0) {
+            val temporaryContractsCreateCmds =
+              Seq.fill(temporaryContractsPerBatch)(100.0).map { amount =>
+                val owner = owners(ownerIdx.getAndIncrement() % ownersCount)
+                IouSyntax.testIou(bank, owner, amount).create.commands.loneElement
+              }
+            val chip = JavaDecodeUtil.decodeAllCreated(M.iou.Iou.COMPANION)(
+              participant1.ledger_api.javaapi.commands
+                .submit(Seq(bank), temporaryContractsCreateCmds)
+            )
+
+            val archiveCmds = chip.map(_.id.exerciseArchive().commands().loneElement)
+
+            participant1.ledger_api.javaapi.commands.submit(Seq(bank), archiveCmds)
+          }
+
+          val ledgerEnd = participant1.ledger_api.state.end()
+          val end = System.nanoTime()
+          logger.info(
+            s"Batch: ${batch.head} to ${batch.last} took ${TimeUnit.NANOSECONDS
+                .toMillis(end - start)}ms and ledger end = $ledgerEnd"
+          )
+        }
       }
+        .map(_ => ())
     }
+
+    val futureResult =
+      MonadUtil.batchedSequentialTraverse_(parallelism, chunkSize)(contractsDataset)(processBatch)
+
+    // Await completion of all concurrent batches
+    futureResult.futureValue(Timeout(Span(30, Minutes)))
 
     // Sanity checks
     participant1.ledger_api.state.acs
@@ -239,6 +287,10 @@ protected abstract class LargeAcsExportAndImportTestBase extends LargeAcsIntegra
   * The number of created active contracts is defined by the [[AcsTestSet]].
   */
 protected abstract class DumpTestSet extends LargeAcsExportAndImportTestBase {
+
+  // Use INFO log level to save storage space, switch to DEBUG as needed
+  NodeLoggingUtil.setLevel(level = "INFO")
+
   override protected def environmentDefinition: EnvironmentDefinition =
     baseEnvironmentDefinition.withSetup { implicit env =>
       testSetup()
@@ -262,6 +314,9 @@ protected abstract class DumpTestSet extends LargeAcsExportAndImportTestBase {
 protected abstract class EstablishTestSet extends LargeAcsExportAndImportTestBase {
 
   protected def testContractIdImportMode: ContractImportMode
+
+  // Use INFO log level to save storage space, switch to DEBUG as needed
+  NodeLoggingUtil.setLevel(level = "INFO")
 
   // Replicate Bank from P1 to P3
   private val acsExportFile = new SingleUseCell[File]
@@ -375,18 +430,17 @@ protected abstract class EstablishTestSet extends LargeAcsExportAndImportTestBas
 final class LargeAcsCreateContractsTest extends DumpTestSet {
   override protected def testSet: AcsTestSet =
     AcsTestSet(
-      PositiveInt.tryCreate(1000),
+      PositiveInt.tryCreate(10_000),
       temporaryContracts = NonNegativeInt.zero,
       directorySuffix = "LargeAcsExportAndImportTest",
     )
 }
 
 /** The actual test */
-@AcsCommitmentTest
 final class LargeAcsExportAndImportTest extends EstablishTestSet {
   override protected def testSet: AcsTestSet =
     AcsTestSet(
-      PositiveInt.tryCreate(1000),
+      PositiveInt.tryCreate(10_000),
       temporaryContracts = NonNegativeInt.zero,
       directorySuffix = "LargeAcsExportAndImportTest",
     )

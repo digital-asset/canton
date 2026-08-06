@@ -1,0 +1,60 @@
+name: Add compliance label
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  add-compliance-label:
+    name: Add Standard-Change label if compliance paths are modified
+    runs-on: dach-ny-canton
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check changed files and add label
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const prefixes = [
+              '.ci',
+              '.github',
+              'release',
+              'scripts/ci',
+              'nix',
+              'shell.nix',
+              'project',
+              'build.sbt',
+              'shared_dependencies.json',
+            ];
+            const exceptions = new Set([
+              'project/project/DamlVersions.scala',
+              '.circleci/branches_to_be_fully_recompiled_in_ci.txt',
+            ]);
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+
+            const matchesCompliance = files
+              .filter(({ filename }) => !exceptions.has(filename))
+              .some(({ filename }) =>
+                prefixes.some(p => filename === p || filename.startsWith(p + '/'))
+              );
+
+            if (!matchesCompliance) {
+              core.info('No compliance-controlled paths modified, skipping label.');
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              labels: ['Standard-Change'],
+            });
+
+            core.info('Added "Standard-Change" label.');

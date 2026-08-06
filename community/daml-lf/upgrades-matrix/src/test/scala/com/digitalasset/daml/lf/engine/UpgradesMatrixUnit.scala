@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.engine.Error as EE
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.ValueTranslator
@@ -206,7 +207,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
     def hash(fci: FatContractInstance): crypto.Hash =
       newEngine()
         .hashCreateNode(fci.toCreateNode, identity, crypto.Hash.HashingMethod.TypedNormalForm)
-        .consume(pkgs = cases.allPackages)
+        .consume(lookupHandler(pkgs = cases.allPackages))
         .fold(e => throw new IllegalArgumentException(s"hashing $fci failed: $e"), identity)
 
     val hashes = Map(
@@ -236,17 +237,19 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
         prefetchKeys = Seq.empty,
       )
       .consume(
-        pcs = lookupContractById,
-        pkgs = creationPackageStatus match {
-          case UpgradesMatrixCases.CreationPackageVetted => cases.allPackages
-          case UpgradesMatrixCases.CreationPackageUnvetted => cases.allNonCreationPackages
-        },
-        keys = lookupContractByKey,
-        idValidator = (cid, hash) =>
-          hashes.get(cid) match {
-            case Some(expectedHash) => hash == expectedHash
-            case None => false
+        lookupHandler(
+          pcs = lookupContractById,
+          pkgs = creationPackageStatus match {
+            case UpgradesMatrixCases.CreationPackageVetted => cases.allPackages
+            case UpgradesMatrixCases.CreationPackageUnvetted => cases.allNonCreationPackages
           },
+          keys = lookupContractByKey,
+          idValidator = (cid, hash) =>
+            hashes.get(cid) match {
+              case Some(expectedHash) => hash == expectedHash
+              case None => false
+            },
+        )
       )
   }
 

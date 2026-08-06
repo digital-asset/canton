@@ -3,27 +3,43 @@
 
 package com.digitalasset.canton.participant.commitment
 
+import cats.syntax.functor.*
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle, RunOnClosing}
+import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.lifecycle.{
+  AsyncCloseable,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  LifeCycle,
+  RunOnClosing,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.sync.CantonSyncService.SyncServiceHandle
+import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
+import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.util.signalling.{EventSignaller, LocalEventSignaller}
+import com.digitalasset.canton.version.ProtocolVersion
+import org.apache.pekko.Done
+import org.apache.pekko.stream.{KillSwitch, Materializer}
 
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 /** Used to manage all running digest processors for the participant.
   */
 class AcsCommitmentProcessorManager(
     digestProcessorFactory: DigestProcessorFactory,
+    matcherFactory: ReceivedAcsCommitmentMatcherFactory,
+    aliasForSynchronizerId: SynchronizerId => Option[SynchronizerAlias],
     exitOnFatalFailures: Boolean,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext)
+)(implicit ec: ExecutionContext, mat: Materializer)
     extends NamedLogging
     with FlagCloseable {
 
@@ -32,38 +48,55 @@ class AcsCommitmentProcessorManager(
 
   private val lock = new Mutex()
 
-  def getOrCreate(synchronizerId: SynchronizerId): SynchronizerCommitmentState =
+  def getOrCreate(
+      synchronizerId: SynchronizerId
+  )(implicit traceContext: TraceContext): SynchronizerCommitmentState =
     lock.exclusive {
       synchronizers.getOrElseUpdate(
-        synchronizerId,
-        SynchronizerCommitmentState(
-          new DigestProcessorManager(
+        synchronizerId, {
+          val synchronizerLoggerFactory =
+            loggerFactory.append("synchronizer", synchronizerId.toString)
+          val signaller = new LocalEventSignaller[Unit, Offset](
+            "subscriber",
+            timeouts,
+            synchronizerLoggerFactory,
+          )
+          val alias = aliasForSynchronizerId(synchronizerId).getOrElse(
+            ErrorUtil.invalidArgument(s"No alias for synchronizer ID $synchronizerId")
+          )
+          val digestProcessorManager = new DigestProcessorManager(
+            alias,
             synchronizerId,
             digestProcessorFactory,
+            signaller,
             exitOnFatalFailures,
             futureSupervisor,
             timeouts,
-            loggerFactory.append("synchronizer", synchronizerId.toString),
+            synchronizerLoggerFactory,
           )
-        ),
+          val matcherF = matcherFactory.startMatcherPipeline(
+            alias,
+            synchronizerId,
+            signaller,
+          )
+          SynchronizerCommitmentState(digestProcessorManager, signaller, matcherF)
+        },
       )
     }
 
-  private def getAllAndClear(): Seq[SynchronizerCommitmentState] = lock.exclusive {
-    val tmp = synchronizers.values.toSeq
-    synchronizers.clear()
-    tmp
-  }
+  private def getAllAndClear(): Seq[(SynchronizerId, SynchronizerCommitmentState)] =
+    lock.exclusive {
+      val tmp = synchronizers.toSeq
+      synchronizers.clear()
+      tmp
+    }
 
-  override protected def onClosed(): Unit = {
-    def closeSynchronizer(sync: SynchronizerCommitmentState): Unit =
-      LifeCycle.close(sync.digestProcessorManager)(logger)
-    getAllAndClear().foreach(closeSynchronizer)
-  }
+  override protected def onClosed(): Unit =
+    LifeCycle.close(getAllAndClear().flatMap(closeSynchronizerCommitmentState))(logger)
 
   /** Subscribe to new synchronizer connections.
     */
-  def subscribeToSynchronizerConnections(sync: SyncServiceHandle)(implicit
+  def subscribeToSynchronizerConnections(sync: CantonSyncService)(implicit
       traceContext: TraceContext
   ): Unit =
     // whenever the participant connects to a synchronizer, start the digest processor
@@ -71,7 +104,26 @@ class AcsCommitmentProcessorManager(
       val handle = sync.subscribeToConnections {
         _.withTraceContext { implicit traceContext => synchronizerId =>
           FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-            getOrCreate(synchronizerId).digestProcessorManager.startRunningDigestProcessor(),
+            {
+              val syncState = getOrCreate(synchronizerId)
+              val senderO = sync
+                .readyConnectedSynchronizerById(synchronizerId)
+                .collect {
+                  case connectedSynchronizer
+                      if connectedSynchronizer.psid.protocolVersion >= ProtocolVersion.acsCommitmentRedesign =>
+                    connectedSynchronizer.ephemeral.acsCommitmentSender
+                }
+              for {
+                _ <- syncState.digestProcessorManager.startRunningDigestProcessor()
+                _ = senderO.foreach(
+                  _.startPipeline(
+                    syncState.tickSignaller
+                      .readSignals((), "ACS commitment sender")
+                      .map(_.signal)
+                  )
+                )
+              } yield ()
+            },
             s"failed to start running digest processor for $synchronizerId",
           )
         }
@@ -82,6 +134,49 @@ class AcsCommitmentProcessorManager(
         override def run()(implicit traceContext: TraceContext): Unit = handle.close()
       })
     }.onShutdown(())
+
+  private def closeSynchronizerCommitmentState(
+      item: (SynchronizerId, SynchronizerCommitmentState)
+  ): Seq[AutoCloseable] = {
+    import TraceContext.Implicits.Empty.*
+    val (synchronizerId, state) = item
+    val matcherClose = AsyncCloseable(
+      s"ReceivedAcsCommitmentMatcher($synchronizerId)",
+      state.matcherF
+        .flatMap { case (killSwitch, doneF) =>
+          killSwitch.shutdown()
+          FutureUnlessShutdown.outcomeF(doneF.void)
+        }
+        .onShutdown(()),
+      timeouts.shutdownProcessing,
+    )
+
+    Seq(
+      state.digestProcessorManager,
+      matcherClose,
+      state.tickSignaller,
+    )
+  }
 }
 
-final case class SynchronizerCommitmentState(digestProcessorManager: DigestProcessorManager)
+/** This class holds various components for processing the ACS commitments for a particular
+  * synchronizer.
+  * @param digestProcessorManager
+  *   for managing digest processors
+  * @param tickSignaller
+  *   for connecting the various components with
+  *   [[com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointWritten]]
+  *   signals for ticks
+  */
+final case class SynchronizerCommitmentState(
+    digestProcessorManager: DigestProcessorManager,
+    tickSignaller: TickSignaller,
+    matcherF: FutureUnlessShutdown[(KillSwitch, Future[Done])],
+)
+
+object SynchronizerCommitmentState {
+  // The subscriber key type is Unit, because:
+  // - the event signaller supports multiple subscribers for the same key, and
+  // - the checkpoints aren't really "assigned" to a specific set of subscribers
+  type TickSignaller = EventSignaller[Unit, Offset]
+}

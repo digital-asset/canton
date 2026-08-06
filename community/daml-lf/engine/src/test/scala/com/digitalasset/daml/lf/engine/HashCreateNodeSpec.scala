@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.crypto.Hash.HashingMethod
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.{Compiler, SValue}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -98,7 +99,7 @@ class HashCreateNodeSpec
 
       newEngine
         .hashCreateNode(createNode(createArg(cid0)), cidMapping, HashingMethod.Legacy)
-        .consume() shouldBe Right(
+        .consume(lookupHandler()) shouldBe Right(
         expectedHash
       )
     }
@@ -119,7 +120,7 @@ class HashCreateNodeSpec
           cidMapping,
           HashingMethod.UpgradeFriendlyUnsafe,
         )
-        .consume() shouldBe Right(
+        .consume(lookupHandler()) shouldBe Right(
         expectedHash
       )
     }
@@ -139,7 +140,7 @@ class HashCreateNodeSpec
 
       newEngine
         .hashCreateNode(createNode(createArg(cid0)), cidMapping, HashingMethod.TypedNormalForm)
-        .consume(pkgs = Map(pkgId -> pkg)) shouldBe Right(expectedHash)
+        .consume(lookupHandler(pkgs = Map(pkgId -> pkg))) shouldBe Right(expectedHash)
     }
 
     "ill-typed contract is reported as a SResultError" in {
@@ -149,7 +150,7 @@ class HashCreateNodeSpec
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[?, ?]]
+        .consume(lookupHandler(pkgs = Map(pkgId -> pkg))) shouldBe a[Left[?, ?]]
     }
 
     "contract with trailing nones is reported as a SResultError" in {
@@ -159,7 +160,7 @@ class HashCreateNodeSpec
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map(pkgId -> pkg)) shouldBe a[Left[?, ?]]
+        .consume(lookupHandler(pkgs = Map(pkgId -> pkg))) shouldBe a[Left[?, ?]]
     }
 
     "missing package is reported as a SResultError" in {
@@ -169,7 +170,7 @@ class HashCreateNodeSpec
           cidMapping,
           HashingMethod.TypedNormalForm,
         )
-        .consume(pkgs = Map.empty) shouldBe a[Left[?, ?]]
+        .consume(lookupHandler(pkgs = Map.empty)) shouldBe a[Left[?, ?]]
     }
   }
 

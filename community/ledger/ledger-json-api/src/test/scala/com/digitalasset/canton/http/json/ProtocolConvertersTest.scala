@@ -6,10 +6,7 @@ package com.digitalasset.canton.http.json
 import cats.implicits.toFunctorOps
 import com.daml.ledger.api.v2 as lapi
 import com.daml.ledger.api.v2.value.{Identifier, Record, Value}
-import com.digitalasset.canton.http.json.v2.LegacyDTOs.GetUpdateTreesResponse.Update
-import com.digitalasset.canton.http.json.v2.LegacyDTOs.TreeEvent.Kind
 import com.digitalasset.canton.http.json.v2.{
-  LegacyDTOs,
   MockSchemaProcessor,
   MockTranscodePackageIdResolver,
   ProtocolConverter,
@@ -51,7 +48,6 @@ class ProtocolConvertersTest extends AnyWordSpec with BaseTest with HasExecution
     JsMapping(converters.InterfaceView),
     JsMapping(converters.Event),
     JsMapping(converters.Transaction),
-    JsMapping(converters.SubmitAndWaitTransactionTreeResponseLegacy),
     JsMapping(converters.SubmitAndWaitTransactionResponse),
     JsMapping(converters.SubmitAndWaitForReassignmentResponse),
     JsMapping(converters.SubmitAndWaitForTransactionRequest),
@@ -64,8 +60,6 @@ class ProtocolConvertersTest extends AnyWordSpec with BaseTest with HasExecution
     JsMapping(converters.ReassignmentEvent),
     JsMapping(converters.Reassignment),
     JsMapping(converters.GetUpdatesResponse),
-    JsMapping(converters.GetUpdateTreesResponseLegacy),
-    JsMapping(converters.GetTransactionResponseLegacy),
 //    JsMapping(converters.PrepareSubmissionRequest),//we only need toJson
 //    JsMapping(converters.PrepareSubmissionResponse), // we only need toJson
 //    JsMapping(converters.ExecuteSubmissionRequest), // we only need fromJson
@@ -141,13 +135,6 @@ object Arbitraries {
     nonEmptyScalaPbOneOf(
       ArbitraryDerivation[lapi.topology_transaction.TopologyEvent.Event]
     )
-  implicit val arbTreeEventLegacyKind: Arbitrary[LegacyDTOs.TreeEvent.Kind] = {
-    val arb = ArbitraryDerivation[LegacyDTOs.TreeEvent.Kind]
-    Arbitrary {
-      arb.arbitrary.retryUntil(_ != Kind.Empty)
-    }
-  }
-
   implicit val arbPrefetchContractKey: Arbitrary[lapi.commands.PrefetchContractKey] = {
     val arb = ArbitraryDerivation[lapi.commands.PrefetchContractKey]
     Arbitrary {
@@ -168,13 +155,6 @@ object Arbitraries {
           transactionHash = Some(transactionHash32Bytes),
         )
       }
-    }
-  }
-
-  implicit val arbTransactionTree: Arbitrary[LegacyDTOs.TransactionTree] = {
-    val arb = ArbitraryDerivation[LegacyDTOs.TransactionTree]
-    Arbitrary {
-      arb.arbitrary.retryUntil(v => v.effectiveAt.isDefined && v.recordTime.isDefined)
     }
   }
 
@@ -205,29 +185,9 @@ object Arbitraries {
     nonEmptyScalaPbOneOf(
       ArbitraryDerivation[lapi.update_service.GetUpdatesResponse.Update]
     )
-  implicit val arbGetUpdatesTreesResponseLegacyUpdate
-      : Arbitrary[LegacyDTOs.GetUpdateTreesResponse.Update] = {
-    val arb = ArbitraryDerivation[LegacyDTOs.GetUpdateTreesResponse.Update]
-    Arbitrary {
-      arb.arbitrary.retryUntil(_ != Update.Empty)
-    }
-  }
-  implicit val arbSubmitAndWaitTransactionTreeResponseLegacy
-      : Arbitrary[LegacyDTOs.SubmitAndWaitForTransactionTreeResponse] = {
-    val arb = ArbitraryDerivation[LegacyDTOs.SubmitAndWaitForTransactionTreeResponse]
-    Arbitrary {
-      arb.arbitrary.retryUntil(_.transaction.isDefined)
-    }
-  }
   implicit val arbSubmitAndWaitTransactionResponse
       : Arbitrary[lapi.command_service.SubmitAndWaitForTransactionResponse] = {
     val arb = ArbitraryDerivation[lapi.command_service.SubmitAndWaitForTransactionResponse]
-    Arbitrary {
-      arb.arbitrary.retryUntil(_.transaction.isDefined)
-    }
-  }
-  implicit val arbGetTransactionResponseLegacy: Arbitrary[LegacyDTOs.GetTransactionResponse] = {
-    val arb = ArbitraryDerivation[LegacyDTOs.GetTransactionResponse]
     Arbitrary {
       arb.arbitrary.retryUntil(_.transaction.isDefined)
     }

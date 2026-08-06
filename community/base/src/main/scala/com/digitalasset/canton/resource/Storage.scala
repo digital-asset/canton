@@ -349,7 +349,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A]
 
   def query[A](
@@ -383,7 +382,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     runWrite(action, operationName, maxRetries)
 
@@ -397,7 +395,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[Unit] =
     runWrite(action, operationName, maxRetries).map(_ => ())
 
@@ -418,7 +415,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     runWrite(action, operationName, maxRetries)
 
@@ -426,21 +422,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
 }
 
 object DbStorage {
-  // Type class for return types that allows us know whether any rows were altered,
-  // i.e. updated, inserted or deleted.
-  trait RowsAltered[A] { def apply(a: A): Boolean }
-
-  object RowsAltered {
-    implicit val ofInt: RowsAltered[Int] = _ > 0
-    implicit val ofUnit: RowsAltered[Unit] = (_ => false)
-
-    implicit def ofSeq[A](implicit r: RowsAltered[A]): RowsAltered[Seq[A]] = _.exists(r(_))
-    implicit def ofArray[A](implicit r: RowsAltered[A]): RowsAltered[Array[A]] = _.exists(r(_))
-
-    implicit def ofEither[Err, A](implicit r: RowsAltered[A]): RowsAltered[Either[Err, A]] =
-      _.fold(_ => false, r(_))
-  }
-
   val healthName: String = "db-storage"
 
   // sql prepared statement have a limit of 65535 parameters

@@ -380,8 +380,15 @@ class OutputModule[E <: Env[E]](
             )
             recoverFromBlockNumber
           }
-        // We skip the "is it empty" label for the startup figure of blocks ordered
-        metrics.global.blocksOrdered.mark(Math.max(0L, firstBlockToProcess - 1))
+        // We don't skip the "is it empty" label for the startup figure of blocks ordered,
+        //  as this would cause a third series to appear in grafana, which is confusing and not useful.
+        //  Since we don't have this information at startup, however, we set it to `false`,
+        //  which is the most common case.
+        metrics.global.blocksOrdered.mark(Math.max(0L, firstBlockToProcess - 1))(
+          mc.withExtraLabels(
+            metrics.global.labels.IsBlockEmpty -> "false"
+          )
+        )
         maybeCompletedBlocksProcessingPeanoQueue
           .putIfAbsent(new PeanoQueue(firstBlockToProcess)(abort))
           .foreach(_ => abort("Completed block processing Peano Queue has already been set"))

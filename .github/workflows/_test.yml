@@ -1,0 +1,122 @@
+name: Test
+on:
+  workflow_call:
+    inputs:
+      override_java_version_for_tests:
+        default: ""
+        type: string
+      protocol_version:
+        default: ""
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_PASSWORD:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  test:
+    name: Test (shard ${{ matrix.shard }})
+    runs-on: dach-ny-canton
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        # Keep in sync with num_test_buckets in run_ordinary_tests step below
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    # This is a safety net, not the primary limit. A hung sbt run is caught first, and gracefully, by
+    # the 40m GNU-timeout cap in run_ordinary_tests, which leaves the if-always cleanup and log-upload
+    # steps intact. The job-level cap here only comes into play for hangs outside sbt (postgres
+    # teardown, nix-build, a wedged runner) and for a doomed failed-only rerun. A normal shard finishes
+    # well under 22 minutes, and around 35 even with a rerun, so 60 is a comfortable ceiling that stops
+    # a wedged shard from running for three hours.
+    timeout-minutes: 60
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.shard }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Set Canton Protocol Version
+        if: inputs.protocol_version != ''
+        env:
+          CANTON_PROTOCOL_VERSION: ${{ inputs.protocol_version }}
+        run: |
+          echo "CANTON_PROTOCOL_VERSION=$CANTON_PROTOCOL_VERSION" >> "$GITHUB_ENV"
+          echo "Canton will use protocol version $CANTON_PROTOCOL_VERSION"
+        shell: bash
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+
+      - name: Run Ordinary Tests
+        uses: ./.github/actions/test/run_ordinary_tests
+        with:
+          collect_postgres_query_stats: "true"
+          execution_context_size: "8"
+          exclude_unstable_tests: "true"
+          num_test_buckets: "12"
+          num_parallel_tasks: "4"
+          override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
+          shard_index: ${{ matrix.shard }}
+          test_file: test-full-class-names.log
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: test
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: test

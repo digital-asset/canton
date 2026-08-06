@@ -13,7 +13,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   CheckpointFenceOr,
-  CheckpointWritten,
+  CheckpointToBeWritten,
   Classification,
   NotCheckpointFence,
   PartyAddedToParticipant,
@@ -21,16 +21,17 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   ProcessingContext,
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
+import com.digitalasset.canton.participant.metrics.TestCommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  Checkpoint,
   LocalPartyFirst,
   ParticipantAcsDigestUpdate,
   PartyAcsDigestUpdate,
   PartyAndOrder,
   PartyOrder,
   RemotePartyFirst,
+  allCheckpointsFilter,
 }
 import com.digitalasset.canton.participant.store.db.{BaseDbAcsDigestStoreTest, DbAcsDigestStore}
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
@@ -88,15 +89,17 @@ trait SequentialDigestAccumulatorTest
         digestStore,
         stringInterning,
         tracingMode,
+        TestCommitmentMetrics(),
         loggerFactory,
       )
 
     def process(
         inputs: (Timepoint, CheckpointFenceOr[Classification])*
-    ): FutureUnlessShutdown[Seq[CheckpointWritten]] =
+    ): FutureUnlessShutdown[Seq[CheckpointToBeWritten]] =
       MonadUtil
         .sequentialTraverse(inputs) { case (timepoint, classification) =>
-          accumulator.process(ProcessingContext(timepoint, classification))
+          accumulator
+            .process(ProcessingContext(timepoint, classification))
         }
         .map(_.flatten)
 
@@ -141,11 +144,17 @@ trait SequentialDigestAccumulatorTest
           )
       ).futureValueUS shouldBe empty
 
-      digestStore.firstCheckpointAfter(Offset.firstOffset).futureValueUS shouldBe None
+      digestStore
+        .firstCheckpointAfter(Offset.firstOffset, allCheckpointsFilter)
+        .futureValueUS shouldBe None
       val partyDigest = lookupPartyDigest(alice, RemotePartyFirst).value
       val participantDigest = lookupParticipantDigest(p1).value
 
       partyDigest.digestUpdate.digestO.value shouldBe participantDigest.digestUpdate.digestO.value
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
     }
 
     // given cid0 with stakeholders alice and bob,
@@ -177,6 +186,9 @@ trait SequentialDigestAccumulatorTest
           tp(2) -> PartyAddedToParticipant(bob, p1),
         )
         .futureValueUS shouldBe empty
+      fixtureBobOnboarded.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
 
       val fixtureBobAlreadyHosted = new Fixture(p1)
       fixtureBobAlreadyHosted
@@ -191,6 +203,10 @@ trait SequentialDigestAccumulatorTest
             )
         )
         .futureValueUS shouldBe empty
+
+      fixtureBobAlreadyHosted.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
 
       fixtureBobAlreadyHosted
         .lookupParticipantDigest(p1)
@@ -247,6 +263,10 @@ trait SequentialDigestAccumulatorTest
         )
         .futureValueUS shouldBe empty
 
+      fixtureBobOffboarded.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
+
       val fixtureBobNotHosted = new Fixture(p1)
       fixtureBobNotHosted
         .process(
@@ -260,6 +280,10 @@ trait SequentialDigestAccumulatorTest
             )
         )
         .futureValueUS shouldBe empty
+
+      fixtureBobNotHosted.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
 
       fixtureBobNotHosted
         .lookupParticipantDigest(p1)
@@ -285,26 +309,30 @@ trait SequentialDigestAccumulatorTest
         .digestO
     }
 
-    "write a checkpoint when requested" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "emit a CheckpointToBeWritten when requested" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
       val fixture = new Fixture(p1)
       import fixture.*
 
-      val targetCheckpoint = Checkpoint(off(17), ts(1), ReconciliationIntervalBoundary)
+      val targetCheckpointToBeWritten =
+        CheckpointToBeWritten(ts(1), off(17), ReconciliationIntervalBoundary)
 
-      val checkpoint = process(
-        targetCheckpoint.timepoint -> CheckpointFence(targetCheckpoint.checkpointType)
+      val timepointKey = Timepoint(targetCheckpointToBeWritten.offsetInclusive)(
+        targetCheckpointToBeWritten.recordTimeInclusive
+      )
+
+      val emittedCheckpointToBeWritten = process(
+        timepointKey -> CheckpointFence(
+          targetCheckpointToBeWritten.checkpointType
+        )
       ).futureValueUS.loneElement
 
       // verify that the right CheckpointWritten notification is emitted
-      checkpoint.recordTimeInclusive shouldBe targetCheckpoint.recordTime
-      checkpoint.offsetInclusive shouldBe targetCheckpoint.offset
-      checkpoint.checkpointType shouldBe ReconciliationIntervalBoundary
+      emittedCheckpointToBeWritten.recordTimeInclusive shouldBe targetCheckpointToBeWritten.recordTimeInclusive
+      emittedCheckpointToBeWritten.offsetInclusive shouldBe targetCheckpointToBeWritten.offsetInclusive
+      emittedCheckpointToBeWritten.checkpointType shouldBe ReconciliationIntervalBoundary
 
-      // verify that the checkpoint was actually written
-      digestStore
-        .latestCheckpointUpTo(Offset.MaxValue)
-        .futureValueUS
-        .value shouldBe targetCheckpoint
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe targetCheckpointToBeWritten.recordTimeInclusive.toMicros
+
     }
 
     "not store empty initial digests" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
@@ -323,6 +351,10 @@ trait SequentialDigestAccumulatorTest
       lookupParticipantDigest(p2) shouldBe empty
       lookupPartyDigest(alice, RemotePartyFirst) shouldBe empty
       lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
     }
 
     "store empty digests after a non-empty initial digest" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
@@ -347,6 +379,10 @@ trait SequentialDigestAccumulatorTest
         .tryCreate(lookupParticipantDigest(p1).value.digestUpdate.digestO.value)
         .isEmpty shouldBe false
 
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
+
       process(
         Timepoint(off(3))(ts(2)) -> AcsUpdate(
           stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
@@ -356,6 +392,10 @@ trait SequentialDigestAccumulatorTest
           isActivation = false,
         )
       ).futureValueUS shouldBe empty // no checkpoints written
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
 
       // check digests for participants
       Seq(p1, p2).foreach { participant =>
@@ -392,6 +432,10 @@ trait SequentialDigestAccumulatorTest
           )
       ).futureValueUS shouldBe empty // no checkpoints written
 
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
+
       // the first entry doesn't replace anything
       for {
         party <- Seq(alice, bob)
@@ -411,6 +455,10 @@ trait SequentialDigestAccumulatorTest
           isActivation = true,
         )
       ).futureValueUS shouldBe empty // no checkpoints written
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
 
       // processing an update on a later offset should properly set replacesOffset
       for {
@@ -463,6 +511,10 @@ trait SequentialDigestAccumulatorTest
         )
       ).futureValueUS shouldBe empty // no checkpoints written
 
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
+
       lookupParticipantDigest(
         p2
       ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
@@ -478,6 +530,10 @@ trait SequentialDigestAccumulatorTest
           isActivation = false,
         )
       ).futureValueUS shouldBe empty // no checkpoints written
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
 
       lookupParticipantDigest(
         p2
@@ -506,6 +562,10 @@ trait SequentialDigestAccumulatorTest
       process(
         Timepoint(off(4))(ts(3)) -> PartyAddedToParticipant(alice, p2)
       ).futureValueUS shouldBe empty // no checkpoints written
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       lookupParticipantDigest(
         p2
@@ -542,6 +602,10 @@ trait SequentialDigestAccumulatorTest
         )
       ).futureValueUS shouldBe empty // no checkpoints written
 
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
+
       lookupParticipantDigest(
         p2
       ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
@@ -557,6 +621,10 @@ trait SequentialDigestAccumulatorTest
           isActivation = false,
         )
       ).futureValueUS shouldBe empty // no checkpoints written
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
 
       lookupParticipantDigest(
         p1
@@ -583,6 +651,10 @@ trait SequentialDigestAccumulatorTest
         )
       ).futureValueUS shouldBe empty // no checkpoints written
 
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        2
+      ).toMicros
+
       lookupParticipantDigest(
         p1
       ).value.digestUpdate.trace.value.traces should contain theSameElementsAs Seq(
@@ -602,6 +674,10 @@ trait SequentialDigestAccumulatorTest
       process(
         Timepoint(off(4))(ts(3)) -> PartyAddedToParticipant(alice, p2)
       ).futureValueUS shouldBe empty // no checkpoints written
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       lookupParticipantDigest(
         p2

@@ -132,7 +132,8 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
       lsid: SynchronizerId,
       onboarding: Boolean,
   ): Assertion =
-    eventually() {
+    eventually(retryOnTestFailuresOnly = false) {
+      // This may throw CommandFailure which is not a TestFailure
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         assertParticipantHostsParty(participant, party, lsid, onboarding),
         LogEntry.assertLogSeq(

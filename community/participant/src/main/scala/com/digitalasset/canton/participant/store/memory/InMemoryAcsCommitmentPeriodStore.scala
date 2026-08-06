@@ -95,21 +95,12 @@ final class InMemoryAcsCommitmentPeriodStore(
   ): FutureUnlessShutdown[immutable.Iterable[MatchedCommitmentMatchPeriod]] =
     FutureUnlessShutdown.pure(lookupInternal(matched, periods))
 
-  override def watermarks()(implicit
+  override def watermark()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[MatchingWatermark] =
     FutureUnlessShutdown.pure(lock.exclusive(watermarksVar))
 
-  override def increaseInsertionWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(
-      implicit traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = {
-    withLock {
-      watermarksVar = watermarksVar.bump(watermark, affirmationOnly)
-    }
-    FutureUnlessShutdown.unit
-  }
-
-  override def increaseMatcherWatermark(offset: Offset)(implicit
+  override def increaseWatermark(offset: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     withLock {
@@ -122,22 +113,12 @@ final class InMemoryAcsCommitmentPeriodStore(
       implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     withLock {
-      val MatchingWatermark(reconciliation, affirmation, _) = watermarksVar
-      val (tooEarly, good) = digests.partition(_.toInclusive <= affirmation)
-      if (tooEarly.nonEmpty) {
-        logger.debug(s"Skip inserting outdated commitment periods: ${tooEarly
-            .map { matchPeriod =>
-              s"${matchPeriod.participant}:${matchPeriod.fromExclusive}-${matchPeriod.toInclusive}"
-            }
-            .mkString(", ")}")
-      }
-      good.foreach { matchPeriod =>
+      digests.foreach { matchPeriod =>
         val periods = outstanding.getOrElseUpdate(
           matchPeriod.participant,
           mutable.SortedMap.empty[CantonTimestamp, OutstandingCommitmentMatchPeriod],
         )
-        val capped = matchPeriod.capBelow(reconciliation)
-        periods.getOrElseUpdate(capped.toInclusive, capped).discard
+        periods.getOrElseUpdate(matchPeriod.toInclusive, matchPeriod).discard
       }
     }
     FutureUnlessShutdown.unit
@@ -162,12 +143,6 @@ final class InMemoryAcsCommitmentPeriodStore(
           insertMismatchedOrUnexpected,
           insertMatched,
         )
-
-        // Since the insertions cover the same time range as the deletions,
-        // it suffices to check the timestamps of the deletions against the watermark.
-        val affirmation = watermarksVar.affirmation
-        ensureAtOrBelow(deleteOutstanding, affirmation, "affirmation watermark")
-        ensureAtOrBelow(deleteMismatched, affirmation, "affirmation watermark")
       }
 
       deleteFrom(outstanding, deleteOutstanding)
@@ -179,12 +154,16 @@ final class InMemoryAcsCommitmentPeriodStore(
     FutureUnlessShutdown.unit
   }
 
-  override def checkInvariant()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    lock.exclusive(checkInvariantInternal())
+  override def checkInvariant(
+      affirmationWatermark: Option[CantonTimestamp]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    lock.exclusive(checkInvariantInternal(affirmationWatermark))
     FutureUnlessShutdown.unit
   }
 
-  private def checkInvariantInternal()(implicit traceContext: TraceContext): Unit = {
+  private def checkInvariantInternal(
+      affirmationWatermark: Option[CantonTimestamp]
+  )(implicit traceContext: TraceContext): Unit = {
     def checkGoodPeriods(): Unit = {
       val all: Seq[TableAny] = Seq(outstanding, mismatched, matched)
       all.foreach { table =>
@@ -198,14 +177,6 @@ final class InMemoryAcsCommitmentPeriodStore(
           }
         }
       }
-    }
-
-    def checkWatermarks(): Unit = {
-      val MatchingWatermark(reconciliation, affirmation, _) = watermarksVar
-      ErrorUtil.requireState(
-        affirmation >= reconciliation,
-        s"Affirmation watermark $affirmation is below reconciliation watermark $reconciliation",
-      )
     }
 
     def checkDisjoint(): Unit = {
@@ -222,24 +193,28 @@ final class InMemoryAcsCommitmentPeriodStore(
       }
     }
 
-    def checkWatermarkBounds[Digest, Off](table: Table[Digest, Off], name: String): Unit = {
-      val affirmation = watermarksVar.affirmation
+    def checkWatermarkBounds[Digest, Off](
+        table: Table[Digest, Off],
+        name: String,
+        watermark: CantonTimestamp,
+    ): Unit =
       table.foreach { case (participant, periodMap) =>
         periodMap.lastOption.foreach { case (_, period) =>
           ErrorUtil.requireState(
-            period.toInclusive <= affirmation,
+            period.toInclusive <= watermark,
             s"$name period (${period.fromExclusive}, ${period.toInclusive}] for participant ${stringInterning.participantId
-                .externalize(participant)} exceeds affirmation watermark $affirmation",
+                .externalize(participant)} exceeds affirmation watermark $watermark",
           )
         }
       }
-    }
 
-    checkWatermarks()
     checkGoodPeriods()
     checkDisjoint()
-    checkWatermarkBounds(mismatched, "Mismatched")
-    checkWatermarkBounds(matched, "Matched")
+    affirmationWatermark.foreach { watermark =>
+      checkWatermarkBounds(mismatched, "Mismatched", watermark)
+      checkWatermarkBounds(matched, "Matched", watermark)
+    }
+
   }
 
   override def deleteOutstandingAfter(fromExclusive: CantonTimestamp)(implicit
@@ -285,9 +260,9 @@ final class InMemoryAcsCommitmentPeriodStore(
   @SynchronizedLikeMethod
   private def withLock[A](f: => A)(implicit traceContext: TraceContext): A =
     lock.exclusive {
-      if (enableConsistencyChecks) checkInvariantInternal()
+      if (enableConsistencyChecks) checkInvariantInternal(None)
       val result = f
-      if (enableConsistencyChecks) checkInvariantInternal()
+      if (enableConsistencyChecks) checkInvariantInternal(None)
       result
     }
 
@@ -319,20 +294,6 @@ final class InMemoryAcsCommitmentPeriodStore(
             if (matchPeriod.fromExclusive < period.toInclusive) mapFilter(matchPeriod) else None
         }
       others ++ overlapsRight.toList
-    }
-
-  private def ensureAtOrBelow(
-      periods: immutable.Iterable[CommitmentMatchPeriod[?, ?]],
-      limit: CantonTimestamp,
-      limitName: String,
-  )(implicit
-      traceContext: TraceContext
-  ): Unit =
-    periods.foreach { period =>
-      ErrorUtil.requireState(
-        period.toInclusive <= limit,
-        s"Period $period exceeds $limitName $limit",
-      )
     }
 
   private def ensurePresentForDeletion[Digest, Off](

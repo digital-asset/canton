@@ -1,0 +1,41 @@
+name: Run Bash Command in Nix
+description: Wraps a command execution inside a Nix environment
+
+inputs:
+  command:
+    default: ""
+    required: true
+    description: Bash command with args to be run
+  working_directory:
+    default: "."
+    required: false
+    description: Directory where the command should be executed
+  output-name:
+    default: ''
+    required: false
+    description: Name of output to forward
+
+outputs:
+  result:
+    description: The captured output of the command
+    value: ${{ steps.json.outputs.result}}
+
+runs:
+  using: composite
+  steps:
+    - name: Run command in nix-shell
+      id: exec
+      run: |
+        PROJECT_ROOT=$(git rev-parse --show-toplevel)
+        $PROJECT_ROOT/.ci/nix-exec ${{ inputs.command }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+
+    - name: Forward output to result
+      id: json
+      if: ${{ inputs.output-name != '' }}
+      run: |
+        JSON_OUTPUTS='${{ toJSON(steps.exec.outputs) }}'
+        SELECTED_VALUE=$(echo "$JSON_OUTPUTS" | jq -r ".[\"${{ inputs.output-name }}\"] // empty")
+        echo "result=$SELECTED_VALUE" >> $GITHUB_OUTPUT
+      shell: bash

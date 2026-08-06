@@ -148,23 +148,6 @@ update_canton_build_docker_image:
           git diff-index --quiet HEAD || git commit -m "Updated docker image for Canton builds"
           git push
 
-verify_circleci_config:
-  executor: canton-small-docker
-  steps:
-    - checkout:
-        method: blobless
-    - check_pr_skip_ci
-    - run:
-        name: Generate and check circleci config with committed one
-        command: |
-          cd .circleci
-          circleci config pack config > config.yml.new
-          if ! diff -q -I '^#' config.yml config.yml.new; then # Ignore full-line comments as part of the check
-            echo "ERROR: Committed config.yml is stale, please run build-config.sh in .circleci"
-            exit 1
-          fi
-    - slack_red_main_with_volunteer
-
 daml_upgrade_pr:
   executor: canton-medium-docker
   steps:

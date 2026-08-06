@@ -3,9 +3,8 @@
 
 package com.digitalasset.canton.auth
 
-import com.auth0.jwt.algorithms.Algorithm
 import com.daml.http.test.SimpleHttpServer
-import com.daml.jwt.{DecodedJwt, Error, Jwt, JwtSigner, KeyUtils}
+import com.daml.jwt.{Error, Jwt, JwtSigner, KeyUtils}
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest}
@@ -116,8 +115,7 @@ class JwksSpecRSA extends JwksSpec with JwksSpecKeys {
       privateKey: PrivateKeyType,
   ): Either[Error, Jwt] = {
     val jwtPayload = s"""{"test": "JwksSpec"}"""
-    val jwtHeader = s"""{"alg": "RS256", "typ": "JWT", "kid": "$keyId"}"""
-    JwtSigner.RSA256.sign(DecodedJwt(jwtHeader, jwtPayload), privateKey)
+    JwtSigner.RSA256(privateKey, kid = Some(keyId)).signPayload(jwtPayload)
   }
 }
 
@@ -144,8 +142,7 @@ class JwksSpecES256 extends JwksSpec with JwksSpecKeys {
       privateKey: PrivateKeyType,
   ): Either[Error, Jwt] = {
     val jwtPayload = s"""{"test": "JwksSpec"}"""
-    val jwtHeader = s"""{"alg": "ES256", "typ": "JWT", "kid": "$keyId"}"""
-    JwtSigner.ECDSA.sign(DecodedJwt(jwtHeader, jwtPayload), privateKey, Algorithm.ECDSA256(null, _))
+    JwtSigner.ES256(privateKey, kid = Some(keyId)).signPayload(jwtPayload)
   }
 }
 
@@ -172,7 +169,6 @@ class JwksSpecES512 extends JwksSpec with JwksSpecKeys {
       privateKey: PrivateKeyType,
   ): Either[Error, Jwt] = {
     val jwtPayload = s"""{"test": "JwksSpec"}"""
-    val jwtHeader = s"""{"alg": "ES512", "typ": "JWT", "kid": "$keyId"}"""
-    JwtSigner.ECDSA.sign(DecodedJwt(jwtHeader, jwtPayload), privateKey, Algorithm.ECDSA512(null, _))
+    JwtSigner.ES512(privateKey, kid = Some(keyId)).signPayload(jwtPayload)
   }
 }

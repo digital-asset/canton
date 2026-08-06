@@ -152,11 +152,6 @@ trait ModuleRef[-AcceptedMessageT] {
   def asyncSend(
       msg: AcceptedMessageT
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit
-
-  def asyncSendNoTrace(
-      msg: AcceptedMessageT
-  )(implicit metricsContext: MetricsContext): Unit =
-    asyncSend(msg)(traceContext = TraceContext.empty, metricsContext = metricsContext)
 }
 
 /** An abstraction of the network for deterministic simulation testing purposes.
@@ -333,7 +328,7 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
 
   def newModuleRef[NewModuleMessageT](moduleName: ModuleName)(
       moduleNameForMetrics: String = moduleName.name
-  ): E#ModuleRefT[NewModuleMessageT]
+  )(implicit traceContext: TraceContext): E#ModuleRefT[NewModuleMessageT]
 
   /** Spawns a new module. The `module` handler object must not be spawned more than once, lest it
     * potentially cause a violation of the actor model, as its state could be accessed concurrently.
@@ -351,13 +346,6 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
       traceContext: TraceContext,
       metricsContext: MetricsContext,
   ): CancellableEvent
-
-  def delayedEventNoTrace(delay: FiniteDuration, messageT: MessageT)(implicit
-      metricsContext: MetricsContext
-  ): CancellableEvent = delayedEvent(delay, messageT)(
-    traceContext = TraceContext.empty,
-    metricsContext = metricsContext,
-  )
 
   /** Similar to TraceContext.withNewTraceContext but can be deterministically simulated
     */
@@ -431,20 +419,22 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
       fun: Try[X] => Option[MessageT]
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit
 
-  def blockingAwait[X](future: E#FutureUnlessShutdownT[X], duration: FiniteDuration): X
+  def blockingAwait[X](future: E#FutureUnlessShutdownT[X], duration: FiniteDuration)(implicit
+      traceContext: TraceContext
+  ): X
 
   def become(module: Module[E, MessageT])(implicit traceContext: TraceContext): Unit
 
-  def stop(onStop: () => Unit = () => ()): Unit
+  def stop(onStop: () => Unit = () => ())(implicit traceContext: TraceContext): Unit
 
   // Aborting in Canton shouldn't kill the whole process, as it may contain several nodes,
   //  but rather only the module/sequencer.
 
-  def abort(): Nothing
+  def abort()(implicit traceContext: TraceContext): Nothing
 
-  def abort(msg: String): Nothing
+  def abort(msg: String)(implicit traceContext: TraceContext): Nothing
 
-  def abort(failure: Throwable): Nothing
+  def abort(failure: Throwable)(implicit traceContext: TraceContext): Nothing
 }
 
 /** An environment defines the concrete actor context, reference and timer times for a specific

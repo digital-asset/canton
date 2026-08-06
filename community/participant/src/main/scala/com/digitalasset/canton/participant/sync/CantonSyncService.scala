@@ -1263,7 +1263,7 @@ class CantonSyncService(
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     connectionsManager.performLsu(currentPsid, synchronizerSuccessor)
 
   /** Complete unfinished LSUs.
@@ -1542,12 +1542,12 @@ class CantonSyncService(
 
   def performLateLsu(
       request: LateLsuRequest
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     connectionsManager.performLateLsu(request)
 
   def performManualLsu(
       request: ManualLsuRequest
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     connectionsManager.performManualLsu(request)
 
   def logout(synchronizerAlias: SynchronizerAlias)(implicit
@@ -1663,7 +1663,7 @@ class CantonSyncService(
       participantNodePersistentState.value,
     )
 
-    LifeCycle.close(instances*)(logger)
+    LifeCycle.close(instances)(logger)
   }
 
   override def toString: String = s"CantonSyncService($participantId)"

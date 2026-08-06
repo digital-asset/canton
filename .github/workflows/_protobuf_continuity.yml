@@ -1,0 +1,35 @@
+name: Protobuf Continuity
+on:
+  workflow_call:
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  protobuf_continuity:
+    name: Protobuf Continuity
+    runs-on: dach-ny-canton
+    env:
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 2500M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Run protobuf continuity check
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: protobufContinuityCheck
+          report_to_datadog: "false"
+          execution_context_size: "2"

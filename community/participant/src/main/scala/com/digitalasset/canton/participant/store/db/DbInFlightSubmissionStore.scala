@@ -219,7 +219,7 @@ class DbInFlightSubmissionStore(
           )(setParams)
 
           storage
-            .queryAndUpdate(action, functionFullName)(traceContext, self.closeContext, implicitly)
+            .queryAndUpdate(action, functionFullName)(traceContext, self.closeContext)
             .map(_ => Seq.fill(items.size)(()))
         }
 

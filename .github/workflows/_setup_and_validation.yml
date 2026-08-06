@@ -1,0 +1,71 @@
+name: Setup nix and validate skip-ci label and yaml files
+
+on:
+  workflow_call:
+    outputs:
+      should-skip:
+        value: ${{ jobs.setup_and_skip_check.outputs.should-skip }}
+
+jobs:
+  setup_and_skip_check:
+    name: Setup Nix and validate skip-ci label
+    runs-on: dach-ny-canton
+    outputs:
+      should-skip: ${{ steps.skip_check.outputs.should-skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            .github/actions
+            scripts/ci
+            .ci/
+            shell.nix
+            nix/
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+      - name: Nix Warmup
+        uses: ./.github/actions/nix/nix_warmup
+      - name: Check whether build should be aborted due to `skip ci` label on PR
+        id: skip_check
+        uses: ./.github/actions/build/check_pr_skip_ci
+
+
+  yaml_lint:
+    name: Check YAML files with yamllint
+    runs-on: dach-ny-canton
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            .github
+            .yamllint
+            .ci
+            shell.nix
+            nix
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+      - name: Run yamllint
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: yamllint -c .yamllint .github/
+
+  verify_circleci_config:
+    name: Verify CircleCI config
+    runs-on: dach-ny-canton
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            .github/actions/utils/verify_circleci_config
+            .github/actions/nix
+            .circleci
+            .ci
+            shell.nix
+            nix
+          sparse-checkout-cone-mode: false
+          fetch-depth: 1
+      - name: Verify CircleCI config sync
+        uses: ./.github/actions/utils/verify_circleci_config

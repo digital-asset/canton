@@ -157,6 +157,12 @@ object ConfigTransforms {
         )
     )
 
+  lazy val disableOldAcsCommitmentProcessor: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
+        .replace(true)
+    )
+
   lazy val enableInteractiveSubmissionTransforms: ConfigTransform =
     ConfigTransforms
       .updateAllParticipantConfigs_(

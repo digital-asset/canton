@@ -16,7 +16,9 @@ import value.{CidContainer, Value}
 sealed abstract class FatContractInstance extends CidContainer[FatContractInstance] {
   type CreatedAtTime <: CreationTime
 
+  /** The minimum serialization version that can be used to serialize this contract instance. */
   val version: SerializationVersion
+
   val contractId: Value.ContractId
   val packageName: Ref.PackageName
   val templateId: Ref.TypeConId

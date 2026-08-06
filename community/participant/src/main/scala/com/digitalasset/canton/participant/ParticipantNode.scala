@@ -39,6 +39,7 @@ import com.digitalasset.canton.participant.admin.party.{PartyReplicationEndpoint
 import com.digitalasset.canton.participant.commitment.{
   AcsCommitmentProcessorManager,
   DigestProcessorFactoryImpl,
+  ReceivedAcsCommitmentMatcherFactoryImpl,
 }
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.extension.{
@@ -711,6 +712,7 @@ class ParticipantNodeBootstrap(
         )
 
         syncEphemeralStateFactory = new SyncEphemeralStateFactoryImpl(
+          parameters,
           exitOnFatalFailures = parameters.exitOnFatalFailures,
           parameters.processingTimeouts,
           loggerFactory,
@@ -953,7 +955,7 @@ class ParticipantNodeBootstrap(
           parameters.acsCommitments.enableRunningDigestProcessor && parameters.devVersionSupport
         acsDigestProcessorManagerO = Option.when(acsDigestProcessorEnabled)(
           new LifeCycleContainer[AcsCommitmentProcessorManager](
-            "ACS digest processor manager",
+            "ACS commitment processor manager",
             create = () => {
               val ledgerApiStore = ledgerApiIndexerContainer.asEval.flatMap(_.ledgerApiStore).value
               val topologyLookupForAcsDigestProcessing = new TopologyLookup(
@@ -982,18 +984,32 @@ class ParticipantNodeBootstrap(
                 participantId,
                 topologyLookupForAcsDigestProcessing,
                 syncPersistentStateManager.acsDigestStore,
+                syncPersistentStateManager.acsCommitmentPeriodStore,
                 ledgerApiServerContainer.asEval.value.internalIndexService,
                 ledgerApiStore,
                 ledgerApiStore.stringInterningView,
                 parameters.acsCommitments,
+                metrics.connectedSynchronizerMetrics(_).commitments,
                 enableAdditionalConsistencyChecks = parameters.enableAdditionalConsistencyChecks,
                 timeouts,
+                loggerFactory,
+              )
+
+              val matcherFactory = new ReceivedAcsCommitmentMatcherFactoryImpl(
+                syncPersistentStateManager.acsCommitmentPeriodStore,
+                syncPersistentStateManager.acsDigestStore,
+                ledgerApiServerContainer.asEval.value.internalIndexService,
+                ledgerApiStore.stringInterningView,
+                parameters.acsCommitments.matchingParallelism,
+                metrics.connectedSynchronizerMetrics(_).commitments,
                 loggerFactory,
               )
 
               val manager =
                 new AcsCommitmentProcessorManager(
                   digestProcessorFactory,
+                  matcherFactory,
+                  syncPersistentStateManager.aliasForSynchronizerId,
                   parameters.exitOnFatalFailures,
                   futureSupervisor,
                   timeouts,

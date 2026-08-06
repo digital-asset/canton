@@ -1,0 +1,316 @@
+name: Run Tests
+description: Run tests with optional sharding and test selection based on historical timings
+
+inputs:
+  collect_postgres_query_stats:
+    description: Collect postgres query stats and run stats analysis test
+    required: false
+    default: 'false'
+  command:
+    description: |
+      SBT command template used to run tests.
+      If num_test_buckets>0 (sharding enabled), the command must contain $RUN_SPLITTED_TESTS_CMD,
+      which is replaced with "<test_sub_command> <selected tests>".
+      If num_test_buckets=0 (no sharding), pass an explicit command without $RUN_SPLITTED_TESTS_CMD.
+      Include any test-tag filters inline in the command template (for example: -- -l UnstableTest).
+    required: true
+  reset_classes_if_requested:
+    description: Reset precompiled classes if requested (passed through to restore_precompiled_classes)
+    required: false
+    default: 'false'
+  execution_context_size:
+    description: Scala concurrent context size
+    required: false
+    default: '2'
+  fail_on_error_in_output:
+    description: Fail if sbt output contains error-like messages
+    required: false
+    default: 'true'
+  exclude_patterns:
+    description: >
+      Newline-separated regex patterns to exclude from test selection.
+      Mirrors the grep -e patterns from the CircleCI filter.
+      When empty, the built-in defaults from split_tests.py are used.
+    required: false
+    default: ''
+  include_patterns:
+    description: >
+      Newline-separated regex patterns to include in test selection.
+      When set, only matching tests are selected.
+    required: false
+    default: ''
+  num_parallel_tasks:
+    description: Parallel test tasks inside one shard
+    required: false
+    default: '2'
+  num_test_buckets:
+    description: Number of test shards
+    required: false
+    default: '1'
+  override_java_version_for_tests:
+    description: Java version override for tests
+    required: false
+    default: ''
+  release_path:
+    description: Path to packaged release to restore
+    required: false
+    default: ''
+  report_to_datadog:
+    description: Whether cleanup should report to Datadog
+    required: false
+    default: 'true'
+  shard_index:
+    description: Index of test shard, required when num_test_buckets is not 0
+    required: false
+    default: "0"
+  skip_cleanup:
+    description: Skip cleanup/reporting step
+    required: false
+    default: 'false'
+  succeed_on_error:
+    description: Succeed even if the test command fails
+    required: false
+    default: 'false'
+  test_file:
+    description: Input test file for sharding
+    required: false
+    default: 'test-full-class-names.log'
+  test_sub_command:
+    description: SBT sub command to use for tests
+    required: false
+    default: 'testOnly'
+  timeout:
+    description: SBT timeout
+    required: false
+    default: '240m'
+  timings_file:
+    description: Historical timings JSON file
+    default: ""
+    required: false
+
+outputs:
+  selected_tests_file:
+    description: File containing selected tests for this shard
+    value: ${{ steps.split.outputs.selected_tests_file }}
+  tests_per_shard:
+    description: Number of tests per shard
+    value: ${{ steps.split.outputs.tests_per_shard }}
+  total_tests:
+    description: Total filtered tests
+    value: ${{ steps.split.outputs.total_tests }}
+  monitor_pid:
+    description: PID of the CPU/Memory monitoring process
+    value: ${{ steps.track_start.outputs.monitor_pid }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore Precompiled Classes and sbt caches
+      id: restore_classes
+      uses: ./.github/actions/build/restore_compile_sbt_caches
+      with:
+        reset_classes_if_requested: ${{ inputs.reset_classes_if_requested }}
+
+    - name: Track CPU and Memory Start
+      id: track_start
+      uses: ./.github/actions/build/track_cpu_memory
+
+    - name: Restore Packaged Release
+      if: inputs.release_path != ''
+      uses: ./.github/actions/cache/restore_packaged_release
+      with:
+        workspace-path: ${{ inputs.release_path }}
+
+    - name: Setup GCP KMS
+      uses: ./.github/actions/test/setup_gcp_kms
+
+    - name: Validate sharding inputs
+      shell: bash
+      env:
+        NUM_TEST_BUCKETS: ${{ inputs.num_test_buckets }}
+        SHARD_INDEX: ${{ inputs.shard_index }}
+      run: |
+        if [[ "$NUM_TEST_BUCKETS" == "0" ]]; then
+          exit 0
+        fi
+
+        if ! [[ "$NUM_TEST_BUCKETS" =~ ^[0-9]+$ ]] || [[ "$NUM_TEST_BUCKETS" -le 0 ]]; then
+          echo "num_test_buckets must be a positive integer or 0, got: $NUM_TEST_BUCKETS" >&2
+          exit 1
+        fi
+
+        if ! [[ "$SHARD_INDEX" =~ ^[0-9]+$ ]]; then
+          echo "shard_index must be a non-negative integer when sharding is enabled, got: $SHARD_INDEX" >&2
+          exit 1
+        fi
+
+        if [[ "$SHARD_INDEX" -ge "$NUM_TEST_BUCKETS" ]]; then
+          echo "shard_index ($SHARD_INDEX) must be < num_test_buckets ($NUM_TEST_BUCKETS)" >&2
+          exit 1
+        fi
+
+    - name: Split Tests Evenly
+      id: split
+      if: inputs.num_test_buckets != '0'
+      uses: ./.github/actions/test/split_tests
+      with:
+        shard_index: ${{ inputs.shard_index }}
+        total_shards: ${{ inputs.num_test_buckets }}
+        test_file: ${{ inputs.test_file }}
+        timings_file: ${{ inputs.timings_file }}
+        exclude_patterns: ${{ inputs.exclude_patterns }}
+        include_patterns: ${{ inputs.include_patterns }}
+        debug_split_tests: "false"
+
+    - name: Build RUN_SPLITTED_TESTS_CMD
+      id: build_cmd
+      shell: bash
+      env:
+        NUM_TEST_BUCKETS: ${{ inputs.num_test_buckets }}
+        SHARD_INDEX: ${{ inputs.shard_index }}
+        SELECTED_TESTS_FILE: ${{ steps.split.outputs.selected_tests_file }}
+        TEST_SUB_COMMAND: ${{ inputs.test_sub_command }}
+        COMMAND_TEMPLATE: ${{ inputs.command }}
+        COLLECT_POSTGRES_QUERY_STATS: ${{ inputs.collect_postgres_query_stats }}
+      run: |
+        echo "::group::Resolve test command"
+
+        # Build resolved command based on sharding mode
+        if [[ "$NUM_TEST_BUCKETS" != "0" ]]; then
+          # Sharded mode: template must contain $RUN_SPLITTED_TESTS_CMD placeholder
+          if [[ "$COMMAND_TEMPLATE" != *"\$RUN_SPLITTED_TESTS_CMD"* ]]; then
+            echo "num_test_buckets>0 requires command template to contain \$RUN_SPLITTED_TESTS_CMD." >&2
+            exit 1
+          fi
+          if [[ -z "$SELECTED_TESTS_FILE" || ! -f "$SELECTED_TESTS_FILE" ]]; then
+            echo "selected_tests_file is missing or does not exist: $SELECTED_TESTS_FILE" >&2
+            exit 1
+          fi
+          SELECTED=$(cat "$SELECTED_TESTS_FILE")
+          SELECTED_COUNT=$(echo "$SELECTED" | wc -w)
+          echo "Tests count: $SELECTED_COUNT"
+          if [[ "$SELECTED_COUNT" -eq 0 ]]; then
+            # An empty bucket must not fall through to a bare "$TEST_SUB_COMMAND", which sbt expands
+            # to running every test in scope and can exhaust Metaspace. Mark the shard to be skipped.
+            echo "No tests selected for shard ${SHARD_INDEX}, skipping test execution."
+            echo "skip_tests=true" >> "$GITHUB_OUTPUT"
+          fi
+          RUN_CMD="$TEST_SUB_COMMAND $SELECTED"
+          RESOLVED="${COMMAND_TEMPLATE//\$RUN_SPLITTED_TESTS_CMD/$RUN_CMD}"
+        else
+          # Non-sharded mode: use explicit command
+          if [[ "$COMMAND_TEMPLATE" == *"\$RUN_SPLITTED_TESTS_CMD"* ]]; then
+            echo "num_test_buckets=0 requires an explicit command without \$RUN_SPLITTED_TESTS_CMD." >&2
+            exit 1
+          fi
+          RESOLVED="$COMMAND_TEMPLATE"
+        fi
+
+        if [[ "${COLLECT_POSTGRES_QUERY_STATS,,}" == "true" || "$COLLECT_POSTGRES_QUERY_STATS" == "1" ]]; then
+          RESOLVED="$RESOLVED \"community-common / testOnly / com.digitalasset.canton.integration.tests.manual.PostgresStatsAnalysisTest\""
+        fi
+
+        resolved_command_file="$RUNNER_TEMP/resolved-sbt-command-${SHARD_INDEX}.txt"
+        printf '%s\n' "$RESOLVED" > "$resolved_command_file"
+        echo "resolved_command_file=$resolved_command_file" >> "$GITHUB_OUTPUT"
+        echo "::endgroup::"
+
+    - name: Limit Parallel Test Execution
+      uses: ./.github/actions/test/limit_parallel_test_execution
+      with:
+        num_tasks: ${{ inputs.num_parallel_tasks }}
+
+    - name: Set CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS
+      shell: bash
+      run: echo "CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS=true" >> "$GITHUB_ENV"
+
+    - name: Run SBT Tests
+      id: run_sbt_tests
+      if: steps.build_cmd.outputs.skip_tests != 'true'
+      uses: ./.github/actions/sbt/execute_sbt_command
+      continue-on-error: true
+      with:
+        cmd_file: ${{ steps.build_cmd.outputs.resolved_command_file }}
+        execution_context_size: ${{ inputs.execution_context_size }}
+        fail_on_error_in_output: ${{ inputs.fail_on_error_in_output }}
+        matrix_shard: ${{ inputs.shard_index }}
+        override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
+        succeed_on_error: ${{ inputs.succeed_on_error }}
+        timeout: ${{ inputs.timeout }}
+        report_to_datadog: ${{ inputs.report_to_datadog }}
+        extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC.log:time
+
+    - name: Snapshot first-run JUnit reports
+      if: always()
+      uses: ./.github/actions/test/snapshot_junit_reports
+      with:
+        output_dir: .ci-test-results/first-run
+
+    - name: Prepare Failed-only Rerun Command
+      if: steps.build_cmd.outputs.skip_tests != 'true' && steps.run_sbt_tests.outcome != 'success' && inputs.succeed_on_error != 'true'
+      id: failed_rerun_cmd
+      uses: ./.github/actions/test/prepare_rerun_command
+      with:
+        command: ${{ inputs.command }}
+        test_sub_command: ${{ inputs.test_sub_command }}
+        shard_index: ${{ inputs.shard_index }}
+        num_test_buckets: ${{ inputs.num_test_buckets }}
+
+    - name: Clear canton_test.log before failed-only rerun
+      if: steps.failed_rerun_cmd.outputs.has_failed_test_classes == 'true' && inputs.succeed_on_error != 'true'
+      shell: bash
+      run: |
+        mkdir -p log
+        if [[ -f log/canton_test.log ]]; then
+          cp log/canton_test.log "log/canton_test_first_run_${{ github.run_id }}_${{ inputs.shard_index }}.log"
+        fi
+        : > log/canton_test.log
+
+    - name: Run SBT Tests (Failed-only Rerun)
+      if: steps.failed_rerun_cmd.outputs.has_failed_test_classes == 'true' && inputs.succeed_on_error != 'true'
+      id: run_sbt_tests_failed_only_rerun
+      uses: ./.github/actions/sbt/execute_sbt_command
+      with:
+        cmd_file: ${{ steps.failed_rerun_cmd.outputs.command_file }}
+        execution_context_size: ${{ inputs.execution_context_size }}
+        fail_on_error_in_output: ${{ inputs.fail_on_error_in_output }}
+        matrix_shard: ${{ inputs.shard_index }}
+        override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
+        succeed_on_error: ${{ inputs.succeed_on_error }}
+        timeout: ${{ inputs.timeout }}
+        extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC_rerun.log:time
+        sbt_output_file: sbt_output_rerun
+        report_to_datadog: ${{ inputs.report_to_datadog }}
+
+    - name: Snapshot rerun JUnit reports
+      if: always() && steps.failed_rerun_cmd.outputs.has_failed_test_classes == 'true' && inputs.succeed_on_error != 'true'
+      uses: ./.github/actions/test/snapshot_junit_reports
+      with:
+        output_dir: .ci-test-results/rerun
+
+    - name: Fail if tests did not pass
+      if: >
+        steps.build_cmd.outputs.skip_tests != 'true' &&
+        inputs.succeed_on_error != 'true' &&
+        steps.run_sbt_tests.outcome != 'success' &&
+        steps.run_sbt_tests_failed_only_rerun.outcome != 'success'
+      shell: bash
+      run: |
+        echo "Tests failed on the first run and were not recovered by the failed-only rerun." >&2
+        exit 1
+
+    - name: Cleanup Test Job
+      if: always() && inputs.skip_cleanup != 'true'
+      uses: ./.github/actions/test/cleanup_test_job
+      with:
+        monitor_pid: ${{ steps.track_start.outputs.monitor_pid }}
+        num_test_buckets: ${{ inputs.num_test_buckets }}
+        shard_index: ${{ inputs.shard_index }}
+        collect_postgres_query_stats: ${{ inputs.collect_postgres_query_stats }}
+        report_to_datadog: ${{ inputs.report_to_datadog }}
+        test_job_success: >-
+          ${{
+            steps.build_cmd.outputs.skip_tests == 'true' ||
+            steps.run_sbt_tests.outcome == 'success' ||
+            steps.run_sbt_tests_failed_only_rerun.outcome == 'success'
+          }}

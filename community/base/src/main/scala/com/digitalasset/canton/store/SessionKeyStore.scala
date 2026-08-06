@@ -176,14 +176,14 @@ final class SessionKeyStoreWithInMemoryCache(
 
   override def close(): Unit =
     LifeCycle.close(
-      {
-        // Invalidate all cache entries and run pending maintenance tasks
+      // Invalidate all cache entries and run pending maintenance tasks
+      () => {
         sessionKeysCacheRecipients.invalidateAll()
         sessionKeysCacheRecipients.cleanUp()
         sessionKeysCacheDecryptions.invalidateAll()
         sessionKeysCacheDecryptions.cleanUp()
-        ExecutorServiceExtensions(scheduledExecutorService)(logger, timeouts)
-      }
+      },
+      ExecutorServiceExtensions(scheduledExecutorService)(logger, timeouts),
     )(logger)
 }
 

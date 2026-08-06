@@ -7,26 +7,97 @@ import com.digitalasset.canton.config.{PemFile, PemFileOrString}
 import io.grpc.netty.shaded.io.netty.handler.ssl.{ClientAuth, SslContext}
 import org.slf4j.LoggerFactory
 
+object TlsConfig {
+  private val disallowedTlsVersions = Seq(
+    TlsVersion.V1.version,
+    TlsVersion.V1_1.version,
+  )
+
+  private val knownTlsVersions = Seq(
+    TlsVersion.V1.version,
+    TlsVersion.V1_1.version,
+    TlsVersion.V1_2.version,
+    TlsVersion.V1_3.version,
+  )
+
+  // Source: https://configurator.tlsref.org/#server=tomcat&version=11.0.1&config=intermediate&hsts&guideline=6.0
+  // General guidelines: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+  // For 1.3 suites, customize the supported key exchanges using the Java `jdk.tls.namedGroups` property
+  lazy val defaultCiphers = {
+    val candidates = Seq(
+      // TLS 1.3 suites
+      "TLS_AES_256_GCM_SHA384",
+      "TLS_AES_128_GCM_SHA256",
+      "TLS_CHACHA20_POLY1305_SHA256",
+
+      // For TLS 1.2 compatibility
+      // Transformed the values from the tlsref configurator, example: ECDHE-ECDSA-AES128-GCM-SHA256 -> TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+      "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+      "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+    )
+    val logger = LoggerFactory.getLogger(TlsConfig.getClass)
+    val filtered = candidates.filter { x =>
+      io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
+        .availableOpenSslCipherSuites()
+        .contains(x) ||
+      io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.availableJavaCipherSuites().contains(x)
+    }
+    if (filtered.isEmpty) {
+      val len = io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
+        .availableOpenSslCipherSuites()
+        .size() + io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
+        .availableJavaCipherSuites()
+        .size()
+      logger.warn(
+        s"All of Canton's default TLS ciphers are unsupported by your JVM (netty reports $len ciphers). Defaulting to JVM settings."
+      )
+      if (!io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.isAvailable) {
+        logger.info(
+          "Netty OpenSSL is not available because of an issue",
+          io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.unavailabilityCause(),
+        )
+      }
+      None
+    } else {
+      logger.debug(
+        s"Using ${filtered.length} out of ${candidates.length} Canton's default TLS ciphers"
+      )
+      Some(filtered)
+    }
+  }
+
+  val defaultMinimumServerProtocol = "TLSv1.2"
+}
+
 sealed trait TlsConfig {
   def certChainFile: PemFileOrString
+
   def privateKeyFile: PemFile
+
   def minimumServerProtocolVersion: Option[String]
+
   def ciphers: Option[Seq[String]]
 
   def protocols: Option[Seq[String]] =
     minimumServerProtocolVersion.map { minVersion =>
-      val knownTlsVersions =
-        Seq(
-          TlsVersion.V1.version,
-          TlsVersion.V1_1.version,
-          TlsVersion.V1_2.version,
-          TlsVersion.V1_3.version,
+      if (TlsConfig.disallowedTlsVersions.contains(minVersion)) {
+        throw new IllegalArgumentException(
+          s"Unsupported TLS version $minVersion: Protocol is deprecated and insecure."
         )
-      knownTlsVersions
+      }
+
+      val versionFound = TlsConfig.knownTlsVersions
         .find(_ == minVersion)
-        .fold[Seq[String]](
-          throw new IllegalArgumentException(s"Unknown TLS protocol version $minVersion")
-        )(versionFound => knownTlsVersions.filter(_ >= versionFound))
+        .getOrElse(
+          throw new IllegalArgumentException(
+            s"Invalid TLS configuration: The requested minimum protocol '$minVersion' is unknown."
+          )
+        )
+      TlsConfig.knownTlsVersions.filter(_ >= versionFound)
     }
 }
 
@@ -38,9 +109,9 @@ final case class BaseServerTlsConfig(
     certChainFile: PemFileOrString,
     privateKeyFile: PemFile,
     minimumServerProtocolVersion: Option[String] = Some(
-      TlsServerConfig.defaultMinimumServerProtocol
+      TlsConfig.defaultMinimumServerProtocol
     ),
-    ciphers: Option[Seq[String]] = TlsServerConfig.defaultCiphers,
+    ciphers: Option[Seq[String]] = TlsConfig.defaultCiphers,
 ) extends TlsConfig
 
 /** A wrapper for TLS related server parameters supporting mutual authentication.
@@ -82,9 +153,9 @@ final case class TlsServerConfig(
     trustCollectionFile: Option[PemFileOrString] = None,
     clientAuth: ServerAuthRequirementConfig = ServerAuthRequirementConfig.Optional,
     minimumServerProtocolVersion: Option[String] = Some(
-      TlsServerConfig.defaultMinimumServerProtocol
+      TlsConfig.defaultMinimumServerProtocol
     ),
-    ciphers: Option[Seq[String]] = TlsServerConfig.defaultCiphers,
+    ciphers: Option[Seq[String]] = TlsConfig.defaultCiphers,
     enableCertRevocationChecking: Boolean = false,
 ) extends TlsConfig {
   lazy val clientConfig: TlsClientConfig = {
@@ -102,79 +173,14 @@ final case class TlsServerConfig(
     if (enableCertRevocationChecking) OcspProperties.enableOcsp()
     ProtocolDisabler.disableSSLv2Hello()
   }
-
-  override def protocols: Option[Seq[String]] = {
-    val disallowedTlsVersions =
-      Seq(
-        TlsVersion.V1.version,
-        TlsVersion.V1_1.version,
-      )
-    minimumServerProtocolVersion match {
-      case Some(minVersion) if disallowedTlsVersions.contains(minVersion) =>
-        throw new IllegalArgumentException(s"Unsupported TLS version: $minVersion")
-      case _ =>
-        super.protocols
-    }
-  }
-
 }
 
 object TlsServerConfig {
-
-  // Source: https://configurator.tlsref.org/#server=tomcat&version=11.0.1&config=intermediate&hsts&guideline=6.0
-  // General guidelines: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
-  // For 1.3 suites, customize the supported key exchanges using the Java `jdk.tls.namedGroups` property
-  lazy val defaultCiphers = {
-    val candidates = Seq(
-      // TLS 1.3 suites
-      "TLS_AES_256_GCM_SHA384",
-      "TLS_AES_128_GCM_SHA256",
-      "TLS_CHACHA20_POLY1305_SHA256",
-
-      // For TLS 1.2 compatibility
-      // Transformed the values from the tlsref configurator, example: ECDHE-ECDSA-AES128-GCM-SHA256 -> TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-      "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
-      "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
-      "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
-      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
-      "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
-      "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
-    )
-    val logger = LoggerFactory.getLogger(TlsServerConfig.getClass)
-    val filtered = candidates.filter { x =>
-      io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
-        .availableOpenSslCipherSuites()
-        .contains(x) ||
-      io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.availableJavaCipherSuites().contains(x)
-    }
-    if (filtered.isEmpty) {
-      val len = io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
-        .availableOpenSslCipherSuites()
-        .size() + io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
-        .availableJavaCipherSuites()
-        .size()
-      logger.warn(
-        s"All of Canton's default TLS ciphers are unsupported by your JVM (netty reports $len ciphers). Defaulting to JVM settings."
-      )
-      if (!io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.isAvailable) {
-        logger.info(
-          "Netty OpenSSL is not available because of an issue",
-          io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.unavailabilityCause(),
-        )
-      }
-      None
-    } else {
-      logger.debug(
-        s"Using ${filtered.length} out of ${candidates.length} Canton's default TLS ciphers"
-      )
-      Some(filtered)
-    }
-  }
-
-  val defaultMinimumServerProtocol = "TLSv1.2"
+  lazy val defaultCiphers: Option[Seq[String]] = TlsConfig.defaultCiphers
+  val defaultMinimumServerProtocol: String = TlsConfig.defaultMinimumServerProtocol
 
   /** Netty incorrectly hardcodes the report that the SSLv2Hello protocol is enabled. There is no
-    * way to stop it from doing it, so we just filter the netty's erroneous claim. We also make sure
+    * way to stop it from doing it, so we just filter the Netty's erroneous claim. We also make sure
     * that the SSLv2Hello protocol is knocked out completely at the JSSE level through the
     * ProtocolDisabler
     */

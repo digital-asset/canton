@@ -121,8 +121,9 @@ object Main {
           )
         val jwtPayload = AuthServiceJWTCodec.compactPrint(payload)
         val jwtHeader = s"""{"alg": "RS256", "typ": "JWT", "kid": "$keyId"}"""
-        val signed: Jwt = JwtSigner.RSA256
-          .sign(DecodedJwt(jwtHeader, jwtPayload), signingKey)
+        val signed: Jwt = JwtSigner
+          .RSA256(signingKey)
+          .sign(DecodedJwt(jwtHeader, jwtPayload))
           .fold(e => handleGenerateTokensError("Error signing JWT token")(e.prettyPrint), identity)
 
         def changeExtension(file: File, extension: String): File = {

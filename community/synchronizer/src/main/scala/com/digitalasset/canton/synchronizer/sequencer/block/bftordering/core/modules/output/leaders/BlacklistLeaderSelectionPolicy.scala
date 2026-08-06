@@ -48,8 +48,7 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
       epochNumber: EpochNumber,
       orderedBlockNumber: BlockNumber,
       viewNumber: ViewNumber,
-  ): Unit = {
-    implicit val tc: TraceContext = TraceContext.empty
+  )(implicit traceContext: TraceContext): Unit = {
     logger.trace(s"Adding $orderedBlockNumber | $viewNumber (epoch $epochNumber) ")
     if (epochNumber < state.epochNumber) {
       // After a restart we might reprocess old blocks in output module. We ignore them here
@@ -100,12 +99,12 @@ class BlacklistLeaderSelectionPolicy[E <: Env[E]](
   private def updateState(
       topology: OrderingTopology,
       epochNumber: EpochNumber,
-  ): Unit = {
+  )(implicit traceContext: TraceContext): Unit = {
     assert(EpochNumber(state.epochNumber + 1) == epochNumber)
 
-    logger.trace(s"old blacklist state $state")(TraceContext.empty)
+    logger.trace(s"old blacklist state $state")
     state = state.update(topology, blockToLeader, nodesToPunish.toSet)
-    logger.trace(s"new blacklist state $state")(TraceContext.empty)
+    logger.trace(s"new blacklist state $state")
     nodesToPunish.clear()
 
     updateMetrics(topology)

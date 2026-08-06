@@ -159,29 +159,6 @@ trait BaseVersioningCompanionF[
   ): ParsingResult[DeserializedValueClass] =
     fromByteString(protocolVersionValidation, ev.apply(()), bytes)
 
-  /** Alias of fromByteString that can be used when the Context is a
-    * [[com.digitalasset.canton.version.ProtocolVersion]].
-    */
-  def fromByteStringPV(expectedProtocolVersion: ProtocolVersion, bytes: OriginalByteString)(implicit
-      ev: ProtocolVersion =:= Context
-  ): ParsingResult[DeserializedValueClass] =
-    fromByteString(
-      ProtocolVersionValidation(expectedProtocolVersion),
-      ev.apply(expectedProtocolVersion),
-      bytes,
-    )
-
-  /** Alias of fromByteString that can be used when the Context is a
-    * [[com.digitalasset.canton.version.ProtocolVersionValidation]].
-    */
-  def fromByteStringPVV(
-      protocolVersionValidation: ProtocolVersionValidation,
-      bytes: OriginalByteString,
-  )(implicit
-      ev: ProtocolVersionValidation =:= Context
-  ): ParsingResult[DeserializedValueClass] =
-    fromByteString(protocolVersionValidation, ev.apply(protocolVersionValidation), bytes)
-
   /** Deserializes the given bytes without validation.
     *
     * '''Unsafe!''' Do NOT use this method unless you can justify that the given bytes originate
@@ -266,21 +243,6 @@ trait BaseVersioningCompanionF[
   )(implicit
       ev: Unit =:= Context
   ): DeserializedValueClass = tryReadFromTrustedFile(ev.apply(()), inputFile)
-
-  def readFromTrustedFilePVV(
-      inputFile: String
-  )(implicit ev: ProtocolVersionValidation =:= Context): Either[String, DeserializedValueClass] =
-    readFromTrustedFile(ev.apply(ProtocolVersionValidation.NoValidation), inputFile)
-
-  /** Since dependency on the ProtocolVersionValidation is encoded in the context, one still has to
-    * provide `ProtocolVersionValidation.NoValidation` even when calling `fromTrustedByteString`,
-    * which is counterintuitive. This method allows a simpler call if the Context is a
-    * [[com.digitalasset.canton.version.ProtocolVersionValidation]]
-    */
-  def fromTrustedByteStringPVV(
-      bytes: OriginalByteString
-  )(implicit ev: ProtocolVersionValidation =:= Context): ParsingResult[DeserializedValueClass] =
-    fromTrustedByteString(ev.apply(ProtocolVersionValidation.NoValidation))(bytes)
 
   /** Deserializes a message using a delimiter (the message length) from the given input stream.
     *
@@ -387,7 +349,6 @@ trait VersioningCompanionMemoization2F[F[
       Unit, // Dependency
     ] {
 
-  @nowarn("msg=parameter _ctx in anonymous function is never used")
   protected def supportedProtoVersionMemoized[Proto <: scalapb.GeneratedMessage](
       p: scalapb.GeneratedMessageCompanion[Proto]
   )(

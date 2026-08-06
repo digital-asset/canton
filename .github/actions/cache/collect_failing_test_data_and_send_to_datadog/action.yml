@@ -1,0 +1,20 @@
+name: Collect Failing Data and send to Datadog
+description: Collect Failing Data and send to Datadog
+
+inputs:
+  matrix-shard:
+    description: The matrix shard to run the command on
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Send name of each failing test to datadog
+      if: always()
+      uses: ./.github/actions/nix/nix_run
+      env:
+        GH_TOKEN: ${{ github.token }}
+        DATADOG_API_KEY: ${{ env.DATADOG_API_KEY }}
+        MATRIX_SHARD: ${{ inputs.matrix-shard }}
+      with:
+        command: python3 ./scripts/ci/report_failing_tests.py

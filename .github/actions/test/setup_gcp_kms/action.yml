@@ -1,0 +1,26 @@
+name: Setup GCP/kms
+description: >
+  Setup GCP credentials for KMS tests.
+  Callers must set the GCLOUD_SERVICE_KEY environment variable (a GCP service account key JSON)
+  before invoking this action, typically via a job-level env block mapped from a repository secret.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup GCP credentials for KMS
+      env:
+        GCLOUD_SERVICE_KEY: ${{ env.GCLOUD_SERVICE_KEY }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "${GCLOUD_SERVICE_KEY:-}" ]]; then
+          echo "GCLOUD_SERVICE_KEY is not set or empty." >&2
+          exit 1
+        fi
+
+        umask 077
+        key="$(mktemp)"
+        printf '%s' "${GCLOUD_SERVICE_KEY}" > "$key"
+        chmod 600 "$key"
+        echo "GOOGLE_APPLICATION_CREDENTIALS=$key" >> "$GITHUB_ENV"
+      shell: bash

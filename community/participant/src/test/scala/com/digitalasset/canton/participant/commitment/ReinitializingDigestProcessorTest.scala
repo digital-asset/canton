@@ -16,11 +16,17 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 }
 import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.metrics.{
+  CommitmentMetrics,
+  ParticipantTestMetrics,
+  TestCommitmentMetrics,
+}
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigestUpdate,
   Checkpoint,
   CheckpointType,
   RawDigest,
+  allCheckpointsFilter,
 }
 import com.digitalasset.canton.participant.store.{
   AcsDigestStore,
@@ -70,6 +76,7 @@ class ReinitializingDigestProcessorTest
         ),
       ).build(),
       hasLedgerEnd: Boolean = true,
+      metrics: CommitmentMetrics = ParticipantTestMetrics.synchronizer.commitments,
   ): ReinitializingDigestProcessor = {
     val testSynchronizerId = DefaultTestIdentities.synchronizerId
     val mockLedgerApiStore: LedgerApiStore = {
@@ -100,6 +107,7 @@ class ReinitializingDigestProcessorTest
       acsDigestStore,
       mockStringInterning,
       AcsDigestTracingMode.Disabled,
+      metrics,
       loggerFactory,
     )
 
@@ -119,6 +127,7 @@ class ReinitializingDigestProcessorTest
         FutureUnlessShutdown.pure(
           testingTopologyFactory.topologySnapshot(timestampOfSnapshot = ts.value)
         ),
+      metrics = metrics,
       loggerFactory = loggerFactory,
       timeouts = timeouts,
     )
@@ -636,10 +645,12 @@ class ReinitializingDigestProcessorTest
 
       "do nothing on an empty digest store" in {
         val testDigestStore = mkInMemoryDigestStore()
+        val metrics = TestCommitmentMetrics()
         val rdp = mkReinitializingDigestProcessor(
           reinitTimepoint = tp100,
           acsDigestStore = testDigestStore,
           testingTopologyFactory = topologySnapshotFactory,
+          metrics = metrics,
         )
 
         rdp.start().futureValueUS
@@ -655,10 +666,13 @@ class ReinitializingDigestProcessorTest
 
         participantDigests.isEmpty shouldBe true
         partyDigests.isEmpty shouldBe true
+        // Write a checkpoint and update the metric even if all digests are empty
+        metrics.checkpointWatermark.getValue shouldBe tp100.recordTime.toMicros
       }
 
       "prepare tombstones and set new values with checkpoint" in {
         val testDigestStore = mkInMemoryDigestStore()
+        val metrics = TestCommitmentMetrics()
         val rdp = mkReinitializingDigestProcessor(
           reinitTimepoint = tp100,
           acsDigestStore = testDigestStore,
@@ -669,6 +683,7 @@ class ReinitializingDigestProcessorTest
             (off(100), cid(2), Seq(party(alice), party(bob), party(charlie))),
           ),
           testingTopologyFactory = topologySnapshotFactory,
+          metrics = metrics,
         )
 
         testDigestStore.participant
@@ -689,10 +704,13 @@ class ReinitializingDigestProcessorTest
         rdp.start().futureValueUS
         rdp.completionFuture.futureValueUS
 
-        val lastCheckpoint = testDigestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS
+        val lastCheckpoint =
+          testDigestStore.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter).futureValueUS
 
         lastCheckpoint.isDefined shouldBe true
         lastCheckpoint.value shouldBe Checkpoint(tp(100), CheckpointType.Reinitialization)
+
+        metrics.checkpointWatermark.getValue shouldBe ts(100).toMicros
 
         // Do we still have a valid chain of digest journals?
         testDigestStore.checkReplacesInvariant().futureValueUS

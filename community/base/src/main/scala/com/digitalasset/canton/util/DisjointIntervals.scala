@@ -127,7 +127,7 @@ sealed trait DisjointIntervals[A] extends PrettyPrinting with Product with Seria
     other.isInstanceOf[DisjointIntervals[?]]
 
   final override def hashCode(): Int =
-    MurmurHash3.productHash(this)
+    MurmurHash3.caseClassHash(this)
 
   override def productArity: Int = 1
   override def productElement(n: Int): Any = intervals

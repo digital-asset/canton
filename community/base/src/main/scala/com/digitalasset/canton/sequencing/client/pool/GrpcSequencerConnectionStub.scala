@@ -148,7 +148,7 @@ class GrpcSequencerConnectionStub(
           .validateThen(
             synchronizerIdP.sequencerUid,
             "sequencer_uid",
-            ProtocolVersionValidation.AlwaysValidation,
+            ProtocolVersionValidation.PV(psid.protocolVersion),
           )(UniqueIdentifier.fromProtoPrimitive)
           .map(SequencerId(_))
           .leftMap[SequencerConnectionStubError](err =>

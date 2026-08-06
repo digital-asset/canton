@@ -46,10 +46,10 @@ class CachedJwtVerifierLoaderRefreshSpec
   private val keyId = "test-key-1"
 
   private def generateToken(): Jwt = {
-    val jwtHeader = s"""{"alg": "RS256", "typ": "JWT", "kid": "$keyId"}"""
     val jwtPayload = s"""{"test": "CachedJwtVerifierLoaderRefreshSpec"}"""
-    JwtSigner.RSA256
-      .sign(DecodedJwt(jwtHeader, jwtPayload), privateKey)
+    JwtSigner
+      .RSA256(privateKey, kid = Some(keyId))
+      .signPayload(jwtPayload)
       .fold(e => fail("Failed to generate signed token: " + e.prettyPrint), identity)
   }
 

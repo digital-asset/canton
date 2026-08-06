@@ -36,9 +36,11 @@ class AcsCommitmentPublicationPostProcessor(
       connectedSynchronizersLookupContainer
         // not publishing if not connected to synchronizer: it means subsequent crash recovery will establish consistency again
         .get(synchronizerId)
+        // Obtaining the ACS Commitment processor, there is no publishing if it is disabled (=not defined)
+        .flatMap(_.acsCommitmentProcessorO)
         // not publishing anything if the AcsCommitmentProcessor initialization succeeded with AbortedDueToShutdown or failed
         .foreach(
-          _.acsCommitmentProcessor.publish(
+          _.publish(
             RecordTime.fromSynchronizerIndex(synchronizerIndex),
             acsChangeFactoryO,
           )(
@@ -68,9 +70,11 @@ class AcsCommitmentPublicationPostProcessor(
         connectedSynchronizersLookupContainer
           // not publishing if not connected to synchronizer: it means subsequent crash recovery will establish consistency again
           .get(upgradeTimeReached.synchronizerId)
+          // Obtaining the ACS Commitment processor, there is no publishing if it is disabled (=not defined)
+          .flatMap(_.acsCommitmentProcessorO)
           // not publishing anything if the AcsCommitmentProcessor initialization succeeded with AbortedDueToShutdown or failed
           .foreach(
-            _.acsCommitmentProcessor.publishForUpgradeTime(
+            _.publishForUpgradeTime(
               upgradeTimeReached.synchronizerIndex.recordTime
             )(
               // The trace context is deliberately generated here instead of continuing the one for the Update

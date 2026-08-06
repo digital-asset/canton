@@ -7,13 +7,16 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.objId
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.*
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.stub.StreamObserver
 
 class P2PGrpcBftOrderingService(
-    createServerSidePeerReceiver: StreamObserver[
-      BftOrderingMessage
-    ] => UnlessShutdown[StreamObserver[
+    createServerSidePeerReceiver: (
+        StreamObserver[
+          BftOrderingMessage
+        ],
+        TraceContext,
+    ) => UnlessShutdown[StreamObserver[
       BftOrderingMessage
     ]],
     override val loggerFactory: NamedLoggerFactory,
@@ -22,12 +25,12 @@ class P2PGrpcBftOrderingService(
 
   override def receive(
       sendingStreamObserver: StreamObserver[BftOrderingMessage]
-  ): StreamObserver[BftOrderingMessage] =
-    createServerSidePeerReceiver(sendingStreamObserver) match {
+  ): StreamObserver[BftOrderingMessage] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    createServerSidePeerReceiver(sendingStreamObserver, traceContext) match {
       case UnlessShutdown.Outcome(peerReceiver) => peerReceiver
       case UnlessShutdown.AbortedDueToShutdown =>
         // No receiver created means that we're shutting down
-        implicit val traceContext: TraceContext = TraceContext.empty
         logger.debug(s"Completing peer sender ${objId(sendingStreamObserver)} due to shutdown")
         // Unsynchronized but we're shutting down, so this observer hasn't been sent anything
         sendingStreamObserver.onCompleted()
@@ -40,4 +43,5 @@ class P2PGrpcBftOrderingService(
             logger.debug(s"Received completion")
         }
     }
+  }
 }

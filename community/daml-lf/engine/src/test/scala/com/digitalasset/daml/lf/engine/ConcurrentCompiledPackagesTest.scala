@@ -28,7 +28,7 @@ class ConcurrentCompiledPackagesTest extends AnyWordSpec with Matchers with Insi
     "load valid package" in {
 
       new ConcurrentCompiledPackages(Compiler.Config.Dev)
-        .addPackage(parserParameters.defaultPackageId, pkg) shouldBe Result.Unit
+        .addPackage(parserParameters.defaultPackageId, pkg) shouldBe Result.unit
 
     }
 
@@ -44,8 +44,8 @@ class ConcurrentCompiledPackagesTest extends AnyWordSpec with Matchers with Insi
         }
       """;
 
-      inside(packages.addPackage(parserParameters.defaultPackageId, illFormedPackage)) {
-        case ResultError(Error.Package(_: Error.Package.Validation)) =>
+      inside(packages.addPackage(parserParameters.defaultPackageId, illFormedPackage).start) {
+        case Result.Step.Error(Error.Package(_: Error.Package.Validation)) =>
       }
     }
   }

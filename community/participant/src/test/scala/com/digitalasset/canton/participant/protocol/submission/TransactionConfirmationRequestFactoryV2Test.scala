@@ -11,13 +11,9 @@ import com.digitalasset.canton.crypto.{
   SymmetricKeyScheme,
   SynchronizerSnapshotSyncCryptoApi,
 }
+import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{
-  ByCiphertextId,
-  ByViewHash,
-  LightTransactionViewTree,
-  SubviewReferenceAndKey,
-}
+import com.digitalasset.canton.data.{ByCiphertextId, ByViewHash, LightTransactionViewTree}
 import com.digitalasset.canton.protocol.messages.{
   EncryptedMultipleViews,
   EncryptedMultipleViewsMessage,
@@ -26,6 +22,7 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.protocol.{ExampleTransaction, ViewHash}
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 
 import scala.collection.concurrent.TrieMap
@@ -150,10 +147,9 @@ class TransactionConfirmationRequestFactoryV2Test
     }
   }
 
-  // TODO(#32393): Enable for PV`transparency`+ after implementing the new full view encryption/decryption flow.
   "A ConfirmationRequestFactory version 2 (uses ciphertext IDs references)" must {
-    /*if (testedProtocolVersion >= ProtocolVersion.transparency)
-      behave like transactionConfirmationRequestFactoryTest()*/
+    if (testedProtocolVersion >= ProtocolVersion.transparency)
+      behave like transactionConfirmationRequestFactoryTest()
   }
 
 }

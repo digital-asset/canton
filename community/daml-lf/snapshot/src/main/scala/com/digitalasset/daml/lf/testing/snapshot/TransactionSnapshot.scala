@@ -8,6 +8,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.archive.{ArchiveDecoder, DarDecoder}
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error, TransactionCoder as TxCoder}
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
@@ -78,7 +79,7 @@ final case class TransactionSnapshot(
           InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
         metricPlugins = metricPlugins,
       )
-      .consume(contracts, pkgs, contractKeys)
+      .consume(lookupHandler(contracts, pkgs, contractKeys))
       .map { case (_, _, metrics) => metrics }
 
   def validate(): Either[Error, Unit] =
@@ -95,7 +96,7 @@ final case class TransactionSnapshot(
           InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
         metricPlugins = metricPlugins,
       )
-      .consume(contracts, pkgs, contractKeys)
+      .consume(lookupHandler(contracts, pkgs, contractKeys))
 
 }
 
@@ -129,7 +130,7 @@ private[snapshot] object TransactionSnapshot {
     AstUtil.dependenciesInTopologicalOrder(pkgs.keys.toList, pkgs).foreach { pkgId =>
       val r = engine
         .preloadPackage(pkgId, pkgs(pkgId))
-        .consume(unexpectedError, unexpectedError, unexpectedError)
+        .consume(lookupHandler(unexpectedError, unexpectedError, unexpectedError))
       assert(r.isRight)
     }
     engine

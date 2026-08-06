@@ -1,0 +1,75 @@
+name: Slack Failure Notification
+description: slack_red_main_with_volunteer
+
+inputs:
+  webhook_url:
+    description: Slack webhook URL
+    required: true
+  failed_job:
+    description: Failed job name
+    required: true
+  allowed_branches:
+    description: Comma-separated allowed branches
+    required: false
+    default: 'main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10'
+  gcloud_sheets_sa_key:
+    description: Service-account key for the rota Google Sheet. Without it select_rota falls back to the roster pool.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Choose volunteer
+      id: choose_volunteer
+      # Pick the rota for the failed job from the rota Google Sheet: a blackduck
+      # job maps to the Release & Blackduck rota, everything else to the CI rota
+      # (see JOB_ROTATION in select_rota.py). This mirrors the CircleCI path,
+      # which passes --job "$CIRCLE_JOB". Runs under .ci/nix-exec for the
+      # cryptography dep. select_rota.py falls back to the roster pool if the
+      # sheet is unreadable, so it never fails.
+      env:
+        GCLOUD_SHEETS_SA_KEY: ${{ inputs.gcloud_sheets_sa_key }}
+        FAILED_JOB: ${{ inputs.failed_job }}
+      run: |
+        SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$FAILED_JOB")
+        echo "$SELECTED_VOLUNTEER"
+        echo "volunteer=${SELECTED_VOLUNTEER}" >> $GITHUB_OUTPUT
+      shell: bash
+
+    - name: Check allowed branch
+      id: branch-check
+      uses: ./.github/actions/utils/check_allowed_branches
+      with:
+        allowed-branches: ${{ inputs.allowed_branches }}
+
+    - name: Build Slack message
+      id: slack_message
+      shell: bash
+      env:
+        FAILED_JOB: ${{ inputs.failed_job }}
+        REF_NAME: ${{ github.ref_name }}
+        VOLUNTEER: ${{ steps.choose_volunteer.outputs.volunteer }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        TEXT=$(printf '*[GitHub Actions]* A `%s` job has failed on branch' "$FAILED_JOB")
+        TEXT="$TEXT \`$REF_NAME\`!"
+        TEXT="$TEXT Can you have a look? <$RUN_URL|View workflow run>"
+        # Only add the mention if select_rota actually returned someone, an empty
+        # value would render as a broken "<@>" in Slack.
+        if [ -n "$VOLUNTEER" ]; then
+          TEXT="$TEXT <@$VOLUNTEER>"
+        fi
+        # Build the payload with jq so the text is JSON-escaped, the job name can
+        # contain quotes or other special characters without breaking the payload.
+        PAYLOAD=$(jq -cn --arg text "$TEXT" '{text: $text}')
+        echo "payload=$PAYLOAD" >> "$GITHUB_OUTPUT"
+
+    - name: Slack Failure Notification
+      if: steps.branch-check.outputs.branch_allowed == 'true'
+      uses: slackapi/slack-github-action@v1.26.0
+      env:
+        SLACK_WEBHOOK_URL: ${{ inputs.webhook_url }}
+        SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+      with:
+        payload: ${{ steps.slack_message.outputs.payload }}

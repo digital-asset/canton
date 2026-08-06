@@ -36,8 +36,6 @@ class TeaDbTrafficStore(
     with TeaTrafficStore {
   import storage.api.*
 
-  implicit val rowsAlteredAccountState: DbStorage.RowsAltered[Option[AccountState]] = _.isDefined
-
   override def persistDelta(
       accountId: AccountId,
       eventId: EventId,

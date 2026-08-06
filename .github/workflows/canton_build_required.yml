@@ -1,0 +1,486 @@
+name: Canton Build Required
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      test_to_run_many_times:
+        type: boolean
+        default: false
+      manual_job:
+        type: string
+        default: none
+
+# On main and release-line branches, each run gets a unique concurrency group (based on run_id),
+# so runs never cancel or wait for each other.
+# On all other branches, runs are grouped by workflow and branch, so a newer push cancels
+# any in-progress run for the same branch.
+concurrency:
+  group: |-
+    ${{ case(
+      github.ref_name == 'main', github.run_id,
+      startsWith(github.ref_name, 'release-line'), github.run_id,
+      format('{0}-{1}', github.workflow, github.ref_name)
+    ) }}
+  cancel-in-progress: ${{ github.ref_name != 'main' && !startsWith(github.ref_name, 'release-line') }}
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+  pull-requests: read
+
+jobs:
+  setup_and_validation:
+    name: Setup nix and Validate skip-ci label and yaml files
+    uses: ./.github/workflows/_setup_and_validation.yml
+    secrets: inherit
+
+  static_tests:
+    name: Static Tests
+    needs: setup_and_validation
+    if: |
+      needs.setup_and_validation.outputs.should-skip != 'true' &&
+      (inputs.test_to_run_many_times != true || github.event_name != 'workflow_call') &&
+      (inputs.manual_job == 'none' || github.event_name != 'workflow_call')
+    uses: ./.github/workflows/_static_tests.yml
+    secrets: inherit
+
+  compile:
+    name: Compile
+    needs: setup_and_validation
+    if: |
+      (
+        needs.setup_and_validation.outputs.should-skip != 'true' &&
+        (inputs.test_to_run_many_times != true || github.event_name != 'workflow_call') &&
+        (inputs.manual_job == 'none' || github.event_name != 'workflow_call')
+      ) &&
+      (
+        github.ref_type == 'branch' ||
+        (
+          github.ref_type == 'tag' &&
+          startsWith(github.ref, 'refs/tags/v')
+        )
+      )
+    uses: ./.github/workflows/_compile.yml
+    secrets: inherit
+    with:
+      reset_classes_if_requested: true
+
+  test:
+    name: Test
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      override_java_version_for_tests: ""
+      protocol_version: ""
+
+  build_docs:
+    name: Build Docs
+    needs:
+      - build_docs_snippets
+      - build_scaladoc
+      - package_community
+    if: |
+      github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/heads/release-line') ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_build_docs.yml
+    secrets: inherit
+
+  build_docs_snippets:
+    name: Build Docs Snippets
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        (
+          github.ref == 'refs/heads/main' ||
+          startsWith(github.ref, 'refs/heads/release-line')
+        )
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_build_docs_snippets.yml
+    secrets: inherit
+
+  build_scaladoc:
+    name: Build Scaladoc
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        (
+          github.ref == 'refs/heads/main' ||
+          startsWith(github.ref, 'refs/heads/release-line')
+        )
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_build_scaladoc.yml
+    secrets: inherit
+
+  crash_recovery_test:
+    name: Crash Recovery Test
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_crash_recovery_test.yml
+    secrets: inherit
+
+  ledger_api_compatibility_tests:
+    name: Ledger API Compatibility Tests
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        (
+          github.ref == 'refs/heads/main' ||
+          startsWith(github.ref, 'refs/heads/release-line')
+        )
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
+    secrets: inherit
+
+  package_community:
+    name: Package Community
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_package_community.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+
+  protobuf_continuity:
+    name: Protobuf Continuity
+    needs: test
+    if: |
+      github.ref_type == 'branch' &&
+      !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+    uses: ./.github/workflows/_protobuf_continuity.yml
+    secrets: inherit
+
+  protocol_continuity_test_latest:
+    name: Protocol Continuity Test Latest
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_protocol_continuity_test_latest.yml
+    secrets: inherit
+
+  scalafix:
+    name: Scalafix
+    needs: compile
+    if: |
+      github.ref_type == 'branch' ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_scalafix.yml
+    secrets: inherit
+
+  sequential_test:
+    name: Sequential Test
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        (
+            github.ref == 'refs/heads/main' ||
+            startsWith(github.ref, 'refs/heads/release-line')
+        )
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    needs: [test, compile]
+    uses: ./.github/workflows/_sequential_test.yml
+    secrets: inherit
+
+  smoke_test:
+    name: Smoke Test
+    needs: compile
+    if: |
+      github.ref_type == 'branch' &&
+      startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+    uses: ./.github/workflows/_smoke_test.yml
+    secrets: inherit
+
+  temp_acs_commitment_tests_pv_dev:
+    name: Temp ACS Commitment Tests PV Dev
+    needs: compile
+    if: |
+      github.ref_type == 'branch' &&
+      (
+        github.ref != 'refs/heads/main' &&
+        !startsWith(github.ref, 'refs/heads/release-line') &&
+        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      )
+    uses: ./.github/workflows/_temp_acs_commitment_tests_pv_dev.yml
+    secrets: inherit
+
+  test_data_continuity_dumps:
+    name: Test Data Continuity Dumps
+    needs: compile
+    if: |
+      github.ref_type == 'branch' &&
+      !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+    uses: ./.github/workflows/_test_data_continuity_dumps.yml
+    # Full coverage on main and release-line branches, scoped down on regular PR branches. A PR
+    # targeting a release-line still gets full coverage from the push to the release-line branch
+    # once it merges, right before the release that usually follows.
+    with:
+      full_coverage: ${{ github.ref_name == 'main' || startsWith(github.ref_name, 'release-line') }}
+    secrets: inherit
+
+  test_docker_images:
+    name: Test Docker Images
+    needs: package_community
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_test_docker_images.yml
+    secrets: inherit
+
+  test_protocol_version_36:
+    name: Test Protocol Version 36
+    needs: compile
+    if: |
+      github.ref_type == 'branch' &&
+      !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      protocol_version: '36'
+
+  test_protocol_version_dev:
+    name: Test Protocol Version Dev
+    needs: test_protocol_version_36
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        (
+            github.ref == 'refs/heads/main' ||
+            startsWith(github.ref, 'refs/heads/release-line')
+        )
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      protocol_version: 'DEV'
+
+  toxiproxy_test_fast:
+    name: Toxiproxy Test Fast
+    needs: compile
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        !startsWith(github.ref_name, 'gh-readonly-queue/main/')
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref_name, 'v')
+      )
+    uses: ./.github/workflows/_toxiproxy_test_fast.yml
+    secrets: inherit
+
+  unstable_test:
+    name: Unstable Test
+    needs: package_community
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        (
+          github.ref == 'refs/heads/main' ||
+          startsWith(github.ref, 'refs/heads/release-line')
+        )
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_unstable_test.yml
+    secrets: inherit
+
+  variations_test:
+    name: Variations Test
+    needs: test
+    if: |
+      (
+        github.ref_type == 'branch' &&
+        (
+            github.ref == 'refs/heads/main' ||
+            startsWith(github.ref, 'refs/heads/release-line')
+        )
+      ) ||
+      (
+        github.ref_type == 'tag' &&
+        startsWith(github.ref, 'refs/tags/v')
+      )
+    uses: ./.github/workflows/_variations_test.yml
+    secrets: inherit
+
+  variations_test_selected_users:
+    name: Variations Test (Selected Users)
+    needs: compile
+    if: |
+      github.ref_type == 'branch' &&
+      (
+          github.ref != 'refs/heads/main' &&
+          !startsWith(github.ref, 'refs/heads/release-line') &&
+          !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      )
+    uses: ./.github/workflows/_variations_test.yml
+    secrets: inherit
+    with:
+      only_for_selected_users: true
+
+  notify:
+    name: Notify on Failure
+    needs:
+      - setup_and_validation
+      - static_tests
+      - compile
+      - build_docs
+      - build_docs_snippets
+      - build_scaladoc
+      - package_community
+      - protobuf_continuity
+      - protocol_continuity_test_latest
+      - scalafix
+      - test_data_continuity_dumps
+      - test_docker_images
+      # Also depend on the aggregate gate, so notify fires for any gate-covered job that is not
+      # listed individually above (the *_test jobs, protocol version jobs, toxiproxy, ...). The gate
+      # fails whenever any required job fails, so this is a catch-all on top of the detailed entries.
+      - canton_build_required_gate
+    if: |
+      always() &&
+      github.run_attempt >= 2 &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}
+
+  canton_build_required_gate:
+    name: Canton Build Required Gate
+    needs:
+      - setup_and_validation
+      - static_tests
+      - compile
+      - test
+      - build_docs
+      - build_docs_snippets
+      - build_scaladoc
+      - crash_recovery_test
+      - ledger_api_compatibility_tests
+      - package_community
+      - protobuf_continuity
+      - protocol_continuity_test_latest
+      - scalafix
+      - sequential_test
+      - smoke_test
+      - temp_acs_commitment_tests_pv_dev
+      - test_data_continuity_dumps
+      - test_docker_images
+      - test_protocol_version_36
+      - test_protocol_version_dev
+      - toxiproxy_test_fast
+      - unstable_test
+      - variations_test
+      - variations_test_selected_users
+    if: ${{ always() }}
+    runs-on: dach-ny-canton
+    steps:
+      # Required before the local nix_script_run action below: a `uses: ./...` action is only
+      # resolvable once the repository is present in the runner workspace.
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Evaluate workflow results
+        uses: ./.github/actions/nix/nix_script_run
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        with:
+          command: |
+            python3 <<'PY'
+            import json
+            import os
+            import sys
+
+            needs = json.loads(os.environ["NEEDS_JSON"])
+
+            failed_or_interrupted = {
+                job_name: job_data.get("result")
+                for job_name, job_data in needs.items()
+                if job_data.get("result") in {"failure", "cancelled"}
+            }
+
+            if failed_or_interrupted:
+                print("The following jobs did not complete successfully:")
+                for job_name, result in failed_or_interrupted.items():
+                    print(f" - {job_name}: {result}")
+                sys.exit(1)
+
+            print("All required canton_build_required jobs either succeeded or were skipped.")
+            sys.exit(0)
+            PY

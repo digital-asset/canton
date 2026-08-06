@@ -36,7 +36,8 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{MonadUtil, OptionUtil}
-import com.digitalasset.canton.version.ReleaseVersion
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersionValidation, ReleaseVersion}
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -132,15 +133,35 @@ class GrpcTopologyAggregationService(
       request: v30.ListPartiesRequest
   ): Future[v30.ListPartiesResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val v30.ListPartiesRequest(asOfP, limit, synchronizerIdsP, filterParty, filterParticipant) =
+    val v30.ListPartiesRequest(asOfP, limit, synchronizerIdsP, filterPartyP, filterParticipantP) =
       request
 
     val res: EitherT[FutureUnlessShutdown, RpcError, v30.ListPartiesResponse] = for {
       synchronizerIds <- EitherT
         .fromEither[FutureUnlessShutdown](
-          synchronizerIdsP.traverse(SynchronizerId.fromProtoPrimitive(_, "synchronizer_ids"))
+          ProtoValidation.validateThen(
+            synchronizerIdsP,
+            "synchronizer_ids",
+            ProtocolVersionValidation.AlwaysValidation,
+          )(SynchronizerId.fromProtoPrimitive)
         )
         .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
+
+      filterParty <- wrapErrUS(
+        ProtoValidation.validate(
+          filterPartyP,
+          Some("filter_party"),
+          ProtocolVersionValidation.AlwaysValidation,
+        )
+      )
+      filterParticipant <- wrapErrUS(
+        ProtoValidation
+          .validate(
+            filterParticipantP,
+            Some("filter_participant"),
+            ProtocolVersionValidation.AlwaysValidation,
+          )
+      )
 
       matched <- snapshots(synchronizerIds.toSet, asOfP)
 
@@ -214,30 +235,48 @@ class GrpcTopologyAggregationService(
 
     val res: EitherT[FutureUnlessShutdown, RpcError, v30.ListKeyOwnersResponse] = for {
       keyOwnerTypeO <- wrapErrUS(
-        OptionUtil
-          .emptyStringAsNone(request.filterKeyOwnerType)
-          .traverse(code => MemberCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
+        ProtoValidation.validateThen(
+          request.filterKeyOwnerType,
+          "filter_key_owner_type",
+          ProtocolVersionValidation.AlwaysValidation,
+        )((code, field) =>
+          OptionUtil.emptyStringAsNone(code).traverse(MemberCode.fromProtoPrimitive(_, field))
+        )
       ): EitherT[FutureUnlessShutdown, RpcError, Option[MemberCode]]
 
       clientVersion <- EitherT
         .fromEither[FutureUnlessShutdown](
-          request.baseAggregationRequest
-            .map(_.clientVersion)
-            .traverse(ReleaseVersion.fromProtoPrimitive(_, "client_version"))
+          ProtoValidation.validateThen(
+            request.baseAggregationRequest.map(_.clientVersion),
+            "client_version",
+            ProtocolVersionValidation.AlwaysValidation,
+          )(ReleaseVersion.fromProtoPrimitive)
         )
         .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
 
       synchronizerIds <- EitherT
         .fromEither[FutureUnlessShutdown](
-          request.synchronizerIds.traverse(SynchronizerId.fromProtoPrimitive(_, "synchronizer_ids"))
+          ProtoValidation.validateThen(
+            request.synchronizerIds,
+            "synchronizer_ids",
+            ProtocolVersionValidation.AlwaysValidation,
+          )(SynchronizerId.fromProtoPrimitive)
         )
         .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
+
+      filterKeyOwnerUid <- wrapErrUS(
+        ProtoValidation.validate(
+          request.filterKeyOwnerUid,
+          Some("filter_key_owner_uid"),
+          ProtocolVersionValidation.AlwaysValidation,
+        )
+      )
 
       matched <- snapshots(synchronizerIds.toSet, request.asOf)
 
       res <- EitherT.right(MonadUtil.parTraverseWithLimit(batchingConfig.parallelism)(matched) {
         case (storeId, client) =>
-          client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
+          client.inspectKeys(filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
             (storeId, res)
           }
       })

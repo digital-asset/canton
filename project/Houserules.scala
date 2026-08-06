@@ -187,7 +187,7 @@ object HouseRules extends AutoPlugin {
       Test / scalacOptions --= scalacOptionsToDisableForTests,
       libraryDependencies ++= onScalaVersion(
         scala213 = Seq(
-          compilerPlugin(("org.typelevel" %% "kind-projector" % "0.13.3").cross(CrossVersion.full))
+          compilerPlugin(("org.typelevel" %% "kind-projector" % "0.13.4").cross(CrossVersion.full))
         )
       ).value,
       Compile / compile / wartremoverErrors ++= wartremoverErrorsForCompileScope,

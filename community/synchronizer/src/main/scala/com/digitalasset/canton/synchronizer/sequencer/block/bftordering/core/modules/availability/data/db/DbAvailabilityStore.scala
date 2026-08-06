@@ -92,7 +92,7 @@ class DbAvailabilityStore(
         ): FutureUnlessShutdown[immutable.Iterable[Option[OrderingRequestBatch]]] =
           lookupBatches(items.map(_.value))
 
-        override def prettyItem: Pretty[BatchIdAndEpochNumber] = {
+        override val prettyItem: Pretty[BatchIdAndEpochNumber] = {
           import com.digitalasset.canton.logging.pretty.PrettyUtil.*
           prettyOfClass[BatchIdAndEpochNumber](
             param("batchId", _.batchId.hash),

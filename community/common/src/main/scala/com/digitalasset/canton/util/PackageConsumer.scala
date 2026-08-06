@@ -96,32 +96,39 @@ abstract class PackageConsumer(
       implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, String, V] =
-    result match {
-      case ResultError(e) =>
-        EitherT.leftT[FutureUnlessShutdown, V](e.toString)
+  ): EitherT[FutureUnlessShutdown, String, V] = {
+    def drive(step: Result.Step[V]): EitherT[FutureUnlessShutdown, String, V] =
+      step match {
+        case Result.Step.Error(e) =>
+          EitherT.leftT[FutureUnlessShutdown, V](e.toString)
 
-      case ResultNeedPackage(packageId, resume) =>
-        for {
-          p <- resolve(packageId, onMissingPackage)
-          r <- consume(resume(p), onMissingPackage)
-        } yield r
+        case Result.Step.Pure(value) =>
+          EitherT.rightT[FutureUnlessShutdown, String](value)
 
-      case ResultInterruption(continue, abort) =>
-        if (continueOnInterruption()) {
-          consume(continue(), onMissingPackage)
-        } else {
-          val reason = abort()
-          EitherT.leftT[FutureUnlessShutdown, V](
-            s"Aborted engine: ${reason.getOrElse("no context provided")}"
-          )
-        }
+        case im: Result.Step.Impure[x, V] =>
+          im.fx match {
+            case Result.Need.Package(packageId) =>
+              for {
+                p <- resolve(packageId, onMissingPackage)
+                r <- drive(im.resume(p))
+              } yield r
 
-      case ResultDone(result) =>
-        EitherT.rightT[FutureUnlessShutdown, String](result)
+            case Result.Need.Interruption(abort) =>
+              if (continueOnInterruption()) {
+                drive(im.resume(()))
+              } else {
+                val reason = abort()
+                EitherT.leftT[FutureUnlessShutdown, V](
+                  s"Aborted engine: ${reason.getOrElse("no context provided")}"
+                )
+              }
 
-      case other =>
-        EitherT.leftT[FutureUnlessShutdown, V](s"PackageConsumer did not expect: $other")
-    }
+            case other =>
+              EitherT.leftT[FutureUnlessShutdown, V](s"PackageConsumer did not expect: $other")
+          }
+      }
+
+    drive(result.start)
+  }
 
 }
