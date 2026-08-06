@@ -109,6 +109,7 @@ private[events] object TransactionLogUpdatesConversions {
 
     case u: TransactionLogUpdate.TopologyTransactionEffective =>
       internalUpdateFormat.includeTopologyEvents
+        .filter(_.synchronizerId.forall(_.toProtoPrimitive == u.synchronizerId))
         .flatMap(_.participantAuthorizationFormat)
         .flatMap { participantAuthorizationFormat =>
           val filteredEvents =

@@ -250,29 +250,34 @@ class UpdatesStreamReader(
     }
 
     val topologyTransactions: Source[(Offset, UpdateResponse), NotUsed] =
-      internalUpdateFormat.includeTopologyEvents.flatMap(_.participantAuthorizationFormat) match {
-        case Some(participantAuthorizationFormat) =>
-          topologyTransactionsStreamReader
-            .streamTopologyTransactions(
-              TopologyTransactionsStreamQueryParams(
-                queryRange = queryRange,
-                descendingOrder = descendingOrder,
-                payloadQueriesLimiter = payloadQueriesLimiter,
-                idPageSizing = idPageSizing,
-                participantAuthorizationFormat = participantAuthorizationFormat,
-                maxParallelIdQueries = maxParallelIdTopologyEventsQueries,
-                maxPagesPerIdPagesBuffer = maxPayloadsPerPayloadsPage,
-                maxPayloadsPerPayloadsPage = maxParallelPayloadTopologyEventsQueries,
-                maxParallelPayloadQueries = transactionsProcessingParallelism,
-              )
-            )
-            .map { case (offset, topologyTransaction) =>
-              offset -> UpdateResponse.ProtoUpdate(
-                GetUpdateResponse(
-                  GetUpdateResponse.Update.TopologyTransaction(topologyTransaction)
-                ).withPrecomputedSerializedSize()
-              )
-            }
+      internalUpdateFormat.includeTopologyEvents match {
+        case Some(topologyFormat) =>
+          topologyFormat.participantAuthorizationFormat match {
+            case Some(participantAuthorizationFormat) =>
+              topologyTransactionsStreamReader
+                .streamTopologyTransactions(
+                  TopologyTransactionsStreamQueryParams(
+                    queryRange = queryRange,
+                    descendingOrder = descendingOrder,
+                    payloadQueriesLimiter = payloadQueriesLimiter,
+                    idPageSizing = idPageSizing,
+                    participantAuthorizationFormat = participantAuthorizationFormat,
+                    synchronizerId = topologyFormat.synchronizerId,
+                    maxParallelIdQueries = maxParallelIdTopologyEventsQueries,
+                    maxPagesPerIdPagesBuffer = maxPayloadsPerPayloadsPage,
+                    maxPayloadsPerPayloadsPage = maxParallelPayloadTopologyEventsQueries,
+                    maxParallelPayloadQueries = transactionsProcessingParallelism,
+                  )
+                )
+                .map { case (offset, topologyTransaction) =>
+                  offset -> UpdateResponse.ProtoUpdate(
+                    GetUpdateResponse(
+                      GetUpdateResponse.Update.TopologyTransaction(topologyTransaction)
+                    ).withPrecomputedSerializedSize()
+                  )
+                }
+            case None => Source.empty
+          }
         case None => Source.empty
       }
 

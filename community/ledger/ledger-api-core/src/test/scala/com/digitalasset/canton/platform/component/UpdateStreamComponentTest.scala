@@ -92,7 +92,8 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         updateFormat = updateFormat(LedgerEffects).copy(includeTopologyEvents =
           Some(
             TopologyFormat(
-              Some(ParticipantAuthorizationFormat(None))
+              participantAuthorizationFormat = Some(ParticipantAuthorizationFormat(parties = None)),
+              synchronizerId = None,
             )
           )
         ),
@@ -212,7 +213,11 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
               )
             ),
             includeTopologyEvents = Some(
-              TopologyFormat(Some(ParticipantAuthorizationFormat(None)))
+              TopologyFormat(
+                participantAuthorizationFormat =
+                  Some(ParticipantAuthorizationFormat(parties = None)),
+                synchronizerId = None,
+              )
             ),
           ),
         descendingOrder = true,

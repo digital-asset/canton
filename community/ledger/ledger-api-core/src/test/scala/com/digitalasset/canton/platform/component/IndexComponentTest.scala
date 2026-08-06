@@ -522,6 +522,7 @@ trait IndexComponentTest
 
   protected val synchronizer1: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer1")
   protected val synchronizer2: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer2")
+  protected val synchronizer3: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer3")
   protected val packageName: Ref.PackageName = Ref.PackageName.assertFromString("-package-name-")
   protected val dsoParty: ValueParty =
     ValueParty(Ref.Party.assertFromString("dsoParty")) // sees all
@@ -690,6 +691,7 @@ trait IndexComponentTest
       recordTime: () => CantonTimestamp,
       argumentLength: Int,
       resultLength: Int,
+      synchronizerId: SynchronizerId = synchronizer1,
   )(
       creates: Seq[Node.Create]
   ): Update.SequencedTransactionAccepted = {
@@ -700,7 +702,7 @@ trait IndexComponentTest
     archives.foreach(txBuilder.add)
     val tx = txBuilder.buildCommitted()
     transaction(
-      synchronizerId = synchronizer1,
+      synchronizerId = synchronizerId,
       recordTime = recordTime(),
     )(tx, Nil)
   }

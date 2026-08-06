@@ -17,6 +17,7 @@ import com.digitalasset.canton.sequencing.authentication.{
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth.TokenFetcher
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.tracing.TraceContextGrpc.TraceContextOptionsKey
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.*
@@ -61,7 +62,8 @@ private[grpc] class SequencerClientTokenAuthentication(
         appExecutor: Executor,
         applier: CallCredentials.MetadataApplier,
     ): Unit = {
-      implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+      val tcOpts = Option(requestInfo.getCallOptions.getOption(TraceContextOptionsKey))
+      implicit val traceContext: TraceContext = tcOpts.getOrElse(TraceContextGrpc.fromGrpcContext)
       getToken(tokenManager)
         .fold(
           applier.fail,

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.syntax.foldable.*
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
@@ -14,6 +15,7 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SimpleExecutionQueue
@@ -22,8 +24,10 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
 
 class DigestProcessorManager(
+    synchronizerAlias: SynchronizerAlias,
     synchronizerId: SynchronizerId,
     digestProcessorFactory: DigestProcessorFactory,
+    tickSignaller: TickSignaller,
     exitOnFatalFailures: Boolean,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
@@ -58,7 +62,8 @@ class DigestProcessorManager(
         val oldProc = currentProcessorRef.get()
         for {
           _ <- oldProc.traverse_(stopProcessorIgnoringShutdown)
-          rdp = digestProcessorFactory.createRunningDigestProcessor(synchronizerId)
+          rdp = digestProcessorFactory
+            .createRunningDigestProcessor(synchronizerAlias, synchronizerId, tickSignaller)
           _ = currentProcessorRef.set(Some(rdp))
           _ <- rdp.start()
         } yield ()
@@ -77,7 +82,10 @@ class DigestProcessorManager(
     sequentialQueue.executeUS(
       currentProcessorRef.get() match {
         case None =>
-          val rdp = digestProcessorFactory.createReinitializingDigestProcessor(synchronizerId)
+          val rdp = digestProcessorFactory.createReinitializingDigestProcessor(
+            synchronizerAlias,
+            synchronizerId,
+          )
           currentProcessorRef.set(Some(rdp))
           rdp.start()
         case Some(proc) if proc.isReinitializingProcessor && proc.isStartingOrStarted =>
@@ -87,7 +95,10 @@ class DigestProcessorManager(
           logger.info(s"Stopping $otherProcessor before starting reinitialization")
           for {
             _ <- stopProcessorIgnoringShutdown(otherProcessor)
-            rdp = digestProcessorFactory.createReinitializingDigestProcessor(synchronizerId)
+            rdp = digestProcessorFactory.createReinitializingDigestProcessor(
+              synchronizerAlias,
+              synchronizerId,
+            )
             _ = currentProcessorRef.set(Some(rdp))
             _ <- rdp.start()
           } yield ()

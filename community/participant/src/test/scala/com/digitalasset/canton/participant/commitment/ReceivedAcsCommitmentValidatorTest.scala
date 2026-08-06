@@ -25,7 +25,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.ReceivedAcsCommit
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidatorTest.Publisher
-import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
+import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, TestCommitmentMetrics}
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
@@ -117,12 +117,12 @@ class ReceivedAcsCommitmentValidatorTest
   private lazy val p3client: SynchronizerCryptoClient =
     testingTopology.forOwnerAndSynchronizer(participant3)
 
-  private def mkValidator =
+  private def mkValidator(metrics: CommitmentMetrics): ReceivedAcsCommitmentValidatorImpl =
     new ReceivedAcsCommitmentValidatorImpl(
       physicalSynchronizerId,
       participant1,
       p1client,
-      ParticipantTestMetrics.synchronizer.commitments,
+      metrics,
       PositiveInt.one,
       loggerFactory,
     )
@@ -159,7 +159,8 @@ class ReceivedAcsCommitmentValidatorTest
 
   "ReceivedAcsCommitmentValidatorImpl" should {
     "pass protocol messages to publish" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
-      val validator = mkValidator
+      val metrics = TestCommitmentMetrics()
+      val validator = mkValidator(metrics)
       val publisher = new Publisher
 
       val messages = NonEmpty(
@@ -191,10 +192,13 @@ class ReceivedAcsCommitmentValidatorTest
           ),
         )
       )
+
+      metrics.receivedWatermark.getValue shouldBe CantonTimestamp.ofEpochSecond(10).toMicros
     }
 
     "not publish invalid protocol messages" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
-      val validator = mkValidator
+      val metrics = TestCommitmentMetrics()
+      val validator = mkValidator(metrics)
       val publisher = new Publisher
 
       val futurePeriodCommitment = AcsCommitment.create(
@@ -257,10 +261,13 @@ class ReceivedAcsCommitmentValidatorTest
           ),
         )
       )
+
+      metrics.receivedWatermark.getValue shouldBe CantonTimestamp.ofEpochSecond(10).toMicros
     }
 
     "not publish anything if no envelopes pass validation" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
-      val validator = mkValidator
+      val metrics = TestCommitmentMetrics()
+      val validator = mkValidator(metrics)
       val publisher = new Publisher
 
       val messages = NonEmpty(
@@ -282,6 +289,8 @@ class ReceivedAcsCommitmentValidatorTest
       )
 
       publisher.publishRef.get.value shouldBe empty
+
+      metrics.receivedWatermark.getValue shouldBe 0L
     }
   }
 

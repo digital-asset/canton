@@ -21,7 +21,6 @@ import com.digitalasset.canton.admin.sequencer.v30 as sequencerV30
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.error.CantonBaseError
-import com.digitalasset.canton.error.LsuError.FailedLsu
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -316,11 +315,11 @@ class GrpcSynchronizerConnectivityService(
       )
       expectedProtocolVersion = config.psid
         .map(psid => ProtocolVersionValidation(psid.protocolVersion))
-        .getOrElse(ProtocolVersionValidation.NoValidation)
+        .getOrElse(ProtocolVersionValidation.AlwaysValidation)
 
       onboardingTransactions <- EitherT.fromEither[FutureUnlessShutdown](
         onboardingTransactionsPO
-          .traverse(SignedTopologyTransaction.fromByteStringPVV(expectedProtocolVersion, _))
+          .traverse(SignedTopologyTransaction.fromByteString(expectedProtocolVersion, _))
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       _ = logger.info(show"Registering new synchronizer $config")
@@ -366,13 +365,13 @@ class GrpcSynchronizerConnectivityService(
         validation <- EitherT.fromEither[FutureUnlessShutdown](
           parseSequencerConnectionValidation(sequencerConnectionValidationPO)
         )
-        expectedProtocolVersion = config.psid
+        protocolVersionValidation = config.psid
           .map(psid => ProtocolVersionValidation(psid.protocolVersion))
-          .getOrElse(ProtocolVersionValidation.NoValidation)
+          .getOrElse(ProtocolVersionValidation.AlwaysValidation)
 
         onboardingTransactions <- EitherT.fromEither[FutureUnlessShutdown](
           onboardingTransactionsPO
-            .traverse(SignedTopologyTransaction.fromByteStringPVV(expectedProtocolVersion, _))
+            .traverse(SignedTopologyTransaction.fromByteString(protocolVersionValidation, _))
             .leftMap(ProtoDeserializationFailure.Wrap(_))
         )
         _ = logger.info(show"Registering new synchronizer $config")
@@ -513,7 +512,7 @@ class GrpcSynchronizerConnectivityService(
 
       _ <- sync
         .performManualLsu(request)
-        .leftMap[CantonBaseError](FailedLsu.Error(_))
+        .leftWiden[CantonBaseError]
     } yield PerformManualLsuResponse()
 
     _mapErrNewEUS(res)

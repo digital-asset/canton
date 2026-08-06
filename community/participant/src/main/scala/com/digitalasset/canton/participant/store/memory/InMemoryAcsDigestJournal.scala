@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.participant.store.memory
 
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.participant.store.{
   AcsDigestJournal,
@@ -19,6 +21,7 @@ import com.digitalasset.canton.util.ErrorUtil
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable
 import scala.collection.immutable.TreeMap
+import scala.concurrent.ExecutionContext
 import scala.util.Try
 
 class InMemoryAcsDigestJournal[K](
@@ -27,6 +30,9 @@ class InMemoryAcsDigestJournal[K](
 ) extends AcsDigestJournal[K]
     with NamedLogging {
   import InMemoryAcsDigestJournal.*
+
+  override protected val executionContext: ExecutionContext =
+    DirectExecutionContext(noTracingLogger)
 
   private val journal = TrieMap[K, TreeMap[Offset, AcsDigestUpdate[K]]]()
 
@@ -50,16 +56,13 @@ class InMemoryAcsDigestJournal[K](
     lookupInternal(key, toInclusive)
   }
 
-  override def bulkLookup(
-      keys: immutable.Iterable[K],
-      toInclusive: Offset,
-  )(implicit
+  override def bulkLookup(keysUptoInclusive: immutable.Iterable[(K, AtInclusive)])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K]]] = FutureUnlessShutdown.pure {
-    keys.flatMap { key =>
-      lookupInternal(key, toInclusive)
-        .map(value => key -> value)
+  ): FutureUnlessShutdown[Map[(K, Offset), store.AcsDigestStore.ParticipantAcsDigestUpdate[K]]] = {
+    val result = keysUptoInclusive.flatMap { case item @ (key, toInclusive) =>
+      lookupInternal(key, toInclusive).map(item -> _)
     }.toMap
+    FutureUnlessShutdown.pure(result)
   }
 
   override def snapshot(
@@ -236,6 +239,8 @@ class InMemoryAcsDigestJournal[K](
       history <- journal.get(key)
       (_, update) <- history.rangeTo(toInclusive).lastOption
     } yield update
+
+  override def close(): Unit = ()
 }
 
 object InMemoryAcsDigestJournal {

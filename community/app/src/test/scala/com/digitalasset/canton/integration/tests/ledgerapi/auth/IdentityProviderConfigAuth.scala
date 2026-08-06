@@ -273,8 +273,7 @@ trait IdentityProviderConfigAuth extends KeyPairs {
             userId = userId,
           )
         )
-        .map(_.partyId)
-    } yield resp
+    } yield resp.partyId
   }
 
   protected def idpAdminRights: Vector[uproto.Right] = Vector(

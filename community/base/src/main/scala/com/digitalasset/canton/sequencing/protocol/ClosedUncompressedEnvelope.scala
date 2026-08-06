@@ -75,7 +75,7 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     NonEmpty.from(signatures) match {
       case Some(signaturesNE) =>
         TypedSignedProtocolMessageContent
-          .fromByteStringPVV(ProtocolVersionValidation.PV(protocolVersion), bytes)
+          .fromByteString(ProtocolVersionValidation.PV(protocolVersion), bytes)
           .map { typedMessage =>
             OpenEnvelope(
               SignedProtocolMessage(typedMessage, signaturesNE),

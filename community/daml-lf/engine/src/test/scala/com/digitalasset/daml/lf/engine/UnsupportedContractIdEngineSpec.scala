@@ -16,15 +16,10 @@ import com.digitalasset.daml.lf.transaction.{
   NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
-import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-class UnsupportedContractIdEngineSpec
-    extends AnyWordSpec
-    with Matchers
-    with Inside
-    with SuppressingLogging {
+class UnsupportedContractIdEngineSpec extends AnyWordSpec with Matchers with SuppressingLogging {
 
   implicit val logContext: LoggingContext = LoggingContext.ForTesting
 
@@ -37,12 +32,20 @@ class UnsupportedContractIdEngineSpec
   private val withKeyTemplateId = Ref.Identifier(basicTestsPkgId, "BasicTests:WithKey")
   private val withKeySKey = mkSValuePair(SValue.SParty(alice), SValue.SInt64(42))
 
-  private def driveAuxiliary[A](result: Result[A]): Result[A] = result match {
-    case ResultNeedPackage(pkgId, resume) => driveAuxiliary(resume(lookupPackage.lift(pkgId)))
-    case ResultPrefetch(_, _, r) => driveAuxiliary(r())
-    case ResultInterruption(continue, _) => driveAuxiliary(continue())
-    case other => other
-  }
+  /** Drive a program past the needs that can be answered automatically (packages, prefetch,
+    * interruptions), stopping at the first contract/key/external-call suspension (or the result).
+    */
+  private def driveAuxiliary[A](step: Result.Step[A]): Result.Step[A] =
+    step match {
+      case im: Result.Step.Impure[x, A] =>
+        im.fx match {
+          case Result.Need.Package(pkgId) => driveAuxiliary(im.resume(lookupPackage.lift(pkgId)))
+          case Result.Need.Prefetch(_, _) => driveAuxiliary(im.resume(()))
+          case Result.Need.Interruption(_) => driveAuxiliary(im.resume(()))
+          case _ => step
+        }
+      case other => other
+    }
 
   private def runFetchTemplate(coid: com.digitalasset.daml.lf.value.Value.ContractId) = {
     val templateId = Ref.Identifier(basicTestsPkgId, "BasicTests:Simple")
@@ -81,44 +84,57 @@ class UnsupportedContractIdEngineSpec
 
   "Engine" should {
 
-    "return UnsupportedContractId Error when ResultNeedContract receives UnsupportedContractIdVersion" in {
+    "return UnsupportedContractId Error when NeedContract receives UnsupportedContractIdVersion" in {
       // Use a CID that is not in defaultContracts so the engine asks for it.
       val coid = toContractId("BasicTests:Simple:99")
       val result = runFetchTemplate(coid)
 
-      inside(driveAuxiliary(result)) { case ResultNeedContract(_, resume) =>
-        inside(resume(ResultNeedContract.Response.UnsupportedContractIdVersion)) {
-          case ResultError(err) =>
-            err shouldBe Error.Interpretation(
-              Error.Interpretation.DamlException(
-                interpretation.Error.UnsupportedContractId(coid)
-              ),
-              None,
-            )
-        }
+      driveAuxiliary(result.start) match {
+        case im: Result.Step.Impure[x, ?] =>
+          im.fx match {
+            case Result.Need.Contract(_) =>
+              im.resume(Result.Need.Contract.UnsupportedIdVersion) match {
+                case Result.Step.Error(err) =>
+                  err shouldBe Error.Interpretation(
+                    Error.Interpretation.DamlException(
+                      interpretation.Error.UnsupportedContractId(coid)
+                    ),
+                    None,
+                  )
+                case other => fail(s"expected an Error step, got $other")
+              }
+            case other => fail(s"expected a NeedContract, got $other")
+          }
+        case other => fail(s"expected a NeedContract suspension, got $other")
       }
     }
 
-    "return UnsupportedContractId Error when a ResultNeedKey response contains only UnsupportedContractIdVersion" in {
+    "return UnsupportedContractId Error when a NeedKey response contains only UnsupportedContractIdVersion" in {
       val coid = toContractId("BasicTests:WithKey:unsupported")
       val result = runFetchByKey()
 
-      inside(driveAuxiliary(result)) { case ResultNeedKey(_, _, _, resume) =>
-        inside(
-          resume(
-            ResultNeedKey.Response(
-              Vector(ResultNeedKey.Response.UnsupportedContractIdVersion(coid)),
-              NeedKeyProgression.Finished,
-            )
-          )
-        ) { case ResultError(err) =>
-          err shouldBe Error.Interpretation(
-            Error.Interpretation.DamlException(
-              interpretation.Error.UnsupportedContractId(coid)
-            ),
-            None,
-          )
-        }
+      driveAuxiliary(result.start) match {
+        case im: Result.Step.Impure[x, ?] =>
+          im.fx match {
+            case Result.Need.Key(_, _, _) =>
+              im.resume(
+                Result.Need.Key.Response(
+                  Vector(Result.Need.Key.Response.UnsupportedContractIdVersion(coid)),
+                  NeedKeyProgression.Finished,
+                )
+              ) match {
+                case Result.Step.Error(err) =>
+                  err shouldBe Error.Interpretation(
+                    Error.Interpretation.DamlException(
+                      interpretation.Error.UnsupportedContractId(coid)
+                    ),
+                    None,
+                  )
+                case other => fail(s"expected an Error step, got $other")
+              }
+            case other => fail(s"expected a NeedKey, got $other")
+          }
+        case other => fail(s"expected a NeedKey suspension, got $other")
       }
     }
 
@@ -126,25 +142,37 @@ class UnsupportedContractIdEngineSpec
       val coid = toContractId("BasicTests:WithKey:unsupported")
       val result = runFetchByKey()
 
-      inside(driveAuxiliary(result)) { case ResultNeedKey(_, _, _, resume) =>
-        val continued = driveAuxiliary(
-          resume(
-            ResultNeedKey.Response(
-              Vector(
-                ResultNeedKey.Response.AuthenticableFatContractInstance(
-                  withKeyContractInst,
-                  Hash.HashingMethod.TypedNormalForm,
-                  _ => true,
-                ),
-                ResultNeedKey.Response.UnsupportedContractIdVersion(coid),
-              ),
-              NeedKeyProgression.Finished,
-            )
-          )
-        )
-        inside(continued) { case ResultNeedContract(coid, _) =>
-          coid shouldBe withKeyContractInst.contractId
-        }
+      driveAuxiliary(result.start) match {
+        case im: Result.Step.Impure[x, ?] =>
+          im.fx match {
+            case Result.Need.Key(_, _, _) =>
+              val continued = driveAuxiliary(
+                im.resume(
+                  Result.Need.Key.Response(
+                    Vector(
+                      Result.Need.Key.Response.AuthenticableFatContractInstance(
+                        withKeyContractInst,
+                        Hash.HashingMethod.TypedNormalForm,
+                        _ => true,
+                      ),
+                      Result.Need.Key.Response.UnsupportedContractIdVersion(coid),
+                    ),
+                    NeedKeyProgression.Finished,
+                  )
+                )
+              )
+              continued match {
+                case im2: Result.Step.Impure[y, ?] =>
+                  im2.fx match {
+                    case Result.Need.Contract(coid2) =>
+                      coid2 shouldBe withKeyContractInst.contractId
+                    case other => fail(s"expected a NeedContract, got $other")
+                  }
+                case other => fail(s"expected a NeedContract suspension, got $other")
+              }
+            case other => fail(s"expected a NeedKey, got $other")
+          }
+        case other => fail(s"expected a NeedKey suspension, got $other")
       }
     }
   }

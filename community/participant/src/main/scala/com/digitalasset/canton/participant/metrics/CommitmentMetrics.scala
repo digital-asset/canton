@@ -36,6 +36,60 @@ class CommitmentHistograms(parent: MetricName)(implicit inventory: HistogramInve
   )
 }
 
+class RunningDigestProcessorMetrics private[metrics] (
+    parent: MetricName,
+    metricsFactory: LabeledMetricsFactory,
+)(implicit context: MetricsContext) {
+  private val prefix = parent :+ "running-digest-processor"
+
+  val latestAcsUpdate: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "latest-acs-update-record-time",
+      summary = "Record time of the latest event that was emitted by the internal index service.",
+      description =
+        "Record time of the latest event that was emitted by the internal index service.",
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+
+  val latestCheckpointedRecordTime: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "latest-checkpointed-record-time",
+      summary =
+        "Record time of the latest event that went through the checkpointing stage in the running digest processor.",
+      description =
+        "Record time of the latest event that went through the checkpointing stage in the running digest processor.",
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+
+  val latestClassifiedRecordTime: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "latest-classified-record-time",
+      summary =
+        "Record time of the latest event that went through the classification stage in the running digest processor.",
+      description =
+        "Record time of the latest event that went through the classification stage in the running digest processor.",
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+  val latestAccumulatedRecordTime: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "latest-accumulated-record-time",
+      summary =
+        "Record time of the latest event that went through the digest accumulation stage in the running digest processor.",
+      description =
+        "Record time of the latest event that went through the digest accumulation stage in the running digest processor.",
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+
+}
+
 class CommitmentMetrics private[metrics] (
     histograms: CommitmentHistograms,
     metricsFactory: LabeledMetricsFactory,
@@ -187,6 +241,55 @@ class CommitmentMetrics private[metrics] (
     0L,
   )
 
+  val checkpointWatermark: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "checkpoint-watermark",
+      summary = "Record time of the latest checkpoint that has been persisted",
+      description =
+        """Measures up to how far the participant has produced and persisted ACS digests from the ACS and topology changes.
+          |If this metric falls significantly behind the ledger end's record time for the given synchronizer,
+          |digest processing is likely overloaded.""".stripMargin,
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+
+  val tickWatermark: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "tick-watermark",
+      summary =
+        "Record time of the latest (reconciliation or affirmation) tick for which ACS digests have been persisted",
+      description =
+        "The record time of the latest tick for which ACS digests have been computed and persisted.",
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+
+  val receivedWatermark: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "received-watermark",
+      summary = "Sequencing time of the latest received incoming ACS commitment",
+      description = "The sequencing time of the latest received incoming ACS commitment.",
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+
+  val matchingWatermark: Gauge[Long] = metricsFactory.gauge(
+    MetricInfo(
+      prefix :+ "matching-watermark",
+      summary = "The sequencing time of the latest processed incoming ACS commitment",
+      description = """The sequencing time of the latest processed incoming ACS commitment.
+          |If this watermark falls behind the `tick-watermark` and the `received-watermark`,
+          |then the matching cannot keep up.""".stripMargin,
+      qualification = MetricQualification.Debug,
+    ),
+    0L,
+  )
+
+  val runningDigestProcessor = new RunningDigestProcessorMetrics(prefix, metricsFactory)
+
   val lastLocallyCompleted: Gauge[Long] = metricsFactory.gauge(
     MetricInfo(
       prefix :+ "last-locally-completed",
@@ -223,4 +326,5 @@ class CommitmentMetrics private[metrics] (
     0L,
   )
 
+  val sender: CommitmentSenderMetrics = new CommitmentSenderMetrics(prefix, metricsFactory)
 }

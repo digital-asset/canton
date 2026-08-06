@@ -10,6 +10,7 @@ Then, read through the following files, as they contain very important guideline
  * [4_testing.md](4_testing.md)
  * [5_ci-usage.md](5_ci-usage.md)
  * [6_github.md](6_github.md)
+ * [7_ci-github-actions-usage.md](7_ci-github-actions-usage.md)
 
 Finally, read the introductory sections of every other file in [the current folder](.),
 so you get an idea of the Canton development ecosystem.

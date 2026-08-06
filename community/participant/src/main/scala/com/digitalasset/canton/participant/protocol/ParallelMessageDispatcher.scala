@@ -69,7 +69,9 @@ class ParallelMessageDispatcher(
     override protected val requestProcessors: RequestProcessors,
     override protected val topologyProcessor: ParticipantTopologyProcessor,
     override protected val trafficProcessor: TrafficControlProcessor,
-    override protected val legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+    override protected val legacyAcsCommitmentProcessorO: Option[
+      AcsCommitmentProcessor.ProcessorType
+    ],
     override protected val acsCommitmentValidator: ReceivedAcsCommitmentValidator,
     override protected val requestCounterAllocator: RequestCounterAllocator,
     override protected val recordOrderPublisher: RecordOrderPublisher,

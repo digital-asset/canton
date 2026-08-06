@@ -107,6 +107,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   LsuRepair,
   LsuSequencingBoundsOverride,
   RemoteSequencerConfig,
+  SequencerLimits,
   SequencerLsuConfig,
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
@@ -1036,6 +1037,8 @@ object CantonConfig {
         deriveReader[AuthServiceConfig.JwtJwks]
       implicit val authServiceConfigWildcardReader: ConfigReader[AuthServiceConfig.Wildcard.type] =
         deriveReader[AuthServiceConfig.Wildcard.type]
+      implicit val authServiceConfigPartyJwtReader: ConfigReader[AuthServiceConfig.PartyJwt] =
+        deriveReader[AuthServiceConfig.PartyJwt]
       deriveReader[AuthServiceConfig]
     }
     lazy implicit final val rateLimitConfigReader: ConfigReader[RateLimitingConfig] =
@@ -1453,6 +1456,9 @@ object CantonConfig {
         implicit val senderConfigReader: ConfigReader[AcsCommitmentSenderConfig] =
           deriveReader[AcsCommitmentSenderConfig]
 
+        implicit val periodWriterConfigReader: ConfigReader[AcsCommitmentPeriodConfig] =
+          deriveReader[AcsCommitmentPeriodConfig]
+
         deriveReader[AcsCommitmentConfig]
       }
 
@@ -1545,6 +1551,9 @@ object CantonConfig {
 
     implicit val publicServerConfigReader: ConfigReader[PublicServerConfig] =
       deriveReader[PublicServerConfig]
+
+    implicit val sequencerLimitsReader: ConfigReader[SequencerLimits] =
+      deriveReader[SequencerLimits]
 
     implicit val sequencerNodeConfigReader: ConfigReader[SequencerNodeConfig] = {
       import DeclarativeSequencerConfig.Readers.*
@@ -1831,6 +1840,8 @@ object CantonConfig {
         )
       implicit val authServiceConfigWildcardWriter: ConfigWriter[AuthServiceConfig.Wildcard.type] =
         deriveWriter[AuthServiceConfig.Wildcard.type]
+      implicit val authServiceConfigPartyJwtWriter: ConfigWriter[AuthServiceConfig.PartyJwt] =
+        deriveWriter[AuthServiceConfig.PartyJwt]
       deriveWriter[AuthServiceConfig]
     }
     lazy implicit final val rateLimitConfigWriter: ConfigWriter[RateLimitingConfig] =
@@ -2215,6 +2226,9 @@ object CantonConfig {
         implicit val senderConfigWriter: ConfigWriter[AcsCommitmentSenderConfig] =
           deriveWriter[AcsCommitmentSenderConfig]
 
+        implicit val periodWriterConfigWriter: ConfigWriter[AcsCommitmentPeriodConfig] =
+          deriveWriter[AcsCommitmentPeriodConfig]
+
         deriveWriter[AcsCommitmentConfig]
       }
 
@@ -2300,6 +2314,10 @@ object CantonConfig {
     }
     implicit val mediatorNodeConfigWriter: ConfigWriter[MediatorNodeConfig] =
       deriveWriter[MediatorNodeConfig]
+
+    implicit val sequencerLimitsWriter: ConfigWriter[SequencerLimits] =
+      deriveWriter[SequencerLimits]
+
     implicit val sequencerNodeConfigWriter: ConfigWriter[SequencerNodeConfig] = {
       import DeclarativeSequencerConfig.Writers.*
       deriveWriter[SequencerNodeConfig]

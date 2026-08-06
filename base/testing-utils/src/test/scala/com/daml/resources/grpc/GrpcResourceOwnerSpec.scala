@@ -14,6 +14,9 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration.DurationInt
 
+// This test lives in the `testing-utils` project instead of `resources-grpc` where the corresponding `GrpcResourceOwnerFactory` lives
+// so that the logback configuration from `testing-utils` applies to this test too. Otherwise netty prints lots of debug
+// messages to the console and our CI tests fail because some of them contain the word "error".
 final class GrpcResourceOwnerSpec extends AsyncFlatSpec with Matchers {
 
   private val DefaultTimeout = 5.seconds

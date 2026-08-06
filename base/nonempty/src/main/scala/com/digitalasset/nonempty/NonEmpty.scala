@@ -232,6 +232,10 @@ object NonEmptyCollInstances {
   ) extends AnyVal {
     import NonEmptyColl.Instance.unsafeNarrow as un
     private type ESelf = IterableOps[A, CC, C with imm.Iterable[A]]
+    def grouped1(size: Int): Iterator[NonEmpty[C]] = {
+      import NonEmptyReturningOps.*
+      self.forgetNE.grouped1(size)
+    }
     def groupBy[K](f: A => K): NonEmpty[Map[K, NonEmpty[C]]] =
       NonEmptyColl.Instance.subst[Lambda[`f[_]` => f[Map[K, f[C]]]]]((self: ESelf) groupBy f)
     def groupBy1[K](f: A => K): NonEmpty[Map[K, NonEmpty[C]]] = self groupBy f

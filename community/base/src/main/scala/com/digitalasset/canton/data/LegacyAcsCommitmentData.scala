@@ -10,7 +10,7 @@ import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 /** Super trait to both [[BufferedAcsCommitment]] and
   * [[com.digitalasset.canton.protocol.messages.LegacyAcsCommitment]].
   */
-trait AcsCommitmentData extends PrettyPrinting {
+trait LegacyAcsCommitmentData extends PrettyPrinting {
   def sender: ParticipantId
   def counterParticipant: ParticipantId
   def period: LegacyCommitmentPeriod
@@ -30,7 +30,7 @@ final case class BufferedAcsCommitment(
     counterParticipant: ParticipantId,
     period: LegacyCommitmentPeriod,
     commitment: Digest.HashedDigestType,
-) extends AcsCommitmentData {
+) extends LegacyAcsCommitmentData {
   override lazy val pretty: Pretty[BufferedAcsCommitment] =
     prettyOfClass(
       param("synchronizerId", _.synchronizerId),

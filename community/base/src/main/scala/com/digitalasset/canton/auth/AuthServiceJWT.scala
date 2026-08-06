@@ -10,6 +10,7 @@ import com.daml.jwt.{
   Error,
   JwtFromBearerHeader,
   JwtVerifierBase,
+  PartyJWTPayload,
   StandardJWTPayload,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -144,6 +145,7 @@ class AuthServiceJWT(
         userId = payload.userId,
         expiration = payload.exp,
       )
+    case payload: PartyJWTPayload => ClaimSet.Unauthenticated
   }
 }
 
@@ -161,11 +163,13 @@ class UserConfigAuthService private[auth] (
       AuthServiceJWTCodec.jsonImplicits(warnOnJwtScopeUsage),
     ) {
   protected[this] def payloadToClaims(serviceName: String): AuthServiceJWTPayload => ClaimSet = {
-    case payload: StandardJWTPayload =>
+    case payload: PartyJWTPayload => ClaimSet.Unauthenticated
+    case payload: StandardJWTPayload => {
       users
         .find(_.userId == payload.userId)
         .flatMap(_.allowedServices.find(_ == serviceName))
         .fold[ClaimSet](ClaimSet.Unauthenticated)(_ => ClaimSet.Claims.Admin)
+    }
   }
 }
 
@@ -188,6 +192,7 @@ class AuthServicePrivilegedJWT private[auth] (
     case AccessLevel.Wildcard => ClaimSet.Claims.Wildcard.claims
   }
   protected[this] def payloadToClaims(serviceName: String): AuthServiceJWTPayload => ClaimSet = {
+    case payload: PartyJWTPayload => ClaimSet.Unauthenticated
     case payload: StandardJWTPayload =>
       ClaimSet.Claims(
         claims = claims,

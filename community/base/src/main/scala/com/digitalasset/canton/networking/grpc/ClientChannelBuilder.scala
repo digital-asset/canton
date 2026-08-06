@@ -177,32 +177,36 @@ object ClientChannelBuilder {
       clientConfig: ClientConfig,
       maxInboundMessageSize: Option[Int],
   )(implicit executor: Executor): ManagedChannelBuilderProxy = {
+    val clientChannelParams = clientConfig.channel
     val nettyChannelBuilder =
       NettyChannelBuilder
         .forAddress(clientConfig.address, clientConfig.port.unwrap)
         .executor(executor)
+        .maxInboundMessageSize(
+          maxInboundMessageSize.getOrElse(clientChannelParams.maxInboundMessageSize.value)
+        )
+        .flowControlWindow(clientChannelParams.flowControlWindow.value)
 
-    val baseBuilder = nettyChannelBuilder
-      .maxInboundMessageSize(
-        maxInboundMessageSize.getOrElse(clientConfig.channel.maxInboundMessageSize.value)
+    if (clientChannelParams.traceContextPropagation == Propagation.Enabled)
+      nettyChannelBuilder
+        .intercept(TraceContextGrpc.clientInterceptor())
+        .discard // Imperative-style builder
+
+    // Apply TLS settings
+    clientConfig.tlsConfig
+      .flatMap(tls =>
+        Option.when(tls.enabled) {
+          nettyChannelBuilder
+            .useTransportSecurity()
+            .sslContext(sslContext(tls))
+        }
       )
-      .flowControlWindow(clientConfig.channel.flowControlWindow.value)
+      .getOrElse(nettyChannelBuilder.usePlaintext())
+      .discard
 
     // apply keep alive settings
-    val builder =
-      clientConfig.tlsConfig
-        // if tls isn't configured assume that it's a plaintext channel
-        .fold(baseBuilder.usePlaintext()) { tls =>
-          if (tls.enabled)
-            baseBuilder
-              .useTransportSecurity()
-              .sslContext(sslContext(tls))
-          else
-            baseBuilder.usePlaintext()
-        }
-
     ManagedChannelBuilderProxy(
-      configureKeepAlive(clientConfig.channel.keepAliveClient, builder)
+      configureKeepAlive(clientChannelParams.keepAliveClient, nettyChannelBuilder)
     )
   }
 }

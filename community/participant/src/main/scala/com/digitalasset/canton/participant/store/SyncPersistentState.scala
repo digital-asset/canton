@@ -51,6 +51,9 @@ class SyncPersistentState(
   override def acsInspection: AcsInspection = logical.acsInspection
   override def acsCommitmentStore: AcsCommitmentStore = logical.acsCommitmentStore
   override def acsDigestStore: AcsDigestStore = logical.acsDigestStore
+  override def acsCommitmentPeriodStore: AcsCommitmentPeriodStore = logical.acsCommitmentPeriodStore
+  override def acsCommitmentSenderWatermarkStore: AcsCommitmentSenderWatermarkStore =
+    logical.acsCommitmentSenderWatermarkStore
   override def reassignmentStore: ReassignmentStore = logical.reassignmentStore
   override def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore =
     logical.pendingOnboardingClearanceStore
@@ -96,6 +99,8 @@ trait LogicalSyncPersistentState extends NamedLogging with AutoCloseable {
   def acsInspection: AcsInspection
   def acsCommitmentStore: AcsCommitmentStore
   def acsDigestStore: AcsDigestStore
+  def acsCommitmentPeriodStore: AcsCommitmentPeriodStore
+  def acsCommitmentSenderWatermarkStore: AcsCommitmentSenderWatermarkStore
   def reassignmentStore: ReassignmentStore
   def pendingOnboardingClearanceStore: PendingOnboardingClearanceStore
 

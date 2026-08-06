@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   CheckpointFenceOr,
-  CheckpointWritten,
+  CheckpointToBeWritten,
   Classification,
   DigestAccumulator_Input,
   NotCheckpointFence,
@@ -30,11 +30,11 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.digest.{DigestDelta, DigestOperation, DigestOps}
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
   AcsDigestUpdate,
-  Checkpoint,
   InternedParticipantId,
   LocalPartyFirst,
   PartyAndOrder,
@@ -74,9 +74,10 @@ class InMemoryDigestAccumulator(
     stringInterning: StringInterning,
     acsUpdateBatchSize: Int,
     digestLoadParallelism: Int,
-    digestStoreParallelism: Int,
     tracingMode: AcsDigestTracingMode,
     enableConsistencyChecks: Boolean,
+    @VisibleForTesting
+    private[canton] val metrics: CommitmentMetrics,
 )(implicit executionContext: ExecutionContext)
     extends DigestAccumulator
     with NamedLogging {
@@ -90,7 +91,8 @@ class InMemoryDigestAccumulator(
 
   def flow()(implicit
       traceContext: TraceContext
-  ): Flow[DigestAccumulator_Input, CheckpointWritten, NotUsed] = flowInternal()
+  ): Flow[DigestAccumulator_Input, CheckpointToBeWritten, NotUsed] =
+    flowInternal()
 
   @VisibleForTesting
   def flowInternal(
@@ -104,7 +106,7 @@ class InMemoryDigestAccumulator(
         None,
   )(implicit
       traceContext: TraceContext
-  ): Flow[DigestAccumulator_Input, CheckpointWritten, NotUsed] =
+  ): Flow[DigestAccumulator_Input, CheckpointToBeWritten, NotUsed] =
     Flow[DigestAccumulator_Input]
       .map(ensurePresent)
       .withBlocker(computeDigestBlocker)(directExecutionContext)
@@ -130,11 +132,10 @@ class InMemoryDigestAccumulator(
       .mapConcat(_.forgetNE)
       .withBlocker(storeBlocker)(directExecutionContext)
       .async
-      .mapAsyncAndDrainUS(parallelism = digestStoreParallelism)(persistDigestUpdates)
-      .mapAsyncAndDrainUS(
-        // Checkpoints must be written sequentially!
-        parallelism = 1
-      )(persistCheckpoint)
+      // We must persist the digest updates sequentially because two consecutive copy snapshots may
+      // update the same digest keys at the same offsets (e.g., if the aggregation blocked with a full accumulator)
+      // and thus we must avoid the later copy to be overwritten by the earlier copy
+      .mapAsyncAndDrainUS(parallelism = 1)(persistDigestUpdates)
       .mapConcat(deregister)
 
   /** Finds all the
@@ -524,34 +525,30 @@ class InMemoryDigestAccumulator(
       input: CopySnapshotOutput
   ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
     implicit val traceContext: TraceContext = input.traceContext
-    input.traverse(_.traverse(_.traverse(_.traverse { case (updates, usageCounters) =>
-      val (participantUpdates, partyUpdates) = updates.partitionMap { update =>
-        update.partitionMap(_.toEither)
+    input
+      .traverse(_.traverse(_.traverse(_.traverse { case (updates, usageCounters) =>
+        val (participantUpdates, partyUpdates) = updates.partitionMap { update =>
+          update.partitionMap(_.toEither)
+        }
+        for {
+          _ <- digestStore.party.upsertDigestUpdates(partyUpdates)
+          _ <- digestStore.participant.upsertDigestUpdates(participantUpdates)
+        } yield {
+          usageCounters
+        }
+      })))
+      .map { output =>
+        metrics.runningDigestProcessor.latestAccumulatedRecordTime.updateValue(
+          input.recordTime.toMicros
+        )
+        output
       }
-      for {
-        _ <- digestStore.party.upsertDigestUpdates(partyUpdates)
-        _ <- digestStore.participant.upsertDigestUpdates(participantUpdates)
-      } yield usageCounters
-    })))
-  }
-
-  /** Persists checkpoints to the store. */
-  private def persistCheckpoint(
-      input: PersistDigestUpdatesOutput
-  ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
-    implicit val traceContext: TraceContext = input.traceContext
-    input.value match {
-      case CheckpointFence(tpe) =>
-        implicit val executionContext = directExecutionContext
-        digestStore
-          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
-          .map((_: Unit) => input)
-      case other => FutureUnlessShutdown.pure(input)
-    }
   }
 
   /** Deregisters the usages from [[digests]] and evicts unused accumulators. */
-  private def deregister(input: PersistDigestUpdatesOutput): immutable.Iterable[CheckpointWritten] =
+  private def deregister(
+      input: PersistDigestUpdatesOutput
+  ): immutable.Iterable[CheckpointToBeWritten] =
     input match {
       case context @ ProcessingContext(_, NotCheckpointFence(_, (_, usagesO))) =>
         usagesO.foreach { usages =>
@@ -559,7 +556,7 @@ class InMemoryDigestAccumulator(
         }
         immutable.Iterable.empty
       case ProcessingContext(timepoint, CheckpointFence(tpe)) =>
-        immutable.Iterable(CheckpointWritten(timepoint, tpe))
+        immutable.Iterable(CheckpointToBeWritten(timepoint, tpe))
     }
 
   private def doDeregister(

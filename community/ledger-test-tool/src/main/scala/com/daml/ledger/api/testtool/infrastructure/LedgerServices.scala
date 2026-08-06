@@ -207,7 +207,6 @@ import com.digitalasset.canton.http.json.v2.{
   JsUpdateService,
   JsUserManagementService,
   JsVersionService,
-  LegacyDTOs,
   PagedList,
   ProtocolConverters,
   SchemaProcessorsImpl,
@@ -597,22 +596,12 @@ private final class LedgerServicesJson(
         responseObserver: StreamObserver[GetActiveContractsResponse],
     ): Unit = wsCall(
       JsStateService.activeContractsEndpoint,
-      toGetActiveContractsRequestLegacy(request),
+      request,
       responseObserver,
       (v: JsGetActiveContractsResponse) =>
         protocolConverters.GetActiveContractsResponse
           .fromJson(v),
     )
-
-    private def toGetActiveContractsRequestLegacy(
-        req: GetActiveContractsRequest
-    ): LegacyDTOs.GetActiveContractsRequest =
-      LegacyDTOs.GetActiveContractsRequest(
-        filter = None,
-        activeAtOffset = req.activeAtOffset,
-        eventFormat = req.eventFormat,
-        streamContinuationToken = req.streamContinuationToken,
-      )
 
     override def getActiveContractsPage(
         request: GetActiveContractsPageRequest
@@ -830,20 +819,9 @@ private final class LedgerServicesJson(
     ): Unit =
       wsCall(
         JsUpdateService.getUpdatesEndpoint,
-        toGetUpdatesRequestLegacy(request),
+        request,
         responseObserver,
         protocolConverters.GetUpdatesResponse.fromJson,
-      )
-
-    private def toGetUpdatesRequestLegacy(
-        req: GetUpdatesRequest
-    ): LegacyDTOs.GetUpdatesRequest =
-      LegacyDTOs.GetUpdatesRequest(
-        beginExclusive = req.beginExclusive,
-        endInclusive = req.endInclusive,
-        filter = None,
-        updateFormat = req.updateFormat,
-        descendingOrder = req.descendingOrder,
       )
 
     override def getUpdateByOffset(

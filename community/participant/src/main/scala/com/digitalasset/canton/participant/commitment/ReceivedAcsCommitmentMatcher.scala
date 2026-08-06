@@ -3,12 +3,13 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import cats.Eval
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
+import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.{
   CommitmentMatchPeriod,
@@ -24,7 +25,7 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.canton.{LedgerParticipantId, checked}
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.Flow
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, Source}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
@@ -37,7 +38,8 @@ import scala.concurrent.ExecutionContext
   */
 class ReceivedAcsCommitmentMatcher(
     store: AcsCommitmentPeriodStore,
-    stringInterningEval: Eval[StringInterning],
+    stringInterning: StringInterning,
+    metrics: CommitmentMetrics,
     override protected val loggerFactory: NamedLoggerFactory,
     parallelProcessingLimit: PositiveInt,
 )(implicit executionContext: ExecutionContext)
@@ -47,7 +49,7 @@ class ReceivedAcsCommitmentMatcher(
   private val queue: ShardedSequentialProcessingQueue[LedgerParticipantId] =
     new GarbageCollectedShardedSequentialProcessingQueue[LedgerParticipantId]
 
-  def flow(implicit traceContext: TraceContext): Flow[
+  def pipeline(implicit traceContext: TraceContext): Flow[
     InternalIndexService.AcsUpdateContainer,
     Unit,
     NotUsed,
@@ -57,7 +59,7 @@ class ReceivedAcsCommitmentMatcher(
       .mapAsyncAndDrainUS(parallelism = parallelProcessingLimit.value)(dispatchToQueue)
       .mapConcat(_.toList)
       .conflateWithSeed(TracedMany.fromTraced)((acc, next) =>
-        acc.accumulateTraced(offset => next.map(_.max(offset)))
+        acc.accumulateTraced(timepoint => next.map(Ordering[Timepoint].max(_, timepoint)))
       )
       .mapAsyncAndDrainUS(parallelism = 1)(persistWatermark)
 
@@ -70,8 +72,9 @@ class ReceivedAcsCommitmentMatcher(
         ReceivedAcsCommitments.fromTrustedByteString(payload) match {
           case Right(commitments) =>
             val lastIndex = commitments.messages.size - 1
+            val timepoint = Timepoint(input.offset)(input.synchronizerTime)
             commitments.messages.view.zipWithIndex.map { case (envelope, index) =>
-              AcsCommitmentMessageContainer(envelope, input.offset, index == lastIndex)
+              AcsCommitmentMessageContainer(envelope, timepoint, index == lastIndex)
             }.toSeq
           case Left(err) =>
             logger.warn(
@@ -82,25 +85,27 @@ class ReceivedAcsCommitmentMatcher(
 
       case _: InternalIndexService.AcsUpdate.AcsChangeUpdate => Seq.empty
       case _: InternalIndexService.AcsUpdate.EffectiveTopologyUpdate => Seq.empty
+      case InternalIndexService.AcsUpdate.OffsetCheckpoint => Seq.empty
     }
   }
 
   private def dispatchToQueue(
       container: AcsCommitmentMessageContainer
-  ): FutureUnlessShutdown[Option[Traced[Offset]]] = {
+  ): FutureUnlessShutdown[Option[Traced[Timepoint]]] = {
     implicit val traceContext: TraceContext = container.traceContext
-    val offset = container.offset
+    val timepoint = container.timepoint
     queue.executeUS(container.envelope.acsCommitment.sender)(
-      processMessage(offset, container.envelope, container.lastEnvelopeInBatch),
-      s"Process envelope at offset $offset",
+      processMessage(timepoint, container.envelope, container.lastEnvelopeInBatch),
+      s"Process envelope at offset ${timepoint.offset}",
     )
   }
 
   private def processMessage(
-      offset: Offset,
+      timepoint: Timepoint,
       envelope: AcsCommitmentProtocolMessage,
       lastEnvelopeForOffset: Boolean,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[Traced[Offset]]] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[Traced[Timepoint]]] = {
+    val offset = timepoint.offset
     val senderExternalized = envelope.acsCommitment.sender
     val sender = checked(
       // The signature check in ReceivedAcsCommitmentValidatorImpl.checkCommitmentSignature ensures
@@ -148,6 +153,27 @@ class ReceivedAcsCommitmentMatcher(
         val outstandingMismatchesToInsert = outstandingToMismatch.map { interval =>
           interval.copy(offset = offset, hashedDigest = Some(interval.hashedDigest))
         }
+        if (outstandingMismatchesToInsert.nonEmpty) {
+          val remote =
+            AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.RemoteAcsCommitmentData(
+              sender = senderExternalized,
+              counterparticipant = envelope.acsCommitment.counterparticipant,
+              period = period,
+              digest = digest,
+            )
+          val locals = outstandingMismatchesToInsert.map { mismatched =>
+            AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.LocalDigest(
+              period = mismatched.commitmentPeriod,
+              digest = mismatched.hashedDigest.value,
+            )
+          }
+          val mismatch = AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.Mismatch(
+            synchronizerId = envelope.psid.logical,
+            remote = remote,
+            local = locals,
+          )
+          mismatch.report()
+        }
 
         store.persistMatchingOutcome(
           deleteOutstanding = outstanding,
@@ -158,25 +184,30 @@ class ReceivedAcsCommitmentMatcher(
         )
       }
       // TODO(#34324) Check whether the commitment was unexpected
-    } yield Option.when(lastEnvelopeForOffset)(Traced(offset))
+    } yield Option.when(lastEnvelopeForOffset)(Traced(timepoint))
   }
 
-  private def persistWatermark(offset: TracedMany[Offset]): FutureUnlessShutdown[Unit] = {
+  private def persistWatermark(timepoint: TracedMany[Timepoint]): FutureUnlessShutdown[Unit] = {
     implicit val batchTraceContext: TraceContext =
-      TraceContext.ofBatch("persist-watermark-matching")(offset.traceContexts)(logger)
-    store.increaseMatcherWatermark(offset.value)
+      TraceContext.ofBatch("persist-watermark-matching")(timepoint.traceContexts)(logger)
+    store.increaseWatermark(timepoint.value.offset).map { _ =>
+      metrics.matchingWatermark.updateValue(timepoint.value.recordTime.toMicros)
+    }
   }
-
-  private def stringInterning: StringInterning = stringInterningEval.value
-
 }
 
 object ReceivedAcsCommitmentMatcher {
 
   private final case class AcsCommitmentMessageContainer(
       envelope: AcsCommitmentProtocolMessage,
-      offset: Offset,
+      timepoint: Timepoint,
       lastEnvelopeInBatch: Boolean,
   )(implicit val traceContext: TraceContext)
 
+  def synchronizationFlow[Mat](
+      source: Source[Offset, Mat]
+  ): Flow[InternalIndexService.AcsUpdateContainer, InternalIndexService.AcsUpdateContainer, Mat] =
+    Flow[InternalIndexService.AcsUpdateContainer].gateKeeperMat(source.conflate(_ max _))(_.offset)(
+      Keep.right
+    )
 }

@@ -64,6 +64,7 @@ final class SegmentModuleRefFactoryImpl[E <: Env[E]](
       segmentState: SegmentState,
       metricsAccumulator: EpochMetricsAccumulator,
   ): E#ModuleRefT[ConsensusSegment.Message] = {
+    implicit val tc: TraceContext = traceContext
     val module =
       new IssSegmentModule[E](
         epoch,

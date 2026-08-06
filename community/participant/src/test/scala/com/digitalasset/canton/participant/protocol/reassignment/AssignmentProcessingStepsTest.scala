@@ -19,6 +19,7 @@ import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, F
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
@@ -213,6 +214,7 @@ final class AssignmentProcessingStepsTest
         mock[RecordOrderPublisher],
         mock[SynchronizerTimeTracker],
         mock[InFlightSubmissionSynchronizerTracker],
+        mock[AcsCommitmentSender],
         mock[OnboardingClearanceScheduler],
         persistentState,
         ledgerApiIndexer,

@@ -109,7 +109,7 @@ private[channel] final class TestRecorder(
                   ByteStringUtil
                     .decompressGzip(byteString, BaseTest.defaultMaxBytesToDecompress)
                     .value
-                decompressed.toString("UTF-8")
+                decompressed.toStringUtf8
               case Left(error) => error.toString
             }
             res

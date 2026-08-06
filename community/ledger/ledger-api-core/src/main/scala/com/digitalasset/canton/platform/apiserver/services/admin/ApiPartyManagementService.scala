@@ -84,7 +84,6 @@ import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.PositiveTopologyTransaction
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.user.store.UserManagementStore
-import com.digitalasset.canton.user.store.UserManagementStore.UserInfo
 import com.digitalasset.canton.user.{
   IdentityProviderId,
   ObjectMeta,
@@ -117,6 +116,7 @@ private[apiserver] final class ApiPartyManagementService private (
     managementServiceTimeout: FiniteDuration,
     submissionIdGenerator: CreateSubmissionId,
     partyAllocationTracker: PartyAllocation.Tracker,
+    pendingPartyAllocations: PendingPartyAllocations,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext,
@@ -125,8 +125,6 @@ private[apiserver] final class ApiPartyManagementService private (
     with GrpcApiService
     with NamedLogging
     with AuthenticatedUserContextResolver {
-
-  private val pendingPartyAllocations = new PendingPartyAllocations()
 
   private implicit val loggingContext: LoggingContext =
     createLoggingContext(loggerFactory)(identity)
@@ -336,11 +334,16 @@ private[apiserver] final class ApiPartyManagementService private (
             pendingPartyAllocations.withUser(userId) { outstandingCalls =>
               for {
                 _ <- identityProviderExistsOrError(identityProviderId)
-                userInfo <- getUserIfUserSpecified(userId, identityProviderId)
-                _ <- checkUserLimitsIfUserSpecified(
+                userInfo <- Utils.getUserIfUserSpecified(
+                  userId,
+                  identityProviderId,
+                  userManagementStore,
+                )
+                _ <- Utils.checkUserLimitsIfUserSpecified(
                   userInfo.map(_.rights),
                   outstandingCalls,
                   authenticatedUserContextF,
+                  maxSelfAllocatedParties.unwrap,
                 )
                 _ <- verifyPartyIsNonExistentOrInIdp(
                   identityProviderId,
@@ -751,41 +754,6 @@ private[apiserver] final class ApiPartyManagementService private (
         Future.successful(t)
     }
 
-  private def getUserIfUserSpecified(
-      userId: Option[Ref.UserId],
-      identityProviderId: IdentityProviderId,
-  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[Option[UserInfo]] =
-    userId.fold[Future[Option[UserInfo]]](Future.successful(None))(
-      userManagementStore
-        .getUserInfo(_, identityProviderId)
-        .flatMap(result => Utils.handleResult("checking user's existence")(result).map(Some(_)))
-    )
-
-  private def checkUserLimitsIfUserSpecified(
-      userRights: Option[Set[UserRight]],
-      outstandingCalls: Int,
-      authenticatedUserContextF: Future[AuthenticatedUserContext],
-  )(implicit loggingContextWithTrace: LoggingContextWithTrace): Future[Unit] =
-    userRights match {
-      case None => Future.unit
-      case Some(rights) =>
-        for {
-          authenticatedUserContext <- authenticatedUserContextF
-          resultingRightsCount = rights.flatMap(_.getParty).size + outstandingCalls
-          _ <-
-            if (
-              authenticatedUserContext.isRegularUser && resultingRightsCount > maxSelfAllocatedParties.unwrap
-            )
-              Future.failed(
-                AuthorizationChecksErrors.PermissionDenied
-                  .Reject(s"User quota of party allocations exhausted")
-                  .asGrpcError
-              )
-            else
-              Future.unit
-        } yield ()
-    }
-
   private def identityProviderExistsOrError(
       id: IdentityProviderId
   )(implicit
@@ -954,12 +922,16 @@ private[apiserver] final class ApiPartyManagementService private (
             } yield ()
 
             for {
-              _ <- identityProviderExistsOrError(identityProviderId)
-              userInfo <- getUserIfUserSpecified(userId, identityProviderId)
-              _ <- checkUserLimitsIfUserSpecified(
+              userInfo <- Utils.getUserIfUserSpecified(
+                userId,
+                identityProviderId,
+                userManagementStore,
+              )
+              _ <- Utils.checkUserLimitsIfUserSpecified(
                 userInfo.map(_.rights),
                 outstandingCalls,
                 authenticatedUserContextF,
+                maxSelfAllocatedParties.unwrap,
               )
               _ <- verifyPartyIsNonExistentOrInIdp(
                 identityProviderId,
@@ -1204,6 +1176,7 @@ private[apiserver] object ApiPartyManagementService {
       managementServiceTimeout: FiniteDuration,
       submissionIdGenerator: CreateSubmissionId,
       partyAllocationTracker: PartyAllocation.Tracker,
+      pendingPartyAllocations: PendingPartyAllocations,
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
@@ -1220,6 +1193,7 @@ private[apiserver] object ApiPartyManagementService {
       managementServiceTimeout,
       submissionIdGenerator,
       partyAllocationTracker,
+      pendingPartyAllocations,
       loggerFactory,
     )
 

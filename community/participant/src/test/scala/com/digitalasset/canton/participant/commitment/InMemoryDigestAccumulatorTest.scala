@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   CheckpointFenceOr,
-  CheckpointWritten,
+  CheckpointToBeWritten,
   Classification,
   NotCheckpointFence,
   PartyAddedToParticipant,
@@ -24,9 +24,9 @@ import com.digitalasset.canton.participant.commitment.InMemoryDigestAccumulator.
   PartyDigestIdentifier,
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
+import com.digitalasset.canton.participant.metrics.TestCommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  Checkpoint,
   LocalPartyFirst,
   ParticipantAcsDigestUpdate,
   PartyAcsDigestUpdate,
@@ -75,7 +75,6 @@ class InMemoryDigestAccumulatorTest
       participant: LedgerParticipantId,
       acsUpdateBatchSize: Int = 1,
       digestLoadParallelism: Int = 1,
-      digestStoreParallelism: Int = 1,
   ) {
     val stringInterning: StringInterning = new MockStringInterning()
     val digestStore: AcsDigestStore = InMemoryAcsDigestStore.create(
@@ -89,9 +88,9 @@ class InMemoryDigestAccumulatorTest
       stringInterning,
       acsUpdateBatchSize,
       digestLoadParallelism,
-      digestStoreParallelism,
       tracingMode = AcsDigestTracingMode.Disabled,
       enableConsistencyChecks = true,
+      metrics = TestCommitmentMetrics(),
     )
 
     def lookupPartyDigest(
@@ -185,8 +184,8 @@ class InMemoryDigestAccumulatorTest
   ] = TestSource.probe[ProcessingContext[CheckpointFenceOr[Classification]]]
 
   @unused
-  private def testSink: Sink[CheckpointWritten, TestSubscriber.Probe[CheckpointWritten]] =
-    TestSink.probe[CheckpointWritten]
+  private def testSink: Sink[CheckpointToBeWritten, TestSubscriber.Probe[CheckpointToBeWritten]] =
+    TestSink.probe[CheckpointToBeWritten]
 
   "InMemoryDigestAccumulator" should {
     "process a simple AcsUpdate" in {
@@ -207,11 +206,7 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(1)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue
-
-      result shouldBe Seq(CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary))
-
-      digestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS.value shouldBe
-        Checkpoint(tp(1), ReconciliationIntervalBoundary)
+      result shouldBe Seq(CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary))
 
       val partyDigest = lookupPartyDigest(alice, RemotePartyFirst).value
       val participantDigest = lookupParticipantDigest(p1).value
@@ -219,6 +214,10 @@ class InMemoryDigestAccumulatorTest
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
     }
 
     // given cid0 with stakeholders alice and bob,
@@ -253,7 +252,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobOnboarded.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      fixtureBobOnboarded.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       val fixtureBobAlreadyHosted = new Fixture(p1)
       Source(
@@ -270,7 +273,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobAlreadyHosted.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      fixtureBobAlreadyHosted.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // All in-memory state has been evicted
       fixtureBobOnboarded.accumulator.digestsUsageCounters shouldBe empty
@@ -323,7 +330,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobOffboarded.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      fixtureBobOffboarded.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       val fixtureBobNotHosted = new Fixture(p1)
       Source(
@@ -340,7 +351,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobNotHosted.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      fixtureBobNotHosted.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // All in-memory state has been evicted
       fixtureBobNotHosted.accumulator.digestsUsageCounters shouldBe empty
@@ -376,7 +391,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(4)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(4), off(4), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(4), off(4), ReconciliationIntervalBoundary))
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        4
+      ).toMicros
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -411,7 +430,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -456,7 +479,8 @@ class InMemoryDigestAccumulatorTest
           )
         )
         .sendNext(checkpoint(tp(2)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(2), off(2), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(2), off(2), ReconciliationIntervalBoundary)
 
       // the first entry doesn't replace anything
       for {
@@ -484,8 +508,13 @@ class InMemoryDigestAccumulatorTest
         // Force an intermediate checkpoint to be written so that we persist an intermediate result.
         // Such checkpoints should not happen in practice because they would corrupt crash recovery.
         .sendNext(checkpoint(tp(3)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary)
       sink.request(1)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // processing an update on a later offset should properly set replacesOffset
       for {
@@ -509,7 +538,12 @@ class InMemoryDigestAccumulatorTest
           )
         )
         .sendNext(checkpoint(tp(4)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(4), off(4), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(4), off(4), ReconciliationIntervalBoundary)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        4
+      ).toMicros
 
       // since the first persisted update at off(2) was just an intermediate result that got persisted,
       // another update for the same offset should retain the original replacesOffset
@@ -590,8 +624,17 @@ class InMemoryDigestAccumulatorTest
         SortedMap.from(expectedDigestUsage)
 
       storeBlockPromise.success(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary)
-      sink.expectNext() shouldBe CheckpointWritten(ts(20), off(20), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary)
+      sink.expectNext() shouldBe CheckpointToBeWritten(
+        ts(20),
+        off(20),
+        ReconciliationIntervalBoundary,
+      )
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        20
+      ).toMicros
 
       // All in-memory state has been evicted
       // accumulator.digestsUsageCounters shouldBe empty
@@ -705,8 +748,14 @@ class InMemoryDigestAccumulatorTest
         SortedMap.from(expectedUsages)
 
       storeBlockPromise.success(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary)
-      sink.expectNext() shouldBe CheckpointWritten(ts(5), off(5), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(5), off(5), ReconciliationIntervalBoundary)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        5
+      ).toMicros
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -775,9 +824,9 @@ class InMemoryDigestAccumulatorTest
         stringInterning,
         acsUpdateBatchSize = 1,
         digestLoadParallelism = 2,
-        digestStoreParallelism = 1,
         tracingMode = AcsDigestTracingMode.Disabled,
         enableConsistencyChecks = true,
+        metrics = TestCommitmentMetrics(),
       )
 
       val releaseP = PromiseUnlessShutdown.unsupervised[Unit]()
@@ -892,7 +941,12 @@ class InMemoryDigestAccumulatorTest
         SortedMap.from(expectedDigestUsage)
 
       releaseP.outcome_(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(6), off(6), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(6), off(6), ReconciliationIntervalBoundary)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        6
+      ).toMicros
 
       source.sendComplete()
       sink.expectComplete()

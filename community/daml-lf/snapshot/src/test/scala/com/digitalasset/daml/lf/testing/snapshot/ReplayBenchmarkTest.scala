@@ -10,6 +10,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.Result
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -61,17 +62,19 @@ class ReplayBenchmarkTest(contractIdVersion: ContractIdVersion)
         snapshotDir = Some(snapshotDir),
         loggerFactory = loggerFactory,
       )
-      engine.submit(
-        submitters = Set(alice),
-        readAs = Set.empty,
-        cmds = ApiCommands(ImmArray(cmd), Time.Timestamp.now(), "replay-snapshot-test"),
-        participantId = participantId,
-        submissionSeed = submissionSeed,
-        contractIdVersion = contractIdVersion,
-        prefetchKeys = Seq.empty,
-        interpretationConfig =
-          InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
-      )
+      engine
+        .submit(
+          submitters = Set(alice),
+          readAs = Set.empty,
+          cmds = ApiCommands(ImmArray(cmd), Time.Timestamp.now(), "replay-snapshot-test"),
+          participantId = participantId,
+          submissionSeed = submissionSeed,
+          contractIdVersion = contractIdVersion,
+          prefetchKeys = Seq.empty,
+          interpretationConfig =
+            InterpretationConfig.Default.copy(contractStateMode = ContractStateMachine.Mode.default),
+        )
+        .consume(Result.lookupHandler()) shouldBe a[Right[?, ?]]
 
       Files.exists(snapshotFile) should be(true)
       Files.size(snapshotFile) should be > 0L

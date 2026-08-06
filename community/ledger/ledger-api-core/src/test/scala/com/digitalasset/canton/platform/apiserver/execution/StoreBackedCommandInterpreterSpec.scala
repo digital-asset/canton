@@ -292,8 +292,8 @@ class StoreBackedCommandInterpreterSpec
 
     "dispatch external calls to the handler in submission mode" in {
       val externalCallEngine = new Engine(Engine.DevConfig, loggerFactory)
-      inside(externalCallEngine.preloadPackage(externalCallPackageId, externalCallPackage)) {
-        case ResultDone(()) => succeed
+      inside(externalCallEngine.preloadPackage(externalCallPackageId, externalCallPackage).start) {
+        case Result.Step.Pure(()) => succeed
       }
 
       val observedCall =
@@ -307,7 +307,7 @@ class StoreBackedCommandInterpreterSpec
             mode: ExternalCallMode,
         )(implicit
             tc: TraceContext
-        ): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] = {
+        ): FutureUnlessShutdown[Either[Result.Need.ExternalCall.Error, String]] = {
           observedCall.set(Some((extensionId, functionId, configHash, input, mode)))
           FutureUnlessShutdown.pure(Right("beef"))
         }

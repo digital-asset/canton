@@ -194,7 +194,7 @@ private[channel] abstract class UninitializedGrpcSequencerChannel(
                   .bimap(err => (err.message, Status.INVALID_ARGUMENT), _.unwrap)
               request <-
                 ConnectToSequencerChannelRequest
-                  .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, requestP)
+                  .fromProtoV30(ProtocolVersionValidation.PV(protocolVersion), requestP)
                   .leftMap(err => (err.toString, Status.INVALID_ARGUMENT))
               metadata <- request.request match {
                 case ConnectToSequencerChannelRequest.Metadata(metadata) =>

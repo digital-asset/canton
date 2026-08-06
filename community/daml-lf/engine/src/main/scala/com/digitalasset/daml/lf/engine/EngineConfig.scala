@@ -39,10 +39,10 @@ import java.nio.file.Path
   * @param iterationsBetweenInterruptions
   *   bound the maximal number of interpreter steps needed to produce a Result.
   * @param useDefensiveContractLookup
-  *   When true, contracts passed to the ResultNeedContract callback are type-checked, authenticated
-  *   and upgraded by the engine. Explicit disclosures are assumed to be provided via
-  *   ResultNeedContract. This parameter is temporary and will be retired once all client code has
-  *   migrated to the new `ResultNeedContract` question.
+  *   When true, contracts passed in answer to the `Result.Need.Contract` question are type-checked,
+  *   authenticated and upgraded by the engine. Explicit disclosures are assumed to be provided via
+  *   `Result.Need.Contract`. This parameter is temporary and will be retired once all client code
+  *   has migrated to the new `Result.Need.Contract` question.
   */
 final case class EngineConfig(
     allowedLanguageVersions: Seq[language.LanguageVersion],

@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.digest.{DigestDelta, DigestOperation, DigestOps}
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.platform.store.interning.StringInterning
@@ -36,31 +37,29 @@ class SequentialDigestAccumulator(
     acsDigestStore: AcsDigestStore,
     stringInterning: StringInterning,
     tracingMode: AcsDigestTracingMode,
+    private[canton] val metrics: CommitmentMetrics,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends DigestAccumulator
     with NamedLogging {
-
   override def flow()(implicit traceContext: TraceContext): Flow[
     DigestAccumulator_Input,
-    DigestAccumulator_Output,
+    CheckpointToBeWritten,
     NotUsed,
   ] =
     Flow[DigestAccumulator_Input]
       .mapAsyncAndDrainUS(1)(process)
-      .collect { case Some(checkpointWritten) => checkpointWritten }
+      .collect { case Some(checkpointToBeWritten) => checkpointToBeWritten }
 
   @VisibleForTesting
   def process(
       input: ProcessingContext[CheckpointFenceOr[Classification]]
-  ): FutureUnlessShutdown[Option[CheckpointWritten]] = {
+  ): FutureUnlessShutdown[Option[CheckpointToBeWritten]] = {
     implicit val traceContext: TraceContext = input.traceContext
     // for now use the offset as the tiebreaker
-    input match {
-      case ProcessingContext(_, CheckpointFence(tpe)) =>
-        acsDigestStore
-          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
-          .map(_ => Some(CheckpointWritten(input.timepoint, tpe)))
+    val result = input match {
+      case ProcessingContext(timepoint, CheckpointFence(tpe)) =>
+        FutureUnlessShutdown.pure(Some(CheckpointToBeWritten(timepoint, tpe)))
 
       case ProcessingContext(_, NotCheckpointFence(_, classification)) =>
         classification match {
@@ -110,6 +109,13 @@ class SequentialDigestAccumulator(
           case PartyOnboardingToParticipant(party, participant) =>
             FutureUnlessShutdown.pure(None)
         }
+    }
+
+    result.map { output =>
+      metrics.runningDigestProcessor.latestAccumulatedRecordTime.updateValue(
+        input.recordTime.toMicros
+      )
+      output
     }
   }
 

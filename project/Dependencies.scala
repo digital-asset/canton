@@ -28,7 +28,7 @@ object Dependencies {
   lazy val incompatibleLogging: Array[ExclusionRule] =
     Array(ExclusionRule("org.slf4j"), ExclusionRule("ch.qos.logback"))
 
-  lazy val scala_version = "2.13.16"
+  lazy val scala_version = "2.13.18"
   lazy val scala3_version = "3.3.6"
   lazy val scala_version_short = "2.13"
 
@@ -38,40 +38,40 @@ object Dependencies {
   lazy val pekko_persistence_version = "1.2.1"
   lazy val pekko_http_version = resolveDependency("org.apache.pekko", "pekko-http").revision
 
-  lazy val ammonite_version = "3.0.1"
+  lazy val ammonite_version = "3.0.9"
   lazy val apispec_version = "0.11.7"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.44.3"
+  lazy val aws_version = "2.49.4"
   lazy val better_files_version = "3.9.2"
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
-  lazy val cats_version = "2.9.0"
+  lazy val cats_version = "2.13.0"
   lazy val checkerFramework_version = "3.47.0"
   lazy val chimney_version = "1.4.0"
   lazy val circe_version = "0.14.2"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "12.0.2"
-  // From https://github.com/googleapis/java-cloud-bom/tree/v26.58.0
-  // kms 2.63.0 and storage 2.50.0 are within the same compatibility matrix
+  // From https://github.com/googleapis/java-cloud-bom/tree/v26.85.0
+  // kms 2.97.0 and storage 2.70.0 are within the same compatibility matrix
   // We should switch to using the BOM versioning system for these deps
   // https://docs.cloud.google.com/java/docs/bom
-  lazy val gcp_kms_version = "2.63.0"
-  lazy val gcp_storage_version = "2.50.0"
-  lazy val zstd_version = "1.5.5-5"
-  lazy val gson_version = "2.9.1"
+  lazy val gcp_kms_version = "2.97.0"
+  lazy val gcp_storage_version = "2.70.0"
+  lazy val zstd_version = "1.5.7-12"
+  lazy val gson_version = "2.14.0"
   lazy val gson_fire_version = "1.9.0"
   lazy val h2_version = "2.2.224"
   lazy val janino_version = "3.1.12"
   lazy val javax_annotations_version = "1.3.2"
   lazy val jackson_databind_nullable_version = "0.2.10"
-  lazy val jakarta_annotation_api_version = "1.3.5"
+  lazy val jakarta_annotation_api_version = "3.0.0"
   lazy val magnolia_version = "1.1.10"
   lazy val magnolifyScalacheck_version = "0.6.2"
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.2.0"
-  lazy val munit_version = "0.7.26"
+  lazy val munit_version = "1.3.4"
   lazy val grpc_version = resolveDependency("io.grpc", "grpc-api").revision
 
   lazy val pekko_http_backend_version = "3.9.0"
@@ -305,7 +305,7 @@ object Dependencies {
   lazy val opentelemetry_exporter_prometheus =
     resolveDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
   lazy val opentelemetry_proto =
-    "io.opentelemetry.proto" % "opentelemetry-proto" % "1.7.0-alpha"
+    "io.opentelemetry.proto" % "opentelemetry-proto" % "1.11.0-alpha"
 
   lazy val opentelemetry_instrumentation_grpc =
     resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-grpc-1.6")
@@ -470,7 +470,11 @@ object Dependencies {
 
   lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")
   lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")
-  lazy val protobuf_version = google_protobuf_java.revision
+  // protoc stays on 3.x while the runtime is on 4.x: a 4.x runtime reads 3.x gencode but not the
+  // reverse, so 3.x gencode keeps our published Java bindings usable on protobuf-java 3.x.
+  // Keep in step with scalapb, which consumes protoc's output: no stable release targets
+  // protobuf 4 yet (0.11.20 still targets 3.25.8), so only bump this once scalapb does.
+  lazy val protoc_version = "3.25.9"
   lazy val google_protobuf_java_util =
     resolveDependency("com.google.protobuf", "protobuf-java-util")
 

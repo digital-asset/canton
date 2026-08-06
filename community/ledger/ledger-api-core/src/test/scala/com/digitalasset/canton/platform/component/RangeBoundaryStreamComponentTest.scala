@@ -87,7 +87,10 @@ trait RangeBoundaryStreamComponentTest
     )
 
   private def acsUpdates(fromExclusive: Option[Offset]): Source[AcsUpdate, NotUsed] =
-    internalIndexService.acsUpdates(synchronizer1, fromExclusive).map(_.acsUpdate)
+    internalIndexService
+      .acsUpdates(synchronizer1, fromExclusive)
+      .map(_.acsUpdate)
+      .filter(_ != AcsUpdate.OffsetCheckpoint)
 
   private def witnessedCreates(
       num: Int
@@ -185,7 +188,12 @@ trait RangeBoundaryStreamComponentTest
     Seq(false, true).foreach { descendingOrder =>
       s"exclude the topology transaction sitting exactly on the exclusive lower bound (descendingOrder=$descendingOrder)" in {
         val updateFormat = transactionUpdateFormat(includeTopologyEvents =
-          Some(TopologyFormat(Some(ParticipantAuthorizationFormat(None))))
+          Some(
+            TopologyFormat(
+              participantAuthorizationFormat = Some(ParticipantAuthorizationFormat(None)),
+              synchronizerId = None,
+            )
+          )
         )
 
         val boundary = ingestPartyOnboarding(Set("boundary-party-1"), nextRecordTime())
@@ -209,7 +217,12 @@ trait RangeBoundaryStreamComponentTest
 
       s"include the topology transaction sitting exactly on the inclusive upper bound (descendingOrder=$descendingOrder)" in {
         val updateFormat = transactionUpdateFormat(includeTopologyEvents =
-          Some(TopologyFormat(Some(ParticipantAuthorizationFormat(None))))
+          Some(
+            TopologyFormat(
+              participantAuthorizationFormat = Some(ParticipantAuthorizationFormat(None)),
+              synchronizerId = None,
+            )
+          )
         )
 
         val startExclusive = index.currentLedgerEnd().value.lastOffset
