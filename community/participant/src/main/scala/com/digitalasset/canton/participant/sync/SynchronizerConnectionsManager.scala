@@ -1185,6 +1185,7 @@ private[sync] class SynchronizerConnectionsManager(
                   synchronizerHandle.topologyClient,
                   ephemeral.recordOrderPublisher,
                   pendingLsuOperationsStore = pendingLsuOperationsStore,
+                  synchronizerConnectionConfigStore = synchronizerConnectionConfigStore,
                   persistent.pendingOnboardingClearanceStore,
                   synchronizerHandle.syncPersistentState.sequencedEventStore,
                   synchronizerConnectionConfig.predecessor,

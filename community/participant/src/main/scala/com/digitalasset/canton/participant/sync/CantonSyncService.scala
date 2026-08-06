@@ -1136,6 +1136,7 @@ class CantonSyncService(
     *   - psid2 is the successor of psid1
     *   - Connection to psid1 is marked as LsuSource
     *   - Connection to psid2 is marked as LsuTarget
+    *   - There's no other psid for the same lsid that is marked as Active
     *
     * Such unfinished LSUs need to be finished "manually" because the normal flow is triggered by a
     * connection to the synchronizer. However, `LsuSource` state marks the connection as inactive,
@@ -1147,6 +1148,15 @@ class CantonSyncService(
   def finishLSUs()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    // lsid -> currently active psid
+    val activePsids: Map[SynchronizerId, PhysicalSynchronizerId] = synchronizerConnectionConfigStore
+      .getAll()
+      .mapFilter { connection =>
+        if (connection.status == SynchronizerConnectionConfigStore.Active) {
+          connection.configuredPsid.toOption.map(psid => psid.logical -> psid)
+        } else None
+      }
+      .toMap
     // psid -> successor for all successors that are a LsuTarget
     val psidToSuccessor: Map[PhysicalSynchronizerId, SynchronizerSuccessor] =
       synchronizerConnectionConfigStore
@@ -1161,21 +1171,51 @@ class CantonSyncService(
         }
         .toMap
 
-    val unfinishedLsus = synchronizerConnectionConfigStore.getAll().mapFilter { connectionConfig =>
-      if (connectionConfig.status == SynchronizerConnectionConfigStore.LsuSource) {
-        connectionConfig.configuredPsid.toOption.flatMap { currentPsid =>
-          psidToSuccessor
-            .get(currentPsid)
-            .map(successor =>
-              FinishAutomaticLsuRequest(
-                connectionConfig.config.synchronizerAlias,
-                currentPsid = currentPsid,
-                successorPsid = successor.psid,
+    val unfinishedLsuCandidates =
+      synchronizerConnectionConfigStore.getAll().mapFilter { connectionConfig =>
+        if (connectionConfig.status == SynchronizerConnectionConfigStore.LsuSource) {
+          connectionConfig.configuredPsid.toOption.flatMap { currentPsid =>
+            psidToSuccessor
+              .get(currentPsid)
+              .map(successor =>
+                FinishAutomaticLsuRequest(
+                  connectionConfig.config.synchronizerAlias,
+                  currentPsid = currentPsid,
+                  successorPsid = successor.psid,
+                )
               )
-            )
-        }
-      } else None
+          }
+        } else None
+      }
+
+    // Due to a bug, LSU cancellation after a handshake could leave
+    // a pair of LsuSource/LsuTarget connections in the store even beyond further successful LSUs.
+    // So if there's yet another Active connection present for the same lsid,
+    // we don't want to finish this stale LSU.
+    // While this was fixed by setting the LsuTarget => Inactive on cancellation,
+    // this workaround code remains for PNs already affected by the bug.
+    // This can be removed after this state disappears from all PNs (e.g. in one of the next releases).
+    val unfinishedLsus = unfinishedLsuCandidates.filterNot { finishLsuRequest =>
+      activePsids.contains(finishLsuRequest.currentPsid.logical)
     }
+    val staleUnfinishedLsus = unfinishedLsuCandidates.toSet -- unfinishedLsus
+    val staleCleanupFUS
+        : EitherT[FutureUnlessShutdown, SynchronizerConnectionConfigStore.Error, Unit] =
+      MonadUtil.sequentialTraverse_(staleUnfinishedLsus) { staleLsuRequest =>
+        logger.info(
+          s"Cleaning up stale unfinished LSU for ${staleLsuRequest.currentPsid} -> ${staleLsuRequest.successorPsid}"
+        )
+        synchronizerConnectionConfigStore.setStatus(
+          alias = staleLsuRequest.alias,
+          configuredPsid = ConfiguredPhysicalSynchronizerId(Some(staleLsuRequest.successorPsid)),
+          status = SynchronizerConnectionConfigStore.Inactive,
+        )
+      }
+    // Running the cleanup in the background, so that it doesn't block the startup (+ also in case of errors)
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      future = staleCleanupFUS.value,
+      failureMessage = "Stale unfinished LSUs clean up failed",
+    )
 
     logger.info(s"Found unfinished LSUs: $unfinishedLsus")
 

@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.EitherT
 import cats.implicits.toTraverseOps
+import cats.syntax.foldable.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -20,6 +21,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
@@ -28,12 +30,13 @@ import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.EventInfo
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStore.EffectiveStateChange
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.TopologyMapping
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, ParticipantId, PartyId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -60,6 +63,7 @@ class ParticipantTopologyTerminateProcessing(
     pauseSynchronizerIndexingDuringPartyReplication: Boolean,
     synchronizerPredecessor: Option[SynchronizerPredecessor],
     pendingLsuOperationsStore: PendingLsuOperation.Store,
+    synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
     onboardingClearanceScheduler: OnboardingClearanceScheduler,
     metrics: ParticipantMetrics,
@@ -272,11 +276,27 @@ class ParticipantTopologyTerminateProcessing(
 
     metrics.resetLsuStatus(successor.psid)
 
-    pendingLsuOperationsStore.delete(
-      psid,
-      PendingLsuOperation.operationKey,
-      PendingLsuOperation.operationName,
-    )
+    for {
+      _ <- pendingLsuOperationsStore.delete(
+        psid,
+        PendingLsuOperation.operationKey,
+        PendingLsuOperation.operationName,
+      )
+      successorConnectionO = synchronizerConnectionConfigStore.get(successor.psid).toOption
+      _ <- successorConnectionO.traverse_(connection =>
+        synchronizerConnectionConfigStore
+          .setStatus(
+            alias = connection.config.synchronizerAlias,
+            configuredPsid = ConfiguredPhysicalSynchronizerId(Some(successor.psid)),
+            status = SynchronizerConnectionConfigStore.Inactive,
+          )
+          .valueOr(err =>
+            ErrorUtil.invalidState(
+              s"Failed to set cancelled LSU synchronizer connection config status to Inactive for ${successor.psid}: $err"
+            )
+          )
+      )
+    } yield ()
   }
 
   private def scheduleEvent(

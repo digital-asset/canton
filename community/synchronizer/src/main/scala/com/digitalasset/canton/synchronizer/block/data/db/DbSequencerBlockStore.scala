@@ -146,26 +146,11 @@ class DbSequencerBlockStore(
   override def prune(requestedTimestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[String] = for {
-    (count, maxHeight) <- storage.query(
-      sql"select count(*), max(height) from seq_block_height where latest_event_ts < $requestedTimestamp "
-        .as[(Long, Long)]
-        .head,
-      functionFullName,
-    )
-    _ <- storage.queryAndUpdate(
-      sqlu"delete from seq_block_height where height < $maxHeight",
+    count <- storage.update(
+      sqlu"delete from seq_block_height where latest_event_ts < $requestedTimestamp",
       functionFullName,
     )
     _ <- stateManagerStore.pruneExpiredInFlightAggregations(requestedTimestamp)
-  } yield {
-    // the first element (with lowest height) in the seq_block_height can either represent an actual existing block
-    // in the database in the case where we've never pruned and also not started this sequencer from a snapshot.
-    // In this case we want to count that as a removed block now.
-    // The other case is when we've started from a snapshot or have pruned before, and the first element of this table
-    // merely represents the initial state from where new timestamps can be computed subsequently.
-    // In that case we don't want to count it as a removed block, since it did not actually represent a block with existing data.
-    val pruningFromBeginning = (maxHeight - count) == -1
-    s"Removed ${if (pruningFromBeginning) count else Math.max(0, count - 1)} blocks"
-  }
+  } yield s"Removed $count blocks"
 
 }

@@ -25,6 +25,7 @@ import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.{ParticipantHistograms, ParticipantMetrics}
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore
 import com.digitalasset.canton.topology.*
@@ -122,6 +123,7 @@ final class ParticipantTopologyTerminateProcessingTest
       pauseSynchronizerIndexingDuringPartyReplication = false,
       synchronizerPredecessor = synchronizerPredecessor,
       pendingLsuOperationsStore = mock[PendingLsuOperation.Store],
+      synchronizerConnectionConfigStore = mock[SynchronizerConnectionConfigStore],
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
       onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
       metrics,

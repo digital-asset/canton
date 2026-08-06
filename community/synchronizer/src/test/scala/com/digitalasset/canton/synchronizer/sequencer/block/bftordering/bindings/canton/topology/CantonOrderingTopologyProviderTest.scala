@@ -17,10 +17,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
-  DynamicSynchronizerParametersWithValidity,
   SequencingParameters,
   SequencingParametersWithValidity,
 }
+import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -37,7 +37,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SegmentLength,
 }
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -164,21 +164,19 @@ class CantonOrderingTopologyProviderTest
                     )
                   )
                 )
-              when(topologySnapshotMock.findDynamicSynchronizerParameters())
-                .thenReturn(
-                  FutureUnlessShutdown.pure(
-                    Right(
-                      DynamicSynchronizerParametersWithValidity(
-                        DynamicSynchronizerParameters
-                          .defaultValues(
-                            testedProtocolVersion
-                          ),
-                        validFrom = aTimestamp,
-                        validUntil = None,
-                      )
-                    ).withLeft[String]
-                  )
+              when(
+                topologySnapshotMock.findDynamicSynchronizerParametersOrDefault(
+                  testedProtocolVersion,
+                  warnOnUsingDefault = true,
                 )
+              ).thenReturn(
+                FutureUnlessShutdown.pure(
+                  DynamicSynchronizerParameters
+                    .defaultValues(
+                      testedProtocolVersion
+                    )
+                )
+              )
               when(topologySnapshotMock.findDynamicSequencingParameters()(any[TraceContext]))
                 .thenReturn(
                   FutureUnlessShutdown.pure(
@@ -212,6 +210,9 @@ class CantonOrderingTopologyProviderTest
                 .thenReturn(FutureUnlessShutdown.pure(synchronizerSnapshotSyncCryptoApiMock))
               when(cryptoApiMock.headSnapshot(any[TraceContext]))
                 .thenReturn(synchronizerSnapshotSyncCryptoApiMock)
+              val synchronizerTopologyClient = mock[SynchronizerTopologyClient]
+              when(synchronizerTopologyClient.protocolVersion).thenReturn(testedProtocolVersion)
+              when(cryptoApiMock.ips).thenReturn(synchronizerTopologyClient)
 
               activationTimestampAndMaxEffectiveTimestampO.foreach {
                 case (activationTimestamp, maxEffectiveTimestamp) =>
@@ -232,6 +233,7 @@ class CantonOrderingTopologyProviderTest
                   segmentLengthForPv34 = configSegmentLength,
                   leaderSelectionPolicyConfigForPv34 = configLeaderSelectionPolicy,
                 ),
+                PublicServerConfig(),
                 loggerFactory,
                 SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
               )
@@ -249,6 +251,7 @@ class CantonOrderingTopologyProviderTest
                   activationTimestampAndMaxEffectiveTimestampO.fold {
                     // No activation timestamp tp query nor max effective time available -> bootstrap (genesis or LSU)
                     verify(cryptoApiMock, times(1)).headSnapshot(any[TraceContext])
+                    verify(cryptoApiMock, times(1)).ips
                     verifyNoMoreInteractions(cryptoApiMock)
                   } { case (activationTimestamp, maxEffectiveTimestamp) =>
                     verify(cryptoApiMock, times(1)).awaitSnapshot(eqTo(activationTimestamp))(
@@ -257,6 +260,7 @@ class CantonOrderingTopologyProviderTest
                     verify(cryptoApiMock, times(1)).awaitMaxTimestamp(
                       eqTo(SequencedTime(activationTimestamp.immediatePredecessor))
                     )(any[TraceContext])
+                    verify(cryptoApiMock, times(1)).ips
                     verifyNoMoreInteractions(cryptoApiMock)
                   }
                   orderingTopology.areTherePendingCantonTopologyChanges shouldBe expectedPendingTopologyChangesFlag
@@ -270,7 +274,7 @@ class CantonOrderingTopologyProviderTest
                     someSequencerIds.size.toLong
                   )
                   orderingTopology.sequencingParameters.blacklistLeaderSelectionPolicyConfig shouldBe expectedLeaderSelectionPolicy
-                  orderingTopology.maxBytesToDecompress shouldBe defaultMaxBytesToDecompress
+                  orderingTopology.maxRequestPayloadBytes shouldBe DynamicSynchronizerParameters.defaultMaxRequestSize.value
                 }
           }
       }
@@ -307,6 +311,7 @@ class CantonOrderingTopologyProviderTest
       new CantonOrderingTopologyProvider(
         cryptoApiMock,
         BftBlockOrdererConfig(),
+        PublicServerConfig(),
         loggerFactory,
         SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
       ).getFirstKnownAt(TopologyActivationTime(aTimestamp))

@@ -387,39 +387,6 @@ class AvailabilityModuleOutputFetchTest
       }
     }
 
-    "it receives OutputFetch.FetchedBatchStored but there are more requests than allowed" should {
-
-      "not store the batch" in {
-        val outputFetchProtocolState = new MainOutputFetchProtocolState()
-        val availabilityStore = spy(new FakeAvailabilityStore[IgnoringUnitTestEnv])
-
-        outputFetchProtocolState.localOutputMissingBatches.addOne(
-          ABatchId -> AMissingBatchStatusNode1And2Acks
-        )
-        val availability = createAndStartAvailability[IgnoringUnitTestEnv](
-          outputFetchProtocolState = outputFetchProtocolState,
-          availabilityStore = availabilityStore,
-          maxRequestsInBatch = 0,
-        )
-        assertLogs(
-          availability.receive(
-            RemoteOutputFetch.RemoteBatchDataFetched.create(Node1, ABatchId, ABatch)
-          ),
-          log => {
-            log.level shouldBe Level.WARN
-            log.message should include regex (
-              """Batch BatchId\([^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
-            )
-          },
-        )
-
-        outputFetchProtocolState.localOutputMissingBatches should
-          contain only ABatchId -> AMissingBatchStatusNode1And2Acks
-        outputFetchProtocolState.incomingBatchRequests should be(empty)
-        verifyZeroInteractions(availabilityStore)
-      }
-    }
-
     "it receives OutputFetch.FetchedBatchStored and " +
       "the batch is missing" should {
 

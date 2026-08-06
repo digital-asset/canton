@@ -20,23 +20,6 @@ Protect the Sequencer via rate limiting
 Confirmation request max rate is a dynamic Synchronizer parameter. You update the `confirmationRequestsMaxRate` field when you
 :ref:`change the dynamic Synchronizer parameters<change_dynamic_synchronizer_parameters>`.
 
-Protect the Byzantine Fault Tolerance orderer from large requests
------------------------------------------------------------------
-
-When starting the Byzantine Fault Tolerance (BFT) orderer, you can provide limits for both `max-request-payload-bytes` how many
-bytes one transaction can handle, and `max-request-in-batch` for how many transactions can be handled in a batch.
-
-.. literalinclude:: CANTON/community/app/src/pack/examples/11-bft-sequencer/set-batch-size.conf
-   :language: scala
-   :start-after: user-manual-entry-begin: BftSequencerSetBatchSizeConfig
-   :end-before: user-manual-entry-end: BftSequencerSetBatchSizeConfig
-   :dedent:
-
-.. note::
-
-    Do note that `max-requests-in-batch` is a network wide parameter and should be the same for all orderers in the network.
-
-
 Protect the Sequencer from too many acknowledgements
 ----------------------------------------------------
 

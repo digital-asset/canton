@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulat
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.{
   ClientSettings,
   FutureSettings,
@@ -25,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   TopologySettings,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.generateNodeOnboardingDelay
+import com.digitalasset.canton.util.MaxBytesToDecompress
 import org.scalatest.Assertion
 import org.slf4j.event.Level
 
@@ -364,7 +364,7 @@ class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimulation
             requestApproximateByteSize =
               // -100 to account for tags and payloads' prefixes
               // Exceeding the default size results in warning logs and dropping messages in Mempool
-              Some(PositiveInt.tryCreate(BftBlockOrdererConfig.DefaultMaxRequestPayloadBytes - 100)),
+              Some(PositiveInt.tryCreate(MaxBytesToDecompress.HardcodedDefault.limit.value - 100)),
           ),
         ),
         TopologySettings(randomSourceToCreateSettings.nextLong()),
@@ -459,10 +459,10 @@ class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
       )
       logEntry.loggerName should include("AvailabilityModule")
     },
-    // We might get messages about waiting for new membership after epoch completion, don't count these as errors.
+    // We might get messages about waiting for new topology after epoch completion, don't count these as errors.
     { logEntry =>
       logEntry.message should include(
-        "Waiting for new membership after epoch completion"
+        "Waiting for new topology after epoch completion"
       )
       logEntry.loggerName should include("IssConsensusModule")
     },

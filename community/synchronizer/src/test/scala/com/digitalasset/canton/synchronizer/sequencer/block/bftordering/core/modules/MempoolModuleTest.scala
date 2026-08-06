@@ -4,6 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules
 
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.WriteReadiness
@@ -16,7 +18,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  Membership,
+  OrderingTopology,
+  SequencingParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Mempool,
@@ -415,21 +421,28 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       availability: ModuleRef[Availability.Message[E]],
       mempoolState: MempoolState = createMempoolState(),
       maxMempoolQueueSize: Int = BftBlockOrdererConfig.DefaultMaxMempoolQueueSize,
-      maxRequestPayloadBytes: Int = BftBlockOrdererConfig.DefaultMaxRequestPayloadBytes,
-      maxRequestsInBatch: Short = BftBlockOrdererConfig.DefaultMaxRequestsInBatch,
+      maxRequestPayloadBytes: Int = DynamicSynchronizerParameters.defaultMaxRequestSize.value.value,
+      maxRequestsInBatch: Short = SequencingParameters.DefaultMaxRequestsInBatch,
       minRequestsInBatch: Short = BftBlockOrdererConfig.DefaultMinRequestsInBatch,
       maxBatchCreationInterval: FiniteDuration =
         BftBlockOrdererConfig.DefaultMaxBatchCreationInterval,
   ): MempoolModule[E] = {
     val config = MempoolModuleConfig(
       maxMempoolQueueSize,
-      maxRequestPayloadBytes,
-      maxRequestsInBatch,
       minRequestsInBatch,
       maxBatchCreationInterval,
     )
     val mempool = new MempoolModule[E](
       config,
+      OrderingTopology.forTesting(
+        Set.empty,
+        sequencingParameters = Some(
+          SequencingParameters.create(
+            maxRequestsInBatch = maxRequestsInBatch
+          )
+        ),
+        maxRequestPayloadBytes = NonNegativeInt.tryCreate(maxRequestPayloadBytes),
+      ),
       mempoolState,
       SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
       availability,

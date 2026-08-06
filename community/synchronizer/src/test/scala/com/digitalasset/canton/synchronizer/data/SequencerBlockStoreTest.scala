@@ -397,6 +397,23 @@ trait SequencerBlockStoreTest
       }
 
     }
+
+    "prune" should {
+      "prune blocks" in {
+        val (_, store) = mkBothStores()
+        for {
+          _ <- addBlockUpdates(store)(BlockInfo(1L, t2, Some(t2), Some(t2)))
+          _ <- addBlockUpdates(store)(BlockInfo(2L, t3, Some(t3), Some(t3)))
+          block1 <- store.findBlockContainingTimestamp(t2).valueOrFail("block should exist")
+          _ <- store.prune(t3)
+          block2 <- store.findBlockContainingTimestamp(t2).valueOrFail("block should exist")
+        } yield {
+          block1.lastTs shouldBe t2
+          // after pruning block with ts2 is gone, so the next block with ts3 is returned
+          block2.lastTs shouldBe t3
+        }
+      }
+    }
   }
 
   def partialBlockUpdate(store: SequencerBlockStore)(

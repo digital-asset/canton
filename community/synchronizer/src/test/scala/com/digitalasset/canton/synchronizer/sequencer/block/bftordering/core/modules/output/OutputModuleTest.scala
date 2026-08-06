@@ -1573,7 +1573,7 @@ class OutputModuleTest
           ),
           DefaultEpochLength,
           SequencingParameters.Default,
-          defaultMaxBytesToDecompress, // irrelevant for this test
+          defaultMaxBytesToDecompress.limit, // irrelevant for this test
           topologyActivationTime,
           areTherePendingCantonTopologyChanges = Some(false),
         ),

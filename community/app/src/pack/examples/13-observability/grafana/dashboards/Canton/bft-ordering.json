@@ -18,7 +18,7 @@
   "description": "",
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": 8,
   "links": [],
   "liveNow": false,
@@ -1225,6 +1225,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "Wall-clock duration between the instant a request is received by the CantonBFT orderer and the instant the fully assembled ordered block metadata is stored, just before the request is pushed to the post-ordering stages. Its meaningfulness requires wall-clock synchronization, as not all ordered requests are received and timestamped on this node.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2164,10 +2165,6 @@
       "title": "Sequencer core buffer size (blocks #)",
       "type": "timeseries"
     },
-
-
-
-
     {
       "datasource": {
         "type": "prometheus",
@@ -2266,6 +2263,220 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 94
+      },
+      "hideTimeOverride": true,
+      "id": 105,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max",
+            "min",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "increase(daml_sequencer_bftordering_topology_blacklisted_epochs{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[5m])",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "(reporter: {{namespace}}.{{node}}): {{sequencer_id}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Total number of epochs a sequencer was blacklisted in the last 5m",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 94
+      },
+      "hideTimeOverride": true,
+      "id": 105,
+      "options": {
+        "legend": {
+          "calcs": [
+            "max",
+            "min",
+            "mean"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "10.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "uid": "prometheus"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "daml_sequencer_bftordering_topology_blacklisted_epochs{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}\n",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "interval": "",
+          "intervalFactor": 1,
+          "legendFormat": "(reporter: {{namespace}}.{{node}}): {{sequencer_id}}",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Total number of epochs a sequencer is blacklisted",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "description": "Size of the stream buffer at various stages",
       "fieldConfig": {
         "defaults": {
@@ -2320,8 +2531,8 @@
       "gridPos": {
         "h": 7,
         "w": 12,
-        "x": 12,
-        "y": 94
+        "x": 0,
+        "y": 101
       },
       "id": 104,
       "options": {
@@ -2436,7 +2647,7 @@
         "h": 7,
         "w": 6,
         "x": 12,
-        "y": 94
+        "y": 101
       },
       "hideTimeOverride": true,
       "id": 85,
@@ -2570,7 +2781,7 @@
         "h": 7,
         "w": 6,
         "x": 18,
-        "y": 94
+        "y": 101
       },
       "hideTimeOverride": false,
       "id": 50,
@@ -2658,7 +2869,7 @@
         "h": 28,
         "w": 24,
         "x": 0,
-        "y": 101
+        "y": 108
       },
       "hideTimeOverride": false,
       "id": 73,
@@ -2820,7 +3031,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 129
+        "y": 136
       },
       "hideTimeOverride": false,
       "id": 74,
@@ -2926,7 +3137,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 129
+        "y": 136
       },
       "hideTimeOverride": true,
       "id": 78,
@@ -3031,7 +3242,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 136
+        "y": 143
       },
       "hideTimeOverride": true,
       "id": 77,
@@ -3136,7 +3347,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 136
+        "y": 143
       },
       "hideTimeOverride": true,
       "id": 79,
@@ -3241,7 +3452,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 143
+        "y": 150
       },
       "hideTimeOverride": true,
       "id": 82,
@@ -3346,7 +3557,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 143
+        "y": 150
       },
       "hideTimeOverride": true,
       "id": 76,
@@ -3393,7 +3604,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 150
+        "y": 157
       },
       "id": 55,
       "panels": [],
@@ -3479,7 +3690,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 151
+        "y": 158
       },
       "hideTimeOverride": true,
       "id": 83,
@@ -3580,7 +3791,7 @@
         "h": 14,
         "w": 6,
         "x": 12,
-        "y": 151
+        "y": 158
       },
       "id": 59,
       "options": {
@@ -3673,7 +3884,7 @@
         "h": 14,
         "w": 6,
         "x": 18,
-        "y": 151
+        "y": 158
       },
       "id": 58,
       "options": {
@@ -3774,7 +3985,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 158
+        "y": 165
       },
       "hideTimeOverride": true,
       "id": 84,
@@ -3812,7 +4023,7 @@
       "type": "timeseries"
     }
   ],
-  "refresh": "5s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": [

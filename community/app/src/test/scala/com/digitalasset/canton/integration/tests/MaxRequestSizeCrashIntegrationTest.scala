@@ -201,8 +201,11 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
       restart
 
       // Use the old env (without the override), submission should work
-      val (_, submissionF) = submitCommand(participant1)
-      submissionF.futureValue.discard
+      eventually() {
+        // CantonBFT might still be in the epoch before the new topology is active, so we might have to retry until it goes to next epoch
+        val (_, submissionF) = submitCommand(participant1)
+        submissionF.futureValue.discard
+      }
     }
   }
 }

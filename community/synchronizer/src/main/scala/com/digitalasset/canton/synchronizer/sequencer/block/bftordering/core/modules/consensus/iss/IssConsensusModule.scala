@@ -292,7 +292,8 @@ final class IssConsensusModule[E <: Env[E]](
 
           startConsensusForCurrentEpoch()
           logger.info(
-            s"New epoch ${epochState.epoch.info.number} has started with leaders = ${newMembership.leaders}; " +
+            s"New epoch ${epochState.epoch.info.number} has started with leaders = ${newMembership.leaders}" +
+              s"and blacklisted nodes = ${newMembership.blacklistedNodes}; " +
               s"ordering topology = ${newMembership.orderingTopology}"
           )
 

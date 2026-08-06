@@ -35,11 +35,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultConsensusEmptyBlockCreationTimeout,
   DefaultMaxBatchCreationInterval,
-  DefaultMaxBatchesPerProposal,
-  DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
   DefaultSequencerCoreSubscriptionConfig,
   SequencerCoreSubscriptionConfig,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.{
+  DefaultMaxBatchesPerProposal,
+  DefaultMaxRequestsInBatch,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.dabft.DaBftBindingFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performance.{
@@ -312,10 +315,14 @@ class BftOrderingBenchmark
         UseStandaloneConfig(segmentLength, postOrderingDelayConfig = testPostOrderingDelayConfigO)
       ),
       consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
-      maxRequestsInBatch = maxRequestsInBatch,
+      sequencingParameters = Some(
+        SequencingParameters.create(
+          maxRequestsInBatch = maxRequestsInBatch,
+          maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
+        )(testedProtocolVersion)
+      ),
       minRequestsInBatch = minRequestsInBatch,
       maxBatchCreationInterval = maxBatchCreationInterval,
-      maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
       availabilityMinProposalCreationDelay = availabilityMinProposalCreationDelay,
       dedicatedExecutionContextDivisor = dedicatedExecutionContextDivisor,
       sequencerCoreSubscriptionConfig = SequencerCoreSubscriptionConfig(

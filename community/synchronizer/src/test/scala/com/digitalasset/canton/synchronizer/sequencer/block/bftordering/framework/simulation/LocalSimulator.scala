@@ -14,12 +14,13 @@ import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.Random
 
-import SimulationModuleSystem.SimulationEnv
+import SimulationModuleSystem.{SimulationEnv, TraceContextGenerator}
 
 class LocalSimulator(
     settings: LocalSettings,
     nodes: Set[BftNodeId],
     agenda: Agenda,
+    traceContextGenerator: TraceContextGenerator,
 ) {
   private val random = new Random(settings.randomSeed)
 
@@ -44,7 +45,10 @@ class LocalSimulator(
         val nodesToCrashPermanently = random.shuffle(nodes).take(numberOfNodesToPermanentlyCrash)
         nodesToCrashPermanently.foreach { node =>
           crashNodeStatus(node) = LocalSimulator.Permanent
-          agenda.addOne(CrashNode(node, permanent = true), duration = 1.microsecond)
+          agenda.addOne(
+            CrashNode(node, permanent = true, traceContextGenerator.newTraceContext),
+            duration = 1.microsecond,
+          )
         }
       }
       havePermanentlyCrashedNodes = true
@@ -54,9 +58,12 @@ class LocalSimulator(
         val gracePeriod =
           at.add(settings.crashRestartGracePeriod.generateRandomDuration(random).toJava)
         if (settings.crashRestartChance.flipCoin(random)) {
-          agenda.addOne(CrashNode(node), duration = 1.microsecond)
           agenda.addOne(
-            RestartNode(node),
+            CrashNode(node, permanent = false, traceContextGenerator.newTraceContext),
+            duration = 1.microsecond,
+          )
+          agenda.addOne(
+            RestartNode(node, traceContextGenerator.newTraceContext),
             duration = settings.crashTimeDistribution.generateRandomDuration(random),
           )
         }
