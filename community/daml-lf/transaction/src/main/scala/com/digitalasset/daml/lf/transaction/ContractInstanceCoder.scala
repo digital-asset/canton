@@ -10,7 +10,6 @@ import com.digitalasset.daml.lf.value.{DecodeError, EncodeError}
 import com.google.protobuf.{ByteString, ProtocolStringList}
 
 import scala.Ordering.Implicits.infixOrderingOps
-import scala.annotation.nowarn
 import scala.collection.immutable.TreeSet
 import scala.jdk.CollectionConverters.*
 
@@ -311,9 +310,6 @@ class ContractInstanceCoder(allowNullCharacters: Boolean) {
           Left(DecodeError(s"exception $e while decoding the object"))
       }
 
-    @nowarn(
-      "cat=unused-pat-vars"
-    ) // suppress wrong warnings that version and unversioned are unused
     def decodeFatContractInstance(bytes: ByteString): Either[DecodeError, FatContractInstance] =
       for {
         versionedBlob <- decodeVersioned(bytes)

@@ -1,0 +1,103 @@
+name: Post to Datadog
+description: Post to Datadog
+
+inputs:
+  data:
+    default: ""
+    description: data
+  label:
+    default: ""
+    description: label
+  metric_type:
+    default: "gauge"
+    description: Metric Type enum [gauge, count, rate]
+  use_commit_time:
+    default: "true"
+    description: Use Commit Time
+  when:
+    default: "always"
+    description: When enum [always, on_success, on_fail]
+
+runs:
+  using: composite
+  steps:
+    - name: Validate enum inputs
+      shell: bash
+      env:
+        METRIC_TYPE: ${{ inputs.metric_type }}
+        WHEN_MODE: ${{ inputs.when }}
+      run: |
+        case "$METRIC_TYPE" in
+          gauge|count|rate) ;;
+          *) echo "Invalid metric_type: $METRIC_TYPE" >&2; exit 1 ;;
+        esac
+
+        case "$WHEN_MODE" in
+          always|on_success|on_fail) ;;
+          *) echo "Invalid when: $WHEN_MODE" >&2; exit 1 ;;
+        esac
+
+    - name: Check always
+      id: always
+      if: ${{ inputs.when == 'always' && always() }}
+      shell: bash
+      run: echo "should_post=true" >> "$GITHUB_OUTPUT"
+
+    - name: Check on fail
+      id: on_fail
+      if: ${{ inputs.when == 'on_fail' && failure() }}
+      shell: bash
+      run: echo "should_post=true" >> "$GITHUB_OUTPUT"
+
+    - name: Check on success
+      id: on_success
+      if: ${{ inputs.when == 'on_success' && success() }}
+      shell: bash
+      run: echo "should_post=true" >> "$GITHUB_OUTPUT"
+
+    - name: Post to Datadog
+      if: >-
+        ${{ steps.always.outputs.should_post == 'true' ||
+        steps.on_fail.outputs.should_post == 'true' ||
+        steps.on_success.outputs.should_post == 'true' }}
+      uses: ./.github/actions/nix/nix_script_run
+      env:
+        DATA: ${{ inputs.data }}
+        LABEL: ${{ inputs.label }}
+        METRIC_TYPE: ${{ inputs.metric_type }}
+        USE_COMMIT_TIME: ${{ inputs.use_commit_time }}
+      with:
+        command: |
+          if [[ -z "${DATADOG_API_KEY:-}" ]]; then
+            echo "DATADOG_API_KEY is not set, skipping Datadog reporting."
+            exit 0
+          fi
+
+          if [[ -n "$LABEL" ]]; then
+            echo "Datadog label: $LABEL"
+          fi
+
+          if [[ -n "$DATA" ]]; then
+            if [[ "$USE_COMMIT_TIME" == "true" ]]; then
+              TIMESTAMP=$(git log -1 --pretty=%ct)
+            else
+              TIMESTAMP=$(date +%s)
+            fi
+
+            echo "Timestamp: $TIMESTAMP"
+            HASH=$(git log -1 --pretty=%h)
+            export HASH
+            echo "Commit hash (abbreviated): $HASH"
+            TAGS=$(python3 -c \
+              "import json, os; env=os.environ; print(json.dumps([\
+                f'branch:{env.get(\"GITHUB_REF_NAME\", \"\")}', \
+                f'hash:{env.get(\"HASH\", \"\")}', \
+                f'workflow:{env.get(\"GITHUB_WORKFLOW\", \"\")}', \
+                f'job:{env.get(\"GITHUB_JOB\", \"\")}', \
+                f'build:{env.get(\"GITHUB_RUN_NUMBER\", \"\")}', \
+                f'url:{env.get(\"GITHUB_SERVER_URL\", \"\")}/{env.get(\"GITHUB_REPOSITORY\", \"\")}/actions/runs/{env.get(\"GITHUB_RUN_ID\", \"\")}'\
+              ]))")
+
+            read -r -a data <<< "$DATA"
+            ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" "$METRIC_TYPE" "$TAGS" "${data[@]}"
+          fi

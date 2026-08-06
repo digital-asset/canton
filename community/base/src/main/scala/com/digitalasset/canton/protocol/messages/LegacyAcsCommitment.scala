@@ -7,10 +7,10 @@ import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.data.{
-  AcsCommitmentData,
   BufferedAcsCommitment,
   CantonTimestamp,
   CantonTimestampSecond,
+  LegacyAcsCommitmentData,
 }
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
@@ -55,7 +55,7 @@ abstract sealed case class LegacyAcsCommitment private (
     ],
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[LegacyAcsCommitment]
-    with AcsCommitmentData
+    with LegacyAcsCommitmentData
     with SignedProtocolMessageContent
     with NoCopy {
 

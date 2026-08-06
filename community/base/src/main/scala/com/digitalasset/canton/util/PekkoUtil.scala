@@ -38,10 +38,12 @@ import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.Logger
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.scaladsl.GraphDSL.Implicits.SourceShapeArrow
 import org.apache.pekko.stream.scaladsl.{
   Flow,
   FlowOps,
   FlowOpsMat,
+  GraphDSL,
   Keep,
   RunnableGraph,
   Sink,
@@ -58,7 +60,9 @@ import org.apache.pekko.stream.stage.{
 import org.apache.pekko.stream.{
   ActorAttributes,
   Attributes,
+  FanInShape2,
   FlowShape,
+  Graph,
   Inlet,
   KillSwitch,
   KillSwitches,
@@ -980,6 +984,38 @@ object PekkoUtil extends HasLoggerName {
       }
   }
 
+  /** Emits the elements from `flowOps` in order. An element `e` is emitted only when the `gate` has
+    * previously produced a value that is at least as large as `by(e)`. Otherwise, `e` is buffered
+    * until such a value is produced by the `gate`.
+    *
+    * Backpressures when either `flowOps` or `gate` are slow.
+    *
+    * Completes when either input stream completes and all inputs have been emitted. May not
+    * complete when `flowOps` completes after some elements that are still queued in front of the
+    * `gate` and the `gate` has not yet completed.
+    */
+  def gateKeeper[A, B: Ordering, Mat](flowOps: FlowOps[A, Mat], gate: Graph[SourceShape[B], ?])(
+      by: A => B
+  ): flowOps.Repr[A] =
+    flowOps.via(gateKeeperGraph(gate, by))
+
+  /** @see com.digitalasset.canton.util.PekkoUtil.gateKeeper */
+  def gateKeeperMat[A, B: Ordering, Mat1, Mat2, Mat3](
+      flowOps: FlowOpsMat[A, Mat1],
+      gate: Graph[SourceShape[B], Mat2],
+  )(by: A => B)(combine: (Mat1, Mat2) => Mat3): flowOps.ReprMat[A, Mat3] =
+    flowOps.viaMat(gateKeeperGraph(gate, by))(combine)
+
+  private def gateKeeperGraph[A, B: Ordering, M](
+      gate: Graph[SourceShape[B], M],
+      by: A => B,
+  ): Graph[FlowShape[A, A], M] =
+    GraphDSL.createGraph(gate) { implicit b => r =>
+      val gated = b.add(new GateKeeper[A, B](by))
+      r ~> gated.in1
+      FlowShape(gated.in0, gated.out)
+    }
+
   object syntax {
 
     /** Defines extension methods for [[org.apache.pekko.stream.scaladsl.FlowOpsMat]] that map to
@@ -1062,6 +1098,9 @@ object PekkoUtil extends HasLoggerName {
           initial: A => Agg
       )(full: Agg => Boolean, aggregate: (Agg, A) => Agg, emit: Agg => B): U#Repr[B] =
         PekkoUtil.aggregate(graph)(initial)(full, aggregate, emit)
+
+      def gateKeeper[B: Ordering](gate: Graph[SourceShape[B], ?])(by: A => B): U#Repr[A] =
+        PekkoUtil.gateKeeper(graph, gate)(by)
     }
 
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
@@ -1120,6 +1159,11 @@ object PekkoUtil extends HasLoggerName {
 
       def injectKillSwitch(killSwitch: Mat => KillSwitch): U#ReprMat[WithKillSwitch[A], Mat] =
         PekkoUtil.injectKillSwitch(graph)(killSwitch)
+
+      def gateKeeperMat[B: Ordering, Mat2, Mat3](gate: Graph[SourceShape[B], Mat2])(by: A => B)(
+          combine: (Mat, Mat2) => Mat3
+      ): U#ReprMat[A, Mat3] =
+        PekkoUtil.gateKeeperMat(graph, gate)(by)(combine)
     }
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
     // Otherwise IntelliJ gets very resource hungry.
@@ -2100,5 +2144,65 @@ object PekkoUtil extends HasLoggerName {
 
     /** The stash has been completed normally. */
     case object StashClosed extends StashCompletionResult
+  }
+
+  private final class GateKeeper[A, B: Ordering](by: A => B)
+      extends GraphStage[FanInShape2[A, B, A]] {
+    private val in = Inlet[A]("in")
+    private val gate = Inlet[B]("gate")
+    private val out = Outlet[A]("out")
+
+    override val shape = new FanInShape2(in, gate, out)
+
+    @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
+    override def createLogic(attr: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
+      import Ordering.Implicits.*
+      setHandler(in, eagerTerminateInput)
+      setHandler(gate, ignoreTerminateInput)
+      setHandler(out, eagerTerminateOutput)
+
+      var watermark: B = _
+      var buffered: A = _
+
+      override def preStart(): Unit = {
+        // all fan-in stages need to eagerly pull all inputs to get cycles started
+        pull(in)
+        read(gate)(
+          g => {
+            watermark = g
+            readIn()
+          },
+          () => completeStage(),
+        )
+      }
+
+      val readIn: () => Unit = () =>
+        read(in)(
+          a =>
+            if (by(a) <= watermark) {
+              emit(out, a, readIn)
+            } else {
+              buffered = a
+              readGate()
+            },
+          () => completeStage(),
+        )
+
+      @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+      val readGate: () => Unit = () =>
+        read(gate)(
+          g => {
+            watermark = g max watermark
+            if (by(buffered) <= watermark) {
+              val next = buffered
+              buffered = null.asInstanceOf[A]
+              emit(out, next, readIn)
+            } else {
+              readGate()
+            }
+          },
+          () => completeStage(),
+        )
+    }
   }
 }

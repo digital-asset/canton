@@ -1,0 +1,72 @@
+# Sandbox workflow for posting Slack messages to #team-qa-bot-tests via the
+# canton QA bot (SLACK_BOT_QA_NOTIFICATIONS). Useful for verifying the bot
+# token, channel routing, custom emoji rendering, and any payload-formatting
+# changes (blocks, mentions, icon overrides) before applying them to the
+# production flaky-test alert in scripts/ci/alert_slack.py.
+#
+# This workflow posts a fixed sample payload that mirrors the production
+# `send_duplicate_summary` output: header block + description section
+# + affected-tests section, with :rotating_light: as the avatar and
+# :this-is-fine-fire: in the header text. Sample data (commit SHA, issue
+# numbers, test names) is hardcoded so the run is reproducible.
+#
+# Note: this sandbox intentionally uses YAML-form payload for readability and
+# easier line wrapping in workflow YAML. Repository-wide convention elsewhere is
+# mostly JSON payloads for slackapi/slack-github-action.
+#
+# How to trigger:
+#   gh workflow run "Manually test Slack notifications to #team-qa-bot-tests" \
+#     --repo DACH-NY/canton \
+#     --ref <branch>
+#
+# Or from the Actions tab: pick this workflow, "Run workflow", choose the
+# branch you want, and dispatch.
+#
+# Note: the workflow file must exist on the default branch for GitHub to
+# surface it in the UI / CLI. Once registered there, you can dispatch
+# against any ref that has the file.
+
+name: "Manually test Slack notifications to #team-qa-bot-tests"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    name: Post to Slack
+    runs-on: dach-ny-canton
+    steps:
+      - name: Post production-shaped sample to Slack
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          channel-id: '#team-qa-bot-tests'
+          payload: |
+            channel: "#team-qa-bot-tests"
+            icon_emoji: ":rotating_light:"
+            text: "Flaky test alert on main"
+            blocks:
+              - type: header
+                text:
+                  type: plain_text
+                  text: ":this-is-fine-fire: Flaky test alert on main"
+                  emoji: true
+              - type: section
+                text:
+                  type: mrkdwn
+                  text: >-
+                    Flaky tests have failed on 3 consecutive commits ending at
+                    <https://github.com/DACH-NY/canton/commit/abcdef1234567890abcdef1234567890abcdef12|abcdef12> on branch `main`.
+
+                    Main may be broken, can you have a look?
+              - type: section
+                text:
+                  type: mrkdwn
+                  text: |-
+                    *Affected tests:*
+                    • <https://github.com/DACH-NY/canton/issues/12345|#12345> Flaky LedgerApiConformanceTestPostgres
+                    • <https://github.com/DACH-NY/canton/issues/67890|#67890> Flaky SequencerConnectionServiceIntegrationTestDefault
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}

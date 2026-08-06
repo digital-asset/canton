@@ -324,7 +324,7 @@ class ExternalTransactionProcessor(
             routingSynchronizerState = routingSynchronizerState,
           )
           .map(FutureUnlessShutdown.pure)
-          .leftMap(err => FutureUnlessShutdown.failed[SynchronizerRank](err.asGrpcError))
+          .leftMap(err => FutureUnlessShutdown.failed[SynchronizerRank](err.toGrpcError))
           .merge
           .flatten
       )

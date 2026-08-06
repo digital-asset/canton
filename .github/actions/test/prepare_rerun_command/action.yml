@@ -1,0 +1,153 @@
+name: Prepare Rerun Command
+description: Prepares a command to rerun the current workflow with the same inputs and secrets.
+
+inputs:
+  command:
+    description: The command to run the tests, e.g. `sbt test`
+    required: true
+  test_sub_command:
+    description: The sub-command to run the tests, e.g. `testOnly`
+    required: true
+  shard_index:
+    description: The index of the current shard (0-based)
+    required: true
+  num_test_buckets:
+    description: The total number of test buckets
+    required: true
+  succeed_on_error:
+    description: Whether to succeed even if there are failed tests
+    required: false
+    default: 'false'
+
+outputs:
+  command_file:
+    description: Path to a file containing the rerun command
+    value: ${{ steps.build_failed_rerun_cmd.outputs.resolved_command_file }}
+  failed_test_classes_file:
+    description: Path to the generated file containing normalized failed test classes
+    value: ${{ steps.build_failed_rerun_cmd.outputs.failed_test_classes_file }}
+  has_failed_test_classes:
+    description: Whether there are failed test classes
+    value: ${{ steps.build_failed_rerun_cmd.outputs.has_failed_test_classes }}
+  failed_test_classes_count:
+    description: The number of failed test classes
+    value: ${{ steps.build_failed_rerun_cmd.outputs.failed_test_classes_count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build Failed Test Summary
+      env:
+        SHARD_INDEX: ${{ inputs.shard_index }}
+        NUM_TEST_BUCKETS: ${{ inputs.num_test_buckets }}
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: >
+          python3 scripts/ci/test_output/summarize_test_results.py
+          --shard-index "$SHARD_INDEX"
+          --total-shards "$([[ "$NUM_TEST_BUCKETS" == "0" ]] && echo "1" || echo "$NUM_TEST_BUCKETS")"
+          --junit-glob "**/TEST-*.xml"
+          --json-output "failed-test-summary.json"
+
+    - name: Compute failed-only rerun command
+      uses: ./.github/actions/nix/nix_script_run
+      env:
+        COMMAND_TEMPLATE: ${{ inputs.command }}
+        FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/failed-test-classes-${{ inputs.shard_index }}.txt
+        RESOLVED_COMMAND_FILE: ${{ runner.temp }}/failed-rerun-command-${{ inputs.shard_index }}.txt
+        HAS_FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/has-failed-test-classes-${{ inputs.shard_index }}.txt
+        FAILED_TEST_CLASSES_COUNT_FILE: ${{ runner.temp }}/failed-test-classes-count-${{ inputs.shard_index }}.txt
+        NUM_TEST_BUCKETS: ${{ inputs.num_test_buckets }}
+        SUMMARY_JSON: failed-test-summary.json
+        TEST_SUB_COMMAND: ${{ inputs.test_sub_command }}
+      with:
+        command: |
+          python3 - <<-'PY'
+          import json
+          import os
+
+          summary_path = os.environ["SUMMARY_JSON"]
+          failed_test_classes_file = os.environ["FAILED_TEST_CLASSES_FILE"]
+          resolved_command_file = os.environ["RESOLVED_COMMAND_FILE"]
+          has_failed_test_classes_file = os.environ["HAS_FAILED_TEST_CLASSES_FILE"]
+          failed_test_classes_count_file = os.environ["FAILED_TEST_CLASSES_COUNT_FILE"]
+          num_test_buckets_raw = os.environ.get("NUM_TEST_BUCKETS", "1")
+          command_template = os.environ["COMMAND_TEMPLATE"]
+          test_sub_command = os.environ["TEST_SUB_COMMAND"]
+
+          try:
+              num_test_buckets = int(num_test_buckets_raw)
+          except ValueError:
+              num_test_buckets = 1
+
+          classes = []
+          if os.path.exists(summary_path):
+              with open(summary_path, encoding="utf-8") as f:
+                  summary = json.load(f)
+              classes = summary.get("results", {}).get("not_passed_classes", [])
+
+          normalized_classes = []
+          seen = set()
+          for classname in classes:
+              classname = (classname or "").strip()
+              if classname and classname not in seen:
+                  seen.add(classname)
+                  normalized_classes.append(classname)
+
+          with open(failed_test_classes_file, "w", encoding="utf-8") as f:
+              for classname in normalized_classes:
+                  f.write(f"{classname}\n")
+
+          resolved_command = ""
+          if normalized_classes:
+              rerun_command = f"{test_sub_command} {' '.join(normalized_classes)}"
+              sharding_enabled = num_test_buckets > 0
+              if sharding_enabled and "$RUN_SPLITTED_TESTS_CMD" not in command_template:
+                  raise ValueError(
+                      "COMMAND_TEMPLATE must contain $RUN_SPLITTED_TESTS_CMD when failed-only rerun is needed in sharded mode"
+                  )
+
+              # In sharded mode, quoting is owned by COMMAND_TEMPLATE around $RUN_SPLITTED_TESTS_CMD.
+              # In non-sharded mode, we add quotes here so the direct rerun stays a single shell token
+              if "$RUN_SPLITTED_TESTS_CMD" in command_template:
+                  resolved_command = command_template.replace("$RUN_SPLITTED_TESTS_CMD", rerun_command)
+              else:
+                  resolved_command = f'"{rerun_command}"'
+
+          with open(resolved_command_file, "w", encoding="utf-8") as f:
+              f.write(resolved_command)
+          with open(has_failed_test_classes_file, "w", encoding="utf-8") as f:
+              f.write("true" if normalized_classes else "false")
+          with open(failed_test_classes_count_file, "w", encoding="utf-8") as f:
+              f.write(str(len(normalized_classes)))
+
+          if normalized_classes:
+              print(f"Prepared failed-only rerun for {len(normalized_classes)} test classes")
+          else:
+              print("No failed test classes found, skipping failed-only rerun")
+          PY
+
+    - name: Export failed-only rerun outputs
+      id: build_failed_rerun_cmd
+      shell: bash
+      env:
+        FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/failed-test-classes-${{ inputs.shard_index }}.txt
+        RESOLVED_COMMAND_FILE: ${{ runner.temp }}/failed-rerun-command-${{ inputs.shard_index }}.txt
+        HAS_FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/has-failed-test-classes-${{ inputs.shard_index }}.txt
+        FAILED_TEST_CLASSES_COUNT_FILE: ${{ runner.temp }}/failed-test-classes-count-${{ inputs.shard_index }}.txt
+      run: |
+        has_failed_test_classes="false"
+        if [[ -f "$HAS_FAILED_TEST_CLASSES_FILE" ]]; then
+          has_failed_test_classes="$(cat "$HAS_FAILED_TEST_CLASSES_FILE")"
+        fi
+        failed_test_classes_count="0"
+        if [[ -f "$FAILED_TEST_CLASSES_COUNT_FILE" ]]; then
+          failed_test_classes_count="$(cat "$FAILED_TEST_CLASSES_COUNT_FILE")"
+        fi
+
+        {
+          echo "resolved_command_file=$RESOLVED_COMMAND_FILE"
+          echo "failed_test_classes_file=$FAILED_TEST_CLASSES_FILE"
+          echo "has_failed_test_classes=$has_failed_test_classes"
+          echo "failed_test_classes_count=$failed_test_classes_count"
+        } >> "$GITHUB_OUTPUT"

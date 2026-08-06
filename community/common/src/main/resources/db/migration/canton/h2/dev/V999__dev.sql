@@ -92,6 +92,9 @@ create table par_acs_running_digests_checkpoint (
   primary key (synchronizer_idx, change_offset)
 );
 
+create index par_acs_running_digests_checkpoint_by_type
+    on par_acs_running_digests_checkpoint (synchronizer_idx, checkpoint_type, change_offset);
+
 create table par_acs_commitment_period_outstanding (
   synchronizer_idx integer not null,
   -- interned participant id
@@ -150,9 +153,7 @@ create index par_acs_commitment_period_match_to_inclusive on par_acs_commitment_
 
 create table par_acs_commitment_period_watermark (
   synchronizer_idx integer not null,
-  watermark_reconciliation bigint not null,
-  watermark_affirmation bigint not null,
-  watermark_matching bigint,
+  watermark_matching bigint not null,
   primary key (synchronizer_idx)
 );
 
@@ -162,5 +163,12 @@ create table par_acs_commitment_period_pruning (
   -- UTC timestamp in microseconds relative to EPOCH
   ts bigint not null,
   succeeded bigint null,
+  primary key (synchronizer_idx)
+);
+
+create table par_acs_commitment_sender_watermark (
+  synchronizer_idx integer not null,
+  watermark_offset bigint not null,
+  watermark_timestamp bigint not null,
   primary key (synchronizer_idx)
 );

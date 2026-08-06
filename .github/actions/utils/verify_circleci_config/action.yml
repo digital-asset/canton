@@ -1,0 +1,16 @@
+name: Verify CircleCI Config
+description: Verify that `.circleci/config.yml` is in sync with `.circleci/config/**`.
+
+runs:
+  using: composite
+  steps:
+    - name: Verify CircleCI config sync
+      uses: ./.github/actions/nix/nix_script_run
+      with:
+        working_directory: .circleci
+        command: |
+          circleci config pack config > config.yml.new
+          if ! diff -q -I '^#' config.yml config.yml.new; then # Ignore full-line comments as part of the check
+            echo "ERROR: Committed config.yml is stale, please run build-config.sh in .circleci"
+            exit 1
+          fi

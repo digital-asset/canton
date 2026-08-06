@@ -8,6 +8,8 @@ override-components:
     version: $DAML_VERSION
   codegen:
     version: $DAML_VERSION
+build-options:
+- --target=2.2
 name: ReplayBenchmark
 version: 0.0.1
 dependencies:

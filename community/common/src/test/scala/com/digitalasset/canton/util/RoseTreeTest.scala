@@ -9,6 +9,7 @@ import com.digitalasset.canton.BaseTestWordSpec
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalatest.wordspec.AnyWordSpec
 
+import scala.annotation.nowarn
 import scala.collection.mutable
 import scala.util.{Success, Try}
 
@@ -20,6 +21,8 @@ class RoseTreeTest extends AnyWordSpec with BaseTestWordSpec {
   private def recursivePreorder[A](tree: RoseTree[A]): Seq[A] =
     tree.root +: tree.children.flatMap(recursivePreorder)
 
+  // RoseTree.hashCode is defined to equal productHash; keep the reference pinned to it.
+  @nowarn("cat=deprecation")
   private def recursiveHashcode[A](tree: RoseTree[A]): Int =
     scala.util.hashing.MurmurHash3.productHash(tree)
 

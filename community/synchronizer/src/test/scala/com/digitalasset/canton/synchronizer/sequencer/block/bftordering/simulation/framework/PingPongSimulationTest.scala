@@ -257,7 +257,7 @@ object TestSystem {
   def pingerClient[E <: Env[E]](
       loggerFactory: NamedLoggerFactory,
       timeout: ProcessingTimeout,
-  ): SimulationClient.Initializer[E, Unit, String] =
+  )(implicit traceContext: TraceContext): SimulationClient.Initializer[E, Unit, String] =
     new SimulationClient.Initializer[E, Unit, String] {
       private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
@@ -265,7 +265,7 @@ object TestSystem {
         PingerClient(systemRef, loggerFactory, timeout)
 
       override def init(context: E#ActorContextT[Unit]): Unit =
-        context.delayedEventNoTrace(0.seconds, ())
+        context.delayedEvent(0.seconds, ())
     }
 }
 

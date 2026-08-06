@@ -1,0 +1,28 @@
+name: Close stale flake issues
+
+on:
+  schedule:
+    - cron: '0 5 * * 1-5' # Every workday at 05:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print what would be closed without actually closing'
+        type: boolean
+        default: true
+
+jobs:
+  close-stale-flake-issues:
+    name: Close flake issues with no activity for sufficiently long
+    runs-on: dach-ny-canton
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Close stale flake issues
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 scripts/ci/close_stale_flake_issues.py ${{ inputs.dry_run == true && '--dry-run' || '' }}

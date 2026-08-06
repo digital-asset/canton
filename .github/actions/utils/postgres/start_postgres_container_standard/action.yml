@@ -1,0 +1,46 @@
+name: Start Postgres Container Standard
+description: Starts a Postgres container with standard configuration for testing purposes.
+
+inputs:
+  shard-index:
+    description: The index of the shard for which the Postgres container is being started.
+    required: true
+  dockerhub-username:
+    description: DockerHub username for pulling the Postgres image.
+    required: true
+  dockerhub-password:
+    description: DockerHub password for pulling the Postgres image.
+    required: true
+
+
+outputs:
+  container-name:
+    description: Started Postgres container name
+    value: ${{ steps.postgres.outputs.container-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Export standard Postgres env
+      shell: bash
+      run: |
+        echo "POSTGRES_DB=test" >> "$GITHUB_ENV"
+        echo "POSTGRES_HOST=localhost" >> "$GITHUB_ENV"
+        echo "POSTGRES_INITDB_ARGS=-A scram-sha-256" >> "$GITHUB_ENV"
+        echo "POSTGRES_PASSWORD=test-password" >> "$GITHUB_ENV"
+        echo "POSTGRES_PORT=5432" >> "$GITHUB_ENV"
+        echo "POSTGRES_USER=test" >> "$GITHUB_ENV"
+
+    - name: Start Postgres container
+      id: postgres
+      uses: ./.github/actions/utils/postgres/start_postgres_container
+      with:
+        shard-index: ${{ inputs.shard-index }}
+        postgres-db: ${{ env.POSTGRES_DB }}
+        postgres-initdb-args: ${{ env.POSTGRES_INITDB_ARGS }}
+        postgres-password: ${{ env.POSTGRES_PASSWORD }}
+        postgres-port: ${{ env.POSTGRES_PORT }}
+        postgres-user: ${{ env.POSTGRES_USER }}
+        initdb-mount-path: 'initdb-test'
+        username: ${{ inputs.dockerhub-username }}
+        password: ${{ inputs.dockerhub-password }}

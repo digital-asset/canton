@@ -106,7 +106,10 @@ package api {
   )
 
   final case class TopologyFormat(
-      participantAuthorizationFormat: Option[ParticipantAuthorizationFormat]
+      participantAuthorizationFormat: Option[ParticipantAuthorizationFormat],
+      // If set, only topology transactions for this synchronizer are included. If None, all
+      // synchronizers are included.
+      synchronizerId: Option[SynchronizerId],
   )
 
   // The list of parties for which the topology transactions should be sent. If None then all the parties that the

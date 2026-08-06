@@ -276,7 +276,7 @@ private[mediator] class DbMediatorDeduplicationStore(
         sqlu"""delete from mediator_deduplication_store
               where request_time >= $deleteFromInclusive""",
         functionFullName,
-      )(traceContext, callerCloseContext, implicitly)
+      )(traceContext, callerCloseContext)
 
       activeUuids <- storage.query(
         sql"""select uuid, request_time, expire_after from mediator_deduplication_store
@@ -334,7 +334,6 @@ private[mediator] class DbMediatorDeduplicationStore(
             _ <- storage.queryAndUpdate(action, functionFullName)(
               traceContext,
               callerCloseContext,
-              implicitly,
             )
           } yield Seq.fill(items.size)(())
         }
@@ -372,7 +371,7 @@ private[mediator] class DbMediatorDeduplicationStore(
               sqlu"""delete from mediator_deduplication_store
                        where expire_after <= $upToInclusive""",
               functionFullName,
-            )(traceContext, callerCloseContext, implicitly)
+            )(traceContext, callerCloseContext)
           lastPruningOperation.set(newPruning)
           newPruning
         } else {

@@ -280,6 +280,7 @@ final case class DynamicSynchronizerParameters(
     acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
     preparationTimeRecordTimeTolerance: config.NonNegativeFiniteDuration,
+    sizeLimits: SizeLimits,
 ) extends PrettyPrinting {
 
   def decisionTimeout: config.NonNegativeFiniteDuration =
@@ -322,6 +323,7 @@ final case class DynamicSynchronizerParameters(
       param("participant synchronizer limits", _.participantSynchronizerLimits),
       param("preparation time record time tolerance", _.preparationTimeRecordTimeTolerance),
       param("onboarding restriction", _.onboardingRestriction),
+      param("size limits", _.sizeLimits),
     )
 
   def update(
@@ -386,6 +388,7 @@ final case class DynamicSynchronizerParameters(
           participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
           preparationTimeRecordTimeTolerance =
             InternalNonNegativeFiniteDuration.fromConfig(preparationTimeRecordTimeTolerance),
+          sizeLimits = sizeLimits.toInternal,
         )(rpv)
       }
 }

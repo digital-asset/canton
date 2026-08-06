@@ -123,7 +123,13 @@ class AuthenticationTokenProvider(
             .fromProtoPrimitive(challenge.nonce)
             .leftMap(err => Status.INVALID_ARGUMENT.withDescription(s"Invalid nonce: $err"))
             .toEitherT[FutureUnlessShutdown]
-          token <- authenticate(endpoint, authenticationClient, nonce, challenge.fingerprints)
+          token <- authenticate(
+            endpoint,
+            authenticationClient,
+            nonce,
+            challenge.fingerprints,
+            synchronizerId.protocolVersion,
+          )
         } yield token).value
       }.map {
         case Left(status) if unavailableDueToChannelShutdown(status) =>
@@ -206,12 +212,13 @@ class AuthenticationTokenProvider(
       authenticationClient: GrpcClient[SequencerAuthenticationServiceStub],
       nonce: Nonce,
       fingerprintsP: Seq[String],
+      protocolVersion: ProtocolVersion,
   )(implicit
       tc: TraceContext
   ): EitherT[FutureUnlessShutdown, Status, AuthenticationTokenWithExpiry] =
     for {
       fingerprintsValid <- ProtoValidation
-        .validateThen(fingerprintsP, "fingerprints", ProtocolVersionValidation.AlwaysValidation)(
+        .validateThen(fingerprintsP, "fingerprints", ProtocolVersionValidation.PV(protocolVersion))(
           Fingerprint.fromProtoPrimitive
         )
         .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))

@@ -1,0 +1,28 @@
+name: Check Allowed Branch
+description: Check if current branch is in allowed list
+
+inputs:
+  allowed-branches:
+    description: Comma-separated allowed branches
+    required: true
+    default: 'main'
+
+outputs:
+  branch_allowed:
+    description: true if branch allowed
+    value: ${{ steps.check.outputs.send }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      run: |
+        BRANCHES="${{ inputs.allowed-branches }}"
+        if printf '%s\n' "$BRANCHES" | tr ',' '\n' | grep -Fxq "${{ github.ref_name }}"; then
+          echo "send=true" >> $GITHUB_OUTPUT
+          echo "Branch ${{ github.ref_name }} allowed"
+        else
+          echo "send=false" >> $GITHUB_OUTPUT
+          echo "Branch ${{ github.ref_name }} not allowed [$BRANCHES]"
+        fi

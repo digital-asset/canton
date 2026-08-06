@@ -538,6 +538,9 @@ object MediatorId {
   def tryCreate(identifier: String, namespace: Namespace): MediatorId =
     MediatorId(UniqueIdentifier.tryCreate(identifier, namespace))
 
+  def fromProtoPrimitiveUid(mediatorUid: String, fieldName: String): ParsingResult[MediatorId] =
+    UniqueIdentifier.fromProtoPrimitive(mediatorUid, fieldName).map(MediatorId(_))
+
   def fromProtoPrimitive(
       mediatorId: String,
       fieldName: String,
@@ -580,6 +583,9 @@ object SequencerId {
 
   def tryCreate(identifier: String, namespace: Namespace): SequencerId =
     SequencerId(UniqueIdentifier.tryCreate(identifier, namespace))
+
+  def fromProtoPrimitiveUid(sequencerUid: String, fieldName: String): ParsingResult[SequencerId] =
+    UniqueIdentifier.fromProtoPrimitive(sequencerUid, fieldName).map(SequencerId(_))
 
   def fromProtoPrimitive(
       proto: String,

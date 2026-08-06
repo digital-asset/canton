@@ -15,9 +15,7 @@ final class P2PGrpcServerManager(
 ) extends NamedLogging
     with FlagCloseable { self =>
 
-  import TraceContext.Implicits.Empty.emptyTraceContext
-
-  def startServer(): Unit =
+  def startServer()(implicit traceContext: TraceContext): Unit =
     if (!isClosing) {
       maybeServerUS.fold {
         logger.info("Not starting P2P gRPC server due to none configured")
@@ -32,13 +30,15 @@ final class P2PGrpcServerManager(
       logger.info("Not starting P2P gRPC server due to shutdown")
     }
 
-  private def shutdownGrpcServers(): Unit =
+  private def shutdownGrpcServers()(implicit traceContext: TraceContext): Unit =
     maybeServerUS.foreach(_.foreach { closeableServer =>
       logger.info(s"Shutting down P2P gRPC server")
       shutdownGrpcServer(closeableServer)
     })
 
-  private def shutdownGrpcServer(server: LifeCycle.CloseableServer): Unit = {
+  private def shutdownGrpcServer(
+      server: LifeCycle.CloseableServer
+  )(implicit traceContext: TraceContext): Unit = {
     // https://github.com/grpc/grpc-java/issues/8770
     val serverPort = server.server.getPort
     logger.debug(s"Terminating P2P gRPC server on port $serverPort")
@@ -47,6 +47,8 @@ final class P2PGrpcServerManager(
   }
 
   override def onClosed(): Unit = {
+    implicit val traceContext: TraceContext =
+      TraceContext.createNew("P2PGrpcServerManager.onClosed")
     logger.debug("Closing P2P gRPC server manager")
     shutdownGrpcServers()
     logger.debug("Closed P2P gRPC server manager")

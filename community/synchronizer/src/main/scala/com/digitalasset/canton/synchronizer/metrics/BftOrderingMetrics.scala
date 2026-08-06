@@ -1044,14 +1044,23 @@ class BftOrderingMetrics private[metrics] (
     val queryLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.topology.queryLatency.info)
 
+    val blacklistedEpochsCounter: Counter =
+      openTelemetryMetricsFactory.counter(
+        MetricInfo(
+          prefix :+ "blacklisted-epochs",
+          "Number of epochs a node has been blacklisted for",
+          MetricQualification.Traffic,
+          "Number of epochs a node has been blacklisted for after failing to timely lead a segment",
+        )
+      )
+
     object labels {
       val sequencerId: String = "sequencer-id"
     }
-
     // We assign different values to different nodes just to make it easier to distinguish them in Grafana
     private val topologyGauges = mutable.Map[BftNodeId, Gauge[Int]]()
-    private val leadersGauges = mutable.Map[BftNodeId, Gauge[Int]]()
 
+    private val leadersGauges = mutable.Map[BftNodeId, Gauge[Int]]()
     private val maxToleratedFaultsGauge =
       openTelemetryMetricsFactory.gauge(
         MetricInfo(
@@ -1092,6 +1101,10 @@ class BftOrderingMetrics private[metrics] (
       maxToleratedFaultsGauge.updateValue(orderingTopology.maxToleratedFaults)
       weakQuorumGauge.updateValue(orderingTopology.weakQuorum)
       strongQuorumGauge.updateValue(orderingTopology.strongQuorum)
+
+      newMembership.blacklistedNodes.foreach { nodeId =>
+        blacklistedEpochsCounter.inc()(metricsContext.withExtraLabels(labels.sequencerId -> nodeId))
+      }
 
       {
         lock.exclusive {

@@ -1,0 +1,45 @@
+name: SBT Package
+description: Creates a release artifact using an sbt package command
+
+inputs:
+  artifact_suffix:
+    default: .tar.gz
+    required: false
+    description: Suffix to append to the artifact name (e.g., .tar.gz)
+  cmd:
+    required: true
+    description: SBT command to execute for packaging
+  location:
+    required: true
+    description: Location of the generated artifact to upload
+  execution_context_size:
+    required: false
+    default: "2"
+    description: Scala concurrent context size passed to sbt-ci-wrapper
+
+runs:
+  using: composite
+  steps:
+    - name: Restore compile and sbt caches
+      uses: ./.github/actions/build/restore_compile_sbt_caches
+
+    - name: SBT package
+      uses: ./.github/actions/sbt/execute_sbt_command
+      with:
+        cmd: ${{ inputs.cmd }}
+        report_to_datadog: "false"
+        fail_on_error_in_output: 'false'
+        execution_context_size: ${{ inputs.execution_context_size }}
+
+    - name: Prepare for artifact upload
+      shell: bash
+      run: |
+        # Clean-up temporary releases from previous package jobs
+        rm -rf tmp-release && mkdir tmp-release
+        cp -v ${{ inputs.location}}/*${{inputs.artifact_suffix}} tmp-release
+
+    - name: Upload release artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ github.job }}-release${{ inputs.artifact_suffix }}
+        path: tmp-release

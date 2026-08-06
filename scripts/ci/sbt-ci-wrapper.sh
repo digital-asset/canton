@@ -65,6 +65,21 @@ if [ -z "${EXECUTION_CONTEXT_SIZE##*[!0-9]*}" ]; then
   EXECUTION_CONTEXT_SIZE=${EXECUTOR_NUM_CPUS}
 fi
 
+# The GHA ARC runner pods have no CPU limit, request or cpuset, so the JVM detects the whole node
+# CPU count (e.g. 96) and sizes CPU-derived pools to it, far above the few cores a shard actually
+# uses. The Scala global execution context is already pinned below via scala.concurrent.context.*,
+# so this value covers what that setting does not reach: GC threads, JIT compiler threads, the JVM
+# common ForkJoinPool and libraries that read availableProcessors directly (Netty, Pekko, gRPC).
+# Applied on GHA only (see the gated block below), because CircleCI declares EXECUTOR_NUM_CPUS per
+# resource class and its pods have CPU limits. Defaults to EXECUTION_CONTEXT_SIZE with a floor of 4:
+# a job that dials the Scala execution context right down (the sequential deadlock-discovery run uses
+# EC=1, protobuf continuity uses 2) is making a test-serialization choice, not declaring the shard's
+# real CPU budget, so we keep a few threads for GC and JIT rather than starving them. An explicit
+# override is taken as-is. Per-job tuning of this value can be a follow-up if the floor is too coarse.
+if [[ -z "${EXECUTOR_ACTIVE_PROCESSOR_COUNT:-}" ]]; then
+  EXECUTOR_ACTIVE_PROCESSOR_COUNT=$(( 10#${EXECUTION_CONTEXT_SIZE} > 4 ? 10#${EXECUTION_CONTEXT_SIZE} : 4 ))
+fi
+
 # SBT output mode
 DEBUG="${DEBUG:-false}"
 # Use Azure DevOps Maven mirror for dependencies
@@ -190,6 +205,7 @@ _print_header "${c_white}Running parameters:${c_reset}"
 for i in EXECUTION_CONTEXT_SIZE \
          MAX_CONCURRENT_SBT_TEST_TASKS \
          EXECUTOR_NUM_CPUS \
+         EXECUTOR_ACTIVE_PROCESSOR_COUNT \
          EXECUTOR_JVM_HEAP_SIZE \
          EXECUTOR_JVM_METASPACE_SIZE \
          TIMEOUT \
@@ -287,6 +303,19 @@ SBT_CMD+=("-J-XX:+HeapDumpOnOutOfMemoryError")
 # Setup execution context size
 SBT_CMD+=("-J-Dscala.concurrent.context.numThreads=${EXECUTION_CONTEXT_SIZE}")
 SBT_CMD+=("-J-Dscala.concurrent.context.maxThreads=${EXECUTION_CONTEXT_SIZE}")
+
+# Pin the JVM's view of the available CPU count so GC threads, JIT compiler threads, the JVM common
+# ForkJoinPool and availableProcessors-based library pools (Netty, Pekko, gRPC) are sized to the
+# intended parallelism rather than the full (uncapped) node CPU count. This does not touch the Scala
+# global execution context, which scala.concurrent.context.numThreads/maxThreads above already pins.
+# Gated to GHA to avoid changing CircleCI behavior in this PR: CircleCI declares EXECUTOR_NUM_CPUS per
+# resource class and its pods have CPU limits, so the uncapped-node problem this solves does not apply
+# there. Only applied when the value resolves to a positive integer, so a non-numeric override leaves
+# the JVM default untouched. The 10# prefix forces base-10 so a value with leading zeros (e.g. 08) is
+# not misread as octal.
+if [[ "$IS_GHA" == "true" && "${EXECUTOR_ACTIVE_PROCESSOR_COUNT}" =~ ^[0-9]+$ && "$((10#${EXECUTOR_ACTIVE_PROCESSOR_COUNT}))" -gt 0 ]]; then
+  SBT_CMD+=("-J-XX:ActiveProcessorCount=${EXECUTOR_ACTIVE_PROCESSOR_COUNT}")
+fi
 
 # Print JVM arguments
 SBT_CMD+=("-J-XX:+PrintCommandLineFlags")

@@ -161,25 +161,25 @@ Because a remote console (i.e., remote instance references) is used here, nodes 
 The easiest way to trigger catch-up is to remove some of the connections (copy-paste ready):
 
 ```
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig.{EndpointId, P2PEndpointConfig}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{EndpointId, P2PEndpointConfig}
 import com.digitalasset.canton.config.RequireTypes.Port
-sequencer1.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31031), false))
-sequencer3.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31031), false))
-sequencer4.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31031), false))
-sequencer2.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31030), false))
-sequencer2.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31032), false))
-sequencer2.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31033), false))
+sequencer1.bft.remove_peer_endpoint(EndpointId("canton", Port.tryCreate(31031), false))
+sequencer3.bft.remove_peer_endpoint(EndpointId("canton", Port.tryCreate(31031), false))
+sequencer4.bft.remove_peer_endpoint(EndpointId("canton", Port.tryCreate(31031), false))
+sequencer2.bft.remove_peer_endpoint(EndpointId("canton", Port.tryCreate(31030), false))
+sequencer2.bft.remove_peer_endpoint(EndpointId("canton", Port.tryCreate(31032), false))
+sequencer2.bft.remove_peer_endpoint(EndpointId("canton", Port.tryCreate(31033), false))
 ```
 
 And then add them back:
 
 ```
-sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31030), None))
-sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31032), None))
-sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31033), None))
-sequencer1.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31031), None))
-sequencer3.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31031), None))
-sequencer4.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31031), None))
+sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("canton", Port.tryCreate(31030), None))
+sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("canton", Port.tryCreate(31032), None))
+sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("canton", Port.tryCreate(31033), None))
+sequencer1.bft.add_peer_endpoint(P2PEndpointConfig("canton", Port.tryCreate(31031), None))
+sequencer3.bft.add_peer_endpoint(P2PEndpointConfig("canton", Port.tryCreate(31031), None))
+sequencer4.bft.add_peer_endpoint(P2PEndpointConfig("canton", Port.tryCreate(31031), None))
 ```
 
 ## Stopping

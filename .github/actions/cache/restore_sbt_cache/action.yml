@@ -1,0 +1,59 @@
+name: Restore SBT cache
+description: Restore Ivy and SBT caches
+
+outputs:
+  ivy-cache-hit:
+    description: Whether ivy cache had an exact hit
+    value: ${{ steps.restore_ivy.outputs.cache-hit }}
+  ivy-cache-matched-key:
+    description: Restored ivy cache key
+    value: ${{ steps.restore_ivy.outputs.cache-matched-key }}
+  sbt-cache-hit:
+    description: Whether sbt cache had an exact hit
+    value: ${{ steps.restore_sbt.outputs.cache-hit }}
+  sbt-cache-matched-key:
+    description: Restored sbt cache key
+    value: ${{ steps.restore_sbt.outputs.cache-matched-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute build hash
+      id: compute_hash
+      uses: ./.github/actions/cache/compute_build_hash
+
+    - name: Obtain latest main git commit sha
+      id: compute_main_sha
+      shell: bash
+      run: |
+        echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+
+    - name: Reset local dependency caches before restore
+      shell: bash
+      run: |
+        rm -rf ~/.ivy2/cache ~/.sbt
+        mkdir -p ~/.ivy2/cache ~/.sbt
+
+    - name: Restore Ivy cache
+      id: restore_ivy
+      uses: ./.github/actions/cache/restore_cache
+      with:
+        path: ~/.ivy2/cache/
+        key: >-
+          sbt-ivy-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+        restore-keys: |-
+          sbt-ivy-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-ivy-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
+          sbt-ivy-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+
+    - name: Restore SBT cache
+      id: restore_sbt
+      uses: ./.github/actions/cache/restore_cache
+      with:
+        path: ~/.sbt/
+        key: >-
+          sbt-home-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+        restore-keys: |-
+          sbt-home-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-home-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
+          sbt-home-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=

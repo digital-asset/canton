@@ -116,6 +116,12 @@ final class GeneratorsProtocol(
           .choose(0L, 10000L)
           .map(NonNegativeFiniteDuration.tryOfMicros)
 
+//        synchronizerSizeLimits <-
+//          if (protocolVersion >= ProtocolVersion.v36) Arbitrary.arbitrary[SizeLimits]
+//          else Gen.const(SizeLimits.max)
+        // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
+        synchronizerSizeLimits <- Gen.const(SizeLimits.max)
+
         dynamicSynchronizerParameters = DynamicSynchronizerParameters.tryCreate(
           confirmationResponseTimeout,
           mediatorReactionTimeout,
@@ -130,6 +136,7 @@ final class GeneratorsProtocol(
           acsCommitmentsCatchupConfig,
           participantSynchronizerLimits,
           preparationTimeRecordTimeTolerance,
+          synchronizerSizeLimits,
         )(representativePV)
 
       } yield dynamicSynchronizerParameters

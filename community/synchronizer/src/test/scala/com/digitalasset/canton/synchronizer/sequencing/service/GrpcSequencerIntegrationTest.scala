@@ -78,7 +78,7 @@ import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTrace
 import com.digitalasset.canton.store.memory.{InMemorySendTrackerStore, InMemorySequencedEventStore}
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerParameters
+import com.digitalasset.canton.synchronizer.sequencer.config.{SequencerLimits, SequencerParameters}
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.time.{SimClock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -241,6 +241,7 @@ class Env(
     cryptoApi = cryptoApi,
     clock = clock,
     lsuSequencingBounds = None,
+    sequencerLimits = SequencerLimits(),
     sanitizePublicErrorMessages = false,
     disableReleaseVersionHandshakeCheck = false,
     synchronizerTopologyManager = mockSynchronizerTopologyManager,

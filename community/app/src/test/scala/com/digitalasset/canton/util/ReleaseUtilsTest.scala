@@ -28,26 +28,18 @@ final class ReleaseUtilsTest extends AnyFlatSpec with Matchers with Inspectors w
   it should "put 1 item per shard when the number of items equals the requested shards" in {
     shard(NonEmptyList.of(1, 2, 3), three) shouldBe List(List(1), List(2), List(3))
   }
-  it should "spread items to all shards" in {
-    shard(NonEmptyList.of(1, 2, 3, 4), two) shouldBe List(List(1, 2), List(3, 4))
+  it should "deal items out round-robin across the shards" in {
+    // The element at 0-based index i lands in shard i % n, so consecutive items go to different shards.
+    shard(NonEmptyList.of(1, 2, 3, 4), two) shouldBe List(List(1, 3), List(2, 4))
 
-    shard(NonEmptyList.of(1, 2, 3, 4), three) shouldBe List(List(1), List(2), List(3, 4))
-    /*
-    ^^ shard(list = List(1, 2, 3, 4), n = 3) with
-        val itemsPerShard = Math.ceil(list.length / n.toDouble).toInt // = 2
-        list.grouped(itemsPerShard)
-            .toList
-            .padTo(n)
-
-     results in: List(List(1, 2), List(3, 4), List())
-     */
+    shard(NonEmptyList.of(1, 2, 3, 4), three) shouldBe List(List(1, 4), List(2), List(3))
   }
-  it should "spread items evenly to shards" in {
+  it should "spread items evenly across the shards" in {
     shard(NonEmptyList.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), four) shouldBe List(
-      List(1, 2),
-      List(3, 4),
-      List(5, 6, 7),
-      List(8, 9, 10),
+      List(1, 5, 9),
+      List(2, 6, 10),
+      List(3, 7),
+      List(4, 8),
     )
   }
 

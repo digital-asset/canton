@@ -5,19 +5,7 @@ package com.digitalasset.canton.http.json.v2
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2 as lapi
-import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter.WildcardFilter
-import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
-  TRANSACTION_SHAPE_ACS_DELTA,
-  TRANSACTION_SHAPE_LEDGER_EFFECTS,
-}
-import com.daml.ledger.api.v2.transaction_filter.{
-  CumulativeFilter,
-  EventFormat,
-  Filters,
-  ParticipantAuthorizationTopologyFormat,
-  TransactionFormat,
-  UpdateFormat,
-}
+import com.daml.ledger.api.v2.transaction_filter.ParticipantAuthorizationTopologyFormat
 import com.daml.ledger.api.v2.{offset_checkpoint, transaction_filter, update_service}
 import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.http.WebsocketConfig
@@ -28,13 +16,10 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   JsCantonError,
   JsReassignment,
   JsTransaction,
-  JsTransactionTree,
   OneOfSchemaExtension,
 }
-import com.digitalasset.canton.http.json.v2.JsUpdateServiceConverters.toUpdateFormat
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs.*
 import com.digitalasset.canton.ledger.client.LedgerClient
-import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
@@ -80,7 +65,7 @@ class JsUpdateService(
     asList(
       JsUpdateService.getUpdatesListEndpoint,
       getUpdates,
-      timeoutOpenEndedStream = (r: LegacyDTOs.GetUpdatesRequest) => r.endInclusive.isEmpty,
+      timeoutOpenEndedStream = (r: update_service.GetUpdatesRequest) => r.endInclusive.isEmpty,
     ),
     withServerLogic(
       JsUpdateService.getUpdateByOffsetEndpoint,
@@ -141,16 +126,13 @@ class JsUpdateService(
 
   private def getUpdates(
       caller: CallerContext
-  ): TracedInput[Unit] => Flow[LegacyDTOs.GetUpdatesRequest, JsGetUpdatesResponse, NotUsed] =
+  ): TracedInput[Unit] => Flow[update_service.GetUpdatesRequest, JsGetUpdatesResponse, NotUsed] =
     _ => {
       implicit val tc = caller.traceContext()
-      Flow[LegacyDTOs.GetUpdatesRequest].map { request =>
-        toGetUpdatesRequest(request, forTrees = false)
-      } via
-        prepareSingleWsStream(
-          updateServiceClient(caller.token()).getUpdates,
-          (r: update_service.GetUpdatesResponse) => protocolConverters.GetUpdatesResponse.toJson(r),
-        )
+      prepareSingleWsStream(
+        updateServiceClient(caller.token()).getUpdates,
+        (r: update_service.GetUpdatesResponse) => protocolConverters.GetUpdatesResponse.toJson(r),
+      )
     }
 
   private def getUpdatesPage(
@@ -166,45 +148,6 @@ class JsUpdateService(
         .resultToRight
     }
 
-  private def toGetUpdatesRequest(
-      req: LegacyDTOs.GetUpdatesRequest,
-      forTrees: Boolean,
-  )(implicit traceContext: TraceContext): update_service.GetUpdatesRequest =
-    (req.updateFormat, req.filter, req.verbose) match {
-      case (Some(_), Some(_), _) =>
-        throw RequestValidationErrors.InvalidArgument
-          .Reject(
-            "Both update_format and filter are set. Please use either backwards compatible arguments (filter and verbose) or update_format, but not both."
-          )
-          .asGrpcError
-      case (Some(_), _, true) =>
-        throw RequestValidationErrors.InvalidArgument
-          .Reject(
-            "Both update_format and verbose are set. Please use either backwards compatible arguments (filter and verbose) or update_format, but not both."
-          )
-          .asGrpcError
-      case (Some(_), None, false) =>
-        update_service.GetUpdatesRequest(
-          beginExclusive = req.beginExclusive,
-          endInclusive = req.endInclusive,
-          updateFormat = req.updateFormat,
-          descendingOrder = req.descendingOrder,
-        )
-      case (None, None, _) =>
-        throw RequestValidationErrors.InvalidArgument
-          .Reject(
-            "Either filter/verbose or update_format is required. Please use either backwards compatible arguments (filter and verbose) or update_format."
-          )
-          .asGrpcError
-      case (None, Some(filter), verbose) =>
-        update_service.GetUpdatesRequest(
-          beginExclusive = req.beginExclusive,
-          endInclusive = req.endInclusive,
-          updateFormat = Some(toUpdateFormat(filter, verbose, forTrees)),
-          descendingOrder = req.descendingOrder,
-        )
-    }
-
 }
 
 object JsUpdateService extends DocumentationEndpoints {
@@ -217,7 +160,7 @@ object JsUpdateService extends DocumentationEndpoints {
   val getUpdatesEndpoint = updates.get
     .out(
       webSocketBody[
-        LegacyDTOs.GetUpdatesRequest,
+        update_service.GetUpdatesRequest,
         CodecFormat.Json,
         Either[JsCantonError, JsGetUpdatesResponse],
         CodecFormat.Json,
@@ -227,7 +170,7 @@ object JsUpdateService extends DocumentationEndpoints {
 
   val getUpdatesListEndpoint =
     updates.post
-      .in(jsonBody[LegacyDTOs.GetUpdatesRequest])
+      .in(jsonBody[update_service.GetUpdatesRequest])
       .out(jsonBody[Seq[JsGetUpdatesResponse]])
       .protoRef(update_service.UpdateServiceGrpc.METHOD_GET_UPDATES)
       .inStreamListParamsAndDescription()
@@ -279,10 +222,6 @@ object JsUpdate {
       extends Update
 }
 
-final case class JsGetTransactionTreeResponse(transaction: JsTransactionTree)
-
-final case class JsGetTransactionResponse(transaction: JsTransaction)
-
 final case class JsGetUpdateResponse(update: JsUpdate.Update)
 
 final case class JsGetUpdatesResponse(
@@ -298,17 +237,6 @@ final case class JsGetUpdatesPageResponse(
     nextPageToken: Option[ByteString],
 )
 
-object JsUpdateTree {
-  sealed trait Update
-  final case class OffsetCheckpoint(value: offset_checkpoint.OffsetCheckpoint) extends Update
-  final case class Reassignment(value: JsReassignment) extends Update
-  final case class TransactionTree(value: JsTransactionTree) extends Update
-}
-
-final case class JsGetUpdateTreesResponse(
-    update: JsUpdateTree.Update
-)
-
 object JsUpdateServiceCodecs {
   import JsSchema.config
   import JsSchema.JsServicesCommonCodecs.*
@@ -318,12 +246,6 @@ object JsUpdateServiceCodecs {
   implicit val topologyFormatRW: Codec[transaction_filter.TopologyFormat] = deriveRelaxedCodec
   implicit val updateFormatRW: Codec[transaction_filter.UpdateFormat] = deriveRelaxedCodec
   implicit val getUpdatesRequestRW: Codec[update_service.GetUpdatesRequest] = deriveRelaxedCodec
-  implicit val getUpdatesRequestLegacyRW: Codec[LegacyDTOs.GetUpdatesRequest] = deriveRelaxedCodec
-  implicit val getTransactionByIdRequestLegacyRW: Codec[LegacyDTOs.GetTransactionByIdRequest] =
-    deriveRelaxedCodec
-  implicit val getTransactionByOffsetRequestLegacyRW
-      : Codec[LegacyDTOs.GetTransactionByOffsetRequest] =
-    deriveRelaxedCodec
   implicit val getUpdateByIdRequestRW: Codec[update_service.GetUpdateByIdRequest] =
     deriveRelaxedCodec
   implicit val getUpdateByOffsetRequestRW: Codec[update_service.GetUpdateByOffsetRequest] =
@@ -342,19 +264,7 @@ object JsUpdateServiceCodecs {
   implicit val jsUpdateTopologyTransactionRW: Codec[JsUpdate.TopologyTransaction] =
     deriveConfiguredCodec
 
-  implicit val jsGetUpdateTreesResponseRW: Codec[JsGetUpdateTreesResponse] = deriveConfiguredCodec
-
-  implicit val jsGetTransactionTreeResponseRW: Codec[JsGetTransactionTreeResponse] =
-    deriveConfiguredCodec
-  implicit val jsGetTransactionResponseRW: Codec[JsGetTransactionResponse] = deriveConfiguredCodec
   implicit val jsGetUpdateResponseRW: Codec[JsGetUpdateResponse] = deriveConfiguredCodec
-
-  implicit val jsUpdateTreeRW: Codec[JsUpdateTree.Update] = deriveConfiguredCodec
-  implicit val jsUpdateTreeOffsetCheckpointRW: Codec[JsUpdateTree.OffsetCheckpoint] =
-    deriveConfiguredCodec
-  implicit val jsUpdateTreeReassignmentRW: Codec[JsUpdateTree.Reassignment] = deriveConfiguredCodec
-  implicit val jsUpdateTreeTransactionRW: Codec[JsUpdateTree.TransactionTree] =
-    deriveConfiguredCodec
 
   implicit val jsGetUpdatesPageResponseRW: Codec[JsGetUpdatesPageResponse] = deriveConfiguredCodec
   implicit val getUpdatesPageRequest: Codec[update_service.GetUpdatesPageRequest] =
@@ -401,53 +311,5 @@ object JsUpdateServiceCodecs {
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
   implicit val jsUpdateSchema: Schema[JsUpdate.Update] =
     Schema.oneOfWrapped[JsUpdate.Update].oneOfExtension()
-
-  @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
-  implicit val jsUpdateTreeSchema: Schema[JsUpdateTree.Update] =
-    Schema.oneOfWrapped[JsUpdateTree.Update].oneOfExtension()
-
-}
-
-object JsUpdateServiceConverters {
-  def toUpdateFormat(
-      filter: LegacyDTOs.TransactionFilter,
-      verbose: Boolean,
-      forTrees: Boolean,
-  ): UpdateFormat = {
-    def addWildcardCond(f: Filters): Filters =
-      if (
-        f.cumulative.map(_.identifierFilter).exists {
-          case _: WildcardFilter => true
-          case _ => false
-        } || !forTrees
-      )
-        f
-      else
-        Filters(cumulative =
-          f.cumulative :+ CumulativeFilter(
-            WildcardFilter(transaction_filter.WildcardFilter(includeCreatedEventBlob = false))
-          )
-        )
-
-    val eventFormat = EventFormat(
-      filtersByParty = filter.filtersByParty.map { case (party, f) =>
-        party -> addWildcardCond(f)
-      },
-      filtersForAnyParty = filter.filtersForAnyParty.map(addWildcardCond),
-      verbose = verbose,
-    )
-
-    val transactionFormat = TransactionFormat(
-      transactionShape =
-        if (forTrees) TRANSACTION_SHAPE_LEDGER_EFFECTS else TRANSACTION_SHAPE_ACS_DELTA,
-      eventFormat = Some(eventFormat),
-    )
-
-    UpdateFormat(
-      includeTransactions = Some(transactionFormat),
-      includeReassignments = Some(eventFormat),
-      includeTopologyEvents = None,
-    )
-  }
 
 }

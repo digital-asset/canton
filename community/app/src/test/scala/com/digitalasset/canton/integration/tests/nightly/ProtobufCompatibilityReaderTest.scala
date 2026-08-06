@@ -128,6 +128,8 @@ final class ProtobufCompatibilityReaderTest
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
+      // CantonBFT blacklisting
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Changed for 3.5.1-rc4
@@ -174,8 +176,9 @@ final class ProtobufCompatibilityReaderTest
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
-      // CantonBFT blacklisting
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
+      // adding backwards compatible sequencing parameters
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto:Previously present field "4" with name "max_requests_in_batch" on message "DynamicSequencingParametersPayload" was deleted.""",
+      """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto:Previously present field "5" with name "max_batches_per_proposal" on message "DynamicSequencingParametersPayload" was deleted.""",
     ),
   )
 
