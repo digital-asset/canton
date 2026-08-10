@@ -25,6 +25,10 @@ import com.digitalasset.canton.integration.plugins.toxiproxy.{
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
+import com.digitalasset.canton.integration.tests.manual.BftOrderingBenchmark.{
+  BftBlockOrderingP2PSendDelayConfigEntry,
+  DelaysConfig,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -32,6 +36,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
+  BftBlockOrderingP2PSendDelayConfig,
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultConsensusEmptyBlockCreationTimeout,
   DefaultMaxBatchCreationInterval,
@@ -67,7 +72,7 @@ import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
   *
   * export SBT_OPTS="\
   * -Xmx60G -Xms60G \
-  * -Dbft-ordering-benchmark.num-nodes=16 \
+  * -Dbft-ordering-benchmark.num-nodes=4 \
   * -Dbft-ordering-benchmark.enable-prometheus-metrics=true \
   * -Dscala.concurrent.context.numThreads=30 \
   * -Dbft-ordering-benchmark.num-db-connections-per-node=5 \
@@ -77,6 +82,7 @@ import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
   * -Dbft-ordering-benchmark.test-pause-orderer-threshold-buffer-size=10 \
   * -Dbft-ordering-benchmark.test-resume-orderer-threshold-buffer-size=5 \
   * -Dbft-ordering-benchmark.test-backpressure={nodes-to-delay=[2],delay=1minute} \
+  * -Dbft-ordering-benchmark.test-p2p-send-delays={entries=[{sources=[1,2],config={delays-by-recipients=[{instance-names=[3,4],delay-distribution={type=constant-distribution,duration=300ms}}],default-delay-distribution={type=constant-distribution,duration=10ms}}}]}\
   * -Dbft-ordering-benchmark.benchmark-duration=1minute \
   * -Dbft-ordering-benchmark.per-node-write-period=1millisecond"
   *
@@ -286,7 +292,7 @@ class BftOrderingBenchmark
         .getOrElse(DefaultSequencerCoreSubscriptionConfig.resumeOrdererThresholdBufferSize)
     )
 
-  private val testPostOrderingDelayConfigO: Option[UseBftSequencer.PostOrderingDelayConfig] =
+  private val postOrderingDelayConfigO: Option[UseBftSequencer.PostOrderingDelayConfig] =
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-backpressure"))
       .map { s =>
         val result =
@@ -296,6 +302,26 @@ class BftOrderingBenchmark
         result.left.foreach(errors => logger.error(s"Failed to parse testCatchup config: $errors"))
         result.getOrElse(throw new RuntimeException("Invalid test catchup configuration"))
       }
+
+  private val p2pSendDelays: Map[String, BftBlockOrderingP2PSendDelayConfig] =
+    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-p2p-send-delays"))
+      .map { s =>
+        val result =
+          ConfigSource
+            .string(s)
+            .load[DelaysConfig]
+        result.left.foreach(errors =>
+          logger.error(s"Failed to parse p2p send delay config: $errors")
+        )
+        result.getOrElse(throw new RuntimeException("Invalid test p2p send delay configuration"))
+      }
+      .map(_.entries)
+      .getOrElse(Seq.empty)
+      .view
+      .flatMap { case BftBlockOrderingP2PSendDelayConfigEntry(sources, config) =>
+        sources.map(_ -> config)
+      }
+      .toMap
 
   registerPlugin(
     new UsePostgres(
@@ -312,8 +338,9 @@ class BftOrderingBenchmark
       shouldUseMemoryStorageForBftOrderer = useInMemoryStorageForBftOrderer,
       shouldBenchmarkBftSequencer = true,
       useStandaloneConfig = Some(
-        UseStandaloneConfig(segmentLength, postOrderingDelayConfig = testPostOrderingDelayConfigO)
+        UseStandaloneConfig(segmentLength, postOrderingDelayConfig = postOrderingDelayConfigO)
       ),
+      p2pSendDelays = p2pSendDelays,
       consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
       sequencingParameters = Some(
         SequencingParameters.create(
@@ -513,4 +540,14 @@ class BftOrderingBenchmark
       )
     benchmarkTool.run(benchmarkToolConfig).discard
   }
+}
+
+private object BftOrderingBenchmark {
+
+  private final case class BftBlockOrderingP2PSendDelayConfigEntry(
+      sources: Seq[String],
+      config: BftBlockOrderingP2PSendDelayConfig,
+  )
+
+  private final case class DelaysConfig(entries: Seq[BftBlockOrderingP2PSendDelayConfigEntry])
 }

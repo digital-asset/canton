@@ -45,6 +45,7 @@ final case class TransactionValidationResult(
     replayCheckResult: Option[String],
     validatedExternalTransactionHash: Option[Hash],
     commitAfterFailedActivenessCheck: Boolean,
+    hostedOnboardingPartiesO: Option[HostedOnboardingParties],
 ) {
 
   def commitSet(
@@ -57,5 +58,6 @@ final case class TransactionValidationResult(
       transient,
       createdContracts,
       commitAfterFailedActivenessCheck,
+      hostedOnboardingPartiesO,
     )
 }

@@ -1,0 +1,116 @@
+name: Check release notes
+
+# For PRs targeting a release-line* branch, require that UNRELEASED.md is
+# updated. PRs that legitimately need no release note (forward-ports, CI-only,
+# docs) can bypass the check with the "no-release-note" label.
+#
+# On failure the check posts a single "sticky" PR comment (updated in place,
+# cleared/marked passed when the check passes) so the guidance is visible inline
+# rather than only as a failed check. Implemented with actions/github-script
+# since the job only interacts with the GitHub API.
+on:
+  pull_request:
+    branches:
+      - 'release-line*'
+      # TODO(#33711): add main once release-line enforcement is validated
+    # labeled/unlabeled so toggling the skip label re-evaluates the check.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+
+# Cancel superseded runs on the same PR so only the latest commit's run posts the
+# sticky comment / status, avoiding racing runs that leave a stale comment.
+concurrency:
+  group: check-unreleased-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-unreleased:
+    name: Require UNRELEASED.md update
+    runs-on: dach-ny-canton
+    permissions:
+      contents: read
+      # write so the script can post/update the sticky PR comment.
+      pull-requests: write
+    steps:
+      - name: Require UNRELEASED.md update
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const SKIP_LABEL = 'no-release-note';
+            const RELEASE_NOTES_FILE = 'UNRELEASED.md';
+            const MARKER = '<!-- check-unreleased-notes -->';
+            const pr = context.payload.pull_request;
+            const { owner, repo } = context.repo;
+
+            const labels = pr.labels.map(l => l.name);
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+            const touched = files.some(f => f.filename === RELEASE_NOTES_FILE);
+            const skipped = labels.includes(SKIP_LABEL);
+            const ok = touched || skipped;
+
+            // Diagnostics: record event + mergeability on every run so that, if a
+            // PR ever stalls (required check left with no result on its head), we
+            // have a forensic trail. The pull_request payload omits mergeable /
+            // mergeable_state, so re-fetch the PR to capture them.
+            let mergeable = null, mergeable_state = null, draft = pr.draft;
+            try {
+              const { data: fresh } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+              mergeable = fresh.mergeable;
+              mergeable_state = fresh.mergeable_state;
+              draft = fresh.draft;
+            } catch (e) {
+              core.warning(`pulls.get failed: ${e.message}`);
+            }
+            const diag = {
+              event: context.eventName, action: context.payload.action,
+              pr: pr.number, head: pr.head.sha, base: pr.base.ref,
+              draft, mergeable, mergeable_state, labels, touched, skipped, ok,
+            };
+            core.info(`release-notes-check diagnostics: ${JSON.stringify(diag)}`);
+            await core.summary
+              .addHeading('Release-notes check', 3)
+              .addTable([
+                [{ data: 'field', header: true }, { data: 'value', header: true }],
+                ['decision', ok ? '✅ pass' : '⚠️ fail'],
+                ['event', `${diag.event} / ${diag.action}`],
+                ['head', diag.head],
+                ['base', diag.base],
+                ['mergeable', String(mergeable)],
+                ['mergeable_state', String(mergeable_state)],
+                ['draft', String(draft)],
+                ['UNRELEASED.md touched', String(touched)],
+                ['no-release-note label', String(skipped)],
+              ])
+              .write();
+
+            // Find a sticky comment posted by a previous run (by hidden marker).
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            const sticky = comments.find(c => c.body && c.body.includes(MARKER));
+
+            const body = ok
+              ? `${MARKER}\n✅ Release-notes check passed.`
+              : `${MARKER}\n⚠️ **Release note required.** This PR targets \`${pr.base.ref}\` but does not ` +
+                `modify \`${RELEASE_NOTES_FILE}\`.\n\nPlease add a release note to \`${RELEASE_NOTES_FILE}\`, ` +
+                `or apply the \`${SKIP_LABEL}\` label if this change needs none (e.g. forward-port, CI-only, docs).`;
+
+            if (ok) {
+              // Only update an existing comment; never add noise to a clean PR.
+              if (sticky) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: sticky.id, body });
+              }
+              core.notice(touched ? `${RELEASE_NOTES_FILE} was updated.` : `'${SKIP_LABEL}' label present; skipping.`);
+              return;
+            }
+
+            if (sticky) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: sticky.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+            }
+            core.setFailed(
+              `This PR targets '${pr.base.ref}' but does not modify ${RELEASE_NOTES_FILE}. ` +
+              `Add a release note, or apply the '${SKIP_LABEL}' label if this change needs none (e.g. forward-port, CI-only, docs).`
+            );

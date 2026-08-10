@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerLimits
 import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.*
@@ -61,6 +62,7 @@ class GrpcSequencerConnectServiceTest
       initialTimeBound.map(ts =>
         LsuSequencingBounds.unsafeCreate(upgradeTime = ts, lowerBoundSequencingTimeExclusive = ts)
       ),
+      SequencerLimits(),
       sanitizePublicErrorMessages = false,
       disableReleaseVersionHandshakeCheck = false,
       SequencerTestMetrics(this.getClass.getSimpleName),
@@ -279,6 +281,43 @@ class GrpcSequencerConnectServiceTest
           PositiveInt.tryCreate(10),
         )
       result shouldBe Right(())
+    }
+
+    // --- handshake clientProtocolVersions size limit ---
+
+    "reject a handshake request that exceeds the clientProtocolVersions limit" in {
+      val env = new Env()
+      val maxClientProtocolVersions = SequencerLimits().maxClientProtocolVersions.value
+      val exceedingClientProtocolVersions =
+        maxClientProtocolVersions + 1 // One over the configured limit
+      val request = SequencerConnect.HandshakeRequest(
+        clientProtocolVersions = Seq.fill(exceedingClientProtocolVersions)(30),
+        minimumProtocolVersion = None,
+        clientVersion = "",
+      )
+      inside(env.service.handshake(request).failed.futureValue) { case ex: StatusRuntimeException =>
+        ex.getStatus.getCode shouldBe Code.INVALID_ARGUMENT
+        ex.getStatus.getDescription should include("Too many client protocol versions")
+        ex.getStatus.getDescription should include(s"Limit: $maxClientProtocolVersions")
+        ex.getStatus.getDescription should include(
+          s"Found: $exceedingClientProtocolVersions"
+        )
+      }
+    }
+
+    "accept a handshake request with exactly the clientProtocolVersions limit" in {
+      val env = new Env()
+      val protocolVersion = env.staticSynchronizerParameters.protocolVersion.v
+      val maxClientProtocolVersions = SequencerLimits().maxClientProtocolVersions.value
+
+      val request = SequencerConnect.HandshakeRequest(
+        clientProtocolVersions = Seq.fill(maxClientProtocolVersions)(protocolVersion),
+        minimumProtocolVersion = None,
+        clientVersion = com.digitalasset.canton.version.ReleaseVersion.current.toProtoPrimitive,
+      )
+
+      val response = env.service.handshake(request).futureValue
+      response.serverProtocolVersion shouldBe protocolVersion
     }
   }
 }

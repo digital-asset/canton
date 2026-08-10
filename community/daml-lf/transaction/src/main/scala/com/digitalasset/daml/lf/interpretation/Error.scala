@@ -309,20 +309,6 @@ object Error {
 
     sealed abstract class Error extends Serializable with Product
 
-    sealed case class Conformance(
-        provided: TxNode.Create,
-        recomputed: TxNode.Create,
-        details: String,
-    ) extends Error
-
-    /** A choice guard returned false, invalidating some expectation. */
-    final case class ChoiceGuardFailed(
-        coid: ContractId,
-        templateId: TypeConId,
-        choiceName: ChoiceName,
-        byInterface: Option[TypeConId],
-    ) extends Error
-
     final case class Limit(error: Limit.Error) extends Error
 
     object Limit {

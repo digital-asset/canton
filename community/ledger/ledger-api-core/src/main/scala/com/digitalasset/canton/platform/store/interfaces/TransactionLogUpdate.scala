@@ -112,6 +112,9 @@ object TransactionLogUpdate {
       effectiveTime: Timestamp,
       synchronizerId: String,
       events: Vector[PartyToParticipantAuthorization],
+      synchronizerParametersState: Option[
+        Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState
+      ],
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate {
     override def completionStreamResponseO: Option[CompletionStreamResponse] = None

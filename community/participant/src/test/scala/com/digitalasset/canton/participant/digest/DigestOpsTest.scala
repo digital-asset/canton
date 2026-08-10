@@ -11,11 +11,6 @@ import com.digitalasset.canton.participant.commitment.{
   TracedLtHash16Blake3,
 }
 import com.digitalasset.canton.participant.digest.DigestOperation.Add
-import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  LocalPartyFirst,
-  PartyAndOrder,
-  RemotePartyFirst,
-}
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.{BaseTest, LfPartyId, ReassignmentCounter}
@@ -133,7 +128,6 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
         val reassignmentCounter = ReassignmentCounter.Genesis
 
         val actualDeltas = DigestOps.computeDeltas(
-          participant1,
           AcsUpdate(
             stakeholders = Map(
               party1 -> Set(participant1),
@@ -150,60 +144,30 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
 
         val expectedDeltas = Seq[DigestDelta](
           DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party1, LocalPartyFirst),
+            partyId = party1,
             digest = makeExpectedDigest(
               contractId = contractId1,
-              partyPairs = Set(party1 -> party1, party2 -> party1, party3 -> party1),
+              partyPairs = Seq(party1 -> party1, party1 -> party2, party1 -> party3),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
             operation = DigestOperation.Add,
           ),
           DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party1, RemotePartyFirst),
+            partyId = party2,
             digest = makeExpectedDigest(
               contractId = contractId1,
-              partyPairs = Set(party1 -> party1, party1 -> party2, party1 -> party3),
+              partyPairs = Seq(party1 -> party2, party2 -> party2, party2 -> party3),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
             operation = DigestOperation.Add,
           ),
           DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party2, LocalPartyFirst),
+            partyId = party3,
             digest = makeExpectedDigest(
               contractId = contractId1,
-              partyPairs = Set(party1 -> party2, party2 -> party2, party3 -> party2),
-              reassignmentCounter = reassignmentCounter,
-              enableTracing = enableDigestTracing,
-            ),
-            operation = DigestOperation.Add,
-          ),
-          DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party2, RemotePartyFirst),
-            digest = makeExpectedDigest(
-              contractId = contractId1,
-              partyPairs = Set(party2 -> party1, party2 -> party2, party2 -> party3),
-              reassignmentCounter = reassignmentCounter,
-              enableTracing = enableDigestTracing,
-            ),
-            operation = DigestOperation.Add,
-          ),
-          DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party3, LocalPartyFirst),
-            digest = makeExpectedDigest(
-              contractId = contractId1,
-              partyPairs = Set(party1 -> party3, party2 -> party3, party3 -> party3),
-              reassignmentCounter = reassignmentCounter,
-              enableTracing = enableDigestTracing,
-            ),
-            operation = DigestOperation.Add,
-          ),
-          DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party3, RemotePartyFirst),
-            digest = makeExpectedDigest(
-              contractId = contractId1,
-              partyPairs = Set(party3 -> party1, party3 -> party2, party3 -> party3),
+              partyPairs = Seq(party1 -> party3, party2 -> party3, party3 -> party3),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
@@ -213,15 +177,15 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
             participantId = participant1,
             digest = makeExpectedDigest(
               contractId = contractId1,
-              partyPairs = Set(
+              partyPairs = Seq(
                 party1 -> party1,
                 party1 -> party2,
                 party1 -> party3,
-                party2 -> party1,
+                party1 -> party2,
                 party2 -> party2,
                 party2 -> party3,
-                party3 -> party1,
-                party3 -> party2,
+                party1 -> party3,
+                party2 -> party3,
                 party3 -> party3,
               ),
               reassignmentCounter = reassignmentCounter,
@@ -233,10 +197,10 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
             participantId = participant2,
             digest = makeExpectedDigest(
               contractId = contractId1,
-              partyPairs = Set(
+              partyPairs = Seq(
                 party1 -> party2,
                 party2 -> party2,
-                party3 -> party2,
+                party2 -> party3,
                 party1 -> party3,
                 party2 -> party3,
                 party3 -> party3,
@@ -262,7 +226,6 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
         val reassignmentCounter = ReassignmentCounter.One
 
         val actualDeltas = DigestOps.computeDeltas(
-          participant2,
           AcsUpdate(
             stakeholders = Map(
               party3 -> Set(participant1, participant2, participant3),
@@ -278,40 +241,20 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
 
         val expectedDeltas = Seq[DigestDelta](
           DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party3, LocalPartyFirst),
+            partyId = party3,
             digest = makeExpectedDigest(
               contractId = contractId2,
-              partyPairs = Set(party3 -> party3),
+              partyPairs = Seq(party3 -> party3),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
             operation = DigestOperation.Remove,
           ),
           DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party4, LocalPartyFirst),
+            partyId = party4,
             digest = makeExpectedDigest(
               contractId = contractId2,
-              partyPairs = Set(party3 -> party4),
-              reassignmentCounter = reassignmentCounter,
-              enableTracing = enableDigestTracing,
-            ),
-            operation = DigestOperation.Remove,
-          ),
-          DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party3, RemotePartyFirst),
-            digest = makeExpectedDigest(
-              contractId = contractId2,
-              partyPairs = Set(party3 -> party3),
-              reassignmentCounter = reassignmentCounter,
-              enableTracing = enableDigestTracing,
-            ),
-            operation = DigestOperation.Remove,
-          ),
-          DigestDelta.Party(
-            partyAndOrder = PartyAndOrder(party4, RemotePartyFirst),
-            digest = makeExpectedDigest(
-              contractId = contractId2,
-              partyPairs = Set(party4 -> party3),
+              partyPairs = Seq(party3 -> party4),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
@@ -321,7 +264,7 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
             participantId = participant3,
             digest = makeExpectedDigest(
               contractId = contractId2,
-              partyPairs = Set(party3 -> party3, party3 -> party4),
+              partyPairs = Seq(party3 -> party3, party3 -> party4),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
@@ -331,7 +274,7 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
             participantId = participant2,
             digest = makeExpectedDigest(
               contractId = contractId2,
-              partyPairs = Set(party3 -> party3),
+              partyPairs = Seq(party3 -> party3),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
@@ -341,7 +284,7 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
             participantId = participant1,
             digest = makeExpectedDigest(
               contractId = contractId2,
-              partyPairs = Set(party3 -> party3, party4 -> party3),
+              partyPairs = Seq(party3 -> party3, party3 -> party4),
               reassignmentCounter = reassignmentCounter,
               enableTracing = enableDigestTracing,
             ),
@@ -357,7 +300,6 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
 
         val deltaForParticipant2 = DigestOps
           .computeDeltas(
-            participant1,
             AcsUpdate(
               stakeholders = Map(
                 party1 -> Set(participant1),
@@ -378,7 +320,6 @@ class DigestOpsTest extends AnyWordSpec with BaseTest {
 
         val deltaForParticipant1 = DigestOps
           .computeDeltas(
-            participant2,
             AcsUpdate(
               stakeholders = Map(
                 party1 -> Set(participant1),
@@ -445,7 +386,7 @@ object DigestOpsTest {
 
   def makeExpectedDigest(
       contractId: LfContractId,
-      partyPairs: Set[(LfPartyId, LfPartyId)],
+      partyPairs: Seq[(LfPartyId, LfPartyId)],
       reassignmentCounter: ReassignmentCounter = ReassignmentCounter.Genesis,
       isActivation: Boolean = true,
       enableTracing: Boolean,
@@ -459,7 +400,7 @@ object DigestOpsTest {
         isActivation = isActivation,
         traceChanges = enableTracing,
       )
-    }.toSeq)
+    })
 
   def makeExpectedTrace(
       contractId: LfContractId,

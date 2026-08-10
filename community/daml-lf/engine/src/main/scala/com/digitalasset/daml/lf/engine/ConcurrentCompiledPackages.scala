@@ -31,9 +31,10 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
 
   // We unconditionally load stable packages
   this.synchronized {
-    val _ = signatures.addAll(CompiledPackages.stablePackageSignatures)
-    val _ = definitions.addAll(CompiledPackages.stableDefs)
-    val _ = packageDeps.addAll(CompiledPackages.stableDeps)
+    val stablePackagesInfo = CompiledPackages.stablePackagesInfoFromCompilerConfig(compilerConfig)
+    val _ = signatures.addAll(stablePackagesInfo.packageSignatures)
+    val _ = definitions.addAll(stablePackagesInfo.defs)
+    val _ = packageDeps.addAll(stablePackagesInfo.deps)
   }
 
   /** Might ask for a package if the package you're trying to add references it.
@@ -65,7 +66,7 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
 
           val pkg = state.packages.get(pkgId) match {
             case None =>
-              return ResultError(
+              return Result.error(
                 Error.Package.Internal(
                   NameOf.qualifiedNameOfCurrentFunc,
                   s"broken invariant: Could not find package $pkgId",
@@ -78,21 +79,26 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
           // Load dependencies of this package and transitively its dependencies.
           for (dependency <- pkg.directDeps) {
             if (!signatures.contains(dependency) && !state.seenDependencies.contains(dependency)) {
-              return ResultNeedPackage(
-                dependency,
-                {
+              return for {
+                dependencyPkgO <- Result.needPackage(dependency)
+                dependencyPkg <- dependencyPkgO match {
+                  case Some(p) => Result.done(p)
                   case None =>
-                    ResultError(Error.Package.MissingPackage(dependency))
-                  case Some(dependencyPkg) =>
-                    addPackageInternal(
-                      AddPackageState(
-                        packages = state.packages + (dependency -> dependencyPkg),
-                        seenDependencies = state.seenDependencies + dependency,
-                        toCompile = dependency :: pkgId :: toCompile,
+                    Result.error(
+                      Error.Package.MissingPackage(
+                        dependency,
+                        language.Reference.Package(data.Ref.PackageRef.Id(dependency)),
                       )
                     )
-                },
-              )
+                }
+                result <- addPackageInternal(
+                  AddPackageState(
+                    packages = state.packages + (dependency -> dependencyPkg),
+                    seenDependencies = state.seenDependencies + dependency,
+                    toCompile = dependency :: pkgId :: toCompile,
+                  )
+                )
+              } yield result
             }
           }
 
@@ -112,18 +118,18 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
                   .unsafeCompilePackage(pkgId, pkg)
               } catch {
                 case e: validation.ValidationError =>
-                  return ResultError(Error.Package.Validation(e))
+                  return Result.error(Error.Package.Validation(e))
                 case Compiler.LanguageVersionError(
                       packageId,
                       languageVersion,
                       allowedLanguageVersions,
                     ) =>
-                  return ResultError(
+                  return Result.error(
                     Error.Package
                       .AllowedLanguageVersion(packageId, languageVersion, allowedLanguageVersions)
                   )
                 case err @ Compiler.CompilationError(msg) =>
-                  return ResultError(
+                  return Result.error(
                     // compilation errors are internal since typechecking should
                     // catch any errors arising during compilation
                     Error.Package.Internal(
@@ -133,7 +139,7 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
                     )
                   )
                 case NonFatal(err) =>
-                  return ResultError(
+                  return Result.error(
                     Error.Package.Internal(
                       NameOf.qualifiedNameOfCurrentFunc,
                       s"Unexpected ${err.getClass.getSimpleName} Exception",
@@ -156,7 +162,7 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
         }
       }
 
-      Result.Unit
+      Result.unit
     }
 
   def clear(): Unit = this.synchronized[Unit] {

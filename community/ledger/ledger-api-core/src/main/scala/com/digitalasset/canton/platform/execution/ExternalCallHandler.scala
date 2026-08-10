@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.execution
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.engine.ResultNeedExternalCall
+import com.digitalasset.daml.lf.engine.Result
 
 /** Handler for external calls made during Daml contract execution. External calls are deterministic
   * extension-service calls that are recorded in the transaction for replay during validation.
@@ -17,7 +17,7 @@ trait ExternalCallHandler {
       configHash: String,
       input: String,
       mode: ExternalCallMode,
-  )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]]
+  )(implicit tc: TraceContext): FutureUnlessShutdown[Either[Result.Need.ExternalCall.Error, String]]
 }
 
 object ExternalCallHandler {
@@ -30,7 +30,9 @@ object ExternalCallHandler {
         mode: ExternalCallMode,
     )(implicit
         tc: TraceContext
-    ): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] =
-      FutureUnlessShutdown.pure(Left(ResultNeedExternalCall.Error("External calls not supported")))
+    ): FutureUnlessShutdown[Either[Result.Need.ExternalCall.Error, String]] =
+      FutureUnlessShutdown.pure(
+        Left(Result.Need.ExternalCall.Error("External calls not supported"))
+      )
   }
 }

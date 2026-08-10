@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.digest.{DigestDelta, DigestOperation, DigestOps}
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
 import com.digitalasset.canton.platform.store.interning.StringInterning
@@ -32,51 +33,47 @@ import scala.concurrent.ExecutionContext
   * then immediately writes it back to the store.
   */
 class SequentialDigestAccumulator(
-    thisLfParticipant: LedgerParticipantId,
     acsDigestStore: AcsDigestStore,
     stringInterning: StringInterning,
     tracingMode: AcsDigestTracingMode,
+    private[canton] val metrics: CommitmentMetrics,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends DigestAccumulator
     with NamedLogging {
-
   override def flow()(implicit traceContext: TraceContext): Flow[
     DigestAccumulator_Input,
-    DigestAccumulator_Output,
+    CheckpointToBeWritten,
     NotUsed,
   ] =
     Flow[DigestAccumulator_Input]
       .mapAsyncAndDrainUS(1)(process)
-      .collect { case Some(checkpointWritten) => checkpointWritten }
+      .collect { case Some(checkpointToBeWritten) => checkpointToBeWritten }
 
   @VisibleForTesting
   def process(
       input: ProcessingContext[CheckpointFenceOr[Classification]]
-  ): FutureUnlessShutdown[Option[CheckpointWritten]] = {
+  ): FutureUnlessShutdown[Option[CheckpointToBeWritten]] = {
     implicit val traceContext: TraceContext = input.traceContext
     // for now use the offset as the tiebreaker
-    input match {
-      case ProcessingContext(_, CheckpointFence(tpe)) =>
-        acsDigestStore
-          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
-          .map(_ => Some(CheckpointWritten(input.timepoint, tpe)))
+    val result = input match {
+      case ProcessingContext(timepoint, CheckpointFence(tpe)) =>
+        FutureUnlessShutdown.pure(Some(CheckpointToBeWritten(timepoint, tpe)))
 
       case ProcessingContext(_, NotCheckpointFence(_, classification)) =>
         classification match {
           case update: AcsUpdate =>
             val deltas = DigestOps.computeDeltas(
-              thisLfParticipant,
               update,
               // if tracing is enabled, track the changes coming from the deltas
               traceChanges = tracingMode != AcsDigestTracingMode.Disabled,
             )
             MonadUtil
               .sequentialTraverse_(deltas) {
-                case DigestDelta.Party(partyAndOrder, digestDelta, operation) =>
+                case DigestDelta.Party(partyId, digestDelta, operation) =>
                   updateDigest(acsDigestStore.party)(
                     input.timepoint,
-                    partyAndOrder.map(stringInterning.party.internalize),
+                    stringInterning.party.internalize(partyId),
                     digestDelta,
                     operation,
                   )
@@ -110,6 +107,13 @@ class SequentialDigestAccumulator(
           case PartyOnboardingToParticipant(party, participant) =>
             FutureUnlessShutdown.pure(None)
         }
+    }
+
+    result.map { output =>
+      metrics.runningDigestProcessor.latestAccumulatedRecordTime.updateValue(
+        input.recordTime.toMicros
+      )
+      output
     }
   }
 
@@ -190,12 +194,11 @@ class SequentialDigestAccumulator(
       isAddition: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val internedPid = stringInterning.participantId.internalize(participant)
-    val partyKey = PartyAndOrder(
-      stringInterning.party.internalize(party),
-      PartyOrder.orderFor(thisLfParticipant, participant),
-    )
     for {
-      partyDigestUpdateO <- acsDigestStore.party.lookup(partyKey, timepoint.offset)
+      partyDigestUpdateO <- acsDigestStore.party.lookup(
+        stringInterning.party.internalize(party),
+        timepoint.offset,
+      )
       nonEmptyPartyDigestO = partyDigestUpdateO
         .flatMap(_.digestUpdate.digestO)
         .map(LtHash16Blake3.tryCreate)

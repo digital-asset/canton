@@ -10,7 +10,7 @@ import org.scalatest.wordspec.AsyncWordSpec
 class MemoryTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficStoreTest {
 
   "MemoryTeaTrafficStore" should {
-    behave like teaTrafficStore(() => new TeaMemoryTrafficStore())
+    behave like teaTrafficStore(() => new TeaMemoryTrafficStore(loggerFactory))
   }
 
 }

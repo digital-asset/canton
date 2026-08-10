@@ -323,7 +323,7 @@ private[platform] object InMemoryStateUpdater {
       participantId: Ref.ParticipantId,
   ): Unit =
     updates.view
-      .collect { case TransactionLogUpdate.TopologyTransactionEffective(_, _, _, _, events) =>
+      .collect { case TransactionLogUpdate.TopologyTransactionEffective(_, _, _, _, events, _) =>
         events.collect { case u: TransactionLogUpdate.PartyToParticipantAuthorization =>
           PartyAllocation.Completed(
             PartyAllocation.TrackerKey(u.party, u.participant, u.authorizationEvent),
@@ -591,6 +591,11 @@ private[platform] object InMemoryStateUpdater {
             )
         }
         .toVector,
+      synchronizerParametersState = u.genericTopologyEvents.reverseIterator
+        .collectFirst {
+          case state: Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState =>
+            state
+        },
     )(u.traceContext)
 
   private def convertReceivedAcsCommitment(

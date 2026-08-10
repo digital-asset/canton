@@ -1,0 +1,38 @@
+name: Save compiled classes
+description: Save compiled classes
+
+inputs:
+  cache-hit:
+    description: If cache was found in restoring phase
+    required: false
+    default: "false"
+  cache-matched-key:
+    description: Key of cache matched when restoring cache
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Compute Compile Hash
+      id: compute_hash
+      uses: ./.github/actions/cache/compute_build_hash
+
+    - name: Check if cache is up to date
+      id: cache_up_to_date_check
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: |
+          ./scripts/ci/check_cache_update_needed.sh \
+            "${{ steps.compute_hash.outputs.hash }}" \
+            "${{ inputs.cache-hit }}" \
+            "${{ inputs.cache-matched-key }}"
+        output-name: cache-up-to-date
+
+    - uses: ./.github/actions/cache/save_cache
+      if: steps.cache_up_to_date_check.outputs.result != 'true' # Save the cache if the cache has not been up to date
+      with:
+        path: |
+          **/target
+        key: |-
+          compile-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}

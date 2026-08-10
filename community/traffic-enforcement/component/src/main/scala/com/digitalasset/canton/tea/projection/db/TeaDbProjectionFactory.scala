@@ -9,7 +9,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStorageMulti, DbStorageSin
 import com.digitalasset.canton.tea.projection.{
   EventId,
   EventSource,
-  EventType,
   ProjectionEvent,
   TeaProjectionFactory,
 }
@@ -97,6 +96,8 @@ private[projection] class TeaDbProjectionFactory(
     override def process(envelope: Traced[ProjectionEvent]): DBIO[Done] = {
       val account = envelope.value.account
       val event = envelope.value.event
+
+      logger.debug(s"Persisting event ${envelope.value}")(envelope.traceContext)
       for {
         // We don't add 'transactionally' on purpose here, as this DBIO is picked up by the pekko projection
         // which will add the offset persistence to it and wrap the whole thing into a transaction
@@ -104,11 +105,10 @@ private[projection] class TeaDbProjectionFactory(
         _ <- store.persistDeltaDBIO(
           accountId = account,
           eventId = EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),
-          delta = event.deltaEvent.delta,
+          trafficDelta = event.deltaEvent.delta,
           timestamp = event.deltaEvent.timestamp,
-          eventType = EventType.Usage,
           eventSource = eventSource,
-        )
+        )(envelope.traceContext)
       } yield Done
     }
   }

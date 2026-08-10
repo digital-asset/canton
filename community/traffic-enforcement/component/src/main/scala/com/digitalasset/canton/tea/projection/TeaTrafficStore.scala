@@ -4,15 +4,19 @@
 package com.digitalasset.canton.tea.projection
 
 import cats.data.OptionT
+import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.TrafficEnforcementErrorGroup
+import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Persistence store for the TEA. Provides methods to update and retrieve traffic for accounts.
   */
 trait TeaTrafficStore {
 
-  /** Return the current balance for an account
+  /** Return the current balance for an account and traffic type
     * @param accountId
     *   account to retrieve
     * @return
@@ -22,8 +26,9 @@ trait TeaTrafficStore {
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, AccountState]
 
-  /** Insert a new event into the event table, and updates the corresponding account state. The new
-    * balance be current balance + delta. Delta is positive for credits and negative for debits.
+  /** Insert a new event into the event table, and updates the corresponding credit account state.
+    * The new total credit will be existing + delta. The total debit stays unchanged. Delta may be a
+    * negative value. This means the total credit value may be negative.
     *
     * Note: the account state returned may have a timestamp higher than this timestamp. That's
     * because events can arrive out of order from different sources from different clocks. To avoid
@@ -32,20 +37,21 @@ trait TeaTrafficStore {
     *
     * @param accountId
     *   account to update
-    * @param delta
-    *   delta to apply
     * @param timestamp
     *   timestamp of the update. There's no guarantee that the timestamp is strictly higher than
     *   previous entries.
+    * @param eventId
+    *   eventId uniquely identifying this update
+    * @param eventSource
+    *   source of the event
     * @return
     *   optional account state
     */
-  def persistDelta(
+  def persistTrafficDelta(
       accountId: AccountId,
       eventId: EventId,
       eventSource: EventSource,
-      eventType: EventType,
-      delta: Long,
+      trafficDelta: TrafficDelta,
       timestamp: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
@@ -66,4 +72,30 @@ trait TeaTrafficStore {
   def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[DeltaEvent]]
+}
+
+object TeaTrafficStore {
+  trait TeaTrafficStoreError extends Product with Serializable with ContextualizedCantonError
+
+  object TeaTrafficStoreError extends TrafficEnforcementErrorGroup {
+    @Explanation(
+      "This error indicates that a traffic delta could not be applied, as it would overflow the current credit balance."
+    )
+    @Resolution(
+      "Use a lower (absolute) delta value."
+    )
+    object TrafficUpdateOutOfBound
+        extends ErrorCode(
+          "TRAFFIC_UPDATE_OUT_OF_BOUND",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+      final case class Error(accountId: AccountId, delta: TrafficDelta)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause =
+              s"The traffic delta $delta cannot be applied to the current balance of $accountId without the credit balance exceeding its maximum value."
+          )
+          with TeaTrafficStoreError
+    }
+  }
 }

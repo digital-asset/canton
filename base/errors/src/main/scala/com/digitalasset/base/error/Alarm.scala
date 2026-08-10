@@ -36,7 +36,7 @@ trait BaseAlarm extends BaseError {
     this
   }
 
-  def asGrpcError(implicit logger: BaseErrorLogger): StatusRuntimeException =
+  def toGrpcError(implicit logger: BaseErrorLogger): StatusRuntimeException =
     ErrorCode.asGrpcError(this)(logger)
 }
 

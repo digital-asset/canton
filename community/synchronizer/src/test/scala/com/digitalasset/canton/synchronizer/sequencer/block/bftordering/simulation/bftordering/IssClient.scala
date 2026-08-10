@@ -87,7 +87,7 @@ object IssClient {
       node: BftNodeId,
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
-  ): SimulationClient.Initializer[E, Unit, Mempool.Message] =
+  )(implicit traceContext: TraceContext): SimulationClient.Initializer[E, Unit, Mempool.Message] =
     new SimulationClient.Initializer[E, Unit, Mempool.Message] {
 
       override def createClient(systemRef: ModuleRef[Mempool.Message]): Module[E, Unit] =
@@ -97,7 +97,7 @@ object IssClient {
         // If the interval is None, the progress of the simulation time will solely depend on other delayed events
         // across the BFT Ordering Service (e.g., clock tick events from the Availability module).
         simSettings.clientSettings.requestInterval.foreach(interval =>
-          context.delayedEventNoTrace(interval, ())
+          context.delayedEvent(interval, ())
         )
     }
 }

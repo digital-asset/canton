@@ -2042,7 +2042,8 @@ class IssSegmentModuleTest
 
         val blockMetadata = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(otherIds(0)))
         consensus.receive(
-          ConsensusSegment.ConsensusMessage.BlockOrdered(blockMetadata, isEmpty = true)
+          ConsensusSegment.ConsensusMessage
+            .BlockOrdered(blockMetadata, isEmpty = true, hasCompletedLedSegment = false)
         )
         context.runPipedMessages() shouldBe empty
       }
@@ -2057,7 +2058,8 @@ class IssSegmentModuleTest
 
         val blockMetadata = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(otherIds(0)))
         consensus.receive(
-          ConsensusSegment.ConsensusMessage.BlockOrdered(blockMetadata, isEmpty = false)
+          ConsensusSegment.ConsensusMessage
+            .BlockOrdered(blockMetadata, isEmpty = false, hasCompletedLedSegment = false)
         )
         context.runPipedMessages() should matchPattern {
           case Seq(
@@ -2083,7 +2085,8 @@ class IssSegmentModuleTest
 
         val blockMetadata = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(otherIds(0)))
         consensus.receive(
-          ConsensusSegment.ConsensusMessage.BlockOrdered(blockMetadata, isEmpty = false)
+          ConsensusSegment.ConsensusMessage
+            .BlockOrdered(blockMetadata, isEmpty = false, hasCompletedLedSegment = false)
         )
         // we are blocking progress but we don't start ordering an empty block until we've heard back from availability
         context.runPipedMessages() shouldBe empty

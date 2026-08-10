@@ -211,8 +211,7 @@ final class DbP2PEndpointsStore(
       action: DBIOAction[X, NoStream, Effect.Write & Effect.Transactional],
       actionName: String,
   )(implicit
-      traceContext: TraceContext,
-      rowsAltered: DbStorage.RowsAltered[X],
+      traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[X] =
     PekkoFutureUnlessShutdown(actionName, () => storage.update(action, actionName))
 
@@ -220,8 +219,7 @@ final class DbP2PEndpointsStore(
       action: DBIOAction[X, NoStream, Effect.Write & Effect.Transactional],
       actionName: String,
   )(implicit
-      traceContext: TraceContext,
-      rowsAltered: DbStorage.RowsAltered[X],
+      traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[Unit] =
     updateUnlessShutdown(action, actionName).map(_ => ())
 }

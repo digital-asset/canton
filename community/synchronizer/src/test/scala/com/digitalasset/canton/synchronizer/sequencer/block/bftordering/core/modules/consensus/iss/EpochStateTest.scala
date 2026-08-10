@@ -119,12 +119,14 @@ class EpochStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         epochState.confirmBlockCompleted(
           BlockMetadata.mk(EpochNumber.First, blockNumber),
           CommitCertificate(pp, Seq.empty),
+          false,
         )
         epochState.epochCompletionStatus.isComplete shouldBe false
       }
       epochState.confirmBlockCompleted(
         BlockMetadata.mk(EpochNumber.First, 2L),
         CommitCertificate(pp, Seq.empty),
+        true,
       )
 
       epochState.epochCompletionStatus.isComplete shouldBe true

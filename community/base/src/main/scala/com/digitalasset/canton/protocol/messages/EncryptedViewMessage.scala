@@ -754,6 +754,8 @@ object EncryptedViewMessageError {
   final case class InvalidContractIdInView(error: String) extends EncryptedViewMessageError
 
   final case class TooManyViews(error: String) extends EncryptedViewMessageError
+
+  final case class InvalidSubviewReferenceError(error: String) extends EncryptedViewMessageError
 }
 
 final case class EncryptedMultipleViewsMessage[+VT <: ViewType](

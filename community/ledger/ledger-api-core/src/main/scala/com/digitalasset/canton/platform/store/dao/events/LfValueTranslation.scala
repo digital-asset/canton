@@ -470,14 +470,14 @@ final class LfValueTranslation(
       executionContext: ExecutionContext,
   ): Future[Either[Status, Versioned[Value]]] = Timed.future(
     metrics.index.lfValue.computeInterfaceView, {
-      def goAsync(
-          res: LfEngine.Result[Versioned[Value]]
+      def drive(
+          step: LfEngine.Result.Step[Versioned[Value]]
       ): Future[Either[Status, Versioned[Value]]] =
-        res match {
-          case LfEngine.ResultDone(x) =>
+        step match {
+          case LfEngine.Result.Step.Pure(x) =>
             Future.successful(Right(x))
 
-          case LfEngine.ResultError(err) =>
+          case LfEngine.Result.Step.Error(err) =>
             err
               .pipe(ErrorCause.DamlLf.apply)
               .pipe(RejectionGenerators.commandExecutorError)
@@ -485,38 +485,35 @@ final class LfValueTranslation(
               .pipe(Left.apply)
               .pipe(Future.successful)
 
-          // Note: the compiler should enforce that the computation is a pure function,
-          // ResultNeedContract and ResultNeedKey should never appear in the result.
-          case LfEngine.ResultNeedContract(_, _) =>
-            Future.failed(new IllegalStateException("View computation must be a pure function"))
+          case im: LfEngine.Result.Step.Impure[x, Versioned[Value]] =>
+            im.fx match {
+              case LfEngine.Result.Need.Package(packageId) =>
+                packageLoader
+                  .loadPackage(
+                    packageId = packageId,
+                    delegate = packageId => loadPackage(packageId, loggingContext.traceContext),
+                    metric = metrics.index.db.translation.getLfPackage,
+                  )
+                  .map(im.resume)
+                  .flatMap(drive)
 
-          case LfEngine.ResultNeedKey(_, _, _, _) =>
-            Future.failed(new IllegalStateException("View computation must be a pure function"))
+              case LfEngine.Result.Need.Interruption(_) =>
+                drive(im.resume(()))
 
-          case LfEngine.ResultNeedPackage(packageId, resume) =>
-            packageLoader
-              .loadPackage(
-                packageId = packageId,
-                delegate = packageId => loadPackage(packageId, loggingContext.traceContext),
-                metric = metrics.index.db.translation.getLfPackage,
-              )
-              .map(resume)
-              .flatMap(goAsync)
+              case LfEngine.Result.Need.Prefetch(_, _) =>
+                drive(im.resume(()))
 
-          case LfEngine.ResultInterruption(continue, _) =>
-            goAsync(continue())
-
-          case LfEngine.ResultPrefetch(_, _, resume) =>
-            goAsync(resume())
-
-          case LfEngine.ResultNeedExternalCall(_, _, _, _, _) =>
-            Future.failed(
-              new IllegalStateException("View computation must be a pure function")
-            )
+              // Note: the compiler should enforce that the computation is a pure function,
+              // Contract, NeedKey and ExternalCall should never appear in the result.
+              case _ =>
+                Future.failed(
+                  new IllegalStateException("View computation must be a pure function")
+                )
+            }
         }
 
       Future(engine.computeInterfaceView(templateId, value, interfaceId))
-        .flatMap(goAsync)
+        .flatMap(res => drive(res.start))
     },
   )
 }

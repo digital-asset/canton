@@ -107,7 +107,7 @@ final class GrpcParticipantRepairService(
     } yield ()
 
     res.fold(
-      err => Future.failed(err.asGrpcError),
+      err => Future.failed(err.toGrpcError),
       _ => Future.successful(PurgeContractsResponse()),
     )
   }
@@ -434,7 +434,7 @@ final class GrpcParticipantRepairService(
     EitherTUtil
       .toFutureUnlessShutdown(
         result.bimap(
-          _.asGrpcError,
+          _.toGrpcError,
           _ => ChangeAssignationResponse(),
         )
       )
@@ -635,8 +635,9 @@ final class GrpcParticipantRepairService(
 
       _ <- sync
         .performLateLsu(validatedRequest)
-        .leftMap[RpcError](
-          RepairServiceError.SynchronizerUpgradeError.Error(validatedRequest.successorPsid, _)
+        .leftMap[RpcError](err =>
+          RepairServiceError.SynchronizerUpgradeError
+            .Error(validatedRequest.successorPsid, err.toString)
         )
     } yield PerformLateLsuResponse()
 

@@ -14,8 +14,9 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
-import com.digitalasset.canton.error.LsuError.FailedLsu
+import com.digitalasset.canton.error.LsuError
 import com.digitalasset.canton.examples.java.iou.Iou
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
@@ -27,7 +28,6 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
   getLsuSequencingTestMetricValues,
 }
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
-import com.digitalasset.canton.integration.{ConfigTransforms, *}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
@@ -529,7 +529,7 @@ abstract class LsuRollForwardIntegrationTest
                   "sequencer connection validation",
                 ),
                 (
-                  _.shouldBeCantonErrorCode(FailedLsu),
+                  _.shouldBeCantonErrorCode(LsuError.SynchronizerConnection),
                   "command failure",
                 ),
               )
@@ -614,7 +614,7 @@ abstract class LsuRollForwardIntegrationTest
                 "error when connecting to sequencer4",
               ),
               (
-                _.shouldBeCantonErrorCode(FailedLsu),
+                _.shouldBeCantonErrorCode(LsuError.SynchronizerConnection),
                 "command failure",
               ),
             )

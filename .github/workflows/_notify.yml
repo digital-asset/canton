@@ -1,0 +1,47 @@
+name: Notify on Failure
+on:
+  workflow_call:
+    inputs:
+      needs_json:
+        required: true
+        description: needs information as json string
+        type: string
+
+jobs:
+  send_notification:
+    name: Send Slack Notification
+    runs-on: dach-ny-canton
+    steps:
+      - name: Checkout (slack)
+        # Full checkout (not sparse): select_rota.py reads the rota Google Sheet
+        # and must run under .ci/nix-exec, which needs shell.nix and nix/.
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Detect failed jobs
+        id: failed-jobs
+        uses: actions/github-script@v9
+        env:
+          NEEDS_JSON: ${{ inputs.needs_json }}
+        with:
+          # Return the raw string, the default json encoding wraps it in quotes
+          # that would then break the Slack JSON payload built downstream.
+          result-encoding: string
+          script: |
+            const needs = JSON.parse(process.env.NEEDS_JSON)
+            const failed = Object.entries(needs)
+              .filter(([_,d]) => ['failure','cancelled'].includes(d.result))
+              .map(([n]) => n)
+            console.log('FAILED:', failed)
+            return failed.join(', ')
+
+      - name: Slack notification
+        # Only alert when there is a nameable non-test failure. If the failed
+        # list is empty, stay silent instead of posting an "unknown" alert.
+        if: steps.failed-jobs.outputs.result != ''
+        uses: ./.github/actions/slack/slack_red_main_with_volunteer
+        with:
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_TEAM_CANTON_INTERNAL }}
+          failed_job: ${{ steps.failed-jobs.outputs.result }}
+          gcloud_sheets_sa_key: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}

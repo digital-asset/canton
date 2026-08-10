@@ -5,7 +5,6 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.daml.nameof.NameOf
-import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash.{HashingMethod, hashContractInstance}
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.*
@@ -1757,31 +1756,6 @@ private[lf] object SBuiltinFun {
     ): Control[Question.Update] = {
       val coid = getSContractId(args, 0)
       fetchTemplate(machine, templateId, coid).run(Control.Value.apply)
-    }
-  }
-
-  final case class SBApplyChoiceGuard(
-      choiceName: ChoiceName,
-      byInterface: Option[TypeConId],
-  ) extends UpdateBuiltin(3) {
-    override protected def executeUpdate(
-        args: ArraySeq[SValue],
-        machine: UpdateMachine,
-    ): Control.Expression = {
-      val guard = args(0)
-      val (templateId, record) = getSAnyContract(args, 1)
-      val coid = getSContractId(args, 2)
-
-      val e = SEAppAtomic(SEValue(guard), ArraySeq(SEValue(SAnyContract(templateId, record))))
-      machine.pushKont(KCheckChoiceGuard(coid, templateId, choiceName, byInterface))
-      Control.Expression(e)
-    }
-  }
-
-  final case object SBGuardConstTrue extends SBuiltinPure(1) {
-    override private[speedy] def executePure(args: ArraySeq[SValue], machine: Machine[?]): SBool = {
-      discard(getSAnyContract(args, 0))
-      SValue.SValue.True
     }
   }
 

@@ -14,7 +14,8 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.protocol.SynchronizerParametersLookup
+import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.{
   CantonCryptoProvider,
@@ -52,17 +53,17 @@ import scala.concurrent.ExecutionContext
 private[canton] final class CantonOrderingTopologyProvider(
     cryptoApi: SynchronizerCryptoClient,
     config: BftBlockOrdererConfig,
+    publicServerConfig: PublicServerConfig,
     override val loggerFactory: NamedLoggerFactory,
     metrics: BftOrderingMetrics,
 )(implicit
+    traceContext: TraceContext,
     ec: ExecutionContext,
     synchronizerProtocolVersion: ProtocolVersion,
 ) extends OrderingTopologyProvider[PekkoEnv]
     with NamedLogging {
 
-  logger.debug(s"CantonOrderingTopologyProvider created with cryptoApi for ${cryptoApi.member}")(
-    TraceContext.empty
-  )
+  logger.debug(s"CantonOrderingTopologyProvider created with cryptoApi for ${cryptoApi.member}")
 
   override def getOrderingTopologyAt(
       activationTime: Option[TopologyActivationTime],
@@ -224,21 +225,14 @@ private[canton] final class CantonOrderingTopologyProvider(
   private def getMaxRequestSize(
       snapshot: SynchronizerSnapshotSyncCryptoApi
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[NonNegativeInt] =
-    for {
-      maybeMaxRequestSize <- snapshot.ipsSnapshot
-        .findDynamicSynchronizerParameters()
-        .map(_.map(_.parameters.maxRequestSize))
-    } yield maybeMaxRequestSize.fold(
-      error => {
-        val defaultSize = DynamicSynchronizerParameters.defaultMaxRequestSize.value
-        logger.debug(
-          s"Max request size could not be retrieved from topology snapshot at ${snapshot.ipsSnapshot.timestamp} (error: $error)," +
-            s"using default ($defaultSize)"
-        )
-        defaultSize
-      },
-      _.value,
-    )
+    SynchronizerParametersLookup
+      .forSequencerSynchronizerParameters(
+        publicServerConfig.overrideMaxRequestSize,
+        cryptoApi.ips,
+        loggerFactory,
+      )
+      .get(snapshot.ipsSnapshot, warnOnUsingDefaults = true)
+      .map(_.maxRequestSize.value)
 
   private def computeFirstKnownAtTimestamps(
       sequencers: Seq[SequencerId],

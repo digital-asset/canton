@@ -3,24 +3,33 @@
 
 package com.digitalasset.canton.platform.store.dao.events
 
-import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
+import com.daml.ledger.api.v2.topology_transaction.{TopologyEvent, TopologyTransaction}
+import com.daml.ledger.api.v2.trace_context.TraceContext as ProtoTraceContext
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.ParticipantAuthorizationFormat
+import com.digitalasset.canton.ledger.api.TopologyFormat
+import com.digitalasset.canton.ledger.api.util.TimestampConversion
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.Party
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend
+import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
+  RawDynamicSynchronizerParameters,
   RawParticipantAuthorization,
+  RawTopologyEvent,
   SequentialIdBatch,
 }
+import com.digitalasset.canton.platform.store.backend.{Conversions, EventStorageBackend}
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.dao.events.EventsTable.TransactionConversions
+import com.digitalasset.canton.platform.store.dao.events.OrderingUtils.orderingBasedOnDescending
 import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.{
+  CommonTopologyTransactionProperties,
   PayloadDbQuery,
+  TopologyTransactionResponse,
   TopologyTransactionsStreamQueryParams,
 }
 import com.digitalasset.canton.platform.store.dao.{DbDispatcher, PaginatingAsyncStream}
@@ -29,6 +38,8 @@ import com.digitalasset.canton.platform.store.utils.{
   QueueBasedConcurrencyLimiter,
 }
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.google.protobuf.ByteString
+import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Attributes
 import org.apache.pekko.stream.scaladsl.Source
@@ -56,55 +67,49 @@ class TopologyTransactionsStreamReader(
       topologyTransactionsStreamQueryParams: TopologyTransactionsStreamQueryParams
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, TopologyTransaction), NotUsed] = {
+  ): Source[(Offset, TopologyTransactionResponse), NotUsed] = {
     import topologyTransactionsStreamQueryParams.*
 
     val assignedEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdQueries, executionContext)
 
-    def fetchIds(
-        maxParallelIdQueriesLimiter: QueueBasedConcurrencyLimiter,
-        maxOutputBatchCount: Int,
+    def streamIds(
+        idStreamName: String,
         metric: DatabaseMetrics,
-        idPageQuery: Option[Party] => IdPageQuery,
-    )(implicit
-        loggingContext: LoggingContextWithTrace
-    ): Source[Iterable[Long], NotUsed] = {
-      val partiesO: Vector[Option[Party]] = participantAuthorizationFormat.parties match {
-        case Some(parties) => parties.map(Some(_)).toVector
-        // fetch ids for all the parties
-        case None => Vector(None)
-      }
-      partiesO
-        .map { partyO =>
-          paginatingAsyncStream.streamIdsFromSeekPaginationWithoutIdFilter(
-            idStreamName = s"Update IDs for topology transaction events for partyO:$partyO",
-            idPageSizing = idPageSizing,
-            idPageBufferSize = maxPagesPerIdPagesBuffer,
-            initialEventSeqIdRange = queryRange.eventSeqIdRange,
-            descendingOrder = descendingOrder,
-          )(idPageQuery(partyO))(
-            executeIdQuery = f =>
-              maxParallelIdQueriesLimiter.execute {
-                globalIdQueriesLimiter.execute {
-                  dbDispatcher.executeSql(metric)(f)
-                }
-              }
-          )
-        }
+        idPageQuery: IdPageQuery,
+    ): Source[Long, NotUsed] =
+      paginatingAsyncStream.streamIdsFromSeekPaginationWithoutIdFilter(
+        idStreamName = idStreamName,
+        idPageSizing = idPageSizing,
+        idPageBufferSize = maxPagesPerIdPagesBuffer,
+        initialEventSeqIdRange = queryRange.eventSeqIdRange,
+        descendingOrder = descendingOrder,
+      )(idPageQuery)(
+        executeIdQuery = f =>
+          assignedEventIdQueriesLimiter.execute {
+            globalIdQueriesLimiter.execute {
+              dbDispatcher.executeSql(metric)(f)
+            }
+          }
+      )
+
+    def fetchIds(
+        maxOutputBatchCount: Int,
+        idStreams: Vector[Source[Long, NotUsed]],
+    ): Source[Iterable[Long], NotUsed] =
+      idStreams
         .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = descendingOrder))
         .batchN(
           maxBatchSize = maxPayloadsPerPayloadsPage,
           maxBatchCount = maxOutputBatchCount,
         )
-    }
 
     def fetchPayloads(
         ids: Source[Iterable[Long], NotUsed],
         maxParallelPayloadQueries: Int,
         dbMetric: DatabaseMetrics,
         payloadDbQuery: PayloadDbQuery,
-    ): Source[RawParticipantAuthorization, NotUsed] = {
+    ): Source[RawTopologyEvent, NotUsed] = {
       // Pekko requires for this buffer's size to be a power of two.
       val inputBufferSize = Utils.largestSmallerOrEqualPowerOfTwo(maxParallelPayloadQueries)
       ids.async
@@ -130,35 +135,163 @@ class TopologyTransactionsStreamReader(
         .mapConcat(identity)
     }
 
-    val ids =
-      fetchIds(
-        maxParallelIdQueriesLimiter = assignedEventIdQueriesLimiter,
-        maxOutputBatchCount = maxParallelPayloadQueries + 1,
-        metric = dbMetrics.topologyTransactionsStream.fetchTopologyPartyEventIds,
-        idPageQuery = eventStorageBackend.fetchTopologyPartyEventIds,
-      )
-    val payloads =
-      fetchPayloads(
-        ids = ids,
-        maxParallelPayloadQueries = maxParallelPayloadQueries,
-        dbMetric = dbMetrics.topologyTransactionsStream.fetchTopologyPartyEventPayloads,
-        payloadDbQuery = eventStorageBackend.topologyPartyEventBatch,
+    val partyEvents: Source[RawTopologyEvent, NotUsed] =
+      topologyFormat.participantAuthorizationFormat match {
+        case Some(participantAuthorizationFormat) =>
+          val partyEventIds =
+            fetchIds(
+              maxOutputBatchCount = maxParallelPayloadQueries + 1,
+              idStreams = {
+                val partiesO: Vector[Option[Party]] =
+                  participantAuthorizationFormat.parties match {
+                    case Some(parties) => parties.map(Some(_)).toVector
+                    // fetch ids for all the parties
+                    case None => Vector(None)
+                  }
+                partiesO.map(partyO =>
+                  streamIds(
+                    idStreamName = s"Event IDs for topology transaction events for partyO:$partyO",
+                    metric = dbMetrics.topologyTransactionsStream.fetchTopologyPartyEventIds,
+                    idPageQuery = eventStorageBackend.fetchTopologyPartyEventIds(partyO),
+                  )
+                )
+              },
+            )
+          fetchPayloads(
+            ids = partyEventIds,
+            maxParallelPayloadQueries = maxParallelPayloadQueries,
+            dbMetric = dbMetrics.topologyTransactionsStream.fetchTopologyPartyEventPayloads,
+            payloadDbQuery = eventStorageBackend.topologyPartyEventBatch,
+          )
+        case None =>
+          Source.empty
+      }
+
+    val synchronizerParameterEvents: Source[RawTopologyEvent, NotUsed] =
+      if (topologyFormat.synchronizerParametersFormat) {
+        val synchronizerParameterEventIds =
+          fetchIds(
+            maxOutputBatchCount = maxParallelPayloadQueries + 1,
+            idStreams = Vector(
+              streamIds(
+                idStreamName = "Event IDs for synchronizer parameters events",
+                metric =
+                  dbMetrics.topologyTransactionsStream.fetchDynamicSynchronizerParametersEventIds,
+                idPageQuery = eventStorageBackend.fetchDynamicSynchronizerParametersEventIds,
+              )
+            ),
+          )
+        fetchPayloads(
+          ids = synchronizerParameterEventIds,
+          dbMetric =
+            dbMetrics.topologyTransactionsStream.fetchDynamicSynchronizerParametersEventPayloads,
+          maxParallelPayloadQueries = maxParallelPayloadQueries,
+          payloadDbQuery = eventStorageBackend.dynamicSynchronizerParametersBatch,
+        )
+      } else
+        Source.empty
+
+    val merged: Source[RawTopologyEvent, NotUsed] =
+      partyEvents.mergeSorted(synchronizerParameterEvents)(
+        Ordering.by[RawTopologyEvent, Long](_.offset.unwrap)(
+          orderingBasedOnDescending(descendingOrder)
+        )
       )
 
+    val filtered: Source[RawTopologyEvent, NotUsed] =
+      topologyFormat.synchronizerId match {
+        case Some(synchronizerId) =>
+          merged.filter(_.synchronizerId == synchronizerId.toProtoPrimitive)
+        case None =>
+          merged
+      }
+
     UpdateReader
-      .groupContiguous(payloads)(by = _.updateId)
-      .mapConcat(TransactionConversions.toTopologyTransaction(noTracingLogger))
+      .groupContiguous(filtered)(by = _.updateId)
+      .mapConcat(group => toTopologyTransactionResponse(group).toList)
   }
+
+  private def toTopologyTransactionResponse(
+      payloads: Vector[RawTopologyEvent]
+  ): Option[(Offset, TopologyTransactionResponse)] =
+    payloads.headOption.map { first =>
+      val events = payloads.collect { case raw: RawParticipantAuthorization =>
+        TransactionConversions.toTopologyEvent(
+          partyId = raw.partyId,
+          participantId = raw.participantId,
+          authorizationEvent = raw.authorizationEvent,
+        )
+      }
+      val synchronizerParametersState = payloads.reverseIterator.collectFirst {
+        case raw: RawDynamicSynchronizerParameters =>
+          SynchronizerParametersState(ByteString.copyFrom(raw.payload))
+      }
+      first.offset -> TopologyTransactionResponse(
+        commonTopologyTransactionProperties = CommonTopologyTransactionProperties(
+          updateId = first.updateId,
+          offset = first.offset.unwrap,
+          synchronizerId = first.synchronizerId,
+          recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
+          traceContext = Conversions.protoTraceContextFrom(noTracingLogger)(first.traceContext),
+        ),
+        events = events,
+        synchronizerParametersState = synchronizerParametersState,
+      )
+    }
 
 }
 
 object TopologyTransactionsStreamReader {
+
+  final case class CommonTopologyTransactionProperties(
+      updateId: String,
+      offset: Long,
+      synchronizerId: String,
+      recordTime: Option[ProtoTimestamp],
+      traceContext: Option[ProtoTraceContext],
+  )
+
+  object CommonTopologyTransactionProperties {
+    def fromProto(topologyTx: TopologyTransaction): CommonTopologyTransactionProperties =
+      CommonTopologyTransactionProperties(
+        updateId = topologyTx.updateId,
+        offset = topologyTx.offset,
+        synchronizerId = topologyTx.synchronizerId,
+        recordTime = topologyTx.recordTime,
+        traceContext = topologyTx.traceContext,
+      )
+  }
+
+  final case class TopologyTransactionResponse(
+      commonTopologyTransactionProperties: CommonTopologyTransactionProperties,
+      events: Seq[TopologyEvent],
+      synchronizerParametersState: Option[SynchronizerParametersState],
+  ) {
+
+    def toProtoTopologyTransaction: Option[TopologyTransaction] =
+      Option.when(events.nonEmpty)(
+        TopologyTransaction(
+          updateId = commonTopologyTransactionProperties.updateId,
+          offset = commonTopologyTransactionProperties.offset,
+          synchronizerId = commonTopologyTransactionProperties.synchronizerId,
+          recordTime = commonTopologyTransactionProperties.recordTime,
+          events = events,
+          traceContext = commonTopologyTransactionProperties.traceContext,
+        ).withPrecomputedSerializedSize()
+      )
+  }
+
+  final case class SynchronizerParametersResponse(
+      commonTopologyTransactionProperties: CommonTopologyTransactionProperties,
+      synchronizerParametersState: SynchronizerParametersState,
+  )
+
   final case class TopologyTransactionsStreamQueryParams(
       queryRange: EventsRange,
       descendingOrder: Boolean,
       payloadQueriesLimiter: ConcurrencyLimiter,
       idPageSizing: IdPageSizing,
-      participantAuthorizationFormat: ParticipantAuthorizationFormat,
+      topologyFormat: TopologyFormat,
       maxParallelIdQueries: Int,
       maxPagesPerIdPagesBuffer: Int,
       maxPayloadsPerPayloadsPage: Int,
@@ -169,6 +302,6 @@ object TopologyTransactionsStreamReader {
   trait PayloadDbQuery {
     def fetchPayloads(
         eventSequentialIds: SequentialIdBatch
-    ): Connection => Vector[RawParticipantAuthorization]
+    ): Connection => Vector[RawTopologyEvent]
   }
 }

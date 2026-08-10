@@ -555,117 +555,115 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
       }
     }
 
-    List("exercise_interface", "exercise_interface_with_guard").foreach { testCase =>
-      testCase - {
+    "exercise_interface" - {
 
-        "a non-cached global contract" - {
+      "a non-cached global contract" - {
 
-          // TEST_EVIDENCE: Integrity: Authorization failure of exercise_interface of a non-cached global contract
-          "authorization failure" in {
-            val res = evalUpdateApp(
-              pkgs = pkgs,
-              e =
-                e"""\(exercisingParty : Party) (cId: ContractId M:Human) -> Test:$testCase exercisingParty cId""",
-              args = ArraySeq(SParty(charlie), SContractId(cId)),
-              parties = Set(charlie),
-              readAs = Set(alice),
-              getContract = getIfaceContract,
-            )
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise_interface of a non-cached global contract
+        "authorization failure" in {
+          val res = evalUpdateApp(
+            pkgs = pkgs,
+            e =
+              e"""\(exercisingParty : Party) (cId: ContractId M:Human) -> Test:exercise_interface exercisingParty cId""",
+            args = ArraySeq(SParty(charlie), SContractId(cId)),
+            parties = Set(charlie),
+            readAs = Set(alice),
+            getContract = getIfaceContract,
+          )
 
-            inside(res) {
-              case Success(
-                    Left(
-                      SErrorDamlException(
-                        IE.FailedAuthorization(
+          inside(res) {
+            case Success(
+                  Left(
+                    SErrorDamlException(
+                      IE.FailedAuthorization(
+                        _,
+                        ExerciseMissingAuthorization(
+                          Human,
+                          "Nap",
                           _,
-                          ExerciseMissingAuthorization(
-                            Human,
-                            "Nap",
-                            _,
-                            authorizingParties,
-                            requiredParties,
-                          ),
-                        )
+                          authorizingParties,
+                          requiredParties,
+                        ),
                       )
                     )
-                  ) =>
-                authorizingParties shouldBe Set(charlie)
-                requiredParties shouldBe Set(alice)
-            }
+                  )
+                ) =>
+              authorizingParties shouldBe Set(charlie)
+              requiredParties shouldBe Set(alice)
           }
         }
+      }
 
-        "a cached global contract" - {
+      "a cached global contract" - {
 
-          // TEST_EVIDENCE: Integrity: Authorization failure of exercise by interface of cached global contract
-          "authorization failure" in {
-            val res = evalUpdateApp(
-              pkgs,
-              e"""\(exercisingParty : Party) (cId: ContractId M:Human) ->
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise by interface of cached global contract
+        "authorization failure" in {
+          val res = evalUpdateApp(
+            pkgs,
+            e"""\(exercisingParty : Party) (cId: ContractId M:Human) ->
            ubind x: M:Human <- fetch_template @M:Human cId
-           in  Test:$testCase exercisingParty cId""",
-              ArraySeq(SParty(bob), SContractId(cId)),
-              Set(bob),
-              getContract = getIfaceContract,
-            )
+           in  Test:exercise_interface exercisingParty cId""",
+            ArraySeq(SParty(bob), SContractId(cId)),
+            Set(bob),
+            getContract = getIfaceContract,
+          )
 
-            inside(res) {
-              case Success(
-                    Left(
-                      SErrorDamlException(
-                        IE.FailedAuthorization(
+          inside(res) {
+            case Success(
+                  Left(
+                    SErrorDamlException(
+                      IE.FailedAuthorization(
+                        _,
+                        ExerciseMissingAuthorization(
+                          Human,
+                          "Nap",
                           _,
-                          ExerciseMissingAuthorization(
-                            Human,
-                            "Nap",
-                            _,
-                            authorizingParties,
-                            requiredParties,
-                          ),
-                        )
+                          authorizingParties,
+                          requiredParties,
+                        ),
                       )
                     )
-                  ) =>
-                authorizingParties shouldBe Set(bob)
-                requiredParties shouldBe Set(alice)
-            }
+                  )
+                ) =>
+              authorizingParties shouldBe Set(bob)
+              requiredParties shouldBe Set(alice)
           }
         }
+      }
 
-        "a local contract" - {
+      "a local contract" - {
 
-          // TEST_EVIDENCE: Integrity: Authorization failure of exercise_interface of a local contract
-          "authorization failure" in {
-            val res = evalUpdateApp(
-              pkgs,
-              e"""\(exercisingParty : Party) (other : Party)->
+        // TEST_EVIDENCE: Integrity: Authorization failure of exercise_interface of a local contract
+        "authorization failure" in {
+          val res = evalUpdateApp(
+            pkgs,
+            e"""\(exercisingParty : Party) (other : Party)->
               ubind cId: ContractId M:Human <- create @M:Human M:Human {person = exercisingParty, obs = other, ctrl = other, precond = True, key = M:toKey exercisingParty, nested = M:buildNested 0} in
-                Test:$testCase exercisingParty cId
+                Test:exercise_interface exercisingParty cId
               """,
-              ArraySeq(SParty(alice), SParty(bob)),
-              Set(alice),
-            )
+            ArraySeq(SParty(alice), SParty(bob)),
+            Set(alice),
+          )
 
-            inside(res) {
-              case Success(
-                    Left(
-                      SErrorDamlException(
-                        IE.FailedAuthorization(
-                          _,
-                          FailedAuthorization.ExerciseMissingAuthorization(
-                            Human,
-                            "Nap",
-                            None,
-                            authorizingParties,
-                            requiredParties,
-                          ),
-                        )
+          inside(res) {
+            case Success(
+                  Left(
+                    SErrorDamlException(
+                      IE.FailedAuthorization(
+                        _,
+                        FailedAuthorization.ExerciseMissingAuthorization(
+                          Human,
+                          "Nap",
+                          None,
+                          authorizingParties,
+                          requiredParties,
+                        ),
                       )
                     )
-                  ) =>
-                authorizingParties shouldBe Set(alice)
-                requiredParties shouldBe Set(bob)
-            }
+                  )
+                ) =>
+              authorizingParties shouldBe Set(alice)
+              requiredParties shouldBe Set(bob)
           }
         }
       }

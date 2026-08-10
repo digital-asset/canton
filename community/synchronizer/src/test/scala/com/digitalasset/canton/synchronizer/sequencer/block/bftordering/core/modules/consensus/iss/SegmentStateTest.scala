@@ -42,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.BlockStatus
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
@@ -1624,7 +1625,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
 
       segmentState.status shouldBe ConsensusStatus.SegmentStatus.InProgress(
         ViewNumber.First,
-        Seq(
+        Seq[BlockStatus](
           ConsensusStatus.BlockStatus
             .InProgress(
               prePrepared = true,

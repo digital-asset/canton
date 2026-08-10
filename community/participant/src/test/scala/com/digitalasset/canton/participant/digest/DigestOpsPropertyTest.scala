@@ -69,7 +69,6 @@ class DigestOpsPropertyTest
 
       val deltaFromParticipantOpt = DigestOps
         .computeDeltas(
-          input.participant,
           updateOnParticipant,
           traceChanges = false,
         )
@@ -80,7 +79,6 @@ class DigestOpsPropertyTest
 
       val deltaFromCounterParticipantOpt = DigestOps
         .computeDeltas(
-          input.counterParticipant,
           updateOnCounterParticipant,
           traceChanges = false,
         )

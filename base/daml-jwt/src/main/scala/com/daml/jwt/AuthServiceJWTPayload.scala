@@ -62,6 +62,17 @@ final case class StandardJWTPayload(
     scope: Option[String],
 ) extends AuthServiceJWTPayload
 
+/** Payload parsed from a Party JWT.
+  */
+final case class PartyJWTPayload(
+    synchronizerId: String,
+    partyId: String,
+    userId: String,
+    participantId: String,
+    exp: Option[Instant],
+    scope: Option[String],
+) extends AuthServiceJWTPayload
+
 /** Codec for writing and reading [[AuthServiceJWTPayload]] to and from JSON.
   *
   * In general:
@@ -90,6 +101,9 @@ object AuthServiceJWTCodec {
   private[this] final val propSub: String = "sub"
   private[this] final val propScope: String = "scope"
   private[this] final val propScp: String = "scp"
+  private[this] final val propDamlBlock: String = "daml.com"
+  private[this] final val propDamlBlockUsr: String = "usr"
+  private[this] final val propDamlBlockSyn: String = "syn"
 
   // ------------------------------------------------------------------------------------------------------------------
   // Encoding
@@ -114,6 +128,18 @@ object AuthServiceJWTCodec {
         propExp -> writeOptionalInstant(v.exp),
         propScope -> writeOptionalString(v.scope),
       )
+    case v: PartyJWTPayload =>
+      Json.obj(
+        propAud -> Json.fromString(v.participantId),
+        propIss -> Json.fromString(v.partyId),
+        propSub -> Json.fromString(v.partyId),
+        propExp -> writeOptionalInstant(v.exp),
+        propScope -> writeOptionalString(v.scope),
+        propDamlBlock -> Json.obj(
+          propDamlBlockUsr -> Json.fromString(v.userId),
+          propDamlBlockSyn -> Json.fromString(v.synchronizerId),
+        ),
+      )
   }
 
   def writeAudienceBasedPayload: AuthServiceJWTPayload => Json = {
@@ -129,6 +155,10 @@ object AuthServiceJWTCodec {
       throw new RuntimeException(
         s"Could not write StandardJWTPayload of scope format as audience-based payload"
       )
+    case _: PartyJWTPayload =>
+      throw new RuntimeException(
+        s"Could not write PartyJWTPayload as audience-based payload"
+      )
   }
 
   def writeScopeBasedPayload: AuthServiceJWTPayload => Json = {
@@ -143,6 +173,10 @@ object AuthServiceJWTCodec {
     case _: StandardJWTPayload =>
       throw new RuntimeException(
         s"Could not write StandardJWTPayload of audience-based format as scope payload"
+      )
+    case _: PartyJWTPayload =>
+      throw new RuntimeException(
+        s"Could not write PartyJWTPayload as scope payload"
       )
   }
 
@@ -222,7 +256,31 @@ object AuthServiceJWTCodec {
         // where `${participantId}` is non-empty string are supported.
         // As required for JWTs, additional fields can be in a token but will be ignored (including scope)
         val participantAudiences = audienceValue.filter(_.startsWith(audPrefix))
-        if (participantAudiences.nonEmpty) {
+        if (isSelfIssued(fields) && audienceValue.nonEmpty) {
+          (for {
+            partyId <- readOptionalString(propIss, fields).toRight(
+              "Expecting party ID in \"iss\" field"
+            )
+            participantId <- audienceValue match {
+              case List(participantId) => Right(participantId)
+              case _ => Left("Expecting single participant in \"aud\" field")
+            }
+            damlBlock = readDamlBlock(fields)
+            userId <- damlBlock.user.toRight(
+              s"Expecting user ID in \"$propDamlBlock\".\"usr\""
+            )
+            synchronizerId <- damlBlock.synchronizer.toRight(
+              s"Expecting synchronizer ID in \"$propDamlBlock\".\"syn\""
+            )
+          } yield PartyJWTPayload(
+            partyId = partyId,
+            participantId = participantId,
+            userId = userId,
+            exp = readInstant(propExp, fields),
+            scope = readAndCombineScopes(fields),
+            synchronizerId = synchronizerId,
+          )).left.map("Error reading Party JWT: " + _)
+        } else if (participantAudiences.nonEmpty) {
           participantAudiences
             .map(_.substring(audPrefix.length))
             .filter(_.nonEmpty) match {
@@ -285,6 +343,11 @@ object AuthServiceJWTCodec {
           s"Could not read ${value.noSpaces} as AuthServiceJWTPayload: value is not an object"
         )
     }
+
+  private[this] def isSelfIssued(fields: Map[String, Json]) =
+    // If the issuer matches the subject, the JWT is self-issued.
+    readOptionalString(propIss, fields)
+      .fold(false)(iss => readOptionalString(propSub, fields).contains(iss))
 
   private[this] def readOptionalString(name: String, fields: Map[String, Json]): Option[String] =
     fields.get(name) match {
@@ -353,6 +416,27 @@ object AuthServiceJWTCodec {
             throw new RuntimeException(s"Could not read ${j.spaces2} as epoch seconds for $name")
           )
     }
+
+  /** Extra attributes parsed ledger JWTs. Called such because it is provided under the key
+    * "daml.com". Currently only used in Party JWTs.
+    */
+  private final case class DamlBlock(
+      user: Option[String],
+      synchronizer: Option[String],
+  )
+
+  private[this] def readDamlBlock(fields: Map[String, Json]): DamlBlock =
+    fields
+      .get(propDamlBlock)
+      .flatMap(_.asObject)
+      .map(_.toMap)
+      .map { obj =>
+        DamlBlock(
+          user = readOptionalString("usr", obj),
+          synchronizer = readOptionalString("syn", obj),
+        )
+      }
+      .getOrElse(DamlBlock(None, None))
 
   // ------------------------------------------------------------------------------------------------------------------
   // Implicits that can be imported to write JSON

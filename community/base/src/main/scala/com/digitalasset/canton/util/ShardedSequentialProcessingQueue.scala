@@ -173,5 +173,5 @@ class NonGarbageCollectedShardedSequentialProcessingQueue[Ident: Pretty](
 
   override protected def onClosed(): Unit =
     // close() (not onClosed()) so each shard queue flushes and runs its close hooks
-    LifeCycle.close(processingQueues.readOnlySnapshot().values.toSeq*)(logger)
+    LifeCycle.close(processingQueues.readOnlySnapshot().values)(logger)
 }

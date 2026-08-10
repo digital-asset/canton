@@ -540,6 +540,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       archivals = Map.empty[LfContractId, ArchivalCommit],
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      hostedOnboardingPartiesO = None,
     )
     val acs2 = AcsChangeSupport.fromCommitSet(cs2).acsChange(Map.empty)
 
@@ -556,6 +557,7 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      hostedOnboardingPartiesO = None,
     )
     val acs4 = AcsChangeSupport
       .fromCommitSet(cs4)
@@ -580,6 +582,7 @@ sealed trait AcsCommitmentProcessorBaseTest
           reassignmentCounter2,
         )
       ),
+      hostedOnboardingPartiesO = None,
     )
     val acs7 = AcsChangeSupport.fromCommitSet(cs7).acsChange(Map.empty)
 
@@ -598,6 +601,7 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      hostedOnboardingPartiesO = None,
     )
     val acs8 =
       AcsChangeSupport
@@ -620,6 +624,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       ),
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      hostedOnboardingPartiesO = None,
     )
     val acs9 = AcsChangeSupport
       .fromCommitSet(cs9)
@@ -639,6 +644,7 @@ sealed trait AcsCommitmentProcessorBaseTest
           reassignmentCounter2,
         )
       ),
+      hostedOnboardingPartiesO = None,
     )
     val acs10 = AcsChangeSupport.fromCommitSet(cs10).acsChange(Map.empty)
 
@@ -653,6 +659,7 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      hostedOnboardingPartiesO = None,
     )
     val acs12 = AcsChangeSupport.fromCommitSet(cs12).acsChange(Map.empty)
 
@@ -793,6 +800,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       archivals = Map.empty[LfContractId, ArchivalCommit],
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      hostedOnboardingPartiesO = None,
     )
     val acs2 = AcsChangeSupport.fromCommitSet(cs2).acsChange(Map.empty)
 
@@ -808,6 +816,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       ),
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      hostedOnboardingPartiesO = None,
     )
     val acs4 = AcsChangeSupport
       .fromCommitSet(cs4)
@@ -2307,6 +2316,7 @@ class AcsCommitmentProcessorTest
             reassignmentCounter1,
           )
         ),
+        hostedOnboardingPartiesO = None,
       )
 
       val reassignmentCounterOfArchival =

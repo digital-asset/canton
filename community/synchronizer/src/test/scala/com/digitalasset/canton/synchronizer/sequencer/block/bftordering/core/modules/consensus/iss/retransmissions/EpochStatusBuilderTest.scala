@@ -9,6 +9,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
   ViewNumber,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.SegmentStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
   ConsensusStatus,
@@ -58,7 +59,7 @@ class EpochStatusBuilderTest extends AnyWordSpec with BftSequencerBaseTest {
         ConsensusStatus.EpochStatus.create(
           myId,
           epoch0,
-          Seq(inProgressSegment, completeSegment, inViewChangeSegment),
+          Seq[SegmentStatus](inProgressSegment, completeSegment, inViewChangeSegment),
         )
       )
     }

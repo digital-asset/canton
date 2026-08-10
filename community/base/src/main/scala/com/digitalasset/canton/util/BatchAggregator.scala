@@ -90,7 +90,7 @@ trait BatchAggregator[A, B] {
     *   processor's responses to all items in order, after all batches containing them have
     *   finished.
     */
-  def runMany(items: NonEmpty[Seq[Traced[A]]])(implicit
+  def runMany(items: NonEmpty[immutable.Iterable[Traced[A]]])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
@@ -198,24 +198,19 @@ class NoOpBatchAggregator[A, B](
   ): FutureUnlessShutdown[immutable.Iterable[B]] =
     executeBatch(items, traceContext, callerCloseContext)
 
-  override def runMany(items: NonEmpty[Seq[Traced[A]]])(implicit
+  override def runMany(items: NonEmpty[immutable.Iterable[Traced[A]]])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
   ): FutureUnlessShutdown[immutable.Iterable[B]] = {
-    val batches = items.grouped(maximumBatchSize.value).toSeq
+    val batches = items.grouped1(maximumBatchSize.value).toSeq
     batches match {
       case Seq(singleBatch) =>
-        NonEmpty.from(singleBatch) match {
-          case Some(singleBatchNE) => executeBatch(singleBatchNE, traceContext, callerCloseContext)
-          case None =>
-            FutureUnlessShutdown.pure(immutable.Iterable.empty[B])
-        }
+        executeBatch(singleBatch.toVector, traceContext, callerCloseContext)
       case multipleBatches =>
-        val batchesNE = multipleBatches.flatMap(batch => NonEmpty.from(batch))
         MonadUtil
-          .parTraverseWithLimit(maxParallelBatches)(batchesNE)(batchNE =>
-            executeBatch(batchNE, traceContext, callerCloseContext)
+          .parTraverseWithLimit(maxParallelBatches)(multipleBatches)(batchNE =>
+            executeBatch(batchNE.toVector, traceContext, callerCloseContext)
           )
           .map(_.flatten)
     }
@@ -274,25 +269,21 @@ class BatchAggregatorImpl[A, B](
     }
   }
 
-  override def runMany(items: NonEmpty[Seq[Traced[A]]])(implicit
+  override def runMany(items: NonEmpty[immutable.Iterable[Traced[A]]])(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
       callerCloseContext: CloseContext,
   ): FutureUnlessShutdown[immutable.Iterable[B]] = {
-    val batches: Seq[NonEmpty[Vector[Traced[A]]]] = items
-      .grouped(maximumBatchSize.value)
-      .flatMap { batch =>
-        NonEmpty.from(batch.toVector)
-      }
-      .toSeq
+    val batches = items.grouped1(maximumBatchSize.value).toSeq
 
     val futures = batches.flatMap { batch =>
+      val batchSeq = batch.toVector
       val oldInFlight = inFlight.getAndUpdate(v => (v + 1).min(maximumInFlight))
 
       if (oldInFlight < maximumInFlight) {
-        Seq(runBatchWithoutIncrement(batch))
+        Seq(runBatchWithoutIncrement(batchSeq))
       } else {
-        val individualFutures = batch.map { tracedItem =>
+        val individualFutures = batchSeq.map { tracedItem =>
           val promise = PromiseUnlessShutdown.unsupervised[immutable.Iterable[B]]()
           batcher.add(ItemsAndCompletionPromise(NonEmpty(Vector, tracedItem), promise)).discard
           promise.futureUS
@@ -325,7 +316,7 @@ class BatchAggregatorImpl[A, B](
       callerCloseContext: CloseContext,
   ): FutureUnlessShutdown[immutable.Iterable[B]] =
     FutureUnlessShutdown
-      .fromTry(Try(processor.executeBatch(items)))
+      .fromTry(Try(processor.executeBatch(items.toVector)))
       .flatten
       .thereafter(maybeRunAfterProcessing(processed = items.map(_.value)))
 

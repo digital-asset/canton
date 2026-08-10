@@ -24,8 +24,8 @@ final case class W3CTraceContext(parent: String, state: Option[String] = None)
   /** HTTP headers of this trace context. Marked transient as the headers do not need to be
     * serialized when using java serialization.
     */
-  @transient lazy val asHeaders: Map[String, String] =
-    Map(TRACEPARENT_HEADER_NAME -> parent) ++ state.map(TRACESTATE_HEADER_NAME -> _).toList
+  @transient lazy val asHeaders: Map[HeaderName, String] =
+    Map(TraceparentHeader -> parent) ++ state.map(TracestateHeader -> _).toList
 
   override def toString: String = {
     val sb = new mutable.StringBuilder()
@@ -41,27 +41,27 @@ final case class W3CTraceContext(parent: String, state: Option[String] = None)
 object W3CTraceContext {
   // https://www.w3.org/TR/trace-context/
   private val propagator = W3CTraceContextPropagator.getInstance()
-  private val TRACEPARENT_HEADER_NAME =
-    "traceparent" // same as W3CTraceContextPropagator.TRACE_PARENT
-  private val TRACESTATE_HEADER_NAME = "tracestate" // same as W3CTraceContextPropagator.TRACE_STATE
+  // values match W3CTraceContextPropagator.TRACE_PARENT / TRACE_STATE
+  private val TraceparentHeader = HeaderName("traceparent")
+  private val TracestateHeader = HeaderName("tracestate")
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   def fromOpenTelemetryContext(context: OpenTelemetryContext): Option[W3CTraceContext] = {
     var builder = new W3CTraceContextBuilder
     val setter: TextMapSetter[W3CTraceContextBuilder] = (carrier, key, value) =>
-      builder = key match {
-        case TRACEPARENT_HEADER_NAME => carrier.copy(parent = Some(value))
-        case TRACESTATE_HEADER_NAME => carrier.copy(state = Some(value))
+      builder = HeaderName(key) match {
+        case TraceparentHeader => carrier.copy(parent = Some(value))
+        case TracestateHeader => carrier.copy(state = Some(value))
         case _ => carrier
       }
     propagator.inject(context, builder, setter)
     builder.build
   }
 
-  def fromHeaders(headers: Map[String, String]): Option[W3CTraceContext] =
+  def fromHeaders(headers: Map[HeaderName, String]): Option[W3CTraceContext] =
     W3CTraceContextBuilder(
-      headers.get(TRACEPARENT_HEADER_NAME),
-      headers.get(TRACESTATE_HEADER_NAME),
+      headers.get(TraceparentHeader),
+      headers.get(TracestateHeader),
     ).build
 
   private final case class W3CTraceContextBuilder(
@@ -96,10 +96,12 @@ object W3CTraceContext {
     * returned but the current span will be invalid and [[TraceContext.traceId]] will return None.
     */
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  def toTraceContext(parent: Option[String], state: Option[String]): TraceContext = extract {
-    case `TRACEPARENT_HEADER_NAME` => parent.orNull
-    case `TRACESTATE_HEADER_NAME` => state.orNull
-    case _ => null
+  def toTraceContext(parent: Option[String], state: Option[String]): TraceContext = extract { key =>
+    HeaderName(key) match {
+      case TraceparentHeader => parent.orNull
+      case TracestateHeader => state.orNull
+      case _ => null
+    }
   }
 
   private def extract(getter: String => String): TraceContext =

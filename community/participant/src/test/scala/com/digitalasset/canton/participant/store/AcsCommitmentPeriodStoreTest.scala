@@ -46,77 +46,36 @@ trait AcsCommitmentPeriodStoreTest
       mk(stringInterning, enableConsistencyChecks, executionContext)
 
     "increaseWatermarks" should {
-      "increase the watermarks" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
-        val store = newStore()
-        val ts0 = ts(0)
-        val ts10 = ts(10)
-        val ts100 = ts(100)
-        for {
-          empty <- store.watermarks()
-          _ <- store.increaseInsertionWatermark(ts(-1), affirmationOnly = true)
-          affirmationOnly <- store.watermarks()
-          _ <- store.increaseInsertionWatermark(ts(0), affirmationOnly = false)
-          epoch <- store.watermarks()
-          _ <- store.increaseInsertionWatermark(ts10, affirmationOnly = true)
-          affirmation10 <- store.watermarks()
-          _ <- store.increaseInsertionWatermark(ts100, affirmationOnly = false)
-          epoch100 <- store.watermarks()
-          _ <- store.increaseMatcherWatermark(off(10))
-          off10 <- store.watermarks()
-        } yield {
-          empty shouldBe MatchingWatermark.initial
-          affirmationOnly shouldBe MatchingWatermark.initial.copy(affirmation = ts(-1))
-          epoch shouldBe MatchingWatermark(ts0, ts0, None)
-          affirmation10 shouldBe MatchingWatermark(ts0, ts10, None)
-          epoch100 shouldBe MatchingWatermark(ts100, ts100, None)
-          off10 shouldBe MatchingWatermark(ts100, ts100, Some(off(10)))
-        }
-      }
-
-      "increase the matching watermark first" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "increase the watermark" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
         val store = newStore()
         for {
-          empty <- store.watermarks()
-          _ <- store.increaseMatcherWatermark(off(10))
-          off10 <- store.watermarks()
+          empty <- store.watermark()
+          _ <- store.increaseWatermark(off(10))
+          off10 <- store.watermark()
         } yield {
           empty shouldBe MatchingWatermark.initial
-          off10 shouldBe MatchingWatermark.initial.copy(matching = Some(off(10)))
+          off10 shouldBe MatchingWatermark(Some(off(10)))
         }
       }
 
       "never decrease" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
         val store = newStore()
-        val ts10 = ts(10)
-        val ts50 = ts(50)
-        val ts100 = ts(100)
         for {
-          _ <- store.increaseInsertionWatermark(ts10, affirmationOnly = false)
-          _ <- store.increaseInsertionWatermark(ts100, affirmationOnly = true)
-          wm100 <- store.watermarks()
-          _ <- store.increaseInsertionWatermark(CantonTimestamp.Epoch, affirmationOnly = false)
-          wm100a <- store.watermarks()
-          _ <- store.increaseInsertionWatermark(ts50, affirmationOnly = false)
-          wm50 <- store.watermarks()
-          _ <- store.increaseInsertionWatermark(ts10, affirmationOnly = true)
-          wm50a <- store.watermarks()
-          _ <- store.increaseMatcherWatermark(off(10))
-          off10 <- store.watermarks()
-          _ <- store.increaseMatcherWatermark(off(5))
-          off10a <- store.watermarks()
+          empty <- store.watermark()
+          _ <- store.increaseWatermark(off(10))
+          off10 <- store.watermark()
+          _ <- store.increaseWatermark(off(5))
+          off10a <- store.watermark()
         } yield {
-          wm100 shouldBe MatchingWatermark(ts10, ts100, None)
-          wm100a shouldBe wm100
-          wm50 shouldBe MatchingWatermark(ts50, ts100, None)
-          wm50a shouldBe wm50
-          off10 shouldBe MatchingWatermark(ts50, ts100, Some(off(10)))
+          empty shouldBe MatchingWatermark.initial
+          off10 shouldBe MatchingWatermark(Some(off(10)))
           off10a shouldBe off10
         }
       }
     }
 
     "markOutstanding" should {
-      "insert periods above the watermark" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "insert periods" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
         val store = newStore()
         val periods = Seq(
           CommitmentMatchPeriod.outstanding(p1, ts(1), ts(10), "P1:1-10"),
@@ -133,30 +92,6 @@ trait AcsCommitmentPeriodStoreTest
           tooEarly.toSeq shouldBe Seq.empty
           hitAll.toSeq should contain theSameElementsAs periods
           tooLate shouldBe Seq.empty
-        }
-      }
-
-      "cap periods at watermark" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
-        val store = newStore()
-        val periods = Seq(
-          // Skipped
-          CommitmentMatchPeriod.outstanding(p1, ts(1), ts(10), "P1:1-10"),
-          // Kept
-          CommitmentMatchPeriod.outstanding(p2, ts(12), ts(20), "P2:12-20"),
-          // Capped
-          CommitmentMatchPeriod.outstanding(p3, ts(1), ts(20), "P3:1-20"),
-        )
-        for {
-          _ <- store.increaseInsertionWatermark(ts(4), affirmationOnly = false)
-          _ <- store.increaseInsertionWatermark(ts(15), affirmationOnly = true)
-          _ <- store.markOutstanding(periods)
-          lookupP1 <- store.lookupOutstanding(Seq(p1 -> cp(0, 100)))
-          lookupP2 <- store.lookupOutstanding(Seq(p2 -> cp(0, 100)))
-          lookupP3 <- store.lookupOutstanding(Seq(p3 -> cp(0, 100)))
-        } yield {
-          lookupP1 shouldBe Seq.empty
-          lookupP2 shouldBe Seq(periods(1))
-          lookupP3 shouldBe Seq(periods(2).copy(fromExclusive = ts(4)))
         }
       }
     }
@@ -196,7 +131,6 @@ trait AcsCommitmentPeriodStoreTest
         val lookupPeriods = Seq(p1 -> cp(0, 25), p2 -> cp(0, 25), p3 -> cp(0, 25))
         for {
           _ <- store.markOutstanding(periods)
-          _ <- store.increaseInsertionWatermark(ts(25), affirmationOnly = true)
           lo <- store.lookupOutstanding(lookupPeriods)
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq(periods(0), periods(1), periods(3)),
@@ -266,7 +200,6 @@ trait AcsCommitmentPeriodStoreTest
         )
         for {
           _ <- store.markOutstanding(periodsToKeep ++ periodsToDelete)
-          _ <- store.increaseInsertionWatermark(ts(15), affirmationOnly = true)
           _ <- store.deleteOutstandingAfter(ts(15))
           remaining <- store.lookupOutstanding(
             Seq(p1 -> cp(0, 100), p2 -> cp(0, 100), p3 -> cp(0, 100))
@@ -294,7 +227,6 @@ trait AcsCommitmentPeriodStoreTest
         implicit val closeContext: CloseContext = testCloseContext
         for {
           _ <- store.markOutstanding(periodsToKeep ++ periodsToPrune)
-          _ <- store.increaseInsertionWatermark(ts(20), affirmationOnly = false)
           _ <- store.prune(ts(14))
           remaining <- store.lookupOutstanding(
             Seq(p1 -> cp(0, 100), p2 -> cp(0, 100), p3 -> cp(0, 100))
@@ -311,12 +243,16 @@ trait AcsCommitmentPeriodStoreTest
     }
 
     "checkInvariant" should {
-      // The normal methods of the store should already enforce most invariants, e.g., the watermark invariant.
-      // So we only test the invariant checks here that are the caller's responsibility.
-      def checkInvariant(store: AcsCommitmentPeriodStore): FutureUnlessShutdown[Throwable] =
+      def checkInvariant(
+          store: AcsCommitmentPeriodStore,
+          affirmationWatermark: Option[CantonTimestamp],
+      ): FutureUnlessShutdown[Throwable] =
         for {
           failure <- loggerFactory.assertLogs(
-            FutureUnlessShutdown.fromTry(Try(store.checkInvariant())).flatten.failed,
+            FutureUnlessShutdown
+              .fromTry(Try(store.checkInvariant(affirmationWatermark)))
+              .flatten
+              .failed,
             _.errorMessage shouldBe internalErrorMessage,
           )
         } yield {
@@ -343,7 +279,7 @@ trait AcsCommitmentPeriodStoreTest
         val invalidPeriodMatched = CommitmentMatchPeriod.matched(p1, ts(10), ts(10), off(13))
         for {
           _ <- store.markOutstanding(Seq(invalidPeriodOutstanding))
-          failureOutstanding <- checkInvariant(store)
+          failureOutstanding <- checkInvariant(store, None)
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq(invalidPeriodOutstanding),
             deleteMismatched = Seq.empty,
@@ -351,7 +287,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq(invalidPeriodMismatched),
             insertMatched = Seq.empty,
           )
-          failureMismatched <- checkInvariant(store)
+          failureMismatched <- checkInvariant(store, None)
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq.empty,
             deleteMismatched = Seq(invalidPeriodMismatched),
@@ -359,7 +295,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq.empty,
             insertMatched = Seq(invalidPeriodMatched),
           )
-          failureMatched <- checkInvariant(store)
+          failureMatched <- checkInvariant(store, None)
         } yield {
           assertInvalidPeriodError(failureOutstanding, p1, ts(10), ts(10))
           assertInvalidPeriodError(failureMismatched, p1, ts(10), ts(10))
@@ -391,7 +327,6 @@ trait AcsCommitmentPeriodStoreTest
         implicit val closeContext: CloseContext = testCloseContext
         for {
           _ <- store.markOutstanding(Seq(periodOutstanding1))
-          _ <- store.increaseInsertionWatermark(ts(8), affirmationOnly = true)
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq.empty,
             deleteMismatched = Seq.empty,
@@ -399,10 +334,10 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq(periodUnexpected),
             insertMatched = Seq.empty,
           )
-          failureUnexpected <- checkInvariant(store)
+          failureUnexpected <- checkInvariant(store, Some(ts(8)))
           _ <- store.prune(ts(12))
           _ <- store.markOutstanding(Seq(periodOutstanding2a, periodOutstanding2b))
-          failureOutstanding <- checkInvariant(store)
+          failureOutstanding <- checkInvariant(store, Some(ts(30)))
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq(periodOutstanding2b),
             deleteMismatched = Seq.empty,
@@ -410,7 +345,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq(periodMismatched2b),
             insertMatched = Seq.empty,
           )
-          failureOutstandingMismatched <- checkInvariant(store)
+          failureOutstandingMismatched <- checkInvariant(store, Some(ts(30)))
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq.empty,
             deleteMismatched = Seq(periodMismatched2b),
@@ -418,7 +353,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq.empty,
             insertMatched = Seq(periodMatched2b),
           )
-          failureOutstandingMatched <- checkInvariant(store)
+          failureOutstandingMatched <- checkInvariant(store, Some(ts(30)))
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq(periodOutstanding2a),
             deleteMismatched = Seq.empty,
@@ -426,7 +361,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq(periodMismatched2a),
             insertMatched = Seq.empty,
           )
-          failureMismatchedMatched <- checkInvariant(store)
+          failureMismatchedMatched <- checkInvariant(store, Some(ts(30)))
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq.empty,
             deleteMismatched = Seq(periodMismatched2a),
@@ -434,7 +369,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq.empty,
             insertMatched = Seq(periodMatched2a),
           )
-          failureMatched <- checkInvariant(store)
+          failureMatched <- checkInvariant(store, Some(ts(30)))
           _ <- store.prune(ts(35))
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq.empty,
@@ -443,7 +378,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq(periodMismatched3a, periodUnexpected3b),
             insertMatched = Seq.empty,
           )
-          failureMismatched <- checkInvariant(store)
+          failureMismatched <- checkInvariant(store, Some(ts(30)))
         } yield {
           val overlapMsg =
             s"Overlapping periods for participant ${stringInterning.participantId.externalize(p1)}"
@@ -486,8 +421,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq(periodMismatched),
             insertMatched = Seq.empty,
           )
-          failureNoWatermark <- checkInvariant(store)
-          _ <- store.increaseInsertionWatermark(ts(11), affirmationOnly = true)
+          failureNoWatermark <- checkInvariant(store, Some(CantonTimestamp.MinValue))
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq.empty,
             deleteMismatched = Seq.empty,
@@ -495,11 +429,7 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq(periodMismatched),
             insertMatched = Seq.empty,
           )
-          failureMismatched <- checkInvariant(store)
-          _ <- store.increaseInsertionWatermark(
-            periodMatched.toInclusive.immediatePredecessor,
-            affirmationOnly = true,
-          )
+          failureMismatched <- checkInvariant(store, Some(ts(11)))
           _ <- store.persistMatchingOutcome(
             deleteOutstanding = Seq.empty,
             deleteMismatched = Seq.empty,
@@ -507,7 +437,10 @@ trait AcsCommitmentPeriodStoreTest
             insertMismatchedOrUnexpected = Seq.empty,
             insertMatched = Seq(periodMatched),
           )
-          failureMatched <- checkInvariant(store)
+          failureMatched <- checkInvariant(
+            store,
+            Some(periodMatched.toInclusive.immediatePredecessor),
+          )
         } yield {
           failureNoWatermark.getMessage should include(
             s"Mismatched period (${ts(10)}, ${ts(12)}] for participant ${stringInterning.participantId

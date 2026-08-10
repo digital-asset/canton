@@ -10,6 +10,7 @@ import com.digitalasset.daml.lf.command.{ApiCommand, ApiContractKey}
 import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, PackageRef, PackageVersion, Party}
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError}
 import com.digitalasset.daml.lf.speedy.{Command, Compiler, SValue}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -41,6 +42,20 @@ class PreprocessorSpec
 
   val compilerConfig = Compiler.Config.Dev
 
+  private def asPrefetch[A](
+      result: Result[A]
+  ): (Seq[ContractId], Map[GlobalKey, Int]) =
+    result.start match {
+      case im: Result.Step.Impure[x, ?] =>
+        im.fx match {
+          case Result.Need.Prefetch(contractIds, keys) =>
+            im.resume(()) shouldBe Result.Step.Pure(())
+            (contractIds, keys)
+          case other => fail(s"expected a Prefetch, got $other")
+        }
+      case other => fail(s"expected a Prefetch suspension, got $other")
+    }
+
   "preprocessor" should {
     "returns correct result when resuming" in {
       val preprocessor = refinement.Preprocessor.forTesting(compilerConfig, loggerFactory)
@@ -49,8 +64,10 @@ class PreprocessorSpec
           Ast.TTyCon("Mod:WithoutKey"),
           ValueRecord("", ImmArray("owners" -> parties, "data" -> ValueInt64(42))),
         )
-      intermediaryResult shouldBe a[ResultNeedPackage[?]]
-      val finalResult = intermediaryResult.consume(pkgs = pkgs)
+      inside(intermediaryResult.start) { case im: Result.Step.Impure[?, ?] =>
+        im.fx shouldBe a[Result.Need.Package]
+      }
+      val finalResult = intermediaryResult.consume(lookupHandler(pkgs = pkgs))
       finalResult shouldBe a[Right[?, ?]]
     }
 
@@ -64,8 +81,10 @@ class PreprocessorSpec
             ImmArray("owners" -> parties, "wrong_field" -> ValueInt64(42)),
           ),
         )
-      intermediaryResult shouldBe a[ResultNeedPackage[?]]
-      val finalResult = intermediaryResult.consume(pkgs = pkgs)
+      inside(intermediaryResult.start) { case im: Result.Step.Impure[?, ?] =>
+        im.fx shouldBe a[Result.Need.Package]
+      }
+      val finalResult = intermediaryResult.consume(lookupHandler(pkgs = pkgs))
       inside(finalResult) { case Left(Error.Preprocessing(error)) =>
         error shouldBe a[Error.Preprocessing.TypeMismatch]
       }
@@ -166,9 +185,7 @@ class PreprocessorSpec
         packagePreference = packagePreferenceSet.map(Ref.PackageId.assertFromString).toSet,
       )
 
-      result shouldBe expected.map(_.map { case (rawPkgName, rawPkgId) =>
-        PackageName.assertFromString(rawPkgName) -> PackageId.assertFromString(rawPkgId)
-      })
+      result.start shouldBe expected.start
     }
 
     "build package resolution map" when {
@@ -180,7 +197,7 @@ class PreprocessorSpec
             ("pkgId3", "pkgName2", "1.0.0"),
           ),
           packagePreferenceSet = Seq("pkgId2", "pkgId3"),
-          expected = ResultDone(Map("pkgName1" -> "pkgId2", "pkgName2" -> "pkgId3")),
+          expected = Result.done(Map("pkgName1" -> "pkgId2", "pkgName2" -> "pkgId3")),
         )
       }
     }
@@ -190,7 +207,7 @@ class PreprocessorSpec
         testBuildPackageResolution(
           packageMap = Seq(),
           packagePreferenceSet = Seq("pkgId"),
-          expected = ResultError(
+          expected = Result.error(
             Error.Preprocessing.Lookup(
               LookupError.MissingPackage(Ref.PackageId.assertFromString("pkgId"))
             )
@@ -200,7 +217,7 @@ class PreprocessorSpec
         testBuildPackageResolution(
           packageMap = Seq(("otherPkgId", "pkgName1", "1.0.0")),
           packagePreferenceSet = Seq("pkgId"),
-          expected = ResultError(
+          expected = Result.error(
             Error.Preprocessing.Lookup(
               LookupError.MissingPackage(Ref.PackageId.assertFromString("pkgId"))
             )
@@ -218,7 +235,7 @@ class PreprocessorSpec
               ("pkgId3", "pkgName2", "1.0.0"),
             ),
             packagePreferenceSet = Seq("pkgId1", "pkgId2", "pkgId3"),
-            expected = ResultError(
+            expected = Result.error(
               Error.Preprocessing.Internal(
                 qualifiedNameOfMember[refinement.Preprocessor](_.buildPackageResolution()),
                 errorMessage,
@@ -290,18 +307,16 @@ class PreprocessorSpec
 
         val Right(preprocessedCommands) = preprocessor
           .preprocessApiCommands(priority, commands)
-          .consume(pkgs = pkgs)
+          .consume(lookupHandler(pkgs = pkgs))
 
         val resultAllPrefetch =
           preprocessor.prefetchContractIdsAndKeys(
             preprocessedCommands,
             Seq.empty,
           )
-        inside(resultAllPrefetch) { case ResultPrefetch(contractIds, keys, resume) =>
-          contractIds shouldBe Seq(contractId)
-          keys shouldBe Map(globalKey1 -> 1, globalKey2 -> 1)
-          resume() shouldBe Result.Unit
-        }
+        val (contractIds, keys) = asPrefetch(resultAllPrefetch)
+        contractIds shouldBe Seq(contractId)
+        keys shouldBe Map(globalKey1 -> 1, globalKey2 -> 1)
       }
 
       "include explicitly specified keys" in {
@@ -313,16 +328,16 @@ class PreprocessorSpec
         )
 
         val Right(globalKeys) =
-          preprocessor.preprocessApiContractKeys(priority, prefetch).consume(pkgs = pkgs)
+          preprocessor
+            .preprocessApiContractKeys(priority, prefetch)
+            .consume(lookupHandler(pkgs = pkgs))
         globalKeys shouldBe Seq((globalKey1, 1), (globalKey2, 1))
 
         val resultAllUndisclosed =
           preprocessor.prefetchContractIdsAndKeys(ImmArray.empty, globalKeys)
-        inside(resultAllUndisclosed) { case ResultPrefetch(contractIds, keys, resume) =>
-          contractIds shouldBe Seq.empty
-          keys shouldBe Map(globalKey1 -> 1, globalKey2 -> 1)
-          resume() shouldBe Result.Unit
-        }
+        val (contractIds, keys) = asPrefetch(resultAllUndisclosed)
+        contractIds shouldBe Seq.empty
+        keys shouldBe Map(globalKey1 -> 1, globalKey2 -> 1)
       }
 
       "extract contract IDs from commands" in {
@@ -373,29 +388,27 @@ class PreprocessorSpec
 
         val Right(preprocessedCommands) = preprocessor
           .preprocessApiCommands(priority, commands)
-          .consume(pkgs = pkgs)
+          .consume(lookupHandler(pkgs = pkgs))
 
         val resultAllPrefetch =
           preprocessor.prefetchContractIdsAndKeys(
             preprocessedCommands,
             Seq.empty,
           )
-        inside(resultAllPrefetch) { case ResultPrefetch(contractIds, keys, resume) =>
-          contractIds.toSet shouldBe ((contractId +: moreContractIds).toSet)
-          keys shouldBe Map(
-            GlobalKey(
-              withContractIdTmplId,
+        val (contractIds, keys) = asPrefetch(resultAllPrefetch)
+        contractIds.toSet shouldBe ((contractId +: moreContractIds).toSet)
+        keys shouldBe Map(
+          GlobalKey(
+            withContractIdTmplId,
+            pkgName,
+            parties,
+            SValueHash.assertHashContractKey(
               pkgName,
-              parties,
-              SValueHash.assertHashContractKey(
-                pkgName,
-                withContractIdTmplId.qualifiedName,
-                partiesSValue,
-              ),
-            ) -> 1
-          )
-          resume() shouldBe Result.Unit
-        }
+              withContractIdTmplId.qualifiedName,
+              partiesSValue,
+            ),
+          ) -> 1
+        )
 
       }
 
@@ -416,7 +429,7 @@ class PreprocessorSpec
             priority,
             commands,
           )
-          .consume(pkgs = pkgs)
+          .consume(lookupHandler(pkgs = pkgs))
 
         val commandsWithContractIdAsKey = preprocessedCommands.map {
           case ex: speedy.Command.ExerciseByKey =>
@@ -428,8 +441,8 @@ class PreprocessorSpec
           commandsWithContractIdAsKey,
           Seq.empty,
         )
-        inside(result) {
-          case ResultError(
+        inside(result.start) {
+          case Result.Step.Error(
                 Error.Preprocessing(Error.Preprocessing.ContractIdInContractKey(value))
               ) =>
             value shouldBe Value.ValueContractId(contractId)

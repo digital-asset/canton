@@ -26,7 +26,7 @@ import scala.concurrent.{Future, blocking}
 class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   "traverse" when {
-    futureLikes.foreach { fOps =>
+    sequentialFutureLikes.foreach { fOps =>
       s"used with ${fOps.name}" should {
         "deadlock" in {
           deadlockTraverse(fOps)
@@ -45,9 +45,9 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     }
 
     "used on a general Seq" should {
-      "convert everything to Vector" in {
+      "convert everything to List" in {
         def go(xs: Seq[Int]): Assertion =
-          xs.traverse(Option.apply).value shouldBe a[Vector[?]]
+          xs.traverse(Option.apply).value shouldBe a[List[?]]
 
         go(List(1))
         go(Vector(1))
@@ -66,12 +66,12 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     }
 
     "used on a generic NonEmpty Seq" should {
-      "convert everything to Vector" in {
+      "convert everything to List" in {
         def go(xs: NonEmpty[Seq[Int]]): Assertion =
           xs.toNEF
             .traverse(Option.apply)
             .value
-            .forgetNE shouldBe a[Vector[?]]
+            .forgetNE shouldBe a[List[?]]
 
         go(NonEmpty(List, 1))
         go(NonEmpty(Vector, 1))
@@ -82,7 +82,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   }
 
   "traverse_" when {
-    futureLikes.foreach { fOps =>
+    sequentialFutureLikes.foreach { fOps =>
       s"used with ${fOps.name}" should {
         "deadlock" in {
           deadlockTraverse_(fOps)
@@ -92,7 +92,7 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
   }
 
   "flatTraverse" when {
-    futureLikes.foreach { fOps =>
+    sequentialFutureLikes.foreach { fOps =>
       s"used with ${fOps.name}" should {
         "deadlock" in {
           deadlockFlatTraverse(fOps)
@@ -182,6 +182,10 @@ class TraverseTest extends AnyWordSpec with BaseTest with HasExecutionContext {
     FutureUnlessShutdownOps,
     EitherTFutureOps,
   )
+
+  // Since cats 2.11, plain traverse over a Future runs concurrently (Future is a StackSafeMonad),
+  // so it no longer deadlocks; FutureUnlessShutdown and EitherT[Future, *] stay sequential.
+  private lazy val sequentialFutureLikes = futureLikes.filterNot(_ == FutureOps)
 
   private sealed trait Op extends Product with Serializable
   private case object Acquire extends Op

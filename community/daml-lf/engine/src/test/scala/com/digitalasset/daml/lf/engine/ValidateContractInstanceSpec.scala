@@ -9,6 +9,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.{Compiler, SValue}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -246,7 +247,7 @@ class ValidateContractInstanceSpec
                 idValidatorCalledWithExpectedHash
               },
             )
-            .consume(pkgs = Map(targetPackageId -> targetPackage))
+            .consume(lookupHandler(pkgs = Map(targetPackageId -> targetPackage)))
 
           idValidatorCalledWithExpectedHash shouldBe true
           result shouldBe Right(Right(()))
@@ -279,7 +280,7 @@ class ValidateContractInstanceSpec
               hashingMethod,
               idValidator = _ => false, // We pretend that the authentication always fails
             )
-            .consume(pkgs = Map(targetPackageId -> targetPackage))
+            .consume(lookupHandler(pkgs = Map(targetPackageId -> targetPackage)))
 
           inside(result) { case Right(res) =>
             res shouldBe a[Left[?, ?]]
@@ -306,7 +307,7 @@ class ValidateContractInstanceSpec
             hashingMethod,
             idValidator = _ => true,
           )
-          .consume(pkgs = Map(pkgId3 -> pkg3))
+          .consume(lookupHandler(pkgs = Map(pkgId3 -> pkg3)))
 
         inside(result) { case Right(res) =>
           res shouldBe a[Left[?, ?]]
@@ -332,7 +333,7 @@ class ValidateContractInstanceSpec
             hashingMethod,
             idValidator = _ => true,
           )
-          .consume(pkgs = Map(pkgId4 -> pkg4))
+          .consume(lookupHandler(pkgs = Map(pkgId4 -> pkg4)))
 
         inside(result) { case Right(res) =>
           res shouldBe a[Left[?, ?]]
@@ -358,7 +359,7 @@ class ValidateContractInstanceSpec
             hashingMethod,
             idValidator = _ => true,
           )
-          .consume(pkgs = Map(pkgId5 -> pkg5))
+          .consume(lookupHandler(pkgs = Map(pkgId5 -> pkg5)))
 
         inside(result) { case Right(res) =>
           res shouldBe a[Left[?, ?]]
@@ -384,7 +385,7 @@ class ValidateContractInstanceSpec
             hashingMethod,
             idValidator = _ => true,
           )
-          .consume(pkgs = Map(pkgId6 -> pkg6))
+          .consume(lookupHandler(pkgs = Map(pkgId6 -> pkg6)))
 
         inside(result) { case Right(res) =>
           res shouldBe a[Left[?, ?]]
@@ -410,9 +411,11 @@ class ValidateContractInstanceSpec
             hashingMethod,
             idValidator = _ => true,
           )
-          .consume(pkgs = Map.empty) // We reply with "not found" to any NeedPackage question
+          .consume(
+            lookupHandler(pkgs = Map.empty)
+          ) // We reply with "not found" to any NeedPackage question
 
-        result shouldBe a[Left[?, ?]] // consume reports ResultError as a Left
+        result shouldBe a[Left[?, ?]] // consume reports a Result error as a Left
       }
     }
   }

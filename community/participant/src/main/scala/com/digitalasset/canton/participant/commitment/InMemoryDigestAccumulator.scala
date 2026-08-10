@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   CheckpointFenceOr,
-  CheckpointWritten,
+  CheckpointToBeWritten,
   Classification,
   DigestAccumulator_Input,
   NotCheckpointFence,
@@ -30,17 +30,13 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
 import com.digitalasset.canton.participant.digest.{DigestDelta, DigestOperation, DigestOps}
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
   AcsDigestUpdate,
-  Checkpoint,
   InternedParticipantId,
-  LocalPartyFirst,
-  PartyAndOrder,
-  PartyOrder,
   RawDigest,
-  RemotePartyFirst,
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.tracing.TraceContext
@@ -68,15 +64,17 @@ import scala.util.{Failure, Success, Try}
   *   How many queries shall be made in parallel to load digests. Must be a power of two.
   */
 class InMemoryDigestAccumulator(
-    thisParticipant: LedgerParticipantId,
     digestStore: AcsDigestStore,
     override protected val loggerFactory: NamedLoggerFactory,
     stringInterning: StringInterning,
     acsUpdateBatchSize: Int,
     digestLoadParallelism: Int,
-    digestStoreParallelism: Int,
+    digestComputeParallelism: Int,
+    bufferSize: Int,
     tracingMode: AcsDigestTracingMode,
     enableConsistencyChecks: Boolean,
+    @VisibleForTesting
+    private[canton] val metrics: CommitmentMetrics,
 )(implicit executionContext: ExecutionContext)
     extends DigestAccumulator
     with NamedLogging {
@@ -90,7 +88,8 @@ class InMemoryDigestAccumulator(
 
   def flow()(implicit
       traceContext: TraceContext
-  ): Flow[DigestAccumulator_Input, CheckpointWritten, NotUsed] = flowInternal()
+  ): Flow[DigestAccumulator_Input, CheckpointToBeWritten, NotUsed] =
+    flowInternal()
 
   @VisibleForTesting
   def flowInternal(
@@ -104,7 +103,7 @@ class InMemoryDigestAccumulator(
         None,
   )(implicit
       traceContext: TraceContext
-  ): Flow[DigestAccumulator_Input, CheckpointWritten, NotUsed] =
+  ): Flow[DigestAccumulator_Input, CheckpointToBeWritten, NotUsed] =
     Flow[DigestAccumulator_Input]
       .map(ensurePresent)
       .withBlocker(computeDigestBlocker)(directExecutionContext)
@@ -112,13 +111,17 @@ class InMemoryDigestAccumulator(
       // reads are spawned by `ensurePresent` when the buffer is filling up. This bound is conservative
       // in that it also counts `ensurePresent` that do not have to load anything at all.
       .buffer(digestLoadParallelism, OverflowStrategy.backpressure)
-      .map(computeDigestChanges)
+      // Separate buffered in addition to the buffer before so that we can use the same buffer size everywhere
+      .buffered(metrics.bufferDigestPipelineBeforeComputeDigestsChanges, bufferSize)
+      .mapAsync(digestComputeParallelism)(event => Future(computeDigestChanges(event)))
+      .buffered(metrics.bufferDigestPipelineBeforeJoinLoading, bufferSize)
       .mapAsyncAndDrainUS(
         // Parallelism one here ensures that the above buffer size limit actually translates to the number of parallel reads.
         // Otherwise the parallelism could add up.
         parallelism = 1
       )(joinLoading)
       .async
+      .buffered(metrics.bufferDigestPipelineBeforeAggregation, bufferSize)
       .withBlocker(sequentialBlocker)(directExecutionContext)
       // The accumulator is a non-empty Seq of at most two elements. The first one accumulates the changes so far
       // and the second element is only used if it cannot be accumulated into the first one.
@@ -130,11 +133,11 @@ class InMemoryDigestAccumulator(
       .mapConcat(_.forgetNE)
       .withBlocker(storeBlocker)(directExecutionContext)
       .async
-      .mapAsyncAndDrainUS(parallelism = digestStoreParallelism)(persistDigestUpdates)
-      .mapAsyncAndDrainUS(
-        // Checkpoints must be written sequentially!
-        parallelism = 1
-      )(persistCheckpoint)
+      .buffered(metrics.bufferDigestPipelineBeforePersistence, bufferSize)
+      // We must persist the digest updates sequentially because two consecutive copy snapshots may
+      // update the same digest keys at the same offsets (e.g., if the aggregation blocked with a full accumulator)
+      // and thus we must avoid the later copy to be overwritten by the earlier copy
+      .mapAsyncAndDrainUS(parallelism = 1)(persistDigestUpdates)
       .mapConcat(deregister)
 
   /** Finds all the
@@ -172,11 +175,9 @@ class InMemoryDigestAccumulator(
             val internedParticipantId = stringInterning.participantId.internalize(participant)
             ParticipantDigestIdentifier(internedParticipantId)
           }
-        val stakeholders = stakeholdersToParticipants.flatMap { case (stakeholder, _) =>
+        val stakeholders = stakeholdersToParticipants.map { case (stakeholder, _) =>
           val internedStakeholder = stringInterning.party.internalize(stakeholder)
-          Seq(LocalPartyFirst, RemotePartyFirst).map(
-            PartyDigestIdentifier(internedStakeholder, _)
-          )
+          PartyDigestIdentifier(internedStakeholder)
         }
         Some(stakeholders ++ participants)
       case _: PartyOnboardingToParticipant =>
@@ -187,10 +188,7 @@ class InMemoryDigestAccumulator(
           stringInterning.participantId.internalize(remoteParticipant)
         )
         val internedParty = stringInterning.party.internalize(addedRemoved.party)
-        val partyOrder =
-          if (thisParticipant < remoteParticipant) LocalPartyFirst
-          else RemotePartyFirst
-        val party = PartyDigestIdentifier(internedParty, partyOrder)
+        val party = PartyDigestIdentifier(internedParty)
         val identifiers = Seq(participant, party)
         Some(identifiers)
     }
@@ -270,7 +268,7 @@ class InMemoryDigestAccumulator(
 
             identifier match {
               case party: PartyDigestIdentifier =>
-                initializeAccumulator(partyDigests, party.partyAndOrder)
+                initializeAccumulator(partyDigests, party.partyId)
 
               case participant: ParticipantDigestIdentifier =>
                 initializeAccumulator(participantDigests, participant.participantId)
@@ -322,16 +320,15 @@ class InMemoryDigestAccumulator(
 
   private def computeDigestChangesFromAcsUpdate(acsUpdate: AcsUpdate): ComputedDigestChanges = {
     val deltas = DigestOps.computeDeltas(
-      thisParticipant,
       acsUpdate,
       traceChanges = tracingMode != AcsDigestTracingMode.Disabled,
     )
 
     deltas.map {
-      case DigestDelta.Party(partyAndOrder, digest, operation) =>
-        val internedParty = stringInterning.party.internalize(partyAndOrder.party)
+      case DigestDelta.Party(partyId, digest, operation) =>
+        val internedParty = stringInterning.party.internalize(partyId)
         ComputedDigestChange(
-          PartyDigestIdentifier(internedParty, partyAndOrder.order),
+          PartyDigestIdentifier(internedParty),
           digest,
           operation,
         )
@@ -383,8 +380,7 @@ class InMemoryDigestAccumulator(
         val party = hostingChange.party
         val participant = hostingChange.participant
         val internedParty = stringInterning.party.internalize(party)
-        val order = PartyOrder.orderFor(thisParticipant, participant)
-        val partyIdentifier = PartyDigestIdentifier(internedParty, order)
+        val partyIdentifier = PartyDigestIdentifier(internedParty)
         val partyDigest = accumulators
           .getOrElse(
             partyIdentifier,
@@ -524,34 +520,30 @@ class InMemoryDigestAccumulator(
       input: CopySnapshotOutput
   ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
     implicit val traceContext: TraceContext = input.traceContext
-    input.traverse(_.traverse(_.traverse(_.traverse { case (updates, usageCounters) =>
-      val (participantUpdates, partyUpdates) = updates.partitionMap { update =>
-        update.partitionMap(_.toEither)
+    input
+      .traverse(_.traverse(_.traverse(_.traverse { case (updates, usageCounters) =>
+        val (participantUpdates, partyUpdates) = updates.partitionMap { update =>
+          update.partitionMap(_.toEither)
+        }
+        for {
+          _ <- digestStore.party.upsertDigestUpdates(partyUpdates)
+          _ <- digestStore.participant.upsertDigestUpdates(participantUpdates)
+        } yield {
+          usageCounters
+        }
+      })))
+      .map { output =>
+        metrics.runningDigestProcessor.latestAccumulatedRecordTime.updateValue(
+          input.recordTime.toMicros
+        )
+        output
       }
-      for {
-        _ <- digestStore.party.upsertDigestUpdates(partyUpdates)
-        _ <- digestStore.participant.upsertDigestUpdates(participantUpdates)
-      } yield usageCounters
-    })))
-  }
-
-  /** Persists checkpoints to the store. */
-  private def persistCheckpoint(
-      input: PersistDigestUpdatesOutput
-  ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
-    implicit val traceContext: TraceContext = input.traceContext
-    input.value match {
-      case CheckpointFence(tpe) =>
-        implicit val executionContext = directExecutionContext
-        digestStore
-          .insertCheckpointTime(Checkpoint(input.offset, input.recordTime, tpe))
-          .map((_: Unit) => input)
-      case other => FutureUnlessShutdown.pure(input)
-    }
   }
 
   /** Deregisters the usages from [[digests]] and evicts unused accumulators. */
-  private def deregister(input: PersistDigestUpdatesOutput): immutable.Iterable[CheckpointWritten] =
+  private def deregister(
+      input: PersistDigestUpdatesOutput
+  ): immutable.Iterable[CheckpointToBeWritten] =
     input match {
       case context @ ProcessingContext(_, NotCheckpointFence(_, (_, usagesO))) =>
         usagesO.foreach { usages =>
@@ -559,7 +551,7 @@ class InMemoryDigestAccumulator(
         }
         immutable.Iterable.empty
       case ProcessingContext(timepoint, CheckpointFence(tpe)) =>
-        immutable.Iterable(CheckpointWritten(timepoint, tpe))
+        immutable.Iterable(CheckpointToBeWritten(timepoint, tpe))
     }
 
   private def doDeregister(
@@ -594,8 +586,8 @@ class InMemoryDigestAccumulator(
   def prettyIdentifier(identifier: DigestIdentifier): String = identifier match {
     case ParticipantDigestIdentifier(participantId) =>
       s"Participant(${stringInterning.participantId.externalize(participantId)})"
-    case PartyDigestIdentifier(partyId, order) =>
-      s"Party(${stringInterning.party.externalize(partyId)}, $order)"
+    case PartyDigestIdentifier(partyId) =>
+      s"Party(${stringInterning.party.externalize(partyId)})"
   }
 
   @VisibleForTesting
@@ -651,26 +643,24 @@ object InMemoryDigestAccumulator {
   }
 
   sealed trait DigestIdentifier extends Product with Serializable {
-    def toEither: Either[InternedParticipantId, PartyAndOrder[InternedPartyId]]
+    def toEither: Either[InternedParticipantId, InternedPartyId]
   }
   final case class ParticipantDigestIdentifier(participantId: InternedParticipantId)
       extends DigestIdentifier {
-    override def toEither: Either[InternedParticipantId, PartyAndOrder[InternedPartyId]] = Left(
+    override def toEither: Either[InternedParticipantId, InternedPartyId] = Left(
       participantId
     )
   }
-  final case class PartyDigestIdentifier(partyId: InternedPartyId, order: PartyOrder)
-      extends DigestIdentifier {
-    def partyAndOrder: PartyAndOrder[InternedPartyId] = PartyAndOrder(partyId, order)
-    override def toEither: Either[InternedParticipantId, PartyAndOrder[InternedPartyId]] =
-      Right(partyAndOrder)
+  final case class PartyDigestIdentifier(partyId: InternedPartyId) extends DigestIdentifier {
+    override def toEither: Either[InternedParticipantId, InternedPartyId] =
+      Right(partyId)
   }
   object DigestIdentifier {
     implicit val orderingDigestIdentifier: Ordering[DigestIdentifier] =
       Ordering.by[DigestIdentifier, (Boolean, Int)] {
         case ParticipantDigestIdentifier(participantId) => (true, participantId)
-        case PartyDigestIdentifier(partyId, order) =>
-          (false, PartyAndOrder.encodePartyAndOrder(PartyAndOrder(partyId, order)))
+        case PartyDigestIdentifier(partyId) =>
+          (false, partyId)
       }
   }
 

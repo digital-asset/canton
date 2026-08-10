@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.engine.refinement.Enricher as LfEnricher
-import com.digitalasset.daml.lf.engine.{Engine, Result, ResultDone}
+import com.digitalasset.daml.lf.engine.{Engine, Result}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
@@ -220,8 +220,8 @@ private[lf] object IdeLedgerRunner {
       loggerFactory = loggerFactory,
     )
     def consume[V](res: Result[V]): V =
-      res match {
-        case ResultDone(x) => x
+      res.start match {
+        case Result.Step.Pure(x) => x
         case x => crash(s"unexpected Result when enriching value: $x")
       }
     override def enrich(tx: VersionedTransaction)(implicit

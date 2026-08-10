@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.*
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.script.IdeLedger
@@ -288,9 +289,9 @@ class LargeTransactionTest(
       val suffix = Bytes.fromByteArray(Array(0, 0))
       val suffixedTx = data.assertRight(tx.suffixCid(_ => suffix, _ => suffix))
       def consume[V](res: Result[V]): V =
-        res match {
-          case ResultDone(x) => x
-          case x => fail(s"unexpected Result when enriching value: $x")
+        res.consume(lookupHandler()) match {
+          case Right(x) => x
+          case Left(err) => fail(s"unexpected error when enriching value: $err")
         }
       CommittedTransaction(consume(enricher.enrichVersionedTransaction(suffixedTx)))
     }
@@ -306,11 +307,13 @@ class LargeTransactionTest(
         prefetchKeys = Seq.empty,
       )
       .consume(
-        ledger.get(submitter, effectiveAt).andThen(_.nonVerboseWithoutTrailingNones),
-        allPackages,
-        { case _ =>
-          sys.error("TODO keys for LargeTransactionTest")
-        },
+        lookupHandler(
+          ledger.get(submitter, effectiveAt).andThen(_.nonVerboseWithoutTrailingNones),
+          allPackages,
+          { case _ =>
+            sys.error("TODO keys for LargeTransactionTest")
+          },
+        )
       ) match {
       case Left(err) =>
         fail(s"Unexpected error: $err")

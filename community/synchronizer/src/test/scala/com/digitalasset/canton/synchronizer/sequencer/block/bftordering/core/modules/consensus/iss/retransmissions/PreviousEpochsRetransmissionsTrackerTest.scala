@@ -95,7 +95,7 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
           ConsensusStatus.EpochStatus.create(
             anotherId,
             epoch0,
-            Seq(
+            Seq[SegmentStatus](
               inProgressSegmentStatus(Seq(true, false, false)),
               completeSegmentStatus,
               inViewChangeSegmentStatus(Seq(false, false, true)),
@@ -117,7 +117,7 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
           ConsensusStatus.EpochStatus.create(
             anotherId,
             epoch0,
-            Seq(
+            Seq[SegmentStatus](
               inProgressSegmentStatus(Seq(false, true, false, false)), // blocks 0, 3, 6, 9
               completeSegmentStatus, // blocks 1, 4, 7
               SegmentStatus

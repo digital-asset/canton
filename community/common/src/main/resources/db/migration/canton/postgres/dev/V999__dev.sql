@@ -68,41 +68,22 @@ create or replace view debug.par_party_replication_indexed_watermarks as
 
 create table par_acs_party_running_digest (
     synchronizer_idx integer not null,
-    -- encoded integer for the interned party id and order (local - or remote)
-    party_and_order_id integer not null,
+    -- encoded integer for the interned party id
+    party_id integer not null,
     -- ledger offset of the change
     change_offset bigint not null,
     -- record time of the change_offset
     ts bigint not null,
     digest bytea,
     trace_data varchar collate "C",
-    -- link to the last version of the digest that has the same party_order_id
+    -- link to the last version of the digest that has the same party_id
     replaces_offset bigint
 );
-
--- DB counterpart of the Scala decode function
--- in com.digitalasset.canton.participant.store.AcsDigestStore.PartyAndOrder
--- and resolving the party_id to string format
-create or replace function debug.decode_party_and_order(integer) returns varchar as -- collate "C" result. This comment is necessary to satisfy our linter
-$$
-select
-    (debug.resolve_lapi_interned_string($1 / 2) ||
-    case
-        -- If encoded % 2 == 0, it's LocalPartyFirst
-        when $1 % 2 = 0 then ' (LocalPartyFirst)'
-        -- Otherwise, it's RemotePartyFirst
-        else ' (RemotePartyFirst)'
-        end) collate "C"; -- collate in the right place because PG doesn't let us use it in the function signature
-$$
-language sql
-  immutable
-  returns null on null input;
-
 
 create or replace view debug.par_acs_party_running_digest as
 select
     debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
-    debug.decode_party_and_order(party_and_order_id) as party_and_order_id,
+    debug.resolve_lapi_interned_string(party_id) as party_id,
     change_offset,
     debug.canton_timestamp(ts) as ts,
     lower(encode(digest, 'hex')) as digest,
@@ -111,10 +92,10 @@ select
 from par_acs_party_running_digest;
 
 create unique index par_acs_party_running_digest_by_key
-    on par_acs_party_running_digest (synchronizer_idx, party_and_order_id, change_offset desc);
+    on par_acs_party_running_digest (synchronizer_idx, party_id, change_offset desc);
 
 create index par_acs_party_running_digest_by_time
-    on par_acs_party_running_digest (synchronizer_idx, change_offset, party_and_order_id)
+    on par_acs_party_running_digest (synchronizer_idx, change_offset, party_id)
     include (replaces_offset);
 
 create table par_acs_participant_running_digest (
@@ -159,6 +140,10 @@ create table par_acs_running_digests_checkpoint (
     checkpoint_type integer not null,
     primary key (synchronizer_idx, change_offset)
 );
+
+create index par_acs_running_digests_checkpoint_by_type
+    on par_acs_running_digests_checkpoint (synchronizer_idx, checkpoint_type, change_offset)
+    include (ts);
 
 create or replace view debug.par_acs_running_digests_checkpoint as
 select
@@ -227,9 +212,7 @@ create index par_acs_commitment_period_match_to_inclusive on par_acs_commitment_
 
 create table par_acs_commitment_period_watermark (
   synchronizer_idx integer not null,
-  watermark_reconciliation bigint not null,
-  watermark_affirmation bigint not null,
-  watermark_matching bigint,
+  watermark_matching bigint not null,
   primary key (synchronizer_idx)
 );
 
@@ -239,6 +222,13 @@ create table par_acs_commitment_period_pruning (
   -- UTC timestamp in microseconds relative to EPOCH
   ts bigint not null,
   succeeded bigint null,
+  primary key (synchronizer_idx)
+);
+
+create table par_acs_commitment_sender_watermark (
+  synchronizer_idx integer not null,
+  watermark_offset bigint not null,
+  watermark_timestamp bigint not null,
   primary key (synchronizer_idx)
 );
 
@@ -273,8 +263,6 @@ from par_acs_commitment_period_match;
 create or replace view debug.par_acs_commitment_period_watermark as
 select
     debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
-    debug.canton_timestamp(watermark_reconciliation) as watermark_reconciliation,
-    debug.canton_timestamp(watermark_affirmation) as watermark_affirmation,
     watermark_matching
 from par_acs_commitment_period_watermark;
 
@@ -285,3 +273,10 @@ select
     debug.canton_timestamp(ts) as ts,
     debug.canton_timestamp(succeeded) as succeeded
 from par_acs_commitment_period_pruning;
+
+create or replace view debug.par_acs_commitment_sender_watermark as
+select
+    debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
+    watermark_offset,
+    debug.canton_timestamp(watermark_timestamp) as watermark_timestamp
+from par_acs_commitment_sender_watermark;

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Block
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -63,7 +64,10 @@ class SegmentBlockState(
     }
 
   def confirmCompleteBlockStored(): Unit = unconfirmedStorageCommitCertificate match {
-    case unconfirmed @ Some(_) => commitCertificate = unconfirmed
+    case unconfirmed @ Some(_) =>
+      commitCertificate = unconfirmed
+      // once we have a commit certificate, there is no need to hold on to the previous views, so we can clear them to save memory
+      views.clear()
     case None =>
       abort(
         "Should not confirm block stored if unconfirmed commit certificate has not been previously set"
@@ -75,7 +79,24 @@ class SegmentBlockState(
   ) {
     currentViewNumber = newViewNumber
     views(currentViewNumber) = factory(currentViewNumber)
+    cleanUpPreviousViews()
   }
+
+  // We can clean up the state for views that are lower than the highest view number for which we have a prepare quorum,
+  // since we will never need those messages for consensus or retransmissions again.
+  private def cleanUpPreviousViews(): Unit =
+    (ViewNumber.First to currentViewNumber).reverse
+      .map(ViewNumber(_))
+      .collectFirst(
+        Function.unlift(viewNumber =>
+          views.get(viewNumber).flatMap(_.prepareCertificate).map(_ => viewNumber)
+        )
+      )
+      .foreach { highestPrepareQuorumViewNumber =>
+        (ViewNumber.First until highestPrepareQuorumViewNumber).foreach(viewNumber =>
+          views.remove(ViewNumber(viewNumber)).discard
+        )
+      }
 
   def consensusCertificate: Option[ConsensusCertificate] =
     // find the highest view from which there exists Some(ConsensusCertificate),

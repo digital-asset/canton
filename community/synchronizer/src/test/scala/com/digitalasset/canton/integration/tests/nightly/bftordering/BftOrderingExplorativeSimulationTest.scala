@@ -18,6 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   SimulationTestStageSettings,
   TopologySettings,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.PowerDistribution
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 

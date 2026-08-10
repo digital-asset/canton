@@ -40,28 +40,28 @@ object ReleaseUtils {
       release.protocolVersions.map(e => release.copy(protocolVersions = NonEmpty.mk(List, e)))
     }
 
-  /** Given a list of `E` and a number of shards `n` returns a new list with exactly `n` sub-lists
-    * (shards) containing ideally the same number of elements.
+  /** Spreads the elements of `list` across exactly `numberOfShards` shards in round-robin order, so
+    * the element at 0-based position `i` lands in shard `i % numberOfShards`.
     *
-    * For a given list having fewer elements than the given `n` the result is padded with empty
-    * lists so that the resulting list has size `n`.
+    * This keeps the shards balanced by count and, crucially, keeps any run of heavy elements from
+    * all landing in the same shard. The data continuity dumps are ordered by release, so contiguous
+    * chunking used to pile the heavier dumps into one class and make it the long pole. Dealing the
+    * dumps out in turn instead evens the classes out. The set of elements is unchanged, only their
+    * grouping.
+    *
+    * The result always has exactly `numberOfShards` sub-lists. When there are fewer elements than
+    * shards, the trailing shards are empty.
     *
     * Examples:
-    *   - List(1, 2, 3) and n=2 => List(List(1), List(2, 3))
+    *   - List(1, 2, 3, 4) and n=2 => List(List(1, 3), List(2, 4))
     *   - List(1, 2, 3) and n=4 => List(List(1), List(2), List(3), List())
     */
   def shard[E](list: NonEmptyList[E], numberOfShards: PositiveInt): List[List[E]] = {
-    val items = list.toList
     val n = numberOfShards.value
-    val numItems = items.size
-    val sharded =
-      if (numItems < n) items.grouped(1).padTo(n, Nil)
-      else {
-        val (itemsPerShard, remainingItems) = (numItems / n, numItems % n)
-        val (left, right) = items.splitAt(numItems - remainingItems * (itemsPerShard + 1))
-        left.grouped(itemsPerShard) ++ right.grouped(itemsPerShard + 1)
-      }
-    sharded.toList
+    val byShard = list.toList.zipWithIndex.groupBy { case (_, index) => index % n }
+    (0 until n)
+      .map(shardIndex => byShard.getOrElse(shardIndex, Nil).map { case (element, _) => element })
+      .toList
   }
 
   /** Lists `canton-open-source-*` releases published in the public S3 bucket.

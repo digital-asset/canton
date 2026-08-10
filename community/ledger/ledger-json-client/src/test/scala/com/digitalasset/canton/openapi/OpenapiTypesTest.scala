@@ -6,7 +6,6 @@ package com.digitalasset.canton.openapi
 import com.daml.ledger.api.v2
 import com.daml.ledger.api.v2.version_service.FeaturesDescriptor
 import com.digitalasset.canton.http.json.v2 as json
-import com.digitalasset.canton.http.json.v2.LegacyDTOs
 import com.digitalasset.canton.openapi.json.{JSON, model as openapi}
 import io.circe.{Decoder, Encoder}
 import io.swagger.parser.OpenAPIParser
@@ -179,6 +178,28 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
 
     // Explicitly defined arbitrary instance with the Optional fields populated
     // to match the OpenAPI schema required properties
+    private[Mappings] implicit val getUpdatesRequestArb
+        : Arbitrary[v2.update_service.GetUpdatesRequest] =
+      Arbitrary(
+        for {
+          request <- genArbitrary[v2.update_service.GetUpdatesRequest].arbitrary
+          updateFormat <- genArbitrary[v2.transaction_filter.UpdateFormat].arbitrary
+        } yield request.copy(updateFormat = Some(updateFormat))
+      )
+
+    // Explicitly defined arbitrary instance with the Optional fields populated
+    // to match the OpenAPI schema required properties
+    private[Mappings] implicit val getActiveContractsRequestArb
+        : Arbitrary[v2.state_service.GetActiveContractsRequest] =
+      Arbitrary(
+        for {
+          request <- genArbitrary[v2.state_service.GetActiveContractsRequest].arbitrary
+          eventFormat <- genArbitrary[v2.transaction_filter.EventFormat].arbitrary
+        } yield request.copy(eventFormat = Some(eventFormat))
+      )
+
+    // Explicitly defined arbitrary instance with the Optional fields populated
+    // to match the OpenAPI schema required properties
     private[Mappings] implicit val featuresDescriptorArb: Arbitrary[FeaturesDescriptor] =
       Arbitrary(
         for {
@@ -321,9 +342,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[json.JsSchema.JsEvent.CreatedEvent, openapi.CreatedEvent](
           openapi.CreatedEvent.fromJson
         ),
-        Mapping[json.JsSchema.JsTreeEvent.CreatedTreeEvent, openapi.CreatedTreeEvent](
-          openapi.CreatedTreeEvent.fromJson
-        ),
         Mapping[
           v2.admin.identity_provider_config_service.CreateIdentityProviderConfigRequest,
           openapi.CreateIdentityProviderConfigRequest,
@@ -399,9 +417,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[json.JsSchema.JsEvent.ExercisedEvent, openapi.ExercisedEvent](
           openapi.ExercisedEvent.fromJson
         ),
-        Mapping[json.JsSchema.JsTreeEvent.ExercisedTreeEvent, openapi.ExercisedTreeEvent](
-          openapi.ExercisedTreeEvent.fromJson
-        ),
         Mapping[
           v2.experimental_features.ExperimentalCommandInspectionService,
           openapi.ExperimentalCommandInspectionService,
@@ -426,7 +441,7 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.transaction_filter.Filters, openapi.Filters](
           openapi.Filters.fromJson
         ),
-        Mapping[LegacyDTOs.GetActiveContractsRequest, openapi.GetActiveContractsRequest](
+        Mapping[v2.state_service.GetActiveContractsRequest, openapi.GetActiveContractsRequest](
           openapi.GetActiveContractsRequest.fromJson
         ),
         Mapping[
@@ -524,7 +539,7 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.update_service.GetUpdateByHashRequest, openapi.GetUpdateByHashRequest](
           openapi.GetUpdateByHashRequest.fromJson
         ),
-        Mapping[LegacyDTOs.GetUpdatesRequest, openapi.GetUpdatesRequest](
+        Mapping[v2.update_service.GetUpdatesRequest, openapi.GetUpdatesRequest](
           openapi.GetUpdatesRequest.fromJson
         ),
         Mapping[v2.admin.user_management_service.GetUserResponse, openapi.GetUserResponse](
@@ -711,7 +726,7 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.reassignment_commands.ReassignmentCommands, openapi.ReassignmentCommands](
           openapi.ReassignmentCommands.fromJson
         ),
-        Mapping[json.JsUpdateTree.Reassignment, openapi.Reassignment](
+        Mapping[json.JsUpdate.Reassignment, openapi.Reassignment](
           openapi.Reassignment.fromJson
         ),
         Mapping[
@@ -787,17 +802,11 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.trace_context.TraceContext, openapi.TraceContext](
           openapi.TraceContext.fromJson
         ),
-        Mapping[LegacyDTOs.TransactionFilter, openapi.TransactionFilter](
-          openapi.TransactionFilter.fromJson
-        ),
         Mapping[v2.transaction_filter.TransactionFormat, openapi.TransactionFormat](
           openapi.TransactionFormat.fromJson
         ),
         Mapping[json.JsUpdate.Transaction, openapi.Transaction](
           openapi.Transaction.fromJson
-        ),
-        Mapping[json.JsSchema.JsTreeEvent.TreeEvent, openapi.TreeEvent](
-          openapi.TreeEvent.fromJson
         ),
         Mapping[v2.reassignment_commands.UnassignCommand, openapi.UnassignCommand1](
           openapi.UnassignCommand1.fromJson
@@ -1147,15 +1156,8 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           json.JsSubmitAndWaitForTransactionResponse,
           openapi.JsSubmitAndWaitForTransactionResponse,
         ](openapi.JsSubmitAndWaitForTransactionResponse.fromJson),
-        Mapping[
-          json.JsSubmitAndWaitForTransactionTreeResponse,
-          openapi.JsSubmitAndWaitForTransactionTreeResponse,
-        ](openapi.JsSubmitAndWaitForTransactionTreeResponse.fromJson),
         Mapping[json.JsSchema.JsTransaction, openapi.JsTransaction](
           openapi.JsTransaction.fromJson
-        ),
-        Mapping[json.JsSchema.JsTransactionTree, openapi.JsTransactionTree](
-          openapi.JsTransactionTree.fromJson
         ),
         Mapping[json.JsSchema.JsReassignmentEvent.JsUnassignedEvent, openapi.JsUnassignedEvent](
           openapi.JsUnassignedEvent.fromJson
@@ -1177,18 +1179,6 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.JsExecuteSubmissionAndWaitForTransactionResponse,
         ](
           openapi.JsExecuteSubmissionAndWaitForTransactionResponse.fromJson
-        ),
-        Mapping[
-          LegacyDTOs.GetUpdatesRequest,
-          openapi.GetUpdatesRequest,
-        ](
-          openapi.GetUpdatesRequest.fromJson
-        ),
-        Mapping[
-          LegacyDTOs.TransactionFilter,
-          openapi.TransactionFilter,
-        ](
-          openapi.TransactionFilter.fromJson
         ),
       )
     }

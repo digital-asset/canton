@@ -383,7 +383,7 @@ final class P2PNetworkOutModule[
         locally {
           logger.trace(s"Sending network message to $recipientBftNodeId: $message")
           implicit val mc: MetricsContext = mc1
-          networkSend(ref, serializedMessage)
+          networkSend(recipientBftNodeId, ref, serializedMessage)
           emitSendStats(metrics, serializedMessage)
         }
       }
@@ -609,10 +609,14 @@ final class P2PNetworkOutModule[
   }
 
   private def networkSend(
+      recipientBftNodeId: BftNodeId,
       ref: P2PNetworkRef[BftOrderingMessage],
       message: BftOrderingMessageBody,
   )(implicit traceContext: TraceContext, mc: MetricsContext): Unit =
-    ref.asyncP2PSend(maybeNetworkSendInstant => messageToSend(message, maybeNetworkSendInstant))
+    ref.asyncP2PSend(
+      recipientBftNodeId,
+      maybeNetworkSendInstant => messageToSend(message, maybeNetworkSendInstant),
+    )
 
   private def messageToSend(
       message: BftOrderingMessageBody,

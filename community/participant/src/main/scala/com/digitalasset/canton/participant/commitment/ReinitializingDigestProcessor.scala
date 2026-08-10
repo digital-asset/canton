@@ -20,6 +20,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
 }
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
@@ -70,8 +71,6 @@ import scala.concurrent.{ExecutionContext, Future}
   * TODO(#33422) - Disaster Recovery Notes: For DR, we either need stable order of ACS stream, to
   * continue where we left off or solve it in another way
   *
-  * TODO(#33422) - Handle shutdown correctly
-  *
   * TODO(#33422) - either add a flag to the existing `reinitialize_commitments` command or create a
   * new one (should be discussed)
   */
@@ -80,10 +79,11 @@ class ReinitializingDigestProcessor(
     override val synchronizerId: SynchronizerId,
     acsCommitmentConfig: AcsCommitmentConfig,
     digestAccumulator: DigestAccumulator,
-    acsDigestStore: AcsDigestStore,
+    protected override val acsDigestStore: AcsDigestStore,
     indexService: InternalIndexService,
     getTopologySnapshot: Traced[CantonTimestamp] => FutureUnlessShutdown[TopologySnapshot],
     ledgerApiStore: LedgerApiStore,
+    private[canton] override val metrics: CommitmentMetrics,
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -119,6 +119,7 @@ class ReinitializingDigestProcessor(
             reinitializingTimepoint = reinitializingTimepoint,
             topologySnapshot = topologySnapshot,
           ).via(digestAccumulator.flow())
+            .mapAsyncAndDrainUS(1)(writeCheckpoint)
             .toMat(Sink.ignore)(Keep.both),
           errorLogMessagePrefix = "RecomputeAndAppendNewDigestsToJournal",
         )

@@ -31,7 +31,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.SegmentStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.{
+  BlockStatus,
+  SegmentStatus,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue.{
   DeduplicationStrategy,
@@ -246,7 +249,7 @@ class SegmentState(
           preparesPresent = allMissing,
           commitsPresent = allMissing,
         )
-        areBlocksComplete.map {
+        areBlocksComplete.map[BlockStatus] {
           case true => ConsensusStatus.BlockStatus.Complete
           case false => inProgress
         }
@@ -511,11 +514,23 @@ class SegmentState(
           )
           if (process(vcState)(message) && vcState.shouldAdvanceViewChange) {
             result = advanceViewChange(viewNumber)
+            cleanUpPreviousViews()
           }
       }
     }
     result
   }
+
+  private def cleanUpPreviousViews(): Unit =
+    viewChangeState.get(currentViewNumber).foreach { currentVcState =>
+      // Once we have reached a weak quorum or stronger, we have enough to retransmit to other nodes that are
+      // in a lower view and bring them to this view. So we can discard the view change state for all lower views,
+      // as they are no longer relevant (and we can save memory).
+      if (currentVcState.reachedWeakQuorum || currentVcState.newViewMessage.isDefined)
+        (ViewNumber.First until currentViewNumber).foreach(v =>
+          viewChangeState.remove(ViewNumber(v)).discard
+        )
+    }
 
   // View Change Case: ViewChange, NewView
   // Note: Similarly to the future message queue, we may want to limit how many concurrent viewChangeState

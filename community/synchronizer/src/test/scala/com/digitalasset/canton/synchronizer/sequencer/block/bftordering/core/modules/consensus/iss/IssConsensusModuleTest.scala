@@ -1558,6 +1558,7 @@ class IssConsensusModuleTest
             metrics,
             clock,
             loggerFactory,
+            logEndOfEpochProgress = true,
           )
         ),
         dependencies,

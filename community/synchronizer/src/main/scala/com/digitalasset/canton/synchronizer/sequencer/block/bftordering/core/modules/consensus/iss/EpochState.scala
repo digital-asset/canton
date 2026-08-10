@@ -175,12 +175,14 @@ class EpochState[E <: Env[E]](
   def confirmBlockCompleted(
       blockMetadata: BlockMetadata,
       commitCertificate: CommitCertificate,
+      hasCompletedLedSegment: Boolean,
   )(implicit traceContext: TraceContext): Unit = {
     setCommitCertificate(blockMetadata.blockNumber, commitCertificate)
     sendMessageToSegmentModules(
       ConsensusSegment.ConsensusMessage.BlockOrdered(
         blockMetadata,
-        isEmpty = commitCertificate.prePrepare.message.block.proofs.isEmpty,
+        commitCertificate.prePrepare.message.block.proofs.isEmpty,
+        hasCompletedLedSegment,
       )
     )
   }
@@ -230,7 +232,7 @@ class EpochState[E <: Env[E]](
         segmentModules.values.foreach(_.asyncSend(msg))
       case cancelEpoch: ConsensusSegment.ConsensusMessage.CancelEpoch =>
         segmentModules.values.foreach(_.asyncSend(cancelEpoch))
-      case ConsensusSegment.ConsensusMessage.BlockOrdered(block, _) =>
+      case ConsensusSegment.ConsensusMessage.BlockOrdered(block, _, _) =>
         (for {
           segment <- mySegment
           // only send block completion for blocks we're not a leader of

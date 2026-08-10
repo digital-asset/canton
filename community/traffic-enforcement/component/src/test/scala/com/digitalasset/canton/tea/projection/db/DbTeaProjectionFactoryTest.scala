@@ -60,7 +60,7 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
           storage.underlying,
           loggerFactory,
           dbStore,
-          EventSource.LedgerAPI,
+          EventSource.LedgerAPICompletions,
           ProjectionConfig(),
         )
     }

@@ -41,7 +41,10 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerAdminStatus,
   SequencerHealthStatus,
 }
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
+import com.digitalasset.canton.synchronizer.sequencer.config.{
+  SequencerLimits,
+  SequencerNodeParameters,
+}
 import com.digitalasset.canton.synchronizer.sequencer.time.{
   BroadcastTimeTrackerImpl,
   LsuSequencingBounds,
@@ -111,6 +114,7 @@ class SequencerRuntime(
     @VisibleForTesting val client: SequencerClient,
     staticSynchronizerParameters: StaticSynchronizerParameters,
     localNodeParameters: SequencerNodeParameters,
+    sequencerLimits: SequencerLimits,
     lsuSequencingBounds: Option[LsuSequencingBounds],
     val timeTracker: SynchronizerTimeTracker,
     val metrics: SequencerMetrics,
@@ -293,6 +297,7 @@ class SequencerRuntime(
             syncCrypto,
             clock,
             lsuSequencingBounds,
+            sequencerLimits,
             sanitizePublicErrorMessages = localNodeParameters.sanitizePublicErrorMessages,
             disableReleaseVersionHandshakeCheck =
               localNodeParameters.disableReleaseVersionHandshakeCheck,

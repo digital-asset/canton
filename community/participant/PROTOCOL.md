@@ -63,7 +63,7 @@ In the following, code pointers for the individual phases are provided.
 The submission of transaction commands through the ledger API is implemented by `ApiCommandSubmissionService.submit`.
 The submitting participant uses `Engine.submit` to convert the received commands into a `lf.Transaction` (as well as some metadata),
 and then passes it to `CantonSyncService.submitTransaction`.
-Next, the `lf.Transaction` is passed to `SynchronizerRouter.submitTransaction`,
+Next, the `lf.Transaction` is passed to `TransactionRoutingProcessor.submitTransaction`,
 which chooses a `ConnectedSynchronizer` suitable for processing the transaction and calls `ConnectedSynchronizer.submitTransaction`.
 If the input contracts of the transaction reside on different synchronizers, the `SynchronizerRouter` will submit reassignments
 to assign the input contracts to a common synchronizer.
@@ -90,7 +90,7 @@ The actual validation occurs in `ConfirmationRequestAndResponseProcessor.process
 
 ### Phase 3
 
-The subscription of the participant to the sequencer is setup in `ConnectedSynchronizer.startAsync`.
+The subscription of the participant to the sequencer is setup in `ConnectedSynchronizer.start`.
 In `MessageDispatcher.handleAll`, each participant performs some basic validation and
 routes events to the responsible processor (transaction / reassignment / topology / ...).
 The actual validation starts with `ProtocolProcessor.processRequest`.
@@ -113,7 +113,7 @@ The mediator uses `DefaultVerdictSender.sendResult` to send the `ConfirmationRes
 
 ### Phase 7
 
-As for Phase 3, a participant subscribes to the sequencer in `ConnectedSynchronizer.startAsync` and uses `MessageDispatcher` to route events.
+As for Phase 3, a participant subscribes to the sequencer in `ConnectedSynchronizer.start` and uses `MessageDispatcher` to route events.
 A `ConfirmationResultMessage` is validated in `ProtocolProcessor.processResult`,
 which either commits or rolls back the underlying request.
 Next, a participant internally provides a stream of `Update`s through `CantonSyncService.stateUpdates`.
@@ -174,7 +174,7 @@ The `FullInformeeTree` is sent as part of an `InformeeMessage`.
 ### Reassignments Processing
 
 At the ledger API, a reassignment command is specified as `message ReassignmentCommands` in `reassignment_commands.proto`.
-Internally, reassignment commands are represented by `participant.state.vx.ReassignmentCommand`.
+Internally, reassignment commands are represented by `participant.state.ReassignmentCommand`.
 
 Unlike for transactions, a participant receives either the entire reassignment command or nothing of it.
 Therefore, a reassignment command consists of a single view only.

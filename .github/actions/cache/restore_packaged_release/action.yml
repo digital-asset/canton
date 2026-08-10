@@ -1,0 +1,24 @@
+name: Restore Packaged Release
+description: Restore packaged release from cache
+
+inputs:
+  workspace-path:
+    description: Temporary workspace for storing the downloaded artifact
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download packaged community release artifact
+      uses: actions/download-artifact@v7
+      with:
+        pattern: package-community-release*.tar.gz
+        path: ${{ inputs.workspace-path }}/community-release
+        merge-multiple: true
+
+    - name: Restore packaged release
+      env:
+        TMP_WORKSPACE: ${{ inputs.workspace-path }}
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: scripts/ci/restore_packaged_release.sh

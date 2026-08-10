@@ -44,8 +44,8 @@ create table par_party_replication_indexed_watermarks (
 
 create table par_acs_party_running_digest (
   synchronizer_idx integer not null,
-  -- encoded integer for the interned party id and order (local - or remote)
-  party_and_order_id integer not null,
+  -- encoded integer for the interned party id
+  party_id integer not null,
   -- ledger offset
   change_offset bigint not null,
   -- record time of the change_offset
@@ -54,13 +54,13 @@ create table par_acs_party_running_digest (
   -- see https://www.h2database.com/html/datatypes.html for details
   digest varbinary,
   trace_data varchar,
-  -- link to the last version of the digest that has the same party_and_order_id
+  -- link to the last version of the digest that has the same party_id
   replaces_offset bigint,
-  primary key (synchronizer_idx, party_and_order_id, change_offset)
+  primary key (synchronizer_idx, party_id, change_offset)
 );
 
 create index par_acs_party_running_digest_by_time
-    on par_acs_party_running_digest (synchronizer_idx, party_and_order_id, change_offset desc, replaces_offset);
+    on par_acs_party_running_digest (synchronizer_idx, party_id, change_offset desc, replaces_offset);
 
 create table par_acs_participant_running_digest (
   synchronizer_idx integer not null,
@@ -91,6 +91,9 @@ create table par_acs_running_digests_checkpoint (
   checkpoint_type integer not null,
   primary key (synchronizer_idx, change_offset)
 );
+
+create index par_acs_running_digests_checkpoint_by_type
+    on par_acs_running_digests_checkpoint (synchronizer_idx, checkpoint_type, change_offset);
 
 create table par_acs_commitment_period_outstanding (
   synchronizer_idx integer not null,
@@ -150,9 +153,7 @@ create index par_acs_commitment_period_match_to_inclusive on par_acs_commitment_
 
 create table par_acs_commitment_period_watermark (
   synchronizer_idx integer not null,
-  watermark_reconciliation bigint not null,
-  watermark_affirmation bigint not null,
-  watermark_matching bigint,
+  watermark_matching bigint not null,
   primary key (synchronizer_idx)
 );
 
@@ -162,5 +163,12 @@ create table par_acs_commitment_period_pruning (
   -- UTC timestamp in microseconds relative to EPOCH
   ts bigint not null,
   succeeded bigint null,
+  primary key (synchronizer_idx)
+);
+
+create table par_acs_commitment_sender_watermark (
+  synchronizer_idx integer not null,
+  watermark_offset bigint not null,
+  watermark_timestamp bigint not null,
   primary key (synchronizer_idx)
 );

@@ -1,0 +1,58 @@
+name: Restore precompiled classes
+description: Restore precompiled classes
+
+inputs:
+  reset_classes_if_requested:
+    default: "false"
+    description: Reset classes if request, boolean as string
+
+outputs:
+  needs_network_restore:
+    description: Check if restore was performed
+    value: ${{ steps.prepare_logic.outputs.needs_network_restore }}
+  cache-hit:
+    description: Cache hit status
+    value: ${{ steps.restore_classes.outputs.cache-hit }}
+  cache-primary-key:
+    description: Primary cache key used
+    value: ${{ steps.restore_classes.outputs.cache-primary-key }}
+  cache-matched-key:
+    description: Key of the cache that was restored
+    value: ${{ steps.restore_classes.outputs.cache-matched-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Reset compile cache if necessary
+      id: prepare_logic
+      shell: bash
+      run: ./scripts/ci/reset_compile_cache.sh
+      env:
+        RESET_REQUESTED: ${{ inputs.reset_classes_if_requested }}
+        BRANCH_NAME: ${{ github.ref_name }}
+
+    - name: Compute Compile Hash
+      id: compute_build_hash
+      if: steps.prepare_logic.outputs.needs_network_restore == 'true'
+      uses: ./.github/actions/cache/compute_build_hash
+
+    - name: Compute main SHA
+      id: compute_main_sha
+      shell: bash
+      run: |
+        echo "main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Incremental Compile Cache
+      if: steps.prepare_logic.outputs.needs_network_restore == 'true'
+      id: restore_classes
+      uses: actions/cache/restore@v5
+      with:
+        path: |
+          **/target
+        key: |-
+          compile-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ github.sha }}
+        restore-keys: |-
+          compile-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
+          compile-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
+          compile-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
+        # Restore keys are prefix matching on the cache keys, which we use to fallback on previous caches when not specifying an exact sha

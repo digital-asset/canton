@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -93,14 +94,16 @@ object ConsensusStatus {
     )
   }
 
-  sealed trait SegmentStatus {
+  sealed trait SegmentStatus extends PrettyPrinting {
     def toProto: v30.SegmentStatus
   }
 
   object SegmentStatus {
-    final object Complete extends SegmentStatus {
+    final case object Complete extends SegmentStatus {
       override val toProto: v30.SegmentStatus =
         v30.SegmentStatus(v30.SegmentStatus.Status.Complete(com.google.protobuf.empty.Empty()))
+
+      override protected def pretty: Pretty[Complete.this.type] = prettyOfObject[Complete.this.type]
     }
     sealed trait Incomplete extends SegmentStatus {
       def viewNumber: ViewNumber
@@ -116,6 +119,11 @@ object ConsensusStatus {
             v30.SegmentInProgress(viewNumber, blockStatuses.map(_.toProto))
           )
         )
+
+      override protected def pretty: Pretty[InProgress.this.type] = prettyOfClass(
+        param("viewNumber", _.viewNumber),
+        param("blockStatuses", _.blockStatuses),
+      )
     }
     final case class InViewChange(
         viewNumber: ViewNumber,
@@ -127,6 +135,13 @@ object ConsensusStatus {
           v30.SegmentInViewChange(viewNumber, viewChangeMessagesPresent, areBlocksComplete)
         )
       )
+
+      override protected def pretty: Pretty[InViewChange.this.type] =
+        prettyOfClass(
+          param("viewNumber", _.viewNumber),
+          param("viewChangeMessagesPresent", _.viewChangeMessagesPresent),
+          param("areBlocksComplete", _.areBlocksComplete),
+        )
     }
 
     private[modules] def fromProto(proto: v30.SegmentStatus): ParsingResult[SegmentStatus] =
@@ -153,16 +168,18 @@ object ConsensusStatus {
 
   }
 
-  sealed trait BlockStatus {
+  sealed trait BlockStatus extends PrettyPrinting {
     def isComplete: Boolean
     def toProto: v30.BlockStatus
   }
 
   object BlockStatus {
-    final object Complete extends BlockStatus {
+    final case object Complete extends BlockStatus {
       override val isComplete: Boolean = true
       override val toProto: v30.BlockStatus =
         v30.BlockStatus(v30.BlockStatus.Status.Complete(com.google.protobuf.empty.Empty()))
+
+      override protected def pretty: Pretty[Complete.this.type] = prettyOfObject[Complete.this.type]
     }
     final case class InProgress(
         prePrepared: Boolean,
@@ -174,6 +191,12 @@ object ConsensusStatus {
         v30.BlockStatus.Status.InProgress(
           v30.BlockInProgress(prePrepared, preparesPresent, commitsPresent)
         )
+      )
+
+      override protected def pretty: Pretty[InProgress.this.type] = prettyOfClass(
+        param("prePrepared", _.prePrepared),
+        param("preparesPresent", _.preparesPresent),
+        param("commitsPresent", _.commitsPresent),
       )
     }
 

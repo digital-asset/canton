@@ -12,7 +12,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
   CheckpointFenceOr,
-  CheckpointWritten,
+  CheckpointToBeWritten,
   Classification,
   NotCheckpointFence,
   PartyAddedToParticipant,
@@ -24,15 +24,11 @@ import com.digitalasset.canton.participant.commitment.InMemoryDigestAccumulator.
   PartyDigestIdentifier,
 }
 import com.digitalasset.canton.participant.config.AcsDigestTracingMode
+import com.digitalasset.canton.participant.metrics.TestCommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  Checkpoint,
-  LocalPartyFirst,
   ParticipantAcsDigestUpdate,
   PartyAcsDigestUpdate,
-  PartyAndOrder,
-  PartyOrder,
-  RemotePartyFirst,
 }
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.participant.store.{AcsDigestStore, BlockingAcsDigestStore}
@@ -72,10 +68,9 @@ class InMemoryDigestAccumulatorTest
   }
 
   class Fixture(
-      participant: LedgerParticipantId,
       acsUpdateBatchSize: Int = 1,
       digestLoadParallelism: Int = 1,
-      digestStoreParallelism: Int = 1,
+      digestComputeParallelism: Int = 1,
   ) {
     val stringInterning: StringInterning = new MockStringInterning()
     val digestStore: AcsDigestStore = InMemoryAcsDigestStore.create(
@@ -83,23 +78,23 @@ class InMemoryDigestAccumulatorTest
       loggerFactory,
     )
     val accumulator: InMemoryDigestAccumulator = new InMemoryDigestAccumulator(
-      participant,
       digestStore,
       loggerFactory,
       stringInterning,
       acsUpdateBatchSize,
-      digestLoadParallelism,
-      digestStoreParallelism,
+      digestLoadParallelism = digestLoadParallelism,
+      digestComputeParallelism = digestComputeParallelism,
+      bufferSize = 0,
       tracingMode = AcsDigestTracingMode.Disabled,
       enableConsistencyChecks = true,
+      metrics = TestCommitmentMetrics(),
     )
 
     def lookupPartyDigest(
         party: LfPartyId,
-        order: PartyOrder,
         offset: Offset = Offset.MaxValue,
-    ): Option[AcsDigestStore.AcsDigestUpdate[PartyAndOrder[LfPartyId]]] =
-      Fixture.lookupPartyDigest(digestStore, stringInterning, party, order, offset)
+    ): Option[AcsDigestStore.AcsDigestUpdate[LfPartyId]] =
+      Fixture.lookupPartyDigest(digestStore, stringInterning, party, offset)
 
     def lookupParticipantDigest(
         participant: LedgerParticipantId,
@@ -112,12 +107,11 @@ class InMemoryDigestAccumulatorTest
         digestStore: AcsDigestStore,
         stringInterning: StringInterning,
         party: LfPartyId,
-        order: PartyOrder,
         offset: Offset = Offset.MaxValue,
-    ): Option[AcsDigestStore.AcsDigestUpdate[PartyAndOrder[LfPartyId]]] =
+    ): Option[AcsDigestStore.AcsDigestUpdate[LfPartyId]] =
       digestStore.party
         .lookup(
-          PartyAndOrder(stringInterning.party.internalize(party), order),
+          stringInterning.party.internalize(party),
           offset,
         )
         .futureValueUS
@@ -143,16 +137,20 @@ class InMemoryDigestAccumulatorTest
   private val p3 = DefaultTestIdentities.participant3.toLf
   private val p4 = DefaultTestIdentities.participant4.toLf
   private val p5 = DefaultTestIdentities.participant5.toLf
+  private val p6 = DefaultTestIdentities.participant6.toLf
   private val alice = DefaultTestIdentities.party1.toLf
   private val bob = DefaultTestIdentities.party2.toLf
   private val carol = DefaultTestIdentities.party3.toLf
   private val dave = DefaultTestIdentities.party4.toLf
   private val evelyn = DefaultTestIdentities.party5.toLf
+  private val frank = DefaultTestIdentities.party6.toLf
   private val rc0 = ReassignmentCounter.Genesis
   private val cid0 = cid(0)
   private val cid1 = cid(1)
   private val cid2 = cid(2)
   private val cid3 = cid(3)
+  private val cid4 = cid(4)
+  private val cid5 = cid(5)
 
   private def ts(offsetFromEpoch: Long): CantonTimestamp =
     CantonTimestamp.Epoch.plusSeconds(offsetFromEpoch)
@@ -185,12 +183,12 @@ class InMemoryDigestAccumulatorTest
   ] = TestSource.probe[ProcessingContext[CheckpointFenceOr[Classification]]]
 
   @unused
-  private def testSink: Sink[CheckpointWritten, TestSubscriber.Probe[CheckpointWritten]] =
-    TestSink.probe[CheckpointWritten]
+  private def testSink: Sink[CheckpointToBeWritten, TestSubscriber.Probe[CheckpointToBeWritten]] =
+    TestSink.probe[CheckpointToBeWritten]
 
   "InMemoryDigestAccumulator" should {
     "process a simple AcsUpdate" in {
-      val fixture = new Fixture(p1)
+      val fixture = new Fixture()
       import fixture.*
 
       val result = Source(
@@ -207,18 +205,18 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(1)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue
+      result shouldBe Seq(CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary))
 
-      result shouldBe Seq(CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary))
-
-      digestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS.value shouldBe
-        Checkpoint(tp(1), ReconciliationIntervalBoundary)
-
-      val partyDigest = lookupPartyDigest(alice, RemotePartyFirst).value
+      val partyDigest = lookupPartyDigest(alice).value
       val participantDigest = lookupParticipantDigest(p1).value
       partyDigest.digestUpdate.digestO.value shouldBe participantDigest.digestUpdate.digestO.value
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        1
+      ).toMicros
     }
 
     // given cid0 with stakeholders alice and bob,
@@ -226,7 +224,7 @@ class InMemoryDigestAccumulatorTest
     // 1. p1 hosts only alice, receives cid0, and then onboards bob
     // 2. p1 hosts alice and bob, and then receives cid0
     "process a party onboarding scenario" in {
-      val fixtureBobOnboarded = new Fixture(p1)
+      val fixtureBobOnboarded = new Fixture()
 
       Source(
         Seq(
@@ -253,9 +251,13 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobOnboarded.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
 
-      val fixtureBobAlreadyHosted = new Fixture(p1)
+      fixtureBobOnboarded.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
+
+      val fixtureBobAlreadyHosted = new Fixture()
       Source(
         Seq(
           from(tp(1))(
@@ -270,7 +272,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobAlreadyHosted.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      fixtureBobAlreadyHosted.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // All in-memory state has been evicted
       fixtureBobOnboarded.accumulator.digestsUsageCounters shouldBe empty
@@ -281,12 +287,11 @@ class InMemoryDigestAccumulatorTest
 
       for {
         party <- Seq(alice, bob)
-        order <- Seq(LocalPartyFirst, RemotePartyFirst)
       } yield {
         val digestAlreadyHosted =
-          fixtureBobAlreadyHosted.lookupPartyDigest(party, order).value.digestUpdate.digestO
+          fixtureBobAlreadyHosted.lookupPartyDigest(party).value.digestUpdate.digestO
         val digestOnboarded =
-          fixtureBobOnboarded.lookupPartyDigest(party, order).value.digestUpdate.digestO
+          fixtureBobOnboarded.lookupPartyDigest(party).value.digestUpdate.digestO
         digestAlreadyHosted shouldBe digestOnboarded
       }
     }
@@ -296,7 +301,7 @@ class InMemoryDigestAccumulatorTest
     // 1. p1 hosts alice and bob, receives cid0, and then offboards bob
     // 2. p1 hosts only alice and receives cid0
     "process a party offboarding scenario" in {
-      val fixtureBobOffboarded = new Fixture(p1)
+      val fixtureBobOffboarded = new Fixture()
 
       Source(
         Seq(
@@ -323,9 +328,13 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobOffboarded.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
 
-      val fixtureBobNotHosted = new Fixture(p1)
+      fixtureBobOffboarded.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
+
+      val fixtureBobNotHosted = new Fixture()
       Source(
         Seq(
           from(tp(2))(
@@ -340,7 +349,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(fixtureBobNotHosted.accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      fixtureBobNotHosted.accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // All in-memory state has been evicted
       fixtureBobNotHosted.accumulator.digestsUsageCounters shouldBe empty
@@ -351,23 +364,21 @@ class InMemoryDigestAccumulatorTest
 
       for {
         party <- Seq(alice, bob)
-        order <- Seq(LocalPartyFirst, RemotePartyFirst)
       } yield {
         val digestNotHosted =
-          fixtureBobNotHosted.lookupPartyDigest(party, order).value.digestUpdate.digestO
+          fixtureBobNotHosted.lookupPartyDigest(party).value.digestUpdate.digestO
         val digestOffboarded =
-          fixtureBobOffboarded.lookupPartyDigest(party, order).value.digestUpdate.digestO
+          fixtureBobOffboarded.lookupPartyDigest(party).value.digestUpdate.digestO
         digestNotHosted shouldBe digestOffboarded
       }
     }
 
     "not store empty initial digests" in {
-      val fixture = new Fixture(p1)
+      val fixture = new Fixture()
       import fixture.*
 
       lookupParticipantDigest(p2) shouldBe empty
-      lookupPartyDigest(alice, RemotePartyFirst) shouldBe empty
-      lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
+      lookupPartyDigest(alice) shouldBe empty
 
       Source(
         Seq(
@@ -376,23 +387,25 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(4)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(4), off(4), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(4), off(4), ReconciliationIntervalBoundary))
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        4
+      ).toMicros
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
 
       lookupParticipantDigest(p2) shouldBe empty
-      lookupPartyDigest(alice, RemotePartyFirst) shouldBe empty
-      lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
+      lookupPartyDigest(alice) shouldBe empty
     }
 
     "store empty digests after a non-empty initial digest" in {
-      val fixture = new Fixture(p1)
+      val fixture = new Fixture()
       import fixture.*
 
       lookupParticipantDigest(p2) shouldBe empty
-      lookupPartyDigest(alice, RemotePartyFirst) shouldBe empty
-      lookupPartyDigest(alice, LocalPartyFirst) shouldBe empty
+      lookupPartyDigest(alice) shouldBe empty
 
       val activation = AcsUpdate(
         stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
@@ -411,7 +424,11 @@ class InMemoryDigestAccumulatorTest
           checkpoint(tp(3)),
         )
       ).via(accumulator.flow()).runWith(Sink.seq).futureValue shouldBe
-        Seq(CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+        Seq(CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary))
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -427,9 +444,8 @@ class InMemoryDigestAccumulatorTest
       // check digests for parties
       for {
         party <- Seq(alice, bob)
-        order <- Seq(RemotePartyFirst, LocalPartyFirst)
       } yield {
-        val digest = lookupPartyDigest(party, order).value
+        val digest = lookupPartyDigest(party).value
         digest.digestUpdate.offset shouldBe off(2)
         digest.replacesOffset shouldBe Some(off(1))
         digest.digestUpdate.digestO shouldBe empty
@@ -437,7 +453,7 @@ class InMemoryDigestAccumulatorTest
     }
 
     "not create cycles in the replacement chain" in {
-      val fixture = new Fixture(p1)
+      val fixture = new Fixture()
       import fixture.*
 
       val (source, sink) = testSource.via(accumulator.flow()).toMat(testSink)(Keep.both).run()
@@ -456,14 +472,14 @@ class InMemoryDigestAccumulatorTest
           )
         )
         .sendNext(checkpoint(tp(2)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(2), off(2), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(2), off(2), ReconciliationIntervalBoundary)
 
       // the first entry doesn't replace anything
       for {
         party <- Seq(alice, bob)
-        order <- Seq(RemotePartyFirst, LocalPartyFirst)
       } {
-        lookupPartyDigest(party, order).value.replacesOffset shouldBe empty
+        lookupPartyDigest(party).value.replacesOffset shouldBe empty
       }
       lookupParticipantDigest(p1).value.replacesOffset shouldBe empty
 
@@ -484,15 +500,19 @@ class InMemoryDigestAccumulatorTest
         // Force an intermediate checkpoint to be written so that we persist an intermediate result.
         // Such checkpoints should not happen in practice because they would corrupt crash recovery.
         .sendNext(checkpoint(tp(3)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(3), off(3), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(3), off(3), ReconciliationIntervalBoundary)
       sink.request(1)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        3
+      ).toMicros
 
       // processing an update on a later offset should properly set replacesOffset
       for {
         party <- Seq(alice, bob)
-        order <- Seq(RemotePartyFirst, LocalPartyFirst)
       } {
-        lookupPartyDigest(party, order).value.replacesOffset.value shouldBe off(1)
+        lookupPartyDigest(party).value.replacesOffset.value shouldBe off(1)
       }
       lookupParticipantDigest(p1).value.replacesOffset.value shouldBe off(1)
 
@@ -509,15 +529,19 @@ class InMemoryDigestAccumulatorTest
           )
         )
         .sendNext(checkpoint(tp(4)))
-      sink.expectNext() shouldBe CheckpointWritten(ts(4), off(4), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(4), off(4), ReconciliationIntervalBoundary)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        4
+      ).toMicros
 
       // since the first persisted update at off(2) was just an intermediate result that got persisted,
       // another update for the same offset should retain the original replacesOffset
       for {
         party <- Seq(alice, bob)
-        order <- Seq(RemotePartyFirst, LocalPartyFirst)
       } {
-        lookupPartyDigest(party, order).value.replacesOffset.value shouldBe off(1)
+        lookupPartyDigest(party).value.replacesOffset.value shouldBe off(1)
       }
       lookupParticipantDigest(p1).value.replacesOffset.value shouldBe off(1)
 
@@ -528,7 +552,7 @@ class InMemoryDigestAccumulatorTest
     // send a checkpoint and 19 ACS updates and then another checkpoint through the flow while the store is blocked.
     // this should conflate all 19 ACS updates into one store update
     "conflate multiple updates when the writing to the store is slow" in {
-      val fixture = new Fixture(p1, acsUpdateBatchSize = 10)
+      val fixture = new Fixture(acsUpdateBatchSize = 10)
       import fixture.*
 
       val storeBlockPromise = Promise[Unit]()
@@ -580,18 +604,26 @@ class InMemoryDigestAccumulatorTest
           ParticipantDigestIdentifier(
             stringInterning.participantId.internalize(participant)
           ) -> count
-        } ++ Seq(LocalPartyFirst, RemotePartyFirst).flatMap(order =>
-          Seq(alice -> 19, bob -> 10, carol -> 6)
-            .map { case (party, count) =>
-              PartyDigestIdentifier(stringInterning.party.internalize(party), order) -> count
-            }
-        )
+        } ++ Seq(alice -> 19, bob -> 10, carol -> 6)
+          .map { case (party, count) =>
+            PartyDigestIdentifier(stringInterning.party.internalize(party)) -> count
+          }
+
       SortedMap.from(accumulator.digestsUsageCounters) shouldBe
         SortedMap.from(expectedDigestUsage)
 
       storeBlockPromise.success(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary)
-      sink.expectNext() shouldBe CheckpointWritten(ts(20), off(20), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary)
+      sink.expectNext() shouldBe CheckpointToBeWritten(
+        ts(20),
+        off(20),
+        ReconciliationIntervalBoundary,
+      )
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        20
+      ).toMicros
 
       // All in-memory state has been evicted
       // accumulator.digestsUsageCounters shouldBe empty
@@ -601,11 +633,9 @@ class InMemoryDigestAccumulatorTest
       p1DU.replacesOffset shouldBe None
 
       forAll(Seq(alice, bob)) { party =>
-        forAll(Seq(LocalPartyFirst, RemotePartyFirst)) { order =>
-          val partyDU = lookupPartyDigest(party, order, off(20)).value
-          partyDU.digestUpdate.offset shouldBe off(20)
-          partyDU.replacesOffset shouldBe None
-        }
+        val partyDU = lookupPartyDigest(party, off(20)).value
+        partyDU.digestUpdate.offset shouldBe off(20)
+        partyDU.replacesOffset shouldBe None
       }
 
       source.sendComplete()
@@ -615,8 +645,7 @@ class InMemoryDigestAccumulatorTest
     // Send more updates than fit into the acsUpdateBatch size and expect that backpressure kicks in.
     "conflation backpressures" in {
       val fixture = new Fixture(
-        p1,
-        acsUpdateBatchSize = 9,
+        acsUpdateBatchSize = 6,
         // Make room for elements to end up in the `async` buffers so that we can measure backpressure.
         digestLoadParallelism = 8,
       )
@@ -648,7 +677,7 @@ class InMemoryDigestAccumulatorTest
       }
       source.sendNext(
         from(tp(2))(
-          // 6 digest identifiers (2 parties * 2 orders + 2 participants)
+          // 4 digest identifiers (2 parties + 2 participants)
           AcsUpdate(
             stakeholders = Map(alice -> Set(p1), bob -> Set(p2)),
             locallyHostedStakeholders = Seq(alice),
@@ -660,7 +689,7 @@ class InMemoryDigestAccumulatorTest
       )
       source.sendNext(
         from(tp(3))(
-          // 3 more digest identifiers (1 party * 2 orders + 1 participant)
+          // 2 more digest identifiers (1 party + 1 participant)
           AcsUpdate(
             stakeholders = Map(alice -> Set(p1), carol -> Set(p3)),
             locallyHostedStakeholders = Seq(alice),
@@ -696,17 +725,22 @@ class InMemoryDigestAccumulatorTest
           ParticipantDigestIdentifier(
             stringInterning.participantId.internalize(participant)
           ) -> count
-        } ++ Seq(LocalPartyFirst, RemotePartyFirst).flatMap(order =>
-          Seq(alice -> 3, bob -> 1, carol -> 2, dave -> 1).map { case (party, count) =>
-            PartyDigestIdentifier(stringInterning.party.internalize(party), order) -> count
-          }
-        )
+        } ++ Seq(alice -> 3, bob -> 1, carol -> 2, dave -> 1).map { case (party, count) =>
+          PartyDigestIdentifier(stringInterning.party.internalize(party)) -> count
+        }
+
       SortedMap.from(accumulator.digestsUsageCounters) shouldBe
         SortedMap.from(expectedUsages)
 
       storeBlockPromise.success(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(1), off(1), ReconciliationIntervalBoundary)
-      sink.expectNext() shouldBe CheckpointWritten(ts(5), off(5), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(5), off(5), ReconciliationIntervalBoundary)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
+        5
+      ).toMicros
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty
@@ -727,16 +761,15 @@ class InMemoryDigestAccumulatorTest
       )
 
       forAll(partyDigestUpdates) { (party, offset, expected) =>
-        forAll(Seq(LocalPartyFirst, RemotePartyFirst)) { order =>
-          val partyDUO = lookupPartyDigest(party, order, offset)
-          expected match {
-            case None => partyDUO shouldBe empty
-            case Some((expectedOffset, replaces)) =>
-              val partyDU = partyDUO.value
-              partyDU.digestUpdate.offset shouldBe expectedOffset
-              partyDU.replacesOffset shouldBe replaces
-          }
+        val partyDUO = lookupPartyDigest(party, offset)
+        expected match {
+          case None => partyDUO shouldBe empty
+          case Some((expectedOffset, replaces)) =>
+            val partyDU = partyDUO.value
+            partyDU.digestUpdate.offset shouldBe expectedOffset
+            partyDU.replacesOffset shouldBe replaces
         }
+
       }
 
       val participantDigestUpdates = Table(
@@ -769,15 +802,16 @@ class InMemoryDigestAccumulatorTest
       val stringInterning = new MockStringInterning()
       val digestStore = new BlockingAcsDigestStore(stringInterning, loggerFactory)
       val accumulator = new InMemoryDigestAccumulator(
-        p1,
         digestStore,
         loggerFactory,
         stringInterning,
         acsUpdateBatchSize = 1,
         digestLoadParallelism = 2,
-        digestStoreParallelism = 1,
+        digestComputeParallelism = 1,
+        bufferSize = 0,
         tracingMode = AcsDigestTracingMode.Disabled,
         enableConsistencyChecks = true,
+        metrics = TestCommitmentMetrics(),
       )
 
       val releaseP = PromiseUnlessShutdown.unsupervised[Unit]()
@@ -835,7 +869,8 @@ class InMemoryDigestAccumulatorTest
           )
         )
       )
-      // This request should not go into the stream, but it ends up in the buffer of the `loadingBlocker`.
+      // This request should not go into the stream,
+      // but it ends up in the buffer of the `mapAsync` for computing digest changes.
       source.sendNext(
         from(tp(4))(
           // 3 more digest identifiers (1 party * 2 orders + 1 participant)
@@ -848,8 +883,8 @@ class InMemoryDigestAccumulatorTest
           )
         )
       )
-      // This request should not go into the stream.
-      // We can still send it to the source because the flow has a non-trivial input buffer of its own.
+      // This request should not go into the stream,
+      // but it ends up in the buffer of the `computeDigestBlocker`
       source.sendNext(
         from(tp(5))(
           // 3 more digest identifiers (1 party * 2 orders + 1 participant)
@@ -862,37 +897,61 @@ class InMemoryDigestAccumulatorTest
               evelyn -> Set(p5),
             ),
             locallyHostedStakeholders = Seq(alice),
-            cid3,
+            cid4,
             rc0,
             isActivation = true,
           )
         )
       )
-      source.sendNext(checkpoint(tp(6)))
+      // This request should not go into the stream.
+      // We can still send it to the source because the flow has a non-trivial input buffer of its own.
+      source.sendNext(
+        from(tp(6))(
+          // 3 more digest identifiers (1 party * 2 orders + 1 participant)
+          AcsUpdate(
+            stakeholders = Map(
+              alice -> Set(p1),
+              bob -> Set(p2),
+              carol -> Set(p3),
+              dave -> Set(p4),
+              evelyn -> Set(p5),
+              frank -> Set(p6),
+            ),
+            locallyHostedStakeholders = Seq(alice),
+            cid5,
+            rc0,
+            isActivation = true,
+          )
+        )
+      )
+      source.sendNext(checkpoint(tp(7)))
       always() {
-        loadingCounter.get should be <= 4
+        loadingCounter.get should be <= 5
       }
       eventually() {
-        loadingCounter.get shouldBe 4
+        loadingCounter.get shouldBe 5
       }
 
       // Check that the usage counters are as expected
       val expectedDigestUsage =
-        Seq(p1 -> 4, p2 -> 3, p3 -> 2, p4 -> 1).map { case (participant, count) =>
+        Seq(p1 -> 5, p2 -> 4, p3 -> 3, p4 -> 2, p5 -> 1).map { case (participant, count) =>
           ParticipantDigestIdentifier(
             stringInterning.participantId.internalize(participant)
           ) -> count
-        } ++ Seq(LocalPartyFirst, RemotePartyFirst).flatMap(order =>
-          Seq(alice -> 4, bob -> 3, carol -> 2, dave -> 1)
-            .map { case (party, count) =>
-              PartyDigestIdentifier(stringInterning.party.internalize(party), order) -> count
-            }
-        )
+        } ++ Seq(alice -> 5, bob -> 4, carol -> 3, dave -> 2, evelyn -> 1)
+          .map { case (party, count) =>
+            PartyDigestIdentifier(stringInterning.party.internalize(party)) -> count
+          }
+
       SortedMap.from(accumulator.digestsUsageCounters) shouldBe
         SortedMap.from(expectedDigestUsage)
 
       releaseP.outcome_(())
-      sink.expectNext() shouldBe CheckpointWritten(ts(6), off(6), ReconciliationIntervalBoundary)
+      sink
+        .expectNext() shouldBe CheckpointToBeWritten(ts(7), off(7), ReconciliationIntervalBoundary)
+
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe
+        ts(7).toMicros
 
       source.sendComplete()
       sink.expectComplete()
