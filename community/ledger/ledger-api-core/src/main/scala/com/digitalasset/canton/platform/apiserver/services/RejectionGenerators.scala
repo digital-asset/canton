@@ -98,6 +98,9 @@ object RejectionGenerators {
         case LfInterpretationError.ContractNotFound(cid) =>
           ConsistencyErrors.ContractNotFound
             .Reject(renderedMessage, cid)
+        case LfInterpretationError.UnsupportedContractId(cid) =>
+          ConsistencyErrors.UnsupportedContractId
+            .Reject(renderedMessage, cid)
         case LfInterpretationError.ContractKeyNotFound(key) =>
           CommandExecutionErrors.Interpreter.LookupErrors.ContractKeyNotFound
             .Reject(renderedMessage, key)

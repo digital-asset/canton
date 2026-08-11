@@ -143,7 +143,7 @@ object TeaProjectionFactory {
           )
         (projection, store)
       case _: MemoryStorage =>
-        val store = new TeaMemoryTrafficStore()
+        val store = new TeaMemoryTrafficStore(loggerFactory)
         val projection: TeaProjectionFactory =
           new TeaMemoryProjectionFactory(loggerFactory, store, onEventCommitted)
         (projection, store)

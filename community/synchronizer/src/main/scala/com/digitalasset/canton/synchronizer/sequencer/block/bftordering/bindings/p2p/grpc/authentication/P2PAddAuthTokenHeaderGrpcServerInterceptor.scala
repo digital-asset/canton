@@ -74,14 +74,9 @@ private[bftordering] class P2PAddAuthTokenHeaderGrpcServerInterceptor(
       next: ServerCallHandler[ReqT, RespT],
   ): ServerCall.Listener[ReqT] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    Option(requestHeaders.get(P2PAddEndpointHeaderGrpcClientInterceptor.ENDPOINT_METADATA_KEY))
-      .orElse(
-        Option(
-          requestHeaders.get(
-            P2PAddEndpointHeaderGrpcClientInterceptor.ENDPOINT_METADATA_KEY_DEPRECATED
-          )
-        )
-      ) match {
+    Option(
+      requestHeaders.get(P2PAddEndpointHeaderGrpcClientInterceptor.ENDPOINT_METADATA_KEY)
+    ) match {
       case Some(p2pEndpoint) =>
         val p2pEndpointId = p2pEndpoint.id
         logger.info(
@@ -174,19 +169,30 @@ object P2PAddAuthTokenHeaderGrpcServerInterceptor {
       extends GrpcSimpleForwardingServerCall[ReqT, RespT](call)
       with NamedLogging {
 
-    override def sendHeaders(responseHeaders: Metadata): Unit = {
-      logger.info(
-        s"Retrieving sequencer client authentication token to authenticate this P2P server to $p2pEndpointId"
-      )
+    private val closed = new java.util.concurrent.atomic.AtomicBoolean(false)
 
-      val tokenFetcher =
-        new ChannelTokenFetcher(
-          tokenProvider,
-          Endpoint(p2pEndpointId.address, p2pEndpointId.port),
-          authenticationServiceChannel,
+    private def cleanupChannel(): Unit =
+      if (closed.compareAndSet(false, true)) {
+        logger.debug(
+          s"Closing the authentication service channel $authenticationServiceChannel " +
+            s"for authenticating this P2P server to $p2pEndpointId"
+        )
+        liveChannels.remove(authenticationServiceChannel).discard
+        authenticationServiceChannel.close()
+      }
+
+    override def sendHeaders(responseHeaders: Metadata): Unit = {
+      Try {
+        logger.info(
+          s"Retrieving sequencer client authentication token to authenticate this P2P server to $p2pEndpointId"
         )
 
-      Try(
+        val tokenFetcher =
+          new ChannelTokenFetcher(
+            tokenProvider,
+            Endpoint(p2pEndpointId.address, p2pEndpointId.port),
+            authenticationServiceChannel,
+          )
         timeouts.network
           .awaitUS("tokenFetcher")( // Unfortunately, headers must be set synchronously
             tokenFetcher.apply
@@ -220,7 +226,7 @@ object P2PAddAuthTokenHeaderGrpcServerInterceptor {
                 "and added authentication headers"
             )
         }
-      ).fold(
+      }.fold(
         logger.warn(
           s"Timed out while trying to fetch P2P server authentication token to $p2pEndpointId",
           _,
@@ -228,15 +234,17 @@ object P2PAddAuthTokenHeaderGrpcServerInterceptor {
         _ => (),
       )
 
-      logger.debug(
-        s"Closing the authentication service channel $authenticationServiceChannel " +
-          s"for authenticating this P2P server to $p2pEndpointId"
-      )
-      liveChannels.remove(authenticationServiceChannel).discard
-      authenticationServiceChannel.close()
+      cleanupChannel()
 
       logger.debug(s"Sending server response headers to $p2pEndpointId")
       super.sendHeaders(responseHeaders)
     }
+
+    override def close(status: Status, trailers: Metadata): Unit =
+      try {
+        super.close(status, trailers)
+      } finally {
+        cleanupChannel() // Ensures channel is closed if sendHeaders was never called
+      }
   }
 }

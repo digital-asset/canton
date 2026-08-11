@@ -4,6 +4,7 @@
 package com.digitalasset.canton.admin.api.client.data
 
 import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.NonEmptyUtil.instances.*
 import com.digitalasset.canton.admin.api.client.data.crypto.{
@@ -350,35 +351,35 @@ final case class DynamicSynchronizerParameters(
   )
 
   private[canton] def toInternal: Either[String, DynamicSynchronizerParametersInternal] =
-    DynamicSynchronizerParametersInternal
-      .protocolVersionRepresentativeFor(ProtoVersion(30))
-      .leftMap(_.message)
-      .map { rpv =>
-        DynamicSynchronizerParametersInternal.tryCreate(
-          confirmationResponseTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(confirmationResponseTimeout),
-          mediatorReactionTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
-          assignmentExclusivityTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(assignmentExclusivityTimeout),
-          ledgerTimeRecordTimeTolerance =
-            InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
-          mediatorDeduplicationTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
-          reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
-          maxRequestSize = MaxRequestSize(maxRequestSize),
-          sequencerAggregateSubmissionTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
-          trafficControl = trafficControl.map(_.toInternal),
-          onboardingRestriction =
-            onboardingRestriction.transformInto[OnboardingRestrictionInternal],
-          acsCommitmentsCatchUpParameters = acsCommitmentsCatchUp
-            .map(_.transformInto[AcsCommitmentsCatchUpParametersInternal]),
-          participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
-          preparationTimeRecordTimeTolerance =
-            InternalNonNegativeFiniteDuration.fromConfig(preparationTimeRecordTimeTolerance),
-        )(rpv)
-      }
+    for {
+      rpv <- DynamicSynchronizerParametersInternal
+        .protocolVersionRepresentativeFor(ProtoVersion(30))
+        .leftMap(_.message)
+      // cannot use chimney here: the internal constructor is private to enforce its invariants
+      acsCommitmentsCatchUpInternal <- acsCommitmentsCatchUp.traverse(_.toInternal)
+    } yield DynamicSynchronizerParametersInternal.tryCreate(
+      confirmationResponseTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(confirmationResponseTimeout),
+      mediatorReactionTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
+      assignmentExclusivityTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(assignmentExclusivityTimeout),
+      ledgerTimeRecordTimeTolerance =
+        InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
+      mediatorDeduplicationTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
+      reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
+      maxRequestSize = MaxRequestSize(maxRequestSize),
+      sequencerAggregateSubmissionTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
+      trafficControl = trafficControl.map(_.toInternal),
+      onboardingRestriction = onboardingRestriction.transformInto[OnboardingRestrictionInternal],
+      acsCommitmentsCatchUpParameters = acsCommitmentsCatchUpInternal,
+      participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
+      preparationTimeRecordTimeTolerance =
+        InternalNonNegativeFiniteDuration.fromConfig(preparationTimeRecordTimeTolerance),
+    )(rpv)
+
 }
 
 object DynamicSynchronizerParameters {
@@ -479,4 +480,9 @@ final case class AcsCommitmentsCatchUpParameters(
       param("catch up interval skip", _.catchUpIntervalSkip),
       param("number of intervals to trigger catch up", _.nrIntervalsToTriggerCatchUp),
     )
+
+  /** The internal representation enforces invariants on these values, so the conversion can fail.
+    */
+  private[canton] def toInternal: Either[String, AcsCommitmentsCatchUpParametersInternal] =
+    AcsCommitmentsCatchUpParametersInternal.create(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
 }

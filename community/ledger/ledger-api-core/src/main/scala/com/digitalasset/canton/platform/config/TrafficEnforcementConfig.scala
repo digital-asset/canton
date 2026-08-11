@@ -23,6 +23,11 @@ import com.typesafe.config.{Config, ConfigFactory}
   *   the account associated with the submission is correctly permissioned and has sufficient
   *   balance to cover the expected traffic cost. If the account has insufficient balance, the
   *   submission will be rejected. Disabled by default.
+  * @param rejectMultiPartySubmissions
+  *   Whether to reject submissions whose actAs has more than one party. TEA accounts are bound to a
+  *   single party, so by default such submissions bypass traffic enforcement entirely (validation
+  *   is skipped and an informational message is logged). When enabled, such submissions are
+  *   rejected instead. Disabled by default.
   * @param trafficEnforcementServer
   *   The configuration for the connection to the traffic server. Currently, only the internal,
   *   in-process server variant is supported.
@@ -30,6 +35,7 @@ import com.typesafe.config.{Config, ConfigFactory}
 final case class TrafficEnforcementConfig(
     enabled: Boolean = false,
     enforceCostOnSubmissions: Boolean = false,
+    rejectMultiPartySubmissions: Boolean = false,
     trafficEnforcementServer: TrafficEnforcementServerConfig =
       TrafficEnforcementServerConfig.Internal(),
 )

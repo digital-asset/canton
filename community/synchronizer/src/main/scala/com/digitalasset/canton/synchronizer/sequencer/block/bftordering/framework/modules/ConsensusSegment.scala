@@ -47,6 +47,8 @@ import com.digitalasset.canton.version.{
 }
 import com.google.protobuf.ByteString
 
+import java.time.Instant
+
 import ConsensusSegment.ConsensusMessage.PbftNetworkMessage.headerFromProto
 
 object ConsensusSegment {
@@ -741,11 +743,14 @@ object ConsensusSegment {
         signedMessages: Seq[SignedMessage[PrePrepare]],
     ) extends PbftViewChangeEvent
 
-    final case class BlockOrdered(metadata: BlockMetadata, isEmpty: Boolean)
+    final case class BlockOrdered(
+        metadata: BlockMetadata,
+        isEmpty: Boolean,
+    ) extends ConsensusMessage
+
+    final case class CompletedLedSegment(epochNumber: EpochNumber, timeWhenItCompleted: Instant)
         extends ConsensusMessage
-
     final case class CompletedEpoch(epochNumber: EpochNumber) extends ConsensusMessage
-
     final case class CancelEpoch(epochNumber: EpochNumber) extends ConsensusMessage
   }
 }

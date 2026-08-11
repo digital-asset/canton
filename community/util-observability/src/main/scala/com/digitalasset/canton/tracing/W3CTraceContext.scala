@@ -48,11 +48,11 @@ object W3CTraceContext {
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   def fromOpenTelemetryContext(context: OpenTelemetryContext): Option[W3CTraceContext] = {
     var builder = new W3CTraceContextBuilder
-    val setter: TextMapSetter[W3CTraceContextBuilder] = (carrier, key, value) =>
+    val setter: TextMapSetter[W3CTraceContextBuilder] = (_, key, value) =>
       builder = key match {
-        case TRACEPARENT_HEADER_NAME => carrier.copy(parent = Some(value))
-        case TRACESTATE_HEADER_NAME => carrier.copy(state = Some(value))
-        case _ => carrier
+        case TRACEPARENT_HEADER_NAME => builder.copy(parent = Some(value))
+        case TRACESTATE_HEADER_NAME => builder.copy(state = Some(value))
+        case _ => builder
       }
     propagator.inject(context, builder, setter)
     builder.build

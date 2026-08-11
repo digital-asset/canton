@@ -17,13 +17,16 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning
-import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.TrafficAccountValidationFailed
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
 import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.config.{
   TrafficEnforcementConfig,
   TrafficEnforcementServerConfig,
+}
+import com.digitalasset.canton.tea.TrafficEnforcementErrors.{
+  InsufficientBalance,
+  MultiPartySubmissionRejected,
 }
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
@@ -62,9 +65,29 @@ sealed trait ParticipantTrafficEnforcementTest
   protected var charlie: PartyId = _
   protected var dan: PartyId = _
 
-  /** Participant config transforms to enable or disable participant-local traffic enforcement.
+  /** Default participant config transforms to enable TEA with cost enforcement on. Subclasses can
+    * add focused transforms on top for this.
     */
-  protected def participantConfigTransforms: Seq[ConfigTransform]
+  protected def defaultTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
+    ConfigTransforms.updateParticipantConfig("participant1")(
+      _.focus(_.trafficEnforcement)
+        .replace(
+          TrafficEnforcementConfig(
+            enabled = true,
+            enforceCostOnSubmissions = true,
+            trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
+          )
+        )
+    ),
+    // Shorten network timeout so retries to the non-existent traffic service give up quickly
+    _.focus(_.parameters.timeouts.processing.network)
+      .replace(config.NonNegativeDuration.tryFromDuration(5.seconds)),
+  )
+
+  protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq.empty
+
+  protected final def participantConfigTransforms: Seq[ConfigTransform] =
+    defaultTrafficEnforcementConfigTransforms ++ extraTrafficEnforcementConfigTransforms
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
@@ -105,9 +128,9 @@ sealed trait ParticipantTrafficEnforcementTest
 }
 
 final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTrafficEnforcementTest {
-  override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
+  override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement).replace(TrafficEnforcementConfig(enabled = false))
+      _.focus(_.trafficEnforcement.enabled).replace(false)
     )
   )
 
@@ -156,22 +179,6 @@ final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTraffic
 
 final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficEnforcementTest {
   registerPlugin(new UsePostgres(loggerFactory))
-
-  override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement)
-        .replace(
-          TrafficEnforcementConfig(
-            enabled = true,
-            enforceCostOnSubmissions = true,
-            trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
-          )
-        )
-    ),
-    // Shorten network timeout so retries to the non-existent traffic service give up quickly
-    _.focus(_.parameters.timeouts.processing.network)
-      .replace(config.NonNegativeDuration.tryFromDuration(5.seconds)),
-  )
 
   "Participant" when {
     "traffic enforcement is enabled" should {
@@ -230,7 +237,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           participant1.ledger_api.javaapi.commands
             .submit(Seq(eveE), iouCreateCmds),
           entry => {
-            entry.shouldBeCantonErrorCode(TrafficAccountValidationFailed)
+            entry.shouldBeCantonErrorCode(InsufficientBalance)
             entry.message should include regex raw".*Insufficient balance \(0\) for actual traffic cost \([1-9][0-9]*\) for account ${eveE.partyId.toProtoPrimitive}"
           },
         )
@@ -251,7 +258,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           participant1.ledger_api.javaapi.commands
             .submit(Seq(eveE), iouCreateCmds),
           entry => {
-            entry.shouldBeCantonErrorCode(TrafficAccountValidationFailed)
+            entry.shouldBeCantonErrorCode(InsufficientBalance)
             entry.message should include regex raw".*Insufficient balance \(1\) for actual traffic cost \([1-9][0-9]*\) for account ${eveE.partyId.toProtoPrimitive}"
           },
         )
@@ -461,22 +468,13 @@ final class ParticipantTrafficEnforcementSubmissionDisabledTest
     extends ParticipantTrafficEnforcementTest {
   registerPlugin(new UsePostgres(loggerFactory))
 
-  override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
+  override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement)
-        .replace(
-          TrafficEnforcementConfig(
-            enabled = true,
-            enforceCostOnSubmissions = false,
-            trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
-          )
-        )
+      _.focus(_.trafficEnforcement.enforceCostOnSubmissions)
+        .replace(false)
         .focus(_.parameters.alphaVersionSupport)
         .replace(true)
-    ),
-    // Shorten network timeout so retries to the non-existent traffic service give up quickly
-    _.focus(_.parameters.timeouts.processing.network)
-      .replace(config.NonNegativeDuration.tryFromDuration(5.seconds)),
+    )
   )
 
   "Participant" when {
@@ -509,6 +507,60 @@ final class ParticipantTrafficEnforcementSubmissionDisabledTest
   }
 }
 
+final class ParticipantTrafficEnforcementRejectMultiPartyTest
+    extends ParticipantTrafficEnforcementTest {
+  registerPlugin(new UsePostgres(loggerFactory))
+
+  override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
+    ConfigTransforms.updateParticipantConfig("participant1")(
+      _.focus(_.trafficEnforcement.rejectMultiPartySubmissions).replace(true)
+    )
+  )
+
+  "Participant" when {
+    "traffic enforcement is enabled with reject-multi-party-submissions=true" should {
+      "reject a multi-act-as submission" in { implicit env =>
+        import env.*
+
+        val actAs = Seq(charlie, dan)
+
+        assertThrowsAndLogsCommandFailures(
+          participant1.ledger_api.commands
+            .submit(
+              actAs = actAs,
+              commands = Seq(createCycleCommand(charlie, "traffic")),
+            )
+            .discard,
+          entry => {
+            entry.shouldBeCantonErrorCode(MultiPartySubmissionRejected)
+            entry.message should include(
+              show"Traffic enforcement rejected submission with non-singleton actAs parties: $actAs"
+            )
+          },
+        )
+      }
+
+      "still validate a single-actAs submission normally" in { implicit env =>
+        import env.*
+
+        val charlieId = charlie.toProtoPrimitive
+        participant1.ledger_api.traffic.update_account(charlieId, balanceDelta = Some(1_000_000L))
+        val initialBalance = participant1.ledger_api.traffic.get_account(charlieId).balance
+
+        val transaction = participant1.ledger_api.javaapi.commands
+          .submit(Seq(charlie), Seq(createCycleCommandJava(charlie, "traffic-single")))
+        val cost = transaction.getPaidTrafficCost
+
+        eventually() {
+          participant1.ledger_api.traffic
+            .get_account(charlieId)
+            .balance shouldBe (initialBalance - cost)
+        }
+      }
+    }
+  }
+}
+
 /** Like [[ParticipantTrafficEnforcementEnabledTest]] but with a real LAPI auth service configured,
   * so [[com.digitalasset.canton.auth.TeaTokenAuthService]] is on the code path.
   */
@@ -522,17 +574,9 @@ final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTraffic
       super.beforeAll()
     }
 
-  override protected def participantConfigTransforms: Seq[ConfigTransform] = Seq(
+  override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement)
-        .replace(
-          TrafficEnforcementConfig(
-            enabled = true,
-            enforceCostOnSubmissions = true,
-            trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
-          )
-        )
-        .focus(_.ledgerApi.authServices)
+      _.focus(_.ledgerApi.authServices)
         .replace(
           Seq(
             AuthServiceConfig.UnsafeJwtHmac256(
@@ -545,10 +589,7 @@ final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTraffic
         // The admin token needs ClaimAdmin for: setup-time external party allocation, update_account, and users.create.
         .focus(_.ledgerApi.adminTokenConfig.adminClaim)
         .replace(true)
-    ),
-    // Shorten network timeout so retries to the non-existent traffic service give up quickly
-    _.focus(_.parameters.timeouts.processing.network)
-      .replace(config.NonNegativeDuration.tryFromDuration(5.seconds)),
+    )
   )
 
   "Participant" when {

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
 import com.daml.metrics.api.MetricsContext
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -85,7 +86,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Commit,
   PrePrepare,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.EpochStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.{
+  EpochStatus,
+  SegmentStatus,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
@@ -1083,7 +1087,9 @@ class IssConsensusModuleTest
           ),
           RetransmissionsMessage.VerifiedNetworkMessage(
             RetransmissionsMessage.RetransmissionRequest(
-              EpochStatus.create(allIds(1), EpochNumber.First, Seq.empty).fakeSign
+              EpochStatus
+                .create(allIds(1), EpochNumber.First, NonEmpty.mk(Seq, SegmentStatus.Complete))
+                .fakeSign
             )
           ),
         ).forEvery { message =>
@@ -1554,6 +1560,7 @@ class IssConsensusModuleTest
             metrics,
             clock,
             loggerFactory,
+            logEndOfEpochProgress = true,
           )
         ),
         dependencies,

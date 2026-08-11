@@ -15,7 +15,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PartitionMode,
   PartitionSymmetry,
   PhaseDurations,
-  Probability,
   SimulationSettings,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering.{
@@ -24,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   TopologySettings,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.generateNodeOnboardingDelay
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import org.scalatest.Assertion
 import org.slf4j.event.Level

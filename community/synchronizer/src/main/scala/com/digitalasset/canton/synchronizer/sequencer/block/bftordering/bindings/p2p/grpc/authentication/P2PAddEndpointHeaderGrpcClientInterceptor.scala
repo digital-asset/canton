@@ -29,10 +29,7 @@ private[p2p] class P2PAddEndpointHeaderGrpcClientInterceptor(
 ) extends ClientInterceptor
     with NamedLogging {
 
-  import P2PAddEndpointHeaderGrpcClientInterceptor.{
-    ENDPOINT_METADATA_KEY,
-    ENDPOINT_METADATA_KEY_DEPRECATED,
-  }
+  import P2PAddEndpointHeaderGrpcClientInterceptor.ENDPOINT_METADATA_KEY
 
   override def interceptCall[ReqT, RespT](
       method: MethodDescriptor[ReqT, RespT],
@@ -47,11 +44,10 @@ private[p2p] class P2PAddEndpointHeaderGrpcClientInterceptor(
     ) {
       override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit = {
         logger.debug(
-          "Adding server endpoint headers to outgoing call: " +
-            s"$ENDPOINT_METADATA_KEY and $ENDPOINT_METADATA_KEY_DEPRECATED with value $peerEndpoint"
+          "Adding endpoint header to outgoing call: " +
+            s"$ENDPOINT_METADATA_KEY with value $peerEndpoint"
         )
         headers.put(ENDPOINT_METADATA_KEY, peerEndpoint)
-        headers.put(ENDPOINT_METADATA_KEY_DEPRECATED, peerEndpoint)
         super.start(responseListener, headers)
       }
     }
@@ -72,13 +68,6 @@ private[bftordering] object P2PAddEndpointHeaderGrpcClientInterceptor {
   val ENDPOINT_METADATA_KEY: Metadata.Key[P2PEndpoint] =
     Metadata.Key.of(
       s"cantonbft-p2p-endpoint${Metadata.BINARY_HEADER_SUFFIX}",
-      ENDPOINT_METADATA_MARSHALLER,
-    )
-
-  // TODO(#34353): remove in >= 3.5.11
-  val ENDPOINT_METADATA_KEY_DEPRECATED: Metadata.Key[P2PEndpoint] =
-    Metadata.Key.of(
-      s"${classOf[P2PEndpoint].getName.replace("$", "_")}-${Metadata.BINARY_HEADER_SUFFIX}",
       ENDPOINT_METADATA_MARSHALLER,
     )
 }

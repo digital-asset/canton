@@ -43,6 +43,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.BlockStatus
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -127,7 +128,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
       val message = ViewChange
@@ -190,7 +191,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       ) should contain theSameElementsInOrderAs List(
         SignPbftMessage(viewChangeMessage.message)
@@ -339,7 +340,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       ) shouldBe List(
         SignPbftMessage(viewChangeMessage.message)
@@ -489,7 +490,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(newViewMessage)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
       segment.isViewChangeInProgress shouldBe false
@@ -562,7 +563,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage(from = otherId3))),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
       val viewChangeMessage2 = ViewChange
@@ -616,7 +617,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage(from = otherId2))),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
       val myViewChangeMessage = ViewChange
@@ -708,7 +709,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage5(from = otherId2))),
           log => {
             log.level shouldBe INFO
-            log.message should be("Segment 0 moving from view number 0 to 5")
+            log.message should include("Segment 0 moving from view number 0 to 5")
           },
         )
       val myViewChangeMessage5 = ViewChange
@@ -751,7 +752,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage21(from = otherId2))),
           log => {
             log.level shouldBe INFO
-            log.message should be("Segment 0 moving from view number 5 to 21")
+            log.message should include("Segment 0 moving from view number 5 to 21")
           },
         )
       val myViewChangeMessageEvenFurther = ViewChange
@@ -835,7 +836,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(PbftSignedNetworkMessage(viewChangeMessage(from = otherId3))),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
 
@@ -993,7 +994,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(firstView)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
       val viewChangeFromTimeout = ViewChange
@@ -1047,7 +1048,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(secondView, nested = true)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 1 to 2")
+          log.message should include("Segment 0 moving from view number 1 to 2")
         },
       )
       val viewChangeFromNewTimeout = ViewChange
@@ -1230,7 +1231,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(view1)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
       val commitCertificate = CommitCertificate(
@@ -1339,7 +1340,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(view2)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 1 to 2")
+          log.message should include("Segment 0 moving from view number 1 to 2")
         },
       )
       val myViewChange = inside(results) { case Seq(SignPbftMessage(vc: ViewChange)) =>
@@ -1434,7 +1435,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           ),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       )
 
@@ -1510,7 +1511,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           ),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       ) should matchPattern { case List(_: ViewChangeCompleted) => }
 
@@ -1547,7 +1548,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           segment.processEvent(PbftSignedNetworkMessage(viewChangeMsgForView2)),
           log => {
             log.level shouldBe INFO
-            log.message should be("Segment 0 moving from view number 0 to 1")
+            log.message should include("Segment 0 moving from view number 0 to 1")
           },
         )
       results shouldBe Seq(SendPbftMessage(viewChangeMsgForView2, None, traceContext))
@@ -1624,7 +1625,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
 
       segmentState.status shouldBe ConsensusStatus.SegmentStatus.InProgress(
         ViewNumber.First,
-        Seq(
+        Seq[BlockStatus](
           ConsensusStatus.BlockStatus
             .InProgress(
               prePrepared = true,
@@ -1813,7 +1814,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(createTimeout(ViewNumber.First)),
         log => {
           log.level shouldBe INFO
-          log.message should be("Segment 0 moving from view number 0 to 1")
+          log.message should include("Segment 0 moving from view number 0 to 1")
         },
       ) shouldBe List(
         SignPbftMessage(createViewChange(view1 + 1, myId).message)

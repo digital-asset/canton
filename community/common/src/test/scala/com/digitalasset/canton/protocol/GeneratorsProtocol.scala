@@ -116,10 +116,12 @@ final class GeneratorsProtocol(
           } yield {
             if (!isNone)
               Some(
-                new AcsCommitmentsCatchUpParameters(
-                  PositiveInt.tryCreate(skip),
-                  PositiveInt.tryCreate(trigger),
-                )
+                AcsCommitmentsCatchUpParameters
+                  .create(
+                    PositiveInt.tryCreate(skip),
+                    PositiveInt.tryCreate(trigger),
+                  )
+                  .value
               )
             else None
           }

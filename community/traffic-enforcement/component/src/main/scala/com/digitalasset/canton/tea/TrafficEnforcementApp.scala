@@ -140,7 +140,7 @@ object TrafficEnforcementApp {
     val (projectionFactory, store) =
       TeaProjectionFactory.create(
         storage,
-        EventSource.LedgerAPI,
+        EventSource.LedgerAPICompletions,
         config.projection,
         loggerFactory,
         timeouts,

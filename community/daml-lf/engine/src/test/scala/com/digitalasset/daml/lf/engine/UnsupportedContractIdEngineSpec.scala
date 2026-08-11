@@ -73,29 +73,44 @@ class UnsupportedContractIdEngineSpec
 
   "Engine" should {
 
-    "crash when ResultNeedContract receives UnsupportedContractIdVersion" in {
+    "return UnsupportedContractId Error when ResultNeedContract receives UnsupportedContractIdVersion" in {
       // Use a CID that is not in defaultContracts so the engine asks for it.
       val coid = toContractId("BasicTests:Simple:99")
       val result = runFetchTemplate(coid)
 
       inside(driveAuxiliary(result)) { case ResultNeedContract(_, resume) =>
-        an[NotImplementedError] should be thrownBy
-          resume(ResultNeedContract.Response.UnsupportedContractIdVersion)
+        inside(resume(ResultNeedContract.Response.UnsupportedContractIdVersion)) {
+          case ResultError(err) =>
+            err shouldBe Error.Interpretation(
+              Error.Interpretation.DamlException(
+                interpretation.Error.UnsupportedContractId(coid)
+              ),
+              None,
+            )
+        }
       }
     }
 
-    "crash when a ResultNeedKey response contains only UnsupportedContractIdVersion" in {
+    "return UnsupportedContractId Error when a ResultNeedKey response contains only UnsupportedContractIdVersion" in {
       val coid = toContractId("BasicTests:WithKey:unsupported")
       val result = runFetchByKey()
 
       inside(driveAuxiliary(result)) { case ResultNeedKey(_, _, _, resume) =>
-        an[NotImplementedError] should be thrownBy
+        inside(
           resume(
             ResultNeedKey.Response(
               Vector(ResultNeedKey.Response.UnsupportedContractIdVersion(coid)),
               NeedKeyProgression.Finished,
             )
           )
+        ) { case ResultError(err) =>
+          err shouldBe Error.Interpretation(
+            Error.Interpretation.DamlException(
+              interpretation.Error.UnsupportedContractId(coid)
+            ),
+            None,
+          )
+        }
       }
     }
 

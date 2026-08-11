@@ -14,11 +14,12 @@ import com.digitalasset.canton.tea.projection.{
   AccountId,
   DeltaEvent,
   EventSource,
-  EventType,
   OffsetDeltaEvent,
   ProjectionEvent,
+  TrafficDelta,
 }
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.SerializableTraceContextConverter.*
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, Traced}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
@@ -78,7 +79,7 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
       offset: Long,
       paidTrafficCost: Long,
       recordTime: Option[CantonTimestamp] = Some(defaultRecordTime),
-  ): CompletionStreamResponse =
+  ): CompletionStreamResponse = TraceContext.withNewTraceContext("test-tc") { tc =>
     CompletionStreamResponse(
       CompletionStreamResponse.CompletionResponse.Completion(
         Completion.defaultInstance.copy(
@@ -91,9 +92,11 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
               recordTime = Some(rt.toProtoTimestamp),
             )
           ),
+          traceContext = SerializableTraceContext(tc).toDamlProto,
         )
       )
     )
+  }
 
   private val checkpointResponse: CompletionStreamResponse =
     CompletionStreamResponse(
@@ -161,7 +164,11 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
         ProjectionEvent(
           alice,
           OffsetDeltaEvent(
-            DeltaEvent(-3L, defaultRecordTime, EventType.Usage, EventSource.LedgerAPI),
+            DeltaEvent(
+              TrafficDelta.debitBalanceDelta(3),
+              defaultRecordTime,
+              EventSource.LedgerAPICompletions,
+            ),
             offset = 5L,
           ),
         )
@@ -182,14 +189,22 @@ class TeaDebitIngestionServiceTest extends AnyWordSpec with BaseTest with HasExe
         ProjectionEvent(
           alice,
           OffsetDeltaEvent(
-            DeltaEvent(-2L, defaultRecordTime, EventType.Usage, EventSource.LedgerAPI),
+            DeltaEvent(
+              TrafficDelta.debitBalanceDelta(2),
+              defaultRecordTime,
+              EventSource.LedgerAPICompletions,
+            ),
             1L,
           ),
         ),
         ProjectionEvent(
           bob,
           OffsetDeltaEvent(
-            DeltaEvent(-4L, defaultRecordTime, EventType.Usage, EventSource.LedgerAPI),
+            DeltaEvent(
+              TrafficDelta.debitBalanceDelta(4),
+              defaultRecordTime,
+              EventSource.LedgerAPICompletions,
+            ),
             3L,
           ),
         ),

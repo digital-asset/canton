@@ -1593,13 +1593,7 @@ final class AvailabilityModule[E <: Env[E]](
       from: BftNodeId,
   )(implicit traceContext: TraceContext): Either[() => Unit, Unit] =
     (for {
-      _ <- Either.cond(
-        BatchId.from(batch) == batchId,
-        (), {
-          emitInvalidMessage(metrics, from)
-          () => logBatchIdDoesntMatchBatchHashWarning(from)
-        },
-      )
+      _ <- validateBatchId(batchId, batch, from)
 
       // We use this node's current topology to infer maxRequestsInBatch and maxRequestPayloadBytes used for
       // validating batches being disseminated, instead of the topology based on the batch's epoch number, for a few reasons:
@@ -1689,17 +1683,23 @@ final class AvailabilityModule[E <: Env[E]](
       batch: OrderingRequestBatch,
       from: BftNodeId,
   )(implicit traceContext: TraceContext): Either[() => Unit, Unit] =
-    // Remotely fetched batches only need to be validated for their hash, to make sure we are getting the right payload, i.e.,
-    // the one that matches tha batch id. Otherwise, the payload being right, all the other validations have already been
-    // previously performed in a way that generated the quorum and proof-of-availability.
-    Either
-      .cond(
-        BatchId.from(batch) == batchId,
-        (), {
-          emitInvalidMessage(metrics, from)
-          () => logBatchIdDoesntMatchBatchHashWarning(from)
-        },
-      )
+    // Remotely fetched batches only need to be validated for their hash, to make sure we are getting the right payload,
+    //  i.e., the one that matches the batch id. Otherwise, the payload being right, all the other validations have
+    //  already been previously performed in a way that generated the quorum and proof-of-availability.
+    validateBatchId(batchId, batch, from)
+
+  private def validateBatchId(
+      batchId: BatchId,
+      batch: OrderingRequestBatch,
+      from: BftNodeId,
+  )(implicit traceContext: TraceContext): Either[() => Unit, Unit] =
+    Either.cond(
+      BatchId.from(batch) == batchId,
+      (), {
+        emitInvalidMessage(metrics, from)
+        () => logBatchIdDoesntMatchBatchHashWarning(from)
+      },
+    )
 
   /** Validates whether a batch received from a remote node exceeds the dissemination quota for that
     * node, returning a log action if the batch is invalid.

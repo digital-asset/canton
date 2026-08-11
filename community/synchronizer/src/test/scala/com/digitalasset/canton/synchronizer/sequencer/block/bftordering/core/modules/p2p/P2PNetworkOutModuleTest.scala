@@ -1259,7 +1259,10 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         .foreach(nodeActions.put(_, p2pConnectionEventListener).discard)
 
       new P2PNetworkRef[BftOrderingMessage]() {
-        override def asyncP2PSend(createMsg: Option[Instant] => BftOrderingMessage)(implicit
+        override def asyncP2PSend(
+            recipientBftNodeId: BftNodeId,
+            createMsg: Option[Instant] => BftOrderingMessage,
+        )(implicit
             traceContext: TraceContext,
             metricsContext: MetricsContext,
         ): Unit =

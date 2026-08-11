@@ -727,21 +727,25 @@ class Engine(
                   entries: Vector[ResultNeedKey.Response.ContractEntry],
                   callerHasStarted: NeedKeyProgression.HasStarted,
               ) = {
+                import cats.instances.either.*
+                import cats.instances.vector.*
+                import cats.syntax.traverse.*
                 val (enginePage, engineRest) = entries.splitAt(n)
-                val callerFcis = enginePage.map {
+                enginePage.traverse {
                   case ResultNeedKey.Response.AuthenticableFatContractInstance(
-                  contractInstance,
-                  _,
-                  _,
+                    contractInstance,
+                    _,
+                    _,
                   ) =>
-                    contractInstance
-                  case ResultNeedKey.Response.UnsupportedContractIdVersion(_) =>
-                    throw new NotImplementedError(
-                      "UnsupportedContractIdVersion is not yet supported."
-                    )
+                    Right(contractInstance)
+                  case ResultNeedKey.Response.UnsupportedContractIdVersion(coid) =>
+                    Left(interpretation.Error.UnsupportedContractId(coid))
+                } match {
+                  case Left(err) => ResultError(Error.Interpretation.DamlException(err))
+                  case Right(sanitizedPage) =>
+                    callback(sanitizedPage, wrapHasStarted(engineRest, callerHasStarted))
+                    interpretLoop(machine, time, submissionInfo)
                 }
-                callback(callerFcis, wrapHasStarted(engineRest, callerHasStarted))
-                interpretLoop(machine, time, submissionInfo)
               }
 
               def askCaller(callerToken: NeedKeyProgression.CanContinue) =

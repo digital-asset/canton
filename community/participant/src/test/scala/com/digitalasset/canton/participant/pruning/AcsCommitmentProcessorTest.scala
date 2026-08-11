@@ -7,7 +7,6 @@ import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.*
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
   NonNegativeProportion,
@@ -79,6 +78,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.{protocol, *}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdString
 import org.scalatest.Assertion
@@ -90,6 +90,7 @@ import scala.annotation.nowarn
 import scala.collection.immutable.{Seq, Set, SortedSet}
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Try
 
 @nowarn("msg=match may not be exhaustive")
 sealed trait AcsCommitmentProcessorBaseTest
@@ -316,7 +317,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   ) = {
 
     val acsCommitmentsCatchUp = Option.when(acsCommitmentsCatchUpModeEnabled)(
-      AcsCommitmentsCatchUpParameters(PositiveInt.two, PositiveInt.one)
+      AcsCommitmentsCatchUpParameters.create(PositiveInt.two, PositiveInt.one).value
     )
 
     val synchronizerCrypto = cryptoSetup(
@@ -2373,6 +2374,60 @@ class AcsCommitmentProcessorTest
           }
         }
 
+      "reject invalid catch-up configs during deserialization instead of throwing" in {
+        // Regression test: a malicious/malformed topology transaction carrying an out-of-range
+        // catch-up config must surface as a parse error, never as an exception escaping the
+        // deserialization path (which would wedge the sequenced event handler of every member).
+        val invalidConfigs = Seq(
+          // ambiguous: catching up with a single interval
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 1,
+            nrIntervalsToTriggerCatchup = 1,
+          ),
+          // overflow when computing the catch-up interval
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = Int.MaxValue,
+            nrIntervalsToTriggerCatchup = 2,
+          ),
+          // 65536 * 65536 = 2^32, which is exactly one past Int.MaxValue, and overflows
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 65536,
+            nrIntervalsToTriggerCatchup = 65536,
+          ),
+          // non-positive values
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 0,
+            nrIntervalsToTriggerCatchup = 5,
+          ),
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 5,
+            nrIntervalsToTriggerCatchup = -1,
+          ),
+        )
+
+        forAll(invalidConfigs) { proto =>
+          Try(AcsCommitmentsCatchUpParameters.fromProtoV30(proto)) match {
+            case scala.util.Success(Left(_)) =>
+              succeed
+            case scala.util.Success(Right(value)) =>
+              fail(s"Invalid catch-up config $proto was accepted as $value")
+            case scala.util.Failure(t) =>
+              fail(s"Deserialization of $proto threw instead of returning an error", t)
+          }
+        }
+
+        // valid configs still round-trip
+        val valid = AcsCommitmentsCatchUpParameters
+          .create(
+            PositiveInt.tryCreate(2),
+            PositiveInt.tryCreate(3),
+          )
+          .value
+        FutureUnlessShutdown.pure(
+          AcsCommitmentsCatchUpParameters.fromProtoV30(valid.toProtoV30) shouldBe Right(valid)
+        )
+      }
+
       "enter catch up mode when processing falls behind" in {
         val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
         val contractSetup = Map(
@@ -2588,24 +2643,6 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "catch up parameters overflow causes exception" in {
-        assertThrows[IllegalArgumentException]({
-          new AcsCommitmentsCatchUpParameters(
-            PositiveInt.tryCreate(Int.MaxValue / 2),
-            PositiveInt.tryCreate(Int.MaxValue / 2),
-          )
-        })
-      }
-
-      "catch up parameters (1,1) throws exception" in {
-        assertThrows[IllegalArgumentException]({
-          new AcsCommitmentsCatchUpParameters(
-            PositiveInt.tryCreate(1),
-            PositiveInt.tryCreate(1),
-          )
-        })
-      }
-
       "catch up with maximum reconciliation interval and catch-up parameters logs error" in {
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
@@ -2639,10 +2676,12 @@ class AcsCommitmentProcessorTest
 
             // maximum catch-up config parameters so that their multiplication is allowed
             val startConfig =
-              new AcsCommitmentsCatchUpParameters(
-                PositiveInt.tryCreate(Int.MaxValue / 8),
-                PositiveInt.tryCreate(8),
-              )
+              AcsCommitmentsCatchUpParameters
+                .create(
+                  PositiveInt.tryCreate(Int.MaxValue / 8),
+                  PositiveInt.tryCreate(8),
+                )
+                .value
             val startConfigWithValidity = SynchronizerParameters.WithValidity(
               validFrom = CantonTimestamp.MinValue,
               validUntil = Some(CantonTimestamp.MaxValue),
@@ -2732,7 +2771,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(2), PositiveInt.tryCreate(3))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(2), PositiveInt.tryCreate(3))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(CantonTimestamp.MaxValue),
@@ -2812,7 +2853,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(10), PositiveInt.tryCreate(2))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(10), PositiveInt.tryCreate(2))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(CantonTimestamp.MaxValue),
@@ -3147,7 +3190,9 @@ class AcsCommitmentProcessorTest
         )
 
         val midConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(1), PositiveInt.tryCreate(2))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(1), PositiveInt.tryCreate(2))
+            .value
         val disabledConfig = AcsCommitmentsCatchUpParameters.disabledCatchUp()
         val changedConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.last.head,
@@ -3255,7 +3300,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(changeConfigTimestamp),
@@ -3343,7 +3390,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(changeConfigTimestamp),
@@ -3351,7 +3400,9 @@ class AcsCommitmentProcessorTest
         )
 
         val changeConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(2), PositiveInt.tryCreate(1))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(2), PositiveInt.tryCreate(1))
+            .value
         val changeConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = changeConfigTimestamp,
           validUntil = None,

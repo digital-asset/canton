@@ -15,7 +15,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.*
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  TracedLogger,
+}
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.resource.{Storage, StorageSingleSetup}
 import com.digitalasset.canton.sequencer.admin.v30
@@ -53,7 +58,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   CloseableActorSystem,
   PekkoModuleSystem,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.standalone.topology.FixedFileBasedOrderingTopologyProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.standalone.topology.StandaloneOrderingTopologyProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   DefaultAuthenticationTokenManagerConfig,
   P2PConnectionManagementConfig,
@@ -62,6 +67,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.OrderingTopologyProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.RequestInspector
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.{
   OutputModule,
@@ -84,6 +90,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BlockNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Mempool,
@@ -94,6 +101,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ModuleRef,
   P2PConnectionEventListener,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.{AuthenticationServices, SequencerSnapshot}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.standalone.v1.{
@@ -108,7 +116,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{DelayUtil, PekkoUtil, SingleUseCell}
+import com.digitalasset.canton.util.{DelayUtil, MaxBytesToDecompress, PekkoUtil, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -121,8 +129,8 @@ import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 
 import java.security.SecureRandom
 import java.time.Instant
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{Executors, ThreadLocalRandom}
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise}
 import scala.util.Random
 
@@ -473,7 +481,7 @@ final class BftBlockOrderer(
           metrics,
         )
       ) { standaloneConfig =>
-        new FixedFileBasedOrderingTopologyProvider(
+        new StandaloneOrderingTopologyProvider(
           standaloneConfig,
           cryptoApi.pureCrypto,
           metrics,
@@ -495,6 +503,11 @@ final class BftBlockOrderer(
       metrics,
       loggerFactory,
       timeouts,
+      requestInspector =
+        config.standalone.fold[RequestInspector](OutputModule.DefaultRequestInspector)(
+          standaloneConfig =>
+            StandaloneRequestInspector(standaloneConfig.topologyBroadcastProbability)
+        ),
       outputPreviousStoredBlock = outputPreviousStoredBlock,
     )
   }
@@ -854,32 +867,7 @@ final class BftBlockOrderer(
       sender: Option[Member] = None,
   )(implicit traceContext: TraceContext): EitherT[Future, SequencerDeliverError, Unit] = {
     val orderingRequestTraceContext =
-      OrderingRequest
-        .traceContextToProtoString(traceContext)
-        .flatMap(tcString => Option.when(tcString.nonEmpty)(tcString))
-        .fold {
-          // TODO(#34554): this is a workaround for the fact that some trace contexts serialize
-          //  to an empty string (fixed by #34557, however, once #34557 is merged, we hash the
-          //  `state` in the trace context but don't serialize it, so this workaround is not enough anymore).
-          //  If we fail to serialize a trace context, we replace it with a new (`state`-less) one
-          //  that serializes to a non-empty string, so that we don't fail hash verification during
-          //  dissemination/fetch on the receiving side.
-          //  This breaks trace continuity but at least doesn't fail batches that contain such requests.
-          val newTc = TraceContext.createNew(messageId)
-          if (OrderingRequest.traceContextToProtoString(newTc).isEmpty) {
-            logger.info(
-              s"Failed to create a new trace context that serializes to a valid proto string for ordering request " +
-                s"with message ID $messageId and tag $tag, using an empty one instead"
-            )
-            TraceContext.empty
-          } else {
-            logger.debug(
-              s"Using a new trace context $newTc that serializes to a valid proto string for ordering request " +
-                s"with message ID $messageId and tag $tag"
-            )
-            newTc
-          }
-        }(_ => traceContext)
+      adaptOrderingRequestTraceContextForBatchValidation(logger, messageId)
     val tracedOrderingRequest =
       Traced(
         OrderingRequest(
@@ -951,4 +939,47 @@ object BftBlockOrderer {
         initialNetwork.serverEndpoint.serverToClientAuthenticationEndpointConfig
       )
     }
+
+  private final case class StandaloneRequestInspector(
+      probabilityOfBroadcast: Option[Probability]
+  ) extends RequestInspector {
+
+    override def isRequestToAllMembersOfSynchronizer(
+        blockMetadata: BlockMetadata,
+        requestNumber: Int,
+        request: OrderingRequest,
+        maxBytesToDecompress: MaxBytesToDecompress,
+        logger: TracedLogger,
+        traceContext: TraceContext,
+    )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
+      probabilityOfBroadcast.fold(false)(_.flipCoin(new Random(ThreadLocalRandom.current())))
+  }
+
+  private[bftordering] def adaptOrderingRequestTraceContextForBatchValidation(
+      logger: TracedLogger,
+      messageId: String,
+  )(implicit traceContext: TraceContext): TraceContext = {
+    // TODO(#34554): we hash the `state` in the trace context as part of the batch hash but we don't serialize it,
+    //  so we need to drop it before that.
+    lazy val fallbackTraceContext = {
+      val newTraceContext = TraceContext.createNew(messageId)
+      logger.info(
+        s"Trace context missing or broken, (or cannot drop its state), " +
+          s"creating a new one ($newTraceContext) instead for inclusion in ordering request $messageId"
+      )
+      newTraceContext
+    }
+    val traceContextWithoutStateO =
+      traceContext.asW3CTraceContext
+        .map(_.copy(state = None).toTraceContext)
+    val traceContextWithoutStateSerializedO =
+      traceContextWithoutStateO
+        .flatMap(OrderingRequest.traceContextToProtoString)
+        .flatMap(tcStr => Option.when(tcStr.nonEmpty)(tcStr))
+    val orderingRequestTraceContext =
+      traceContextWithoutStateSerializedO.fold(fallbackTraceContext)(_ =>
+        traceContextWithoutStateO.getOrElse(fallbackTraceContext)
+      )
+    orderingRequestTraceContext
+  }
 }

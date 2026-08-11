@@ -117,6 +117,14 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
       description = "Records the rate and latency it takes to make progress on a view.",
       qualification = MetricQualification.Latency,
     )
+
+    private[metrics] val relativeSegmentLatency: Item = Item(
+      prefix :+ "relative-segment-latency",
+      summary = "Relative segment latency",
+      description =
+        "Records the rate and latency it takes to complete a segment after the segment led by this node completed",
+      qualification = MetricQualification.Latency,
+    )
   }
   private[metrics] val consensus = new ConsensusHistograms
 
@@ -784,6 +792,9 @@ class BftOrderingMetrics private[metrics] (
 
     val viewChangeProgressLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.consensus.viewChangeProgressLatency.info)
+
+    val relativeSegmentLatency: Timer =
+      openTelemetryMetricsFactory.timer(histograms.consensus.relativeSegmentLatency.info)
 
     // Private constructor to avoid being instantiated multiple times by accident
     final class RetransmissionsMetrics private[BftOrderingMetrics] {

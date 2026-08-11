@@ -566,14 +566,6 @@ class OutputModule[E <: Env[E]](
 
           case ProcessNewEpochTopologyMessagesIfPossible =>
             scheduleBackpressureCheck(context)
-            val isSequencerCoreSlow = blockSubscription.isSequencerCoreSlow
-            val backpressureBufferSize = blockSubscription.bufferSize
-            logger.info(
-              "Checking if sequencer core is still slow or if we can process new epoch topology messages " +
-                s"(backPressureStartInstant = $backPressureStartInstant, " +
-                s"from block subscription: isSequencerCoreSlow = $isSequencerCoreSlow, " +
-                s"bufferSize = $backpressureBufferSize)"
-            )
             processNewEpochTopologyMessagesIfPossible()
 
           // From local consensus
@@ -837,7 +829,7 @@ class OutputModule[E <: Env[E]](
       if (cancellableEvent.cancel())
         logger.debug(s"Backpressure check was already scheduled, cancelled it")
     }
-    logger.info(s"Scheduling backpressure check in $interval")
+    logger.debug(s"Scheduling backpressure check in $interval")
     backPressureDelayedEvent = Some(
       context
         .delayedEvent(
@@ -1175,19 +1167,22 @@ class OutputModule[E <: Env[E]](
       } { startInstant =>
         val duration = Duration.between(startInstant, Instant.now())
         logger.info(
-          s"The sequencer core is still slow after $duration, not processing new epoch topology messages yet"
+          s"The sequencer core is still slow after $duration (current buffer size: $backpressureBufferSize), " +
+            "not processing new epoch topology messages yet"
         )
       }
     } else {
       if (isSequencerCoreSlow)
         logger.info(
           "The subscription reported that the sequencer core is slow but " +
-            "the buffer size is below our resume threshold, processing new epoch topology messages regardless"
+            s"the buffer size $backpressureBufferSize is below our resume threshold " +
+            s"${OutputModule.BackpressureBufferResumeThreshold}, processing new epoch topology messages regardless"
         )
 
       if (backPressureStartInstant.isDefined) {
         logger.info(
-          s"The sequencer core has caught up enough, processing new epoch topology messages"
+          s"The subscription reported that the sequencer core is not slow anymore " +
+            s"(current buffer size: $backpressureBufferSize), processing new epoch topology messages"
         )
         backPressureStartInstant = None
       }
@@ -1201,7 +1196,6 @@ class OutputModule[E <: Env[E]](
       logger.debug(
         s"Polled NewEpochTopology messages: $newEpochTopologyMessages from Peano queue"
       )
-
       logger.info(
         s"Processing ${newEpochTopologyMessages.size} new epoch topology messages"
       )

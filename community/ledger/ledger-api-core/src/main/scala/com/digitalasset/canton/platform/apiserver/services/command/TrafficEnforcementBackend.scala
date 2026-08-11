@@ -3,16 +3,18 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command
 
+import cats.data.EitherT
+import cats.syntax.bifunctor.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.TrafficAccountValidationFailed
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
+import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.v1.GetAccountRequest
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
@@ -24,11 +26,15 @@ import scala.concurrent.ExecutionContext
   *
   * @param enforceCostOnSubmissions
   *   Whether to enforce traffic cost on submissions.
+  * @param rejectMultiPartySubmissions
+  *   Whether to reject submissions whose actAs has more than one party (or none), instead of
+  *   skipping traffic enforcement validation for them.
   * @param trafficServiceClient
   *   The traffic service client used to communicate with the traffic enforcement server.
   */
 class TrafficEnforcementBackend(
     enforceCostOnSubmissions: Boolean,
+    rejectMultiPartySubmissions: Boolean,
     val trafficServiceClient: RichTrafficServiceClient,
     adminParty: LfPartyId,
     override val timeouts: ProcessingTimeout,
@@ -45,37 +51,39 @@ class TrafficEnforcementBackend(
     * @param trafficCost
     *   The expected traffic cost of the submission request
     * @return
-    *   A failed future if the account has insufficient balance or if the request to the traffic
-    *   service fails, otherwise a successful future
+    *   A `Left` if the account has insufficient balance, a failed future if the request to the
+    *   service fails, otherwise a successful `Right`
     */
   def validateTraffic(
       accountId: String,
       trafficCost: Long,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.InsufficientBalance.Reject, Unit] = {
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(logger)
     for {
-      accountResponse <- trafficServiceClient.getAccount(GetAccountRequest(accountId))
-      _ <-
-        if (!enforceCostOnSubmissions || accountResponse.balance >= trafficCost)
-          FutureUnlessShutdown.pure(())
-        else
-          FutureUnlessShutdown.failed(
-            TrafficAccountValidationFailed
-              .Reject(
-                s"Insufficient balance (${accountResponse.balance}) for actual traffic cost ($trafficCost) for account $accountId"
-              )
-              .asGrpcError
-          )
+      accountResponse <- EitherT.right[TrafficEnforcementErrors.InsufficientBalance.Reject](
+        trafficServiceClient.getAccount(GetAccountRequest(accountId))
+      )
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        !enforceCostOnSubmissions || accountResponse.balance >= trafficCost,
+        (),
+        TrafficEnforcementErrors.InsufficientBalance.Reject(
+          s"Insufficient balance (${accountResponse.balance}) for actual traffic cost ($trafficCost) for account $accountId"
+        ),
+      )
     } yield ()
+  }
 
   /** Validates that the account associated with the given actAs parties has sufficient balance to
     * cover the specified traffic cost.
     *
     * @param actAs
-    *   The command's actAs parties, which should contain exactly one party for traffic enforcement,
-    *   otherwise the traffic validation for the request is skipped and an information message is
-    *   logged
+    *   The command's actAs parties, which should contain exactly one party for traffic enforcement.
+    *   If it does not, the traffic validation for the request is either skipped (with an
+    *   informational message logged) or the submission is rejected, depending on
+    *   `rejectMultiPartySubmissions`.
     * @param trafficCost
     *   The expected traffic cost of the submission request
     * @return
@@ -84,7 +92,11 @@ class TrafficEnforcementBackend(
   def validateTraffic(
       actAs: Seq[LfPartyId],
       trafficCost: Long,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(logger)
     logger.debug(
       s"Validating traffic enforcement for actAs parties: $actAs, trafficCost: $trafficCost"
     )
@@ -94,18 +106,22 @@ class TrafficEnforcementBackend(
         logger.debug(
           show"Skipping traffic enforcement validation for participant admin party: $singleActAs"
         )
-        FutureUnlessShutdown.unit
+        EitherT.pure(())
       case singleActAs :: Nil =>
-        validateTraffic(
-          // In Canton 3.5, the account ID is bound to the submitter party
-          accountId = singleActAs,
-          trafficCost = trafficCost,
+        // In Canton 3.5, the account ID is bound to the submitter party
+        validateTraffic(accountId = singleActAs, trafficCost = trafficCost)
+          .leftWiden[TrafficEnforcementErrors.TrafficEnforcementError]
+      case nonSingletonActAs if rejectMultiPartySubmissions =>
+        EitherT.leftT[FutureUnlessShutdown, Unit](
+          TrafficEnforcementErrors.MultiPartySubmissionRejected.Reject(
+            show"Traffic enforcement rejected submission with non-singleton actAs parties: $nonSingletonActAs"
+          )
         )
       case nonSingletonActAs =>
         logger.info(
           show"Skipping traffic enforcement validation due to non-singleton actAs parties: $nonSingletonActAs"
         )
-        FutureUnlessShutdown.unit
+        EitherT.pure(())
     }
   }
 
@@ -116,6 +132,7 @@ class TrafficEnforcementBackend(
 object TrafficEnforcementBackend {
   def apply(
       enforceCostOnSubmissions: Boolean,
+      rejectMultiPartySubmissions: Boolean,
       trafficEnforcementServerConfig: TrafficEnforcementServerConfig,
       instanceName: InstanceName,
       ledgerApiPort: Port,
@@ -136,6 +153,7 @@ object TrafficEnforcementBackend {
 
     new TrafficEnforcementBackend(
       enforceCostOnSubmissions,
+      rejectMultiPartySubmissions,
       trafficServiceClient,
       adminParty,
       processingTimeout,
