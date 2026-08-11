@@ -43,6 +43,7 @@ message UpdateAccountRequest {
   // Negative values will decrease the balance, positive values will increase the balance.
   // If unset, the balance will not be updated
   //
+  // Note that setting a negative value may result in a negative balance if the delta is larger than the current balance.
   // Optional
   optional int64 balance_delta = 2;
 

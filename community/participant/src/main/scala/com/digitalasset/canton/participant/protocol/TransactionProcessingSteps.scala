@@ -745,6 +745,7 @@ class TransactionProcessingSteps(
         participantId,
         effects,
         snapshot.ipsSnapshot,
+        filterForOnboardingParties = participantNodeParameters.deferPartyOnboardingIndexing,
         loggerFactory,
       )
     } yield ParsedTransactionRequest(
@@ -796,7 +797,7 @@ class TransactionProcessingSteps(
       freshOwnTimelyTx,
       malformedPayloads,
       mediator,
-      _,
+      usedAndCreated,
       _,
       snapshot,
       _,
@@ -890,6 +891,7 @@ class TransactionProcessingSteps(
             commonData,
             getEngineAbortStatus = () => engineController.abortStatus,
             reInterpretedTopLevelViews,
+            usedAndCreated.hostedOnboardingPartiesO,
           )
 
         internalConsistencyResultET = EitherT(
@@ -1037,6 +1039,7 @@ class TransactionProcessingSteps(
           parallelChecksResult.authenticationValidatorResult.externalHash,
         commitAfterFailedActivenessCheck =
           participantNodeParameters.commitAfterFailedActivenessCheck,
+        hostedOnboardingPartiesO = usedAndCreated.hostedOnboardingPartiesO,
       )
     }
 
@@ -1375,6 +1378,7 @@ class TransactionProcessingSteps(
             participantId,
             validSubViewEffectsNE,
             topologySnapshot,
+            filterForOnboardingParties = participantNodeParameters.deferPartyOnboardingIndexing,
             loggerFactory,
           )
         )
@@ -1389,6 +1393,7 @@ class TransactionProcessingSteps(
         createdContracts = createdContracts,
         commitAfterFailedActivenessCheck =
           participantNodeParameters.commitAfterFailedActivenessCheck,
+        hostedOnboardingPartiesO = usedAndCreated.hostedOnboardingPartiesO,
       )
 
       commitAndContractsAndEvent = computeCommitAndContractsAndEvent(

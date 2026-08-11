@@ -60,15 +60,24 @@ class InteractiveSubmissionEnricher(engine: Engine, packageResolver: PackageReso
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[V] =
-    result match {
-      case ResultDone(r) => FutureUnlessShutdown.pure(r)
-      case ResultError(e) => FutureUnlessShutdown.failed(new RuntimeException(e.message))
-      case ResultNeedPackage(packageId, resume) =>
-        packageResolver
-          .resolve(packageId, PackageResolver.ignoreMissingPackage)
-          .flatMap(pkgO => consumeEnricherResult(resume(pkgO)))
-      case result =>
-        FutureUnlessShutdown.failed(new RuntimeException(s"Unexpected LfEnricher result: $result"))
-    }
+  ): FutureUnlessShutdown[V] = {
+    def drive(step: Result.Step[V]): FutureUnlessShutdown[V] =
+      step match {
+        case Result.Step.Pure(r) => FutureUnlessShutdown.pure(r)
+        case Result.Step.Error(e) => FutureUnlessShutdown.failed(new RuntimeException(e.message))
+        case im: Result.Step.Impure[x, V] =>
+          im.fx match {
+            case Result.Need.Package(packageId) =>
+              packageResolver
+                .resolve(packageId, PackageResolver.ignoreMissingPackage)
+                .flatMap(pkgO => drive(im.resume(pkgO)))
+            case other =>
+              FutureUnlessShutdown.failed(
+                new RuntimeException(s"Unexpected LfEnricher need: $other")
+              )
+          }
+      }
+
+    drive(result.start)
+  }
 }

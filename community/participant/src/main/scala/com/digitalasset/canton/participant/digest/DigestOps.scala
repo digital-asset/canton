@@ -5,12 +5,6 @@ package com.digitalasset.canton.participant.digest
 
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.AcsUpdate
 import com.digitalasset.canton.participant.commitment.{SingleTrace, TracedLtHash16Blake3}
-import com.digitalasset.canton.participant.store.AcsDigestStore.{
-  LocalPartyFirst,
-  PartyAndOrder,
-  PartyOrder,
-  RemotePartyFirst,
-}
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.DeterministicEncoding
@@ -19,7 +13,6 @@ import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ReassignmentCoun
 object DigestOps {
 
   def computeDeltas(
-      thisParticipantId: LedgerParticipantId,
       acsUpdate: AcsUpdate,
       traceChanges: Boolean,
   ): Seq[DigestDelta] = {
@@ -29,10 +22,11 @@ object DigestOps {
 
     val partiesByParticipant = DigestOps.invertMap(acsUpdate.stakeholders)
 
-    val partyPairsToCompute = (for {
+    val partyPairsToCompute = for {
       local <- locallyHostedStakeholderIds
       stakeholder <- stakeholderIds
-    } yield Set((local, stakeholder), (stakeholder, local))).flatten
+
+    } yield orderedPartyPair((local, stakeholder))
 
     val digestPerPartyPair = partyPairsToCompute.map { case (fromParty, toParty) =>
       (fromParty, toParty) -> DigestOps.singleDigest(
@@ -48,37 +42,22 @@ object DigestOps {
     val digestOperation: DigestOperation =
       if (acsUpdate.isActivation) DigestOperation.Add else DigestOperation.Remove
 
-    val partyDeltas: Map[PartyAndOrder[LfPartyId], DigestDelta] =
-      stakeholderIds.toSeq.flatMap { stakeholderId =>
-        val partyPairsForFirst = locallyHostedStakeholderIds.map((_, stakeholderId))
-        val partyPairsForSecond = locallyHostedStakeholderIds.map((stakeholderId, _))
+    val partyDeltas: Map[LfPartyId, DigestDelta] =
+      stakeholderIds.toSeq.map { stakeholderId =>
+        val partyPairs = locallyHostedStakeholderIds.map((_, stakeholderId)).map(orderedPartyPair)
+        val digest = DigestOps.combineDigests(partyPairs.map(digestPerPartyPair))
 
-        val digestsForFirst = DigestOps.combineDigests(partyPairsForFirst.map(digestPerPartyPair))
-        val digestsForSecond = DigestOps.combineDigests(partyPairsForSecond.map(digestPerPartyPair))
-
-        val localPartyFirst = PartyAndOrder(stakeholderId, LocalPartyFirst)
-        val remotePartyFirst = PartyAndOrder(stakeholderId, RemotePartyFirst)
-
-        Seq(
-          localPartyFirst -> DigestDelta.Party(
-            localPartyFirst,
-            digest = digestsForFirst,
-            operation = digestOperation,
-          ),
-          remotePartyFirst -> DigestDelta.Party(
-            remotePartyFirst,
-            digest = digestsForSecond,
-            operation = digestOperation,
-          ),
+        stakeholderId -> DigestDelta.Party(
+          stakeholderId,
+          digest = digest,
+          operation = digestOperation,
         )
       }.toMap
 
     val participantDeltas: Seq[DigestDelta] = partiesByParticipant.map {
       case (counterParticipant, parties) =>
-        val partyOrder = PartyOrder.orderFor(thisParticipantId, counterParticipant)
-
         val digestsForCounterParticipant = parties.view.map { party =>
-          partyDeltas(PartyAndOrder(party, partyOrder)).digest
+          partyDeltas(party).digest
         }
           // convert to a Seq to not calculate the hashcode of potentially many digests
           .toSeq
@@ -137,6 +116,12 @@ object DigestOps {
       .groupMap(_._2)(_._1)
       .map { case (k, v) => k -> v.toSet }
 
+  private def orderedPartyPair(partyPair: (LfPartyId, LfPartyId)): (LfPartyId, LfPartyId) = {
+    val (partyId1, partyId2) = partyPair
+
+    if (partyId1 < partyId2) (partyId1, partyId2)
+    else (partyId2, partyId1)
+  }
 }
 
 sealed trait DigestOperation extends Product with Serializable
@@ -154,7 +139,7 @@ sealed trait DigestDelta extends Product with Serializable {
 object DigestDelta {
 
   final case class Party(
-      partyAndOrder: PartyAndOrder[LfPartyId],
+      partyId: LfPartyId,
       digest: TracedLtHash16Blake3,
       operation: DigestOperation,
   ) extends DigestDelta

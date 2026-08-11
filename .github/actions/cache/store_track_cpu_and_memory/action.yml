@@ -1,0 +1,46 @@
+name: Store Track CPU & Memory
+description: Store Track CPU & Memory
+
+inputs:
+  monitor_pid:
+    description: monitor's PID to stop it
+    required: true
+  artifact_name_suffix:
+    description: optional suffix to append to artifact name (e.g., run_id-shard_index)
+    required: false
+    default: ""
+  store:
+    description: Whether to store the resource usage artifacts, boolean as string
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Track Cpu and Memory Stop
+      run: |
+        PID=${{ inputs.monitor_pid }}
+
+        if [[ ! "$PID" =~ ^[0-9]+$ ]]; then
+          echo "Invalid PID: '$PID' - skipping"
+          exit 0
+        fi
+
+        if [ -n "$PID" ] && kill -0 $PID 2>/dev/null; then
+          echo "Stopping monitor PID $PID..."
+          kill $PID || true
+          wait $PID 2>/dev/null || true
+          echo "Monitor PID $PID stopped"
+        else
+          echo "No running monitor PID $PID found"
+        fi
+      shell: bash
+
+    - name: Store Resource Usage Artifacts
+      if: ${{ inputs.store == 'true' }}
+      uses: actions/upload-artifact@v7
+      with:
+        # add artifact_name_suffix to name when it is provided and prepends it with '-'
+        name: resource-usage-${{ github.job }}${{ inputs.artifact_name_suffix && format('-{0}', inputs.artifact_name_suffix) || '' }}
+        path: track/
+        retention-days: 7

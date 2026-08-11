@@ -64,6 +64,8 @@ object CantonErrorGroups {
 
     abstract class AdminWorkflowServicesErrorGroup extends ErrorGroup()
 
+    abstract class TrafficEnforcementErrorGroup extends ErrorGroup()
+
   }
 
   object TopologyManagementErrorGroup extends ErrorGroup() {

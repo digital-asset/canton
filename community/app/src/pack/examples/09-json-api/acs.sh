@@ -11,7 +11,7 @@ ledgerEnd=$3
 
 source ./utils.sh
 
-message='{"filter":{"filtersByParty":{},"filtersForAnyParty":{"cumulative":[{"identifierFilter":{"WildcardFilter":{"value":{"includeCreatedEventBlob":true}}}}]}},"verbose":false,"activeAtOffset":'$ledgerEnd',"eventFormat":null}'
+message='{"activeAtOffset":'$ledgerEnd',"eventFormat":{"filtersByParty":{},"filtersForAnyParty":{"cumulative":[{"identifierFilter":{"WildcardFilter":{"value":{"includeCreatedEventBlob":true}}}}]},"verbose":false}}'
 
 output=$( curl_check  "http://$participant/v2/state/active-contracts"  "application/json" \
   --data-raw $message

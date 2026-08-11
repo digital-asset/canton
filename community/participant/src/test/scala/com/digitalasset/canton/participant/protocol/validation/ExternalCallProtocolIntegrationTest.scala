@@ -677,6 +677,7 @@ final class ExternalCallProtocolIntegrationTest
       replayCheckResult = None,
       validatedExternalTransactionHash = None,
       commitAfterFailedActivenessCheck = false,
+      hostedOnboardingPartiesO = None,
     )
 
     responsesFactory

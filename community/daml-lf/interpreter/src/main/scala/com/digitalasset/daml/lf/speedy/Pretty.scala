@@ -265,13 +265,6 @@ private[lf] object Pretty {
         }
       case Dev(_, error) =>
         error match {
-          case Dev.Conformance(provided, recomputed, details) =>
-            text(
-              s"""Contract Conformance fails ($details):
-                 | provided create:  $provided
-                 | recomputed create: $recomputed
-                 |""".stripMargin
-            )
           case Dev.Limit(error) =>
             error match {
               case Dev.Limit.ContractSignatories(
@@ -324,14 +317,6 @@ private[lf] object Pretty {
               case Dev.Limit.TransactionInputContracts(limit) =>
                 text(s"Transaction exceeds maximum input contract number of $limit")
             }
-          case Dev.ChoiceGuardFailed(cid, templateId, choiceName, byInterface) =>
-            text(s"Choice guard failed for") & prettyTypeConId(templateId) &
-              text(s"contract") & prettyContractId(cid) &
-              text(s"when exercising choice $choiceName") &
-              (byInterface match {
-                case None => text("by template")
-                case Some(interfaceId) => text("by interface") & prettyTypeConId(interfaceId)
-              })
           case Dev.Cost(Dev.Cost.BudgetExceeded(cause)) =>
             text("Cost budget has been exceeded:") /
               text(cause)

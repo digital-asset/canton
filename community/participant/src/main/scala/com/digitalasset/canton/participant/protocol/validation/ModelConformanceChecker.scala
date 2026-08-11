@@ -101,6 +101,7 @@ class ModelConformanceChecker(
       commonData: CommonData,
       getEngineAbortStatus: GetEngineAbortStatus,
       reInterpretedTopLevelViews: LazyAsyncReInterpretationMap,
+      hostedOnboardingPartiesO: Option[HostedOnboardingParties],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction[ViewEffect], Result] = {
@@ -238,7 +239,14 @@ class ModelConformanceChecker(
 
     } yield {
       val (errors, viewsTxs) = errorsAndViewTxs
-      val (_, effects, txs) = viewsTxs.unzip3
+      val (_, effects, unmergedTransactions) = viewsTxs.unzip3
+
+      // Filter out transaction nodes only relevant to onboarding parties on this participant
+      val txs = hostedOnboardingPartiesO.fold(unmergedTransactions)(hostedOnboardingParties =>
+        unmergedTransactions.map(
+          WellFormedTransaction.projectOutOnboardingTransactionNodes(_, hostedOnboardingParties)
+        )
+      )
 
       val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(transactionMerge.merge(_)).separate
       val mergeErrorO = mergeErrorOO.flatten.map(MergeError.apply)

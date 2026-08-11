@@ -29,7 +29,6 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
 import com.digitalasset.canton.platform.store.backend.common.QueryStrategy
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
-import com.digitalasset.canton.resource.DbStorage.RowsAltered
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeSynchronizer}
 import com.digitalasset.canton.store.{IndexedString, IndexedSynchronizer}
@@ -263,89 +262,44 @@ class DbAcsCommitmentPeriodStore(
       val action = SimpleJdbcAction { connection =>
         QueryStrategy.plainJdbcQuery(plainQuery)(parse)(connection.connection)
       }
-      implicit val rowsAltered: RowsAltered[Vector[CommitmentMatchPeriod[Digest, Off]]] =
-        new RowsAltered[Vector[CommitmentMatchPeriod[Digest, Off]]] {
-          override def apply(a: Vector[CommitmentMatchPeriod[Digest, Off]]): Boolean = false
-        }
       storage.queryAndUpdate(action, functionFullName)
     }
   }
 
-  override def watermarks()(implicit
+  override def watermark()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[AcsCommitmentPeriodStore.MatchingWatermark] = {
     val query =
-      sql"select watermark_reconciliation, watermark_affirmation, watermark_matching from par_acs_commitment_period_watermark where synchronizer_idx = $indexedSynchronizer"
+      sql"select watermark_matching from par_acs_commitment_period_watermark where synchronizer_idx = $indexedSynchronizer"
         .as[MatchingWatermark]
         .headOption
         .map(_.getOrElse(MatchingWatermark.initial))
     storage.query(query, functionFullName)
   }
 
-  override def increaseInsertionWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(
-      implicit traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = maybeCheckInvariant {
-    // When `affirmationOnly` = true, reconciliation doesn't advance.
-    // Use `MinValue` as a safe fallback if there has not been a row previously.
-    val reconciliationWatermark = if (affirmationOnly) CantonTimestamp.MinValue else watermark
-    val upsert = storage.profile match {
-      case _: DbStorage.Profile.Postgres =>
-        sqlu"""
-          insert into par_acs_commitment_period_watermark (synchronizer_idx, watermark_reconciliation, watermark_affirmation, watermark_matching)
-          values ($indexedSynchronizer, $reconciliationWatermark, $watermark, null)
-          on conflict (synchronizer_idx) do update
-            set watermark_reconciliation =
-                  (case when $affirmationOnly then par_acs_commitment_period_watermark.watermark_reconciliation
-                        else greatest(par_acs_commitment_period_watermark.watermark_reconciliation, excluded.watermark_reconciliation)
-                   end),
-                watermark_affirmation = greatest(par_acs_commitment_period_watermark.watermark_affirmation, excluded.watermark_affirmation)
-          """
-      case _: DbStorage.Profile.H2 =>
-        sqlu"""
-          merge into par_acs_commitment_period_watermark
-          using values ($indexedSynchronizer, $reconciliationWatermark, $watermark, null)
-            as excluded (synchronizer_idx, watermark_reconciliation, watermark_affirmation, watermark_matching)
-          on (par_acs_commitment_period_watermark.synchronizer_idx = excluded.synchronizer_idx)
-          when matched then
-            update set
-                watermark_reconciliation =
-                  (case when $affirmationOnly then par_acs_commitment_period_watermark.watermark_reconciliation
-                        else greatest(par_acs_commitment_period_watermark.watermark_reconciliation, excluded.watermark_reconciliation)
-                   end),
-                watermark_affirmation = greatest(par_acs_commitment_period_watermark.watermark_affirmation, excluded.watermark_affirmation)
-          when not matched then
-            insert (synchronizer_idx, watermark_reconciliation, watermark_affirmation, watermark_matching)
-            values (excluded.synchronizer_idx, excluded.watermark_reconciliation, excluded.watermark_affirmation, excluded.watermark_matching)
-        """
-    }
-    storage.update_(upsert, functionFullName)
-  }
-
-  override def increaseMatcherWatermark(offset: Offset)(implicit
+  override def increaseWatermark(offset: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    // Timestamp to use for tick watermarks when there has not been any row previously for the synchronizer.
-    val defaultTickWatermark = CantonTimestamp.MinValue
     val upsert = storage.profile match {
       case _: DbStorage.Profile.Postgres =>
         sqlu"""
-          insert into par_acs_commitment_period_watermark (synchronizer_idx, watermark_reconciliation, watermark_affirmation, watermark_matching)
-          values ($indexedSynchronizer, $defaultTickWatermark, $defaultTickWatermark, $offset)
+          insert into par_acs_commitment_period_watermark (synchronizer_idx, watermark_matching)
+          values ($indexedSynchronizer, $offset)
           on conflict (synchronizer_idx) do update
             set watermark_matching = greatest(par_acs_commitment_period_watermark.watermark_matching, excluded.watermark_matching)
         """
       case _: DbStorage.Profile.H2 =>
         sqlu"""
           merge into par_acs_commitment_period_watermark
-          using values ($indexedSynchronizer, $defaultTickWatermark, $defaultTickWatermark, $offset)
-            as excluded (synchronizer_idx, watermark_reconciliation, watermark_affirmation, watermark_matching)
+          using values ($indexedSynchronizer, $offset)
+            as excluded (synchronizer_idx, watermark_matching)
           on (par_acs_commitment_period_watermark.synchronizer_idx = excluded.synchronizer_idx)
           when matched then
             update set
                 watermark_matching = greatest(par_acs_commitment_period_watermark.watermark_matching, excluded.watermark_matching)
           when not matched then
-            insert (synchronizer_idx, watermark_reconciliation, watermark_affirmation, watermark_matching)
-            values (excluded.synchronizer_idx, excluded.watermark_reconciliation, excluded.watermark_affirmation, excluded.watermark_matching)
+            insert (synchronizer_idx, watermark_matching)
+            values (excluded.synchronizer_idx, excluded.watermark_matching)
         """
     }
     storage.update_(upsert, functionFullName)
@@ -367,23 +321,12 @@ class DbAcsCommitmentPeriodStore(
               select
                  $indexedSynchronizer as synchronizer_idx,
                  k.participant_id as participant_id,
-                 greatest(k.from_exclusive, watermark.watermark_reconciliation) as from_exclusive,
+                 k.from_exclusive as from_exclusive,
                  k.to_inclusive as to_inclusive,
                  k.expected_hashed_digest as expected_hashed_digest
               from
                  UNNEST($participantsArray, $fromExclusivesArray, $toInclusivesArray, $hashedDigestsArray)
                    as k(participant_id, from_exclusive, to_inclusive, expected_hashed_digest)
-                 cross join (
-                   select
-                     coalesce(wm.watermark_reconciliation, ${CantonTimestamp.MinValue}) as watermark_reconciliation,
-                     coalesce(wm.watermark_affirmation, ${CantonTimestamp.MinValue}) as watermark_affirmation
-                   from
-                     -- ensure that a row with default values is returned even if the watermark table is empty for the synchronizer
-                     (select 1 as dummy)
-                     left join par_acs_commitment_period_watermark wm
-                     on wm.synchronizer_idx = $indexedSynchronizer
-                 ) as watermark
-              where k.to_inclusive > watermark.watermark_affirmation
             )
             on conflict do nothing
           """
@@ -572,7 +515,9 @@ class DbAcsCommitmentPeriodStore(
       }
     }
 
-  override def checkInvariant()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  override def checkInvariant(
+      affirmationWatermark: Option[CantonTimestamp]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val allTables = Seq[String & Singleton](outstandingTable, mismatchTable, matchTable)
     def checkGoodPeriods(): FutureUnlessShutdown[Unit] = {
       def checkTable(tableName: String & Singleton): FutureUnlessShutdown[Unit] = {
@@ -592,23 +537,6 @@ class DbAcsCommitmentPeriodStore(
           })
       }
       allTables.parTraverse_(checkTable)
-    }
-
-    def checkWatermarks(): FutureUnlessShutdown[Unit] = {
-      val query =
-        sql"""
-          select watermark_reconciliation, watermark_affirmation
-          from par_acs_commitment_period_watermark
-          where synchronizer_idx = $indexedSynchronizer
-            and watermark_reconciliation > watermark_affirmation
-        """.as[(CantonTimestamp, CantonTimestamp)].headOption
-      storage.query(query, functionFullName + "-watermarks").map {
-        case Some((reconciliation, affirmation)) =>
-          ErrorUtil.invalidState(
-            s"Affirmation watermark $affirmation is below reconciliation watermark $reconciliation"
-          )
-        case None =>
-      }
     }
 
     def checkDisjoint(): FutureUnlessShutdown[Unit] = {
@@ -659,33 +587,23 @@ class DbAcsCommitmentPeriodStore(
       tablePairs.parTraverse_ { case (first, second) => checkDisjoint(first, second) }
     }
 
-    def checkWatermarkBounds(): FutureUnlessShutdown[Unit] = {
+    def checkWatermarkBounds(watermark: CantonTimestamp): FutureUnlessShutdown[Unit] = {
       def checkTable(table: String & Singleton, name: String): FutureUnlessShutdown[Unit] = {
         val query =
           sql"""
-            (
-              select participant_id, from_exclusive, to_inclusive, watermark_affirmation as watermark
+              select participant_id, from_exclusive, to_inclusive as watermark
               from #$table as stored
-                inner join par_acs_commitment_period_watermark
-                  on stored.synchronizer_idx = $indexedSynchronizer
-                 and par_acs_commitment_period_watermark.synchronizer_idx = $indexedSynchronizer
-                 and to_inclusive > watermark_affirmation
+              where stored.synchronizer_idx = $indexedSynchronizer
+                 and to_inclusive > $watermark
               #${storage.limit(1)}
-            ) union all (
-              select participant_id, from_exclusive, to_inclusive, ${CantonTimestamp.MinValue} as watermark
-              from #$table as stored
-                where stored.synchronizer_idx = $indexedSynchronizer
-                  and not exists(select 1 from par_acs_commitment_period_watermark where synchronizer_idx = $indexedSynchronizer)
-              #${storage.limit(1)}
-            )
           """
-            .as[(InternedParticipantId, CantonTimestamp, CantonTimestamp, CantonTimestamp)]
+            .as[(InternedParticipantId, CantonTimestamp, CantonTimestamp)]
             .headOption
         storage.query(query, functionFullName + "-watermarkBounds").map {
-          case Some((participant, from, to, affirmation)) =>
+          case Some((participant, from, to)) =>
             ErrorUtil.invalidState(
               s"$name period ($from, $to] for participant ${stringInterning.participantId
-                  .externalize(participant)} exceeds affirmation watermark $affirmation"
+                  .externalize(participant)} exceeds affirmation watermark $watermark"
             )
           case None =>
         }
@@ -698,9 +616,8 @@ class DbAcsCommitmentPeriodStore(
 
     for {
       _ <- checkGoodPeriods()
-      _ <- checkWatermarks()
       _ <- checkDisjoint()
-      _ <- checkWatermarkBounds()
+      _ <- affirmationWatermark.traverse_(checkWatermarkBounds)
     } yield ()
   }
 
@@ -709,9 +626,9 @@ class DbAcsCommitmentPeriodStore(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[A] =
     if (enableConsistencyChecks) {
       for {
-        _ <- checkInvariant()
+        _ <- checkInvariant(None)
         result <- f
-        _ <- checkInvariant()
+        _ <- checkInvariant(None)
       } yield result
     } else f
 

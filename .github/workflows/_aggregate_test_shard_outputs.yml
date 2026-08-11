@@ -1,0 +1,103 @@
+name: Aggregate Test Shard Outputs
+on:
+  workflow_call:
+    inputs:
+      caller_job:
+        required: true
+        description: The name of the job that called this workflow.
+        type: string
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  aggregate_shard_outputs:
+    name: Aggregate shard outputs for ${{ inputs.caller_job }}
+    runs-on: ${{ inputs.runner }}
+    if: always()
+    env:
+      CALLER_JOB: ${{ inputs.caller_job }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/actions/nix/nix_run
+            .ci/nix-exec
+            shell.nix
+            nix
+            scripts/ci/test_output/aggregate_test_summaries.py
+            scripts/ci/split-tests/merge_timings.py
+
+      - name: Create directories for aggregated outputs
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: |
+            mkdir -p \
+              "$CALLER_JOB/.timings" \
+              "$CALLER_JOB/.summary-state"
+
+      - name: Download shard bundle artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: ${{ env.CALLER_JOB }}-shard-bundle-${{ github.run_id }}-*
+          path: ${{ env.CALLER_JOB }}/.shard-bundles
+        continue-on-error: true
+
+      - name: Download summary state from previous run (reruns only)
+        if: ${{ always() && github.run_attempt > 1 }}
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.CALLER_JOB }}-test-summary-state-latest
+          path: ${{ env.CALLER_JOB }}/.summary-state/previous
+        continue-on-error: true
+
+      - name: Download previous timings (reruns only)
+        if: ${{ always() && github.run_attempt > 1 }}
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ env.CALLER_JOB }}-timings-latest
+          path: ${{ env.CALLER_JOB }}/.timings/previous
+        continue-on-error: true
+
+      - name: Build global summary
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: |
+            python3 scripts/ci/test_output/aggregate_test_summaries.py \
+              --input-glob "$CALLER_JOB/.shard-bundles/**/summary/test-summary.json" \
+              --summary-path "$GITHUB_STEP_SUMMARY" \
+              --previous-state "$CALLER_JOB/.summary-state/previous/summary-state.json" \
+              --state-output "$CALLER_JOB/.summary-state/summary-state.json"
+
+      - name: Upload summary state
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CALLER_JOB }}-test-summary-state-latest
+          path: ${{ env.CALLER_JOB }}/.summary-state/summary-state.json
+          retention-days: 90
+          overwrite: true
+
+      - name: Build merged timings
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: |
+            python3 scripts/ci/split-tests/merge_timings.py \
+              --input-glob "$CALLER_JOB/.shard-bundles/**/timings/timings.json" \
+              --output "$CALLER_JOB/.timings/timings.json" \
+              --previous-timings "$CALLER_JOB/.timings/previous/timings.json"
+
+      - name: Upload merged timings
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.CALLER_JOB }}-timings-latest
+          path: ${{ env.CALLER_JOB }}/.timings/timings.json
+          retention-days: 90
+          overwrite: true

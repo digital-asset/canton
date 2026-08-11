@@ -39,7 +39,8 @@ import com.digitalasset.canton.synchronizer.service.HandshakeValidator
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.grpc.Status
 import org.slf4j.event.Level
 
@@ -60,7 +61,12 @@ class GrpcSequencerAuthenticationService(
   override def authenticate(request: AuthenticateRequest): Future[AuthenticateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     (for {
-      member <- eitherT(deserializeMember(request.member))
+      memberStr <- eitherT(
+        ProtoValidation
+          .validate(request.member, Some("member"), ProtocolVersionValidation.AlwaysValidation)
+          .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
+      )
+      member <- eitherT(deserializeMember(memberStr))
       signature <- eitherT(
         ProtoConverter
           .parseRequired(Signature.fromProtoV30, "signature", request.signature)
@@ -82,11 +88,12 @@ class GrpcSequencerAuthenticationService(
       )
     }).valueOr { case (error, isSensitive) =>
       // create error message to appropriately log this error
+      val loggedMember = memberForLogging(request.member)
       val redactedError =
         if (isSensitive) {
           SequencerAuthenticationFaultyOrMalicious
             .AuthenticationFailure(
-              request.member,
+              loggedMember,
               error,
               if (error.getCode != Status.INTERNAL.getCode) Some(Level.INFO)
               else None,
@@ -95,7 +102,7 @@ class GrpcSequencerAuthenticationService(
           error.withDescription("Bad authentication request")
         } else {
           SequencerAuthenticationFailure
-            .AuthenticationFailure(request.member, error)
+            .AuthenticationFailure(loggedMember, error)
             .discard
           error
         }
@@ -113,7 +120,12 @@ class GrpcSequencerAuthenticationService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     (for {
       _ <- eitherT(handshakeValidation(request))
-      member <- eitherT(deserializeMember(request.member))
+      memberStr <- eitherT(
+        ProtoValidation
+          .validate(request.member, Some("member"), ProtocolVersionValidation.AlwaysValidation)
+          .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
+      )
+      member <- eitherT(deserializeMember(memberStr))
       result <- authenticationService
         .generateChallenge(member)
         .leftMap(handleAuthError)
@@ -124,11 +136,12 @@ class GrpcSequencerAuthenticationService(
         fingerprints.map(_.unwrap).toList,
       )
     }).valueOr { case (error, isSensitive) =>
+      val loggedMember = memberForLogging(request.member)
       val redactedError =
         if (isSensitive) {
           SequencerAuthenticationFaultyOrMalicious
             .ChallengeFailure(
-              request.member,
+              loggedMember,
               request.memberProtocolVersions,
               error,
               if (error.getCode != Status.INTERNAL.getCode) Some(Level.INFO)
@@ -139,7 +152,7 @@ class GrpcSequencerAuthenticationService(
         } else {
           SequencerAuthenticationFailure
             .ChallengeFailure(
-              request.member,
+              loggedMember,
               request.memberProtocolVersions,
               error,
             )
@@ -185,16 +198,34 @@ class GrpcSequencerAuthenticationService(
         (Status.INVALID_ARGUMENT.withDescription(s"Failed to deserialize member: $err"), true)
       )
 
+  // A member string that fails content validation must not be echoed verbatim into logs; fall back
+  // to "unknown" (the request has already been rejected in the for-comprehension by then).
+  private def memberForLogging(member: String): String =
+    ProtoValidation
+      .validate(member, Some("member"), ProtocolVersionValidation.AlwaysValidation)
+      .getOrElse("invalid")
+
   private def handshakeValidation(request: ChallengeRequest): Either[(Status, Boolean), Unit] =
-    HandshakeValidator
-      .clientIsCompatible(
-        protocolVersion,
-        request.memberProtocolVersions,
-        minClientVersionP = None,
-        clientBinaryVersion = OptionUtil.emptyStringAsNone(request.clientVersion),
-        disableReleaseVersionHandshakeCheck = disableReleaseVersionHandshakeCheck,
-      )
-      .leftMap((_, false))
+    for {
+      clientVersion <- ProtoValidation
+        .validate(
+          request.clientVersion,
+          Some("client_version"),
+          ProtocolVersionValidation.AlwaysValidation,
+        )
+        .leftMap(err =>
+          (Status.INVALID_ARGUMENT.withDescription(err.toString), true): (Status, Boolean)
+        )
+      _ <- HandshakeValidator
+        .clientIsCompatible(
+          protocolVersion,
+          request.memberProtocolVersions,
+          minClientVersionP = None,
+          clientBinaryVersion = OptionUtil.emptyStringAsNone(clientVersion),
+          disableReleaseVersionHandshakeCheck = disableReleaseVersionHandshakeCheck,
+        )
+        .leftMap((_, false))
+    } yield ()
 
   /** Unconditionally revoke a member's authentication tokens and disconnect it
     */

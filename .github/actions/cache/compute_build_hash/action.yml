@@ -1,0 +1,31 @@
+name: Compute build hash
+description: Compute a hash over the shared build definition files used by cache keys
+
+outputs:
+  hash:
+    description: Computed hash
+    value: ${{ steps.compute_hash.outputs.hash }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute hash
+      id: compute_hash
+      shell: bash
+      env:
+        BASE_HASH: >-
+          ${{
+            hashFiles(
+            'build.sbt',
+            'project/Dependencies.scala',
+            'project/plugins.sbt',
+            'project/build.properties',
+            'project/buildinfo.sbt',
+            'project/DamlPlugin.scala',
+            'project/Houserules.scala',
+            'project/project/DamlVersions.scala',
+            'project/project/plugins.sbt',
+            'shared_dependencies.json'
+            )
+          }}
+      run: echo "hash=${BASE_HASH}" >> "$GITHUB_OUTPUT"

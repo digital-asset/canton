@@ -38,7 +38,6 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
-import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   NeedKeyProgression,
@@ -312,177 +311,182 @@ final class StoreBackedCommandInterpreter(
         lookupContractKeyCount = lookupContractKeyCount,
       )
 
-    def resolveStep(result: Result[A]): FutureUnlessShutdown[Either[ErrorCause, A]] =
-      result match {
-        case ResultDone(r) => FutureUnlessShutdown.pure(Right(r))
+    def resolveStep(step: Result.Step[A]): FutureUnlessShutdown[Either[ErrorCause, A]] =
+      step match {
+        case Result.Step.Pure(r) => FutureUnlessShutdown.pure(Right(r))
 
-        case ResultError(err) => FutureUnlessShutdown.pure(Left(ErrorCause.DamlLf(err)))
+        case Result.Step.Error(err) => FutureUnlessShutdown.pure(Left(ErrorCause.DamlLf(err)))
 
-        case ResultNeedContract(acoid, resume) =>
-          (CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
-            case Right(version) =>
-              disclosedOrStoreLookup(acoid).map[Response] {
-                case Some(contract) =>
-                  Response.ContractFound(
-                    contract,
-                    version.contractHashingMethod,
-                    hash => contractAuthenticator(contract, hash).isRight,
+        case im: Result.Step.Impure[x, A] =>
+          im.fx match {
+            case Result.Need.Contract(acoid) =>
+              (CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
+                case Right(version) =>
+                  disclosedOrStoreLookup(acoid).map[Result.Need.Contract.Response] {
+                    case Some(contract) =>
+                      Result.Need.Contract.Found(
+                        contract,
+                        version.contractHashingMethod,
+                        hash => contractAuthenticator(contract, hash).isRight,
+                      )
+                    case None => Result.Need.Contract.NotFound
+                  }
+
+                case Left(_) =>
+                  FutureUnlessShutdown.pure[Result.Need.Contract.Response](
+                    Result.Need.Contract.UnsupportedIdVersion
                   )
-                case None => Response.ContractNotFound
-              }
 
-            case Left(_) =>
-              FutureUnlessShutdown.pure[Response](Response.UnsupportedContractIdVersion)
-
-          }).flatMap(response =>
-            resolveStep(
-              Tracked.value(
-                metrics.execution.engineRunning,
-                trackSyncExecution(interpretationTimeNanos)(resume(response)),
-              )
-            )
-          )
-
-        case ResultNeedKey(key, limit, continuationToken, resume) =>
-          disclosedOrStoreNKeyLookup(key, limit, continuationToken)
-            .flatMap { case (fcis, token) =>
-              val entries: Vector[ResultNeedKey.Response.ContractEntry] = fcis.map { fci =>
-                CantonContractIdVersion.extractCantonContractIdVersion(fci.contractId) match {
-                  case Right(version) =>
-                    ResultNeedKey.Response.AuthenticableFatContractInstance(
-                      fci,
-                      version.contractHashingMethod,
-                      hash => contractAuthenticator(fci, hash).isRight,
-                    )
-                  case Left(_) =>
-                    ResultNeedKey.Response.UnsupportedContractIdVersion(fci.contractId)
-                }
-              }
-              resolveStep(
-                Tracked.value(
-                  metrics.execution.engineRunning,
-                  trackSyncExecution(interpretationTimeNanos)(
-                    resume(ResultNeedKey.Response(entries, token))
-                  ),
-                )
-              )
-            }
-
-        case ResultNeedPackage(packageId, resume) =>
-          packageResolver
-            .resolve(packageId, PackageResolver.ignoreMissingPackage)
-            .flatMap { maybePackage =>
-              resolveStep(
-                Tracked.value(
-                  metrics.execution.engineRunning,
-                  trackSyncExecution(interpretationTimeNanos)(resume(maybePackage)),
-                )
-              )
-            }
-
-        case ResultInterruption(continue, abort) =>
-          // We want to prevent the interpretation to run indefinitely and use all the resources.
-          // For this purpose, we check the following condition:
-          //
-          //    Ledger Effective Time + skew > wall clock
-          //
-          // The skew is given by the dynamic synchronizer parameter `ledgerTimeRecordTimeTolerance`.
-          //
-          // As defined in the "Time on Daml Ledgers" chapter of the documentation, if this condition
-          // is true, then the Record Time (assigned later on when the transaction is sequenced) is already
-          // out of bounds, and the sequencer will reject the transaction. We can therefore abort the
-          // interpretation and return an error to the application.
-
-          // Using a `Future` as a trampoline to make the recursive call to `resolveStep` stack safe.
-          def resume(): FutureUnlessShutdown[Either[ErrorCause, A]] =
-            FutureUnlessShutdown
-              .outcomeF {
-                Future {
+              }).flatMap(response =>
+                resolveStep(
                   Tracked.value(
                     metrics.execution.engineRunning,
-                    trackSyncExecution(interpretationTimeNanos)(continue()),
+                    trackSyncExecution(interpretationTimeNanos)(im.resume(response)),
                   )
-                }
-              }
-              .flatMap(resolveStep)
-
-          ledgerTimeRecordTimeToleranceO match {
-            // Fall back to not checking if the tolerance could not be retrieved
-            case None => resume()
-
-            case Some(ledgerTimeRecordTimeTolerance) =>
-              val let = ledgerEffectiveTime.toInstant
-              val currentTime = timeProvider.getCurrentTime
-
-              val limitExceeded =
-                currentTime.isAfter(let.plus(ledgerTimeRecordTimeTolerance.duration))
-
-              if (limitExceeded) {
-                val error: ErrorCause = ErrorCause
-                  .InterpretationTimeExceeded(
-                    ledgerEffectiveTime,
-                    ledgerTimeRecordTimeTolerance,
-                    abort(),
-                  )
-                FutureUnlessShutdown.pure(Left(error))
-              } else resume()
-          }
-
-        case ResultPrefetch(coids, keys, resume) =>
-          // Trigger loading through the state cache and the batch aggregator.
-          // Loading of contracts is a multi-stage process.
-          // - start with N items
-          // - trigger a single load in contractStore (1:1)
-          // - visit the mutableStateCache which will use the read through lookup
-          // - the read through lookup will ask the contract reader
-          // - the contract reader will ask the batchLoader
-          // - the batch loader will put independent requests together into db batches and respond
-          val disclosedCids = disclosedContractsById.keySet
-          val initialCids = coids.toSet.diff(disclosedCids)
-          import com.digitalasset.canton.util.FutureInstances.*
-          // load all contracts
-
-          val loadContractsF = for {
-            contractsById <- initialCids.toSeq
-              .parTraverse(contractStore.lookupContractState(_))
-              .map(_.flatMap(_.toContractOption.toList))
-            contractsByKey <- keys.toSeq
-              .parTraverse { case (key, limit) =>
-                contractStore.lookupContractKey(Set.empty, key, None, limit)
-              }
-              .map(_.flatMap(_.contracts))
-            contracts = contractsById ++ contractsByKey
-            res <- recursiveLoad(
-              prefetchingRecursionLevel.value - 1,
-              disclosedCids,
-              contracts,
-            )
-          } yield res
-
-          FutureUnlessShutdown
-            .outcomeF(loadContractsF)
-            .flatMap(_ => resolveStep(resume()))
-
-        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
-          externalCallHandler
-            .handleExternalCall(
-              extensionId,
-              functionId,
-              configHash,
-              input,
-              ExternalCallMode.Submission,
-            )
-            .flatMap { result =>
-              resolveStep(
-                Tracked.value(
-                  metrics.execution.engineRunning,
-                  trackSyncExecution(interpretationTimeNanos)(resume(result)),
                 )
               )
-            }
+
+            case Result.Need.Key(key, limit, continuationToken) =>
+              disclosedOrStoreNKeyLookup(key, limit, continuationToken)
+                .flatMap { case (fcis, token) =>
+                  val entries: Vector[Result.Need.Key.Response.ContractEntry] = fcis.map { fci =>
+                    CantonContractIdVersion.extractCantonContractIdVersion(fci.contractId) match {
+                      case Right(version) =>
+                        Result.Need.Key.Response.AuthenticableFatContractInstance(
+                          fci,
+                          version.contractHashingMethod,
+                          hash => contractAuthenticator(fci, hash).isRight,
+                        )
+                      case Left(_) =>
+                        Result.Need.Key.Response.UnsupportedContractIdVersion(fci.contractId)
+                    }
+                  }
+                  resolveStep(
+                    Tracked.value(
+                      metrics.execution.engineRunning,
+                      trackSyncExecution(interpretationTimeNanos)(
+                        im.resume(Result.Need.Key.Response(entries, token))
+                      ),
+                    )
+                  )
+                }
+
+            case Result.Need.Package(packageId) =>
+              packageResolver
+                .resolve(packageId, PackageResolver.ignoreMissingPackage)
+                .flatMap { maybePackage =>
+                  resolveStep(
+                    Tracked.value(
+                      metrics.execution.engineRunning,
+                      trackSyncExecution(interpretationTimeNanos)(im.resume(maybePackage)),
+                    )
+                  )
+                }
+
+            case Result.Need.Interruption(abort) =>
+              // We want to prevent the interpretation to run indefinitely and use all the resources.
+              // For this purpose, we check the following condition:
+              //
+              //    Ledger Effective Time + skew > wall clock
+              //
+              // The skew is given by the dynamic synchronizer parameter `ledgerTimeRecordTimeTolerance`.
+              //
+              // As defined in the "Time on Daml Ledgers" chapter of the documentation, if this condition
+              // is true, then the Record Time (assigned later on when the transaction is sequenced) is already
+              // out of bounds, and the sequencer will reject the transaction. We can therefore abort the
+              // interpretation and return an error to the application.
+
+              // Using a `Future` as a trampoline to make the recursive call to `resolveStep` stack safe.
+              def resume(): FutureUnlessShutdown[Either[ErrorCause, A]] =
+                FutureUnlessShutdown
+                  .outcomeF {
+                    Future {
+                      Tracked.value(
+                        metrics.execution.engineRunning,
+                        trackSyncExecution(interpretationTimeNanos)(im.resume(())),
+                      )
+                    }
+                  }
+                  .flatMap(resolveStep)
+
+              ledgerTimeRecordTimeToleranceO match {
+                // Fall back to not checking if the tolerance could not be retrieved
+                case None => resume()
+
+                case Some(ledgerTimeRecordTimeTolerance) =>
+                  val let = ledgerEffectiveTime.toInstant
+                  val currentTime = timeProvider.getCurrentTime
+
+                  val limitExceeded =
+                    currentTime.isAfter(let.plus(ledgerTimeRecordTimeTolerance.duration))
+
+                  if (limitExceeded) {
+                    val error: ErrorCause = ErrorCause
+                      .InterpretationTimeExceeded(
+                        ledgerEffectiveTime,
+                        ledgerTimeRecordTimeTolerance,
+                        abort(),
+                      )
+                    FutureUnlessShutdown.pure(Left(error))
+                  } else resume()
+              }
+
+            case Result.Need.Prefetch(coids, keys) =>
+              // Trigger loading through the state cache and the batch aggregator.
+              // Loading of contracts is a multi-stage process.
+              // - start with N items
+              // - trigger a single load in contractStore (1:1)
+              // - visit the mutableStateCache which will use the read through lookup
+              // - the read through lookup will ask the contract reader
+              // - the contract reader will ask the batchLoader
+              // - the batch loader will put independent requests together into db batches and respond
+              val disclosedCids = disclosedContractsById.keySet
+              val initialCids = coids.toSet.diff(disclosedCids)
+              import com.digitalasset.canton.util.FutureInstances.*
+              // load all contracts
+
+              val loadContractsF = for {
+                contractsById <- initialCids.toSeq
+                  .parTraverse(contractStore.lookupContractState(_))
+                  .map(_.flatMap(_.toContractOption.toList))
+                contractsByKey <- keys.toSeq
+                  .parTraverse { case (key, limit) =>
+                    contractStore.lookupContractKey(Set.empty, key, None, limit)
+                  }
+                  .map(_.flatMap(_.contracts))
+                contracts = contractsById ++ contractsByKey
+                res <- recursiveLoad(
+                  prefetchingRecursionLevel.value - 1,
+                  disclosedCids,
+                  contracts,
+                )
+              } yield res
+
+              FutureUnlessShutdown
+                .outcomeF(loadContractsF)
+                .flatMap(_ => resolveStep(im.resume(())))
+
+            case Result.Need.ExternalCall(extensionId, functionId, configHash, input) =>
+              externalCallHandler
+                .handleExternalCall(
+                  extensionId,
+                  functionId,
+                  configHash,
+                  input,
+                  ExternalCallMode.Submission,
+                )
+                .flatMap { result =>
+                  resolveStep(
+                    Tracked.value(
+                      metrics.execution.engineRunning,
+                      trackSyncExecution(interpretationTimeNanos)(im.resume(result)),
+                    )
+                  )
+                }
+          }
       }
 
-    resolveStep(result).thereafter { _ =>
+    resolveStep(result.start).thereafter { _ =>
       metrics.execution.lookupActiveContractPerExecution
         .update(lookupActiveContractTime.get(), TimeUnit.NANOSECONDS)
       metrics.execution.lookupActiveContractCountPerExecution

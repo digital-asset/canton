@@ -514,8 +514,6 @@ object LedgerApiCommands {
           CancellableContext,
         ] {
 
-      override type Svc = PartyManagementAlphaServiceStub
-
       override protected def createRequest(): Either[String, ExportPartyAcsRequest] =
         Right(
           ExportPartyAcsRequest(
@@ -556,8 +554,6 @@ object LedgerApiCommands {
           AddPartyWithAcsResponse,
           String,
         ] {
-
-      override type Svc = PartyManagementAlphaServiceStub
 
       override protected def createRequest(): Either[String, Unit] =
         Right(())
@@ -601,7 +597,6 @@ object LedgerApiCommands {
           GetAddPartyStatusResponse,
           PartyReplicationStatus,
         ] {
-      override type Svc = PartyManagementAlphaServiceStub
 
       override protected def createRequest(): Either[String, GetAddPartyStatusRequest] =
         Right(GetAddPartyStatusRequest(requestId))
@@ -619,6 +614,77 @@ object LedgerApiCommands {
           .flatMap(PartyReplicationStatus.fromLapiProto)
           .leftMap(_.toString)
     }
+
+    final case class GeneratePartyTopologyUpdate(
+        partyId: PartyId,
+        synchronizerId: SynchronizerId,
+        targetParticipantId: ParticipantId,
+        participantPermission: ParticipantPermission,
+    ) extends BaseCommand[
+          GeneratePartyTopologyUpdateRequest,
+          GeneratePartyTopologyUpdateResponse,
+          GeneratePartyTopologyUpdateResponse,
+        ] {
+      override protected def createRequest(): Either[String, GeneratePartyTopologyUpdateRequest] =
+        Right(
+          GeneratePartyTopologyUpdateRequest(
+            partyId.toProtoPrimitive,
+            synchronizerId.toProtoPrimitive,
+            targetParticipantId.uid.toProtoPrimitive,
+            participantPermission match {
+              case ParticipantPermission.Observation =>
+                com.daml.ledger.api.v2.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_OBSERVATION
+              case ParticipantPermission.Confirmation =>
+                com.daml.ledger.api.v2.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION
+              case ParticipantPermission.Submission =>
+                com.daml.ledger.api.v2.state_service.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION
+            },
+          )
+        )
+
+      override protected def submitRequest(
+          service: PartyManagementAlphaServiceStub,
+          request: GeneratePartyTopologyUpdateRequest,
+      ): Future[GeneratePartyTopologyUpdateResponse] =
+        service.generatePartyTopologyUpdate(request)
+
+      override protected def handleResponse(
+          response: GeneratePartyTopologyUpdateResponse
+      ): Either[String, GeneratePartyTopologyUpdateResponse] = Right(response)
+    }
+
+    final case class AuthorizePartyUpdate(
+        partyToParticipantTopologyTransaction: ByteString,
+        signatures: Seq[Signature],
+        synchronizerId: SynchronizerId,
+        userId: String,
+        identityProviderId: String,
+    ) extends BaseCommand[
+          AuthorizePartyUpdateRequest,
+          AuthorizePartyUpdateResponse,
+          Unit,
+        ] {
+      override protected def createRequest(): Either[String, AuthorizePartyUpdateRequest] = Right(
+        AuthorizePartyUpdateRequest(
+          synchronizerId.toProtoPrimitive,
+          partyToParticipantTopologyTransaction,
+          signatures.map(_.toProtoV30.transformInto[lapicrypto.Signature]),
+          userId,
+          identityProviderId,
+        )
+      )
+
+      override protected def submitRequest(
+          service: PartyManagementAlphaServiceStub,
+          request: AuthorizePartyUpdateRequest,
+      ): Future[AuthorizePartyUpdateResponse] =
+        service.authorizePartyUpdate(request)
+
+      override protected def handleResponse(
+          response: AuthorizePartyUpdateResponse
+      ): Either[String, Unit] = Either.unit
+    }
+
   }
   object PackageManagementService {
 

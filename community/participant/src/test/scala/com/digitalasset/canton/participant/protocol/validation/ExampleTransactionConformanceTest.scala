@@ -268,6 +268,7 @@ class ExampleTransactionConformanceTest
           commonData,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
           reInterpretedTopLevelViews,
+          hostedOnboardingPartiesO = None,
         )
         .failOnShutdown
     }

@@ -134,8 +134,7 @@ trait TransactionConfirmationRequestFactoryTest
 
   // Device under test
   private def confirmationRequestFactory(
-      transactionTreeFactoryResult: Either[TransactionTreeConversionError, GenTransactionTree],
-      useNewEncryptionAlgorithm: Boolean,
+      transactionTreeFactoryResult: Either[TransactionTreeConversionError, GenTransactionTree]
   ): TransactionConfirmationRequestFactory = {
 
     val transactionTreeFactory: TransactionTreeFactory = new TransactionTreeFactory {
@@ -202,7 +201,6 @@ trait TransactionConfirmationRequestFactoryTest
       LoggingConfig(),
       loggerFactory,
       parallel = false,
-      useNewEncryptionAlgorithm = useNewEncryptionAlgorithm,
     )(
       transactionTreeFactory,
       seedGenerator,
@@ -382,9 +380,7 @@ trait TransactionConfirmationRequestFactoryTest
     )
   }
 
-  protected def transactionConfirmationRequestFactoryTest(
-      useNewEncryptionAlgorithm: Boolean
-  ): Unit = {
+  protected def transactionConfirmationRequestFactoryTest(): Unit = {
     "everything is ok" can {
 
       forEvery(
@@ -392,10 +388,7 @@ trait TransactionConfirmationRequestFactoryTest
         transactionFactory.standardHappyCases.filterNot(_ == transactionFactory.EmptyTransaction)
       ) { example =>
         s"create a transaction confirmation request for: $example" in {
-          val factory = confirmationRequestFactory(
-            Right(example.transactionTree),
-            useNewEncryptionAlgorithm = useNewEncryptionAlgorithm,
-          )
+          val factory = confirmationRequestFactory(Right(example.transactionTree))
 
           ResourceUtil.withResourceM(
             new SessionKeyStoreWithInMemoryCache(
@@ -429,10 +422,7 @@ trait TransactionConfirmationRequestFactoryTest
 
       "use the same session encryption key if view recipients tree is the same" in {
         val multipleRoots = transactionFactory.MultipleRoots
-        val factory = confirmationRequestFactory(
-          Right(multipleRoots.transactionTree),
-          useNewEncryptionAlgorithm,
-        )
+        val factory = confirmationRequestFactory(Right(multipleRoots.transactionTree))
         val store = SessionKeyStoreDisabled
 
         factory
@@ -463,7 +453,7 @@ trait TransactionConfirmationRequestFactoryTest
 
       s"use different session key after key is revoked between two requests" in {
         val factory =
-          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
+          confirmationRequestFactory(Right(singleFetch.transactionTree))
 
         def getSessionKeyFromConfirmationRequest(
             cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -525,7 +515,7 @@ trait TransactionConfirmationRequestFactoryTest
 
       "be rejected" in {
         val factory =
-          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
+          confirmationRequestFactory(Right(singleFetch.transactionTree))
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
@@ -569,7 +559,7 @@ trait TransactionConfirmationRequestFactoryTest
 
       "be rejected" in {
         val factory =
-          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
+          confirmationRequestFactory(Right(singleFetch.transactionTree))
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
@@ -609,7 +599,7 @@ trait TransactionConfirmationRequestFactoryTest
     "transactionTreeFactory fails" must {
       "be rejected" in {
         val error = ContractLookupError(ExampleTransactionFactory.suffixedId(-1, -1), "foo")
-        val factory = confirmationRequestFactory(Left(error), useNewEncryptionAlgorithm)
+        val factory = confirmationRequestFactory(Left(error))
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(
@@ -647,7 +637,7 @@ trait TransactionConfirmationRequestFactoryTest
 
       "be rejected" in {
         val factory =
-          confirmationRequestFactory(Right(singleFetch.transactionTree), useNewEncryptionAlgorithm)
+          confirmationRequestFactory(Right(singleFetch.transactionTree))
 
         ResourceUtil.withResourceM(
           new SessionKeyStoreWithInMemoryCache(

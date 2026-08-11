@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.SignatureCheckError
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
@@ -46,8 +47,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkOut,
 }
 import com.digitalasset.canton.time.SimClock
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
+
+import java.time.Instant
 
 class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
   private val self = BftNodeId("self")
@@ -96,15 +100,44 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     ConsensusStatus.SegmentStatus.Complete,
   )
 
+  private val inProgressSegment = ConsensusStatus.SegmentStatus.InProgress(
+    ViewNumber.First,
+    Seq[BlockStatus](
+      BlockStatus.Complete,
+      BlockStatus.InProgress(prePrepared = true, Seq(false, false), Seq(false, false)),
+    ),
+  )
+  private val segmentStatus1Incomplete = Consensus.RetransmissionsMessage.SegmentStatus(
+    EpochNumber.First,
+    segmentIndex = 1,
+    inProgressSegment,
+  )
+
   private val retransmissionRequest =
     Consensus.RetransmissionsMessage.RetransmissionRequest(
       ConsensusStatus.EpochStatus
         .create(
           self,
           EpochNumber.First,
-          Seq(
+          NonEmpty.mk(
+            Seq,
             ConsensusStatus.SegmentStatus.Complete,
             ConsensusStatus.SegmentStatus.Complete,
+          ),
+        )
+        .fakeSign
+    )
+
+  private val retransmissionRequestIncomplete =
+    Consensus.RetransmissionsMessage.RetransmissionRequest(
+      ConsensusStatus.EpochStatus
+        .create(
+          self,
+          EpochNumber.First,
+          NonEmpty.mk(
+            Seq,
+            ConsensusStatus.SegmentStatus.Complete,
+            inProgressSegment,
           ),
         )
         .fakeSign
@@ -116,11 +149,12 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         .create(
           self,
           EpochNumber.First,
-          Seq(
+          NonEmpty.mk(
+            Seq,
             ConsensusStatus.SegmentStatus.InProgress(
               ViewNumber.First,
               Seq(BlockStatus.InProgress(prePrepared = false, Seq(false, false), Seq(false, false))),
-            )
+            ),
           ),
         )
         .fakeSign
@@ -130,11 +164,12 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     ConsensusStatus.EpochStatus.create(
       other1,
       EpochNumber.First,
-      Seq(
+      NonEmpty.mk(
+        Seq,
         ConsensusStatus.SegmentStatus.InProgress(
           ViewNumber.First,
           Seq(ConsensusStatus.BlockStatus.InProgress(prePrepared = false, Seq.empty, Seq.empty)),
-        )
+        ),
       ),
     )
 
@@ -144,16 +179,15 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       cryptoProvider: CryptoProvider[ProgrammableUnitTestEnv],
       networkOut: ModuleRef[P2PNetworkOut.Message],
       wantedNumberOfInvocations: Int,
+      message: Consensus.RetransmissionsMessage.RetransmissionRequest = retransmissionRequest,
   ): Unit = {
     verify(cryptoProvider, times(wantedNumberOfInvocations)).signMessage(
-      retransmissionRequest.signedEpochStatus.message,
+      message.signedEpochStatus.message,
       AuthenticatedMessageType.BftSignedRetransmissionMessage,
     )
     verify(networkOut, times(wantedNumberOfInvocations)).asyncSend(
       P2PNetworkOut.Multicast(
-        P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
-          retransmissionRequest
-        ),
+        P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(message),
         others,
       )
     )
@@ -424,6 +458,56 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       context.lastCancelledEvent.map(_._1) should contain(2)
     }
 
+    "log status message when waiting for epoch to complete" in {
+      val networkOut = mock[ModuleRef[P2PNetworkOut.Message]]
+      implicit val context
+          : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext()
+      val manager = createManager(networkOut)
+      val epochState = mock[EpochState[ProgrammableUnitTestEnv]]
+      when(epochState.epoch).thenReturn(epoch)
+      when(epochState.epochCompletionStatus).thenReturn(EpochState.Incomplete)
+      def builder = new EpochStatusBuilder(self, EpochNumber.First, 1 + others.size)
+      when(epochState.requestSegmentStatuses())
+        .thenReturn(builder, builder) // we'll need 2 fresh builders in this test
+      val cryptoProvider = spy(ProgrammableUnitTestEnv.noSignatureCryptoProvider)
+
+      // initial request on epoch start
+      manager.startEpoch(epochState)
+      context.lastDelayedMessage shouldBe empty
+      manager.handleMessage(orderingTopologyInfo(cryptoProvider), segmentStatus0)
+      manager.handleMessage(orderingTopologyInfo(cryptoProvider), segmentStatus1Incomplete)
+      context.runPipedMessages() shouldBe List()
+      verifySentRequestNRetransmissionRequests(
+        cryptoProvider,
+        networkOut,
+        wantedNumberOfInvocations = 1,
+        retransmissionRequestIncomplete,
+      )
+      val periodicMsg = Consensus.RetransmissionsMessage.PeriodicStatusBroadcast
+      context.lastDelayedMessage should contain((1, periodicMsg))
+
+      // once our own segment ends, we re-schedule a new request (with a shorter delay while the epoch doesn't end),
+      manager.segmentEnded(Instant.now())
+      context.lastDelayedMessage should contain((2, periodicMsg))
+      // and once the delay passes, we log a status message (on top of broadcasting a new request)
+      manager.handleMessage(orderingTopologyInfo(cryptoProvider), periodicMsg)
+      manager.handleMessage(orderingTopologyInfo(cryptoProvider), segmentStatus0)
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
+        manager.handleMessage(orderingTopologyInfo(cryptoProvider), segmentStatus1Incomplete),
+        logEntry => {
+          logEntry.infoMessage should include("Still waiting for epoch")
+        },
+      )
+      context.runPipedMessages() shouldBe List()
+      verifySentRequestNRetransmissionRequests(
+        cryptoProvider,
+        networkOut,
+        wantedNumberOfInvocations = 2,
+        retransmissionRequestIncomplete,
+      )
+    }
+
     "process retransmission request of same epoch using the epoch state" in {
       implicit val context
           : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
@@ -515,6 +599,7 @@ class RetransmissionsManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       metrics,
       new SimClock(loggerFactory = loggerFactory),
       loggerFactory,
+      logEndOfEpochProgress = true,
       previousEpochsRetransmissionsTrackerO,
     )
   }

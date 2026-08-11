@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.{
   ClientSettings,
+  CrashFaultSettings,
   FutureSettings,
   LocalSettings,
   NetworkPartitionFaultSettings,
@@ -14,7 +15,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PartitionMode,
   PartitionSymmetry,
   PhaseDurations,
-  Probability,
   SimulationSettings,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering.{
@@ -23,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   TopologySettings,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.generateNodeOnboardingDelay
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
@@ -387,7 +388,9 @@ class BftOrderingSimulationTest2NodesCrashFaults extends BftOrderingSimulationTe
         simulationSettings = SimulationSettings(
           LocalSettings(
             randomSeed = randomSourceToCreateSettings.nextLong(),
-            crashRestartChance = Probability(0.02),
+            crashFaultSettings = CrashFaultSettings(
+              crashRestartChance = Probability(0.02)
+            ),
           ),
           NetworkSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
@@ -420,7 +423,9 @@ class BftOrderingSimulationTest4NodesCrashFaults extends BftOrderingSimulationTe
         simulationSettings = SimulationSettings(
           LocalSettings(
             randomSeed = randomSourceToCreateSettings.nextLong(),
-            crashRestartChance = Probability(0.01),
+            crashFaultSettings = CrashFaultSettings(
+              crashRestartChance = Probability(0.01)
+            ),
           ),
           NetworkSettings(
             randomSeed = randomSourceToCreateSettings.nextLong()
@@ -476,7 +481,9 @@ class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
         simulationSettings = SimulationSettings(
           LocalSettings(
             randomSeed = randomSourceToCreateSettings.nextLong(),
-            crashRestartChance = Probability(0.02),
+            crashFaultSettings = CrashFaultSettings(
+              crashRestartChance = Probability(0.02)
+            ),
           ),
           NetworkSettings(
             randomSeed = randomSourceToCreateSettings.nextLong(),
@@ -494,6 +501,34 @@ class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
           randomSeed = randomSourceToCreateSettings.nextLong(),
           nodesToOffboard = Seq(makeEndpoint(2), makeEndpoint(4)),
         ),
+      ),
+    ),
+  )
+}
+
+class BftOrderingSimulationTestCrashAllNodes extends BftOrderingSimulationTest {
+  override def numberOfRuns: Int = 2
+
+  private val randomSourceToCreateSettings: Random =
+    new Random(4) // Manually remove the seed for fully randomized local runs.
+
+  override def generateSettings: SimulationTestSettings = SimulationTestSettings(
+    numberOfInitialNodes = 4,
+    stages = NonEmpty(
+      Seq,
+      SimulationTestStageSettings(
+        simulationSettings = SimulationSettings(
+          LocalSettings(
+            randomSeed = randomSourceToCreateSettings.nextLong(),
+            crashFaultSettings = CrashFaultSettings(
+              globalRestartEnabled = true
+            ),
+          ),
+          NetworkSettings(randomSeed = randomSourceToCreateSettings.nextLong()),
+          FutureSettings(randomSeed = randomSourceToCreateSettings.nextLong()),
+          phaseDurations = PhaseDurations(faulty = 1.minute),
+        ),
+        TopologySettings(randomSeed = randomSourceToCreateSettings.nextLong()),
       ),
     ),
   )

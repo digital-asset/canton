@@ -944,6 +944,7 @@ class ModelConformanceCheckerTest
           commonData = commonData,
           reInterpretedTopLevelViews = reInterpretedTopLevelViews,
           getEngineAbortStatus = getEngineAbortStatus,
+          hostedOnboardingPartiesO = None,
         )
         .map {
           case valid if valid.updateId == commonData.updateId => valid

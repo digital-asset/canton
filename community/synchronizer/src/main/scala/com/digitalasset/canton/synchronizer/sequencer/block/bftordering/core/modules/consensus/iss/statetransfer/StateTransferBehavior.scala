@@ -490,6 +490,7 @@ final class StateTransferBehavior[E <: Env[E]](
         metrics,
         clock,
         loggerFactory,
+        config.consensusEnableLogEndOfEpochProgress,
       ),
       dependencies,
       loggerFactory,

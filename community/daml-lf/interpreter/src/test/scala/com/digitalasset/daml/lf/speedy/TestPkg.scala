@@ -178,10 +178,6 @@ $ifKey       (\(key : M:TKey) -> TRACE @(List Party) "maintainers" (M:TKey {main
               x: M:Nested <-exercise @Test:Helper Exe helperId arg
             in upure @Unit ();
 
-        val exercise_interface_with_guard: Party -> ContractId M:Person -> Update Unit =
-          \(exercisingParty: Party) (cId: ContractId M:Person) ->
-            Test:run @Int64 (exercise_interface_with_guard @M:Person Nap cId 42 (\(x: M:Person) -> TRACE @Bool "interface guard" True));
-
         val exercise_interface: Party -> ContractId M:Person -> Update Unit =
           \(exercisingParty: Party) (cId: ContractId M:Person) ->
             Test:run @Int64 (exercise_interface @M:Person Nap cId 42);

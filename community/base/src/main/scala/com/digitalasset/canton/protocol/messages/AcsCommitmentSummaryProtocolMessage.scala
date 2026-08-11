@@ -104,7 +104,7 @@ object AcsCommitmentSummaryProtocolMessage
     } yield AcsCommitmentSummaryProtocolMessage(acsCommitmentSummary, signatures)
   }
 
-  // TODO(#34070) Re-use more code for signing and verifying instead of copy-pasting
+  // TODO(#34736) Re-use more code for signing and verifying instead of copy-pasting
   def signAndCreate(
       cryptoApi: SynchronizerCryptoClient,
       acsCommitmentSummary: AcsCommitmentSummary,

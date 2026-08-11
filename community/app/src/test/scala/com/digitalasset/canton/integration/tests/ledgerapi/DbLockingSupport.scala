@@ -23,6 +23,11 @@ import java.util.UUID
 import scala.jdk.CollectionConverters.*
 
 trait DbLockingSupport extends NamedLogging {
+
+  trait CommitAndClose {
+    def commitAndClose(): Unit
+  }
+
   def createContract(
       participant: LocalParticipantReference,
       synchronizerId: SynchronizerId,
@@ -48,10 +53,10 @@ trait DbLockingSupport extends NamedLogging {
 
   def withConnectionForTest(
       participant: LocalParticipantReference
-  )(testFunction: Connection => Unit, onCommit: Connection => Unit = _ => ()) = {
+  )(testFunction: Connection => Unit, onCommit: Connection => Unit = _ => ()): CommitAndClose = {
     val conn = connectionFor(participant)
     QueryStrategy.withoutNetworkTimeout(testFunction(conn))(conn, noTracingLogger)
-    new Object {
+    new CommitAndClose {
       def commitAndClose(): Unit = {
         onCommit(conn)
         conn.commit()

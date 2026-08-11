@@ -1,0 +1,71 @@
+name: Compile
+on:
+  workflow_call:
+    inputs:
+      reset_classes_if_requested:
+        default: false
+        description: Reset classes if requested
+        type: boolean
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+jobs:
+  compile:
+    name: Compile
+    runs-on: ${{ inputs.runner }}
+    env:
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Restore compile and sbt caches
+        id: cache_restore
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+        with:
+          reset_classes_if_requested: ${{ inputs.reset_classes_if_requested }}
+
+      - name: Truncate the file collecting the test names to prevent duplicate test runs
+        run: |
+          touch test-full-class-names.log
+          truncate --size=0 test-full-class-names.log
+        shell: bash
+
+      - name: SBT compile
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: update Test/compile printTests
+          report_to_datadog: "false"
+          retry_fetch: "50"
+          execution_context_size: "8"
+
+      - name: Share Test Names for subsequent jobs
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-full-class-names
+          path: test-full-class-names.log
+          retention-days: 1
+
+      - name: Save compiled classes
+        uses: ./.github/actions/cache/save_compiled_classes
+        with:
+          cache-hit: ${{ steps.cache_restore.outputs.compile-cache-hit }}
+          cache-matched-key: ${{ steps.cache_restore.outputs.compile-cache-matched-key }}
+
+      - name: Save SBT caches
+        uses: ./.github/actions/cache/save_sbt_cache
+        with:
+          ivy-cache-hit: ${{ steps.cache_restore.outputs.ivy-cache-hit }}
+          ivy-cache-matched-key: ${{ steps.cache_restore.outputs.ivy-cache-matched-key }}
+          sbt-cache-hit: ${{ steps.cache_restore.outputs.sbt-cache-hit }}
+          sbt-cache-matched-key: ${{ steps.cache_restore.outputs.sbt-cache-matched-key }}

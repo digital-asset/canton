@@ -33,13 +33,13 @@ class AuthorizationHelper(val authorizationTokenSecret: String) {
       audiences = List.empty,
       scope = None,
     )
-    JwtSigner.HMAC256
+    JwtSigner
+      .HMAC256(authorizationTokenSecret)
       .sign(
         jwt = DecodedJwt(
           header = """{"alg": "HS256", "typ": "JWT"}""",
           payload = AuthServiceJWTCodec.compactPrint(payload),
-        ),
-        secret = authorizationTokenSecret,
+        )
       )
       .getOrElse(sys.error("Failed to generate token"))
       .value

@@ -175,7 +175,7 @@ class ConnectedSynchronizer(
     commandProgressTracker: CommandProgressTracker,
     messageDispatcherFactory: MessageDispatcher.Factory[MessageDispatcher],
     journalGarbageCollector: JournalGarbageCollector,
-    val acsCommitmentProcessor: AcsCommitmentProcessor,
+    val acsCommitmentProcessorO: Option[AcsCommitmentProcessor],
     clock: Clock,
     trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
     promiseUSFactory: DefaultPromiseUnlessShutdownFactory,
@@ -402,7 +402,7 @@ class ConnectedSynchronizer(
       assignmentProcessor,
       topologyProcessor,
       trafficProcessor,
-      acsCommitmentProcessor.processBatch,
+      acsCommitmentProcessorO.map(_.processBatch),
       receivedAcsCommitmentValidator,
       ephemeral.requestCounterAllocator,
       ephemeral.recordOrderPublisher,
@@ -495,20 +495,28 @@ class ConnectedSynchronizer(
     // on a restart, we can just load the relevant effective times from the database
     def loadPendingEffectiveTimesFromTopologyStore(
         timestamp: CantonTimestamp
-    ): EitherT[FutureUnlessShutdown, ConnectedSynchronizerInitializationError, Unit] = {
-      val store = synchronizerHandle.syncPersistentState.topologyStore
-      for {
-        _ <- EitherT
-          .right(store.findUpcomingEffectiveChanges(timestamp).map { changes =>
-            changes.headOption.foreach { head =>
-              logger.debug(
-                s"Initializing the acs commitment processor with ${changes.length} effective times starting from: ${head.validFrom}"
-              )
-              acsCommitmentProcessor.initializeTicksOnStartup(changes.map(_.validFrom).toList)
-            }
-          })
-      } yield ()
-    }
+    ): EitherT[FutureUnlessShutdown, ConnectedSynchronizerInitializationError, Unit] =
+      acsCommitmentProcessorO match {
+        case Some(acsCommitmentProcessor) =>
+          val store = synchronizerHandle.syncPersistentState.topologyStore
+          for {
+            _ <- EitherT
+              .right(store.findUpcomingEffectiveChanges(timestamp).map { changes =>
+                changes.headOption.foreach { head =>
+                  logger.debug(
+                    s"Initializing the acs commitment processor with ${changes.length} effective times starting from: ${head.validFrom}"
+                  )
+                  acsCommitmentProcessor.initializeTicksOnStartup(changes.map(_.validFrom).toList)
+                }
+              })
+          } yield ()
+        case None =>
+          logger.info(
+            s"(Old) ACS commitment processor is disabled! " +
+              s"So we don't pre-inform ACS commitment processor about upcoming topology changes!"
+          )
+          EitherT.right(FutureUnlessShutdown.unit)
+      }
 
     def loadAcsChanges(
         fromExclusive: TimeOfChange,
@@ -560,50 +568,57 @@ class ConnectedSynchronizer(
         lastSequencerTimestamp: CantonTimestamp,
         nextRepairCounter: RepairCounter,
         batchSize: PositiveInt,
-    ): EitherT[FutureUnlessShutdown, ConnectedSynchronizerInitializationError, Unit] = {
+    ): EitherT[FutureUnlessShutdown, ConnectedSynchronizerInitializationError, Unit] =
+      acsCommitmentProcessorO match {
+        case Some(acsCommitmentProcessor) =>
+          val endToc = TimeOfChange(lastSequencerTimestamp, Some(nextRepairCounter))
+          logger.info(
+            s"Looking for ACS changes to replay between ${acsChangesReplayStartRt.timestamp} and $endToc in batches of $batchSize"
+          )
 
-      val endToc = TimeOfChange(lastSequencerTimestamp, Some(nextRepairCounter))
-      logger.info(
-        s"Looking for ACS changes to replay between ${acsChangesReplayStartRt.timestamp} and $endToc in batches of $batchSize"
-      )
+          def iterateInBatches(from: TimeOfChange): EitherT[
+            FutureUnlessShutdown,
+            ConnectedSynchronizerInitializationError,
+            Unit,
+          ] =
+            if (lastSequencerTimestamp >= acsChangesReplayStartRt.timestamp) {
+              for {
+                res <- loadAcsChanges(from, endToc, batchSize)
+                (acsChangesToConsume, count) = res
 
-      def iterateInBatches(from: TimeOfChange): EitherT[
-        FutureUnlessShutdown,
-        ConnectedSynchronizerInitializationError,
-        Unit,
-      ] =
-        if (lastSequencerTimestamp >= acsChangesReplayStartRt.timestamp) {
-          for {
-            res <- loadAcsChanges(from, endToc, batchSize)
-            (acsChangesToConsume, count) = res
+                _ <- NonEmpty.from(acsChangesToConsume) match {
+                  case Some(nonEmptyBatch) => // publish ACS changes
+                    EitherT
+                      .liftF[FutureUnlessShutdown, ConnectedSynchronizerInitializationError, Unit](
+                        acsCommitmentProcessor.publish(nonEmptyBatch)
+                      )
+                  case None => EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
+                }
 
-            _ <- NonEmpty.from(acsChangesToConsume) match {
-              case Some(nonEmptyBatch) => // publish ACS changes
-                EitherT.liftF[FutureUnlessShutdown, ConnectedSynchronizerInitializationError, Unit](
-                  acsCommitmentProcessor.publish(nonEmptyBatch)
-                )
-              case None => EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
-            }
+                // decide whether to continue: if we got a "full" batch, there might be more
+                _ <- NonEmpty.from(acsChangesToConsume) match {
+                  // more acs changes might exist; continue from the last TimeOfChange
+                  case Some(fullBatch) if count >= batchSize.value =>
+                    val (lastChange, _) = fullBatch.last1
+                    val lastRt = lastChange.toTimeOfChange
+                    iterateInBatches(lastRt)
+                  //  count < batchSize.value
+                  case Some(_) => EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
+                  // batch is empty
+                  case None => EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
+                }
+              } yield ()
+            } else
+              EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
 
-            // decide whether to continue: if we got a "full" batch, there might be more
-            _ <- NonEmpty.from(acsChangesToConsume) match {
-              // more acs changes might exist; continue from the last TimeOfChange
-              case Some(fullBatch) if count >= batchSize.value =>
-                val (lastChange, _) = fullBatch.last1
-                val lastRt = lastChange.toTimeOfChange
-                iterateInBatches(lastRt)
-              //  count < batchSize.value
-              case Some(_) => EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
-              // batch is empty
-              case None => EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
-            }
-          } yield ()
-        } else
+          // start looping from the original start
+          iterateInBatches(acsChangesReplayStartRt.toTimeOfChange)
+        case None =>
+          logger.info(
+            s"Skipping ACS changes replay to old commitment processor because it is disabled."
+          )
           EitherTUtil.unitUS[ConnectedSynchronizerInitializationError]
-
-      // start looping from the original start
-      iterateInBatches(acsChangesReplayStartRt.toTimeOfChange)
-    }
+      }
 
     def initializeClientAtCleanHead(): Unit = {
       // generally, the topology client will be initialised by the topology processor. however,
@@ -1187,7 +1202,8 @@ class ConnectedSynchronizer(
         LifeCycle.close(
           sequencerIdsRetriever,
           journalGarbageCollector,
-          acsCommitmentProcessor,
+          // NOOP AutoCloseable is returned when the (Old) ACS Commitment Processor was/is disabled
+          LifeCycle.toCloseableOption(acsCommitmentProcessorO),
           transactionProcessor,
           unassignmentProcessor,
           assignmentProcessor,
@@ -1334,42 +1350,51 @@ object ConnectedSynchronizer {
         parameters.processingTimeouts,
         loggerFactory,
       )
+      val isOldProcessorEnabled = parameters.isOldCommitmentProcessorEnabled(
+        synchronizerHandle.staticParameters.protocolVersion
+      )
       for {
-        acsCommitmentProcessor <- AcsCommitmentProcessor(
-          participantId,
-          synchronizerHandle.sequencerClient,
-          synchronizerCrypto,
-          Option.when(parameters.commitmentUseDbSnapshotForParticipantLookup)(
-            synchronizerHandle.topologyFactory
-              .createTopologySnapshot(_, NoPackageDependencies, preferCaching = false)
-          ),
-          sortedReconciliationIntervalsProvider,
-          persistentState.acsCommitmentStore,
-          journalGarbageCollector.observer,
-          connectedSynchronizerMetrics.commitments,
-          parameters.processingTimeouts,
-          futureSupervisor,
-          persistentState.activeContractStore,
-          participantNodePersistentState.value.acsCounterParticipantConfigStore,
-          participantNodePersistentState.value.contractStore,
-          persistentState.enableAdditionalConsistencyChecks,
-          loggerFactory,
-          testingConfig,
-          clock,
-          exitOnFatalFailures = parameters.exitOnFatalFailures,
-          parameters.batchingConfig,
-          asynchronousInitialization = parameters.commitmentAsynchronousInitialization,
-          doNotAwaitOnCheckingIncomingCommitments =
-            parameters.doNotAwaitOnCheckingIncomingCommitments,
-          commitmentCheckpointInterval = parameters.commitmentCheckpointInterval,
-          commitmentMismatchDebugging = parameters.commitmentMismatchDebugging,
-          commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
-            parameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
-          commitmentReduceParallelism = parameters.commitmentReduceParallelism,
-          stringInterning = participantNodePersistentState.value.ledgerApiStore.stringInterningView,
-        )
+        acsCommitmentProcessorO <-
+          if (isOldProcessorEnabled)
+            AcsCommitmentProcessor(
+              participantId,
+              synchronizerHandle.sequencerClient,
+              synchronizerCrypto,
+              Option.when(parameters.commitmentUseDbSnapshotForParticipantLookup)(
+                synchronizerHandle.topologyFactory
+                  .createTopologySnapshot(_, NoPackageDependencies, preferCaching = false)
+              ),
+              sortedReconciliationIntervalsProvider,
+              persistentState.acsCommitmentStore,
+              journalGarbageCollector.observer,
+              connectedSynchronizerMetrics.commitments,
+              parameters.processingTimeouts,
+              futureSupervisor,
+              persistentState.activeContractStore,
+              participantNodePersistentState.value.acsCounterParticipantConfigStore,
+              participantNodePersistentState.value.contractStore,
+              persistentState.enableAdditionalConsistencyChecks,
+              loggerFactory,
+              testingConfig,
+              clock,
+              exitOnFatalFailures = parameters.exitOnFatalFailures,
+              parameters.batchingConfig,
+              asynchronousInitialization = parameters.commitmentAsynchronousInitialization,
+              doNotAwaitOnCheckingIncomingCommitments =
+                parameters.doNotAwaitOnCheckingIncomingCommitments,
+              commitmentCheckpointInterval = parameters.commitmentCheckpointInterval,
+              commitmentMismatchDebugging = parameters.commitmentMismatchDebugging,
+              commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
+                parameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
+              commitmentReduceParallelism = parameters.commitmentReduceParallelism,
+              stringInterning =
+                participantNodePersistentState.value.ledgerApiStore.stringInterningView,
+            ).map(Some(_))
+          else FutureUnlessShutdown.pure(None)
         topologyProcessor <- topologyProcessorFactory.create(
-          acsCommitmentProcessor.scheduleTopologyTick
+          acsCommitmentProcessorO.fold[Traced[EffectiveTime] => Unit](_ => ())(p =>
+            p.scheduleTopologyTick
+          )
         )
 
         topologyManager = synchronizerHandle.topologyFactory.createTopologyManager(
@@ -1412,7 +1437,7 @@ object ConnectedSynchronizer {
           commandProgressTracker,
           ParallelMessageDispatcherFactory,
           journalGarbageCollector,
-          acsCommitmentProcessor,
+          acsCommitmentProcessorO,
           clock,
           trafficEnforcementBackendO,
           promiseUSFactory,

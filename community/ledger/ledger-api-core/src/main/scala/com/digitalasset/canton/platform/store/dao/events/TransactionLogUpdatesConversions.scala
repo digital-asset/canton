@@ -29,6 +29,10 @@ import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.*
 import com.digitalasset.canton.platform.store.backend.common.EventStorageBackendTemplate
 import com.digitalasset.canton.platform.store.dao.EventProjectionProperties
 import com.digitalasset.canton.platform.store.dao.events.EventsTable.TransactionConversions.toTopologyEvent
+import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.{
+  CommonTopologyTransactionProperties,
+  SynchronizerParametersResponse,
+}
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
   CreatedEvent,
@@ -109,12 +113,20 @@ private[events] object TransactionLogUpdatesConversions {
 
     case u: TransactionLogUpdate.TopologyTransactionEffective =>
       internalUpdateFormat.includeTopologyEvents
-        .flatMap(_.participantAuthorizationFormat)
-        .flatMap { participantAuthorizationFormat =>
-          val filteredEvents =
+        .filter(_.synchronizerId.forall(_.toProtoPrimitive == u.synchronizerId))
+        .flatMap { topologyFormat =>
+          val filteredEvents = topologyFormat.participantAuthorizationFormat.fold(
+            Vector.empty[TransactionLogUpdate.PartyToParticipantAuthorization]
+          )(participantAuthorizationFormat =>
             u.events.filter(topologyEventPredicate(participantAuthorizationFormat))
-          Option.when(filteredEvents.nonEmpty)(
-            u.copy(events = filteredEvents)(u.traceContext)
+          )
+          val filteredSynchronizerParametersState =
+            u.synchronizerParametersState.filter(_ => topologyFormat.synchronizerParametersFormat)
+          Option.when(filteredEvents.nonEmpty || filteredSynchronizerParametersState.nonEmpty)(
+            u.copy(
+              events = filteredEvents,
+              synchronizerParametersState = filteredSynchronizerParametersState,
+            )(u.traceContext)
           )
         }
 
@@ -145,8 +157,11 @@ private[events] object TransactionLogUpdatesConversions {
       )
         .map(transaction =>
           UpdateResponse.ProtoUpdate(
-            GetUpdateResponse(GetUpdateResponse.Update.Transaction(transaction))
-              .withPrecomputedSerializedSize()
+            Some(
+              GetUpdateResponse(GetUpdateResponse.Update.Transaction(transaction))
+                .withPrecomputedSerializedSize()
+            ),
+            synchronizerParametersResponse = None,
           )
         )
 
@@ -165,18 +180,24 @@ private[events] object TransactionLogUpdatesConversions {
       )
         .map(reassignment =>
           UpdateResponse.ProtoUpdate(
-            GetUpdateResponse(GetUpdateResponse.Update.Reassignment(reassignment))
-              .withPrecomputedSerializedSize()
+            Some(
+              GetUpdateResponse(GetUpdateResponse.Update.Reassignment(reassignment))
+                .withPrecomputedSerializedSize()
+            ),
+            synchronizerParametersResponse = None,
           )
         )
 
     case topologyTransaction: TransactionLogUpdate.TopologyTransactionEffective =>
-      toTopologyTransaction(topologyTransaction).map(transaction =>
+      toTopologyTransaction(topologyTransaction).map { transactionO =>
         UpdateResponse.ProtoUpdate(
-          GetUpdateResponse(GetUpdateResponse.Update.TopologyTransaction(transaction))
-            .withPrecomputedSerializedSize()
+          response = transactionO.map(transaction =>
+            GetUpdateResponse(GetUpdateResponse.Update.TopologyTransaction(transaction))
+              .withPrecomputedSerializedSize()
+          ),
+          synchronizerParametersResponse = toSynchronizerParametersResponse(topologyTransaction),
         )
-      )
+      }
 
     case commitment: TransactionLogUpdate.ReceivedAcsCommitment =>
       Future.successful(
@@ -218,8 +239,10 @@ private[events] object TransactionLogUpdatesConversions {
             lfValueTranslation,
           )
             .map(transaction =>
-              GetUpdateResponse(GetUpdateResponse.Update.Transaction(transaction))
-                .withPrecomputedSerializedSize()
+              Some(
+                GetUpdateResponse(GetUpdateResponse.Update.Transaction(transaction))
+                  .withPrecomputedSerializedSize()
+              )
             )
 
         case reassignmentAccepted: TransactionLogUpdate.ReassignmentAccepted =>
@@ -236,17 +259,22 @@ private[events] object TransactionLogUpdatesConversions {
             lfValueTranslation,
           )
             .map(reassignment =>
-              GetUpdateResponse(GetUpdateResponse.Update.Reassignment(reassignment))
-                .withPrecomputedSerializedSize()
+              Some(
+                GetUpdateResponse(GetUpdateResponse.Update.Reassignment(reassignment))
+                  .withPrecomputedSerializedSize()
+              )
             )
 
         case topologyTransaction: TransactionLogUpdate.TopologyTransactionEffective =>
-          toTopologyTransaction(topologyTransaction).map(transaction =>
-            GetUpdateResponse(GetUpdateResponse.Update.TopologyTransaction(transaction))
-              .withPrecomputedSerializedSize()
+          // In the pointwise endpoint we do not surface empty topology transactions (i.e. updates
+          // that only carry synchronizer parameters and no party events).
+          toTopologyTransaction(topologyTransaction).map(
+            _.map(transaction =>
+              GetUpdateResponse(GetUpdateResponse.Update.TopologyTransaction(transaction))
+                .withPrecomputedSerializedSize()
+            )
           )
       }
-      .map(_.map(Some(_)))
       .getOrElse(Future.successful(None))
 
   private def toTransaction(
@@ -679,20 +707,39 @@ private[events] object TransactionLogUpdatesConversions {
 
   private def toTopologyTransaction(
       topologyTransaction: TransactionLogUpdate.TopologyTransactionEffective
-  ): Future[TopologyTransaction] = Future.successful {
-    TopologyTransaction(
-      updateId = topologyTransaction.updateId,
-      offset = topologyTransaction.offset.unwrap,
-      synchronizerId = topologyTransaction.synchronizerId,
-      recordTime = Some(TimestampConversion.fromLf(topologyTransaction.effectiveTime)),
-      events = topologyTransaction.events.map(event =>
-        toTopologyEvent(
-          partyId = event.party,
-          participantId = event.participant,
-          authorizationEvent = event.authorizationEvent,
-        )
-      ),
-      traceContext = SerializableTraceContext(topologyTransaction.traceContext).toDamlProto,
+  ): Future[Option[TopologyTransaction]] = Future.successful {
+    Option.when(topologyTransaction.events.nonEmpty)(
+      TopologyTransaction(
+        updateId = topologyTransaction.updateId,
+        offset = topologyTransaction.offset.unwrap,
+        synchronizerId = topologyTransaction.synchronizerId,
+        recordTime = Some(TimestampConversion.fromLf(topologyTransaction.effectiveTime)),
+        events = topologyTransaction.events.map(event =>
+          toTopologyEvent(
+            partyId = event.party,
+            participantId = event.participant,
+            authorizationEvent = event.authorizationEvent,
+          )
+        ),
+        traceContext = SerializableTraceContext(topologyTransaction.traceContext).toDamlProto,
+      )
     )
   }
+
+  private def toSynchronizerParametersResponse(
+      topologyTransaction: TransactionLogUpdate.TopologyTransactionEffective
+  ): Option[SynchronizerParametersResponse] =
+    topologyTransaction.synchronizerParametersState
+      .map { synchronizerParametersState =>
+        SynchronizerParametersResponse(
+          commonTopologyTransactionProperties = CommonTopologyTransactionProperties(
+            updateId = topologyTransaction.updateId,
+            offset = topologyTransaction.offset.unwrap,
+            synchronizerId = topologyTransaction.synchronizerId,
+            recordTime = Some(TimestampConversion.fromLf(topologyTransaction.effectiveTime)),
+            traceContext = SerializableTraceContext(topologyTransaction.traceContext).toDamlProto,
+          ),
+          synchronizerParametersState = synchronizerParametersState,
+        )
+      }
 }

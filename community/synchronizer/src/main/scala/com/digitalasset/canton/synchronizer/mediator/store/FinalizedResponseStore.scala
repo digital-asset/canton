@@ -303,7 +303,7 @@ private[mediator] class DbFinalizedResponseStore(
         storage.queryAndUpdate(
           DbStorage.bulkOperation_(insert, responses, storage.profile)(setData),
           operationName = s"store ${responses.size} batched responses",
-        )(traceContext, closeContext, implicitly)
+        )(traceContext, closeContext)
       }
       .map { _ =>
         // keep the request around for a while to avoid a database lookup under contention
@@ -476,7 +476,7 @@ private[mediator] class DbFinalizedResponseStore(
           removedCount <- storage.update(
             sqlu"delete from med_response_aggregations where request_id <= $timestamp",
             functionFullName,
-          )(traceContext, closeContext, implicitly)
+          )(traceContext, closeContext)
         } yield {
           finishedRequests.invalidateAll()
           logger.debug(s"Removed at least $removedCount finalized responses")

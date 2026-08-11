@@ -52,7 +52,6 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.collection.IterableUtil.Ops
-import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{InternedPartyId, LfPartyId}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -96,9 +95,7 @@ class DbAcsCommitmentStore(
   implicit val getSignedCommitment: GetResult[SignedProtocolMessage[LegacyAcsCommitment]] =
     GetResult(r =>
       SignedProtocolMessage
-        .fromTrustedByteString(ProtocolVersionValidation.NoValidation)(
-          ByteString.copyFrom(r.<<[Array[Byte]])
-        )
+        .fromTrustedByteString(ByteString.copyFrom(r.<<[Array[Byte]]))
         .fold(
           err =>
             throw new DbDeserializationException(
@@ -223,7 +220,6 @@ class DbAcsCommitmentStore(
         )(
           traceContext,
           combinedCloseContext,
-          DbStorage.RowsAltered.ofUnit,
         )
     }
   }
@@ -248,7 +244,6 @@ class DbAcsCommitmentStore(
         storage.update_(upsertQuery, operationName = "commitments: markComputedAndSent")(
           traceContext,
           combinedCloseContext,
-          DbStorage.RowsAltered.ofInt,
         )
     }
   }
@@ -380,7 +375,7 @@ class DbAcsCommitmentStore(
           },
           operationName =
             s"commitments: marking until ${periods.last1.toInclusive} with state $matchingState for $counterParticipant",
-        )(traceContext, combinedCloseContext, DbStorage.RowsAltered.ofUnit)
+        )(traceContext, combinedCloseContext)
     }
   }
 

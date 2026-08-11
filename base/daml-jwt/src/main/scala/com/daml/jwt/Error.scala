@@ -8,4 +8,6 @@ final case class Error(what: Symbol, message: String) {
   def within(another: Symbol): Error = Error(what = another, message = s"($prettyPrint)")
 }
 
-final case class JwtException(error: Error) extends RuntimeException
+final case class JwtException(error: Error) extends RuntimeException {
+  override def getMessage(): String = error.prettyPrint
+}

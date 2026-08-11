@@ -127,10 +127,10 @@ trait SandboxRequiringAuthorizationFuns {
       secret: String,
       enforceFormat: Option[StandardJWTTokenFormat],
   ): String =
-    JwtSigner.HMAC256
+    JwtSigner
+      .HMAC256(secret)
       .sign(
-        DecodedJwt(jwtHeader, AuthServiceJWTCodec.compactPrint(payload, enforceFormat)),
-        secret,
+        DecodedJwt(jwtHeader, AuthServiceJWTCodec.compactPrint(payload, enforceFormat))
       )
       .getOrElse(sys.error("Failed to generate token"))
       .value
@@ -141,13 +141,13 @@ trait SandboxRequiringAuthorizationFuns {
       privateKey: RSAPrivateKey,
       enforceFormat: Option[StandardJWTTokenFormat],
   ): String =
-    JwtSigner.RSA256
+    JwtSigner
+      .RSA256(privateKey)
       .sign(
         DecodedJwt(
           jwtHeaderRSA(keyId),
           AuthServiceJWTCodec.compactPrint(payload, enforceFormat),
-        ),
-        privateKey,
+        )
       )
       .getOrElse(sys.error("Failed to generate token"))
       .value
@@ -164,6 +164,7 @@ trait SandboxRequiringAuthorizationFuns {
       secret: Option[String] = None,
       primaryParty: String = "",
       expiresIn: Option[Duration] = Some(defaultExpiresIn),
+      primaryPartyAuthentication: Boolean = false,
   )(implicit ec: ExecutionContext): Future[(proto.User, ServiceCallContext)] = {
     val userToken = Option(
       toHeader(
@@ -171,7 +172,14 @@ trait SandboxRequiringAuthorizationFuns {
         secret = secret.getOrElse(jwtSecret.unwrap),
       )
     )
-    createUser(userId, userToken, identityProviderId, rights, primaryParty)
+    createUser(
+      userId,
+      userToken,
+      identityProviderId,
+      rights,
+      primaryParty,
+      primaryPartyAuthentication,
+    )
   }
 
   protected def createUserByAdminRSA(
@@ -182,6 +190,7 @@ trait SandboxRequiringAuthorizationFuns {
       privateKey: RSAPrivateKey,
       primaryParty: String = "",
       keyId: String = "",
+      primaryPartyAuthentication: Boolean = false,
   )(implicit ec: ExecutionContext): Future[(User, ServiceCallContext)] = {
     val userToken = Option(
       toHeaderRSA(
@@ -190,7 +199,14 @@ trait SandboxRequiringAuthorizationFuns {
         privateKey = privateKey,
       )
     )
-    createUser(userId, userToken, identityProviderId, rights, primaryParty)
+    createUser(
+      userId,
+      userToken,
+      identityProviderId,
+      rights,
+      primaryParty,
+      primaryPartyAuthentication,
+    )
   }
 
   def createUser(
@@ -199,6 +215,7 @@ trait SandboxRequiringAuthorizationFuns {
       identityProviderId: String,
       rights: Vector[proto.Right],
       primaryParty: String,
+      primaryPartyAuthentication: Boolean,
   )(implicit ec: ExecutionContext): Future[(User, ServiceCallContext)] = {
     val user = proto.User(
       id = userId,
@@ -206,7 +223,7 @@ trait SandboxRequiringAuthorizationFuns {
       identityProviderId = identityProviderId,
       primaryParty = primaryParty,
       isDeactivated = false,
-      primaryPartyAuthentication = false,
+      primaryPartyAuthentication = primaryPartyAuthentication,
     )
     val req = proto.CreateUserRequest(Some(user), rights)
     for {

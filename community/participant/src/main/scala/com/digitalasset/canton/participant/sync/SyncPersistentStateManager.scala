@@ -102,6 +102,7 @@ trait SyncPersistentStateLookup {
 
   def acsCommitmentStore(synchronizerId: SynchronizerId): Option[AcsCommitmentStore]
   def acsDigestStore(synchronizerId: SynchronizerId): Option[AcsDigestStore]
+  def acsCommitmentPeriodStore(synchronizerId: SynchronizerId): Option[AcsCommitmentPeriodStore]
   def acsCommitmentStore(synchronizerAlias: SynchronizerAlias): Option[AcsCommitmentStore] =
     synchronizerIdForAlias(synchronizerAlias).flatMap(acsCommitmentStore)
 
@@ -372,6 +373,11 @@ class SyncPersistentStateManager(
   override def acsDigestStore(synchronizerId: SynchronizerId): Option[AcsDigestStore] =
     logicalPersistentStates.get(synchronizerId).map(_.acsDigestStore)
 
+  override def acsCommitmentPeriodStore(
+      synchronizerId: SynchronizerId
+  ): Option[AcsCommitmentPeriodStore] =
+    logicalPersistentStates.get(synchronizerId).map(_.acsCommitmentPeriodStore)
+
   override def activeContractStore(synchronizerId: SynchronizerId): Option[ActiveContractStore] =
     logicalPersistentStates.get(synchronizerId).map(_.activeContractStore)
 
@@ -507,7 +513,7 @@ class SyncPersistentStateManager(
 
   override def close(): Unit =
     LifeCycle.close(
-      (physicalPersistentStates.values.toSeq ++
-        logicalPersistentStates.values.toSeq :+ aliasResolution)*
+      physicalPersistentStates.values.toSeq ++
+        logicalPersistentStates.values.toSeq :+ aliasResolution
     )(logger)
 }

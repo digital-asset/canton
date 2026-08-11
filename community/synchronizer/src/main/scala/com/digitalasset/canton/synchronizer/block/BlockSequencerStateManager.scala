@@ -24,7 +24,6 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.metrics.InstrumentedGraph.BufferedFlow
 import com.digitalasset.canton.sequencing.traffic.TrafficConsumed
 import com.digitalasset.canton.synchronizer.block
 import com.digitalasset.canton.synchronizer.block.AsyncWriter.AsyncAppendWorkHandle
@@ -947,7 +946,7 @@ class BlockSequencerStateManager(
       .getOrElse(SortedMap.empty[CantonTimestamp, Traced[Promise[Unit]]])
       .get(ackTimestamp)
       .foreach(_.withTraceContext { implicit traceContext => promise =>
-        promise.failure(error.asGrpcError)
+        promise.failure(error.toGrpcError)
       })
   }
 

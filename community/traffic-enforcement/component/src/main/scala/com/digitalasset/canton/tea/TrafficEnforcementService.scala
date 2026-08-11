@@ -17,8 +17,8 @@ import com.digitalasset.canton.tea.projection.{
   AccountState,
   EventId,
   EventSource,
-  EventType,
   TeaTrafficStore,
+  TrafficDelta,
 }
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
@@ -84,12 +84,18 @@ class TrafficEnforcementService(
       newBalance <- EitherT
         .liftF[FutureUnlessShutdown, TrafficEnforcementServiceError, Option[AccountState]](
           store
-            .persistDelta(
+            .persistTrafficDelta(
               accountId,
               eventId,
               EventSource.TeaAPI,
-              EventType.Usage,
-              balanceDelta,
+              // Use TrafficDelta.creditDelta regardless of the sign of balanceDelta, on purpose. This endpoint allows to move the
+              // "totalCredit" value on the balance "up and down". It does not change the "totalDebit"
+              // value, which is updated when traffic is consumed on Ledger and attributed to this account.
+              // This also avoids getting the account stuck: if the absolute value of `balanceDelta` was added
+              // to either "totalCredit" or "totalDebit" depending on its sign,
+              // an `updateAccount(Long.MaxValue)` followed by a `updateAccount(-Long.MaxValue)` would max out both
+              // totals and prevent further updates to the account
+              TrafficDelta.creditBalanceDelta(balanceDelta),
               clock.now,
             )
             .value

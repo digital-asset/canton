@@ -85,7 +85,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Commit,
   PrePrepare,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.EpochStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.{
+  EpochStatus,
+  SegmentStatus,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
@@ -99,6 +102,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.TryValues
 import org.scalatest.exceptions.TestFailedException
@@ -1087,7 +1091,9 @@ class IssConsensusModuleTest
           ),
           RetransmissionsMessage.VerifiedNetworkMessage(
             RetransmissionsMessage.RetransmissionRequest(
-              EpochStatus.create(allIds(1), EpochNumber.First, Seq.empty).fakeSign
+              EpochStatus
+                .create(allIds(1), EpochNumber.First, NonEmpty.mk(Seq, SegmentStatus.Complete))
+                .fakeSign
             )
           ),
         ).forEvery { message =>
@@ -1558,6 +1564,7 @@ class IssConsensusModuleTest
             metrics,
             clock,
             loggerFactory,
+            logEndOfEpochProgress = true,
           )
         ),
         dependencies,

@@ -13,6 +13,7 @@ import com.digitalasset.canton.health.{
 import com.digitalasset.canton.lifecycle.{LifeCycle, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
@@ -52,6 +53,7 @@ class SyncEphemeralState(
     val recordOrderPublisher: RecordOrderPublisher,
     val timeTracker: SynchronizerTimeTracker,
     val inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTracker,
+    val acsCommitmentSender: AcsCommitmentSender,
     val onboardingClearanceScheduler: OnboardingClearanceScheduler,
     persistentState: SyncPersistentState,
     val ledgerApiIndexer: LedgerApiIndexer,
@@ -111,6 +113,7 @@ class SyncEphemeralState(
   val requestTracker: RequestTracker = {
     val conflictDetector = new ConflictDetector(
       persistentState.activeContractStore,
+      persistentState.partyReplicationIndexingStoreIfOnPREnabled,
       reassignmentCache,
       loggerFactory,
       persistentState.enableAdditionalConsistencyChecks,
@@ -158,6 +161,7 @@ class SyncEphemeralState(
       requestTracker,
       recordOrderPublisher,
       submissionTracker,
+      acsCommitmentSender,
       phase37Synchronizer,
       reassignmentCache,
       reassignmentSynchronizer,

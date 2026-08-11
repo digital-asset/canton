@@ -265,8 +265,6 @@ private[lf] final class Compiler(
   private val Env2 = Env1.pushVar
   private val Pos3 = Env2.nextPosition
   private val Env3 = Env2.pushVar
-  private val Pos4 = Env3.nextPosition
-  private val Env4 = Env3.pushVar
 
   private[this] def fun1(body: (Position, Env) => s.SExpr): s.SExpr =
     s.SEAbs(1, body(Pos1, Env1))
@@ -276,9 +274,6 @@ private[lf] final class Compiler(
 
   private[this] def fun3(body: (Position, Position, Position, Env) => s.SExpr): s.SExpr =
     s.SEAbs(3, body(Pos1, Pos2, Pos3, Env3))
-
-  private[this] def fun4(body: (Position, Position, Position, Position, Env) => s.SExpr): s.SExpr =
-    s.SEAbs(4, body(Pos1, Pos2, Pos3, Pos4, Env4))
 
   private[this] def unlabelledTopLevelFunction1(ref: t.SDefinitionRef)(
       body: (Position, Env) => s.SExpr
@@ -305,13 +300,6 @@ private[lf] final class Compiler(
       body: (Position, Position, Position, Env) => s.SExpr
   ): (SDefRef, SDefinition) =
     topLevelFunction(ref)(fun3(body))
-
-  private[this] def topLevelFunction4[SDefRef <: t.SDefinitionRef: LabelModule.Allowed](
-      ref: SDefRef
-  )(
-      body: (Position, Position, Position, Position, Env) => s.SExpr
-  ): (SDefRef, SDefinition) =
-    topLevelFunction(ref)(fun4(body))
 
   val phaseOne: PhaseOne = {
     val config1 =
@@ -537,7 +525,6 @@ private[lf] final class Compiler(
       param: ExprVarName,
       choice: TemplateChoice,
   )(
-      guardPos: Position,
       cidPos: Position,
       choiceArgPos: Position,
       tokenPos: Position,
@@ -548,45 +535,38 @@ private[lf] final class Compiler(
       let(env, SBExtractSAnyValue(env.toSEVar(payloadPos))) { (castPos, env) =>
         // We use a chain of let bindings to make the evaluation order of SBResolveSBUBeginExercise's arguments
         // is independent from the evaluation strategy imposed by the ANF transformation.
-        val applyChoiceGuardExpr = SBApplyChoiceGuard(choice.name, Some(ifaceId))(
-          env.toSEVar(guardPos),
-          env.toSEVar(payloadPos),
-          env.toSEVar(cidPos),
-        )
-        let(env, applyChoiceGuardExpr) { (_, env) =>
-          val controllersExpr = s.SEPreventCatch(translateExp(env, choice.controllers))
-          let(env, controllersExpr) { (controllersPos, env) =>
-            val observersExpr = choice.choiceObservers match {
-              case Some(observers) => s.SEPreventCatch(translateExp(env, observers))
+        val controllersExpr = s.SEPreventCatch(translateExp(env, choice.controllers))
+        let(env, controllersExpr) { (controllersPos, env) =>
+          val observersExpr = choice.choiceObservers match {
+            case Some(observers) => s.SEPreventCatch(translateExp(env, observers))
+            case None => s.SEValue.EmptyList
+          }
+          let(env, observersExpr) { (observersPos, env) =>
+            val authorizersExpr = choice.choiceAuthorizers match {
+              case Some(authorizers) => s.SEPreventCatch(translateExp(env, authorizers))
               case None => s.SEValue.EmptyList
             }
-            let(env, observersExpr) { (observersPos, env) =>
-              val authorizersExpr = choice.choiceAuthorizers match {
-                case Some(authorizers) => s.SEPreventCatch(translateExp(env, authorizers))
-                case None => s.SEValue.EmptyList
-              }
-              let(env, authorizersExpr) { (authorizersPos, env) =>
-                val exerciseExpr = SBResolveSBUBeginExercise(
-                  interfaceId = ifaceId,
-                  choiceName = choice.name,
-                  consuming = choice.consuming,
-                  byKey = false,
-                  explicitChoiceAuthority = choice.choiceAuthorizers.isDefined,
-                )(
-                  env.toSEVar(payloadPos),
-                  env.toSEVar(choiceArgPos),
-                  env.toSEVar(cidPos),
-                  env.toSEVar(controllersPos),
-                  env.toSEVar(observersPos),
-                  env.toSEVar(authorizersPos),
-                  env.toSEVar(castPos),
+            let(env, authorizersExpr) { (authorizersPos, env) =>
+              val exerciseExpr = SBResolveSBUBeginExercise(
+                interfaceId = ifaceId,
+                choiceName = choice.name,
+                consuming = choice.consuming,
+                byKey = false,
+                explicitChoiceAuthority = choice.choiceAuthorizers.isDefined,
+              )(
+                env.toSEVar(payloadPos),
+                env.toSEVar(choiceArgPos),
+                env.toSEVar(cidPos),
+                env.toSEVar(controllersPos),
+                env.toSEVar(observersPos),
+                env.toSEVar(authorizersPos),
+                env.toSEVar(castPos),
+              )
+              let(env, exerciseExpr) { (_, _env) =>
+                val env = _env.bindExprVar(choice.selfBinder, cidPos)
+                s.SEScopeExercise(
+                  app(translateExp(env, choice.update), env.toSEVar(tokenPos))
                 )
-                let(env, exerciseExpr) { (_, _env) =>
-                  val env = _env.bindExprVar(choice.selfBinder, cidPos)
-                  s.SEScopeExercise(
-                    app(translateExp(env, choice.update), env.toSEVar(tokenPos))
-                  )
-                }
               }
             }
           }
@@ -599,10 +579,9 @@ private[lf] final class Compiler(
       param: ExprVarName,
       choice: TemplateChoice,
   ): (t.SDefinitionRef, SDefinition) =
-    topLevelFunction4(t.InterfaceChoiceDefRef(ifaceId, choice.name)) {
-      (guardPos, cidPos, choiceArgPos, tokenPos, env) =>
+    topLevelFunction3(t.InterfaceChoiceDefRef(ifaceId, choice.name)) {
+      (cidPos, choiceArgPos, tokenPos, env) =>
         translateInterfaceChoiceBody(env, ifaceId, param, choice)(
-          guardPos,
           cidPos,
           choiceArgPos,
           tokenPos,
@@ -999,11 +978,7 @@ private[lf] final class Compiler(
       case Command.ExerciseTemplate(templateId, contractId, choiceId, argument) =>
         t.TemplateChoiceDefRef(templateId, choiceId)(s.SEValue(contractId), s.SEValue(argument))
       case Command.ExerciseInterface(interfaceId, contractId, choiceId, argument) =>
-        t.InterfaceChoiceDefRef(interfaceId, choiceId)(
-          s.SEBuiltin(SBGuardConstTrue),
-          s.SEValue(contractId),
-          s.SEValue(argument),
-        )
+        t.InterfaceChoiceDefRef(interfaceId, choiceId)(s.SEValue(contractId), s.SEValue(argument))
       case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
         t.ChoiceByKeyDefRef(templateId, choiceId)(s.SEValue(contractKey), s.SEValue(argument))
       case Command.FetchTemplate(templateId, coid) =>

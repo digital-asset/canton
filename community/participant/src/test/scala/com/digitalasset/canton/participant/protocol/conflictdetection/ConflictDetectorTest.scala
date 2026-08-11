@@ -46,7 +46,12 @@ import com.digitalasset.canton.participant.store.memory.{
   ReassignmentCacheTest,
 }
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange, TimeOfRequest}
-import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId, ReassignmentId}
+import com.digitalasset.canton.protocol.{
+  ExampleTransactionFactory,
+  HostedOnboardingParties,
+  LfContractId,
+  ReassignmentId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.{Checked, CheckedT}
@@ -106,9 +111,11 @@ final class ConflictDetectorTest
   private def mkCd(
       acs: ActiveContractStore = mkEmptyAcs(),
       reassignmentCache: ReassignmentCache = defaultReassignmentCache,
+      partyReplicationIndexingStoreIfOnPREnabled: Option[PartyReplicationIndexingStore] = None,
   ): ConflictDetector =
     new ConflictDetector(
       acs,
+      partyReplicationIndexingStoreIfOnPREnabled,
       reassignmentCache,
       loggerFactory,
       true,
@@ -1886,6 +1893,71 @@ final class ConflictDetectorTest
         // And contract is archived.
         _ <- checkContractState(acs, coid00, (Archived, tor1))(s"contract $coid00 gets archived")
       } yield succeed
+    }
+
+    "record contract creations and archives in party replication indexing store" inUS {
+      val indexingStore = mkEmptyPartyReplicationIndexingStore()
+      val cd = mkCd(mkEmptyAcs(), partyReplicationIndexingStoreIfOnPREnabled = Some(indexingStore))
+
+      val onboardingParty = alice
+      val hostedParties = Set(alice, bob)
+      val partiesAllHostedAreOnboarding = Set(alice, carol)
+      val hostedAndOnboardingPartiesO =
+        HostedOnboardingParties.apply(Set(onboardingParty), hostedParties)
+
+      val transientCoid = coid20
+      val creations = Map(
+        coid00 -> mkCreation(partiesAllHostedAreOnboarding),
+        coid01 -> mkCreation(hostedParties),
+        transientCoid -> mkCreation(partiesAllHostedAreOnboarding),
+      )
+      val archivals = Map(
+        coid10 -> mkArchival(partiesAllHostedAreOnboarding),
+        coid11 -> mkArchival(hostedParties),
+        transientCoid -> mkArchival(partiesAllHostedAreOnboarding),
+      )
+
+      for {
+        _ <- prefetchAndCheck(
+          cd,
+          RequestCounter(0),
+          ActivenessSet(
+            mkActivenessCheck(
+              free = creations.keySet,
+              active = archivals.keySet -- creations.keySet,
+              lock = creations.keySet ++ archivals.keySet,
+            ),
+            Set.empty,
+          ),
+        )
+
+        finalized <- cd
+          .finalizeRequest(
+            CommitSet(
+              archivals = archivals,
+              creations = creations,
+              unassignments = Map.empty,
+              assignments = Map.empty,
+              hostedOnboardingPartiesO = hostedAndOnboardingPartiesO,
+            ),
+            TimeOfRequest(RequestCounter(0), Epoch),
+          )
+          .flatten
+
+        activationChanges <- indexingStore
+          .listContractActivationChanges()
+          .map(_.map {
+            case PartyReplicationIndexingStore.ActivationChange(_, cid, change, _, _, _) =>
+              cid -> change
+          }.toMap)
+      } yield {
+        finalized shouldBe Either.unit
+        activationChanges shouldBe Map[LfContractId, ActiveContractStore.ChangeType](
+          coid00 -> ActiveContractStore.ChangeType.Activation,
+          coid10 -> ActiveContractStore.ChangeType.Deactivation,
+          // transientCoid is not queued for indexing
+        )
+      }
     }
   }
 

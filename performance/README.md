@@ -263,7 +263,7 @@ We have one observability stack for all NY machines (deployed to db-testing). To
 
 1. Run `performance/observability/install-stack.sh <your_ssh_username>`. This will build the dashboard and upload all the files to db-testing.
 2. SSH to the db-testing machine and go to the `/home/canton/observability` folder.
-3. Make sure the containers are running: `sudo docker compose ps`, `sudo docker compose up -d`.
+3. Make sure the containers are running: `sudo docker compose ps`, `sudo docker compose up -d`. If the stack has changed, restart the containers: `sudo docker compose restart`.
 4. Also, make sure all the prometheus config is correct for the performance tests (sgx-testing, canton-testing-2). The `metrics/prometheus.conf` file should look like in https://github.com/DACH-NY/canton/commit/71e546e86a42b8696ffb35972a0ac30ddd7436e8. You can skip this point if you're using the latest version of the repo.
 
 The dashboards are available at http://db-testing.da-int.net:3000/dashboards.

@@ -32,7 +32,6 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{PackageId, ParticipantId, Party, QualifiedName}
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.engine.*
-import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.transaction.*
@@ -43,7 +42,6 @@ import org.scalatest.{EitherValues, OptionValues}
 
 import java.io.File
 import java.time.{Duration, Instant}
-import scala.annotation.tailrec
 
 /** Allows API commands to be applied directly to the engine.
   */
@@ -123,32 +121,18 @@ class TestEngine(
   def consume[T](
       initial: Result[T],
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
-  ): T = {
-    @tailrec
-    def go(need: Result[T]): T =
-      need match {
-        case ResultDone(result) => result
-        case ResultPrefetch(_, _, resume) =>
-          go(resume())
-        case ResultNeedPackage(packageId, resume) =>
-          go(resume(packageStore.getPackage(packageId)))
-        case ResultNeedContract(acoid, resume) =>
-          go(resume(contracts.get(acoid) match {
-            case Some(contractInstance) =>
-              Response.ContractFound(
-                contractInstance,
-                Hash.HashingMethod.UpgradeFriendlyUnsafe,
-                _ => true,
-              )
-            case None =>
-              Response.ContractNotFound
-          }))
-        case ResultInterruption(continue, _) =>
-          go(continue())
-        case other => throw new IllegalStateException(s"Did not expect $other")
-      }
-    go(initial)
-  }
+  ): T =
+    initial.consume(
+      Result.lookupHandler(
+        pcs = contracts,
+        pkgs = packageStore.packages.view.mapValues(_._2),
+      )
+    ) match {
+      case Left(value) =>
+        throw new IllegalStateException(s"unexpected failing result: $value")
+      case Right(value) =>
+        value
+    }
 
   def validateCommand(
       command: com.daml.ledger.javaapi.data.Command,

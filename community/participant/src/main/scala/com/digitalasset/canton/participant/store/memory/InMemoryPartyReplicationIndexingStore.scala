@@ -198,7 +198,7 @@ class InMemoryPartyReplicationIndexingStore(
     FutureUnlessShutdown.unit
   }
 
-  override protected[store] def listContractActivationChanges()(implicit
+  override protected[participant] def listContractActivationChanges()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[ActivationChange]] = {
     val snapshot = state.get()

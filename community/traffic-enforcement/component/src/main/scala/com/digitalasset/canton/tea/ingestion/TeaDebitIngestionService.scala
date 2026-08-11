@@ -5,6 +5,7 @@ package com.digitalasset.canton.tea.ingestion
 
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.client.services.completions.CompletionServiceClient
 import com.digitalasset.canton.ledger.client.services.state.StateServiceClient
@@ -14,9 +15,9 @@ import com.digitalasset.canton.tea.projection.{
   AccountId,
   DeltaEvent,
   EventSource,
-  EventType,
   OffsetDeltaEvent,
   ProjectionEvent,
+  TrafficDelta,
 }
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.*
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -68,10 +69,8 @@ final class TeaDebitIngestionService(
   ): Option[Traced[ProjectionEvent]] =
     response.completionResponse match {
       case CompletionStreamResponse.CompletionResponse.Completion(c) =>
-        // Deserialize only if the trace context is non empty, otherwise it logs a warning
-        implicit val tc: TraceContext = c.traceContext
-          .map(tc => fromDamlProtoSafeOpt(noTracingLogger)(Some(tc)).traceContext)
-          .getOrElse(TraceContext.empty)
+        implicit val tc: TraceContext =
+          fromDamlProtoSafeOpt(noTracingLogger)(c.traceContext).traceContext
 
         logger.debug(
           s"Received a completion: offset=${c.offset}, actAs=${c.actAs}, paidTrafficCost=${c.paidTrafficCost}"
@@ -87,15 +86,28 @@ final class TeaDebitIngestionService(
           .fromProtoTimestamp(recordTime)
           .valueOr(err => throw new IllegalStateException(s"Invalid recordTime $err"))
 
-        val deltaEvent = DeltaEvent(
-          // delta is negative: it's a debit
-          delta = -c.paidTrafficCost,
-          timestamp = cantonTimestampRecordTime,
-          eventType = EventType.Usage,
-          eventSource = EventSource.LedgerAPI,
-        )
+        val offsetDeltaEvent = NonNegativeLong
+          .create(c.paidTrafficCost)
+          .getOrElse(
+            throw new IllegalStateException(
+              s"Negative paid traffic cost received on completion: ${c.paidTrafficCost}"
+            )
+          )
+          // Only record non zero cost to avoid spamming the TEA if traffic control is disabled
+          .toPositiveNumeric
+          .map { positiveDebit =>
+            val deltaEvent = DeltaEvent(
+              delta = TrafficDelta.debitBalanceDelta(positiveDebit.toNonNegative.value),
+              timestamp = cantonTimestampRecordTime,
+              eventSource = EventSource.LedgerAPICompletions,
+            )
 
-        val offsetDeltaEvent = OffsetDeltaEvent(deltaEvent, c.offset)
+            OffsetDeltaEvent(deltaEvent, c.offset)
+          }
+
+        if (offsetDeltaEvent.isEmpty) {
+          logger.debug("Skipping completion because the paid traffic cost is 0")
+        }
 
         c.actAs.toList match {
           case one :: Nil =>
@@ -106,7 +118,7 @@ final class TeaDebitIngestionService(
                 )
                 None
               case Right(accountId) =>
-                Some(Traced(ProjectionEvent(accountId, offsetDeltaEvent)))
+                offsetDeltaEvent.map(e => Traced(ProjectionEvent(accountId, e)))
             }
           case Nil =>
             logger.error(

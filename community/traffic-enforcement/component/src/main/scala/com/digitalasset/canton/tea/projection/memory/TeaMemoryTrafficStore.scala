@@ -5,110 +5,144 @@ package com.digitalasset.canton.tea.projection.memory
 
 import cats.data.OptionT
 import cats.implicits.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.tea.projection.memory.TeaMemoryTrafficStore.EventKey
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.tea.projection.TeaTrafficStore.TeaTrafficStoreError
+import com.digitalasset.canton.tea.projection.memory.TeaMemoryTrafficStore.{
+  BalanceKey,
+  EventKey,
+  TrafficUpdateOutOfBoundException,
+}
 import com.digitalasset.canton.tea.projection.{
   AccountId,
   AccountState,
   DeltaEvent,
   EventId,
   EventSource,
-  EventType,
   TeaTrafficStore,
+  TrafficDelta,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.immutable.VectorMap
 import scala.concurrent.{ExecutionContext, Future}
 
 object TeaMemoryTrafficStore {
   private final case class EventKey(eventSource: EventSource, eventId: EventId)
+  private final case class BalanceKey(accountId: AccountId)
+
+  /** Internal signal raised when applying a delta would drive a running total below zero. It is
+    * caught and mapped to a [[TeaTrafficStoreError.TrafficUpdateOutOfBound]] error.
+    */
+  private final class TrafficUpdateOutOfBoundException
+      extends RuntimeException
+      with scala.util.control.NoStackTrace
 }
 
-class TeaMemoryTrafficStore(implicit ec: ExecutionContext) extends TeaTrafficStore {
+class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(implicit
+    ec: ExecutionContext
+) extends TeaTrafficStore
+    with NamedLogging {
 
   private val lock = new Mutex()
-  private val balances = scala.collection.mutable.Map.empty[AccountId, AccountState]
-  // Mapping Account -> Map[EventId -> Event]
+  private val balances = scala.collection.mutable.Map.empty[BalanceKey, AccountState]
+  // Mapping Account -> Map[EventKey -> Event]
   // use a VectorMap to maintain insertion order
   private val events =
     scala.collection.mutable.Map.empty[AccountId, VectorMap[EventKey, DeltaEvent]]
+  // Deduplication is global on (event_source, event_id), independent of the account, so we track
+  // the set of keys seen across all accounts.
+  private val seenKeys = scala.collection.mutable.Set.empty[EventKey]
 
   override def getBalance(accountId: AccountId)(implicit
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, AccountState] =
-    OptionT.fromOption[FutureUnlessShutdown](balances.get(accountId))
+    OptionT.fromOption[FutureUnlessShutdown](balances.get(BalanceKey(accountId)))
 
-  override def persistDelta(
+  override def persistTrafficDelta(
       accountId: AccountId,
       eventId: EventId,
       eventSource: EventSource,
-      eventType: EventType,
-      delta: Long,
+      trafficDelta: TrafficDelta,
       timestamp: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, AccountState] =
     OptionT[Future, AccountState](
-      persistDeltaInternal(accountId, eventId, DeltaEvent(delta, timestamp, eventType, eventSource))
+      persistDeltaInternal(
+        accountId,
+        eventId,
+        eventSource,
+        trafficDelta,
+        timestamp = timestamp,
+      )
     )
       .mapK(FutureUnlessShutdown.outcomeK)
 
   private[memory] def persistDeltaInternal(
       account: AccountId,
       eventId: EventId,
-      deltaEvent: DeltaEvent,
-  ): Future[Option[AccountState]] = Future.successful {
+      eventSource: EventSource,
+      trafficDelta: TrafficDelta,
+      timestamp: CantonTimestamp,
+  )(implicit traceContext: TraceContext): Future[Option[AccountState]] = Future {
     lock.exclusive {
-      val eventPersisted = new AtomicBoolean(false)
-
-      val debitAmount = if (deltaEvent.delta < 0) -deltaEvent.delta else 0L
-      val creditAmount = if (deltaEvent.delta > 0) deltaEvent.delta else 0L
-
+      val deltaEvent = DeltaEvent(trafficDelta, timestamp, eventSource)
       val key = EventKey(deltaEvent.eventSource, eventId)
-      events
-        .updateWith(account) {
-          case None =>
-            eventPersisted.set(true)
-            Some(VectorMap(key -> deltaEvent))
-          case Some(existingEvents) if !existingEvents.contains(key) =>
-            eventPersisted.set(true)
-            Some(existingEvents.updated(key, deltaEvent))
-          case Some(existingEvents) =>
-            Some(existingEvents)
-        }
-        .discard
+      val balanceKey = BalanceKey(account)
 
-      if (eventPersisted.get()) {
-        balances
-          .updateWith(account) {
-            case None =>
-              Some(
-                AccountState(
-                  account,
-                  debitAmount,
-                  creditAmount,
-                  deltaEvent.timestamp,
-                )
-              )
-            case Some(state) =>
-              Some(
-                state.copy(
-                  totalDebits = state.totalDebits + debitAmount,
-                  totalCredits = state.totalCredits + creditAmount,
-                  updatedAt = deltaEvent.timestamp.max(state.updatedAt),
-                )
-              )
+      // Deduplication is global on (event_source, event_id): if the key was already seen for any
+      // account, this is a duplicate and must be a no-op.
+      val eventPersisted = !seenKeys.contains(key)
+
+      if (eventPersisted) {
+        val (debitUpdate, creditUpdate) = trafficDelta.debitAndCreditDeltas
+
+        // Compute the resulting totals as raw Longs: they may transiently be negative (or overflow),
+        // which we detect and reject rather than let the NonNegativeLong conversion throw.
+        val (newTotalDebits, newTotalCredits, newUpdatedAt) = balances.get(balanceKey) match {
+          case None =>
+            (debitUpdate, creditUpdate, deltaEvent.timestamp)
+          case Some(state) =>
+            (
+              Math.addExact(state.totalDebits.value, debitUpdate),
+              Math.addExact(state.totalCredits.value, creditUpdate),
+              deltaEvent.timestamp.max(state.updatedAt),
+            )
+        }
+
+        // Reject the update if applying the delta would drive either running total below zero.
+        // Validate before mutating so the in-memory state is left untouched on failure.
+        val newState =
+          (NonNegativeLong.create(newTotalDebits), NonNegativeLong.create(newTotalCredits)) match {
+            case (Right(debits), Right(credits)) =>
+              AccountState(account, debits, credits, newUpdatedAt)
+            case _ =>
+              throw new TrafficUpdateOutOfBoundException
           }
+
+        seenKeys.add(key).discard
+        events
+          .updateWith(account) {
+            case None => Some(VectorMap(key -> deltaEvent))
+            case Some(existingEvents) => Some(existingEvents.updated(key, deltaEvent))
+          }
+          .discard
+        balances.update(balanceKey, newState)
+        Some(newState)
       } else {
-        balances.get(account)
+        balances.get(balanceKey)
       }
     }
+  }.recoverWith { case _: ArithmeticException | _: TrafficUpdateOutOfBoundException =>
+    Future.failed(
+      TeaTrafficStoreError.TrafficUpdateOutOfBound.Error(account, trafficDelta).asGrpcError
+    )
   }
 
   override def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit

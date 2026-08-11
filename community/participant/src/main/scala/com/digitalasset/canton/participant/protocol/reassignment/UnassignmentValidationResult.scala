@@ -72,6 +72,7 @@ final case class UnassignmentValidationResult(
       })
       .toMap
       .forgetNE,
+    hostedOnboardingPartiesO = None,
   )
 
   def createReassignmentAccepted(

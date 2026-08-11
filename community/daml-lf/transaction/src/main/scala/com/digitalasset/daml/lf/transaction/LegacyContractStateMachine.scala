@@ -44,7 +44,7 @@ object LegacyContractStateMachine {
     * @param globalKeyInputs
     *   Contains the key mappings required by Daml Engine to get to the current state (including
     *   [[Transaction.KeyCreate]] for create nodes). That is, `globalKeyInputs` contains the answers
-    *   to all [[engine.ResultNeedKey]] requests that Daml Engine would emit while it is building
+    *   to all [[engine.Result.Need.Key]] requests that Daml Engine would emit while it is building
     *   the nodes passed to this contract state machine as input.
     *
     * The map `globalKeyInputs` grows monotonically. Its entries are never overwritten and not reset
@@ -490,8 +490,8 @@ object LegacyContractStateMachine {
 
   def initial[Nid](mode: LegacyContractKeyUniquenessMode): State[Nid] = State.empty(mode)
 
-  /** Represents the answers for [[com.digitalasset.daml.lf.engine.ResultNeedKey]] requests that may
-    * arise during Daml interpretation.
+  /** Represents the answers for [[com.digitalasset.daml.lf.engine.Result.Need.Key]] requests that
+    * may arise during Daml interpretation.
     */
   type KeyResolver = Map[GlobalKey, KeyMapping]
 

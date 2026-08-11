@@ -10,7 +10,8 @@ val aliceIou = participant1.ledger_api.javaapi.state.acs.await(Iou.COMPANION)(al
 
 clock.now
 
-val upgradeTime = CantonTimestamp.assertFromInstant(Instant.parse("1970-01-01T12:00:00Z"))
+//You have 60 seconds to execute the upgrade commands after this
+val upgradeTime = CantonTimestamp.assertFromInstant(Instant.now().plusSeconds(60))
 
 currentPhysicalSynchronizerId
 newPhysicalSynchronizerId
@@ -18,23 +19,23 @@ newPhysicalSynchronizerId
 ---------------------------------------------------------------------------
 Perform the upgrade
 
-sequencer1.topology.synchronizer_upgrade.announcement.propose(newPhysicalSynchronizerId, upgradeTime).discard
+sequencer1.topology.lsu.announcement.propose(newPhysicalSynchronizerId, upgradeTime).discard
 
+// this will fail because the synchronizer update was announced but not yet executed
 participant1.parties.enable("Donald")
 
 writeSynchronizerNodesDataToFiles()
 
-migrateNode(sequencer2, "sequencer1")
+migrateNode(sequencer2, "sequencer1", sequencer1)
 
-migrateNode(mediator2, "mediator1")
+migrateNode(mediator2, "mediator1", sequencer1)
 
-sequencer1.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+sequencer1.topology.lsu.sequencer_successors.propose_successor(
   sequencerId = sequencer1.id,
   endpoints = sequencer2.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-  synchronizerId = currentSynchronizerId,
+  successorSynchronizerId = newPhysicalSynchronizerId,
 ).discard
 
-clock.advanceTo(upgradeTime.immediateSuccessor)
 
 ---------------------------------------------------------------------------
 After the upgrade

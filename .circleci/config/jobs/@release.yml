@@ -46,8 +46,6 @@ publish_release:
         is_nightly_workflow: << parameters.is_nightly_workflow >>
         is_manual: << parameters.is_manual >>
     - publish_release_on_s3
-    - publish_release_on_artifactory:
-        nightly_release: << parameters.is_nightly_workflow >>
     - publish_release_on_oci_registry:
         nightly_release: << parameters.is_nightly_workflow >>
     - when:

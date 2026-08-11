@@ -17,7 +17,7 @@
   },
   "editable": true,
   "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": 8,
   "links": [],
   "liveNow": false,
@@ -40,6 +40,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
+      "description": "Wall-clock duration between the instant a request is received by the CantonBFT orderer and the instant the fully assembled ordered block metadata is stored, just before the request is pushed to the post-ordering stages. Its meaningfulness requires wall-clock synchronization, as not all ordered requests are received and timestamped on this node.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -799,6 +800,100 @@
             }
           ],
           "title": "P2P gRPC network latency",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "The rate of gRPC message send retries",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 47
+          },
+          "id": 15,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node) (irate(daml_sequencer_bftordering_p2p_send_sends_retried{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
+              "legendFormat": "{{namespace}}.{{node}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "gRPC send retry rate",
           "type": "timeseries"
         },
         {
@@ -4440,6 +4535,104 @@
           ],
           "title": "Sign message",
           "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 0,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 92
+          },
+          "id": 114,
+          "options": {
+            "legend": {
+              "calcs": [
+                "min",
+                "mean",
+                "max"
+              ],
+              "displayMode": "table",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by(namespace, job, node, Leader) (rate(daml_sequencer_bftordering_consensus_relative_segment_latency_duration_seconds{namespace=~\"$namespace\", job=~\"$job\", node=~\"$node\"}[$__rate_interval])))",
+              "interval": "",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) {{Leader}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "Relative peer segment completion delay",
+          "type": "timeseries"
         }
       ],
       "title": "Consensus - main protocol",
@@ -5186,7 +5379,7 @@
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "histogram_quantile($percentile, daml_sequencer_bftordering_consensus_view_change_progress_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"})",
+              "expr": "histogram_quantile($percentile, sum by(namespace, job, node, Leader) (rate(daml_sequencer_bftordering_consensus_view_change_progress_latency_duration_seconds{namespace=~\"$namespace\", job=~\"$job\", node=~\"$node\"}[$__rate_interval])))",
               "interval": "",
               "legendFormat": "(reporter: {{namespace}}.{{node}}) {{Leader}}",
               "range": true,
@@ -5374,7 +5567,7 @@
               "calcs": [],
               "displayMode": "list",
               "placement": "bottom",
-              "showLegend": false
+              "showLegend": true
             },
             "tooltip": {
               "mode": "single",
@@ -5401,7 +5594,7 @@
               "editorMode": "code",
               "expr": "histogram_quantile($percentile, sum by (namespace, job, node) (rate(daml_sequencer_bftordering_performance_ordering_stage_latency_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\", ordering_stage=~\"state-transfer-store-epochs\"}[$__rate_interval])))",
               "hide": false,
-              "legendFormat": "Complete + start DB query",
+              "legendFormat": "{{namespace}}.{{node}}",
               "range": true,
               "refId": "B"
             }
@@ -8370,7 +8563,7 @@
       "type": "row"
     }
   ],
-  "refresh": "5s",
+  "refresh": "30s",
   "schemaVersion": 38,
   "style": "dark",
   "tags": [],

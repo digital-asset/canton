@@ -125,8 +125,6 @@ crash_recovery_test:
         filter: &crash_recovery_filter
           "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.crashrecovery"
 
-# Replace the test jobs in `canton_build_required` workflow with this one
-# for faster feedback on the CircleCI test job itself
 fast_smoke_test:
   executor: canton-large-docker-with-postgres
   parallelism: 1

@@ -86,7 +86,6 @@ final class DbStorageSingle private (
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     run("writing", operationName, maxRetries)(
       FutureUnlessShutdown.outcomeF(db.run(action))

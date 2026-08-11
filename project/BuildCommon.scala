@@ -122,7 +122,7 @@ object BuildCommon {
         libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
         libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
         versionScheme := Some("semver-spec"),
-        PB.protocVersion := protobuf_version,
+        PB.protocVersion := protoc_version,
       ) ++ Z3.buildSettings
     )
 
@@ -495,6 +495,7 @@ object BuildCommon {
     case PathList("okhttp3", _ @_*) => MergeStrategy.first
     // h2 and opentelemetry-runtime-telemetry both provide native-image reflect-config.json, discard both as we don't use native-image
     case PathList("META-INF", "native-image", "reflect-config.json") => MergeStrategy.discard
+    case PathList("org", "publicsuffix", "list", "effective_tld_names.dat") => MergeStrategy.first
     case path if path.endsWith("/OSGI-INF/MANIFEST.MF") => MergeStrategy.first
     case x => oldStrategy(x)
   }
@@ -831,12 +832,6 @@ object BuildCommon {
         // Build the example Daml models under src/pack/examples (e.g. 09-json-api/model)
         // so they don't rot when the SDK version advances.
         Compile / damlSourceDirectory := (Compile / sourceDirectory).value / ".." / "pack" / "examples",
-        // Some tests in community-app depend on a newer protobuf-java to use
-        // opentelemetry_proto, which community-integration-testing depends on
-        dependencyOverrides ++= Seq(
-          "com.google.protobuf" % "protobuf-java" % "4.33.5" % Test,
-          "com.google.protobuf" % "protobuf-java-util" % "4.33.5" % Test,
-        ),
         libraryDependencies ++= Seq(
           janino, // not used at compile time, but required for conditionals in logback configuration
           logstash, // not used at compile time, but required for the logback json encoder
@@ -1329,6 +1324,7 @@ object BuildCommon {
       .in(file("community/testing"))
       .dependsOn(
         DamlProjects.`observability-metrics`,
+        DamlProjects.`scalatest-utils`,
         DamlProjects.`testing-utils`,
         `community-base`,
         `magnolify-addon`,
@@ -1766,6 +1762,8 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           commons_io,
           grpc_netty_shaded,
+          logback_classic % Test,
+          logback_core % Test,
           scalatest % Test,
           scalacheck % Test,
           scalatestScalacheck % Test,
@@ -2759,17 +2757,15 @@ object BuildCommon {
           scalatest,
           scalatestScalacheck,
         ),
+        enablePublishLibrary,
       )
 
     lazy val `rs-grpc-bridge` = project
       .in(file("base/rs-grpc-bridge"))
-      .dependsOn(
-        `scalatest-utils` % Test
-      )
+      .dependsOn(`scalatest-utils` % Test)
       .settings(
         libsScalaSettings,
         Compile / javacOptions ++= Seq("--release", "17"),
-        scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
           google_findbugs,
           grpc_api,
@@ -2781,7 +2777,6 @@ object BuildCommon {
           scalatestTestNG % Test,
           scalatest % Test,
         ),
-        coverageEnabled := false,
         enablePublishLibrary,
       )
 
@@ -2848,7 +2843,7 @@ object BuildCommon {
       .dependsOn(
         `contextualized-logging`,
         `logging-entries`,
-        `scalatest-utils`,
+        `scalatest-utils` % Test,
         `timer-utils`,
       )
       .settings(
@@ -2960,7 +2955,7 @@ object BuildCommon {
         `resources-pekko`,
         `rs-grpc-bridge`,
         `rs-grpc-pekko`,
-        `scalatest-utils`,
+        `scalatest-utils` % Test,
         CommunityProjects.`base-errors`,
         CommunityProjects.`util-external`,
         CommunityProjects.`util-observability`,
@@ -3157,6 +3152,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           auth0_java,
           auth0_jwks,
+          bouncycastle_bcprov,
           scalatest % Test,
           slf4j_api,
           circe_core,

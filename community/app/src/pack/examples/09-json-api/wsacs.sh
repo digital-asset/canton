@@ -10,7 +10,7 @@ party=$2
 ledgerEnd=$3
 
 
-message='{"filter":{"filtersByParty":{},"filtersForAnyParty":{"cumulative":[{"identifierFilter":{"WildcardFilter":{"value":{"includeCreatedEventBlob":true}}}}]}},"verbose":false,"activeAtOffset":'$ledgerEnd',"eventFormat":null}'
+message='{"activeAtOffset":'$ledgerEnd',"eventFormat":{"filtersByParty":{},"filtersForAnyParty":{"cumulative":[{"identifierFilter":{"WildcardFilter":{"value":{"includeCreatedEventBlob":true}}}}]},"verbose":false}}'
 
 output=$( echo "${message}" | websocat "ws://${participant}:7575/v2/state/active-contracts"  --protocol "daml.ws.auth" )
 

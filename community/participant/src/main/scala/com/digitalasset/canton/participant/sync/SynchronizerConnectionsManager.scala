@@ -1217,25 +1217,15 @@ private[sync] class SynchronizerConnectionsManager(
             syncEphemeralStateFactory
               .createFromPersistent(
                 persistent,
+                synchronizerHandle,
                 synchronizerCrypto,
                 ledgerApiIndexer.asEval,
                 participantNodePersistentState.map(_.contractStore),
                 participantNodeEphemeralState,
-                synchronizerConnectionConfig.predecessor,
-                () => {
-                  val tracker = SynchronizerTimeTracker(
-                    synchronizerConnectionConfig.config.timeTracker,
-                    clock,
-                    synchronizerHandle.sequencerClient,
-                    timeouts,
-                    synchronizerLoggerFactory,
-                  )
-                  synchronizerHandle.topologyClient.setSynchronizerTimeTracker(tracker)
-                  tracker
-                },
                 promiseUSFactory,
                 connectedSynchronizerMetrics,
                 parameters.cachingConfigs.sessionEncryptionKeyCache,
+                synchronizerConnectionConfig,
                 onboardingClearanceScheduler,
                 participantId,
                 synchronizerLoggerFactory,
@@ -1292,6 +1282,7 @@ private[sync] class SynchronizerConnectionsManager(
                   synchronizerHandle.topologyClient,
                   ephemeral.recordOrderPublisher,
                   pendingLsuOperationsStore = pendingLsuOperationsStore,
+                  synchronizerConnectionConfigStore = synchronizerConnectionConfigStore,
                   persistent.pendingOnboardingClearanceStore,
                   synchronizerHandle.syncPersistentState.sequencedEventStore,
                   synchronizerConnectionConfig.predecessor,
@@ -1321,9 +1312,18 @@ private[sync] class SynchronizerConnectionsManager(
             connectedSynchronizer.sequencerClient.getConnectionPoolHealthStatus
           )
 
-          _ = acsCommitmentProcessorHealth.set(
-            connectedSynchronizer.acsCommitmentProcessor.healthComponent
-          )
+          _ = connectedSynchronizer.acsCommitmentProcessorO match {
+            case Some(acsCommitmentProcessor) =>
+              acsCommitmentProcessorHealth.set(acsCommitmentProcessor.healthComponent)
+            case None =>
+              acsCommitmentProcessorHealth.set(
+                new com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent(
+                  AcsCommitmentProcessor.healthName,
+                  logger,
+                )
+              )
+          }
+
           _ = connectedSynchronizer.resolveUnhealthy()
 
           _ = connectedSynchronizers.tryAdd(connectedSynchronizer)
@@ -1507,7 +1507,7 @@ private[sync] class SynchronizerConnectionsManager(
     *   - Time on the current synchronizer has reached the upgrade time.
     *   - Successor is registered.
     *
-    * Note: The upgrade involve operations that are retried, so the method can take some time to
+    * Note: The upgrade involves operations that are retried, so the method can take some time to
     * complete.
     */
   override def performLsu(
@@ -1515,29 +1515,37 @@ private[sync] class SynchronizerConnectionsManager(
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+  ): EitherT[FutureUnlessShutdown, LsuError, Unit] = {
     logger.info(s"Starting upgrade from $currentPsid to ${synchronizerSuccessor.psid}")
 
     for {
       persistentState <- EitherT.fromEither[FutureUnlessShutdown](
         syncPersistentStateManager
           .get(currentPsid)
-          .toRight(s"Unable to get persistent state for $currentPsid")
+          .toRight(LsuError.Internal.Error(s"Unable to get persistent state for $currentPsid"))
       )
 
       alias <- EitherT.fromEither[FutureUnlessShutdown](
         syncPersistentStateManager
           .aliasForSynchronizerId(currentPsid.logical)
-          .toRight(s"Unable to find alias for synchronizer ${currentPsid.logical}")
+          .toRight(
+            LsuError.Internal.Error(s"Unable to find alias for synchronizer ${currentPsid.logical}")
+          )
       )
 
       event <- persistentState.sequencedEventStore
         .find(SearchCriterion.Latest)
-        .leftMap(_ => "The sequencer event store is empty. Was the upgrade performed already?")
+        .leftMap(_ =>
+          LsuError.Internal
+            .Error("The sequencer event store is empty. Was the upgrade performed already?")
+        )
 
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         event.timestamp >= synchronizerSuccessor.upgradeTime,
-        s"Upgrade time ${synchronizerSuccessor.upgradeTime} not reached: last event in the sequenced event store has timestamp ${event.timestamp}",
+        // Internal error because preconditions of the method have been violated
+        LsuError.Internal.Error(
+          s"Upgrade time ${synchronizerSuccessor.upgradeTime} not reached: last event in the sequenced event store has timestamp ${event.timestamp}"
+        ),
       )
 
       upgrader = new AutomaticLogicalSynchronizerUpgrade(
@@ -1581,12 +1589,13 @@ private[sync] class SynchronizerConnectionsManager(
     */
   def performLateLsu(
       request: LateLsuRequest
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     for {
       _ <- validateSequencerConnection(
         request.successorConfig,
         request.successorConnectionValidation,
-      ).leftMap(_.toString)
+      )
+        .leftMap(err => LsuError.SynchronizerConnection.Error(err.toString))
       _ <-
         new UncheckedLateLogicalSynchronizerUpgrade(
           synchronizerConnectionConfigStore,
@@ -1604,12 +1613,15 @@ private[sync] class SynchronizerConnectionsManager(
 
   def performManualLsu(
       manualLsuRequest: ManualLsuRequest
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     for {
       alias <- EitherT.fromEither[FutureUnlessShutdown](
         syncPersistentStateManager
           .aliasForSynchronizerId(manualLsuRequest.lsid)
-          .toRight(s"Unable to find alias for synchronizer ${manualLsuRequest.lsid}")
+          .toRight(
+            LsuError.MalformedRequest
+              .Error(s"Unable to find alias for synchronizer ${manualLsuRequest.lsid}")
+          )
       )
 
       _ <- ManualLogicalSynchronizerUpgrade.upgrade(
@@ -1675,7 +1687,7 @@ private[sync] class SynchronizerConnectionsManager(
       acsCommitmentProcessorHealth,
     )
 
-    LifeCycle.close(instances*)(logger)
+    LifeCycle.close(instances)(logger)
   }
 
   override def toString: String = s"SynchronizerConnectionsManager($participantId)"
@@ -1864,7 +1876,7 @@ object SynchronizerConnectionsManager {
     def performLsu(
         psid: PhysicalSynchronizerId,
         successor: SynchronizerSuccessor,
-    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit]
+    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit]
   }
 
   final case class NoAutomaticLsuHandler(logger: TracedLogger)(implicit ec: ExecutionContext)
@@ -1872,13 +1884,13 @@ object SynchronizerConnectionsManager {
     override def performLsu(
         psid: PhysicalSynchronizerId,
         successor: SynchronizerSuccessor,
-    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit] = {
       logger.info(
         """Automatic logical synchronizer upgrade is disabled, so the upgrade will not be performed automatically.
           |Adjust `<node>.parameters.automatically-perform-lsu = true` and restart the node
           |or consult the documentation to perform manual upgrade.""".stripMargin
       )
-      EitherT.pure[FutureUnlessShutdown, String](())
+      EitherT.pure[FutureUnlessShutdown, LsuError](())
     }
   }
 }

@@ -21,9 +21,10 @@ import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext, LfPartyId
 class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContext {
 
   private def buildUnderTest(
-      hostedParties: Map[LfPartyId, Option[ParticipantAttributes]]
+      hostedParties: Map[LfPartyId, Option[ParticipantAttributes]],
+      filterForOnboardingParties: Boolean = false,
   ): ExtractUsedAndCreated =
-    new ExtractUsedAndCreated(hostedParties, loggerFactory)
+    new ExtractUsedAndCreated(hostedParties, filterForOnboardingParties, loggerFactory)
 
   private def viewEffectsFromRootViews(
       effectAbsolutizer: LedgerEffectAbsolutizer,
@@ -140,7 +141,8 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
                 _ -> Some(
                   ParticipantAttributes(ParticipantPermission.Confirmation, onboarding = true)
                 )
-              )).toMap
+              )).toMap,
+              filterForOnboardingParties = true,
             )
 
             val actual = underTestOnlyOnboardingHostedParties.inputContractPrep(Seq(viewEffects))
@@ -155,20 +157,26 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
             )
 
             actual shouldBe expected
+            underTestOnlyOnboardingHostedParties
+              .usedAndCreated(Seq(viewEffects))
+              .hostedOnboardingPartiesO
+              .flatMap(_.hostedPartiesIfAllOnboarding(informeeParties)) shouldBe Some(observers)
           }
 
           "not mark unknown contracts if not all hosted stakeholders onboarding" in {
-            val underTestOnlyOnboardingHostedParties = buildUnderTest(
+            val underTestWithOnboardingAndFullyHostedParties = buildUnderTest(
               hostedParties = (signatories.map(
                 _ -> Some(ParticipantAttributes(ParticipantPermission.Observation))
               ) ++ observers.map(
                 _ -> Some(
                   ParticipantAttributes(ParticipantPermission.Confirmation, onboarding = true)
                 )
-              )).toMap
+              )).toMap,
+              filterForOnboardingParties = true,
             )
 
-            val actual = underTestOnlyOnboardingHostedParties.inputContractPrep(Seq(viewEffects))
+            val actual =
+              underTestWithOnboardingAndFullyHostedParties.inputContractPrep(Seq(viewEffects))
 
             val expected = InputContractPrep(
               used = Map(singleExercise.absolutizedContractId -> serializedContract),
@@ -180,6 +188,11 @@ class ExtractUsedAndCreatedTest extends BaseTestWordSpec with HasExecutionContex
             )
 
             actual shouldBe expected
+            // Presence of fully hosted informees should cause onboarding informees to not be considered.
+            underTestWithOnboardingAndFullyHostedParties
+              .usedAndCreated(Seq(viewEffects))
+              .hostedOnboardingPartiesO
+              .flatMap(_.hostedPartiesIfAllOnboarding(informeeParties)) shouldBe None
           }
         }
       }

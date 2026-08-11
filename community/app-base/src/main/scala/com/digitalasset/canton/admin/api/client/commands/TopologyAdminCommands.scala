@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
@@ -1030,7 +1031,7 @@ object TopologyAdminCommands {
       ): Either[String, Seq[GenericSignedTopologyTransaction]] =
         response.transactions
           .traverse(tx =>
-            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.NoValidation, tx)
+            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
           )
           .leftMap(_.message)
     }
@@ -1065,7 +1066,7 @@ object TopologyAdminCommands {
             for {
               parsedTopologyTransaction <-
                 TopologyTransaction
-                  .fromByteString(ProtocolVersionValidation.NoValidation, serializedTransaction)
+                  .fromByteString(ProtocolVersionValidation.AlwaysValidation, serializedTransaction)
                   .leftMap(_.message)
               // We don't really need the hash from the response here because we can re-build it from the deserialized
               // topology transaction. But users of the API without access to this code wouldn't be able to do that,
@@ -1156,7 +1157,7 @@ object TopologyAdminCommands {
         .flatMap(
           SignedTopologyTransaction
             .fromProtoV30(
-              ProtocolVersionValidation.NoValidation,
+              ProtocolVersionValidation.AlwaysValidation,
               _,
             )
             .leftMap(_.message)
@@ -1230,7 +1231,7 @@ object TopologyAdminCommands {
         .toRight("no transaction in response")
         .flatMap(
           SignedTopologyTransaction
-            .fromProtoV30(ProtocolVersionValidation.NoValidation, _)
+            .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _)
             .leftMap(_.message)
             .flatMap(tx =>
               tx.selectMapping[M]
@@ -1337,12 +1338,21 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.GetIdResponse
       ): Either[String, UniqueIdentifier] =
-        if (response.uniqueIdentifier.nonEmpty)
-          UniqueIdentifier.fromProtoPrimitive_(response.uniqueIdentifier).leftMap(_.message)
-        else
-          Left(
-            s"Node is not initialized and therefore does not have an Id assigned yet."
+        ProtoValidation
+          .validate(
+            response.uniqueIdentifier,
+            Some("unique_identifier"),
+            ProtocolVersionValidation.AlwaysValidation,
           )
+          .leftMap(_.message)
+          .flatMap { uniqueIdentifier =>
+            if (uniqueIdentifier.nonEmpty)
+              UniqueIdentifier.fromProtoPrimitive_(uniqueIdentifier).leftMap(_.message)
+            else
+              Left(
+                s"Node is not initialized and therefore does not have an Id assigned yet."
+              )
+          }
     }
   }
 }

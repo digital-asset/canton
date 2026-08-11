@@ -38,7 +38,6 @@ private[bftordering] object Miscellaneous {
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     storage.runWrite(action, operationName, maxRetries)
 

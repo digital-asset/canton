@@ -295,7 +295,7 @@ private[execution] class TapsCommandExecutionFactory(
         .map { prescribedSynchronizerId =>
           InvalidPrescribedSynchronizerId
             .Generic(prescribedSynchronizerId, reason)
-            .asGrpcError
+            .toGrpcError
         }
         .getOrElse(
           CommandExecutionErrors.PackageSelectionFailed

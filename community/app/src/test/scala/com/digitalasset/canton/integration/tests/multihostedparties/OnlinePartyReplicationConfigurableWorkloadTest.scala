@@ -3,7 +3,10 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import cats.syntax.option.*
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape
 import com.digitalasset.canton.BaseTest.CantonLfV21
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
@@ -61,7 +64,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
   private var sourceParticipant: ParticipantReference = _
   private var targetParticipant: LocalParticipantReference = _
 
-  lazy val darPaths: Seq[String] = Seq(CantonLfV21, CantonExamplesPath)
+  lazy val darPaths: Seq[String] = Seq(CantonLfV21, CantonExamplesPath, CantonTestsPath)
 
   // Whether a test pauses the indexer.
   protected def pauseIndexer: Boolean
@@ -161,6 +164,12 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
       // Create some contracts shared with a party (Bob) already on the target participant P2.
       val aliceBob = ListBuffer.from(IouSyntax.createIous(participant2, bob, aliceE, amounts))
 
+      // Create an open choice to test proper indexing of disclosure.
+      val openChoiceToExercise =
+        new AtomicReference(
+          createOpenChoiceDisclosableContract(participant1, Some(daId))(aliceE).some
+        )
+
       sourceParticipant = participant1
       targetParticipant = participant2
 
@@ -202,7 +211,27 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
           if (createContractsAlreadyOnTP) createIouWith(bob)
           if (exerciseContractsAlreadyOnTP) exerciseIou(aliceBob)
           if (createContractsOnboardingOnTP) createIouWith(carol)
-          if (exerciseContractsOnboardingOnTP) exerciseIou(aliceCarol)
+          if (exerciseContractsOnboardingOnTP) {
+            // Can only submit on TP without indexer pausing
+            if (!pauseIndexer) {
+              // Exercise contract disclosed to Bob on TP first non-consuming, then consuming.
+              openChoiceToExercise.getAndSet(None).foreach { case (openChoice, disclosable) =>
+                publicUseOpenChoiceContract(targetParticipant, Some(daId))(
+                  openChoice,
+                  disclosable,
+                  bob,
+                )
+                // Without proper processing of witnessed events on the TP, this would
+                // cause the indexer on the TP to error on archiving an unknown contract.
+                publicArchiveOpenChoiceContract(targetParticipant, Some(daId))(
+                  openChoice,
+                  disclosable,
+                  bob,
+                )
+              }
+            }
+            exerciseIou(aliceCarol)
+          }
         }
       }
 
@@ -273,6 +302,35 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
   "Ensure target participant Ledger Api ACS and internal ACS match" onlyRunWith ProtocolVersion.dev in {
     _ => ensureActiveContractsInSyncBetweenLedgerApiAndSyncService(targetParticipant, maxSizeACS)
   }
+
+  "Witness sees open choice disclosure on TP" onlyRunWhen (testedProtocolVersion.isDev && exerciseContractsOnboardingOnTP && !pauseIndexer) in {
+    _ =>
+      // For good measure check that Bob is indeed able to query the ledger effects on the disclosed contract.
+      val openChoiceExercises = targetParticipant.ledger_api.updates.transactions(
+        partyIds = Set(bob),
+        resultFilter = {
+          case TransactionWrapper(transaction) if transaction.events.exists { e =>
+                e.event.created.exists(_.templateId.exists(_.entityName == "OpenChoice")) ||
+                e.event.exercised.exists(_.templateId.exists(_.entityName == "OpenChoice")) ||
+                e.event.archived.exists(_.templateId.exists(_.entityName == "OpenChoice"))
+              } =>
+            true
+          case _ => false
+        },
+        completeAfter = PositiveInt.tryCreate(5),
+        timeout = config.NonNegativeDuration.ofSeconds(5),
+        transactionShape = TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS,
+      )
+      logger.debug(s"Found ${openChoiceExercises.size} transactions")
+      openChoiceExercises.zipWithIndex.foreach { case (wrapper, idx) =>
+        logger.debug(s"Transaction $idx: ${wrapper.transaction}")
+      }
+
+      openChoiceExercises should have size 2
+      // First exercise was non-consuming, the second one consuming
+      openChoiceExercises.head.transaction.events.head.event.exercised.value.consuming shouldBe false
+      openChoiceExercises(1).transaction.events.head.event.exercised.value.consuming shouldBe true
+  }
 }
 
 class OnlinePartyReplicationWithIndexerPausingAndArbitraryWorkloadTestH2
@@ -282,10 +340,10 @@ class OnlinePartyReplicationWithIndexerPausingAndArbitraryWorkloadTestH2
   override protected def pauseIndexer: Boolean = true
 }
 
-class OnlinePartyReplicationWithOnlineIndexingAndLimitedWorkloadTestPostgres
+class OnlinePartyReplicationWithOnlineIndexingAndArbitraryWorkloadTestPostgres
     extends OnlinePartyReplicationConfigurableWorkloadTest {
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected def pauseIndexer: Boolean = false
-  override protected def exerciseContractsOnboardingOnTP: Boolean = false
+  override protected def exerciseContractsOnboardingOnTP: Boolean = true
 }

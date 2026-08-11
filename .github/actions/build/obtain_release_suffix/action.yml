@@ -1,0 +1,32 @@
+name: Obtain Release Suffix
+description: Compute and obtain the release suffix based on the workflow context
+
+inputs:
+  is_nightly_workflow:
+    description: Whether this is a nightly workflow run, boolean as string
+    required: false
+    default: "false"
+  is_manual:
+    description: Whether this is a manual workflow run, boolean as string
+    required: false
+    default: "false"
+
+outputs:
+  release_suffix:
+    description: The computed release suffix
+    value: ${{ steps.compute.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compute release suffix
+      id: compute
+      uses: ./.github/actions/nix/nix_script_run
+      with:
+        command: |
+          suffix=$(./scripts/ci/obtain-release-suffix.sh \
+            "${{ inputs.is_nightly_workflow }}" \
+            "${{ inputs.is_manual }}")
+          echo "release_suffix=$suffix" >> "$GITHUB_OUTPUT"
+          echo "Release suffix: $suffix"
+        output-name: 'release_suffix'

@@ -1,0 +1,69 @@
+name: Run Variations Tests
+description: Run Variations Tests in parallel shards
+
+inputs:
+  exclude_unstable_tests:
+    description: Whether to exclude unstable tests from the test run
+    default: "true"
+    required: false
+  execution_context_size:
+    description: The size of the execution context for the tests, which can be used to control parallelism within the test runner
+    default: "8"
+    required: false
+  num_test_buckets:
+    description: Number of test shards
+    default: "1"
+    required: false
+  override_java_version_for_tests:
+    description: Java version override for tests
+    required: false
+    default: ''
+  shard_index:
+    description: Index of test shard, required when num_test_buckets is not 0
+    required: false
+    default: "0"
+  succeed_on_error:
+    description: Succeed even if the test command fails
+    required: false
+    default: 'false'
+  test_file:
+    description: Input test file for sharding
+    required: false
+    default: 'test-full-class-names.log'
+  timings_file:
+    description: Historical timings JSON file
+    default: ""
+    required: false
+
+
+runs:
+  using: composite
+  steps:
+    - name: Build SBT command
+      id: build-sbt-command
+      shell: bash
+      env:
+        EXCLUDE_UNSTABLE_TESTS: ${{ inputs.exclude_unstable_tests }}
+      run: |
+        if [[ "$EXCLUDE_UNSTABLE_TESTS" == "true" ]]; then
+          UNSTABLE_FLAGS="-l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
+          CMD="dumpClassPath \"\$RUN_SPLITTED_TESTS_CMD -- $UNSTABLE_FLAGS\" checkErrors"
+        else
+          CMD='dumpClassPath "$RUN_SPLITTED_TESTS_CMD" checkErrors'
+        fi
+        echo "command=$CMD" >> "$GITHUB_OUTPUT"
+
+    - name: Run Tests
+      uses: ./.github/actions/test/run_tests
+      with:
+        command: ${{ steps.build-sbt-command.outputs.command }}
+        execution_context_size: ${{ inputs.execution_context_size }}
+        include_patterns: |
+          ^com\.digitalasset\.canton\.integration\.tests\.variations
+        num_test_buckets: ${{ inputs.num_test_buckets }}
+        override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
+        shard_index: ${{ inputs.shard_index }}
+        succeed_on_error: ${{ inputs.succeed_on_error }}
+        test_file: ${{ inputs.test_file }}
+        timings_file: ${{ inputs.timings_file }}
+        timeout: '240m'
