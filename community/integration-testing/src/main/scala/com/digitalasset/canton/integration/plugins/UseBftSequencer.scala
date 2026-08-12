@@ -9,7 +9,11 @@ import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.StorageConfig.Memory
-import com.digitalasset.canton.config.{CantonConfig, QueryCostMonitoringConfig}
+import com.digitalasset.canton.config.{
+  CantonConfig,
+  PositiveFiniteDuration,
+  QueryCostMonitoringConfig,
+}
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
 import com.digitalasset.canton.integration.plugins.UseBftSequencer.UseStandaloneConfig
@@ -22,7 +26,9 @@ import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleE
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
+  BftBlockOrderingP2PSendDelayConfig,
   BftBlockOrderingStandalonePeerConfig,
   DefaultDedicatedExecutionContextDivisor,
   DefaultMaxBatchCreationInterval,
@@ -31,6 +37,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  FiniteDurationDistribution,
+  Probability,
+}
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerConfig,
@@ -69,6 +79,7 @@ final class UseBftSequencer(
     shouldUseMemoryStorageForBftOrderer: Boolean = false,
     shouldBenchmarkBftSequencer: Boolean = false,
     useStandaloneConfig: Option[UseStandaloneConfig] = None,
+    p2pSendDelays: Map[String, BftBlockOrderingP2PSendDelayConfig] = Map.empty,
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
@@ -119,11 +130,13 @@ final class UseBftSequencer(
       config.sequencers.keys.map(_ -> UniquePortGenerator.next).toMap
 
     val sequencers =
-      config.sequencers.map { case (instanceName, sequencerNodeConfig) =>
+      config.sequencers.map { case (selfInstanceName, sequencerNodeConfig) =>
+        val otherInitialNames = config.sequencers.keys.filterNot(_ == selfInstanceName).toSeq
+        val standaloneOpt = createStandaloneConfig(selfInstanceName, otherInitialNames)
         val sequencer =
           sequencerNodeConfig.sequencer match {
             case BftSequencer(blockSequencerConfig, bftOrdererConfig) =>
-              // When changing this, also update `createFullConfig`
+              // When adding overrides from this plugin, also update `createFullConfig`
               BftSequencer(
                 blockSequencerConfig,
                 bftOrdererConfig
@@ -138,6 +151,8 @@ final class UseBftSequencer(
                     maxBatchCreationInterval = maxBatchCreationInterval,
                     availabilityMinProposalCreationDelay = availabilityMinProposalCreationDelay,
                     dedicatedExecutionContextDivisor = dedicatedExecutionContextDivisor,
+                    standalone = standaloneOpt,
+                    storage = Option.when(shouldUseMemoryStorageForBftOrderer)(Memory()),
                     sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
                   )
                   // server endpoint's lens
@@ -148,11 +163,11 @@ final class UseBftSequencer(
                     _.focus(_.address)
                       .replace("localhost")
                       .focus(_.internalPort)
-                      .replace(Some(instanceNameToPort(instanceName)))
+                      .replace(Some(instanceNameToPort(selfInstanceName)))
                       .focus(_.externalAddress)
                       .replace("localhost")
                       .focus(_.externalPort)
-                      .replace(instanceNameToPort(instanceName))
+                      .replace(instanceNameToPort(selfInstanceName))
                   )
                   // peer endpoints' lens
                   .focus(_.initialNetwork)
@@ -160,7 +175,7 @@ final class UseBftSequencer(
                   .andThen(GenLens[P2PNetworkConfig](_.peerEndpoints))
                   .modify { peerEndpoints =>
                     val otherPeerPorts =
-                      instanceNameToPort.filterNot { case (name, _) => name == instanceName }
+                      instanceNameToPort.filterNot { case (name, _) => name == selfInstanceName }
                     peerEndpoints
                       .zip(otherPeerPorts.values)
                       .map { case (p2pEndpointConfig, port) =>
@@ -176,7 +191,7 @@ final class UseBftSequencer(
             case otherSequencerConfig => otherSequencerConfig
           }
 
-        instanceName -> sequencerNodeConfig.focus(_.sequencer).replace(sequencer)
+        selfInstanceName -> sequencerNodeConfig.focus(_.sequencer).replace(sequencer)
       }
 
     config.focus(_.sequencers).replace(sequencers)
@@ -229,39 +244,7 @@ final class UseBftSequencer(
             peerEndpoints = otherInitialEndpoints,
             overwriteStoredEndpoints = shouldOverwriteStoredEndpoints,
           )
-          val standaloneOpt = useStandaloneConfig.map { standaloneConfig =>
-            val keyPair = JcePrivateCrypto
-              .generateSigningKeypair(SigningKeySpec.EcCurve25519, SigningKeyUsage.ProtocolOnly)
-              .getOrElse(throw new RuntimeException("Failed to generate keypair"))
-            val privKey = keyPair.privateKey
-            val pubKey = keyPair.publicKey
-            val privKeyFile = tmpDir / s"node-${selfInstanceName}_signing_private_key.bin"
-            val pubKeyFile = tmpDir / s"node-${selfInstanceName}_signing_public_key.bin"
-            privKeyFile.writeByteArray(privKey.toProtoV30.value.toByteArray)
-            pubKeyFile.writeByteArray(pubKey.toProtoV30.value.toByteArray)
-            val postOrderingDelayO =
-              standaloneConfig.postOrderingDelayConfig.flatMap { config =>
-                val suffixDigits = selfInstanceName.unwrap.reverse.takeWhile(_.isDigit).reverse
-                Option.when(
-                  suffixDigits.nonEmpty && config.nodesToDelay.contains(suffixDigits.toInt)
-                )(config.delay)
-              }
-            BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig(
-              thisSequencerId = sequencerId(selfInstanceName),
-              signingPrivateKeyProtoFile = privKeyFile.toJava,
-              signingPublicKeyProtoFile = pubKeyFile.toJava,
-              segmentLength = standaloneConfig.segmentLength,
-              peers = otherInitialNames
-                .map { otherInitialInstanceName =>
-                  BftBlockOrderingStandalonePeerConfig(
-                    sequencerId = sequencerId(otherInitialInstanceName),
-                    signingPublicKeyProtoFile =
-                      tmpDir / s"node-${otherInitialInstanceName}_signing_public_key.bin" toJava,
-                  )
-                },
-              postOrderingDelay = postOrderingDelayO,
-            )
-          }
+          val standaloneOpt = createStandaloneConfig(selfInstanceName, otherInitialNames)
           val blockSequencerConfig = {
             // without this config overrides (which are applied before plugins) are not preserved
             val existingBlockSequencerConfig =
@@ -277,10 +260,11 @@ final class UseBftSequencer(
               )
             else existingBlockSequencerConfig
           }
-          // When changing this, also update `generateEndpoints`
+          // When adding overrides from this plugin, also update `generateEndpoints`
           selfInstanceName -> SequencerConfig.BftSequencer(
             block = blockSequencerConfig,
             config = BftBlockOrdererConfig(
+              initialNetwork = Some(network),
               leaderSelectionPolicyConfigForPv34 = getLeaderSelectionPolicyConfigForPv34(
                 sequencingParameters,
                 BftBlockOrdererConfig(),
@@ -291,7 +275,6 @@ final class UseBftSequencer(
               maxBatchCreationInterval = maxBatchCreationInterval,
               availabilityMinProposalCreationDelay = availabilityMinProposalCreationDelay,
               dedicatedExecutionContextDivisor = dedicatedExecutionContextDivisor,
-              initialNetwork = Some(network),
               standalone = standaloneOpt,
               storage = Option.when(shouldUseMemoryStorageForBftOrderer)(Memory()),
               sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
@@ -324,6 +307,67 @@ final class UseBftSequencer(
       .modify(_.map(mapSequencerConfigs))
   }
 
+  private def createStandaloneConfig(
+      selfInstanceName: InstanceName,
+      otherInitialNames: Seq[InstanceName],
+  ): Option[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig] =
+    useStandaloneConfig.map { standaloneConfig =>
+      val keyPair = JcePrivateCrypto
+        .generateSigningKeypair(SigningKeySpec.EcCurve25519, SigningKeyUsage.ProtocolOnly)
+        .getOrElse(throw new RuntimeException("Failed to generate keypair"))
+      val privKey = keyPair.privateKey
+      val pubKey = keyPair.publicKey
+      val privKeyFile = tmpDir / s"node-${selfInstanceName}_signing_private_key.bin"
+      val pubKeyFile = tmpDir / s"node-${selfInstanceName}_signing_public_key.bin"
+      privKeyFile.writeByteArray(privKey.toProtoV30.value.toByteArray)
+      pubKeyFile.writeByteArray(pubKey.toProtoV30.value.toByteArray)
+      val postOrderingDelayO =
+        standaloneConfig.postOrderingDelayConfig.flatMap { config =>
+          val suffixDigits = getSuffixDigits(selfInstanceName.unwrap)
+          Option.when(
+            suffixDigits.nonEmpty && config.nodesToDelay.contains(suffixDigits.toInt)
+          )(config.delay)
+        }
+      BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig(
+        thisSequencerId = standaloneSequencerId(selfInstanceName),
+        signingPrivateKeyProtoFile = privKeyFile.toJava,
+        signingPublicKeyProtoFile = pubKeyFile.toJava,
+        segmentLength = standaloneConfig.segmentLength,
+        pbftViewChangeTimeout = standaloneConfig.pbftViewChangeTimeout.underlying,
+        blacklistLeaderSelectionPolicyConfig =
+          standaloneConfig.blacklistLeaderSelectionPolicyConfig,
+        maxRequestsInBatch = standaloneConfig.maxRequestsInBatch,
+        maxBatchesPerBlockProposal = standaloneConfig.maxBatchesPerBlockProposal,
+        peers = otherInitialNames
+          .map { otherInitialInstanceName =>
+            BftBlockOrderingStandalonePeerConfig(
+              sequencerId = standaloneSequencerId(otherInitialInstanceName),
+              signingPublicKeyProtoFile =
+                tmpDir / s"node-${otherInitialInstanceName}_signing_public_key.bin" toJava,
+            )
+          },
+        postOrderingDelay = postOrderingDelayO,
+        topologyBroadcastProbability = standaloneConfig.topologyBroadcastProbability,
+        pendingTopologyChangesProbability = standaloneConfig.pendingTopologyChangesProbability,
+        getOrderingTopologyDelay = standaloneConfig.getOrderingTopologyDelay,
+        sendDelay = p2pSendDelays
+          .get(getSuffixDigits(selfInstanceName.unwrap))
+          .map(instanceIndexToName(otherInitialNames.map(_.unwrap), _)),
+      )
+    }
+
+  private def instanceIndexToName(
+      otherInstanceNames: Seq[String],
+      config: BftBlockOrderingP2PSendDelayConfig,
+  ): BftBlockOrderingP2PSendDelayConfig =
+    config.copy(delaysByRecipients = config.delaysByRecipients.map {
+      case DelayByRecipients(sources, delayDistribution) =>
+        DelayByRecipients(
+          sources.flatMap(idx => otherInstanceNames.find(oin => idx == getSuffixDigits(oin))),
+          delayDistribution,
+        )
+    })
+
   private def getLeaderSelectionPolicyConfigForPv34(
       sequencingParameters: Option[topology.SequencingParameters],
       bftOrdererConfig: BftBlockOrdererConfig,
@@ -332,10 +376,13 @@ final class UseBftSequencer(
       .map(_.blacklistLeaderSelectionPolicyConfig)
       .orElse(bftOrdererConfig.leaderSelectionPolicyConfigForPv34)
 
-  private def sequencerId(instanceName: InstanceName): String =
+  private def standaloneSequencerId(instanceName: InstanceName): String =
     SequencerId
       .tryCreate(instanceName.unwrap, Namespace(Fingerprint.tryFromString("default")))
       .toProtoPrimitive
+
+  private def getSuffixDigits(s: String): String =
+    s.reverse.takeWhile(_.isDigit).reverse
 }
 
 object UseBftSequencer {
@@ -346,7 +393,14 @@ object UseBftSequencer {
   )
 
   final case class UseStandaloneConfig(
+      pbftViewChangeTimeout: PositiveFiniteDuration,
       segmentLength: Long,
+      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
+      maxRequestsInBatch: Short,
+      maxBatchesPerBlockProposal: Short,
       postOrderingDelayConfig: Option[PostOrderingDelayConfig],
+      topologyBroadcastProbability: Option[Probability],
+      pendingTopologyChangesProbability: Option[Probability],
+      getOrderingTopologyDelay: Option[FiniteDurationDistribution],
   )
 }

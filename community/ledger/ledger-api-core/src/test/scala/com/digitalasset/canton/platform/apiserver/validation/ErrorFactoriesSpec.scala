@@ -41,7 +41,7 @@ class ErrorFactoriesSpec
   private val originalCorrelationId = "cor-id-12345679"
   private val truncatedCorrelationId = "cor-id-1"
 
-  implicit val errorLoggingContext: ErrorLoggingContext =
+  implicit val correlatedErrorLoggingContext: ErrorLoggingContext =
     ErrorLoggingContext.withExplicitCorrelationId(
       logger,
       loggerFactory.properties,
@@ -67,7 +67,7 @@ class ErrorFactoriesSpec
         s"INDEX_DB_SQL_TRANSIENT_ERROR(1,$truncatedCorrelationId): Processing the request failed due to a transient database error: $failureReason"
       assertError(
         IndexErrors.DatabaseErrors.SqlTransientError
-          .Reject(someSqlTransientException)(errorLoggingContext)
+          .Reject(someSqlTransientException)(correlatedErrorLoggingContext)
       )(
         code = Code.UNAVAILABLE,
         message = msg,
@@ -97,7 +97,7 @@ class ErrorFactoriesSpec
         IndexErrors.DatabaseErrors.SqlNonTransientError
           .Reject(
             new SQLNonTransientException(failureReason)
-          )(errorLoggingContext)
+          )(correlatedErrorLoggingContext)
       )(
         code = Code.INTERNAL,
         message = expectedInternalErrorMessage,
@@ -114,7 +114,7 @@ class ErrorFactoriesSpec
         assertStatus(
           LedgerApiErrors.InternalError
             .Generic("some message", Some(t))(
-              errorLoggingContext
+              correlatedErrorLoggingContext
             )
             .asGrpcStatus
         )(
@@ -134,7 +134,7 @@ class ErrorFactoriesSpec
         s"PARTICIPANT_BACKPRESSURE(2,$truncatedCorrelationId): The participant is overloaded: Some buffer is full"
       assertStatus(
         LedgerApiErrors.ParticipantBackpressure
-          .Rejection("Some buffer is full")(errorLoggingContext)
+          .Rejection("Some buffer is full")(correlatedErrorLoggingContext)
           .asGrpcStatus
       )(
         code = Code.ABORTED,
@@ -164,7 +164,7 @@ class ErrorFactoriesSpec
       assertStatus(
         CommonErrors.ServiceNotRunning
           .Reject("Some service")(
-            errorLoggingContext
+            correlatedErrorLoggingContext
           )
           .asGrpcStatus
       )(
@@ -198,7 +198,7 @@ class ErrorFactoriesSpec
             "Timed out while awaiting for a completion corresponding to a command submission.",
             definiteAnswer = false,
           )(
-            errorLoggingContext
+            correlatedErrorLoggingContext
           )
           .asGrpcStatus
       )(
@@ -224,7 +224,7 @@ class ErrorFactoriesSpec
           .Generic(
             "Missing status in completion response.",
             throwableO = None,
-          )(errorLoggingContext)
+          )(correlatedErrorLoggingContext)
           .asGrpcStatus
       )(
         code = Code.INTERNAL,
@@ -242,7 +242,7 @@ class ErrorFactoriesSpec
       val msg = s"PACKAGE_NOT_FOUND(11,$truncatedCorrelationId): Could not find package."
       assertError(
         RequestValidationErrors.NotFound.Package
-          .Reject("packageId123")(errorLoggingContext)
+          .Reject("packageId123")(correlatedErrorLoggingContext)
       )(
         code = Code.NOT_FOUND,
         message = msg,
@@ -262,7 +262,7 @@ class ErrorFactoriesSpec
 
     "return the a versioned service internal error" in {
       assertError(
-        LedgerApiErrors.InternalError.VersionService("message123")(errorLoggingContext)
+        LedgerApiErrors.InternalError.VersionService("message123")(correlatedErrorLoggingContext)
       )(
         code = Code.INTERNAL,
         message = expectedInternalErrorMessage,
@@ -277,7 +277,7 @@ class ErrorFactoriesSpec
       val msg = s"CONFIGURATION_ENTRY_REJECTED(9,$truncatedCorrelationId): message123"
       assertError(
         AdminServiceErrors.ConfigurationEntryRejected.Reject("message123")(
-          errorLoggingContext
+          correlatedErrorLoggingContext
         )
       )(
         code = Code.FAILED_PRECONDITION,
@@ -300,7 +300,7 @@ class ErrorFactoriesSpec
         s"UPDATE_NOT_FOUND(11,$truncatedCorrelationId): Update not found, or not visible."
       assertError(
         RequestValidationErrors.NotFound.Update
-          .RejectWithTxId("uId")(errorLoggingContext)
+          .RejectWithTxId("uId")(correlatedErrorLoggingContext)
       )(
         code = Code.NOT_FOUND,
         message = msg,
@@ -323,7 +323,7 @@ class ErrorFactoriesSpec
         s"DUPLICATE_COMMAND(10,$truncatedCorrelationId): A command with the given command id has already been successfully processed"
       assertError(
         ConsistencyErrors.DuplicateCommand
-          .Reject(existingCommandSubmissionId = None)(errorLoggingContext)
+          .Reject(existingCommandSubmissionId = None)(correlatedErrorLoggingContext)
       )(
         code = Code.ALREADY_EXISTS,
         message = msg,
@@ -343,7 +343,7 @@ class ErrorFactoriesSpec
     "return a permissionDenied error" in {
       assertError(
         AuthorizationChecksErrors.PermissionDenied.Reject("some cause")(
-          errorLoggingContext
+          correlatedErrorLoggingContext
         )
       )(
         code = Code.PERMISSION_DENIED,
@@ -359,7 +359,7 @@ class ErrorFactoriesSpec
       val msg = s"REQUEST_TIME_OUT(3,$truncatedCorrelationId): message123"
       assertError(
         CommonErrors.RequestTimeOut
-          .Reject("message123", definiteAnswer = false)(errorLoggingContext)
+          .Reject("message123", definiteAnswer = false)(correlatedErrorLoggingContext)
       )(
         code = Code.DEADLINE_EXCEEDED,
         message = msg,
@@ -386,7 +386,7 @@ class ErrorFactoriesSpec
             fieldName = "fieldName123",
             offsetValue = -123L,
             message = "message123",
-          )(errorLoggingContext)
+          )(correlatedErrorLoggingContext)
           .asGrpcError
       )(
         code = Code.INVALID_ARGUMENT,
@@ -409,7 +409,7 @@ class ErrorFactoriesSpec
       val msg = s"OFFSET_AFTER_LEDGER_END(12,$truncatedCorrelationId): $expectedMessage"
       assertError(
         RequestValidationErrors.OffsetAfterLedgerEnd
-          .Reject("Absolute", 12345678L, 42L)(errorLoggingContext)
+          .Reject("Absolute", 12345678L, 42L)(correlatedErrorLoggingContext)
       )(
         code = Code.OUT_OF_RANGE,
         message = msg,
@@ -431,7 +431,7 @@ class ErrorFactoriesSpec
       val msg = s"OFFSET_OUT_OF_RANGE(9,$truncatedCorrelationId): message123"
       assertError(
         RequestValidationErrors.OffsetOutOfRange
-          .Reject("message123")(errorLoggingContext)
+          .Reject("message123")(correlatedErrorLoggingContext)
       )(
         code = Code.FAILED_PRECONDITION,
         message = msg,
@@ -451,7 +451,7 @@ class ErrorFactoriesSpec
     "return an unauthenticatedMissingJwtToken error" in {
       assertError(
         AuthorizationChecksErrors.Unauthenticated
-          .MissingJwtToken()(errorLoggingContext)
+          .MissingJwtToken()(correlatedErrorLoggingContext)
       )(
         code = Code.UNAUTHENTICATED,
         message = expectedInternalErrorMessage,
@@ -467,7 +467,7 @@ class ErrorFactoriesSpec
       val someThrowable = new RuntimeException("some internal authentication error")
       assertError(
         AuthorizationChecksErrors.InternalAuthorizationError
-          .Reject(someSecuritySafeMessage, someThrowable)(errorLoggingContext)
+          .Reject(someSecuritySafeMessage, someThrowable)(correlatedErrorLoggingContext)
       )(
         code = Code.INTERNAL,
         message = expectedInternalErrorMessage,
@@ -489,7 +489,7 @@ class ErrorFactoriesSpec
           .Reject(
             reason = errorDetailMessage,
             maxDeduplicationDuration = Some(maxDeduplicationDuration),
-          )(errorLoggingContext)
+          )(correlatedErrorLoggingContext)
           .asGrpcError
       )(
         code = Code.FAILED_PRECONDITION,
@@ -518,7 +518,7 @@ class ErrorFactoriesSpec
         s"INVALID_FIELD(8,$truncatedCorrelationId): The submitted command has a field with invalid value: Invalid field $fieldName: my message"
       assertError(
         RequestValidationErrors.InvalidField
-          .Reject(fieldName, "my message")(errorLoggingContext)
+          .Reject(fieldName, "my message")(correlatedErrorLoggingContext)
       )(
         code = Code.INVALID_ARGUMENT,
         message = msg,
@@ -542,7 +542,7 @@ class ErrorFactoriesSpec
           .Reject(
             "my message",
             0L,
-          )(errorLoggingContext)
+          )(correlatedErrorLoggingContext)
       )(
         code = Code.FAILED_PRECONDITION,
         message = msg,
@@ -566,7 +566,9 @@ class ErrorFactoriesSpec
     }
 
     "return a trackerFailure error" in {
-      assertError(LedgerApiErrors.InternalError.Generic("message123")(errorLoggingContext))(
+      assertError(
+        LedgerApiErrors.InternalError.Generic("message123")(correlatedErrorLoggingContext)
+      )(
         code = Code.INTERNAL,
         message = expectedInternalErrorMessage,
         details = expectedInternalErrorDetails,
@@ -581,7 +583,9 @@ class ErrorFactoriesSpec
 
       val msg =
         s"SERVICE_NOT_RUNNING(1,$truncatedCorrelationId): $serviceName is not running."
-      assertError(CommonErrors.ServiceNotRunning.Reject(serviceName)(errorLoggingContext))(
+      assertError(
+        CommonErrors.ServiceNotRunning.Reject(serviceName)(correlatedErrorLoggingContext)
+      )(
         code = Code.UNAVAILABLE,
         message = msg,
         details = Seq[ErrorDetails.ErrorDetail](
@@ -610,7 +614,7 @@ class ErrorFactoriesSpec
         s"MISSING_FIELD(8,$truncatedCorrelationId): The submitted command is missing a mandatory field: $fieldName"
       assertError(
         RequestValidationErrors.MissingField
-          .Reject(fieldName)(errorLoggingContext)
+          .Reject(fieldName)(correlatedErrorLoggingContext)
       )(
         code = Code.INVALID_ARGUMENT,
         message = msg,
@@ -637,7 +641,7 @@ class ErrorFactoriesSpec
     "return an invalidArgument error" in {
       assertError(
         RequestValidationErrors.InvalidArgument
-          .Reject("my message")(errorLoggingContext)
+          .Reject("my message")(correlatedErrorLoggingContext)
       )(
         code = Code.INVALID_ARGUMENT,
         message = msg,

@@ -24,6 +24,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
@@ -180,7 +181,8 @@ final case class AssignmentCommonData private (
       stakeholders = Some(stakeholders.toProtoV30),
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
       submitterMetadata = Some(submitterMetadata.toProtoV30),
-      reassigningParticipantUids = reassigningParticipants.map(p => p.uid.toProtoPrimitive).toSeq,
+      reassigningParticipantUids =
+        reassigningParticipants.map(_.uid.toProtoPrimitive.toProtoUnvalidated).toSeq,
       unassignmentTs = Some(unassignmentTs.toProtoTimestamp),
     )
 

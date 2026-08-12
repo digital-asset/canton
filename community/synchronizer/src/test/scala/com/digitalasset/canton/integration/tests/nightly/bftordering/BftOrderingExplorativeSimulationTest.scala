@@ -18,6 +18,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   SimulationTestStageSettings,
   TopologySettings,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  PowerDistribution,
+  Probability,
+}
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 
@@ -96,17 +100,25 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
       simulationSettings = SimulationSettings(
         LocalSettings(
           randomSeed = randomSourceToCreateSettings.nextLong(),
-          crashRestartChance = randomEquallyWeightedOneOf(
-            zeroProbability,
-            generateProb(0.0, 0.5),
-          ),
-          crashRestartGracePeriod = randomWeightedOneOf(
-            1 -> shortTime,
-            2 -> longTime,
-          ),
-          permanentlyCrashNodes = randomWeightedOneOf(
-            2 -> None,
-            1 -> Some(OrderingTopology.numToleratedFaults(numberInitialNodes)),
+          crashFaultSettings = CrashFaultSettings(
+            crashRestartChance = randomEquallyWeightedOneOf(
+              zeroProbability,
+              generateProb(0.0, 0.5),
+            ),
+            crashRestartGracePeriod = randomWeightedOneOf(
+              1 -> shortTime,
+              2 -> longTime,
+            ),
+            globalRestartEnabled = true,
+            globalRestartTimeDistribution = randomWeightedOneOf(
+              1 -> shortTime,
+              2 -> longTime,
+            ),
+            globalRestartChance = generateProb(0.0, 0.5),
+            permanentlyCrashNodes = randomWeightedOneOf(
+              2 -> None,
+              1 -> Some(OrderingTopology.numToleratedFaults(numberInitialNodes)),
+            ),
           ),
         ),
         NetworkSettings(

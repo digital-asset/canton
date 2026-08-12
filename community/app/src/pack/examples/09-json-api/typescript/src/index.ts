@@ -63,7 +63,6 @@ function eventFormat(userParty: string, templateId: string): components["schemas
 async function acs(userParty: string, templateId: string, ledger_offset: number): Promise<components["schemas"]["CreatedEvent"][]> {
     const filter: components["schemas"]["GetActiveContractsRequest"] = {
         eventFormat: eventFormat(userParty, templateId),
-        verbose: false,
         activeAtOffset: ledger_offset,
     };
 
@@ -91,7 +90,6 @@ async function updateContracts(startOffset: number, endOffset: number, userParty
                 transactionShape: 'TRANSACTION_SHAPE_ACS_DELTA',
             },
         },
-        verbose: false,
     };
     const {data, error} = await client.POST("/v2/updates", {
         body: filter

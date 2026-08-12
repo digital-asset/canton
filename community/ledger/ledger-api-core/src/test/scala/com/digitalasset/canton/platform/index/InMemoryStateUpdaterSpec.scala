@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.FinalReason
 import com.digitalasset.canton.ledger.participant.state.Update.ContractInfo
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Added
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
   AuthorizationEvent,
   AuthorizationLevel,
@@ -973,6 +974,9 @@ object InMemoryStateUpdaterSpec {
             authorizationEvent = AuthorizationEvent.Added(AuthorizationLevel.Observation),
           )
         ),
+        synchronizerParametersState = Some(
+          SynchronizerParametersState(ByteString.copyFromUtf8("synchronizer-parameters"))
+        ),
       )(emptyTraceContext)
 
     val ledgerEndCache: MutableLedgerEndCache = mock[MutableLedgerEndCache]
@@ -1668,7 +1672,9 @@ object InMemoryStateUpdaterSpec {
           authorizationEvent = Added(authorizationLevel),
         )
       ),
-      genericTopologyEvents = Nil, // TODO(i33326)
+      genericTopologyEvents = List(
+        SynchronizerParametersState(ByteString.copyFromUtf8("synchronizer-parameters"))
+      ),
     )
 
   private val someLedgerEnd =

@@ -1,0 +1,123 @@
+name: Unstable Test
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_PASSWORD:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  unstable_test:
+    name: Unstable Test
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Set up workspace path
+        shell: bash
+        run: |
+          TMP_WORKSPACE="${{ runner.temp }}/workspace-${{ github.run_id }}"
+          mkdir -p "$TMP_WORKSPACE"
+          echo "TMP_WORKSPACE=$TMP_WORKSPACE" >> "$GITHUB_ENV"
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Start Toxiproxy container
+        id: start_toxiproxy
+        uses: ./.github/actions/utils/toxiproxy/start_toxiproxy_container
+        with:
+          shard-index: 0
+          network-mode: host
+
+      - name: Download test file
+        uses: actions/download-artifact@v7
+        with:
+          name: test-full-class-names
+          path: .
+
+      - name: Run Unstable Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.* -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest\""
+          execution_context_size: '8'
+          fail_on_error_in_output: 'false'
+          num_parallel_tasks: '1'
+          num_test_buckets: '0'
+          release_path: ${{ env.TMP_WORKSPACE }}
+          succeed_on_error: 'true'
+          timeout: '240m'
+
+      - name: Clean up workspace
+        if: always()
+        shell: bash
+        run: rm -rf "$TMP_WORKSPACE"
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+      - name: Stop Toxiproxy container
+        if: always()
+        uses: ./.github/actions/utils/toxiproxy/stop_toxiproxy_container
+        with:
+          container-name: ${{ steps.start_toxiproxy.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: unstable_test
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: unstable_test
+      runner: ${{ inputs.runner }}

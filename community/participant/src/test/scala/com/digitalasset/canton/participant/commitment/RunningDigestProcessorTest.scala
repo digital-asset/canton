@@ -6,12 +6,14 @@ package com.digitalasset.canton.participant.commitment
 import cats.Eval
 import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdate.EffectiveTopologyUpdate
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   Onboarding,
   Revoked,
 }
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.Submission
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
   AuthorizationLevel,
@@ -22,16 +24,26 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   AcsUpdate,
   CheckpointFence,
+  CheckpointWritten,
   NotCheckpointFence,
   PartyAddedToParticipant,
   PartyOnboardingToParticipant,
   PartyRemovedFromParticipant,
   ProcessingContext,
 }
+import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
+import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, TestCommitmentMetrics}
 import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
-import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
-import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.{
+  MaxEventsWithoutCheckpoint,
+  PartyHostingChange,
+  ReconciliationIntervalBoundary,
+}
+import com.digitalasset.canton.participant.store.memory.{
+  InMemoryAcsCommitmentPeriodStore,
+  InMemoryAcsDigestStore,
+}
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
@@ -46,7 +58,9 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, TestingTopology}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.signalling.LocalEventSignaller
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, LfPartyId}
+import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import scala.concurrent.duration.*
@@ -64,6 +78,7 @@ class RunningDigestProcessorTest
   def mkRunningDigestProcessor(
       participant: ParticipantId = thisParticipant,
       indexService: InternalIndexService = mkIndexService(),
+      tickSignaller: TickSignaller = mkTickSignaller(),
       counterpartyBatchSize: Int = 10,
       partyTopology: Map[LfPartyId, PartyInfo] = Map.empty,
       maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(5),
@@ -71,6 +86,7 @@ class RunningDigestProcessorTest
         .defaultValues(testedProtocolVersion)
         .reconciliationInterval
         .toFiniteDuration,
+      metrics: CommitmentMetrics = TestCommitmentMetrics(),
   ): RunningDigestProcessor = {
     val testingTopology = TestingTopology(
       topology = partyTopology,
@@ -90,11 +106,17 @@ class RunningDigestProcessorTest
     val mockStringInterning = new MockStringInterning
     val acsDigestStore =
       InMemoryAcsDigestStore.create(Eval.now(mockStringInterning), loggerFactory)
+    val acsPeriodStore =
+      new InMemoryAcsCommitmentPeriodStore(
+        Eval.now(mockStringInterning),
+        loggerFactory,
+        enableConsistencyChecks = true,
+      )
     val digestAccumulator = new SequentialDigestAccumulator(
-      participant.toLf,
       acsDigestStore,
       mockStringInterning,
       AcsDigestTracingMode.Disabled,
+      TestCommitmentMetrics(),
       loggerFactory,
     )
 
@@ -105,22 +127,29 @@ class RunningDigestProcessorTest
         enableRunningDigestProcessor = true,
         maxNumUpdatesBetweenCheckpoints = maxNumUpdatesBetweenCheckpoints,
         counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
-        AcsDigestTracingMode.Disabled,
+        tracing = AcsDigestTracingMode.Disabled,
       ),
       digestAccumulator,
       acsDigestStore,
+      tickSignaller,
       indexService,
       getTopologySnapshot = ts =>
         FutureUnlessShutdown.pure(testingTopology.topologySnapshot(timestampOfSnapshot = ts.value)),
+      enableAdditionalConsistencyChecks = true,
+      new AcsCommitmentPeriodWriter(acsDigestStore, acsPeriodStore, loggerFactory),
+      metrics,
       timeouts,
       loggerFactory,
     )
   }
 
+  def mkTickSignaller(): TickSignaller =
+    new LocalEventSignaller[Unit, Offset]("subscriber", timeouts, loggerFactory)
+
   "RunningDigestProcessor" when {
 
     "checkpointing" should {
-      "emit a checkpoint fence for AcsChanges that cross a reconciliation invertval boundary" in {
+      "emit a checkpoint fence for AcsChanges that cross a reconciliation interval boundary" in {
         val rdp = mkRunningDigestProcessor(
           reconciliationInterval = 5.seconds
         )
@@ -136,6 +165,10 @@ class RunningDigestProcessorTest
             ProcessingContext(tp(7), dummyAcsChange),
           )
         ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
+
+        rdp.metrics.runningDigestProcessor.latestCheckpointedRecordTime.getValue shouldBe ts(
+          7
+        ).toMicros
 
         result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
           ProcessingContext(tp1_0, Left(CheckpointType.ReconciliationIntervalBoundary)),
@@ -157,33 +190,114 @@ class RunningDigestProcessorTest
 
         val dummyAcsChange =
           InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+        val dummyTopologyUpdate =
+          InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(Set.empty, None)
+        val dummyAcsCommitment =
+          InternalIndexService.AcsUpdate.AcsCommitment(ByteString.empty)
         val result = Source(
           Seq(
-            ProcessingContext(tp(2), dummyAcsChange),
+            ProcessingContext(Timepoint(off(2))(ts(2)), dummyAcsChange),
             ProcessingContext(Timepoint(off(3))(ts(2)), dummyAcsChange),
+            // a checkpoint should be injected here
             ProcessingContext(Timepoint(off(4))(ts(2)), dummyAcsChange),
             ProcessingContext(Timepoint(off(5))(ts(3)), dummyAcsChange),
+            // a checkpoint should be injected here
             ProcessingContext(Timepoint(off(8))(ts(5)), dummyAcsChange),
             ProcessingContext(Timepoint(off(9))(ts(6)), dummyAcsChange),
+            // a checkpoint should be injected here
+            // empty topology events don't trigger topology related checkpoints, but should count towards processed events
+            ProcessingContext(tp(11), dummyTopologyUpdate),
+            ProcessingContext(tp(12), dummyTopologyUpdate),
+            // a checkpoint should be injected here
+            ProcessingContext(tp(15), dummyTopologyUpdate),
+            // received acs commitments don't trigger by themselves, but should count towards processed events
+            ProcessingContext(tp(16), dummyAcsCommitment),
+            // a checkpoint should be injected here
+            ProcessingContext(tp(18), dummyAcsCommitment),
+            ProcessingContext(tp(20), dummyAcsCommitment),
+            // a checkpoint should be injected here
           )
         ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
+
+        rdp.metrics.runningDigestProcessor.latestCheckpointedRecordTime.getValue shouldBe ts(
+          20
+        ).toMicros
 
         result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
           ProcessingContext(tp1_0, Left(CheckpointType.ReconciliationIntervalBoundary)),
           ProcessingContext(tp(2), Right(dummyAcsChange)),
           ProcessingContext(Timepoint(off(3))(ts(2)), Right(dummyAcsChange)),
           ProcessingContext(
-            Timepoint(off(3))(ts(2).immediatePredecessor),
+            Timepoint(off(3))(ts(2)),
             Left(CheckpointType.MaxEventsWithoutCheckpoint),
           ),
           ProcessingContext(Timepoint(off(4))(ts(2)), Right(dummyAcsChange)),
           ProcessingContext(Timepoint(off(5))(ts(3)), Right(dummyAcsChange)),
           ProcessingContext(
-            Timepoint(off(7))(ts(5).immediatePredecessor),
+            Timepoint(off(5))(ts(3)),
             Left(CheckpointType.MaxEventsWithoutCheckpoint),
           ),
           ProcessingContext(Timepoint(off(8))(ts(5)), Right(dummyAcsChange)),
           ProcessingContext(Timepoint(off(9))(ts(6)), Right(dummyAcsChange)),
+          ProcessingContext(
+            Timepoint(off(9))(ts(6)),
+            Left(CheckpointType.MaxEventsWithoutCheckpoint),
+          ),
+          ProcessingContext(
+            tp(12),
+            Left(CheckpointType.MaxEventsWithoutCheckpoint),
+          ),
+          ProcessingContext(
+            tp(16),
+            Left(CheckpointType.MaxEventsWithoutCheckpoint),
+          ),
+          ProcessingContext(
+            tp(20),
+            Left(CheckpointType.MaxEventsWithoutCheckpoint),
+          ),
+        )
+      }
+
+      "emit the right checkpoints around reconciliation interval ticks" in {
+        val rdp = mkRunningDigestProcessor(
+          maxNumUpdatesBetweenCheckpoints = PositiveInt.two,
+          reconciliationInterval = 5.seconds,
+        )
+
+        val dummyAcsChange =
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+        val partyHostingChange =
+          InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
+            Set(PartyToParticipantAuthorization(alice, p2.toLf, Added(Submission))),
+            None,
+          )
+        val result = Source(
+          Seq(
+            ProcessingContext(tp(2), dummyAcsChange),
+            ProcessingContext(tp(5), dummyAcsChange), // falls on a recon tick
+            // checkpoints MaxNumEventsWithoutCheckpoint and ReconciliationIntervalBoundary should be injected here in that order
+            ProcessingContext(tp(6), dummyAcsChange),
+            ProcessingContext(tp(10), partyHostingChange),
+            // checkpoints PartyHostingChange and ReconciliationIntervalBoundary should be injected here in that order
+            ProcessingContext(tp(11), dummyAcsChange),
+          )
+        ).via(rdp.checkpointing(None, TraceContext.empty)).runWith(Sink.seq).futureValue
+
+        rdp.metrics.runningDigestProcessor.latestCheckpointedRecordTime.getValue shouldBe ts(
+          11
+        ).toMicros
+
+        result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
+          ProcessingContext(tp1_0, Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(2), Right(dummyAcsChange)),
+          ProcessingContext(tp(5), Right(dummyAcsChange)),
+          ProcessingContext(tp(5), Left(CheckpointType.MaxEventsWithoutCheckpoint)),
+          ProcessingContext(tp(5), Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(6), Right(dummyAcsChange)),
+          ProcessingContext(tp(10), Right(partyHostingChange)),
+          ProcessingContext(tp(10), Left(CheckpointType.PartyHostingChange)),
+          ProcessingContext(tp(10), Left(CheckpointType.ReconciliationIntervalBoundary)),
+          ProcessingContext(tp(11), Right(dummyAcsChange)),
         )
       }
 
@@ -211,6 +325,10 @@ class RunningDigestProcessorTest
           .via(rdp.checkpointing(None, TraceContext.empty))
           .runWith(Sink.seq)
           .futureValue
+
+        rdp.metrics.runningDigestProcessor.latestCheckpointedRecordTime.getValue shouldBe inputEvents
+          .map(_.recordTime.toMicros)
+          .max
 
         // match on CheckpointFenceOr[InputEvent].toEither, so we don't have to match on the topology snapshot
         val expectedResult =
@@ -268,6 +386,11 @@ class RunningDigestProcessorTest
           .runWith(Sink.seq)
           .futureValue
 
+        rdp.metrics.runningDigestProcessor.latestCheckpointedRecordTime.getValue shouldBe inputEvents
+          .map(_.recordTime)
+          .max
+          .toMicros
+
         // match on CheckpointFenceOr[InputEvent].toEither, so we don't have to match on the topology snapshot
         val expectedResult =
           Seq(
@@ -294,6 +417,10 @@ class RunningDigestProcessorTest
           )
         ).via(rdp.checkpointing(Some(ts(5)), TraceContext.empty)).runWith(Sink.seq).futureValue
 
+        rdp.metrics.runningDigestProcessor.latestCheckpointedRecordTime.getValue shouldBe ts(
+          11
+        ).toMicros
+
         result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
           // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
           ProcessingContext(tp(5), Left(CheckpointType.ReconciliationIntervalBoundary)),
@@ -318,6 +445,10 @@ class RunningDigestProcessorTest
           )
         ).via(rdp.checkpointing(Some(ts(6)), TraceContext.empty)).runWith(Sink.seq).futureValue
 
+        rdp.metrics.runningDigestProcessor.latestCheckpointedRecordTime.getValue shouldBe ts(
+          11
+        ).toMicros
+
         result.map(_.map(_.toEither)) should contain theSameElementsInOrderAs Seq(
           // when the checkpoint falls exactly on a reconciliation boundary, the same checkpoint is emitted
           ProcessingContext(tp(7), Right(dummyAcsChange)),
@@ -340,6 +471,8 @@ class RunningDigestProcessorTest
           .runWith(Sink.seq)
           .futureValue
           .loneElement
+
+        rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
 
         result shouldBe ProcessingContext(tp1_0, CheckpointFence(ReconciliationIntervalBoundary))
       }
@@ -385,6 +518,8 @@ class RunningDigestProcessorTest
           .runWith(Sink.seq)
           .futureValue
 
+        rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
+
         result.map(_.value.tryValue) should contain theSameElementsAs Seq(
           AcsUpdate(
             stakeholders = Map(alice -> Set(p1.toLf, p2.toLf), bob -> Set(p2.toLf, p3.toLf)),
@@ -424,6 +559,8 @@ class RunningDigestProcessorTest
           .futureValue
           .loneElement
 
+        rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
+
         result.value.tryValue shouldBe PartyOnboardingToParticipant(bob, p3.toLf)
         verifyZeroInteractions(topologySnapshot)
       }
@@ -448,6 +585,8 @@ class RunningDigestProcessorTest
           .futureValue
           .loneElement
 
+        rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
+
         result.value.tryValue shouldBe PartyAddedToParticipant(bob, p3.toLf)
         verifyZeroInteractions(topologySnapshot)
       }
@@ -471,6 +610,8 @@ class RunningDigestProcessorTest
           .runWith(Sink.seq)
           .futureValue
           .loneElement
+
+        rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe tp1_0.recordTime.toMicros
 
         result.value.tryValue shouldBe PartyRemovedFromParticipant(bob, p3.toLf)
         verifyZeroInteractions(topologySnapshot)
@@ -515,8 +656,7 @@ class RunningDigestProcessorTest
         def processTopologyEventsWithParticipant(
             participant: ParticipantId
         ): Seq[BaseDigestProcessor.Classification] = {
-
-          val rdp_p1 = mkRunningDigestProcessor(
+          val rdp = mkRunningDigestProcessor(
             participant = participant,
             indexService = mkIndexService(
               (off(1), cid(1), Seq(alice, bob, charlie))
@@ -527,12 +667,15 @@ class RunningDigestProcessorTest
 
           val result = Source
             .single(toProcess)
-            .via(rdp_p1.classification)
+            .via(rdp.classification)
             .runWith(Sink.seq)
             .futureValue
-            .map(_.value.tryValue)
 
-          result
+          rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe result
+            .map(_.recordTime.toMicros)
+            .max
+
+          result.map(_.value.tryValue)
         }
         val resultP1 = processTopologyEventsWithParticipant(p1)
 
@@ -628,12 +771,17 @@ class RunningDigestProcessorTest
               NotCheckpointFence(testingTopology.topologySnapshot(), tte(event)),
             )
 
-          Source
+          val result = Source
             .single(toProcess)
             .via(rdp.classification)
             .runWith(Sink.seq)
             .futureValue
-            .map(_.value.tryValue)
+
+          rdp.metrics.runningDigestProcessor.latestClassifiedRecordTime.getValue shouldBe result
+            .map(_.recordTime.toMicros)
+            .max
+
+          result.map(_.value.tryValue)
         }
 
         withClue("counterparty batch size 1") {
@@ -755,6 +903,72 @@ class RunningDigestProcessorTest
             PartyAddedToParticipant(alice, p1.toLf),
           )
         }
+      }
+    }
+
+    "running the pipeline" should {
+      "notify subscribers of persisted checkpoints" in {
+        val signaller = mkTickSignaller()
+        val metrics = TestCommitmentMetrics()
+        val rdp = mkRunningDigestProcessor(
+          participant = thisParticipant,
+          tickSignaller = signaller,
+          reconciliationInterval = 5.seconds,
+          maxNumUpdatesBetweenCheckpoints = PositiveInt.three,
+          metrics = metrics,
+        )
+
+        val dummyAcsChange =
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty))
+
+        val emittedCheckpointsF = signaller.readSignals((), "subscriber").runWith(Sink.seq)
+        val events = Source(
+          Seq(
+            ProcessingContext(tp(2), dummyAcsChange),
+            ProcessingContext(tp(6), dummyAcsChange),
+            ProcessingContext(tp(7), dummyAcsChange),
+            ProcessingContext(tp(8), dummyAcsChange),
+            ProcessingContext(tp(9), dummyAcsChange),
+            ProcessingContext(tp(10), dummyAcsChange),
+            ProcessingContext(
+              tp(11),
+              EffectiveTopologyUpdate(
+                Set(PartyToParticipantAuthorization(bob, p2.toLf, Added(Submission))),
+                None,
+              ),
+            ),
+          )
+        )
+
+        val checkpointsFromPipeline = events
+          .via(rdp.pipeline(None, None))
+          .runWith(Sink.seq)
+          .futureValue
+
+        // verify the expected checkpoints to avoid bitrot
+        checkpointsFromPipeline should contain theSameElementsAs Seq(
+          CheckpointWritten(ts(0), off(1), ReconciliationIntervalBoundary),
+          CheckpointWritten(ts(5), off(5), ReconciliationIntervalBoundary),
+          CheckpointWritten(ts(8), off(8), MaxEventsWithoutCheckpoint),
+          CheckpointWritten(ts(10), off(10), ReconciliationIntervalBoundary),
+          CheckpointWritten(ts(11), off(11), PartyHostingChange),
+        )
+
+        metrics.checkpointWatermark.getValue shouldBe ts(11).toMicros // Last checkpoint written
+        metrics.tickWatermark.getValue shouldBe ts(10).toMicros // Last tick emitted
+
+        signaller.close()
+        val ticksFromSignaller = emittedCheckpointsF.futureValue
+
+        // verify that the checkpoints were emitted in offset order
+        ticksFromSignaller should contain theSameElementsInOrderAs ticksFromSignaller
+          .sortBy(_.signal)
+
+        // verify that the ticks observed via the signaller are a subset of the output of the pipeline
+        ticksFromSignaller
+          .map(_.signal)
+          .toSet
+          .subsetOf(checkpointsFromPipeline.map(_.offsetInclusive).toSet) shouldBe true
       }
     }
   }

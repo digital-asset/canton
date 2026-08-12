@@ -341,6 +341,7 @@ object ApiServices {
           metrics,
           loggerFactory,
         )
+      val pendingPartyAllocations = new PendingPartyAllocations()
       val apiPartyManagementService = ApiPartyManagementService.createApiService(
         partyManagementService,
         userManagementStore,
@@ -350,14 +351,22 @@ object ApiServices {
         partyRecordStore,
         syncService,
         managementServiceTimeout,
-        partyAllocationTracker = partyAllocationTracker,
         submissionIdGenerator =
           ApiPartyManagementService.CreateSubmissionId.forParticipant(participantId),
+        partyAllocationTracker = partyAllocationTracker,
+        pendingPartyAllocations,
         loggerFactory = loggerFactory,
       )
       val apiPartyManagementAlphaServiceO =
         partyReplicationEndpointsO.map(partyReplicationEndpoints =>
-          ApiPartyManagementAlphaService.createApiService(partyReplicationEndpoints)
+          ApiPartyManagementAlphaService.createApiService(
+            partyReplicationEndpoints,
+            userManagementStore,
+            new IdentityProviderExists(identityProviderConfigStore),
+            partyManagementServiceConfig.maxSelfAllocatedParties,
+            pendingPartyAllocations,
+            loggerFactory,
+          )
         )
 
       val apiPackageManagementService =

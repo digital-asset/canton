@@ -39,7 +39,11 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
-import com.digitalasset.canton.data.{AcsCommitmentData, CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  CantonTimestampSecond,
+  LegacyAcsCommitmentData,
+}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AcsCommitmentErrorGroup
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
@@ -53,17 +57,24 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.event.{AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.DegradationError
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.PublishTickData.PersistRunningCommitmentsAtUpgradeTime
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.store.AcsDigestStore.HashedDigest
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.messages.{
+  CommitmentPeriod,
   Digest,
   LegacyAcsCommitment,
   LegacyCommitmentPeriod,
@@ -102,6 +113,7 @@ import com.digitalasset.canton.util.retry.NoExceptionRetryPolicy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   InternedPartyId,
+  LedgerParticipantId,
   LfPartyId,
   ProtoDeserializationError,
   ReassignmentCounter,
@@ -1808,7 +1820,7 @@ class AcsCommitmentProcessor private (
 
   /* Logs all necessary messages and returns whether the remote commitment matches the local ones */
   private def matches(
-      remote: AcsCommitmentData,
+      remote: LegacyAcsCommitmentData,
       local: Iterable[(LegacyCommitmentPeriod, Digest.HashedDigestType)],
       lastPruningTime: Option[CantonTimestamp],
       possibleCatchUp: Boolean,
@@ -1856,14 +1868,14 @@ class AcsCommitmentProcessor private (
           true
         case mismatches =>
           Errors.MismatchError.CommitmentsMismatch
-            .Mismatch(psid.logical, remote, mismatches.toSeq)
+            .LegacyMismatch(psid.logical, remote, mismatches.toSeq)
             .report()
           false
       }
     }
 
   private def checkMatchAndMarkSafe(
-      remote: List[AcsCommitmentData]
+      remote: List[LegacyAcsCommitmentData]
   )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[Unit] = {
     logger.info(s"Processing ${remote.size} remote commitments")
     MonadUtil.parTraverseWithLimit_(threadCount)(remote) { cmt =>
@@ -2505,7 +2517,7 @@ class AcsCommitmentProcessor private (
     }
 
   private def markPeriods(
-      cmt: AcsCommitmentData,
+      cmt: LegacyAcsCommitmentData,
       commitments: Iterable[(LegacyCommitmentPeriod, Digest.HashedDigestType)],
       lastPruningTime: Option[PruningStatus],
       possibleCatchUp: Boolean,
@@ -2913,7 +2925,6 @@ object AcsCommitmentProcessor extends HasLoggerName {
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[AcsCommitmentProcessor] = {
-
     implicit val loggingContext: NamedLoggingContext =
       NamedLoggingContext(loggerFactory, traceContext)
 
@@ -2946,7 +2957,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
 
     // Ensure that the initialization runs first. We don't care about initialization having
     // completed by the time we return - only that it runs first.
-    val executed = for {
+    val executed: FutureUnlessShutdown[AcsCommitmentProcessor] = for {
       initialState <- loadInitialState()
     } yield {
       val (endOfLastProcessedPeriod, runningCommitments) = initialState
@@ -3304,7 +3315,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
           |Either repair the store of this participant or of the counter participant."""
       )
       object NoSharedContracts extends AlarmErrorCode(id = "ACS_MISMATCH_NO_SHARED_CONTRACTS") {
-        final case class Mismatch(synchronizerId: SynchronizerId, remote: AcsCommitmentData)
+        final case class Mismatch(synchronizerId: SynchronizerId, remote: LegacyAcsCommitmentData)
             extends Alarm(
               cause = "Received a commitment where we have no shared contract with the sender"
             )
@@ -3327,11 +3338,48 @@ object AcsCommitmentProcessor extends HasLoggerName {
             |the store of the counter-participant."""
       )
       object CommitmentsMismatch extends AlarmErrorCode(id = "ACS_COMMITMENT_MISMATCH") {
-        final case class Mismatch(
+        final case class LegacyMismatch(
             synchronizerId: SynchronizerId,
-            remote: AcsCommitmentData,
+            remote: LegacyAcsCommitmentData,
             local: Seq[(LegacyCommitmentPeriod, Digest.HashedDigestType)],
         ) extends Alarm(cause = "The local commitment does not match the remote commitment")
+
+        final case class Mismatch(
+            synchronizerId: SynchronizerId,
+            remote: RemoteAcsCommitmentData,
+            local: Seq[LocalDigest],
+        ) extends Alarm(cause = "The local commitment does not match the remote commitment")
+
+        final case class RemoteAcsCommitmentData(
+            sender: LedgerParticipantId,
+            counterparticipant: LedgerParticipantId,
+            period: CommitmentPeriod,
+            digest: HashedDigest,
+        ) extends PrettyPrintingFromCompanion {
+          override def prettyCompanion: PrettyPrintingCompanion[RemoteAcsCommitmentData] =
+            RemoteAcsCommitmentData
+        }
+        object RemoteAcsCommitmentData extends PrettyPrintingCompanion[RemoteAcsCommitmentData] {
+          override protected val pretty: Pretty[RemoteAcsCommitmentData] = prettyOfClass(
+            param("sender", _.sender),
+            param("counterparticipant", _.counterparticipant),
+            param("period", _.period),
+            param("digest", inst => HexString.toHexString(inst.digest).unquoted),
+          )
+        }
+
+        final case class LocalDigest(
+            period: CommitmentPeriod,
+            digest: HashedDigest,
+        ) extends PrettyPrintingFromCompanion {
+          override def prettyCompanion: PrettyPrintingCompanion[LocalDigest] = LocalDigest
+        }
+        object LocalDigest extends PrettyPrintingCompanion[LocalDigest] {
+          override protected val pretty: Pretty[LocalDigest] = prettyOfClass(
+            param("period", _.period),
+            param("digest", inst => HexString.toHexString(inst.digest).unquoted),
+          )
+        }
       }
 
       @Explanation(

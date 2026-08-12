@@ -69,7 +69,7 @@ trait RangeBoundaryStreamComponentTest
         descendingOrder = descendingOrder,
         skipPruningChecks = false,
       )
-      .collect { case UpdatesResponse.ProtoUpdates(response) => response }
+      .collect { case UpdatesResponse.ProtoUpdates(Some(response), _) => response }
       .runWith(Sink.seq)
       .futureValue
 
@@ -87,7 +87,10 @@ trait RangeBoundaryStreamComponentTest
     )
 
   private def acsUpdates(fromExclusive: Option[Offset]): Source[AcsUpdate, NotUsed] =
-    internalIndexService.acsUpdates(synchronizer1, fromExclusive).map(_.acsUpdate)
+    internalIndexService
+      .acsUpdates(synchronizer1, fromExclusive)
+      .map(_.acsUpdate)
+      .filter(_ != AcsUpdate.OffsetCheckpoint)
 
   private def witnessedCreates(
       num: Int
@@ -185,11 +188,18 @@ trait RangeBoundaryStreamComponentTest
     Seq(false, true).foreach { descendingOrder =>
       s"exclude the topology transaction sitting exactly on the exclusive lower bound (descendingOrder=$descendingOrder)" in {
         val updateFormat = transactionUpdateFormat(includeTopologyEvents =
-          Some(TopologyFormat(Some(ParticipantAuthorizationFormat(None))))
+          Some(
+            TopologyFormat(
+              participantAuthorizationFormat = Some(ParticipantAuthorizationFormat(None)),
+              synchronizerParametersFormat = false,
+              synchronizerId = None,
+            )
+          )
         )
 
-        val boundary = ingestPartyOnboarding(Set("boundary-party-1"), nextRecordTime())
-        ingestPartyOnboarding(Set("boundary-party-2"), nextRecordTime())
+        val boundary =
+          ingestTopologyEvents(parties = Set("boundary-party-1"), recordTime = nextRecordTime())
+        ingestTopologyEvents(Set("boundary-party-2"), recordTime = nextRecordTime())
         val rangeEnd = index.currentLedgerEnd().value.lastOffset
 
         val updates = readUpdates(
@@ -209,12 +219,19 @@ trait RangeBoundaryStreamComponentTest
 
       s"include the topology transaction sitting exactly on the inclusive upper bound (descendingOrder=$descendingOrder)" in {
         val updateFormat = transactionUpdateFormat(includeTopologyEvents =
-          Some(TopologyFormat(Some(ParticipantAuthorizationFormat(None))))
+          Some(
+            TopologyFormat(
+              participantAuthorizationFormat = Some(ParticipantAuthorizationFormat(None)),
+              synchronizerParametersFormat = false,
+              synchronizerId = None,
+            )
+          )
         )
 
         val startExclusive = index.currentLedgerEnd().value.lastOffset
-        val boundary = ingestPartyOnboarding(Set("upper-boundary-party-1"), nextRecordTime())
-        ingestPartyOnboarding(Set("upper-boundary-party-2"), nextRecordTime())
+        val boundary =
+          ingestTopologyEvents(Set("upper-boundary-party-1"), recordTime = nextRecordTime())
+        ingestTopologyEvents(Set("upper-boundary-party-2"), recordTime = nextRecordTime())
 
         val updates = readUpdates(
           fromExclusive = Some(startExclusive),

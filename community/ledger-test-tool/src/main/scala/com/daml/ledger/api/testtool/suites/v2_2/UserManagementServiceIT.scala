@@ -32,9 +32,12 @@ import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.base.error.utils.ErrorDetails.matches
 import com.digitalasset.base.error.{BaseError, ErrorCode}
 import com.digitalasset.canton.auth.AuthorizationChecksErrors
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.error.IndexErrors
 import com.digitalasset.canton.ledger.error.groups.{AdminServiceErrors, RequestValidationErrors}
+import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.MonadUtil
 import io.grpc.{Status, StatusRuntimeException}
 
 import java.util.UUID
@@ -428,11 +431,14 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
     val user2 = newUser(UUID.randomUUID.toString)
 
     val maxRightsPerUser = ledger.features.userManagement.maxRightsPerUser
-    val allocatePartiesMaxAndOne = (1 to (maxRightsPerUser + 1)).map(allocateParty)
 
     for {
-      // allocating parties before user is created
-      allocatedParties <- Future.sequence(allocatePartiesMaxAndOne)
+      // allocating parties before user is created; the allocation concurrency is bounded because
+      // each party allocation is a topology transaction and allocating all of them at once can
+      // overflow the participant's topology dispatch queue
+      allocatedParties <- MonadUtil.parTraverseWithLimit(PositiveInt.tryCreate(16))(
+        1 to (maxRightsPerUser + 1)
+      )(allocateParty)
       permissionsMaxPlusOne = allocatedParties.map(createCanActAs)
       permissionOne = permissionsMaxPlusOne.headOption.value
       permissionsMax = permissionsMaxPlusOne.drop(1)

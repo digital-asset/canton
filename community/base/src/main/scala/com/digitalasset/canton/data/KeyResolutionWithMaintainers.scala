@@ -8,6 +8,7 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.LfContractIdSyntax
 import com.digitalasset.canton.protocol.{GlobalKeySerialization, LfContractId, LfGlobalKey, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{LfPartyId, LfVersioned}
@@ -30,7 +31,7 @@ object KeyResolutionWithMaintainers {
   ): v31.ViewParticipantData.KeyResolutionWithMaintainers =
     v31.ViewParticipantData.KeyResolutionWithMaintainers(
       key = Some(GlobalKeySerialization.assertToProtoV31(resolution.map(_ => key))),
-      maintainers = resolution.unversioned.maintainers.toSeq,
+      maintainers = resolution.unversioned.maintainers.toSeq.map(_.toProtoUnvalidated),
       contractIds = resolution.unversioned.contracts.map(_.toProtoPrimitive),
     )
 

@@ -5,6 +5,7 @@ package com.digitalasset.canton.util
 
 import cats.{Functor, Id}
 import com.daml.grpc.adapter.{ExecutionSequencerFactory, PekkoExecutionSequencerPool}
+import com.daml.metrics.api.MetricHandle.Counter
 import com.daml.metrics.api.noop.NoOpGauge
 import com.daml.metrics.api.{
   MetricHandle,
@@ -38,10 +39,12 @@ import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.Logger
 import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.scaladsl.GraphDSL.Implicits.SourceShapeArrow
 import org.apache.pekko.stream.scaladsl.{
   Flow,
   FlowOps,
   FlowOpsMat,
+  GraphDSL,
   Keep,
   RunnableGraph,
   Sink,
@@ -58,12 +61,15 @@ import org.apache.pekko.stream.stage.{
 import org.apache.pekko.stream.{
   ActorAttributes,
   Attributes,
+  FanInShape2,
   FlowShape,
+  Graph,
   Inlet,
   KillSwitch,
   KillSwitches,
   Materializer,
   Outlet,
+  OverflowStrategy,
   QueueCompletionResult,
   QueueOfferResult,
   SourceShape,
@@ -81,6 +87,7 @@ import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.language.implicitConversions
+import scala.util.chaining.*
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -156,6 +163,44 @@ object PekkoUtil extends HasLoggerName {
   def pekkoFlowFunctor[In, Mat]: Functor[Flow[In, *, Mat]] = new Functor[Flow[In, *, Mat]] {
     override def map[A, B](flow: Flow[In, A, Mat])(f: A => B): Flow[In, B, Mat] = flow.map(f)
   }
+
+  /** This method should actually belong to `FlowOps` as an evidence that every `FlowOps`` can be
+    * transformed into its `Repr` type without having to modify the blueprint itself. The
+    * `asInstanceOf` is justified by inspection of all implementations of `FlowOps` (as of Pekko
+    * 1.2.1).
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  def asRepr[Out, Mat](flowOps: FlowOps[Out, Mat]): flowOps.Repr[Out] =
+    flowOps.asInstanceOf[flowOps.Repr[Out]]
+
+  /** Adds a buffer to the output of the `graph`, and adds a Counter metric for buffer size.
+    *
+    * Good for detecting bottlenecks and speed difference between consumer and producer. In case
+    * producer is faster, this buffer should be mostly full. In case producer is slower, this buffer
+    * should be mostly empty.
+    *
+    * If `size` is <= 0, no buffer is added.
+    *
+    * @param counter
+    *   the counter to track the actual size of the buffer
+    * @param size
+    *   the maximum size of the buffer. In case of a bottleneck in producer this will be mostly
+    *   full, so careful estimation is needed to prevent excessive memory pressure.
+    * @param metricsContext
+    *   metrics context for the counter. Can be used to re-use one counter with different contexts
+    * @return
+    *   the instrumented flow
+    */
+  def buffered[Out, Mat](graph: FlowOps[Out, Mat], counter: Counter, size: Int)(implicit
+      metricsContext: MetricsContext = MetricsContext.Empty
+  ): graph.Repr[Out] =
+    if (size <= 0) asRepr(graph)
+    else
+      graph
+        // since wireTap is not guaranteed to be executed always, we need map to prevent counter skew over time.
+        .map(_.tap(_ => counter.inc()))
+        .buffer(size, OverflowStrategy.backpressure)
+        .map(_.tap(_ => counter.dec()))
 
   /** Remembers the last `memory` many elements that have already been emitted previously. Passes
     * those remembered elements downstream with each new element. The current element is the
@@ -980,6 +1025,38 @@ object PekkoUtil extends HasLoggerName {
       }
   }
 
+  /** Emits the elements from `flowOps` in order. An element `e` is emitted only when the `gate` has
+    * previously produced a value that is at least as large as `by(e)`. Otherwise, `e` is buffered
+    * until such a value is produced by the `gate`.
+    *
+    * Backpressures when either `flowOps` or `gate` are slow.
+    *
+    * Completes when either input stream completes and all inputs have been emitted. May not
+    * complete when `flowOps` completes after some elements that are still queued in front of the
+    * `gate` and the `gate` has not yet completed.
+    */
+  def gateKeeper[A, B: Ordering, Mat](flowOps: FlowOps[A, Mat], gate: Graph[SourceShape[B], ?])(
+      by: A => B
+  ): flowOps.Repr[A] =
+    flowOps.via(gateKeeperGraph(gate, by))
+
+  /** @see com.digitalasset.canton.util.PekkoUtil.gateKeeper */
+  def gateKeeperMat[A, B: Ordering, Mat1, Mat2, Mat3](
+      flowOps: FlowOpsMat[A, Mat1],
+      gate: Graph[SourceShape[B], Mat2],
+  )(by: A => B)(combine: (Mat1, Mat2) => Mat3): flowOps.ReprMat[A, Mat3] =
+    flowOps.viaMat(gateKeeperGraph(gate, by))(combine)
+
+  private def gateKeeperGraph[A, B: Ordering, M](
+      gate: Graph[SourceShape[B], M],
+      by: A => B,
+  ): Graph[FlowShape[A, A], M] =
+    GraphDSL.createGraph(gate) { implicit b => r =>
+      val gated = b.add(new GateKeeper[A, B](by))
+      r ~> gated.in1
+      FlowShape(gated.in0, gated.out)
+    }
+
   object syntax {
 
     /** Defines extension methods for [[org.apache.pekko.stream.scaladsl.FlowOpsMat]] that map to
@@ -997,6 +1074,11 @@ object PekkoUtil extends HasLoggerName {
     private[util] class PekkoUtilSyntaxForFlowOps[A, Mat, U <: FlowOps[A, Mat]](
         private val graph: U
     ) extends AnyVal {
+      def buffered(counter: Counter, size: Int)(implicit
+          metricsContext: MetricsContext = MetricsContext.Empty
+      ): U#Repr[A] =
+        PekkoUtil.buffered(graph, counter, size)
+
       def remember(window: NonNegativeInt): U#Repr[NonEmpty[Seq[A]]] =
         PekkoUtil.remember(graph, window)
 
@@ -1062,6 +1144,9 @@ object PekkoUtil extends HasLoggerName {
           initial: A => Agg
       )(full: Agg => Boolean, aggregate: (Agg, A) => Agg, emit: Agg => B): U#Repr[B] =
         PekkoUtil.aggregate(graph)(initial)(full, aggregate, emit)
+
+      def gateKeeper[B: Ordering](gate: Graph[SourceShape[B], ?])(by: A => B): U#Repr[A] =
+        PekkoUtil.gateKeeper(graph, gate)(by)
     }
 
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
@@ -1120,6 +1205,11 @@ object PekkoUtil extends HasLoggerName {
 
       def injectKillSwitch(killSwitch: Mat => KillSwitch): U#ReprMat[WithKillSwitch[A], Mat] =
         PekkoUtil.injectKillSwitch(graph)(killSwitch)
+
+      def gateKeeperMat[B: Ordering, Mat2, Mat3](gate: Graph[SourceShape[B], Mat2])(by: A => B)(
+          combine: (Mat, Mat2) => Mat3
+      ): U#ReprMat[A, Mat3] =
+        PekkoUtil.gateKeeperMat(graph, gate)(by)(combine)
     }
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
     // Otherwise IntelliJ gets very resource hungry.
@@ -2100,5 +2190,65 @@ object PekkoUtil extends HasLoggerName {
 
     /** The stash has been completed normally. */
     case object StashClosed extends StashCompletionResult
+  }
+
+  private final class GateKeeper[A, B: Ordering](by: A => B)
+      extends GraphStage[FanInShape2[A, B, A]] {
+    private val in = Inlet[A]("in")
+    private val gate = Inlet[B]("gate")
+    private val out = Outlet[A]("out")
+
+    override val shape = new FanInShape2(in, gate, out)
+
+    @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
+    override def createLogic(attr: Attributes): GraphStageLogic = new GraphStageLogic(shape) {
+      import Ordering.Implicits.*
+      setHandler(in, eagerTerminateInput)
+      setHandler(gate, ignoreTerminateInput)
+      setHandler(out, eagerTerminateOutput)
+
+      var watermark: B = _
+      var buffered: A = _
+
+      override def preStart(): Unit = {
+        // all fan-in stages need to eagerly pull all inputs to get cycles started
+        pull(in)
+        read(gate)(
+          g => {
+            watermark = g
+            readIn()
+          },
+          () => completeStage(),
+        )
+      }
+
+      val readIn: () => Unit = () =>
+        read(in)(
+          a =>
+            if (by(a) <= watermark) {
+              emit(out, a, readIn)
+            } else {
+              buffered = a
+              readGate()
+            },
+          () => completeStage(),
+        )
+
+      @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+      val readGate: () => Unit = () =>
+        read(gate)(
+          g => {
+            watermark = g max watermark
+            if (by(buffered) <= watermark) {
+              val next = buffered
+              buffered = null.asInstanceOf[A]
+              emit(out, next, readIn)
+            } else {
+              readGate()
+            }
+          },
+          () => completeStage(),
+        )
+    }
   }
 }

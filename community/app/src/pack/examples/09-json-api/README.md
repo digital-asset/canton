@@ -1,25 +1,45 @@
 # Json Api Example
 
-This folder contains scripts and configs demonstrating how to interact with the Ledger using Json API.
+Demonstrates running Canton and interacting with it via the **Ledger JSON API**.
 
-It uses curl and websocat to communicate with JSON API.
+Uses `curl` and `websocat` to communicate with Ledger JSON API.
+
+Detailed description: https://docs.canton.network/appdev/modules/m4-json-api-tutorial.
 
 ## Prerequisites
 
   - Bash-compatible terminal
-  - Daml (https://docs.daml.com/getting-started/installation.html)
+  - DPM (Daml Package Manager) (https://docs.canton.network/sdks-tools/cli-tools/dpm)
   - curl (https://github.com/curl/curl)
   - jq (https://github.com/jqlang/jq)
-  - (optional) websocat (https://github.com/vi/websocat)
+  - optional
+    - Node.js (version 18.20 or later) and npm (https://nodejs.org/en/download/)
+    - websocat (https://github.com/vi/websocat)
 
+## Scenario
+- create two parties
+- create an Iou contract
+- transfer the Iou contract to another party
 
 ## Running
 
-Use two terminal windows.
+### Preparation
+- build canton: `sbt compile`
+- build the release bundle: `sbt bundle`
+- navigate to the example dir: `cd <code_repo_root>/community/app/target/release/canton/examples/09-json-api`
 
-In the first window start `./run.sh`
-In the second window run `./scenario.sh`
+### Running the example
+Open two terminal windows in the above dir.
 
-
-The `scenario.sh` scripts show how to create and exercise transactions and query for active contracts.
-It can be run multiple times.
+- first window
+  - run `./run.sh`
+    - builds the DAR, starts Canton in interactive mode, bootstraps the participant and synchronizer and loads the DAR
+- second window
+  - run `./scenario.sh`
+    - runs the scenario steps
+    - creates contracts, exercises choices and queries active contracts via Ledger JSON API
+    - can be run multiple times
+## Further steps
+- refer to https://docs.canton.network/appdev/modules/m4-json-api-tutorial to do the following
+  - generate TypeScript code bindings for the Ledger JSON API and the contract templates
+  - run the scenario with TypeScript and websocket via npm

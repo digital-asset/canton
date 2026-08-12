@@ -1,0 +1,21 @@
+name: Limit Parallel Test Execution
+description: Limit Parallel Test Execution
+
+inputs:
+  num_tasks:
+    default: "4"
+    description: Number of tasks
+
+runs:
+  using: composite
+  steps:
+    - name: Limit parallel tests
+      shell: bash
+      env:
+        NUM_TASKS: ${{ inputs.num_tasks }}
+      run: |
+        if ! [[ "$NUM_TASKS" =~ ^[0-9]+$ ]] || [[ "$NUM_TASKS" -le 0 ]]; then
+          echo "num_tasks must be a positive integer, got: $NUM_TASKS" >&2
+          exit 1
+        fi
+        echo "MAX_CONCURRENT_SBT_TEST_TASKS=$NUM_TASKS" >> "$GITHUB_ENV"

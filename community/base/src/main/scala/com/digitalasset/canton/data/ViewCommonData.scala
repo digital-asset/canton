@@ -15,6 +15,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.common.annotations.VisibleForTesting
@@ -53,7 +54,7 @@ final case class ViewCommonData private (
   def toProtoV30: v30.ViewCommonData = {
     val informees = viewConfirmationParameters.informees.toSeq
     v30.ViewCommonData(
-      informees = informees,
+      informees = informees.map(_.toProtoUnvalidated),
       quorums = viewConfirmationParameters.quorums.map(
         _.tryToProtoV30(informees)
       ),

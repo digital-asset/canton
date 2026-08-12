@@ -12,6 +12,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlar
 import com.digitalasset.canton.protocol.{
   ContractMetadata,
   GenContractInstance,
+  HostedOnboardingParties,
   LfContractId,
   ReassignmentId,
   RequestId,
@@ -45,6 +46,7 @@ final case class CommitSet(
     creations: Map[LfContractId, CreationCommit],
     unassignments: Map[LfContractId, UnassignmentCommit],
     assignments: Map[LfContractId, AssignmentCommit],
+    hostedOnboardingPartiesO: Option[HostedOnboardingParties],
 ) extends PrettyPrinting {
   requireDisjoint(unassignments.keySet -> "unassignments", archivals.keySet -> "archivals")
   requireDisjoint(assignments.keySet -> "assignments", creations.keySet -> "creations")
@@ -53,14 +55,18 @@ final case class CommitSet(
     paramIfNonEmpty("archivals", _.archivals),
     paramIfNonEmpty("creations", _.creations),
     paramIfNonEmpty("unassignments", _.unassignments),
-    paramIfNonEmpty("assigments", _.assignments),
+    paramIfNonEmpty("assignments", _.assignments),
+    paramIfDefined("onboarding", _.hostedOnboardingPartiesO),
   )
 }
 
 object CommitSet {
 
-  val empty: CommitSet = CommitSet(Map.empty, Map.empty, Map.empty, Map.empty)
+  val empty: CommitSet = CommitSet(Map.empty, Map.empty, Map.empty, Map.empty, None)
 
+  /** Contract creation reference information needed for persistence and updating of in-memory state
+    * when the associated transaction commits.
+    */
   final case class CreationCommit(
       contractMetadata: ContractMetadata,
       reassignmentCounter: ReassignmentCounter,
@@ -94,6 +100,13 @@ object CommitSet {
       param("reassignmentCounter", _.reassignmentCounter),
     )
   }
+
+  /** Contract archival reference information needed for persistence and updating of in-memory state
+    * when the associated transaction commits.
+    *
+    * @param stakeholders
+    *   all contract stakeholders (i.e. not only locally hosted stakeholders)
+    */
   final case class ArchivalCommit(
       stakeholders: Set[LfPartyId]
   ) extends PrettyPrinting {
@@ -110,6 +123,7 @@ object CommitSet {
       transient: Map[LfContractId, Set[LfPartyId]],
       createdContracts: Map[LfContractId, GenContractInstance],
       commitAfterFailedActivenessCheck: Boolean,
+      hostedOnboardingPartiesO: Option[HostedOnboardingParties],
   )(implicit loggingContext: ErrorLoggingContext): CommitSet = {
     if (!activenessResult.isSuccessful) {
       SyncServiceAlarm
@@ -133,6 +147,7 @@ object CommitSet {
       creations = creations,
       unassignments = Map.empty,
       assignments = Map.empty,
+      hostedOnboardingPartiesO = hostedOnboardingPartiesO,
     )
   }
 
@@ -156,5 +171,6 @@ object CommitSet {
         )
         .toMap
         .forgetNE,
+      hostedOnboardingPartiesO = None,
     )
 }

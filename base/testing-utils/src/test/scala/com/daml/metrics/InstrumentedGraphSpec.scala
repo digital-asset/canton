@@ -3,21 +3,19 @@
 
 package com.daml.metrics
 
-import com.daml.metrics.InstrumentedGraph.*
-import com.daml.metrics.InstrumentedGraphSpec.{MaxValueCounter, SamplingCounter}
+import com.daml.metrics.InstrumentedGraphSpec.MaxValueCounter
 import com.daml.metrics.api.noop.NoOpCounter
 import com.daml.metrics.api.testing.InMemoryMetricsFactory.{InMemoryCounter, InMemoryTimer}
 import com.daml.metrics.api.testing.MetricValues
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import org.apache.pekko.stream.QueueOfferResult
-import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink}
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
+import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Future, Promise}
-import scala.util.Try
 
 final class InstrumentedGraphSpec
     extends AsyncFlatSpec
@@ -116,56 +114,6 @@ final class InstrumentedGraphSpec
       capacityCounter.value shouldEqual 0
     }
   }
-
-  // this test suite is disabled since it's timing related expectations proven to be very flaky in automated tests
-  behavior of s"${classOf[BufferedFlow[?, ?, ?]].getSimpleName}.buffered"
-
-  def throttledTest(producerMaxSpeed: Int, consumerMaxSpeed: Int): Future[List[Long]] = {
-    val counter = new SamplingCounter(10.millis)
-    Source(List.fill(1000)("element"))
-      .throttle(producerMaxSpeed, FiniteDuration(10, "millis"))
-      .buffered(counter, 30)
-      .throttle(consumerMaxSpeed, FiniteDuration(10, "millis"))
-      .run()
-      .map(_ => counter.finishSampling())
-  }
-
-  def sampleAverage(samples: List[Long]): Double =
-    samples.sum.toDouble / samples.size.toDouble
-  def samplePercentage(samples: List[Long])(filter: Long => Boolean): Double =
-    samples.count(filter).toDouble / samples.size.toDouble * 100.0
-
-  // These thresholds were established empirically and are tuned to still work
-  // even when the test is slowed down in CI by a busy CPU running many tests.
-  it should "signal mostly full buffer if slow consumer" in {
-    throttledTest(
-      producerMaxSpeed = 10,
-      consumerMaxSpeed = 5,
-    ) map { samples =>
-      sampleAverage(samples) should be > 25.0
-      samplePercentage(samples)(_ == 30) should be > 80.0
-    }
-  }
-
-  it should "signal mostly empty buffer if fast consumer" in {
-    throttledTest(
-      producerMaxSpeed = 10,
-      consumerMaxSpeed = 20,
-    ) map { samples =>
-      sampleAverage(samples) should be < 10.0
-      samplePercentage(samples)(_ == 0) should be > 90.0
-    }
-  }
-
-  it should "signal mostly empty buffer if speeds are aligned" in {
-    throttledTest(
-      producerMaxSpeed = 10,
-      consumerMaxSpeed = 10,
-    ) map { samples =>
-      sampleAverage(samples) should be < 10.0
-      samplePercentage(samples)(_ <= 1) should be > 90.0
-    }
-  }
 }
 
 object InstrumentedGraphSpec extends MetricValues {
@@ -178,29 +126,5 @@ object InstrumentedGraphSpec extends MetricValues {
       ) {
     override def dec(value: Long)(implicit mc: MetricsContext): Unit = ()
 
-  }
-
-  // For testing only, provides a sampled sequence of the state of the counter until finishSampling is called.
-  private final class SamplingCounter(samplingInterval: FiniteDuration)
-      extends InMemoryCounter(
-        MetricInfo(MetricName("test"), "", MetricQualification.Debug),
-        MetricsContext.Empty,
-      ) { self =>
-    private val t = new java.util.Timer()
-    private val samples = scala.collection.mutable.ListBuffer[Long]()
-    private val task = new java.util.TimerTask {
-      def run(): Unit =
-        // Only add elements if the context map has been updated
-        if (Try(self.value).isSuccess) {
-          samples.+=(self.value)
-        }
-    }
-    t.schedule(task, samplingInterval.toMillis, samplingInterval.toMillis)
-
-    def finishSampling(): List[Long] = {
-      t.cancel()
-      task.cancel()
-      samples.result()
-    }
   }
 }

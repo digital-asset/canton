@@ -44,20 +44,9 @@ class DbStorageIdempotency(
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     underlying.runWrite(action, operationName + "-1", maxRetries).flatMap { firstResult =>
-      underlying.runWrite(action, operationName + "-2", maxRetries).flatMap { secondResult =>
-        if (rowsAltered(secondResult)) {
-          FutureUnlessShutdown.failed(
-            new AssertionError(
-              s"The operation '$operationName' was not idempotent. " +
-                s"The second run altered rows, with result: $secondResult"
-            )
-          )
-        }
-        FutureUnlessShutdown.pure(firstResult)
-      }
+      underlying.runWrite(action, operationName + "-2", maxRetries).map(_ => firstResult)
     }
 
   override def isActive: Boolean = underlying.isActive

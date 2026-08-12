@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.logging.entries.LoggingEntries
-import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withMetricLabels
@@ -60,6 +59,7 @@ import com.digitalasset.canton.platform.store.dao.events.{
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.PekkoUtil.{Commit, FutureQueue, PekkoSourceQueueToFutureQueue}
 import com.digitalasset.canton.util.{BatchN, ErrorUtil}
 import com.digitalasset.daml.lf.data.Ref

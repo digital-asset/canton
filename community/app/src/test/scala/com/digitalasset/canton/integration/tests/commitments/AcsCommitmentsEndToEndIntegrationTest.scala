@@ -4,7 +4,9 @@
 package com.digitalasset.canton.integration.tests.commitments
 
 import com.digitalasset.canton.TestPredicateFiltersFixtureAnyWordSpec
+import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters
 import com.digitalasset.canton.annotations.AcsCommitmentTest
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.data.Offset
@@ -23,9 +25,11 @@ import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   CheckpointType,
   InternedParticipantId,
+  allCheckpointsFilter,
 }
+import com.digitalasset.canton.time.NonNegativeSeconds
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.syntax.all.*
 import org.slf4j.event.Level
 
@@ -41,8 +45,9 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
       .addConfigTransforms(ConfigTransforms.enableNewAcsDigestProcessorPipeline)
+      .addConfigTransforms(ConfigTransforms.disableOldAcsCommitmentProcessor)
 
-  "the digest processor creates digests for counterparticipants" onlyRunWithOrGreaterThan ReleaseProtocolVersion.acsCommitmentRedesignStorage.v in {
+  "the digest processor creates digests for counterparticipants" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
     implicit env =>
       import env.*
 
@@ -102,37 +107,40 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
 
   // the following test case should only run when the synchronizer actually runs with `ProtocolVersion.acsCommitmentRedesign`,
   // because otherwise a synchronizer parameter change doesn't trigger a checkpoint
-  // TODO(#33326) enable this test, once the synchronizer parametes are properly persisted in the indexer
-  "synchronizer parameter changes trigger a checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign ignore {
+  "synchronizer parameter changes trigger a checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
     implicit env =>
       import env.*
 
-      val beforeSerial =
-        participant1.topology.synchronizer_parameters.list(daId).loneElement.context.serial
+      val beforeParams =
+        participant1.topology.synchronizer_parameters.list(daId).loneElement
 
       var startOffset = Offset.tryFromLong(participant1.ledger_api.state.end())
-      synchronizerOwners1.foreach(
-        _.topology.synchronizer_parameters.propose_update(
+      synchronizerOwners1.foreach { o =>
+        o.topology.synchronizer_parameters.propose(
           daId,
-          params =>
-            params.update(reconciliationInterval = params.reconciliationInterval.plusSeconds(1)),
+          DynamicSynchronizerParameters(
+            beforeParams.item.update(reconciliationInterval =
+              beforeParams.item.reconciliationInterval.add(NonNegativeSeconds.tryOfSeconds(1))
+            )
+          ),
+          serial = Some(beforeParams.context.serial.increment.value),
         )
-      )
+        Threading.sleep(2000)
+      }
 
       val expectedCheckpointTime = eventually() {
         val params = participant1.topology.synchronizer_parameters.list(daId).loneElement
-        params.context.serial shouldEqual beforeSerial.increment
+        params.context.serial shouldBe beforeParams.context.serial.increment.value
         params.context.validFrom
       }
 
-      participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
       val digestStore =
         participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
 
       eventually() {
         // in case there is no next checkpoint, .value will trigger a retry of the eventually loop
         val cp =
-          digestStore.firstCheckpointAfter(startOffset).futureValueUS.value
+          digestStore.firstCheckpointAfter(startOffset, allCheckpointsFilter).futureValueUS.value
 
         // if there was a checkpoint, update the offset to look for the next checkpoint
         startOffset = cp.offset

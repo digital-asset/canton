@@ -6,15 +6,8 @@ package com.daml.metrics
 import com.daml.metrics.api.MetricHandle.Timer.TimerHandle
 import com.daml.metrics.api.MetricHandle.{Counter, Timer}
 import com.daml.metrics.api.MetricsContext
-import org.apache.pekko.stream.scaladsl.{Flow, Source}
-import org.apache.pekko.stream.{
-  BoundedSourceQueue,
-  Materializer,
-  OverflowStrategy,
-  QueueOfferResult,
-}
-
-import scala.util.chaining.*
+import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.stream.{BoundedSourceQueue, Materializer, QueueOfferResult}
 
 object InstrumentedGraph {
 
@@ -94,41 +87,5 @@ object InstrumentedGraph {
       lengthCounter.dec()
       item
     }
-  }
-
-  implicit class BufferedFlow[In, Out, Mat](val original: Flow[In, Out, Mat]) extends AnyVal {
-
-    /** Adds a buffer to the output of the [[original]] flow, and adds a Counter metric for buffer
-      * size.
-      *
-      * Good for detecting bottlenecks and speed difference between consumer and producer. In case
-      * producer is faster, this buffer should be mostly empty. In case producer is slower, this
-      * buffer should be mostly full.
-      *
-      * @param counter
-      *   the counter to track the actual size of the buffer
-      * @param size
-      *   the maximum size of the buffer. In case of a bottleneck in producer this will be mostly
-      *   full, so careful estimation is needed to prevent excessive memory pressure.
-      * @param metricsContext
-      *   metrics context for the counter. Can be used to re-use one counter with different contexts
-      * @return
-      *   the instrumented flow
-      */
-    def buffered(counter: Counter, size: Int)(implicit
-        metricsContext: MetricsContext = MetricsContext.Empty
-    ): Flow[In, Out, Mat] =
-      original
-        // since wireTap is not guaranteed to be executed always, we need map to prevent counter skew over time.
-        .map(_.tap(_ => counter.inc()))
-        .buffer(size, OverflowStrategy.backpressure)
-        .map(_.tap(_ => counter.dec()))
-  }
-
-  implicit class BufferedSource[Out, Mat](val original: Source[Out, Mat]) extends AnyVal {
-    def buffered(counter: Counter, size: Int)(implicit
-        metricsContext: MetricsContext = MetricsContext.Empty
-    ): Source[Out, Mat] =
-      original.via(Flow[Out].buffered(counter, size))
   }
 }

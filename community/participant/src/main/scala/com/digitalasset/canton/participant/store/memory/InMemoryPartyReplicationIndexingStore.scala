@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.store.memory
 
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.{
   ContractActivationChangeBatch,
   Watermark,
 }
+import com.digitalasset.canton.participant.store.memory.InMemoryPartyReplicationIndexingStore.IndexingWatermarkExt
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{ReassignmentCounter, checked}
@@ -37,7 +38,7 @@ class InMemoryPartyReplicationIndexingStore(
   private val state = new AtomicReference[InMemoryPartyReplicationIndexingStore.State](
     InMemoryPartyReplicationIndexingStore.State(
       partyReplicationIndexing = new TreeSet[ActivationChangeBatchEntry](),
-      indexingWatermark = Watermark.MinValue,
+      indexingWatermark = IndexingWatermarkExt.MinValue,
       indexedWatermark = Watermark.MinValue,
     )
   )
@@ -109,6 +110,8 @@ class InMemoryPartyReplicationIndexingStore(
     // the `PartyReplicationIndexingStore.consumeNextActivationChangesBatch` method cannot be called
     // multiple times concurrently.
     val indexingWatermarkBefore = state.get().indexingWatermark
+
+    // First, update the watermarks
     val updatedState = state.updateAndGet {
       case previousState @ InMemoryPartyReplicationIndexingStore.State(
             activationChanges,
@@ -119,7 +122,8 @@ class InMemoryPartyReplicationIndexingStore(
           .from(
             activationChanges.toSeq
               .collect {
-                case entry: ActivationChangeBatchEntry if entry.watermark > indexingWatermark =>
+                case entry: ActivationChangeBatchEntry
+                    if entry.watermark > indexingWatermark.watermark =>
                   entry
               }
               .take(maxBatchSize.unwrap)
@@ -128,22 +132,37 @@ class InMemoryPartyReplicationIndexingStore(
             val trimmedChangesNE = trimActivationChangesBatch(changesNE)
             InMemoryPartyReplicationIndexingStore.State(
               activationChanges,
-              trimmedChangesNE.last1.watermark,
+              IndexingWatermarkExt(
+                trimmedChangesNE.last1.watermark,
+                Some(
+                  indexingWatermark.acsCommitmentTiebreakerO
+                    .fold(NonNegativeInt.zero)(_.increment.toNonNegative)
+                ),
+              ),
               indexedWatermark,
             )
           }
     }
+
+    // Second, return any change batch if candidates are non-empty based on before/after indexing watermark
     FutureUnlessShutdown.pure(
       NonEmpty
         .from(
           updatedState.partyReplicationIndexing.toSeq
             .collect[(LfContractId, (ChangeType, ReassignmentCounter))] {
               case entry: ActivationChangeBatchEntry
-                  if entry.watermark > indexingWatermarkBefore && entry.watermark <= updatedState.indexingWatermark =>
+                  if entry.watermark > indexingWatermarkBefore.watermark && entry.watermark <= updatedState.indexingWatermark.watermark =>
                 entry.contractId -> (entry.change, entry.reassignmentCounter)
             }
         )
-        .map(ContractActivationChangeBatch(_, updatedState.indexingWatermark))
+        .zip(updatedState.indexingWatermark.acsCommitmentTiebreakerO)
+        .map { case (eligibleChanges, nextTiebreaker) =>
+          ContractActivationChangeBatch(
+            eligibleChanges,
+            updatedState.indexingWatermark.watermark,
+            nextTiebreaker,
+          )
+        }
     )
   }
 
@@ -160,7 +179,7 @@ class InMemoryPartyReplicationIndexingStore(
     state.updateAndGet { case InMemoryPartyReplicationIndexingStore.State(changes, _, _) =>
       InMemoryPartyReplicationIndexingStore.State(
         changes.empty,
-        Watermark.MinValue,
+        IndexingWatermarkExt.MinValue,
         Watermark.MinValue,
       )
     }
@@ -191,14 +210,16 @@ class InMemoryPartyReplicationIndexingStore(
 
         InMemoryPartyReplicationIndexingStore.State(
           preservedChanges,
-          lowerWatermarkIfNecessary(indexingWatermark),
+          indexingWatermark.copy(watermark =
+            lowerWatermarkIfNecessary(indexingWatermark.watermark)
+          ),
           lowerWatermarkIfNecessary(indexedWatermark),
         )
     }
     FutureUnlessShutdown.unit
   }
 
-  override protected[store] def listContractActivationChanges()(implicit
+  override protected[participant] def listContractActivationChanges()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[ActivationChange]] = {
     val snapshot = state.get()
@@ -209,7 +230,7 @@ class InMemoryPartyReplicationIndexingStore(
           watermark,
           contractId,
           changeType,
-          watermark <= snapshot.indexingWatermark,
+          watermark <= snapshot.indexingWatermark.watermark,
           watermark <= snapshot.indexedWatermark,
           reassignmentCounter,
         )
@@ -220,7 +241,23 @@ class InMemoryPartyReplicationIndexingStore(
 object InMemoryPartyReplicationIndexingStore {
   private final case class State(
       partyReplicationIndexing: TreeSet[ActivationChangeBatchEntry],
-      indexingWatermark: Watermark,
+      indexingWatermark: IndexingWatermarkExt,
       indexedWatermark: Watermark,
   )
+
+  /** Augments indexer watermark with a tiebreaker for the acs commitment processor
+    *
+    * @param watermark
+    *   watermark in the deferred indexing "journal" indicating how far indexing has proceeded
+    * @param acsCommitmentTiebreakerO
+    *   onpr unique counter to provide to the acs commitment processor. None if uninitialized
+    */
+  private final case class IndexingWatermarkExt(
+      watermark: Watermark,
+      acsCommitmentTiebreakerO: Option[NonNegativeInt],
+  )
+
+  private object IndexingWatermarkExt {
+    lazy val MinValue = IndexingWatermarkExt(Watermark.MinValue, None)
+  }
 }

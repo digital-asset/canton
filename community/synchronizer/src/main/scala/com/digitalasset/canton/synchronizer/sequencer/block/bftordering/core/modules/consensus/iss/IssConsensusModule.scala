@@ -292,7 +292,8 @@ final class IssConsensusModule[E <: Env[E]](
 
           startConsensusForCurrentEpoch()
           logger.info(
-            s"New epoch ${epochState.epoch.info.number} has started with leaders = ${newMembership.leaders}; " +
+            s"New epoch ${epochState.epoch.info.number} has started with leaders = ${newMembership.leaders}" +
+              s"and blacklisted nodes = ${newMembership.blacklistedNodes}; " +
               s"ordering topology = ${newMembership.orderingTopology}"
           )
 
@@ -507,7 +508,10 @@ final class IssConsensusModule[E <: Env[E]](
 
           if (hasCompletedLedSegment) {
             logger.debug(s"Locally-led segment in epoch $thisNodeEpochNumber is complete")
-            consensusWaitingForEpochCompletionSince = Some(Instant.now())
+            val now = Instant.now()
+            consensusWaitingForEpochCompletionSince = Some(now)
+            retransmissionsManager.segmentEnded(now)
+            epochState.notifyLedSegmentCompletionToSegments(epochNumber, now)
           }
 
           epochState.confirmBlockCompleted(orderedBlock.metadata, commitCertificate)

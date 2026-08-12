@@ -7,9 +7,11 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   AcsChangeSequencedUpdate,
   EmptyAcsPublicationRequired,
   LsuTimeReached,
+  OnPRReassignmentAccepted,
 }
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChangeFactory,
+  IndexingWatermark,
   SynchronizerIndex,
   Update,
 }
@@ -32,14 +34,19 @@ class AcsCommitmentPublicationPostProcessor(
         synchronizerId: SynchronizerId,
         synchronizerIndex: SynchronizerIndex,
         acsChangeFactoryO: Option[AcsChangeFactory],
+        onprIndexingWatermark: Option[IndexingWatermark],
     ): Unit =
       connectedSynchronizersLookupContainer
         // not publishing if not connected to synchronizer: it means subsequent crash recovery will establish consistency again
         .get(synchronizerId)
+        // Obtaining the ACS Commitment processor, there is no publishing if it is disabled (=not defined)
+        .flatMap(_.acsCommitmentProcessorO)
         // not publishing anything if the AcsCommitmentProcessor initialization succeeded with AbortedDueToShutdown or failed
         .foreach(
-          _.acsCommitmentProcessor.publish(
-            RecordTime.fromSynchronizerIndex(synchronizerIndex),
+          _.publish(
+            onprIndexingWatermark.fold(RecordTime.fromSynchronizerIndex(synchronizerIndex))(wm =>
+              RecordTime(synchronizerIndex.recordTime, wm.acsCommitmentTiebreaker.unwrap.toLong)
+            ),
             acsChangeFactoryO,
           )(
             // The trace context is deliberately generated here instead of continuing the one for the Update
@@ -50,11 +57,20 @@ class AcsCommitmentPublicationPostProcessor(
         )
 
     update match {
+      case updateWithAcsChangeFactory: OnPRReassignmentAccepted =>
+        publishAcsCommitment(
+          updateWithAcsChangeFactory.synchronizerId,
+          updateWithAcsChangeFactory.synchronizerIndex,
+          Some(updateWithAcsChangeFactory.acsChangeFactory),
+          Some(updateWithAcsChangeFactory.watermark),
+        )
+
       case updateWithAcsChangeFactory: AcsChangeSequencedUpdate =>
         publishAcsCommitment(
           updateWithAcsChangeFactory.synchronizerId,
           updateWithAcsChangeFactory.synchronizerIndex,
           Some(updateWithAcsChangeFactory.acsChangeFactory),
+          onprIndexingWatermark = None,
         )
 
       case emptyAcsPublicationRequired: EmptyAcsPublicationRequired =>
@@ -62,15 +78,18 @@ class AcsCommitmentPublicationPostProcessor(
           emptyAcsPublicationRequired.synchronizerId,
           emptyAcsPublicationRequired.synchronizerIndex,
           acsChangeFactoryO = None,
+          onprIndexingWatermark = None,
         )
 
       case upgradeTimeReached: LsuTimeReached =>
         connectedSynchronizersLookupContainer
           // not publishing if not connected to synchronizer: it means subsequent crash recovery will establish consistency again
           .get(upgradeTimeReached.synchronizerId)
+          // Obtaining the ACS Commitment processor, there is no publishing if it is disabled (=not defined)
+          .flatMap(_.acsCommitmentProcessorO)
           // not publishing anything if the AcsCommitmentProcessor initialization succeeded with AbortedDueToShutdown or failed
           .foreach(
-            _.acsCommitmentProcessor.publishForUpgradeTime(
+            _.publishForUpgradeTime(
               upgradeTimeReached.synchronizerIndex.recordTime
             )(
               // The trace context is deliberately generated here instead of continuing the one for the Update

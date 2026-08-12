@@ -45,6 +45,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MaxBytesToDecompress, MonadUtil, PekkoUtil}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.version.{ProtocolVersion, VersionedMessage}
 import com.digitalasset.canton.{
   BaseTest,
@@ -356,9 +357,9 @@ class GrpcSequencerServiceTest
     }
 
     "reject envelopes with invalid sender" in { implicit env =>
-      val requestV1 = defaultRequest.toProtoV30.focus(_.sender).modify {
-        case "" => fail("sender should be set")
-        case _sender => "THISWILLFAIL"
+      val requestV1 = defaultRequest.toProtoV30.focus(_.sender).modify { sender =>
+        if (sender == "".toProtoUnvalidated) fail("sender should be set")
+        else "THISWILLFAIL".toProtoUnvalidated
       }
       val signedRequestV0 = signedContent(
         VersionedMessage[SubmissionRequest](requestV1.toByteString, 0).toByteString

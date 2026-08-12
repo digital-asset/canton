@@ -1,0 +1,54 @@
+name: Canton Nightly Scheduler
+on:
+  # TODO(#34877): Re-enable this scheduler after the CircleCI migration is
+  # complete. The intended end state is a weekday 22:00 UTC dispatch of
+  # canton_nightly.yml for main and all release-line* branches.
+  # schedule:
+  #   - cron: '0 22 * * 1-5'
+  workflow_dispatch: {}
+
+# TODO(#34877): Re-enable this scheduler after the CircleCI migration is
+# complete.
+#permissions:
+#  actions: write
+#  contents: read
+
+jobs:
+  dispatch_nightly:
+    name: Dispatch nightly workflow
+    if: ${{ startsWith(github.ref, 'refs/heads/gha-migration/') }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Nightly scheduler is disabled during migration"
+      # TODO(#34877): Re-enable this step after migration to dispatch
+      # canton_nightly.yml for main and all release-line* branches.
+      # - name: Dispatch canton_nightly for main and release-line branches
+      #   env:
+      #     GH_TOKEN: ${{ github.token }}
+      #     REPOSITORY: ${{ github.repository }}
+      #     WORKFLOW_FILE: canton_nightly.yml
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #
+      #     mapfile -t refs < <(
+      #       {
+      #         echo main
+      #         gh api "repos/${REPOSITORY}/branches?per_page=100" --paginate \
+      #           --jq '.[].name' | grep '^release-line' || true
+      #       } | awk '!seen[$0]++'
+      #     )
+      #
+      #     if [[ "${#refs[@]}" -eq 0 ]]; then
+      #       echo "No refs found to dispatch" >&2
+      #       exit 1
+      #     fi
+      #
+      #     printf 'Dispatching %s for refs:\n' "$WORKFLOW_FILE"
+      #     printf ' - %s\n' "${refs[@]}"
+      #
+      #     for ref in "${refs[@]}"; do
+      #       gh workflow run "$WORKFLOW_FILE" \
+      #         --repo "$REPOSITORY" \
+      #         --ref "$ref"
+      #     done

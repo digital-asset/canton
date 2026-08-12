@@ -419,7 +419,7 @@ class DbSequencerStore(
               .map((RegisteredMember.apply _).tupled)
         } yield (updated, registeredMember),
         "registerMember",
-      )(traceContext, closeContext, { case (updated, _) => updated > 0 })
+      )(traceContext, closeContext)
       .map { case (_, registeredMember) => registeredMember }
 
   protected override def lookupMemberInternal(member: Member)(implicit
@@ -869,7 +869,7 @@ class DbSequencerStore(
             )
 
         storage
-          .update_(action, functionFullName)(traceContext, cc, implicitly)
+          .update_(action, functionFullName)(traceContext, cc)
           .recover { case _: TimeoutException =>
             logger.debug(s"goOffline of instance $instanceIndex timed out")
             if (cc.context.isClosing) UnlessShutdown.AbortedDueToShutdown else UnlessShutdown.unit
@@ -911,7 +911,7 @@ class DbSequencerStore(
           )
         },
         functionFullName,
-      )(traceContext, closeContext, { case (updated, _) => updated > 0 })
+      )(traceContext, closeContext)
       .map { case (_, watermark) => watermark }
 
   override def fetchOnlineInstances(implicit

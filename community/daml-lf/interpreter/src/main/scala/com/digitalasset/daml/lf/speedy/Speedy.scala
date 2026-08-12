@@ -381,7 +381,7 @@ private[lf] object Speedy {
             contractLookupCache =
               contractLookupCache.updated(coid, (coinst, hashingMethod, idValidator))
             entry
-          }
+          }(Control.`Defer Control`)
       }
 
     private[speedy] override def asUpdateMachine(location: String)(
@@ -418,12 +418,6 @@ private[lf] object Speedy {
               }
             case KCloseExercise =>
               unwind(ptx.abortExercises)
-            case k: KCheckChoiceGuard =>
-              // We must abort, because the transaction has failed in a way that is
-              // unrecoverable (it depends on the state of an input contract that
-              // we may not have the authority to fetch).
-              abort()
-              k.abort()
             case KPreventException() =>
               UnwindResult.Unhandled
             case converting: KConvertingException[Question.Update] =>
@@ -1721,35 +1715,6 @@ private[lf] object Speedy {
         machine.currentActuals,
         handler: SExpr,
       )
-  }
-
-  private[speedy] final case class KCheckChoiceGuard(
-      coid: V.ContractId,
-      templateId: TypeConId,
-      choiceName: ChoiceName,
-      byInterface: Option[TypeConId],
-  ) extends Kont[Question.Update] {
-    def abort(): Nothing =
-      throw SErrorDamlException(
-        IError.Dev(
-          NameOf.qualifiedNameOfCurrentFunc,
-          IError.Dev.ChoiceGuardFailed(coid, templateId, choiceName, byInterface),
-        )
-      )
-
-    override def execute(machine: Machine[Question.Update], v: SValue): Control.Value = {
-      machine.updateGasBudget(_.KCheckChoiceGuard.cost)
-
-      v match {
-        case SValue.SBool(b) =>
-          if (b)
-            Control.Value(SValue.SUnit)
-          else
-            abort()
-        case _ =>
-          throw SErrorCrash("KCheckChoiceGuard", "Expected SBool value.")
-      }
-    }
   }
 
   /** Continuation produced by [[SELabelClosure]] expressions. This is only used during profiling.

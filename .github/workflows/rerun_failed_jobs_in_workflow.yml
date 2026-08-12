@@ -1,0 +1,105 @@
+name: Rerun Failed Jobs in Workflow
+
+on:
+  workflow_run:
+    workflows:
+      - Canton Build Required
+      - Canton Nightly Workflow
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  rerun_failed_jobs:
+    name: Rerun failed jobs once
+    runs-on: dach-ny-canton
+    timeout-minutes: 10
+    if: |
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt == 1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Show original workflow run
+        shell: bash
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          echo "::group::Original workflow run"
+          echo "run_id=$RUN_ID"
+          echo "run_attempt=$RUN_ATTEMPT"
+          echo "run_url=$RUN_URL"
+          echo "::endgroup::"
+
+      - name: Compute rerun gate decision
+        id: rerun_gate_compute
+        uses: ./.github/actions/nix/nix_script_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          EMIT_RESULT_FILE_OUTPUT: 'true'
+        with:
+          output-name: result
+          command: |
+            python3 ./scripts/ci/rerun_failed_jobs_gate.py
+
+      - name: Export rerun gate outputs
+        id: rerun_gate
+        shell: bash
+        env:
+          GATE_RESULT_PATH: ${{ steps.rerun_gate_compute.outputs.result }}
+        run: |
+          gate_result_path="${GATE_RESULT_PATH:-}"
+          if [[ -z "$gate_result_path" ]]; then
+            echo "Missing rerun gate result path" >&2
+            exit 1
+          fi
+          if [[ ! -f "$gate_result_path" ]]; then
+            echo "Missing rerun gate output file: $gate_result_path" >&2
+            exit 1
+          fi
+
+          should_rerun="$(grep '^should_rerun=' "$gate_result_path" | tail -n1 | cut -d'=' -f2-)"
+          failed_jobs="$(grep '^failed_jobs=' "$gate_result_path" | tail -n1 | cut -d'=' -f2-)"
+          blocked_jobs="$(grep '^blocked_jobs=' "$gate_result_path" | tail -n1 | cut -d'=' -f2-)"
+          blocked_failed="$(grep '^blocked_failed=' "$gate_result_path" | tail -n1 | cut -d'=' -f2-)"
+
+          {
+            echo "should_rerun=$should_rerun"
+            echo "failed_jobs=$failed_jobs"
+            echo "blocked_jobs=$blocked_jobs"
+            echo "blocked_failed=$blocked_failed"
+          } >> "$GITHUB_OUTPUT"
+
+          rm -f "$gate_result_path"
+
+      - name: Report rerun skip reason
+        if: steps.rerun_gate.outputs.should_rerun != 'true'
+        shell: bash
+        env:
+          FAILED_JOBS: ${{ steps.rerun_gate.outputs.failed_jobs }}
+          BLOCKED_FAILED: ${{ steps.rerun_gate.outputs.blocked_failed }}
+        run: |
+          echo "::notice::Skipping failed-job rerun due to workflow policy. blocked_failed=$BLOCKED_FAILED failed_jobs=$FAILED_JOBS"
+
+      - name: Rerun failed jobs
+        if: steps.rerun_gate.outputs.should_rerun == 'true'
+        uses: ./.github/actions/nix/nix_script_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        with:
+          command: |
+            if gh run rerun "$RUN_ID" --failed; then
+              echo "Requested rerun of failed jobs for run_id=$RUN_ID"
+            else
+              echo "::warning::Could not request rerun for run_id=$RUN_ID. This can happen if the run is no longer rerunnable or was already rerun."
+            fi

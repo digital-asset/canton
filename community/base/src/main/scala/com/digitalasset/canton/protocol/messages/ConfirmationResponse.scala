@@ -13,6 +13,7 @@ import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.Si
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmptyUtil.instances.*
@@ -69,7 +70,7 @@ case class ConfirmationResponse private
     v30.ConfirmationResponse(
       viewPosition = viewPositionO.map(_.toProtoV30),
       localVerdict = Some(localVerdict.toProtoV30),
-      confirmingParties = confirmingParties.toList,
+      confirmingParties = confirmingParties.toList.map(_.toProtoUnvalidated),
     )
 
   override protected def pretty: Pretty[this.type] =

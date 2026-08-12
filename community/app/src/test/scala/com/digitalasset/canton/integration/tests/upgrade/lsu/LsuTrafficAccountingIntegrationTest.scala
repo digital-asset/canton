@@ -258,7 +258,8 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       }
 
       // Generate some non-trivial base traffic remainder state
-      environment.simClock.value.advanceTo(upgradeTime.minusMillis(20L))
+      // Note: due to CantonBFT advancing block times 1ms per block, keep the buffer before upgradeTime not be too small
+      environment.simClock.value.advanceTo(upgradeTime.minusMillis(100L))
       participant1.health.ping(participant2)
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)

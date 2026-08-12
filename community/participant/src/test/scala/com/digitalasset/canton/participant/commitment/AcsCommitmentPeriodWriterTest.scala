@@ -6,7 +6,8 @@ package com.digitalasset.canton.participant.commitment
 import cats.Eval
 import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointWritten
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointToBeWritten
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.{
   CommitmentMatchPeriod,
   MatchingWatermark,
@@ -75,27 +76,44 @@ class AcsCommitmentPeriodWriterTest
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
       val pageSize = PositiveInt.tryCreate(100)
 
-      // only CheckpointType.ReconciliationIntervalBoundary would work and increase the watermark
+      val tickTp = tp(1)
+      val p1 = internedParticipantId(1)
+      val p1Digest = genRawDigest(0x2a)
+
+      // only CheckpointType.ReconciliationIntervalBoundary should work
       for {
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten = CheckpointWritten(tp(1), CheckpointType.Reinitialization),
+        // Insert an active digest update for a p1 to check that the checkpoints do not trigger insertion
+        _ <- acsDigestStore.participant.upsertDigestUpdates(
+          Seq(
+            AcsDigestUpdate(AcsDigest(p1, tickTp, Some(p1Digest), None), replacesOffset = None)
+          )
+        )
+        reinit <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten = CheckpointToBeWritten(tp(2), CheckpointType.Reinitialization),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = pageSize,
         )
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten = CheckpointWritten(tp(1), CheckpointType.MaxEventsWithoutCheckpoint),
+        maxEvents <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten =
+            CheckpointToBeWritten(tp(2), CheckpointType.MaxEventsWithoutCheckpoint),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = pageSize,
         )
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten = CheckpointWritten(tp(1), CheckpointType.PartyHostingChange),
+        partyHosting <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten = CheckpointToBeWritten(tp(2), CheckpointType.PartyHostingChange),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = pageSize,
         )
-        watermark <- periodStore.watermarks()
+        outstanding <- periodStore.lookupOutstanding(Seq(p1 -> cp(0, 3)))
       } yield {
-        watermark shouldBe MatchingWatermark.initial
+        reinit shouldBe false
+        maxEvents shouldBe false
+        partyHosting shouldBe false
+        outstanding shouldBe empty
       }
     }
 
-    "populate outstanding periods and advance watermark on reconciliation tick" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "populate outstanding periods on reconciliation tick" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
@@ -128,31 +146,75 @@ class AcsCommitmentPeriodWriterTest
         // Check store's replaces invariant
         _ <- acsDigestStore.checkReplacesInvariant()
 
-        // this should query the participant snapshot, write into outstanding period store and increase the watermark:
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten = CheckpointWritten(
+        // this should query the participant snapshot, write into outstanding period store
+        isRecon <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten = CheckpointToBeWritten(
             tickTp,
             CheckpointType.ReconciliationIntervalBoundary,
           ),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = pageSize,
         )
+        _ <- periodStore.checkInvariant(Some(tickTp.recordTime))
         outstanding <- periodStore.lookupOutstanding(
           Seq(
             p1 -> cp(5, 10),
             p2 -> cp(5, 10),
           )
         )
-        watermark <- periodStore.watermarks()
+        watermark <- periodStore.watermark()
       } yield {
+        isRecon shouldBe true
         outstanding should contain theSameElementsAs Seq(
           CommitmentMatchPeriod
             .outstanding(p1, tickTime.immediatePredecessor, tickTime, p1HashedDigest)
             // No outstanding for p2 as it was a tombstone at tp(10)
         )
-        watermark shouldBe MatchingWatermark.initial.bump(
-          tickTp.recordTime,
-          affirmationOnly = false,
+        watermark shouldBe MatchingWatermark.initial
+      }
+    }
+
+    "skip over past reconciliation ticks" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      val acsDigestStore = mkInMemoryDigestStore()
+      val periodStore = mkPeriodStore()
+
+      val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
+      val pageSize = PositiveInt.tryCreate(100)
+
+      val tickTp1 = tp(1)
+      val p1 = internedParticipantId(1)
+      val p1Digest1 = genRawDigest(0x2a)
+      val tickTp2 = tp(2)
+      val p1Digest2 = genRawDigest(0x3a)
+
+      for {
+        // Insert an active digest update for a p1 to check that the checkpoints do not trigger insertion
+        _ <- acsDigestStore.participant.upsertDigestUpdates(
+          Seq(
+            AcsDigestUpdate(AcsDigest(p1, tickTp1, Some(p1Digest1), None), replacesOffset = None),
+            AcsDigestUpdate(
+              AcsDigest(p1, tickTp2, Some(p1Digest2), None),
+              replacesOffset = Some(tickTp1.offset),
+            ),
+          )
         )
+        exact <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten =
+            CheckpointToBeWritten(tp(1), CheckpointType.ReconciliationIntervalBoundary),
+          reconciliationWatermark = tp(1).recordTime,
+          pageSize = pageSize,
+        )
+        tooOld <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten =
+            CheckpointToBeWritten(tp(1), CheckpointType.ReconciliationIntervalBoundary),
+          reconciliationWatermark = tp(2).recordTime,
+          pageSize = pageSize,
+        )
+        outstanding <- periodStore.lookupOutstanding(Seq(p1 -> cp(0, 3)))
+      } yield {
+        exact shouldBe false
+        tooOld shouldBe false
+        outstanding shouldBe empty
       }
     }
 
@@ -200,22 +262,19 @@ class AcsCommitmentPeriodWriterTest
 
         // Add checkpoint boundary
         _ <- acsDigestStore.insertCheckpointTime(
-          Checkpoint(
-            tickTp,
-            CheckpointType.ReconciliationIntervalBoundary,
-          )
+          Checkpoint(tickTp, CheckpointType.ReconciliationIntervalBoundary)
         )
         _ <- acsDigestStore.checkReplacesInvariant()
 
         // Execute writeOutstandingAtTick with page size 2 to have more than one pages
         // among the pages, there should be empty process result (tombstones)
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten = CheckpointWritten(
-            tickTp,
-            CheckpointType.ReconciliationIntervalBoundary,
-          ),
+        isRecon <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten =
+            CheckpointToBeWritten(tickTp, CheckpointType.ReconciliationIntervalBoundary),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = pageSizeBy2,
         )
+        _ <- periodStore.checkInvariant(Some(tickTp.recordTime))
 
         // Verify lookup results: p2 and p3 should have outstanding periods, p1 should not (due to being a tombstone)
         outstanding <- periodStore.lookupOutstanding(
@@ -225,8 +284,8 @@ class AcsCommitmentPeriodWriterTest
             p3 -> cp(15, 20),
           )
         )
-        watermark <- periodStore.watermarks()
       } yield {
+        isRecon shouldBe true
         outstanding should contain theSameElementsAs (Seq(
           CommitmentMatchPeriod
             .outstanding(p2, tickTime.immediatePredecessor, tickTime, p1HashedDigest),
@@ -234,10 +293,6 @@ class AcsCommitmentPeriodWriterTest
             .outstanding(p3, tickTime.immediatePredecessor, tickTime, p3HashedDigest),
           // p1 ends as a tombstone, so it yields no outstanding entries.
         ))
-        watermark shouldBe MatchingWatermark.initial.bump(
-          tickTp.recordTime,
-          affirmationOnly = false,
-        )
       }
     }
 
@@ -264,16 +319,17 @@ class AcsCommitmentPeriodWriterTest
       val p3HashedDigest = genHashedDigest(p3Digest)
 
       // 1. Create a series of paginated updates for p2 (tombstones) to force multiple pages
-      val p2Updates = (1 to targetTickOffset.unwrap.toInt by 2).foldLeft(
-        Seq.empty[ParticipantAcsDigestUpdate[InternedParticipantId]]
-      ) { case (acc, i) =>
-        val prevOffset = acc.lastOption.map(_.digestUpdate.offset)
-        val update = AcsDigestUpdate(
-          digestUpdate = AcsDigest(p2, tp(i), None, None),
-          replacesOffset = prevOffset,
-        )
-        acc :+ update
-      }
+      val p2Updates = (1 to targetTickOffset.unwrap.toInt by 2)
+        .scanLeft(Option.empty[ParticipantAcsDigestUpdate[InternedParticipantId]]) {
+          case (acc, i) =>
+            val prevOffset = acc.map(_.digestUpdate.offset)
+            val update = AcsDigestUpdate(
+              digestUpdate = AcsDigest(p2, tp(i), None, None),
+              replacesOffset = prevOffset,
+            )
+            Some(update)
+        }
+        .flatten
 
       // 2. Insert an update for p1 at an earlier tick
       val p1EarlyUpdate = Seq(
@@ -294,27 +350,21 @@ class AcsCommitmentPeriodWriterTest
 
         // Insert checkpoints for both the early tick and target tick
         _ <- acsDigestStore.insertCheckpointTime(
-          Checkpoint(
-            earlyTickTp,
-            CheckpointType.ReconciliationIntervalBoundary,
-          )
+          Checkpoint(earlyTickTp, CheckpointType.ReconciliationIntervalBoundary)
         )
         _ <- acsDigestStore.insertCheckpointTime(
-          Checkpoint(
-            targetTickTp,
-            CheckpointType.ReconciliationIntervalBoundary,
-          )
+          Checkpoint(targetTickTp, CheckpointType.ReconciliationIntervalBoundary)
         )
         _ <- acsDigestStore.checkReplacesInvariant()
 
         // Process the target tick with the page size 5, forcing pagination across the tombstone pages
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten = CheckpointWritten(
-            targetTickTp,
-            CheckpointType.ReconciliationIntervalBoundary,
-          ),
+        isRecon <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten =
+            CheckpointToBeWritten(targetTickTp, CheckpointType.ReconciliationIntervalBoundary),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = pageSize,
         )
+        _ <- periodStore.checkInvariant(Some(targetTickTp.recordTime))
 
         // Verify:
         // - p1 should be present (carried forward from before the tick)
@@ -327,8 +377,9 @@ class AcsCommitmentPeriodWriterTest
             p3 -> cp(15, 20),
           )
         )
-        watermark <- periodStore.watermarks()
+        watermark <- periodStore.watermark()
       } yield {
+        isRecon shouldBe true
         outstanding should contain theSameElementsAs (Seq(
           // p1 was updated at earlyTickTime (=ts(10)) so it has the effective period started right before ts(10) (exclusiveFrom)
           CommitmentMatchPeriod
@@ -336,10 +387,7 @@ class AcsCommitmentPeriodWriterTest
           CommitmentMatchPeriod
             .outstanding(p3, targetTickTime.immediatePredecessor, targetTickTime, p3HashedDigest),
         ))
-        watermark shouldBe MatchingWatermark.initial.bump(
-          targetTickTp.recordTime,
-          affirmationOnly = false,
-        )
+        watermark shouldBe MatchingWatermark.initial
       }
     }
 
@@ -411,13 +459,15 @@ class AcsCommitmentPeriodWriterTest
         _ <- acsDigestStore.checkReplacesInvariant()
 
         // Process the target tick with a small page size, forcing pagination across tombstone pages
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten = CheckpointWritten(
+        isRecon <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten = CheckpointToBeWritten(
             targetTickTp,
             CheckpointType.ReconciliationIntervalBoundary,
           ),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = smallPageSize,
         )
+        _ <- periodStore.checkInvariant(Some(targetTickTime))
 
         // Verify:
         // - p1 should have an outstanding period starting from between early and target update time up to targetTickTp
@@ -430,22 +480,18 @@ class AcsCommitmentPeriodWriterTest
             p3 -> cp(15, 20),
           )
         )
-        watermark <- periodStore.watermarks()
       } yield {
+        isRecon shouldBe true
         outstanding should contain theSameElementsAs (Seq(
           CommitmentMatchPeriod
             .outstanding(p1, timeBetween.immediatePredecessor, targetTickTime, p1HashedDigest),
           CommitmentMatchPeriod
             .outstanding(p3, targetTickTime.immediatePredecessor, targetTickTime, p3HashedDigest),
         ))
-        watermark shouldBe MatchingWatermark.initial.bump(
-          targetTickTp.recordTime,
-          affirmationOnly = false,
-        )
       }
     }
 
-    "correctly handle multiple checkpoints, watermark advancement, and state transitions across ticks" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "correctly handle multiple checkpoints and state transitions across ticks" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
@@ -495,13 +541,13 @@ class AcsCommitmentPeriodWriterTest
         )
         _ <- acsDigestStore.checkReplacesInvariant()
 
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten =
-            CheckpointWritten(earlyTickTp, CheckpointType.ReconciliationIntervalBoundary),
+        isRecon1 <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten =
+            CheckpointToBeWritten(earlyTickTp, CheckpointType.ReconciliationIntervalBoundary),
+          reconciliationWatermark = CantonTimestamp.MinValue,
           pageSize = pageSize,
         )
-
-        watermarkAfterTick1 <- periodStore.watermarks()
+        _ <- periodStore.checkInvariant(Some(earlyTickTp.recordTime))
 
         // Outstanding at Tick 1: p2 should be active (p1 became a tombstone at earlyTickTp)
         outstandingTick1 <- periodStore.lookupOutstanding(
@@ -531,13 +577,13 @@ class AcsCommitmentPeriodWriterTest
         )
         _ <- acsDigestStore.checkReplacesInvariant()
 
-        _ <- periodWriter.writeOutstandingAtTick(
-          checkpointWritten =
-            CheckpointWritten(targetTickTp, CheckpointType.ReconciliationIntervalBoundary),
+        isRecon2 <- periodWriter.writeOutstandingAtTick(
+          checkpointToBeWritten =
+            CheckpointToBeWritten(targetTickTp, CheckpointType.ReconciliationIntervalBoundary),
+          reconciliationWatermark = earlyTickTp.recordTime,
           pageSize = pageSize,
         )
-
-        watermarkAfterTick2 <- periodStore.watermarks()
+        _ <- periodStore.checkInvariant(Some(targetTickTp.recordTime))
 
         // Outstanding at Tick 2:
         // p1 (revived between ticks), p2 didn't change but extended in this period and p3 (active at target tick) should appear
@@ -560,27 +606,20 @@ class AcsCommitmentPeriodWriterTest
           )
         )
       } yield {
-        // Verify Tick 1 Watermark & Results
-        watermarkAfterTick1 shouldBe MatchingWatermark.initial.bump(
-          earlyTickTp.recordTime,
-          affirmationOnly = false,
+        // Verify Tick 1 Results
+        isRecon1 shouldBe true
+        outstandingTick1 should contain theSameElementsAs Seq(
+          CommitmentMatchPeriod.outstanding(
+            p2,
+            earlyTickTp.recordTime.immediatePredecessor,
+            earlyTickTp.recordTime,
+            p2HashedDigest_AtEarly,
+          )
         )
-        outstandingTick1 should contain theSameElementsAs (Seq(
-          CommitmentMatchPeriod
-            .outstanding(
-              p2,
-              earlyTickTp.recordTime.immediatePredecessor,
-              earlyTickTp.recordTime,
-              p2HashedDigest_AtEarly,
-            )
-        ))
 
         // Verify Tick 2 Watermark & Results
-        watermarkAfterTick2 shouldBe watermarkAfterTick1.bump(
-          targetTickTp.recordTime,
-          affirmationOnly = false,
-        )
-        outstandingTick2 should contain theSameElementsAs (Seq(
+        isRecon2 shouldBe true
+        outstandingTick2 should contain theSameElementsAs Seq(
           CommitmentMatchPeriod.outstanding(
             p1,
             timeBetweenTp.recordTime.immediatePredecessor,
@@ -602,7 +641,7 @@ class AcsCommitmentPeriodWriterTest
               targetTickTp.recordTime,
               p3HashedDigest_AtTarget,
             ),
-        ))
+        )
 
         outstandingTick2_from5 should contain theSameElementsAs Seq(
           CommitmentMatchPeriod.outstanding(

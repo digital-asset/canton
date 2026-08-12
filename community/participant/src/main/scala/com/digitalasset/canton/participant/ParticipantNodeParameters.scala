@@ -56,6 +56,9 @@ final case class ParticipantNodeParameters(
   // Indexing of party onboarding events is deferred if OnPR indexer pausing is off.
   def deferPartyOnboardingIndexing: Boolean =
     alphaOnlinePartyReplicationSupport.exists(!_.pauseSynchronizerIndexingDuringPartyReplication)
+
+  def isOldCommitmentProcessorEnabled(protocolVersion: ProtocolVersion): Boolean =
+    protocolVersion < ProtocolVersion.acsCommitmentRedesign || !acsCommitments.disableOldAcsCommitmentProcessor
 }
 
 object ParticipantNodeParameters {

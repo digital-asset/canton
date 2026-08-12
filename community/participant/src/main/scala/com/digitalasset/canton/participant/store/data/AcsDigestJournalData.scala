@@ -11,7 +11,7 @@ object AcsDigestJournalData {
   object JournalTable {
     case object PartyJournalTable extends JournalTable {
       override val tableName = "par_acs_party_running_digest"
-      override val keyColumnName = "party_and_order_id"
+      override val keyColumnName = "party_id"
     }
     case object ParticipantJournalTable extends JournalTable {
       override val tableName = "par_acs_participant_running_digest"

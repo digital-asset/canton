@@ -34,7 +34,7 @@ trait LeaderSelectionPolicy[E <: Env[E]] {
       epochNumber: EpochNumber,
       orderedBlockNumber: BlockNumber,
       viewNumber: ViewNumber,
-  ): Unit
+  )(implicit traceContext: TraceContext): Unit
 
   /** Computes the first block we need to [[addBlock]] from. We are snapshotting the state at the
     * epoch boundary so this will usually be the first block in the epoch. If we don't rely on

@@ -1483,17 +1483,14 @@ abstract class EventStorageBackendTemplate(
         .withFetchSize(Some(fetchSize(eventSequentialIds)))
     RowDefs.partyToParticipantEventParser(stringInterning).queryMultipleRows(query)(connection)
   }
-  override def fetchDynamicSynchronizerParametersEventIds(
-      eventSequentialIds: SequentialIdBatch
-  )(connection: Connection): Vector[Long] =
-    SQL"""
-        SELECT e.event_sequential_id
-        FROM lapi_events_generic_topology_events e
-        WHERE ${queryStrategy.inBatch("e.event_sequential_id", eventSequentialIds)}
-        ORDER BY e.event_sequential_id
-        """
-      .withFetchSize(Some(fetchSize(eventSequentialIds)))
-      .asVectorOf(long("event_sequential_id"))(connection)
+  override def fetchDynamicSynchronizerParametersEventIds: IdPageQuery =
+    UpdateStreamingQueries.fetchEventIds(
+      tableName = "lapi_events_generic_topology_events",
+      witnessO = None,
+      templateIdO = None,
+      stringInterning = stringInterning,
+      hasFirstPerSequentialId = false,
+    )
 
   override def dynamicSynchronizerParametersBatch(
       eventSequentialIds: SequentialIdBatch

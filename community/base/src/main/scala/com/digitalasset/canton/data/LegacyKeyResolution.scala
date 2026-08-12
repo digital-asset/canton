@@ -10,6 +10,7 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.{LfContractId, v30}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 
@@ -90,7 +91,8 @@ final case class LegacyFreeKey(override val maintainers: Set[LfPartyId])
 
   override def toProtoOneOfV30: v30.ViewParticipantData.ResolvedKey.Resolution =
     v30.ViewParticipantData.ResolvedKey.Resolution.Free(
-      value = v30.ViewParticipantData.FreeKey(maintainers = maintainers.toSeq)
+      value =
+        v30.ViewParticipantData.FreeKey(maintainers = maintainers.toSeq.map(_.toProtoUnvalidated))
     )
 
   override def asSerializable: LegacySerializableKeyResolution = this

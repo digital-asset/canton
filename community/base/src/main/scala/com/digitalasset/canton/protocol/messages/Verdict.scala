@@ -14,6 +14,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
@@ -127,7 +128,7 @@ object Verdict
     private[messages] override def toProtoV30: v30.Verdict = {
       val reasonsP = v30.ParticipantReject(reasons.map { case (parties, participantId, message) =>
         v30.RejectionReason(
-          parties.toSeq,
+          parties.toSeq.map(_.toProtoUnvalidated),
           Some(message.toProtoV30),
           participantId.toProtoPrimitive,
         )

@@ -135,8 +135,7 @@ class TopologyAdministrationGroup(
         .flatMap(bytes =>
           SignedTopologyTransaction
             .fromByteString(
-              ProtocolVersionValidation.NoValidation,
-              ProtocolVersionValidation.NoValidation,
+              ProtocolVersionValidation.AlwaysValidation,
               bytes,
             )
             .leftMap(_.message)
@@ -396,7 +395,7 @@ class TopologyAdministrationGroup(
         ),
     ): Unit = {
       val transaction = SignedTopologyTransaction
-        .readFromTrustedFilePVV(file)
+        .readFromTrustedFile(file)
         .valueOr { err =>
           consoleEnvironment.run(
             CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -425,7 +424,7 @@ class TopologyAdministrationGroup(
     ): Unit = {
       val transactions = files.map { file =>
         SignedTopologyTransaction
-          .readFromTrustedFilePVV(file)
+          .readFromTrustedFile(file)
           .valueOr { err =>
             consoleEnvironment.run(
               CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -452,7 +451,7 @@ class TopologyAdministrationGroup(
         ),
     ): Unit = {
       val transactions = SignedTopologyTransactions
-        .readFromTrustedFile(ProtocolVersionValidation.NoValidation, file)
+        .readFromTrustedFile(file)
         .valueOr { err =>
           consoleEnvironment.run(
             CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")

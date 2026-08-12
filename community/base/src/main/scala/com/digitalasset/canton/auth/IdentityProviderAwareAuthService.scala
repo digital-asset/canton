@@ -11,6 +11,7 @@ import com.daml.jwt.{
   Error as JwtError,
   JwtFromBearerHeader,
   JwtVerifier,
+  PartyJWTPayload,
   StandardJWTPayload,
 }
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -108,6 +109,8 @@ class IdentityProviderAwareAuthService(
     jwtPayload match {
       case payload: StandardJWTPayload =>
         Future.successful(payload)
+      case _: PartyJWTPayload =>
+        Future.failed(new Exception("unexpected Party JWT"))
     }
 
   private def parse(jwtPayload: String, targetAudience: Option[String]): AuthServiceJWTPayload =

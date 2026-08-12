@@ -20,6 +20,7 @@ import com.digitalasset.canton.{
   LfValue,
   NeedsNewLfContractIds,
   ProtocolVersionChecksAnyWordSpec,
+  protocol,
 }
 import com.digitalasset.daml.lf.transaction.NodeId
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
@@ -444,6 +445,244 @@ class TransactionMergeTest
       errorO shouldBe Some(
         s"Contract id ${cid.coid} is created in nodes NodeId(0) and NodeId(1)"
       )
+    }
+  }
+
+  "WellFormedTransaction.projectOutOnboardingTransactionNodes" should {
+    val onboarding = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"onboarding::party"))
+    val onboarding2 = PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"onboarding2::party"))
+    val onboardingParties = NonEmpty.mk(Set, onboarding, onboarding2)
+    val onboardingPartiesLf = onboardingParties.map(_.toLf)
+    val hosted =
+      NonEmpty.mk(Set, PartyId(UniqueIdentifier.tryFromProtoPrimitive(s"hosted::party")))
+    val hostedOnboardingParties =
+      HostedOnboardingParties(
+        onboardingPartiesLf,
+        onboardingPartiesLf ++ hosted.map(_.toLf),
+      )
+
+    def create(stakeholders: NonEmpty[Set[PartyId]]): protocol.LfNodeCreate =
+      this.create(
+        newLfContractId(),
+        iou.Iou.TEMPLATE_ID_WITH_PACKAGE_ID,
+        stakeholders.head1,
+        stakeholders.head1,
+        stakeholders.toSeq,
+      )
+
+    def exercise(
+        createNode: protocol.LfNodeCreate,
+        txTrees: TxTree*
+    ): TxTree =
+      TxTree(
+        tb.exercise(
+          contract = createNode,
+          choice = "Call",
+          consuming = true,
+          actingParties = createNode.stakeholders,
+          argument = LfValue.ValueUnit,
+          byKey = false,
+        ),
+        txTrees*
+      )
+
+    "remove single onboarding create" in {
+      val actualTx = WellFormedTransaction.projectOutOnboardingTransactionNodes(
+        inputTransaction(
+          Seq.empty,
+          TxTree(create(onboardingParties)),
+        ),
+        hostedOnboardingParties,
+      )
+      val expectedTx = expectedTransaction()
+      assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+    }
+
+    "remove single onboarding exercise" in {
+      val actualTx = WellFormedTransaction.projectOutOnboardingTransactionNodes(
+        inputTransaction(
+          Seq.empty,
+          exercise(create(onboardingParties), TxTree(create(onboardingParties))),
+        ),
+        hostedOnboardingParties,
+      )
+      val expectedTx = expectedTransaction()
+      assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+    }
+
+    "remove single onboarding exercise elevating two hosted creates as roots" in {
+      val createHosted1 = TxTree(create(hosted))
+      val createHosted2 = TxTree(create(hosted))
+      val actualTx = WellFormedTransaction.projectOutOnboardingTransactionNodes(
+        inputTransaction(
+          Seq.empty,
+          exercise(create(onboardingParties), createHosted1, createHosted2),
+        ),
+        hostedOnboardingParties,
+      )
+      val expectedTx = expectedTransaction(createHosted1, createHosted2)
+      assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+    }
+
+    "not remove nested onboarding create under fully hosted exercise" in {
+      val fullyHostedExerciseNestingOnboardingCreate =
+        exercise(create(onboardingParties ++ hosted), TxTree(create(onboardingParties)))
+      val actualTx = WellFormedTransaction.projectOutOnboardingTransactionNodes(
+        inputTransaction(
+          Seq.empty,
+          fullyHostedExerciseNestingOnboardingCreate,
+        ),
+        hostedOnboardingParties,
+      )
+      val expectedTx =
+        expectedTransaction(fullyHostedExerciseNestingOnboardingCreate)
+      assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+    }
+
+    "not remove nested onboarding exercise under fully hosted exercise" in {
+      val fullyHostedExerciseNestingOnboardingExercise = exercise(
+        create(onboardingParties ++ hosted),
+        exercise(create(onboardingParties), TxTree(create(onboardingParties))),
+      )
+      val actualTx = WellFormedTransaction.projectOutOnboardingTransactionNodes(
+        inputTransaction(Seq.empty, fullyHostedExerciseNestingOnboardingExercise),
+        hostedOnboardingParties,
+      )
+      val expectedTx = expectedTransaction(fullyHostedExerciseNestingOnboardingExercise)
+      assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+    }
+
+    "remove nested onboarding nodes in multiple siblings" in {
+      val singleOnboardingParty = NonEmpty.mk(Set, onboarding)
+      val createFullyHostedNodeSibling1 = create(hosted)
+      val exerciseFullyHosted = exercise(
+        create(hosted),
+        exercise(create(hosted), TxTree(create(singleOnboardingParty))),
+      )
+      val actualTxns = Seq(
+        WellFormedTransaction.projectOutOnboardingTransactionNodes(
+          // partially remove:
+          inputTransaction(
+            Seq.empty,
+            exercise(
+              create(singleOnboardingParty),
+              exercise(create(onboardingParties), TxTree(createFullyHostedNodeSibling1)),
+            ),
+          ),
+          hostedOnboardingParties,
+        ),
+        WellFormedTransaction.projectOutOnboardingTransactionNodes(
+          // keep fully:
+          inputTransaction(Seq.empty, exerciseFullyHosted),
+          hostedOnboardingParties,
+        ),
+        WellFormedTransaction.projectOutOnboardingTransactionNodes(
+          // fully remove:
+          inputTransaction(
+            Seq.empty,
+            exercise(
+              create(singleOnboardingParty),
+              exercise(create(singleOnboardingParty), TxTree(create(singleOnboardingParty))),
+            ),
+          ),
+          hostedOnboardingParties,
+        ),
+      )
+      val expectedTxns =
+        Seq[Seq[TxTree]](
+          Seq(TxTree(createFullyHostedNodeSibling1)),
+          Seq(exerciseFullyHosted),
+          Seq.empty,
+        ).map(txTrees => expectedTransaction(txTrees*))
+      expectedTxns.size shouldBe actualTxns.size
+      expectedTxns.zip(actualTxns).foreach { case (expectedTx, actualTx) =>
+        assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+      }
+    }
+
+    "not remove onboarding nodes below a rollback node below a fully hosted exercise" in {
+      val fullyHostedCreateForExercise = create(onboardingParties ++ hosted)
+      val onboardingOnlyCreate = create(onboardingParties)
+      val actualTx = WellFormedTransaction.projectOutOnboardingTransactionNodes(
+        inputTransaction(
+          Seq(PositiveInt.one),
+          exercise(
+            fullyHostedCreateForExercise,
+            TxTree(tb.rollback(), TxTree(onboardingOnlyCreate)),
+          ),
+        ),
+        hostedOnboardingParties,
+      )
+      val expectedTx =
+        expectedTransaction(
+          exercise(
+            fullyHostedCreateForExercise,
+            TxTree(tb.rollback(), TxTree(onboardingOnlyCreate)),
+          )
+        )
+      assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+    }
+
+    "preserve rollback node skeleton surrounded by onboarding exercises" in {
+      val createRb1Hosted1 = TxTree(create(hosted))
+      val createRb1Onboarding1 = TxTree(create(onboardingParties))
+      val createRb1Rb1Hosted1 = TxTree(create(hosted))
+      val createRb1Rb1Onboarding1 = TxTree(create(onboardingParties))
+      val createRb1Rb1Hosted2 = TxTree(create(hosted))
+      val exerciseRb1Onboarding1 = exercise(
+        create(onboardingParties),
+        TxTree(tb.rollback(), createRb1Rb1Hosted1, createRb1Rb1Onboarding1, createRb1Rb1Hosted2),
+      )
+      val createRb1Hosted2 = TxTree(create(hosted))
+      val createRb1Onboarding2 = TxTree(create(onboardingParties))
+      val createRb1Rb2Hosted1 = TxTree(create(hosted))
+      val createRb1Rb2Onboarding1 = TxTree(create(onboardingParties))
+      val createRb1Rb2Hosted2 = TxTree(create(hosted))
+      val exerciseRb1Hosted1 = exercise(
+        create(hosted),
+        TxTree(tb.rollback(), createRb1Rb2Hosted1, createRb1Rb2Onboarding1, createRb1Rb2Hosted2),
+      )
+      val createRb1Hosted3 = TxTree(create(hosted))
+      val actualTx = WellFormedTransaction.projectOutOnboardingTransactionNodes(
+        inputTransaction(
+          Seq(PositiveInt.one),
+          exercise(
+            create(onboardingParties),
+            TxTree(
+              tb.rollback(),
+              createRb1Hosted1,
+              createRb1Onboarding1,
+              exerciseRb1Onboarding1,
+              createRb1Hosted2,
+              createRb1Onboarding2,
+              exerciseRb1Hosted1,
+              createRb1Hosted3,
+            ),
+          ),
+        ),
+        hostedOnboardingParties,
+      )
+      val expectedTxTree = TxTree(
+        tb.rollback(),
+        createRb1Hosted1,
+        TxTree(tb.rollback(), createRb1Rb1Hosted1, createRb1Rb1Hosted2),
+        createRb1Hosted2,
+        exerciseRb1Hosted1,
+        createRb1Hosted3,
+      )
+      val expectedTx = expectedTransaction(expectedTxTree)
+      assertTransactionsMatch(expectedTx, actualTx.unwrap.unwrap)
+
+      // ensure a subsequent merge call does not get upset about root-level rollback nodes
+      val (mergedTx, err) =
+        TransactionMerge(testedProtocolVersion).merge(NonEmpty.apply(Seq, actualTx))
+      err shouldBe None
+      val expectedMergedTx =
+        expectedTransaction(
+          // Merge produces another top-level rollback due to rollback scope of Seq(PositiveInt.one)
+          TxTree(tb.rollback(), expectedTxTree)
+        )
+      assertTransactionsMatch(expectedMergedTx, mergedTx.unwrap)
     }
   }
 

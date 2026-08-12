@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ConsensusStatus,
 }
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 
 /** As part of retransmissions, we broadcast an epoch status to other nodes. However, because we
   * have separate modules processing each segment, we need to request and get segment statuses from
@@ -36,10 +37,11 @@ class EpochStatusBuilder(
     else ()
 
   def epochStatus: Option[ConsensusStatus.EpochStatus] =
-    segmentArray.toList.sequence.map { segments =>
-      ConsensusStatus.EpochStatus.create(from, epochNumber, segments)(
-        synchronizerProtocolVersion
-      )
-    }
+    for {
+      segments <- segmentArray.toList.sequence
+      nonEmptySegments <- NonEmpty.from(segments)
+    } yield ConsensusStatus.EpochStatus.create(from, epochNumber, nonEmptySegments)(
+      synchronizerProtocolVersion
+    )
 
 }

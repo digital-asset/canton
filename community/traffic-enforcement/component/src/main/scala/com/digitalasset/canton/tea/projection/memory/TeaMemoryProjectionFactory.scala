@@ -5,7 +5,7 @@ package com.digitalasset.canton.tea.projection.memory
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tea.projection.{EventId, ProjectionEvent, TeaProjectionFactory}
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.apache.pekko.Done
 import org.apache.pekko.actor.typed.Behavior
 import org.apache.pekko.projection.scaladsl.Handler
@@ -39,13 +39,18 @@ private[projection] class TeaMemoryProjectionFactory(
   }
 
   private def inMemoryHandler(projectionId: ProjectionId) = new Handler[Traced[ProjectionEvent]] {
-    override def process(envelope: Traced[ProjectionEvent]): Future[Done] =
+    override def process(envelope: Traced[ProjectionEvent]): Future[Done] = {
+      implicit val tc: TraceContext = envelope.traceContext
+      val deltaEvent = envelope.value.event.deltaEvent
       store
         .persistDeltaInternal(
-          envelope.value.account,
-          EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),
-          envelope.value.event.deltaEvent,
+          account = envelope.value.account,
+          eventId = EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),
+          eventSource = deltaEvent.eventSource,
+          trafficDelta = deltaEvent.delta,
+          timestamp = envelope.value.event.deltaEvent.timestamp,
         )
         .map(_ => Done)
+    }
   }
 }

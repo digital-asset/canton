@@ -134,21 +134,28 @@ object LfEnricher {
     )(implicit
         ec: ExecutionContext,
         loggingContext: LoggingContextWithTrace,
-    ): Future[V] =
-      result match {
-        case LfEngine.ResultDone(r) => Future.successful(r)
-        case LfEngine.ResultNeedPackage(packageId, resume) =>
-          packageLoader
-            .loadPackage(
-              packageId = packageId,
-              delegate = packageId => loadPackage(packageId, loggingContext.traceContext),
-              metric = metrics.index.db.translation.getLfPackage,
-            )
-            .flatMap(pkgO => consume(resume(pkgO)))
-        case LfEngine.ResultError(e) => Future.failed(new RuntimeException(e.message))
-        case result =>
-          Future.failed(new RuntimeException(s"Unexpected ValueEnricher result: $result"))
-      }
+    ): Future[V] = {
+      def drive(step: LfEngine.Result.Step[V]): Future[V] =
+        step match {
+          case LfEngine.Result.Step.Pure(r) => Future.successful(r)
+          case LfEngine.Result.Step.Error(e) => Future.failed(new RuntimeException(e.message))
+          case im: LfEngine.Result.Step.Impure[x, V] =>
+            im.fx match {
+              case LfEngine.Result.Need.Package(packageId) =>
+                packageLoader
+                  .loadPackage(
+                    packageId = packageId,
+                    delegate = packageId => loadPackage(packageId, loggingContext.traceContext),
+                    metric = metrics.index.db.translation.getLfPackage,
+                  )
+                  .flatMap(pkgO => drive(im.resume(pkgO)))
+              case other =>
+                Future.failed(new RuntimeException(s"Unexpected ValueEnricher need: $other"))
+            }
+        }
+
+      drive(result.start)
+    }
 
   }
 

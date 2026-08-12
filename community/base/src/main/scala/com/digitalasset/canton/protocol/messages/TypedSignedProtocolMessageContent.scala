@@ -57,9 +57,8 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
 }
 
 object TypedSignedProtocolMessageContent
-    extends VersioningCompanionContextMemoization[
-      TypedSignedProtocolMessageContent[SignedProtocolMessageContent],
-      ProtocolVersionValidation,
+    extends VersioningCompanionMemoization[
+      TypedSignedProtocolMessageContent[SignedProtocolMessageContent]
     ] {
   override def name: String = "TypedSignedProtocolMessageContent"
 
@@ -67,7 +66,7 @@ object TypedSignedProtocolMessageContent
     ProtoVersion(30) -> VersionedProtoCodec(
       ProtocolVersion.v34
     )(v30.TypedSignedProtocolMessageContent)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )

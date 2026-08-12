@@ -4,6 +4,7 @@
 package com.digitalasset.canton.admin.api.client.data
 
 import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.data.crypto.{
   CryptoKeyFormat,
   HashAlgorithm,
@@ -280,6 +281,7 @@ final case class DynamicSynchronizerParameters(
     acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
     preparationTimeRecordTimeTolerance: config.NonNegativeFiniteDuration,
+    sizeLimits: SizeLimits,
 ) extends PrettyPrinting {
 
   def decisionTimeout: config.NonNegativeFiniteDuration =
@@ -322,6 +324,7 @@ final case class DynamicSynchronizerParameters(
       param("participant synchronizer limits", _.participantSynchronizerLimits),
       param("preparation time record time tolerance", _.preparationTimeRecordTimeTolerance),
       param("onboarding restriction", _.onboardingRestriction),
+      param("size limits", _.sizeLimits),
     )
 
   def update(
@@ -359,35 +362,35 @@ final case class DynamicSynchronizerParameters(
   )
 
   private[canton] def toInternal: Either[String, DynamicSynchronizerParametersInternal] =
-    DynamicSynchronizerParametersInternal
-      .protocolVersionRepresentativeFor(ProtoVersion(30))
-      .leftMap(_.message)
-      .map { rpv =>
-        DynamicSynchronizerParametersInternal.tryCreate(
-          confirmationResponseTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(confirmationResponseTimeout),
-          mediatorReactionTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
-          assignmentExclusivityTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(assignmentExclusivityTimeout),
-          ledgerTimeRecordTimeTolerance =
-            InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
-          mediatorDeduplicationTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
-          reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
-          maxRequestSize = MaxRequestSize(maxRequestSize),
-          sequencerAggregateSubmissionTimeout =
-            InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
-          trafficControl = trafficControl.map(_.toInternal),
-          onboardingRestriction =
-            onboardingRestriction.transformInto[OnboardingRestrictionInternal],
-          acsCommitmentsCatchUpParameters = acsCommitmentsCatchUp
-            .map(_.transformInto[AcsCommitmentsCatchUpParametersInternal]),
-          participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
-          preparationTimeRecordTimeTolerance =
-            InternalNonNegativeFiniteDuration.fromConfig(preparationTimeRecordTimeTolerance),
-        )(rpv)
-      }
+    for {
+      rpv <- DynamicSynchronizerParametersInternal
+        .protocolVersionRepresentativeFor(ProtoVersion(30))
+        .leftMap(_.message)
+      // cannot use chimney here: the internal constructor is private to enforce its invariants
+      acsCommitmentsCatchUpInternal <- acsCommitmentsCatchUp.traverse(_.toInternal)
+    } yield DynamicSynchronizerParametersInternal.tryCreate(
+      confirmationResponseTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(confirmationResponseTimeout),
+      mediatorReactionTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
+      assignmentExclusivityTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(assignmentExclusivityTimeout),
+      ledgerTimeRecordTimeTolerance =
+        InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
+      mediatorDeduplicationTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
+      reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
+      maxRequestSize = MaxRequestSize(maxRequestSize),
+      sequencerAggregateSubmissionTimeout =
+        InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
+      trafficControl = trafficControl.map(_.toInternal),
+      onboardingRestriction = onboardingRestriction.transformInto[OnboardingRestrictionInternal],
+      acsCommitmentsCatchUpParameters = acsCommitmentsCatchUpInternal,
+      participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
+      preparationTimeRecordTimeTolerance =
+        InternalNonNegativeFiniteDuration.fromConfig(preparationTimeRecordTimeTolerance),
+      sizeLimits = sizeLimits.toInternal,
+    )(rpv)
 }
 
 object DynamicSynchronizerParameters {
@@ -488,4 +491,9 @@ final case class AcsCommitmentsCatchUpParameters(
       param("catch up interval skip", _.catchUpIntervalSkip),
       param("number of intervals to trigger catch up", _.nrIntervalsToTriggerCatchUp),
     )
+
+  /** The internal representation enforces invariants on these values, so the conversion can fail.
+    */
+  private[canton] def toInternal: Either[String, AcsCommitmentsCatchUpParametersInternal] =
+    AcsCommitmentsCatchUpParametersInternal.create(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
 }

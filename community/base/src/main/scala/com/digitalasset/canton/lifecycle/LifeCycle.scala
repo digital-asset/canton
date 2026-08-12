@@ -39,7 +39,9 @@ object LifeCycle extends NoTracing {
     * throw a [[ShutdownFailedException]]. Exceptions thrown by `close` will be logged and the names
     * of failed instances are wrapped into the [[ShutdownFailedException]].
     */
-  def close(instances: AutoCloseable*)(logger: TracedLogger): Unit = {
+  def close(instances: AutoCloseable*)(logger: TracedLogger): Unit = close(instances)(logger)
+
+  def close(instances: IterableOnce[AutoCloseable])(logger: TracedLogger): Unit = {
     def stopSingle(instance: AutoCloseable): Option[String] = {
       val prettiedInstance = show"${instance.toString.singleQuoted}"
       logger.debug(s"Attempting to close $prettiedInstance...")
@@ -57,11 +59,9 @@ object LifeCycle extends NoTracing {
     }
 
     // Do not use mapFilter here because mapFilter does not guarantee to work from left to right
-    val failedInstances = instances.foldLeft(Seq.empty[String]) { (acc, instance) =>
-      acc ++ stopSingle(instance).toList
-    }
+    val failedInstances = instances.iterator.flatMap(stopSingle(_).toList)
 
-    NonEmpty.from(failedInstances).foreach(i => throw new ShutdownFailedException(i))
+    NonEmpty.from(failedInstances.toSeq).foreach(i => throw new ShutdownFailedException(i))
   }
 
   def toCloseableOption[A <: AutoCloseable](maybeClosable: Option[A]): AutoCloseable =

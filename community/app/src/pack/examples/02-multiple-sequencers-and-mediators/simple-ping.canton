@@ -15,9 +15,10 @@ bootstrap.synchronizer(
 // Connect participant1 to da using the connect macro.
 // The connect macro will inspect the synchronizer configuration to find the correct URL and Port.
 // The macro is convenient for local testing, but obviously doesn't work in a distributed setup.
-participant1.synchronizers.connect_local(sequencer1, alias = "da")
-
-val daPort = Option(System.getProperty("canton-examples.da-port")).getOrElse("5001")
+participant1.synchronizers.connect_local_bft(
+  sequencers = Seq(sequencer1, sequencer2),
+  synchronizerAlias = "da",
+)
 
 // Connect participant2 to da using just the target URL and a local name we use to refer to this particular
 // connection. This is actually everything Canton requires and this second type of connect call can be used
@@ -31,7 +32,19 @@ val daPort = Option(System.getProperty("canton-examples.da-port")).getOrElse("50
 // Whether a synchronizer will let a participant connect or not is at the discretion of the synchronizer and can be configured
 // there. While Canton establishes the connection, we perform a handshake, exchanging keys, authorizing the connection
 // and verifying version compatibility.
-participant2.synchronizers.connect("da", s"http://localhost:$daPort")
+participant2.synchronizers.connect_bft(
+  Seq(
+    GrpcSequencerConnection.tryCreate(
+      connection = "http://localhost:5001",
+      sequencerAlias = SequencerAlias.tryCreate("DefaultSequencer"),
+    ),
+    GrpcSequencerConnection.tryCreate(
+      connection = "http://localhost:5011",
+      sequencerAlias = SequencerAlias.tryCreate("AnotherSequencer"),
+    ),
+  ),
+  "da",
+)
 
 // The above connect operation is asynchronous. It is generally at the discretion of the synchronizer
 // to decide if a participant can join and when. Therefore, we need to asynchronously wait here
@@ -42,3 +55,4 @@ utils.retry_until_true {
 }
 
 participant2.health.ping(participant1)
+participant1.health.ping(participant2)

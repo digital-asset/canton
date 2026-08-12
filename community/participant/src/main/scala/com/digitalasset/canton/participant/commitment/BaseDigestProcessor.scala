@@ -13,6 +13,7 @@ import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, O
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointToBeWritten
 import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Initial,
   Started,
@@ -20,7 +21,9 @@ import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Stopped,
   Stopping,
 }
-import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
+import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.store.AcsDigestStore.{Checkpoint, CheckpointType}
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -48,6 +51,17 @@ trait BaseDigestProcessor extends NamedLogging {
   protected def startPipelineInternal()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[(KillSwitch, Future[Unit])]
+
+  @VisibleForTesting
+  private[canton] def metrics: CommitmentMetrics
+  protected def acsDigestStore: AcsDigestStore
+
+  def writeCheckpoint(checkpointToBeWritten: CheckpointToBeWritten)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    acsDigestStore.insertCheckpointTime(checkpointToBeWritten.toCheckpoint).map { _ =>
+      metrics.checkpointWatermark.updateValue(checkpointToBeWritten.recordTimeInclusive.toMicros)
+    }
 
   private val state: AtomicReference[DigestProcessorState] = new AtomicReference(
     Initial
@@ -361,14 +375,47 @@ object BaseDigestProcessor {
       override val participant: LedgerParticipantId,
   ) extends PartyHostingChange
 
-  /** When a checkpoint has been written, meaning that all digests up to record time and offset
-    * (both inclusive) have been persisted.
+  /** When a checkpoint has been written, meaning that all digests up the offset (inclusive) have
+    * been persisted.
     */
   final case class CheckpointWritten(
       recordTimeInclusive: CantonTimestamp,
       offsetInclusive: Offset,
       checkpointType: CheckpointType,
   )
+
+  /** Used to signal that a checkpoint should be written, because all digests up to and including
+    * `offsetInclusive` have been persisted.
+    */
+  final case class CheckpointToBeWritten(
+      recordTimeInclusive: CantonTimestamp,
+      offsetInclusive: Offset,
+      checkpointType: CheckpointType,
+  ) {
+    def toCheckpointWritten: CheckpointWritten =
+      CheckpointWritten(
+        recordTimeInclusive,
+        offsetInclusive,
+        checkpointType,
+      )
+
+    def toCheckpoint: Checkpoint = Checkpoint(
+      offset = offsetInclusive,
+      recordTime = recordTimeInclusive,
+      checkpointType = checkpointType,
+    )
+  }
+
+  object CheckpointToBeWritten {
+    def apply(
+        timepoint: Timepoint,
+        checkpointType: CheckpointType,
+    ): CheckpointToBeWritten = CheckpointToBeWritten(
+      timepoint.recordTime,
+      timepoint.offset,
+      checkpointType,
+    )
+  }
 
   object CheckpointWritten {
     def apply(timepoint: Timepoint, tpe: CheckpointType): CheckpointWritten =

@@ -12,6 +12,7 @@ import com.digitalasset.canton.auth.{
   AuthServiceWildcard,
   AuthorizedUser,
   JwksVerifier,
+  UninitializedPartyJWTAuthService,
 }
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.*
@@ -282,6 +283,23 @@ object AuthServiceConfig {
         loggerFactory,
         users,
         warnOnJwtScopeUsage,
+      )
+  }
+
+  /** Enables Party JWT-based authorization, where the JWT is signed by the signing key from the
+    * corresponding party.
+    */
+  final case class PartyJwt() extends AuthServiceConfig {
+    override def create(
+        jwksCacheConfig: JwksCacheConfig,
+        jwtTimestampLeeway: Option[JwtTimestampLeeway],
+        loggerFactory: NamedLoggerFactory,
+        warnOnJwtScopeUsage: Boolean,
+        globalMaxTokenLife: NonNegativeDuration,
+    ): AuthService =
+      UninitializedPartyJWTAuthService(
+        jwtTimestampLeeway,
+        maxTokenLife.toMillisOrNone().orElse(globalMaxTokenLife.toMillisOrNone()),
       )
   }
 

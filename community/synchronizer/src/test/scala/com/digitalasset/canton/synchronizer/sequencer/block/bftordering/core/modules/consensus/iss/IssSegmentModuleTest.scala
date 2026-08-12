@@ -2083,7 +2083,8 @@ class IssSegmentModuleTest
 
         val blockMetadata = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(otherIds(0)))
         consensus.receive(
-          ConsensusSegment.ConsensusMessage.BlockOrdered(blockMetadata, isEmpty = false)
+          ConsensusSegment.ConsensusMessage
+            .BlockOrdered(blockMetadata, isEmpty = false)
         )
         // we are blocking progress but we don't start ordering an empty block until we've heard back from availability
         context.runPipedMessages() shouldBe empty

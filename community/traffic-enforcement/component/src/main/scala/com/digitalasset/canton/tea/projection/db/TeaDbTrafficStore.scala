@@ -5,23 +5,28 @@ package com.digitalasset.canton.tea.projection.db
 
 import cats.data.OptionT
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.DbStorage.Profile
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.tea.projection.TeaTrafficStore.TeaTrafficStoreError
 import com.digitalasset.canton.tea.projection.{
   AccountId,
   AccountState,
   DeltaEvent,
   EventId,
   EventSource,
-  EventType,
   TeaTrafficStore,
+  TrafficDelta,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import org.h2.jdbc.JdbcSQLDataException
+import org.postgresql.util.{PSQLException, PSQLState}
 
 import scala.concurrent.ExecutionContext
+import scala.util.Failure
 
 import AccountState.*
 
@@ -36,44 +41,55 @@ class TeaDbTrafficStore(
     with TeaTrafficStore {
   import storage.api.*
 
-  implicit val rowsAlteredAccountState: DbStorage.RowsAltered[Option[AccountState]] = _.isDefined
-
-  override def persistDelta(
+  override def persistTrafficDelta(
       accountId: AccountId,
       eventId: EventId,
       eventSource: EventSource,
-      eventType: EventType,
-      delta: Long,
+      trafficDelta: TrafficDelta,
       timestamp: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, AccountState] = OptionT(
-    storage.queryAndUpdate(
-      persistDeltaDBIO(
-        accountId,
-        eventId,
-        eventSource,
-        eventType,
-        delta,
-        timestamp,
-      ).transactionally,
-      "persist traffic delta",
-    )
+    storage
+      .queryAndUpdate(
+        persistDeltaDBIO(
+          accountId,
+          eventId,
+          eventSource,
+          trafficDelta,
+          timestamp = timestamp,
+        ).transactionally,
+        "persist traffic delta",
+      )
+      .transform {
+        // H2 throws this
+        case Failure(ex: JdbcSQLDataException)
+            if ex.getMessage.contains("Numeric value out of range") =>
+          Failure(
+            TeaTrafficStoreError.TrafficUpdateOutOfBound.Error(accountId, trafficDelta).asGrpcError
+          )
+        case Failure(ex: PSQLException)
+            // See https://www.postgresql.org/docs/18/errcodes-appendix.html
+            if ex.getSQLState == PSQLState.NUMERIC_VALUE_OUT_OF_RANGE.getState =>
+          Failure(
+            TeaTrafficStoreError.TrafficUpdateOutOfBound.Error(accountId, trafficDelta).asGrpcError
+          )
+        case other => other
+      }
   )
 
   private def insertEventDBIO(
       accountId: AccountId,
       eventId: EventId,
       eventSource: EventSource,
-      eventType: EventType,
-      delta: Long,
+      trafficDelta: TrafficDelta,
       timestamp: CantonTimestamp,
   ): DBIOAction[Option[Long], NoStream, Effect.Write & Effect.Read] =
     storage.profile match {
       case _: Profile.Postgres =>
         for {
           insertedRows <- sql"""insert into par_traffic_enforcement_event
-                 (account_id, event_id, event_source, event_type, amount, timestamp) values ($accountId, $eventId, $eventSource, $eventType, $delta, $timestamp)
+                 (account_id, event_id, event_source, event_type, amount, timestamp) values ($accountId, $eventId, $eventSource, ${trafficDelta.eventType}, ${trafficDelta.value}, $timestamp)
                  on conflict (event_source, event_id) do nothing
                  returning sequence_nb""".as[Long]
           singleEvent <- insertedRows.toList match {
@@ -81,7 +97,7 @@ class TeaDbTrafficStore(
             case singleton :: Nil => DBIO.successful(Some(singleton))
             case moreThanOne =>
               DBIO.failed(
-                new RuntimeException("Inserted more than one row in the traffic event table")
+                new RuntimeException(s"Inserted $moreThanOne row in the traffic event table")
               )
           }
         } yield singleEvent
@@ -91,7 +107,7 @@ class TeaDbTrafficStore(
         for {
           insertedRows <- sqlu"""
             merge into par_traffic_enforcement_event t
-            using (values ($accountId, $eventId, $eventSource, $eventType, $delta, $timestamp)) as v(account_id, event_id, event_source, event_type, amount, timestamp)
+            using (values ($accountId, $eventId, $eventSource, ${trafficDelta.eventType}, ${trafficDelta.value}, $timestamp)) as v(account_id, event_id, event_source, event_type, amount, timestamp)
             on t.event_source = v.event_source and t.event_id = v.event_id
             when not matched then
               insert (event_id, event_source, event_type, account_id, amount, timestamp)
@@ -105,7 +121,7 @@ class TeaDbTrafficStore(
               sql"""
                     select sequence_nb
                     from par_traffic_enforcement_event
-                    where event_id = $eventId
+                    where event_source = $eventSource and event_id = $eventId
                   """.as[Long].map(_.headOption)
             } else
               DBIO.failed(
@@ -116,33 +132,35 @@ class TeaDbTrafficStore(
 
   private def updateBalanceDBIO(
       accountId: AccountId,
-      eventType: EventType,
-      debitAmount: Long,
-      creditAmount: Long,
+      trafficDelta: TrafficDelta,
       sequenceNb: Long,
       timestamp: CantonTimestamp,
-  ) =
-    storage.profile match {
+  )(implicit traceContext: TraceContext) = {
+    val (debitUpdate, creditUpdate) = trafficDelta.debitAndCreditDeltas
+
+    // Read the resulting totals as raw Longs: after applying the delta they may transiently be
+    // negative, which we must detect and reject rather than let the NonNegativeLong conversion throw.
+    val updatedBalance = storage.profile match {
       // We update the balance by trying an insert
       // then on conflict we update the total debit / credit values by adding the inserted delta with the existing one.
       // Timestamp is updated as greatest of existing + inserted
       case _: Profile.Postgres =>
         sql"""insert into par_traffic_enforcement_balance
-               (account_id, event_sequence_nb, event_type, total_debits, total_credits, updated_at) values($accountId, $sequenceNb, $eventType, $debitAmount, $creditAmount, $timestamp)
-               on conflict (account_id, event_type) do update set
+               (account_id, event_sequence_nb, total_debits, total_credits, updated_at) values($accountId, $sequenceNb, $debitUpdate, $creditUpdate, $timestamp)
+               on conflict (account_id) do update set
                   event_sequence_nb = excluded.event_sequence_nb,
                   total_debits = par_traffic_enforcement_balance.total_debits + excluded.total_debits,
                   total_credits = par_traffic_enforcement_balance.total_credits + excluded.total_credits,
                   updated_at = greatest(excluded.updated_at, par_traffic_enforcement_balance.updated_at)
                returning account_id, total_debits, total_credits, updated_at"""
-          .as[AccountState]
+          .as[(AccountId, Long, Long, CantonTimestamp)]
           .map(_.headOption)
       case _: Profile.H2 =>
         for {
           _ <- sqlu"""
               merge into par_traffic_enforcement_balance t
-              using (values ($accountId, $sequenceNb, $eventType, $debitAmount, $creditAmount, $timestamp)) as v(account_id, event_sequence_nb, event_type, debit_amt, credit_amt, updated_at)
-              on t.account_id = v.account_id and t.event_type = v.event_type
+              using (values ($accountId, $sequenceNb, $debitUpdate, $creditUpdate, $timestamp)) as v(account_id, event_sequence_nb, debit_amt, credit_amt, updated_at)
+              on t.account_id = v.account_id
               when matched then
                 update set
                   event_sequence_nb = v.event_sequence_nb,
@@ -150,44 +168,63 @@ class TeaDbTrafficStore(
                   total_credits = t.total_credits + v.credit_amt,
                   updated_at = greatest(v.updated_at, t.updated_at)
               when not matched then
-                insert (account_id, event_sequence_nb, event_type, total_debits, total_credits, updated_at)
-                values (v.account_id, v.event_sequence_nb, v.event_type, v.debit_amt, v.credit_amt, v.updated_at)
+                insert (account_id, event_sequence_nb, total_debits, total_credits, updated_at)
+                values (v.account_id, v.event_sequence_nb, v.debit_amt, v.credit_amt, v.updated_at)
       """
-          balance <- getBalanceDBIO(accountId)
+          balance <- getRawBalanceDBIO(accountId)
         } yield balance
     }
+
+    // Reject the update if applying the delta would drive either running total below zero.
+    // Failing here rolls back the enclosing transaction (including the inserted event).
+    updatedBalance.flatMap {
+      case Some((account, totalDebits, totalCredits, updatedAt)) =>
+        (NonNegativeLong.create(totalDebits), NonNegativeLong.create(totalCredits)) match {
+          case (Right(debits), Right(credits)) =>
+            DBIO.successful(Some(AccountState(account, debits, credits, updatedAt)))
+          case _ =>
+            DBIO.failed(
+              TeaTrafficStoreError.TrafficUpdateOutOfBound
+                .Error(accountId, trafficDelta)
+                .asGrpcError
+            )
+        }
+      case None => DBIO.successful(None)
+    }
+  }
 
   private[db] def persistDeltaDBIO(
       accountId: AccountId,
       eventId: EventId,
       eventSource: EventSource,
-      eventType: EventType,
-      delta: Long,
+      trafficDelta: TrafficDelta,
       timestamp: CantonTimestamp,
-  ): DBIOAction[Option[AccountState], NoStream, Effect.Write & Effect.Read] = {
-    val debitAmount = if (delta < 0) -delta else 0L
-    val creditAmount = if (delta > 0) delta else 0L
-
+  )(implicit
+      traceContext: TraceContext
+  ): DBIOAction[Option[AccountState], NoStream, Effect.Write & Effect.Read] =
     for {
       // Start by inserting the event in the event table
       // Deduplicate using the event id, this will tell us whether we need to update the balance table
-      insertedEvent <- insertEventDBIO(accountId, eventId, eventSource, eventType, delta, timestamp)
+      insertedEvent <- insertEventDBIO(
+        accountId,
+        eventId,
+        eventSource,
+        trafficDelta,
+        timestamp,
+      )
       balanceUpdate <-
         // If the event was inserted (not a duplicate), update the balance table
         insertedEvent match {
           case Some(sequenceNb) =>
             updateBalanceDBIO(
               accountId,
-              eventType,
-              debitAmount,
-              creditAmount,
+              trafficDelta,
               sequenceNb,
               timestamp,
             )
           case None => getBalanceDBIO(accountId)
         }
     } yield balanceUpdate
-  }
 
   def getBalance(accountId: AccountId)(implicit
       traceContext: TraceContext
@@ -199,6 +236,14 @@ class TeaDbTrafficStore(
   private def getBalanceDBIO(accountId: AccountId) =
     sql"select account_id, total_debits, total_credits, updated_at from par_traffic_enforcement_balance where account_id = $accountId"
       .as[AccountState]
+      .map(_.headOption)
+
+  /** Reads the balance totals as raw Longs so a transiently negative running total can be detected
+    * instead of failing the NonNegativeLong conversion.
+    */
+  private def getRawBalanceDBIO(accountId: AccountId) =
+    sql"select account_id, total_debits, total_credits, updated_at from par_traffic_enforcement_balance where account_id = $accountId"
+      .as[(AccountId, Long, Long, CantonTimestamp)]
       .map(_.headOption)
 
   override def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit

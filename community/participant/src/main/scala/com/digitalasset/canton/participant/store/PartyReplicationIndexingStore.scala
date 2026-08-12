@@ -4,8 +4,9 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
+import com.digitalasset.canton.ledger.participant.state.IndexingWatermark
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
@@ -202,7 +203,10 @@ object PartyReplicationIndexingStore {
       Ordering.by[ActivationChangeBatchEntry, Watermark](_.watermark)
   }
 
-  final case class Watermark(timestamp: CantonTimestamp, counter: NonNegativeLong)
+  final case class Watermark(timestamp: CantonTimestamp, counter: NonNegativeLong) {
+    def toIndexingWatermark(acsCommitmentTiebreaker: NonNegativeInt) =
+      IndexingWatermark(timestamp, counter, acsCommitmentTiebreaker)
+  }
 
   object Watermark {
     implicit val orderingWatermark: Ordering[Watermark] =
@@ -222,6 +226,9 @@ object PartyReplicationIndexingStore {
     }
 
     lazy val MinValue = Watermark(CantonTimestamp.MinValue, NonNegativeLong.zero)
+
+    def fromIndexing(indexingWatermark: IndexingWatermark) =
+      Watermark(indexingWatermark.timestamp, indexingWatermark.counter)
   }
 
   def apply(
@@ -251,11 +258,14 @@ object PartyReplicationIndexingStore {
     * @param onprBatchWatermark
     *   watermark holds an opaque, but unique ordinal useful to the caller to come up with a unique
     *   indexer UpdateId
+    * @param acsCommitmentTiebreaker
+    *   monotonically increasing tiebreaker for AcsCommitmentProcessor
     */
   final case class ContractActivationChangeBatch(
       activationChanges: NonEmpty[
         Seq[(LfContractId, (ActiveContractStore.ChangeType, ReassignmentCounter))]
       ],
       onprBatchWatermark: Watermark,
+      acsCommitmentTiebreaker: NonNegativeInt,
   )
 }

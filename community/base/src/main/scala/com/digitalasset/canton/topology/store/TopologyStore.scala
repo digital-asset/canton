@@ -213,7 +213,7 @@ object StoredTopologyTransaction
       rejectionReason <- proto.rejectionReason.traverse(
         String300.fromProtoPrimitive(_, "rejection_reason")
       )
-      signedTx <- SignedTopologyTransaction.fromTrustedByteStringPVV(proto.transaction)
+      signedTx <- SignedTopologyTransaction.fromTrustedByteString(proto.transaction)
     } yield StoredTopologyTransaction(sequenced, validFrom, validUntil, signedTx, rejectionReason)
 
   override def supportedProtoVersions: StoredTopologyTransaction.SupportedProtoVersions =

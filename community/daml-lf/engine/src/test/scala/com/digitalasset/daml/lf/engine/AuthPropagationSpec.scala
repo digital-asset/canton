@@ -16,6 +16,7 @@ import com.digitalasset.daml.lf.data.Ref.{
   QualifiedName,
 }
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Time}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -132,7 +133,7 @@ class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
           interpretationConfig = interpretConfig,
           prefetchKeys = Seq.empty,
         )
-        .consume(pcs = defaultContracts, pkgs = allPackages)
+        .consume(lookupHandler(pcs = defaultContracts, pkgs = allPackages))
 
     interpretResult
   }

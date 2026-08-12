@@ -39,6 +39,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -378,7 +379,12 @@ object Signature
     for {
       format <- SignatureFormat.fromProtoEnum("format", signatureP.format)
       signature = signatureP.signature
-      longTermKeyId <- Fingerprint.fromProtoPrimitive(signatureP.signedBy)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      longTermKeyId <- ProtoValidation.validateThen(
+        signatureP.signedBy,
+        "signed_by",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
       // ensures compatibility with previous signature versions where the signing algorithm specification is not set
       signingAlgorithmSpecO <- SigningAlgorithmSpec.fromProtoEnumOption(
         "signing_algorithm_spec",
@@ -1901,7 +1907,12 @@ object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey
       privateKeyP: v30.SigningPrivateKey
   ): ParsingResult[SigningPrivateKey] =
     for {
-      id <- Fingerprint.fromProtoPrimitive(privateKeyP.id)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      id <- ProtoValidation.validateThen(
+        privateKeyP.id,
+        "id",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
       format <- CryptoKeyFormat.fromProtoEnum("format", privateKeyP.format)
       keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(
         privateKeyP.keySpec,
@@ -1921,7 +1932,12 @@ object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey
       privateKeyP: v31.SigningPrivateKey
   ): ParsingResult[SigningPrivateKey] =
     for {
-      id <- Fingerprint.fromProtoPrimitive(privateKeyP.id)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      id <- ProtoValidation.validateThen(
+        privateKeyP.id,
+        "id",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
       format <- CryptoKeyFormat.fromProtoEnum("format", privateKeyP.format)
       keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(privateKeyP.keySpec)
       usage <- SigningKeyUsage.fromProtoListWithoutDefaultV31(privateKeyP.usage)

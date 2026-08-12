@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.PostgresTest
+import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory
@@ -66,6 +67,7 @@ class BftOrderingSequencerWithTrafficControlApiTestPostgres
   )(implicit mat: Materializer): BlockSequencerFactory =
     new BftSequencerFactory(
       BftBlockOrdererConfig(),
+      PublicServerConfig(),
       BlockSequencerConfig(),
       producePostOrderingTopologyTicks = false,
       health = None,

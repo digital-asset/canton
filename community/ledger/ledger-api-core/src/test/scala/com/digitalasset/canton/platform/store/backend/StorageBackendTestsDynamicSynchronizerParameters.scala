@@ -10,6 +10,10 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Sequen
   EventSeqIdRange,
   Ids,
 }
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
+  PaginationFromTo,
+  PaginationInput,
+}
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -61,11 +65,22 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
     _.copy(traceContext = Array.emptyByteArray, payload = Array.emptyByteArray)
 
   private def fetchEventIds(
-      idRange: EventSeqIdRange = EventSeqIdRange(1L, 10L)
+      startInclusive: Long = 1L,
+      endInclusive: Long = 10L,
   ): Vector[Long] =
-    executeSql(
-      backend.event.fetchDynamicSynchronizerParametersEventIds(idRange)
-    )
+    executeSql { connection =>
+      backend.event.fetchDynamicSynchronizerParametersEventIds
+        .fetchPage(connection)(
+          PaginationInput(
+            fromTo = PaginationFromTo.ascending(
+              EventSeqIdRange(startInclusive = startInclusive, endInclusive = endInclusive)
+            ),
+            // large enough limit to fetch all matching ids in a single page for the tests
+            limit = 1000,
+          )
+        )
+        .ids
+    }
 
   it should "return the event ids for a single event" in {
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
@@ -73,6 +88,14 @@ private[backend] trait StorageBackendTestsDynamicSynchronizerParameters
     executeSql(updateLedgerEnd(offset(1), ledgerEndSequentialId = 1L))
 
     fetchEventIds() should contain theSameElementsAs Vector(1L)
+  }
+
+  it should "return the event ids across all synchronizers (no synchronizer id filtering in the DB)" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(multipleDtos, _))
+    executeSql(updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L))
+
+    fetchEventIds() should contain theSameElementsAs Vector(1L, 2L, 3L, 4L)
   }
 
   it should "respond with payloads for a single event" in {

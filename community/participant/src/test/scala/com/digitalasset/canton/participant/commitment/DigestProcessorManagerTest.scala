@@ -10,16 +10,18 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.commitment.DigestProcessorManagerTest.TestDigestProcessor
 import com.digitalasset.canton.participant.commitment.DigestProcessorState.{Started, Stopped}
 import com.digitalasset.canton.participant.commitment.DigestProcessorTestBase.PromiseKillSwitch
+import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
+import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, ParticipantTestMetrics}
+import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.TryUtil
-import com.digitalasset.canton.{HasActorSystem, HasExecutionContext}
+import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, SynchronizerAlias}
 import org.apache.pekko.stream.KillSwitch
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Success
 
 @AcsCommitmentTest
 class DigestProcessorManagerTest
@@ -37,21 +39,15 @@ class DigestProcessorManagerTest
       get() shouldBe empty
 
       mgr.startRunningDigestProcessor().futureValueUS
-
       val proc1 = get().value
 
-      val completionMarker = new AtomicInteger(0)
-      val startingF =
-        mgr.startRunningDigestProcessor().thereafter(_ => completionMarker.compareAndSet(0, 2))
+      mgr.startRunningDigestProcessor().futureValueUS
+      val proc2 = get().value
 
-      val stopF = proc1.completionFuture.thereafter(_ => completionMarker.compareAndSet(0, 1))
+      proc1.completionFuture.futureValueUS
+      proc1.stateInternal should matchPattern { case Stopped(Success(())) => }
 
-      stopF.futureValueUS
-      startingF.futureValueUS
-
-      completionMarker.get() shouldBe 1
-
-      get().value should not be proc1
+      proc2 should not be proc1
     }
 
     "starting a reinitialization processor stops the currently running processor" in {
@@ -145,8 +141,10 @@ class DigestProcessorManagerTest
 
   class Fixture() {
     val mgr = new DigestProcessorManager(
+      SynchronizerAlias.tryCreate("synchronizer1"),
       DefaultTestIdentities.synchronizerId,
       new TestDigestProcessorFactory(loggerFactory, timeouts),
+      mock[TickSignaller],
       exitOnFatalFailures = exitOnFatal,
       futureSupervisor,
       timeouts,
@@ -159,7 +157,11 @@ class DigestProcessorManagerTest
   class TestDigestProcessorFactory(loggerFactory: NamedLoggerFactory, timeouts: ProcessingTimeout)
       extends DigestProcessorFactory {
 
-    override def createRunningDigestProcessor(synchronizerId: SynchronizerId)(implicit
+    override def createRunningDigestProcessor(
+        synchronizerAlias: SynchronizerAlias,
+        synchronizerId: SynchronizerId,
+        tickSignaller: TickSignaller,
+    )(implicit
         traceContext: TraceContext
     ): BaseDigestProcessor = new TestDigestProcessor(
       synchronizerId,
@@ -175,7 +177,10 @@ class DigestProcessorManagerTest
       }
     }
 
-    override def createReinitializingDigestProcessor(synchronizerId: SynchronizerId)(implicit
+    override def createReinitializingDigestProcessor(
+        synchronizerAlias: SynchronizerAlias,
+        synchronizerId: SynchronizerId,
+    )(implicit
         traceContext: TraceContext
     ): BaseDigestProcessor = new TestDigestProcessor(
       synchronizerId,
@@ -202,6 +207,11 @@ object DigestProcessorManagerTest {
       override protected val loggerFactory: NamedLoggerFactory,
   )(implicit override protected val executionContext: ExecutionContext)
       extends BaseDigestProcessor {
+
+    override private[canton] def metrics: CommitmentMetrics =
+      ParticipantTestMetrics.synchronizer.commitments
+
+    override protected def acsDigestStore: AcsDigestStore = ???
 
     override protected def startPipelineInternal()(implicit
         traceContext: TraceContext

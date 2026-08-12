@@ -253,7 +253,7 @@ private[refinement] final class EnricherImpl(
     *   - the contract hashes to different values according to different packages
     *   - the contract contains a key.
     *
-    * Returns a ResultError if the enrichment fails for unexpected reasons (e.g. typechecking
+    * Returns a failed `Result` if the enrichment fails for unexpected reasons (e.g. typechecking
     * fails).
     */
   private[lf] def unsafeEnrichCreateWithPackages(

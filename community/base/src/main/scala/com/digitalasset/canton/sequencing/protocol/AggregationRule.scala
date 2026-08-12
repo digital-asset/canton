@@ -22,7 +22,8 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorId, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -520,7 +521,7 @@ final case class AggregationRule(
     input match {
       case AggregationRuleInput.Resolved(eligibleSenders, threshold) =>
         v30.AggregationRule(
-          eligibleMembers = eligibleSenders.map(_.toProtoPrimitive),
+          eligibleMembers = eligibleSenders.map(_.toProtoPrimitive.toProtoUnvalidated),
           threshold = threshold.value,
         )
       case AggregationRuleInput.MediatorGroup(index) =>
@@ -633,7 +634,7 @@ object AggregationRule
     if (useMemberIdsAsEligibleMembers.v) {
       for {
         eligibleMembers <- ProtoConverter.parseRequiredNonEmpty(
-          (member: String) =>
+          (member: ProtoUnvalidatedString) =>
             ProtoValidation
               .validateThen(member, "eligible_members", pvv)(
                 Member.fromProtoPrimitive

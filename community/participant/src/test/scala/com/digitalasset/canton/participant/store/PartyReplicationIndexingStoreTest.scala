@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import cats.data.OptionT
 import com.digitalasset.canton.config.CantonRequireTypes.String300
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   ContractReassignment,
@@ -264,6 +264,7 @@ trait PartyReplicationIndexingStoreTest
                   contractInfo.contract.contractId -> (ActiveContractStore.ChangeType.Activation, contractInfo.counter),
                 ),
                 Watermark(ts1, NonNegativeLong.zero),
+                NonNegativeInt.zero,
               )
             )
             // while batch2 holds the deactivation, showing that the same contract does not end up in the
@@ -275,6 +276,7 @@ trait PartyReplicationIndexingStoreTest
                   contractInfo.contract.contractId -> (ActiveContractStore.ChangeType.Deactivation, contractInfo.counter),
                 ),
                 Watermark(ts2, NonNegativeLong.zero),
+                NonNegativeInt.one,
               )
             )
           }).failOnShutdown

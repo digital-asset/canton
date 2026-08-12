@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/.github"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/docker/canton/images/*"
+      - "/docker/canton/tests/*"
+      - "/community/app/src/pack/examples/*"
+    schedule:
+      interval: "daily"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/docker/canton/images/*"
+      - "/docker/canton/tests/*"
+      - "/community/app/src/pack/examples/*"
+    schedule:
+      interval: "daily"
+    target-branch: "release-line-3.5"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "sbt"
+    directory: "/"
+    schedule:
+      interval: "daily"  # Choose from "daily", "weekly", or "monthly"

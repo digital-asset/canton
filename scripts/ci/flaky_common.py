@@ -75,8 +75,14 @@ def get_ci_build_url() -> str:
         server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
         repository = os.environ.get("GITHUB_REPOSITORY", "")
         run_id = os.environ.get("GITHUB_RUN_ID", "")
+        run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
         if repository and run_id:
-            return f"{server}/{repository}/actions/runs/{run_id}"
+            url = f"{server}/{repository}/actions/runs/{run_id}"
+            # Include the attempt so the link points at the run where the test
+            # actually failed. A bare runs/<id> URL resolves to the latest
+            # attempt, which after an auto-rerun is usually the green one and
+            # hides the failure.
+            return f"{url}/attempts/{run_attempt}" if run_attempt else url
         return ""
     if is_circle_ci():
         return os.environ.get("CIRCLE_BUILD_URL", "")
@@ -221,7 +227,13 @@ def create_issue_table_row():
         repo_owner = os.environ.get('CIRCLE_PROJECT_USERNAME', 'DACH-NY')
     commit_url = f"https://github.com/{repo_owner}/canton/commit/{commit_hash}"
     build_url = get_ci_build_url()
-    build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
+    if is_github_actions_ci():
+        # Derive the label from the run id directly. The URL now ends in
+        # /attempts/<n>, so taking its last path segment would show the attempt
+        # number instead of the run id.
+        build_number = os.environ.get('GITHUB_RUN_ID', '')
+    else:
+        build_number = build_url.rstrip('/').rsplit('/', 1)[-1]
     job = get_ci_job_name()
     node_index = get_ci_node_index()
     parallel_run_url = get_ci_parallel_run_url(build_url, node_index)
@@ -419,6 +431,7 @@ def test_create_issue_table_row():
         'GITHUB_JOB': 'integration-tests-shard-2',
         'MATRIX_SHARD': '2',
         'GITHUB_RUN_ID': '9876543210',
+        'GITHUB_RUN_ATTEMPT': '2',
         'GITHUB_REPOSITORY': 'DACH-NY/canton',
         'GITHUB_SERVER_URL': 'https://github.com',
         'GITHUB_SHA': 'c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4',
@@ -427,13 +440,23 @@ def test_create_issue_table_row():
         line = create_issue_table_row()
         assert '| integration-tests-shard-2 |' in line, f"Missing GHA job name in: {line}"
         assert '| 2 |' in line, f"Missing GHA matrix shard in: {line}"
-        assert '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210)' in line, (
-            f"Missing GHA build link in: {line}"
-        )
+        # The link points at the specific attempt so it survives an auto-rerun,
+        # while the label stays the run id rather than the attempt number.
+        assert (
+            '[9876543210](https://github.com/DACH-NY/canton/actions/runs/9876543210/attempts/2)'
+            in line
+        ), f"Missing GHA build link with attempt in: {line}"
         assert (
             '[c3d4e5f6](https://github.com/DACH-NY/canton/commit/c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4)'
             in line
         ), f"Missing GHA commit in: {line}"
+
+    # GHA without a run attempt in the environment falls back to the bare run URL.
+    env_gha_no_attempt = {k: v for k, v in env_gha.items() if k != 'GITHUB_RUN_ATTEMPT'}
+    with patch.dict(os.environ, env_gha_no_attempt, clear=True):
+        assert get_ci_build_url() == 'https://github.com/DACH-NY/canton/actions/runs/9876543210', (
+            f"Expected bare run URL without attempt, got: {get_ci_build_url()}"
+        )
 
 
 def test_is_nightly_job():

@@ -15,7 +15,8 @@ final class CloseableActorSystem(
     system: ActorSystem[?],
     logger: TracedLogger,
     shutdownProcessing: config.NonNegativeDuration,
-) extends AutoCloseable {
+)(implicit traceContext: TraceContext)
+    extends AutoCloseable {
 
   private val name = system.name
 
@@ -26,7 +27,7 @@ final class CloseableActorSystem(
     )(
       Future.successful(system.terminate())
     )(
-      ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty)
+      ErrorLoggingContext.fromTracedLogger(logger)
     )
 
   override def toString: String = s"Actor system ($name)"

@@ -106,7 +106,9 @@ class UnitTestContext[E <: Env[E], MessageT] extends ModuleContext[E, MessageT] 
 
   override def newModuleRef[NewModuleMessageT](
       moduleName: ModuleName
-  )(moduleNameForMetrics: String = moduleName.name): E#ModuleRefT[NewModuleMessageT] = unsupported()
+  )(moduleNameForMetrics: String = moduleName.name)(implicit
+      traceContext: TraceContext
+  ): E#ModuleRefT[NewModuleMessageT] = unsupported()
 
   override def setModule[NewModuleMessageT](
       moduleRef: E#ModuleRefT[NewModuleMessageT],
@@ -127,19 +129,23 @@ class UnitTestContext[E <: Env[E], MessageT] extends ModuleContext[E, MessageT] 
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
     unsupported()
 
-  override def blockingAwait[X](future: E#FutureUnlessShutdownT[X], duration: FiniteDuration): X =
+  override def blockingAwait[X](future: E#FutureUnlessShutdownT[X], duration: FiniteDuration)(
+      implicit traceContext: TraceContext
+  ): X =
     unsupported()
 
-  override def abort(): Nothing = fail()
+  override def abort()(implicit traceContext: TraceContext): Nothing = fail()
 
-  override def abort(msg: String): Nothing = fail(msg)
+  override def abort(msg: String)(implicit traceContext: TraceContext): Nothing = fail(msg)
 
-  override def abort(failure: Throwable): Nothing = fail(failure)
+  override def abort(failure: Throwable)(implicit traceContext: TraceContext): Nothing = fail(
+    failure
+  )
 
   override def become(module: Module[E, MessageT])(implicit traceContext: TraceContext): Unit =
     unsupported()
 
-  override def stop(onStop: () => Unit): Unit = unsupported()
+  override def stop(onStop: () => Unit)(implicit traceContext: TraceContext): Unit = unsupported()
 
   override def withNewTraceContext[A](fn: TraceContext => A): A = unsupported()
 
@@ -253,7 +259,9 @@ final case class IgnoringUnitTestContext[MessageT]()
       fun: Try[X] => Option[MessageT]
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit = ()
 
-  override def blockingAwait[X](future: () => X, duration: FiniteDuration): X = future()
+  override def blockingAwait[X](future: () => X, duration: FiniteDuration)(implicit
+      traceContext: TraceContext
+  ): X = future()
 }
 
 class IgnoringModuleRef[-MessageT] extends ModuleRef[MessageT] {
@@ -295,7 +303,9 @@ class FakeTimerCellUnitTestContext[MessageT](
       metricsContext: MetricsContext,
   ): Unit = ()
 
-  override def blockingAwait[X](future: () => X, duration: FiniteDuration): X = future()
+  override def blockingAwait[X](future: () => X, duration: FiniteDuration)(implicit
+      traceContext: TraceContext
+  ): X = future()
 }
 
 final class FakeTimerCellUnitTestContextWithTraceContext[MessageT](
@@ -324,7 +334,9 @@ final case class FakePipeToSelfCellUnitTestContext[MessageT](
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
     cell.set(Some(() => fun(Try(futureUnlessShutdown()))))
 
-  override def blockingAwait[X](future: () => X, duration: FiniteDuration): X = future()
+  override def blockingAwait[X](future: () => X, duration: FiniteDuration)(implicit
+      traceContext: TraceContext
+  ): X = future()
 
   override def delayedEvent(delay: FiniteDuration, message: MessageT)(implicit
       traceContext: TraceContext,
@@ -500,10 +512,12 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
 
   def sizeOfPipedMessages: Int = pipedQueue.size
 
-  def blockingAwait[X](future: () => X): X =
+  def blockingAwait[X](future: () => X)(implicit traceContext: TraceContext): X =
     blockingAwait(future, BlockingOperationTimeout)
 
-  override def blockingAwait[X](future: () => X, duration: FiniteDuration): X =
+  override def blockingAwait[X](future: () => X, duration: FiniteDuration)(implicit
+      traceContext: TraceContext
+  ): X =
     if (resolveAwaits)
       future()
     else
@@ -520,9 +534,11 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
     becomes
   }
 
-  override def stop(onStop: () => Unit): Unit = closeActionCell = Some(onStop)
+  override def stop(onStop: () => Unit)(implicit traceContext: TraceContext): Unit =
+    closeActionCell = Some(onStop)
 
   def isStopped: Boolean = closeActionCell.isDefined
 
-  def runCloseAction(): Unit = closeActionCell.getOrElse(abort("No close action defined"))()
+  def runCloseAction()(implicit traceContext: TraceContext): Unit =
+    closeActionCell.getOrElse(abort("No close action defined"))()
 }

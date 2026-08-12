@@ -98,6 +98,23 @@ def normalize_shard_data(data, path):
             return []
         return [str(x) for x in value]
 
+    def parse_optional_bool(source, key, default=False):
+        if key not in source:
+            return default
+        value = source.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1", "yes"}:
+                return True
+            if lowered in {"false", "0", "no"}:
+                return False
+        invalid_fields.append(key)
+        return default
+
+    rerun = data.get("rerun") if isinstance(data.get("rerun"), dict) else data
+
     return {
         "path": path,
         "shard_index": parse_str(data, "shard_index"),
@@ -110,6 +127,9 @@ def normalize_shard_data(data, path):
         "parse_errors": parse_int(results, "parse_errors"),
         "total": parse_int(results, "total"),
         "not_passed_tests": parse_str_list(results, "not_passed_tests"),
+        "rerun_used": parse_optional_bool(rerun, "rerun_used", default=False),
+        "rerun_classes": parse_str_list(rerun, "rerun_classes"),
+        "first_run_not_passed_tests": parse_str_list(rerun, "first_run_not_passed_tests"),
         "missing_fields": sorted(set(missing_fields)),
         "invalid_fields": sorted(set(invalid_fields)),
     }
@@ -214,6 +234,16 @@ def build_summary(files, shards, parse_errors, limit):
                 seen_tests.add(name)
                 all_not_passed.append(name)
 
+    all_first_run_not_passed = []
+    seen_first_run = set()
+    for shard in shards:
+        shard_index = shard.get("shard_index", "?")
+        for name in shard.get("first_run_not_passed_tests", []):
+            entry_key = f"{shard_index}::{name}"
+            if entry_key not in seen_first_run:
+                seen_first_run.add(entry_key)
+                all_first_run_not_passed.append((shard_index, name))
+
     lines = []
     lines.append("## Test summary (all shards)")
     lines.append("")
@@ -274,9 +304,9 @@ def build_summary(files, shards, parse_errors, limit):
         lines.append("### Shard breakdown")
         lines.append("")
         lines.append(
-            "| Shard | JUnit files | Total | Passed | Failed | Errors | Skipped | XML parse errors | Data status |"
+            "| Shard | JUnit files | Total | Passed | Failed | Errors | Skipped | XML parse errors | Rerun | Data status |"
         )
-        lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |")
+        lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |")
 
         def display(value):
             return value if isinstance(value, int) else "n/a"
@@ -290,8 +320,9 @@ def build_summary(files, shards, parse_errors, limit):
             return "; ".join(parts) if parts else "ok"
 
         for shard in shards:
+            rerun_label = "yes" if shard.get("rerun_used") else "no"
             lines.append(
-                f"| {shard['shard_index']} | {display(shard['junit_files'])} | {display(shard['total'])} | {display(shard['passed'])} | {display(shard['failures'])} | {display(shard['errors'])} | {display(shard['skipped'])} | {display(shard['parse_errors'])} | {data_status(shard)} |"
+                f"| {shard['shard_index']} | {display(shard['junit_files'])} | {display(shard['total'])} | {display(shard['passed'])} | {display(shard['failures'])} | {display(shard['errors'])} | {display(shard['skipped'])} | {display(shard['parse_errors'])} | {rerun_label} | {data_status(shard)} |"
             )
         lines.append("")
 
@@ -310,6 +341,21 @@ def build_summary(files, shards, parse_errors, limit):
         lines.append("</details>")
     else:
         lines.append("- none")
+
+    if all_first_run_not_passed:
+        lines.append("")
+        lines.append("### Not passed tests in first run (global)")
+        shown = min(len(all_first_run_not_passed), limit)
+        lines.append(
+            f"<details><summary>Show tests that failed before rerun ({len(all_first_run_not_passed)}, shown {shown})</summary>"
+        )
+        lines.append("")
+        for shard_index, test_name in all_first_run_not_passed[:limit]:
+            lines.append(f"- shard {html.escape(str(shard_index))}: {html.escape(test_name)}")
+        if len(all_first_run_not_passed) > limit:
+            lines.append(f"- and {len(all_first_run_not_passed) - limit} more")
+        lines.append("")
+        lines.append("</details>")
 
     return "\n".join(lines) + "\n"
 
@@ -363,9 +409,16 @@ def _sample_shard(
     total=1,
     junit_files=1,
     not_passed_tests=None,
+    rerun_used=False,
+    rerun_classes=None,
+    first_run_not_passed_tests=None,
 ):
     if not_passed_tests is None:
         not_passed_tests = []
+    if rerun_classes is None:
+        rerun_classes = []
+    if first_run_not_passed_tests is None:
+        first_run_not_passed_tests = []
     return {
         "path": path,
         "shard_index": str(shard_index),
@@ -378,6 +431,10 @@ def _sample_shard(
         "parse_errors": int(parse_errors),
         "total": int(total),
         "not_passed_tests": [str(x) for x in not_passed_tests],
+        "rerun_used": bool(rerun_used),
+        # Kept for potential future reporting; currently not rendered in markdown summary.
+        "rerun_classes": [str(x) for x in rerun_classes],
+        "first_run_not_passed_tests": [str(x) for x in first_run_not_passed_tests],
         "missing_fields": [],
         "invalid_fields": [],
     }
@@ -397,11 +454,18 @@ def test_normalize_shard_data_supports_nested_results():
             "total": 8,
             "not_passed_tests": ["com.example.Foo.testA"],
         },
+        "rerun": {
+            "rerun_used": True,
+            "rerun_classes": ["com.example.Foo"],
+            "first_run_not_passed_tests": ["com.example.Foo.testA"],
+        },
     }
     shard = normalize_shard_data(data, "/tmp/s1.json")
     assert shard["shard_index"] == "1"
     assert shard["passed"] == 5
     assert shard["not_passed_tests"] == ["com.example.Foo.testA"]
+    assert shard["rerun_used"] is True
+    assert shard["first_run_not_passed_tests"] == ["com.example.Foo.testA"]
     assert shard["missing_fields"] == []
     assert shard["invalid_fields"] == []
 
@@ -469,6 +533,9 @@ def test_build_summary_reports_missing_shards_and_deduplicates_tests():
             total_shards="3",
             failures=1,
             total=2,
+            rerun_used=True,
+            rerun_classes=["com.example.Foo"],
+            first_run_not_passed_tests=["com.example.Foo.testA", "com.example.Bar.testB"],
             not_passed_tests=["com.example.Foo.testA", "com.example.Bar.testB"],
         ),
         _sample_shard(
@@ -476,6 +543,7 @@ def test_build_summary_reports_missing_shards_and_deduplicates_tests():
             total_shards="3",
             errors=1,
             total=2,
+            first_run_not_passed_tests=["com.example.Bar.testB", "com.example.Baz.testC"],
             not_passed_tests=["com.example.Bar.testB", "com.example.Baz.testC"],
         ),
     ]
@@ -486,6 +554,9 @@ def test_build_summary_reports_missing_shards_and_deduplicates_tests():
     assert "- Invalid summary files: 1" in summary
     assert summary.count("- com.example.Bar.testB") == 1, "Expected deduplicated failed tests"
     assert "- Shards reported: 2/3" in summary
+    assert "| 0 |" in summary and "| yes |" in summary
+    assert "### Not passed tests in first run (global)" in summary
+    assert "- shard 0: com.example.Foo.testA" in summary
 
 
 def test_build_summary_truncates_not_passed_tests():
@@ -521,10 +592,30 @@ def test_write_state_round_trip():
 
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "state", "summary-state.json")
-        shards = [_sample_shard(shard_index="1", path="roundtrip.json", passed=7, total=7)]
+        shards = [
+            _sample_shard(
+                shard_index="1",
+                path="roundtrip.json",
+                passed=7,
+                failures=1,
+                total=8,
+                rerun_used=True,
+                rerun_classes=["com.example.Foo"],
+                first_run_not_passed_tests=["com.example.Foo.testA"],
+                not_passed_tests=[],
+            )
+        ]
         write_state(path, shards)
         loaded = load_previous_state(path)
-        assert loaded == shards, f"Expected round-trip persisted shards, got {loaded}"
+        assert len(loaded) == 1, f"Expected one shard after round-trip, got {loaded}"
+        loaded_shard = loaded[0]
+        assert loaded_shard["rerun_used"] is True, f"Expected rerun_used=True, got {loaded_shard}"
+        assert loaded_shard["rerun_classes"] == ["com.example.Foo"], (
+            f"Expected rerun_classes to survive round-trip, got {loaded_shard}"
+        )
+        assert loaded_shard["first_run_not_passed_tests"] == ["com.example.Foo.testA"], (
+            f"Expected first_run_not_passed_tests to survive round-trip, got {loaded_shard}"
+        )
 
 
 if __name__ == "__main__":
