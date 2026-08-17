@@ -19,7 +19,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.ClientChannelBuilder.createChannelBuilder
+import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
@@ -27,12 +27,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   AuthenticationInitialState,
   P2PEndpoint,
   completeGrpcStreamObserver,
+  createNettyClientChannelBuilder,
   failGrpcStreamObserver,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.authentication.{
-  AddEndpointHeaderClientInterceptor,
-  AuthenticateServerClientInterceptor,
-  ServerAuthenticatingServerInterceptor,
+  P2PAddAuthTokenHeaderGrpcServerInterceptor,
+  P2PAddEndpointHeaderGrpcClientInterceptor,
+  P2PCheckAuthenticationGrpcClientInterceptor,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PConnectionManagementConfig
@@ -61,7 +62,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 }
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SequencerId
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{AtomicUtil, DelayUtil, Mutex}
 import com.google.protobuf.timestamp.Timestamp
 import io.grpc.stub.{AbstractStub, StreamObserver}
@@ -73,7 +74,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ExecutorService, ThreadLocalRandom}
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future, blocking}
-import scala.jdk.CollectionConverters.*
+import scala.jdk.CollectionConverters.SeqHasAsJava
 import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.math.Ordering.Implicits.infixOrderingOps
 import scala.util.{Failure, Success, Try}
@@ -92,7 +93,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
     longRunningExecutor: ExecutorService,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContextExecutor, metricsContext: MetricsContext)
+)(implicit executionContextExecutor: ExecutionContextExecutor, metricsContext: MetricsContext)
     extends NamedLogging
     with NamedLoggingUtils
     with FlagCloseableAsync { self =>
@@ -106,6 +107,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
   private val longRunningExecutionContext = ExecutionContext.fromExecutor(longRunningExecutor)
 
   private val stateRef = new AtomicReference[State](State())
+
+  private val clientChannelBuilder = ClientChannelBuilder(loggerFactory)
 
   // Called by the connection-managing actor when establishing a connection to an endpoint
   def getPeerSenderOrStartConnection(
@@ -573,7 +576,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
     logger.info(s"Creating a gRPC channel to $p2pEndpointId")
 
     val channel =
-      createChannelBuilder(p2pEndpoint.endpointConfig, maxInboundMessageSize = None).build()
+      createNettyClientChannelBuilder(clientChannelBuilder, p2pEndpoint.endpointConfig).build()
     val channelId = channel.toString
 
     val authenticationContextO =
@@ -629,7 +632,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
           endpoint: P2PEndpoint,
       ) =
         stub.withInterceptors(
-          new AddEndpointHeaderClientInterceptor(
+          new P2PAddEndpointHeaderGrpcClientInterceptor(
             endpoint,
             loggerFactory,
           )
@@ -650,7 +653,11 @@ private[bftordering] final class P2PGrpcConnectionManager(
             channel,
             authenticationContextO,
             maybeSequencerIdFromAuthenticationPromiseUS,
-            maybeAuthenticateStub(BftOrderingServiceGrpc.stub(potentiallyCheckedChannel)),
+            maybeAuthenticateStub(
+              BftOrderingServiceGrpc
+                .stub(potentiallyCheckedChannel)
+                .withOption(TraceContextGrpc.TraceContextOptionsKey, traceContext)
+            ),
           )
         )
       )
@@ -679,7 +686,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
         val sequencerIdFromAuthenticationPromiseUS =
           PromiseUnlessShutdown.unsupervised[SequencerId]()
         val interceptor =
-          new AuthenticateServerClientInterceptor(
+          new P2PCheckAuthenticationGrpcClientInterceptor(
             memberAuthenticationService,
             onAuthenticationSuccess = sequencerId =>
               if (!sequencerIdFromAuthenticationPromiseUS.isCompleted)
@@ -1071,12 +1078,11 @@ private[bftordering] final class P2PGrpcConnectionManager(
       inputModule: ModuleRef[BftOrderingMessage],
       sendingStreamObserver: StreamObserver[BftOrderingMessage],
   )(implicit
-      executionContext: ExecutionContext,
       metricsContext: MetricsContext,
       traceContext: TraceContext,
   ): UnlessShutdown[StreamObserver[BftOrderingMessage]] = {
     val maybeCommunicatedEndpoint =
-      ServerAuthenticatingServerInterceptor.peerEndpointContextKey.get()
+      P2PAddAuthTokenHeaderGrpcServerInterceptor.peerEndpointContextKey.get()
 
     // Notify the new connection for observability purposes
     p2pConnectionEventListener.onConnect(maybeCommunicatedEndpoint.map(_.id))

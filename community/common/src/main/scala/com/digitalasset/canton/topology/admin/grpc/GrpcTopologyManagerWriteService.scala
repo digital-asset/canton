@@ -36,6 +36,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, GrpcStreamingUtils}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.canton.{ProtoDeserializationError, config}
 import com.google.protobuf.ByteString
@@ -88,7 +89,11 @@ class GrpcTopologyManagerWriteService(
       signingKeys <-
         EitherT
           .fromEither[FutureUnlessShutdown](
-            signedBy.traverse(Fingerprint.fromProtoPrimitive)
+            ProtoValidation.validateThen(
+              signedBy,
+              "signed_by",
+              ProtocolVersionValidation.AlwaysValidation,
+            )(Fingerprint.fromProtoPrimitive)
           )
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       forceFlags <- EitherT
@@ -114,11 +119,21 @@ class GrpcTopologyManagerWriteService(
           ProtoDeserializationFailure.Wrap(FieldNotSet("AuthorizeRequest.type"))
         )
 
-      case Type.TransactionHash(value) =>
+      case Type.TransactionHash(txHashP) =>
         for {
           txHash <- EitherT
-            .fromEither[FutureUnlessShutdown](Hash.fromHexString(value).map(TxHash.apply))
-            .leftMap(err => ProtoDeserializationFailure.Wrap(err.toProtoDeserializationError))
+            .fromEither[FutureUnlessShutdown](
+              ProtoValidation.validateThen(
+                txHashP,
+                "transaction_hash",
+                ProtocolVersionValidation.AlwaysValidation,
+              )((hash, _) =>
+                Hash
+                  .fromHexString(hash)
+                  .bimap(_.toProtoDeserializationError, TxHash.apply)
+              )
+            )
+            .leftMap(ProtoDeserializationFailure.Wrap(_))
           signedTopoTx <- authorizeFromHash(txHash)
         } yield signedTopoTx
 
@@ -129,11 +144,15 @@ class GrpcTopologyManagerWriteService(
             .when(serial != 0)(serial)
             .traverse(ProtoConverter.parsePositiveInt("serial", _))
           op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", op)
-          signingKeys <- signedBy.traverse(Fingerprint.fromProtoPrimitive)
+          signingKeys <- ProtoValidation.validateThen(
+            signedBy,
+            "signed_by",
+            ProtocolVersionValidation.AlwaysValidation,
+          )(Fingerprint.fromProtoPrimitive)
           forceFlags <- ForceFlags.fromProtoV30(forceChanges)
           validatedMapping <- mapping match {
             case v30.AuthorizeRequest.Proposal.Mapping.V30(value) =>
-              TopologyMapping.fromProtoV30(value)
+              TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
             case v30.AuthorizeRequest.Proposal.Mapping.Empty =>
               ProtoConverter.required("AuthorizeRequest.mapping", None)
           }
@@ -187,10 +206,14 @@ class GrpcTopologyManagerWriteService(
       signedTxs <-
         requestP.transactions
           .traverse(tx =>
-            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.NoValidation, tx)
+            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
           )
       signingKeys <-
-        requestP.signedBy.traverse(Fingerprint.fromProtoPrimitive)
+        ProtoValidation.validateThen(
+          requestP.signedBy,
+          "signed_by",
+          ProtocolVersionValidation.AlwaysValidation,
+        )(Fingerprint.fromProtoPrimitive)
       forceFlags <- ForceFlags.fromProtoV30(requestP.forceFlags)
     } yield (signedTxs, signingKeys, forceFlags)
 
@@ -414,7 +437,7 @@ class GrpcTopologyManagerWriteService(
         op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
         mapping <- mappingPO match {
           case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
-            TopologyMapping.fromProtoV30(value)
+            TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
           case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>
             ProtoConverter.required("mapping", None)
         }
@@ -459,8 +482,11 @@ class GrpcTopologyManagerWriteService(
       protocolVersion <- ProtocolVersion
         .fromProtoPrimitive(request.protocolVersion)
         .leftMap(ProtoDeserializationFailure.Wrap(_))
+      name <- ProtoValidation
+        .validate(request.name, Some("name"), ProtocolVersionValidation.AlwaysValidation)
+        .leftMap(ProtoDeserializationFailure.Wrap(_))
       storeId <- TemporaryStore
-        .create(request.name)
+        .create(name)
         .leftMap(err =>
           ProtoDeserializationFailure.Wrap(ProtoDeserializationError.StringConversionError(err))
         )

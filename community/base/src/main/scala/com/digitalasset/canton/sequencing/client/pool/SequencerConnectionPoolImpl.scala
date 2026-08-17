@@ -571,12 +571,12 @@ class SequencerConnectionPoolImpl private[sequencing] (
     lock.exclusive(NonNegativeInt.tryCreate(pool.values.flatten.size))
 
   override def onClosed(): Unit = {
-    val instances = (lock.exclusive(trackedConnections.keySet.toSeq))
+    val instances = lock.exclusive(trackedConnections.keySet.toSeq)
 
     initializedP.shutdown_()
     // We close the connections outside the critical section to avoid shutdown problems in case
     // it triggers health callbacks
-    LifeCycle.close(instances*)(logger)
+    LifeCycle.close(instances)(logger)
     metrics.removeMetricsForAllConnections(mc.labels.get("psid"))
     super.onClosed()
   }

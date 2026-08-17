@@ -1,0 +1,48 @@
+name: Restore compile and sbt caches
+description: Restore compile and sbt caches
+
+inputs:
+  reset_classes_if_requested:
+    default: "false"
+    description: Reset classes if requested
+    required: false
+
+outputs:
+  needs_network_restore:
+    description: Check if restore was performed
+    value: ${{ steps.restore_classes.outputs.needs_network_restore }}
+  compile-cache-hit:
+    description: Cache hit status
+    value: ${{ steps.restore_classes.outputs.cache-hit }}
+  compile-cache-primary-key:
+    description: Primary cache key used
+    value: ${{ steps.restore_classes.outputs.cache-primary-key }}
+  compile-cache-matched-key:
+    description: Key of the cache that was restored
+    value: ${{ steps.restore_classes.outputs.cache-matched-key }}
+
+  ivy-cache-hit:
+    description: Whether ivy cache had an exact hit
+    value: ${{ steps.restore_sbt_cache.outputs.ivy-cache-hit }}
+  ivy-cache-matched-key:
+    description: Restored ivy cache key
+    value: ${{ steps.restore_sbt_cache.outputs.ivy-cache-matched-key }}
+  sbt-cache-hit:
+    description: Whether sbt cache had an exact hit
+    value: ${{ steps.restore_sbt_cache.outputs.sbt-cache-hit }}
+  sbt-cache-matched-key:
+    description: Restored sbt cache key
+    value: ${{ steps.restore_sbt_cache.outputs.sbt-cache-matched-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore precompiled classes
+      id: restore_classes
+      uses: ./.github/actions/cache/restore_precompiled_classes
+      with:
+        reset_classes_if_requested: ${{ inputs.reset_classes_if_requested }}
+
+    - name: Restore SBT dependency caches
+      id: restore_sbt_cache
+      uses: ./.github/actions/cache/restore_sbt_cache

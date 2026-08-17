@@ -840,7 +840,6 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
     "DamlScriptTrySubmitWithKeys:contractNotActive" -> Failure(
       "contractNotActive no additional info"
     ),
-    "DamlScriptTrySubmitWithKeys:devError" -> Success(),
     "DamlScriptTrySubmitWithKeys:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
     "DamlScriptTrySubmitWithKeys:wronglyTypedContract" -> Success(),
     "ExceptionSemanticsWithKeys:divulgence" -> Success(),

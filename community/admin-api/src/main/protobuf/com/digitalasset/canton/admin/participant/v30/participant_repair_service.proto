@@ -81,6 +81,14 @@ service ParticipantRepairService {
   //
   // Returns empty response if the pending operation was successfully deleted or no matching pending operation was found.
   rpc DeletePendingOperation(DeletePendingOperationRequest) returns (DeletePendingOperationResponse);
+
+  /**
+   * Reinitialize the party and participant digests at the current ledger end. Ongoing digest processing is stopped.
+   *
+   * Fetches the topology snapshot for the participant at the current ledger end timestamp
+   * and recalculates and persists the party and participant digests.
+   */
+  rpc ReinitializeDigestCommitments(ReinitializeDigestCommitmentsRequest) returns (ReinitializeDigestCommitmentsResponse);
 }
 
 message PurgeContractsRequest {
@@ -379,3 +387,15 @@ message DeletePendingOperationRequest {
 }
 
 message DeletePendingOperationResponse {}
+
+message ReinitializeDigestCommitmentsRequest {
+  string synchronizer_id = 1;
+  bool running_digest_processor_should_start_after = 2;
+}
+
+message ReinitializeDigestCommitmentsResponse {
+  oneof status {
+    string error_message = 2;
+    google.protobuf.Timestamp completed_reinit_timestamp = 3;
+  }
+}

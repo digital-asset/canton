@@ -30,6 +30,7 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -276,7 +277,12 @@ object AsymmetricEncrypted extends HasVersionedMessageCompanion[AsymmetricEncryp
       encryptedP: v30.AsymmetricEncrypted
   ): ParsingResult[AsymmetricEncrypted[T]] =
     for {
-      fingerprint <- Fingerprint.fromProtoPrimitive(encryptedP.fingerprint)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      fingerprint <- ProtoValidation.validateThen(
+        encryptedP.fingerprint,
+        "fingerprint",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
       encryptionAlgorithmSpec <- EncryptionAlgorithmSpec.fromProtoEnum(
         "encryption_algorithm_spec",
         encryptedP.encryptionAlgorithmSpec,
@@ -924,7 +930,12 @@ object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPriva
       privateKeyP: v30.EncryptionPrivateKey
   ): ParsingResult[EncryptionPrivateKey] =
     for {
-      id <- Fingerprint.fromProtoPrimitive(privateKeyP.id)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      id <- ProtoValidation.validateThen(
+        privateKeyP.id,
+        "id",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
       format <- CryptoKeyFormat.fromProtoEnum("format", privateKeyP.format)
       keySpec <- EncryptionKeySpec.fromProtoEnumWithDefaultScheme(
         privateKeyP.keySpec,

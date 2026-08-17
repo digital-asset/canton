@@ -7,6 +7,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
@@ -105,7 +106,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
           InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         prefetchKeys = Seq.empty,
       )
-      .consume(pcs = contracts, pkgs = packages)
+      .consume(lookupHandler(pcs = contracts, pkgs = packages))
 
   val nodeSeeds = metaData.nodeSeeds.iterator.toMap
 
@@ -173,7 +174,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major)
           interpretationConfig =
             InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         )
-        .consume(pcs = contracts, pkgs = packages)
+        .consume(lookupHandler(pcs = contracts, pkgs = packages))
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet
   }
   val n = tx.nodes.iterator.collect {

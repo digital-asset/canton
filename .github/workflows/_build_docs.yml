@@ -1,0 +1,118 @@
+name: Build Docs
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build_docs:
+    name: Build Docs
+    runs-on: ${{ inputs.runner }}
+    env:
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Set up workspace path
+        shell: bash
+        run: |
+          TMP_WORKSPACE="${{ runner.temp }}/workspace-${{ github.run_id }}"
+          mkdir -p "$TMP_WORKSPACE"
+          echo "TMP_WORKSPACE=$TMP_WORKSPACE" >> "$GITHUB_ENV"
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Restore Generated Snippets
+        uses: ./.github/actions/cache/restore_generated_snippets
+
+      - name: Restore packaged release
+        uses: ./.github/actions/cache/restore_packaged_release
+        with:
+          workspace-path: ${{ env.TMP_WORKSPACE }}
+
+      - name: Download ScalaDoc archive
+        uses: actions/download-artifact@v7
+        with:
+          name: scaladoc.tar.gz
+          path: ${{ env.TMP_WORKSPACE }}
+
+      - name: Unpack ScalaDoc in workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$TMP_WORKSPACE/docs/scaladoc"
+          tar xzf "$TMP_WORKSPACE/scaladoc.tar.gz" -C "$TMP_WORKSPACE/docs/scaladoc"
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: 0
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Run docs-open tests
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: docs-open/test
+          use_maven_mirror: "false"
+          report_to_datadog: "false"
+          execution_context_size: "8"
+        env:
+          CI_UNIDOC_ROOT: ${{ env.TMP_WORKSPACE }}/docs/scaladoc/
+
+      - name: Download Ledger API proto docs
+        uses: actions/download-artifact@v7
+        with:
+          name: ledger-api-proto-docs
+          path: community
+
+      - name: Verify Ledger API proto docs inputs
+        shell: bash
+        run: |
+          test -f community/ledger-api-proto/target/src_managed/main/proto-docs.rst
+          test -f community/daml-lf/ledger-api-value-proto/target/src_managed/main/proto-docs.rst.inc
+
+      - name: Package docs with existing release
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: packageDocsFromExistingSnippets
+          use_maven_mirror: "false"
+          report_to_datadog: "false"
+          execution_context_size: "8"
+        env:
+          CI_UNIDOC_ROOT: ${{ env.TMP_WORKSPACE }}/docs/scaladoc/
+
+      - name: Clean up workspace
+        if: always()
+        shell: bash
+        run: rm -rf "$TMP_WORKSPACE"
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}

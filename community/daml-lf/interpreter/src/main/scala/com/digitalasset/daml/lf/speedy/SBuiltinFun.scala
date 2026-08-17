@@ -5,7 +5,6 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.daml.nameof.NameOf
-import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash.{HashingMethod, hashContractInstance}
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.*
@@ -1479,7 +1478,6 @@ private[lf] object SBuiltinFun {
             contractIdVersion = machine.contractIdVersion,
           ) match {
           case Right((coid, newPtx)) =>
-            machine.enforceLimitSignatoriesAndObservers(coid, contract)
             machine.storeLocalContract(coid, templateId, templateArg)
             machine.ptx = newPtx
             machine.insertContractInfoCache(coid, contract)
@@ -1528,25 +1526,10 @@ private[lf] object SBuiltinFun {
         val exerciseVersion = machine.assignSerializationVersion(hasKey = contract.keyOpt.isDefined)
         val chosenValue = args(0).toNormalizedValue
         val controllers = extractParties(NameOf.qualifiedNameOfCurrentFunc, args(2))
-        machine.enforceChoiceControllersLimit(
-          controllers,
-          coid,
-          templateId,
-          choiceId,
-          chosenValue,
-        )
         val obsrs = extractParties(NameOf.qualifiedNameOfCurrentFunc, args(3))
-        machine.enforceChoiceObserversLimit(obsrs, coid, templateId, choiceId, chosenValue)
         val choiceAuthorizers =
           if (explicitChoiceAuthority) {
             val authorizers = extractParties(NameOf.qualifiedNameOfCurrentFunc, args(4))
-            machine.enforceChoiceAuthorizersLimit(
-              authorizers,
-              coid,
-              templateId,
-              choiceId,
-              chosenValue,
-            )
             Some(authorizers)
           } else {
             require(args(4) == SValue.SValue.EmptyList)
@@ -1757,31 +1740,6 @@ private[lf] object SBuiltinFun {
     ): Control[Question.Update] = {
       val coid = getSContractId(args, 0)
       fetchTemplate(machine, templateId, coid).run(Control.Value.apply)
-    }
-  }
-
-  final case class SBApplyChoiceGuard(
-      choiceName: ChoiceName,
-      byInterface: Option[TypeConId],
-  ) extends UpdateBuiltin(3) {
-    override protected def executeUpdate(
-        args: ArraySeq[SValue],
-        machine: UpdateMachine,
-    ): Control.Expression = {
-      val guard = args(0)
-      val (templateId, record) = getSAnyContract(args, 1)
-      val coid = getSContractId(args, 2)
-
-      val e = SEAppAtomic(SEValue(guard), ArraySeq(SEValue(SAnyContract(templateId, record))))
-      machine.pushKont(KCheckChoiceGuard(coid, templateId, choiceName, byInterface))
-      Control.Expression(e)
-    }
-  }
-
-  final case object SBGuardConstTrue extends SBuiltinPure(1) {
-    override private[speedy] def executePure(args: ArraySeq[SValue], machine: Machine[?]): SBool = {
-      discard(getSAnyContract(args, 0))
-      SValue.SValue.True
     }
   }
 
@@ -2110,32 +2068,6 @@ private[lf] object SBuiltinFun {
           key: GlobalKeyWithMaintainers,
       ): Right[Nothing, Unit] =
         Right(())
-    }
-
-    final class Lookup(override val templateId: TypeConId)
-        extends KeyOperation("LookupByKey", needN = false) {
-      import transaction.BackwardsCompatibilityImplicits.*
-
-      override final def handleKnownInputKey(
-          machine: UpdateMachine,
-          key: GlobalKeyWithMaintainers,
-          result: KeyMapping,
-          payloads: List[SValue],
-      ): Control[Nothing] = {
-        machine.ptx = machine.ptx.insertQueryByKey(
-          optLocation = machine.getLastLocation,
-          key = key,
-          result = result,
-          keyVersion = machine.assignSerializationVersion(hasKey = true),
-        )
-        Control.Value(SOptional(result.queue.asCidOption.map(SContractId(_))))
-      }
-
-      override def authorizeLookup(
-          machine: UpdateMachine,
-          key: GlobalKeyWithMaintainers,
-      ): Either[IE, Unit] =
-        machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
     }
 
     final class QueryNByKey(override val templateId: TypeConId)
@@ -2868,8 +2800,6 @@ private[lf] object SBuiltinFun {
     for {
       dstContract <- getContractInfo(machine, coid, dstTmplId, dstTmplArg)
       _ <- ensureContractActive(machine, coid, dstContract.templateId)
-      _ = machine.enforceLimitAddInputContract()
-      _ = machine.enforceLimitSignatoriesAndObservers(coid, dstContract)
       _ <- checkContractUpgradable(
         coid,
         srcTmplId,

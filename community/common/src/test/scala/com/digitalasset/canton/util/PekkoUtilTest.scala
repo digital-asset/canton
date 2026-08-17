@@ -4,7 +4,10 @@
 package com.digitalasset.canton.util
 
 import cats.Eq
+import cats.syntax.either.*
 import cats.syntax.functorFilter.*
+import com.daml.metrics.api.testing.InMemoryMetricsFactory.InMemoryCounter
+import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.concurrent.Threading
@@ -30,9 +33,11 @@ import com.digitalasset.canton.util.PekkoUtil.{
   WithKillSwitch,
   noOpKillSwitch,
 }
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
+import org.apache.pekko.stream.testkit.TestPublisher
 import org.apache.pekko.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import org.apache.pekko.stream.testkit.scaladsl.{TestSink, TestSource}
 import org.apache.pekko.stream.{KillSwitch, KillSwitches, OverflowStrategy}
@@ -45,11 +50,12 @@ import org.scalatest.time.Span
 
 import java.util.concurrent.Semaphore
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
+import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.Random
 import scala.util.control.NonFatal
+import scala.util.{Random, Try}
 
 class PekkoUtilTest
     extends TestKit(ActorSystem(classOf[PekkoUtilTest].getSimpleName))
@@ -2836,6 +2842,214 @@ class PekkoUtilTest
       source.offer(2) shouldBe a[StashOfferResult.Failure]
     }
   }
+
+  "gateKeeper" should {
+    "output elements at or below the gates" in {
+      val emitted = Source(1 to 10)
+        .gateKeeper(Source(Seq(2, 5)))(Predef.identity)
+        .runWith(Sink.seq)
+        .futureValue
+      emitted shouldBe (1 to 5)
+    }
+
+    "pause emitting source elements at the first element that does not fit through the gate" in {
+      val emitted = Source((6 to 10) ++ (1 to 5))
+        .gateKeeper(Source.single(7))(Predef.identity)
+        .runWith(Sink.seq)
+        .futureValue
+      emitted shouldBe (6 to 7)
+    }
+
+    "deal with unordered gates by keeping the maximum" in {
+      val emitted = Source(1 to 10)
+        .gateKeeper(Source(Seq(5, 1, 3)))(Predef.identity)
+        .runWith(Sink.seq)
+        .futureValue
+      emitted shouldBe (1 to 5)
+    }
+
+    "terminate when input terminates and all elements fit through the gate" in {
+      val terminateInput =
+        Source(1 to 10).gateKeeper(Source.repeat(11))(Predef.identity).runWith(Sink.seq).futureValue
+      terminateInput shouldBe (1 to 10)
+    }
+    "terminate when the gate terminates and a source element does not fit through the gate" in {
+      val terminateGate =
+        Source
+          .fromIterator(() => Iterator.from(0))
+          .gateKeeper(Source(Seq(5)))(Predef.identity)
+          .runWith(Sink.seq)
+          .futureValue
+      terminateGate shouldBe (0 to 5)
+    }
+
+    "terminate even when the gate is dry" in {
+      Source
+        .empty[Int]
+        .gateKeeper(Source.never[Int])(Predef.identity)
+        .runWith(Sink.seq)
+        .futureValue shouldBe empty
+    }
+
+    "emit correctly and backpressure when gate and source elements are interleaved" in {
+      val ((input, gate), sink) = TestSource
+        .probe[Int]
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .toMat(TestSink.probe[Int])(Keep.both)
+        .run()
+
+      // The gate keeper eagerly requests items even if there is not yet any downstream demand
+      input.expectRequest()
+      gate.expectRequest()
+      sink.request(100)
+
+      def jam[A](probe: TestPublisher.Probe[A], x: A): Int = {
+        @tailrec def go(attempt: Int): Int =
+          Either.catchOnly[AssertionError](probe.sendNext(x)) match {
+            case Right(_) => go(attempt + 1)
+            case Left(err) =>
+              err.getMessage should include("expecting request() signal")
+              attempt
+          }
+
+        go(0)
+      }
+
+      // Make sure that `sendNext` eventually complains about no element having been requested.
+      // This indicates that the gate does not keep pulling elements forever from the input.
+      val queued = jam(input, 10)
+
+      gate.sendNext(5)
+      sink.expectNoMessage()
+      gate.sendNext(7)
+      sink.expectNoMessage()
+
+      gate.sendNext(10)
+      for (_ <- 1 to queued) {
+        sink.expectNext() shouldBe 10
+      }
+
+      input.sendNext(9)
+      sink.expectNext(9)
+
+      jam(gate, 10)
+
+      input.sendNext(11)
+      gate.sendComplete()
+
+      sink.expectComplete()
+      input.expectCancellation()
+    }
+
+    "propagate failures from the input" in {
+      val failure = new RuntimeException("Input failure")
+      val ((input, gate), sink) = TestSource
+        .probe[Int]
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .toMat(TestSink.probe[Int])(Keep.both)
+        .run()
+      sink.request(5)
+      input.sendNext(1)
+      gate.sendNext(12)
+      sink.expectNext(1)
+      input.sendError(failure)
+      sink.expectError(failure)
+      gate.expectCancellation()
+    }
+
+    "propagate failures from the gate" in {
+      val failure = new RuntimeException("Gate failure")
+      val ((input, gate), sink) = TestSource
+        .probe[Int]
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .toMat(TestSink.probe[Int])(Keep.both)
+        .run()
+      sink.request(5)
+      input.sendNext(1)
+      gate.sendNext(12)
+      sink.expectNext(1)
+      input.sendNext(13)
+      gate.sendError(failure)
+      sink.expectError(failure)
+      input.expectCancellation()
+    }
+
+    "propagate cancellation from the sink" in {
+      val emitted = Source
+        .repeat(1)
+        .gateKeeper(Source.repeat(2))(Predef.identity)
+        .take(5)
+        .runWith(Sink.seq)
+        .futureValue
+      emitted shouldBe Seq.fill(5)(1)
+    }
+
+    "propagate failures from the sink" in {
+      val failure = new RuntimeException("Sink failure")
+      val ((input, gate), sink) = TestSource
+        .probe[Int]
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .toMat(TestSink.probe[Int])(Keep.both)
+        .run()
+      sink.request(5)
+      input.sendNext(1)
+      gate.sendNext(12)
+      sink.expectNext(1)
+      sink.cancel(failure)
+      gate.expectCancellationWithCause(failure)
+      input.expectCancellationWithCause(failure)
+    }
+  }
+
+  "buffered" should {
+    def throttledTest(producerMaxSpeed: Int, consumerMaxSpeed: Int): Future[List[Long]] = {
+      val counter = new SamplingCounter(10.millis)
+      Source(List.fill(5000)("element"))
+        .throttle(producerMaxSpeed, FiniteDuration(10, "millis"))
+        .buffered(counter, 30)
+        .throttle(consumerMaxSpeed, FiniteDuration(10, "millis"))
+        .run()
+        .thereafter(_ => counter.stop())
+        .map(_ => counter.sampleResults())
+    }
+
+    def sampleAverage(samples: List[Long]): Double =
+      samples.sum.toDouble / samples.size.toDouble
+    def samplePercentage(samples: List[Long])(filter: Long => Boolean): Double =
+      samples.count(filter).toDouble / samples.size.toDouble * 100.0
+
+    // These thresholds were established empirically and are tuned to still work
+    // even when the test is slowed down in CI by a busy CPU running many tests.
+    "signal mostly full buffer if slow consumer" in {
+      throttledTest(
+        producerMaxSpeed = 10,
+        consumerMaxSpeed = 5,
+      ) map { samples =>
+        sampleAverage(samples) should be > 25.0
+        samplePercentage(samples)(_ == 30) should be > 80.0
+      }
+    }
+
+    "signal mostly empty buffer if fast consumer" in {
+      throttledTest(
+        producerMaxSpeed = 10,
+        consumerMaxSpeed = 20,
+      ) map { samples =>
+        sampleAverage(samples) should be < 10.0
+        samplePercentage(samples)(_ == 0) should be > 90.0
+      }
+    }
+
+    "signal mostly empty buffer if speeds are aligned" in {
+      throttledTest(
+        producerMaxSpeed = 10,
+        consumerMaxSpeed = 10,
+      ) map { samples =>
+        sampleAverage(samples) should be < 10.0
+        samplePercentage(samples)(_ <= 1) should be > 90.0
+      }
+    }
+  }
 }
 
 object PekkoUtilTest {
@@ -2853,4 +3067,31 @@ object PekkoUtilTest {
 
   implicit def arbitraryChecked[A: Arbitrary]: Arbitrary[WithKillSwitch[A]] =
     Arbitrary(Arbitrary.arbitrary[A].map(withNoOpKillSwitch))
+
+  // For testing only, provides a sampled sequence of the state of the counter until finishSampling is called.
+  private final class SamplingCounter(samplingInterval: FiniteDuration)
+      extends InMemoryCounter(
+        MetricInfo(MetricName("test"), "", MetricQualification.Debug),
+        MetricsContext.Empty,
+      ) { self =>
+    import com.daml.metrics.api.testing.MetricValues.*
+
+    private val t = new java.util.Timer()
+    private val samples = scala.collection.mutable.ListBuffer[Long]()
+    private val task = new java.util.TimerTask {
+      def run(): Unit =
+        // Only add elements if the context map has been updated
+        Try(self.value).foreach(value => samples += value)
+    }
+    t.schedule(task, samplingInterval.toMillis, samplingInterval.toMillis)
+
+    def stop(): Unit = {
+      t.cancel()
+      task.cancel()
+    }
+
+    def sampleResults(): List[Long] =
+      samples.result()
+  }
+
 }

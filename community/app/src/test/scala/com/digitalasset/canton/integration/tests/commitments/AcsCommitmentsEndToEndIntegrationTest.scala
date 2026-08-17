@@ -4,7 +4,10 @@
 package com.digitalasset.canton.integration.tests.commitments
 
 import com.digitalasset.canton.TestPredicateFiltersFixtureAnyWordSpec
+import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.ReinitCommitments.DigestCommitmentReinitializationInfo
+import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters
 import com.digitalasset.canton.annotations.AcsCommitmentTest
+import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.data.Offset
@@ -14,6 +17,7 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
+  HasCycleUtils,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
@@ -23,9 +27,11 @@ import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   CheckpointType,
   InternedParticipantId,
+  allCheckpointsFilter,
 }
+import com.digitalasset.canton.time.NonNegativeSeconds
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseProtocolVersion}
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.syntax.all.*
 import org.slf4j.event.Level
 
@@ -35,14 +41,22 @@ import scala.concurrent.duration.*
 sealed trait AcsCommitmentsEndToEndIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
-    with TestPredicateFiltersFixtureAnyWordSpec {
+    with TestPredicateFiltersFixtureAnyWordSpec
+    with HasCycleUtils {
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
-      .addConfigTransforms(ConfigTransforms.enableNewAcsDigestProcessorPipeline)
+      .addConfigTransforms(
+        ConfigTransforms.disableOldAcsCommitmentProcessor,
+        // Trigger frequent garbage collections so that we can see that they are happening
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.journalGarbageCollectionMinimumGap)
+            .replace(PositiveFiniteDuration.ofSeconds(1))
+        ),
+      )
 
-  "the digest processor creates digests for counterparticipants" onlyRunWithOrGreaterThan ReleaseProtocolVersion.acsCommitmentRedesignStorage.v in {
+  "the digest processor creates digests for counterparticipants" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
     implicit env =>
       import env.*
 
@@ -56,6 +70,8 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       // create parties and a contract using those parties
       val alice = participant1.parties.enable("alice")
       val bob = participant2.parties.enable("bob")
+
+      val pruningBound = participant1.testing.fetch_synchronizer_time(daId)
 
       val iou = IouSyntax.createIou(participant1)(alice, alice, observers = List(bob))
 
@@ -98,47 +114,118 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
           ),
         )
       }
+
+      logger.info(
+        "Check that the journal background collector prunes the ACS even if the legacy commitment processor is disabled"
+      )
+      val p1acsStore = participant1.underlying.value.sync.syncPersistentStateManager
+        .activeContractStore(daId)
+        .value
+      eventually(timeUntilSuccess = 90.seconds) {
+        participant1.health.ping(participant1)
+        val acsPruningStatus = p1acsStore.pruningStatus.futureValueUS
+        acsPruningStatus.value.lastSuccess.value should be >= pruningBound
+      }
   }
 
   // the following test case should only run when the synchronizer actually runs with `ProtocolVersion.acsCommitmentRedesign`,
   // because otherwise a synchronizer parameter change doesn't trigger a checkpoint
-  // TODO(#33326) enable this test, once the synchronizer parametes are properly persisted in the indexer
-  "synchronizer parameter changes trigger a checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign ignore {
+  "synchronizer parameter changes trigger a checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
     implicit env =>
       import env.*
 
-      val beforeSerial =
-        participant1.topology.synchronizer_parameters.list(daId).loneElement.context.serial
+      val beforeParams =
+        participant1.topology.synchronizer_parameters.list(daId).loneElement
 
       var startOffset = Offset.tryFromLong(participant1.ledger_api.state.end())
-      synchronizerOwners1.foreach(
-        _.topology.synchronizer_parameters.propose_update(
-          daId,
-          params =>
-            params.update(reconciliationInterval = params.reconciliationInterval.plusSeconds(1)),
-        )
+      sequencer1.topology.synchronizer_parameters.propose(
+        daId,
+        DynamicSynchronizerParameters(
+          beforeParams.item.update(reconciliationInterval =
+            beforeParams.item.reconciliationInterval.add(NonNegativeSeconds.tryOfSeconds(1))
+          )
+        ),
+        serial = Some(beforeParams.context.serial.increment.value),
       )
 
       val expectedCheckpointTime = eventually() {
         val params = participant1.topology.synchronizer_parameters.list(daId).loneElement
-        params.context.serial shouldEqual beforeSerial.increment
+        params.context.serial shouldBe beforeParams.context.serial.increment.value
         params.context.validFrom
       }
 
-      participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
+      // Create another event that makes it to the digest processor
+      // so that the checkpoint for the reconciliation interval change gets published
+      // TODO(#34918) Check whether this is still needed once indexer checkpoints have been wired.
+      createCycleContract(
+        participant1,
+        participant1.adminParty,
+        "notification after reconciliation interval change",
+      )
+
       val digestStore =
         participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
 
       eventually() {
         // in case there is no next checkpoint, .value will trigger a retry of the eventually loop
         val cp =
-          digestStore.firstCheckpointAfter(startOffset).futureValueUS.value
+          digestStore.firstCheckpointAfter(startOffset, allCheckpointsFilter).futureValueUS.value
 
         // if there was a checkpoint, update the offset to look for the next checkpoint
         startOffset = cp.offset
-        // finally check whether we have reached the checkpoint with the expected checkpoint time
-        cp.recordTime.toInstant shouldBe expectedCheckpointTime
+        // finally check whether we have reached the checkpoint with the expected checkpoint time or later
+        // (as reconciliation checkpoints can be skipped).
+        cp.recordTime.toInstant should be >= expectedCheckpointTime
         cp.checkpointType shouldBe CheckpointType.ReconciliationIntervalBoundary
+      }
+  }
+
+  s"start reinitializing on one participant when running digest processor is active" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    implicit env =>
+      import env.*
+
+      participant1.synchronizers.connect_local(sequencer1, daName)
+      participant2.synchronizers.connect_local(sequencer1, daName)
+      participants.all.dars.upload(CantonExamplesPath)
+
+      val alice = participant1.parties.enable("alice-reinit")
+      val bob = participant2.parties.enable("bob-reinit")
+
+      val iou = IouSyntax.createIou(participant1)(alice, alice, observers = List(bob))
+
+      eventually() {
+        validateDigestAtOffsetOfSharedContract(participant1, participant2, iou.id.contractId)
+      }
+
+      // Kick off reinitialization while running digest processor is active
+      // this command should stop the running digest processor and then once completes, should restart it
+      // on participant1
+      val DigestCommitmentReinitializationInfo(errorOrReinitTimestamp) =
+        participant1.commitments.reinitialize_digest_commitments(daId)
+
+      errorOrReinitTimestamp match {
+        case Right(_) => succeed
+        case Left(err) => fail(s"Reinitialization failed with status: $err")
+      }
+
+      val newIou = IouSyntax.createIou(participant1)(alice, alice, observers = List(bob))
+
+      // Trigger a checkpoint so the running digest processor persists the digest updates
+      // triggered by the new contract
+      participant1.parties.enable("p1-checkpoint-party-trigger-after-reinit")
+
+      participant1.ledger_api.state.acs.of_party(alice).map(_.contractId) should contain(
+        newIou.id.contractId
+      )
+
+      eventually() {
+        participant2.ledger_api.state.acs.of_party(bob).map(_.contractId) should contain(
+          newIou.id.contractId
+        )
+      }
+
+      eventually() {
+        validateDigestAtOffsetOfSharedContract(participant1, participant2, newIou.id.contractId)
       }
   }
 

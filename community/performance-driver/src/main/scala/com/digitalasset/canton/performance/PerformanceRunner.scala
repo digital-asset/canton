@@ -512,9 +512,7 @@ class PerformanceRunner(
     this.active_.set(false)
     val closingResult = Try(
       LifeCycle.close(
-        clock,
-        () => LifeCycle.close(drivers.toSeq*)(logger),
-        () => executionSequencerFactory.close(),
+        clock +: drivers.toSeq :+ executionSequencerFactory
       )(logger)
     )
     logger.info("Terminating actor system of the performance runner")

@@ -12,7 +12,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest.ValidTags
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest.{
+  ValidTags,
+  traceContextForHashBuilder,
+}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.{
@@ -49,8 +52,18 @@ final case class OrderingRequest(
 }
 
 object OrderingRequest {
+
   val ValidTags: Set[String] =
     Set(BlockFormat.AcknowledgeTag, BlockFormat.SendTag)
+
+  def traceContextToProtoString(traceContext: TraceContext): Option[String] =
+    traceContext.asW3CTraceContext.map(_.parent)
+
+  def traceContextFromProtoString(traceContextString: String): TraceContext =
+    TraceContext.fromW3CTraceParent(traceContextString)
+
+  def traceContextForHashBuilder(traceContext: TraceContext): String =
+    traceContext.toString
 }
 
 final case class OrderingRequestBatchStats(requests: Int, bytes: Int) extends PrettyPrinting {
@@ -78,7 +91,7 @@ final case class OrderingRequestBatch private (
     hashBuilder.addLong(epochNumber)
     requests.foreach { request =>
       hashBuilder.addInt(representativeProtocolVersion.representative.toProtoPrimitive)
-      hashBuilder.addString(request.traceContext.toString)
+      hashBuilder.addString(traceContextForHashBuilder(request.traceContext))
       request.value.addToHashBuilder(hashBuilder)
     }
   }
@@ -107,7 +120,7 @@ final case class OrderingRequestBatch private (
       requests.map { orderingRequest =>
         orderingRequestToProtoV30(
           orderingRequest.value,
-          orderingRequest.traceContext.asW3CTraceContext.map(_.parent),
+          OrderingRequest.traceContextToProtoString(orderingRequest.traceContext),
         )
       },
       epochNumber,
@@ -149,7 +162,7 @@ object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
               protoOrderingRequest.payload,
               protoOrderingRequest.orderingStartInstant.map(_.asJavaInstant),
             ),
-            TraceContext.fromW3CTraceParent(protoOrderingRequest.traceContext),
+            OrderingRequest.traceContextFromProtoString(protoOrderingRequest.traceContext),
           )
         )
       },

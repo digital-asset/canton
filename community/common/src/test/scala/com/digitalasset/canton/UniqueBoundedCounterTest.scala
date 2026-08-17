@@ -134,7 +134,7 @@ class UniqueBoundedCounterTest
     }
 
     // Wait long enough; may run slower when run with other tests concurrently
-    Await.result(Future.sequence(futures), 3.minutes)
+    Await.result(Future.sequence(futures), 5.minutes)
 
     val finalValue = counter.get()
     finalValue.success.value should be(startValue + totalIncrements)

@@ -19,7 +19,7 @@ import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.base.error.{DamlErrorWithDefiniteAnswer, RpcError}
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
-import com.digitalasset.canton.http.json.v2.JsSchema.JsEvent.{CreatedEvent, ExercisedEvent}
+import com.digitalasset.canton.http.json.v2.JsSchema.JsEvent.CreatedEvent
 import com.google.protobuf
 import com.google.protobuf.ByteString
 import com.google.protobuf.field_mask.FieldMask
@@ -123,18 +123,6 @@ object JsSchema {
       transactionHash: Option[String],
   )
 
-  final case class JsTransactionTree(
-      updateId: String,
-      commandId: String,
-      workflowId: String,
-      effectiveAt: protobuf.timestamp.Timestamp,
-      offset: Long,
-      eventsById: Map[Int, JsTreeEvent.TreeEvent],
-      synchronizerId: String,
-      traceContext: Option[TraceContext],
-      recordTime: protobuf.timestamp.Timestamp,
-  )
-
   final case class JsInterfaceView(
       interfaceId: Identifier,
       viewStatus: com.google.rpc.status.Status,
@@ -200,8 +188,6 @@ object JsSchema {
       deriveRelaxedCodec
 
     implicit val filtersRW: Codec[transaction_filter.Filters] = deriveRelaxedCodec
-    implicit val transactionFilterLegacyRW: Codec[LegacyDTOs.TransactionFilter] =
-      deriveRelaxedCodec
     implicit val eventFormatRW: Codec[transaction_filter.EventFormat] = deriveRelaxedCodec
 
     implicit val transactionShapeEncoder: Encoder[TransactionShape] =
@@ -329,14 +315,6 @@ object JsSchema {
         implementedInterfaces: Seq[Identifier],
         acsDelta: Boolean,
     ) extends Event
-  }
-
-  object JsTreeEvent {
-    sealed trait TreeEvent
-
-    final case class CreatedTreeEvent(value: CreatedEvent) extends TreeEvent
-
-    final case class ExercisedTreeEvent(value: ExercisedEvent) extends TreeEvent
   }
 
   final case class JsCantonError(
@@ -479,14 +457,6 @@ object JsSchema {
 
     implicit val jsInterfaceView: Codec[JsInterfaceView] = deriveConfiguredCodec
 
-    implicit val jsTransactionTree: Codec[JsTransactionTree] = deriveConfiguredCodec
-
-    implicit val jsSubmitAndWaitForTransactionTreeResponse
-        : Codec[JsSubmitAndWaitForTransactionTreeResponse] = deriveConfiguredCodec
-    implicit val jsTreeEvent: Codec[JsTreeEvent.TreeEvent] = deriveConfiguredCodec
-    implicit val jsExercisedTreeEvent: Codec[JsTreeEvent.ExercisedTreeEvent] = deriveConfiguredCodec
-    implicit val jsCreatedTreeEvent: Codec[JsTreeEvent.CreatedTreeEvent] = deriveConfiguredCodec
-
     implicit val offsetCheckpoint: Codec[offset_checkpoint.OffsetCheckpoint] = deriveRelaxedCodec
     implicit val offsetCheckpointSynchronizerTime: Codec[offset_checkpoint.SynchronizerTime] =
       deriveRelaxedCodec
@@ -623,16 +593,6 @@ object JsSchema {
     @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
     implicit val jsEventSchema: Schema[JsEvent.Event] =
       Schema.oneOfWrapped[JsEvent.Event].oneOfExtension()
-
-    @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
-    implicit val jsTreeEventSchema: Schema[JsTreeEvent.TreeEvent] =
-      Schema.oneOfWrapped[JsTreeEvent.TreeEvent].oneOfExtension()
-
-    implicit val eventsByIdSchema: Schema[Map[Int, JsTreeEvent.TreeEvent]] =
-      Schema.schemaForMap[Int, JsTreeEvent.TreeEvent](_.toString)
-
-    implicit val jsTransactionTreeSchema: Schema[JsTransactionTree] =
-      Schema.derived
 
     implicit val valueSchema: Schema[com.google.protobuf.struct.Value] = Schema.any
 

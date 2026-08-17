@@ -265,39 +265,37 @@ private[lf] object Pretty {
         }
       case Dev(_, error) =>
         error match {
-          case Dev.Conformance(provided, recomputed, details) =>
-            text(
-              s"""Contract Conformance fails ($details):
-                 | provided create:  $provided
-                 | recomputed create: $recomputed
-                 |""".stripMargin
-            )
           case Dev.Limit(error) =>
             error match {
               case Dev.Limit.ContractSignatories(
                     cid @ _,
                     templateId,
-                    arg @ _,
                     signatories,
                     limit,
                   ) =>
                 text(
                   s"Create Fetch or exercise a Contract of type $templateId with ${signatories.size} signatories but the limit is $limit"
                 )
-              case Dev.Limit.ContractObservers(cid @ _, templateId, arg @ _, observers, limit) =>
-                text(
-                  s"Create Fetch or exercise a Contract of type $templateId  ${observers.size} observes but the limit is $limit"
-                )
-              case Dev.Limit.ChoiceControllers(
+              case Dev.Limit.ContractStakeholders(
                     cid @ _,
                     templateId,
-                    choiceName,
-                    arg @ _,
-                    controllers,
+                    stakeholders,
                     limit,
                   ) =>
                 text(
-                  s"Exercise the choice $templateId:$choiceName with ${controllers.size} controllers but the limit is $limit"
+                  s"Create Fetch or exercise a Contract of type $templateId  ${stakeholders.size} stakeholders but the limit is $limit"
+                )
+              case Dev.Limit.KeyMaintainers(ref @ _, templateId, maintainers, limit) =>
+                text(
+                  s"Create Fetch or exercise a Contract of type $templateId with ${maintainers.size} key maintainers but the limit is $limit"
+                )
+              case Dev.Limit.ValueSize(ref @ _, templateId @ _, value @ _, limit) =>
+                text(
+                  s"Value exceeds maximum size of $limit"
+                )
+              case Dev.Limit.ActingParties(cid @ _, templateId, actingParties, limit) =>
+                text(
+                  s"Fetch or exercise a Contract of type $templateId with ${actingParties.size} acting parties but the limit is $limit"
                 )
               case Dev.Limit.ChoiceObservers(
                     cid @ _,
@@ -321,17 +319,45 @@ private[lf] object Pretty {
                 text(
                   s"Exercise the choice $templateId:$choiceName with ${authorizers.size} authorizers but the limit is $limit"
                 )
+              case Dev.Limit.ExternalCallResults(
+                    cid @ _,
+                    templateId @ _,
+                    choiceName @ _,
+                    arg @ _,
+                    externalCallResults,
+                    limit,
+                  ) =>
+                text(
+                  s"External call result with ${externalCallResults.length} results but the limit is $limit"
+                )
+              case Dev.Limit.ExternalCallResultSize(
+                    cid @ _,
+                    templateId @ _,
+                    choiceName @ _,
+                    arg @ _,
+                    externalCallResult @ _,
+                    limit,
+                  ) =>
+                text(s"External call result size exceeds $limit")
+              case Dev.Limit.NodeChildren(
+                    cid @ _,
+                    templateId @ _,
+                    choiceName @ _,
+                    arg @ _,
+                    limit,
+                  ) =>
+                text(s"Transaction node exceeds maximum child node number of $limit")
+              case Dev.Limit.QueryResult(templateId @ _, key @ _, result, limit) =>
+                text(s"Query result size with ${result.size} results but the limit is $limit")
               case Dev.Limit.TransactionInputContracts(limit) =>
                 text(s"Transaction exceeds maximum input contract number of $limit")
+              case Dev.Limit.TransactionRoots(limit) =>
+                text(s"Transaction exceeds maximum root node number of $limit")
+              case Dev.Limit.TransactionNodes(limit) =>
+                text(s"Transaction exceeds maximum node number of $limit")
+              case Dev.Limit.TotalInformees(limit) =>
+                text(s"Total informees in a transaction exceeds $limit")
             }
-          case Dev.ChoiceGuardFailed(cid, templateId, choiceName, byInterface) =>
-            text(s"Choice guard failed for") & prettyTypeConId(templateId) &
-              text(s"contract") & prettyContractId(cid) &
-              text(s"when exercising choice $choiceName") &
-              (byInterface match {
-                case None => text("by template")
-                case Some(interfaceId) => text("by interface") & prettyTypeConId(interfaceId)
-              })
           case Dev.Cost(Dev.Cost.BudgetExceeded(cause)) =>
             text("Cost budget has been exceeded:") /
               text(cause)

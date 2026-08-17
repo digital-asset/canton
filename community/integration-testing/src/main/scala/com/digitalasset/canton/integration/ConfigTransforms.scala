@@ -38,11 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
-import com.digitalasset.canton.version.{
-  ParticipantProtocolVersion,
-  ProtocolVersion,
-  ReleaseProtocolVersion,
-}
+import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
@@ -149,12 +145,29 @@ object ConfigTransforms {
     ),
   )
 
-  lazy val enableNewAcsDigestProcessorPipeline: ConfigTransform =
+  lazy val enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev: ConfigTransform =
     updateAllParticipantConfigs_(
       _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor)
         .replace(
-          BaseTest.testedProtocolVersion >= ReleaseProtocolVersion.acsCommitmentRedesignStorage.v
+          BaseTest.testedProtocolVersion >= ProtocolVersion.acsCommitmentRedesign
         )
+    )
+
+  lazy val disableNewAcsCommitmentProcessorPipeline: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(false)
+    )
+
+  lazy val disableOldAcsCommitmentProcessor: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
+        .replace(true)
+    )
+
+  def setAcsCommitmentSendDelay(min: Double, max: Double): ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.sender)
+        .modify(_.copy(minSendDelayFraction = min, maxSendDelayFraction = max))
     )
 
   lazy val enableInteractiveSubmissionTransforms: ConfigTransform =
@@ -331,6 +344,8 @@ object ConfigTransforms {
             SessionSigningKeysConfig.enabled
           else SessionSigningKeysConfig.disabled
         ),
+        ConfigTransforms.setAcsCommitmentSendDelay(0.0d, 0.0d),
+        enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev,
       ) ++
       enableTrafficAccountingForExternalPartiesTests
 

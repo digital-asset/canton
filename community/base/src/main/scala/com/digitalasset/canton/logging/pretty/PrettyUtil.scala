@@ -165,6 +165,11 @@ trait PrettyUtil {
     * </ul>
     */
   def adHocPrettyInstance[T <: Product](implicit c: ClassTag[T]): Pretty[T] =
+    adHocPrettyInstanceShowingFieldNames(Pretty.DefaultShowFieldNames)
+
+  private def adHocPrettyInstanceShowingFieldNames[T <: Product](
+      showFieldNames: Boolean
+  )(implicit c: ClassTag[T]): Pretty[T] =
     // Need to restrict to Product subtypes as the Walker cannot faithfully deal with arbitrary types.
     new Walker {
       override def additionalHandlers: PartialFunction[Any, Tree] = {
@@ -174,8 +179,31 @@ trait PrettyUtil {
     }.treeify(
       _,
       escapeUnicode = Pretty.DefaultEscapeUnicode,
-      showFieldNames = Pretty.DefaultShowFieldNames,
+      showFieldNames = showFieldNames,
     )
+
+  /** Like [[adHocPrettyInstance]], except the name of the class is replaced by the given one and
+    * field names can be enabled by setting the `showFieldNames`.
+    *
+    * Useful for classes whose name does not identify them, e.g. errors declared as `object
+    * SomeFailure extends ErrorCode(...) { final case class Error(...) }`, which all print as
+    * `Error(...)` and can be given their error code id as name instead: `SOME_FAILURE(details =
+    * "...")`.
+    *
+    * Inherits the drawbacks of [[adHocPrettyInstance]].
+    */
+  def adHocPrettyInstanceWithName[T <: Product: ClassTag](
+      name: T => String,
+      showFieldNames: Boolean = false,
+  ): Pretty[T] = {
+    val underlying = adHocPrettyInstanceShowingFieldNames[T](showFieldNames)
+    inst =>
+      underlying.treeOf(inst) match {
+        case Tree.Apply(_, body) => Tree.Apply(name(inst), body)
+        // arity-0 products and the like are rendered as a literal, which we replace wholesale
+        case _ => treeOfString(name(inst))
+      }
+  }
 }
 
 object PrettyUtil extends PrettyUtil {

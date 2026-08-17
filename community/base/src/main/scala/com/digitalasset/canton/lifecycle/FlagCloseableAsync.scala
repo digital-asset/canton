@@ -21,7 +21,7 @@ trait FlagCloseableAsync extends FlagCloseable {
     */
   protected def closeAsync(): Seq[AsyncOrSyncCloseable]
 
-  final override def onClosed(): Unit = LifeCycle.close(closeAsync()*)(logger)
+  final override def onClosed(): Unit = LifeCycle.close(closeAsync())(logger)
 }
 
 trait AsyncOrSyncCloseable extends AutoCloseable

@@ -8,6 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, Party, QualifiedName}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Versioned
@@ -63,7 +64,7 @@ class InterfaceViewSpec(majorLanguageVersion: LanguageVersion.Major)
   def computeView(templateId: Identifier, argument: Value, interfaceId: Identifier) =
     engine
       .computeInterfaceView(templateId, argument, interfaceId)
-      .consume(PartialFunction.empty, allPackages)
+      .consume(lookupHandler(PartialFunction.empty, allPackages))
 
   private val t1 = id("T1")
   private val t2 = id("T2")

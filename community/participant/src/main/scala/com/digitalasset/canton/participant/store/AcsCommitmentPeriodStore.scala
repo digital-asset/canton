@@ -19,7 +19,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
-import com.digitalasset.canton.store.PrunableByTime
+import com.digitalasset.canton.store.{PrunableByTime, Purgeable}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.IterableUtil
 import com.digitalasset.canton.util.{
@@ -40,7 +40,8 @@ import scala.collection.immutable
 /** Stores the matching state for all periods for which the participant expects to receive
   * commitments from counterparticipants.
   */
-trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
+trait AcsCommitmentPeriodStore extends PrunableByTime with AutoCloseable with Purgeable {
+  this: NamedLogging =>
   import AcsCommitmentPeriodStore.*
 
   protected def stringInterning: StringInterning
@@ -83,46 +84,30 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
       traceContext: TraceContext
   ): FutureUnlessShutdown[immutable.Iterable[MatchedCommitmentMatchPeriod]]
 
-  /** Returns the watermarks. */
-  def watermarks()(implicit
+  /** Returns the watermark. */
+  def watermark()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[MatchingWatermark]
-
-  /** Increases the watermarks that separate insertion from matching. Does nothing if the watermarks
-    * are already higher.
-    *
-    * Must not execute concurrently with [[markOutstanding]].
-    *
-    * @param affirmationOnly
-    *   If true, only the affirmation watermark is increased.
-    */
-  def increaseInsertionWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
 
   /** Increases the watermark for the
     * [[com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentMatcher]]. Does nothing
     * if the watermark is already higher.
     */
-  def increaseMatcherWatermark(offset: Offset)(implicit
+  def increaseWatermark(offset: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
-  /** Inserts the hashed digests for the participants into the store. If a
+  /** Inserts the hashed digests for the participants into the store. The
     * [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.CommitmentMatchPeriod.toInclusive]]
-    * timestamp is at or below the
-    * [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.MatchingWatermark.affirmation]],
-    * the entry is skipped. Otherwise,
+    * timestamps must be after
+    * [[com.digitalasset.canton.participant.store.AcsDigestStore.latestTickCheckpoint]] and
     * [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.CommitmentMatchPeriod.fromExclusive]]
-    * is modified to be at least the
-    * [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.MatchingWatermark.reconciliation]]
-    * watermark prior to insertion.
+    * must be at least
+    * [[com.digitalasset.canton.participant.store.AcsDigestStore.latestReconciliationCheckpoint]].
     *
     * If multiple updates for the same participant are given, the caller must ensure that the
-    * periods do not overlap. The caller must also ensure that the shortened periods do not overlap
-    * with any existing row.
-    *
-    * Must not execute concurrently with [[increaseInsertionWatermark]].
+    * periods do not overlap. The caller must also ensure that the periods do not overlap with any
+    * existing row.
     */
   def markOutstanding(digests: immutable.Iterable[OutstandingCommitmentMatchPeriod])(implicit
       traceContext: TraceContext
@@ -130,8 +115,8 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
 
   /** Atomically performs the given deletions and insertions on the outstanding, mismatched, and
     * matched. All timestamps must be at or below the
-    * [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.MatchingWatermark.affirmation]]
-    * watermark. A period is called unexpected if it is mismatched without a hashed digest.
+    * [[com.digitalasset.canton.participant.store.AcsDigestStore.latestTickCheckpoint]] watermark. A
+    * period is called unexpected if it is mismatched without a hashed digest.
     *
     * The deletions and insertions must constitute a set of valid transitions. In particular, for
     * every participant ID:
@@ -174,6 +159,9 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
 
   /** Checks the consistency of the arguments for [[persistMatchingOutcome]]. This method is not
     * efficient and should not be run in performance-critical production deployments.
+    *
+    * Does not check the affirmation checkpoint bound because this checkpoint belongs to a different
+    * store.
     */
   protected def checkPersistMatchingOutcomeArgumentConsistency(
       deleteOutstanding: immutable.Iterable[OutstandingCommitmentMatchPeriod],
@@ -370,23 +358,18 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
 
   /** Checks the store invariant:
     *
-    *   - The
-    *     [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.MatchingWatermark.affirmation]]
-    *     watermark is at least the
-    *     [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.MatchingWatermark.reconciliation]]
-    *     watermark.
     *   - Periods in outstanding, mismatched, and matched are pairwise disjoint for each
     *     participant.
     *   - [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.CommitmentMatchPeriod.toInclusive]]
-    *     in mismatched and matched rows is at most the
-    *     [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.MatchingWatermark.affirmation]]
-    *     watermark.
+    *     in mismatched and matched rows is at most the affirmation watermark if given.
     *   - For all stored periods,
     *     [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.CommitmentMatchPeriod.fromExclusive]]
     *     is less than
     *     [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.CommitmentMatchPeriod.toInclusive]].
     */
-  def checkInvariant()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  def checkInvariant(affirmationWatermark: Option[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
 
   /** Deletes all rows from outstanding whose
     * [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.CommitmentMatchPeriod.toInclusive]]
@@ -410,32 +393,17 @@ trait AcsCommitmentPeriodStore extends PrunableByTime { this: NamedLogging =>
 
 object AcsCommitmentPeriodStore {
   final case class MatchingWatermark(
-      reconciliation: CantonTimestamp,
-      affirmation: CantonTimestamp,
-      matching: Option[Offset],
+      matching: Option[Offset]
   ) {
-    def bump(timestamp: CantonTimestamp, affirmationOnly: Boolean): MatchingWatermark =
-      if (affirmationOnly) {
-        copy(affirmation = affirmation.max(timestamp))
-      } else {
-        copy(
-          reconciliation = reconciliation.max(timestamp),
-          affirmation = affirmation.max(timestamp),
-        )
-      }
-
     def bump(matching: Offset): MatchingWatermark =
       if (this.matching.forall(_ < matching)) copy(matching = Some(matching)) else this
   }
   object MatchingWatermark {
-    val initial: MatchingWatermark =
-      MatchingWatermark(CantonTimestamp.MinValue, CantonTimestamp.MinValue, None)
+    val initial: MatchingWatermark = MatchingWatermark(None)
 
     implicit val getResultMatchingWatermark: GetResult[MatchingWatermark] = GetResult { r =>
-      val reconciliation = r.<<[CantonTimestamp]
-      val affirmation = r.<<[CantonTimestamp]
-      val matching = r.<<[Option[Offset]]
-      MatchingWatermark(reconciliation, affirmation, matching)
+      val matching = r.<<[Offset]
+      MatchingWatermark(Some(matching))
     }
   }
 

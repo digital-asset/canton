@@ -12,7 +12,9 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Pruning.*
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.ReinitCommitments.{
   CommitmentReinitializationInfo,
+  DigestCommitmentReinitializationInfo,
   ReinitializeCommitments,
+  ReinitializeDigestCommitments,
 }
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Resources.{
   GetResourceLimits,
@@ -1595,6 +1597,37 @@ class CommitmentsAdministrationGroup(
       )
     )
   )
+
+  @Help.Summary(
+    "Reinitializes ACS digests from current ACS for the given synchronizer"
+  )
+  @Help.Description(
+    """Reinitializes the ACS digest for the given synchronizer
+      |on this participant and then - depending on the flag - starts/continues
+      |the running digest processor.
+      |Useful for recovering when participant commitments have become corrupted.
+      |
+      |Default for `runningDigestProcessorShouldStartAfter` is true.
+      |If it is `false`, the running digest processor is not started after the
+      |reinitialization.
+      |
+      |If reinitialization is already in progress for the synchronizer, resubmitting
+      |this command joins the ongoing run and awaits its completion.
+      |
+      |Returns the completed reinitialization status timestamp or error."""
+  )
+  def reinitialize_digest_commitments(
+      synchronizerId: SynchronizerId,
+      runningDigestProcessorShouldStartAfter: Boolean = true,
+  ): DigestCommitmentReinitializationInfo =
+    consoleEnvironment.run(
+      runner.adminCommand(
+        ReinitializeDigestCommitments(
+          synchronizerId,
+          runningDigestProcessorShouldStartAfter,
+        )
+      )
+    )
 
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
   private implicit val ec: ExecutionContext = consoleEnvironment.environment.executionContext

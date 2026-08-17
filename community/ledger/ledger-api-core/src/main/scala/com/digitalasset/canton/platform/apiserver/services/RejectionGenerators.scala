@@ -85,6 +85,8 @@ object RejectionGenerators {
     def processValidationError(err: LfError.Validation.Error): RpcError = err match {
       // we shouldn't see such errors during submission
       case e: Validation.ReplayMismatch => LedgerApiErrors.InternalError.Validation(e)
+
+      case e: Validation.TransactionLimitExceeded => LedgerApiErrors.InternalError.Validation(e)
     }
 
     def processDamlException(

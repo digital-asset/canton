@@ -413,7 +413,7 @@ class GrpcInternalSequencerConnection private[sequencing] (
 
   override def onClosed(): Unit = {
     val toClose = userConnectionRef.get.toList :+ validationLimiter
-    LifeCycle.close(toClose*)(logger)
+    LifeCycle.close(toClose)(logger)
   }
 
   override protected def pretty: Pretty[GrpcInternalSequencerConnection] =

@@ -484,15 +484,17 @@ object Update {
       updateId: UpdateId,
       reassignmentInfo: ReassignmentInfo,
       reassignment: Reassignment.Batch,
-      repairCounter: RepairCounter,
       recordTime: CantonTimestamp,
+      watermark: IndexingWatermark,
       override val synchronizerId: SynchronizerId,
       acsChangeFactory: AcsChangeFactory,
   )(implicit override val traceContext: TraceContext)
       extends ReassignmentAccepted
-      with RepairUpdate
       with AcsChangeSequencedUpdate {
     override def optCompletionInfo: Option[CompletionInfo] = None
+
+    override def synchronizerIndex: SynchronizerIndex =
+      SynchronizerIndex.forFloatingUpdate(recordTime)
 
     override protected def pretty: Pretty[OnPRReassignmentAccepted] =
       OnPRReassignmentAccepted.pretty
@@ -502,7 +504,7 @@ object Update {
     val pretty: Pretty[OnPRReassignmentAccepted] =
       prettyOfClass(
         param("recordTime", _.recordTime),
-        param("repairCounter", _.repairCounter),
+        param("watermark", _.watermark),
         param("updateId", _.updateId.tryAsLedgerTransactionId),
         paramIfDefined("completion", _.optCompletionInfo),
         param("source", _.reassignmentInfo.sourceSynchronizer),

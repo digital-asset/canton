@@ -17,6 +17,8 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   AtMostOnePhysicalActive,
   ConfigAlreadyExists,
   ConfigIdentifier,
+  HardMigratingSource,
+  HardMigratingTarget,
   Inactive,
   InconsistentLogicalSynchronizerIds,
   InconsistentPredecessorLogicalSynchronizerIds,
@@ -148,6 +150,10 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
   private val daStable = PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.latest)
   private val daBeta =
     PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.parseUnchecked(3444))
+  private val daAlpha =
+    PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.alpha.last)
+  private val daAlpha1 =
+    PhysicalSynchronizerId(daId, NonNegativeInt.one, ProtocolVersion.alpha.last)
   private val daDev = PhysicalSynchronizerId(daId, NonNegativeInt.zero, ProtocolVersion.dev)
   private val daName = SynchronizerAlias.tryCreate("da")
 
@@ -1034,6 +1040,191 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           )
 
         } yield succeed
+      }
+
+      "getActiveAt return the synchronizer at the given timestamp" in {
+        val predecessor1 = SynchronizerPredecessor(
+          psid = daStable,
+          upgradeTime = CantonTimestamp.ofEpochSecond(10),
+          isLateUpgrade = false,
+        )
+        val predecessor1a = SynchronizerPredecessor(
+          psid = daStable,
+          upgradeTime = CantonTimestamp.ofEpochSecond(20),
+          isLateUpgrade = false,
+        )
+        val predecessor2 = SynchronizerPredecessor(
+          psid = daAlpha1,
+          upgradeTime = CantonTimestamp.ofEpochSecond(60),
+          isLateUpgrade = false,
+        )
+
+        for {
+          sut <- mk
+          unknown = sut.getActiveAt(daId, CantonTimestamp.Epoch)
+
+          _ <- sut
+            .put(getConfig(daStable), Inactive, KnownPhysicalSynchronizerId(daStable), None)
+            .valueOrFail("put daStable")
+          daStableInactive = sut.getActiveAt(daId, CantonTimestamp.Epoch)
+
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daStable), Active)
+            .valueOrFail("set active da Unknown")
+          daStableActive = sut
+            .getActiveAt(daId, CantonTimestamp.Epoch)
+            .value
+
+          _ <- sut
+            .put(
+              getConfig(daAlpha),
+              LsuTarget,
+              KnownPhysicalSynchronizerId(daAlpha),
+              Some(predecessor1),
+            )
+            .valueOrFail("put da alpha")
+
+          daStableActive2 = sut.getActiveAt(daId, CantonTimestamp.Epoch).value
+          daAlphaNotActive2 = sut.getActiveAt(daId, predecessor1.upgradeTime.immediateSuccessor)
+
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daStable), LsuSource)
+            .valueOrFail("set status stable source")
+          daStableSource3 = sut.getActiveAt(daId, CantonTimestamp.Epoch).value
+          daAlphaNotActive3 = sut.getActiveAt(daId, predecessor1.upgradeTime.immediateSuccessor)
+
+          // Abort the LSU to daAlpha and try again with daAlpha1
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daAlpha), Inactive)
+            .valueOrFail("set status alpha inactive")
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daStable), Active)
+            .valueOrFail("set status stable active again")
+          daStableActive4 = sut.getActiveAt(daId, predecessor1.upgradeTime.plusSeconds(1)).value
+          _ <- sut
+            .put(
+              getConfig(daAlpha1),
+              LsuTarget,
+              KnownPhysicalSynchronizerId(daAlpha1),
+              Some(predecessor1a),
+            )
+            .valueOrFail("put daAlpha1")
+
+          daStableActive5 = sut.getActiveAt(daId, predecessor1a.upgradeTime).value
+          daAlpha1NotActive5 = sut.getActiveAt(daId, predecessor1a.upgradeTime.immediateSuccessor)
+
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daStable), LsuSource)
+            .valueOrFail("set status stable source again")
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daAlpha1), Active)
+            .valueOrFail("set status alpha1 active")
+          daStableSource6 = sut.getActiveAt(daId, predecessor1a.upgradeTime).value
+          daAlpha1Active6 = sut
+            .getActiveAt(daId, predecessor1a.upgradeTime.immediateSuccessor)
+            .value
+
+          _ <- sut
+            .put(
+              getConfig(daDev),
+              LsuTarget,
+              KnownPhysicalSynchronizerId(daDev),
+              Some(predecessor2),
+            )
+            .valueOrFail("put dev target")
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daAlpha1), LsuSource)
+            .valueOrFail("set status alpha1 source")
+          daStableSource7 = sut.getActiveAt(daId, predecessor1a.upgradeTime).value
+          daAlpha1Source7 = sut.getActiveAt(daId, predecessor2.upgradeTime).value
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daDev), Active)
+            .valueOrFail("set status dev active")
+          daStableSource8 = sut.getActiveAt(daId, predecessor1a.upgradeTime).value
+          daAlpha1Source8 = sut.getActiveAt(daId, predecessor2.upgradeTime).value
+          daDevActive8 = sut.getActiveAt(daId, predecessor2.upgradeTime.immediateSuccessor).value
+
+          // Now simulate a hard migration to acme
+          _ <- sut
+            .put(
+              getConfig(acmeStable),
+              HardMigratingTarget,
+              KnownPhysicalSynchronizerId(acmeStable),
+              None,
+            )
+            .valueOrFail("put acme")
+          _ <- sut
+            .setStatus(acmeName, KnownPhysicalSynchronizerId(acmeStable), Active)
+            .valueOrFail("set status acme active")
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daDev), HardMigratingSource)
+            .valueOrFail("set status dev source")
+          daStableSource9 = sut.getActiveAt(daId, predecessor1a.upgradeTime).value
+          daAlpha1Source9 = sut.getActiveAt(daId, predecessor2.upgradeTime).value
+          daDevSource9 = sut.getActiveAt(daId, predecessor2.upgradeTime.immediateSuccessor).value
+
+          // Once the hard domain migration is over, the migrated-off synchronizer is inactive
+          _ <- sut
+            .setStatus(daName, KnownPhysicalSynchronizerId(daDev), Inactive)
+            .valueOrFail("set status dev inactive")
+          daStableInactive10 = sut.getActiveAt(daId, predecessor1a.upgradeTime)
+          daAlpha1Inactive10 = sut.getActiveAt(daId, predecessor2.upgradeTime)
+          daDevInactive10 = sut.getActiveAt(daId, predecessor2.upgradeTime.immediateSuccessor)
+        } yield {
+          unknown shouldBe Left(UnknownAlias(daName))
+          daStableInactive shouldBe Left(NoActiveSynchronizer(daName))
+          daStableActive shouldBe StoredSynchronizerConnectionConfig(
+            getConfig(daStable),
+            Active,
+            KnownPhysicalSynchronizerId(daStable),
+            None,
+          )
+          daStableActive2 shouldBe daStableActive
+          daAlphaNotActive2 shouldBe Left(NoActiveSynchronizer(daName))
+          daStableSource3 shouldBe StoredSynchronizerConnectionConfig(
+            getConfig(daStable),
+            LsuSource,
+            KnownPhysicalSynchronizerId(daStable),
+            None,
+          )
+          daAlphaNotActive3 shouldBe Left(NoActiveSynchronizer(daName))
+          daStableActive4 shouldBe daStableActive
+          daStableActive5 shouldBe daStableActive
+          daAlpha1NotActive5 shouldBe Left(NoActiveSynchronizer(daName))
+          daStableSource6 shouldBe daStableSource3
+          daAlpha1Active6 shouldBe StoredSynchronizerConnectionConfig(
+            getConfig(daAlpha1),
+            Active,
+            KnownPhysicalSynchronizerId(daAlpha1),
+            Some(predecessor1a),
+          )
+          daStableSource7 shouldBe daStableSource3
+          daAlpha1Source7 shouldBe StoredSynchronizerConnectionConfig(
+            getConfig(daAlpha1),
+            LsuSource,
+            KnownPhysicalSynchronizerId(daAlpha1),
+            Some(predecessor1a),
+          )
+          daStableSource8 shouldBe daStableSource3
+          daAlpha1Source8 shouldBe daAlpha1Source7
+          daDevActive8 shouldBe StoredSynchronizerConnectionConfig(
+            getConfig(daDev),
+            Active,
+            KnownPhysicalSynchronizerId(daDev),
+            Some(predecessor2),
+          )
+          daStableSource9 shouldBe daStableSource3
+          daAlpha1Source9 shouldBe daAlpha1Source7
+          daDevSource9 shouldBe StoredSynchronizerConnectionConfig(
+            getConfig(daDev),
+            HardMigratingSource,
+            KnownPhysicalSynchronizerId(daDev),
+            Some(predecessor2),
+          )
+          daStableInactive10 shouldBe Left(NoActiveSynchronizer(daName))
+          daAlpha1Inactive10 shouldBe Left(NoActiveSynchronizer(daName))
+          daDevInactive10 shouldBe Left(NoActiveSynchronizer(daName))
+        }
       }
     }
 

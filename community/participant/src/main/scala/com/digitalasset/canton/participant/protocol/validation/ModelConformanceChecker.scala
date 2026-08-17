@@ -23,11 +23,14 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
   GetEngineAbortStatus,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.CommonData
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
   ContractLookupError,
   TransactionTreeConversionError,
+}
+import com.digitalasset.canton.participant.protocol.submission.{
+  TransactionTreeFactory,
+  UsableSynchronizers,
 }
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.*
 import com.digitalasset.canton.participant.store.{ContractLookup, ReplayContractLookup}
@@ -54,8 +57,10 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, MonadUtil, RoseTree}
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.canton.{LfPartyId, checked}
+import com.digitalasset.canton.{LfPackageId, LfPartyId, checked}
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
+import com.digitalasset.daml.lf.data.Relation
+import com.digitalasset.daml.lf.engine.Blinding
 import com.digitalasset.daml.lf.value.GenValue
 import com.digitalasset.nonempty.NonEmpty
 
@@ -101,6 +106,7 @@ class ModelConformanceChecker(
       commonData: CommonData,
       getEngineAbortStatus: GetEngineAbortStatus,
       reInterpretedTopLevelViews: LazyAsyncReInterpretationMap,
+      hostedOnboardingPartiesO: Option[HostedOnboardingParties],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction[ViewEffect], Result] = {
@@ -115,36 +121,6 @@ class ModelConformanceChecker(
     val (headViewTree, _) = rootViewTrees.head1
     val mediator = headViewTree.mediator
     val transactionUuid = headViewTree.transactionUuid
-
-    def checkSubviewPackageVetting(): FutureUnlessShutdown[Seq[Error]] = {
-      val childViews = rootViewTrees.forgetNE.flatMap { case (rootView, _) =>
-        rootView.view.subviews.unblindedElements.flatMap(_.allSubviews.preorder)
-      }
-
-      MonadUtil
-        .parTraverseWithLimit(parallelism)(childViews) { view =>
-          (for {
-            interpretationResult <- reInterpret(
-              view,
-              ledgerTime,
-              preparationTime,
-              getEngineAbortStatus,
-              topologySnapshot,
-            )
-
-            _ <- checkPackageVetting(
-              view,
-              topologySnapshot,
-              interpretationResult.reInterpretationResult.usedPackages,
-              ledgerTime,
-              protocolVersion,
-            )
-          } yield {
-            ()
-          }).value.map(_.swap.toOption)
-        }
-        .map(_.flatten)
-    }
 
     def findValidSubtransactions(
         views: Seq[
@@ -231,20 +207,22 @@ class ModelConformanceChecker(
 
       errorsAndViewTxs <- findValidSubtransactions(rootViewsWithInfo)
 
-      subviewPackageVettingErrors <-
-        if (protocolVersion >= ProtocolVersion.v36)
-          checkSubviewPackageVetting()
-        else FutureUnlessShutdown.pure(Seq.empty)
-
     } yield {
       val (errors, viewsTxs) = errorsAndViewTxs
-      val (_, effects, txs) = viewsTxs.unzip3
+      val (_, effects, unmergedTransactions) = viewsTxs.unzip3
+
+      // Filter out transaction nodes only relevant to onboarding parties on this participant
+      val txs = hostedOnboardingPartiesO.fold(unmergedTransactions)(hostedOnboardingParties =>
+        unmergedTransactions.map(
+          WellFormedTransaction.projectOutOnboardingTransactionNodes(_, hostedOnboardingParties)
+        )
+      )
 
       val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(transactionMerge.merge(_)).separate
       val mergeErrorO = mergeErrorOO.flatten.map(MergeError.apply)
 
       NonEmpty.from(
-        errors ++ subviewPackageVettingErrors ++ mergeErrorO ++ conflictingStoredContractErrors
+        errors ++ mergeErrorO ++ conflictingStoredContractErrors
       ) match {
         case None =>
           wftxO match {
@@ -405,13 +383,12 @@ class ModelConformanceChecker(
         _,
       ) = lfTxAndMetadata
 
-      _ <- checkPackageVetting(
-        view,
-        topologySnapshot,
-        usedPackages,
-        metadata.ledgerTime,
-        protocolVersion,
-      )
+      _ <-
+        if (protocolVersion >= ProtocolVersion.v36) {
+          checkTxPackageVetting(topologySnapshot, lfTx, metadata.ledgerTime)
+        } else {
+          checkViewPackageVetting(view, topologySnapshot, usedPackages, metadata.ledgerTime)
+        }
 
       wfTx <- EitherT.fromEither[FutureUnlessShutdown](
         WellFormedTransaction
@@ -462,12 +439,12 @@ class ModelConformanceChecker(
     )
   }
 
-  private def checkPackageVetting(
+  // Checks vetting for informees of view, but not subviews informees.
+  private def checkViewPackageVetting(
       view: TransactionView,
       snapshot: TopologySnapshot,
       usedPackages: UsedPackages,
       ledgerTime: CantonTimestamp,
-      protocolVersion: ProtocolVersion,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
 
     val informees = view.viewCommonData.tryUnwrap.viewConfirmationParameters.informees
@@ -500,6 +477,26 @@ class ModelConformanceChecker(
       val combined = unvetted.combineAll.unknownOrUnvetted
       Either.cond(combined.isEmpty, (), UnvettedPackages(combined))
     })
+  }
+
+  // Checks package vetting for entire (sub) transaction so also checks subview vetting
+  private def checkTxPackageVetting(
+      snapshot: TopologySnapshot,
+      tx: LfVersionedTransaction,
+      ledgerTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
+    val requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]] = Blinding.partyPackages(tx)
+    UsableSynchronizers
+      .checkRequiredPackagesByParty(
+        protocolVersion,
+        snapshot,
+        requiredPackagesByParty,
+        ledgerTime,
+      )
+      .leftMap { unknown =>
+        val unvetted = Relation.from(unknown.map(ut => ut.participantId -> ut.packageId))
+        UnvettedPackages(unvetted)
+      }
   }
 
   /** Background:

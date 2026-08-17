@@ -108,7 +108,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     override val loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
     requestInspector: RequestInspector =
-      OutputModule.DefaultRequestInspector, // Only set by simulation tests
+      OutputModule.DefaultRequestInspector, // Only set by simulation and performance tests
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // Only set by simulation tests
     outputPreviousStoredBlock: OutputModule.PreviousStoredBlock =
       new OutputModule.PreviousStoredBlock,

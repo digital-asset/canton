@@ -27,7 +27,10 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
 import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers.TestValidator
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.ContractLookupError
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
+  ContractLookupError,
+  TooFewSalts,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   SeedGenerator,
   TransactionConfirmationRequestFactory,
@@ -39,6 +42,7 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
   ErrorWithSubTransaction,
   LazyAsyncReInterpretationMap,
   Result,
+  TransactionTreeError,
   UnvettedPackages,
   ViewReconstructionError,
 }
@@ -422,12 +426,11 @@ class ModelConformanceCheckerTest
           .modify(_ => MerkleSeq.empty(testedProtocolVersion, pureCrypto))
 
       inside(checkExample(underTest, exampleFactory.acceptPaintOffer(), mutation)) {
-        case ExceptionDuringProcessing(e: IllegalArgumentException) =>
-          e.getMessage should include(
-            "Number of subviews (1) and child effects (0) do not match for view"
-          )
+        case ModelConformanceRejection(error) =>
+          inside(error.errors.head) { case e: TransactionTreeError =>
+            e.details shouldBe TooFewSalts
+          }
       }
-
     }
 
     "reject if an extra subview is added" in {
@@ -754,9 +757,9 @@ class ModelConformanceCheckerTest
 
       val topologySnapshot = buildTopologySnapshot(topology, packages)
 
-      inside(
+      inside {
         checkExample(underTest, example, topologySnapshot, MainViewTree)
-      ) { case ModelConformanceRejection(err) =>
+      } { case ModelConformanceRejection(err) =>
         inside(err.errors.head) { case UnvettedPackages(unvetted) =>
           unvetted.keySet should contain(partyParticipants(exampleFactory.bob.toLf))
         }
@@ -896,15 +899,17 @@ class ModelConformanceCheckerTest
 
   }
 
-  val dummyViewAbsoluteLedgerEffect = RoseTree(
-    ViewAbsoluteLedgerEffect(
-      coreInputs = Map.empty[LfContractId, InputContract],
-      createdCore = Seq.empty[CreatedContract],
-      createdInSubviewArchivedInCore = Set.empty[LfContractId],
-      resolvedKeys = Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
-      inRollback = false,
-      informees = Set.empty[LfPartyId],
-    )
+  private val dummyViewAbsoluteLedgerEffect = ViewAbsoluteLedgerEffect(
+    coreInputs = Map.empty[LfContractId, InputContract],
+    createdCore = Seq.empty[CreatedContract],
+    createdInSubviewArchivedInCore = Set.empty[LfContractId],
+    resolvedKeys = Map.empty[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
+    inRollback = false,
+    informees = Set.empty[LfPartyId],
+  )
+  def dummyEffectRoseTree(children: Int) = RoseTree(
+    dummyViewAbsoluteLedgerEffect,
+    Seq.fill(children)(RoseTree(dummyViewAbsoluteLedgerEffect))*
   )
 
   def checkTrees(
@@ -917,7 +922,9 @@ class ModelConformanceCheckerTest
       TransactionProcessingSteps.tryCommonData(NonEmptyUtil.fromUnsafe(fullTransactionViewTrees))
 
     val rootViewTreesWithEffects =
-      NonEmptyUtil.fromUnsafe(fullTransactionViewTrees.map(t => (t, dummyViewAbsoluteLedgerEffect)))
+      NonEmptyUtil.fromUnsafe(fullTransactionViewTrees.map { t =>
+        (t, dummyEffectRoseTree(t.view.subviews.unblindedElements.length))
+      })
 
     val reInterpretedTopLevelViews: LazyAsyncReInterpretationMap =
       fullTransactionViewTrees
@@ -944,6 +951,7 @@ class ModelConformanceCheckerTest
           commonData = commonData,
           reInterpretedTopLevelViews = reInterpretedTopLevelViews,
           getEngineAbortStatus = getEngineAbortStatus,
+          hostedOnboardingPartiesO = None,
         )
         .map {
           case valid if valid.updateId == commonData.updateId => valid

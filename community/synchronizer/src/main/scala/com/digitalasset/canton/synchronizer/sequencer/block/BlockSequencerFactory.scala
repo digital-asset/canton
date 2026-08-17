@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
@@ -129,8 +128,6 @@ abstract class BlockSequencerFactory(
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
       lsuSequencingBounds: Option[LsuSequencingBounds],
-      parallelism: PositiveInt,
-      enablePrevalidation: Boolean,
       synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
@@ -299,8 +296,6 @@ abstract class BlockSequencerFactory(
         clock,
         rateLimitManager,
         lsuSequencingBounds = lsuSequencingBounds,
-        parallelism = nodeParameters.batchingConfig.parallelism,
-        enablePrevalidation = nodeParameters.enablePrevalidation,
         synchronizerLoggerFactory,
         runtimeReady,
       )

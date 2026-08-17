@@ -36,7 +36,7 @@ import com.digitalasset.canton.metrics.{
   TrafficConsumptionMetrics,
 }
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
@@ -262,9 +262,6 @@ class SequencerMetrics(
     val purchaseCache: CacheMetrics =
       new CacheMetrics(prefix :+ "purchase-cache", openTelemetryMetricsFactory)
 
-    val consumedCache: CacheMetrics =
-      new CacheMetrics(prefix :+ "consumed-cache", openTelemetryMetricsFactory)
-
     val wastedSequencing: Meter =
       openTelemetryMetricsFactory.meter(
         MetricInfo(
@@ -285,6 +282,8 @@ class SequencerMetrics(
           "Number of events that failed traffic validation and were not delivered because of it.",
         description = """Counter for wasted-sequencing.""",
         qualification = MetricQualification.Traffic,
+        labelsWithDescription =
+          Map("reason" -> "The reason for wasted sequencing (discarded or error code)"),
       )
     )
 
@@ -396,6 +395,7 @@ object SequencerMetrics {
 
   def submissionTypeMetricsContext(
       member: Member,
+      orderingSequencerId: SequencerId,
       requestType: SubmissionRequestType,
       logger: TracedLogger,
       warnOnUnexpected: Boolean = true,
@@ -418,6 +418,7 @@ object SequencerMetrics {
     MetricsContext(
       "member" -> member.toString,
       "type" -> messageType,
+      "sequencer" -> orderingSequencerId.uid.toProtoPrimitive,
     )
   }
 }

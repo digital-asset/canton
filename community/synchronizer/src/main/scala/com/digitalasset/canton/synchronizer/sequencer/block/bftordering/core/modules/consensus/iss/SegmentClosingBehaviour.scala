@@ -84,14 +84,16 @@ final class SegmentClosingBehaviour[E <: Env[E]](
     )
 
   private def stopIfWeShould()(implicit
-      context: E#ActorContextT[ConsensusSegment.Message]
+      context: E#ActorContextT[ConsensusSegment.Message],
+      traceContext: TraceContext,
   ): Unit =
     if (waitingForFutureIds.isEmpty && haveReceivedStartModuleClosingBehaviourMessage) {
       stop()
     }
 
   private def stop()(implicit
-      context: E#ActorContextT[ConsensusSegment.Message]
+      context: E#ActorContextT[ConsensusSegment.Message],
+      traceContext: TraceContext,
   ): Unit =
     context.stop { () =>
       implicit val traceContext: TraceContext = traceContextOfParent

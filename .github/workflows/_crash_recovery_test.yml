@@ -1,0 +1,106 @@
+name: Crash Recovery Test
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: false
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_PASSWORD:
+        required: false
+      GCLOUD_SERVICE_KEY:
+        required: false
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+      MAVEN_USERNAME:
+        required: false
+      MAVEN_PASSWORD:
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  crash_recovery_test:
+    name: Crash Recovery Test (shard ${{ matrix.shard }})
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    timeout-minutes: 180
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.shard }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+
+      - name: Run Crash Recovery Tests
+        uses: ./.github/actions/test/run_crash_recovery_tests
+        with:
+          exclude_unstable_tests: 'true'
+          include_patterns: |
+            ^com\.digitalasset\.canton\.integration\.tests\.crashrecovery
+          execution_context_size: '8'
+          num_test_buckets: '6'
+          shard_index: ${{ matrix.shard }}
+          succeed_on_error: 'false'
+          test_file: test-full-class-names.log
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: crash_recovery_test
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: crash_recovery_test
+      runner: ${{ inputs.runner }}
+    secrets: inherit

@@ -39,6 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
 }
+import com.digitalasset.daml.lf.interpretation
 import com.digitalasset.nonempty.NonEmpty
 import com.typesafe.config.ConfigFactory
 import monocle.macros.syntax.lens.*
@@ -549,6 +550,68 @@ class ConfigValidationsTest extends BaseTestWordSpec {
           InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
             parameters = ParticipantNodeParameterConfig(engine =
               CantonEngineConfig(snapshotDir = Some(Files.createTempDirectory("testing")))
+            )
+          )
+        ),
+      )
+      assertValid(config)
+    }
+
+    "allow setting transaction-limits in participants without non-standard config option" in {
+      val transactionLimits = interpretation.Limits(
+        contractSignatories = 1,
+        contractStakeholders = 1,
+        keyMaintainers = 1,
+        valueSize = 1,
+        actingParties = 1,
+        choiceObservers = 1,
+        choiceAuthorizers = 1,
+        externalCallResults = 1,
+        externalCallResultSize = 1,
+        nodeChildren = 1,
+        queryResult = 1,
+        transactionInputContracts = 1,
+        transactionRoots = 1,
+        transactionNodes = 1,
+        totalInformees = 1L,
+      )
+      val config = CantonConfig(
+        parameters = CantonParameters(),
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(engine =
+              CantonEngineConfig(transactionLimits = transactionLimits)
+            )
+          )
+        ),
+      )
+      assertValid(config)
+    }
+
+    "allow setting transaction-limits in participants with non-standard config option" in {
+      val transactionLimits = interpretation.Limits(
+        contractSignatories = 1,
+        contractStakeholders = 1,
+        keyMaintainers = 1,
+        valueSize = 1,
+        actingParties = 1,
+        choiceObservers = 1,
+        choiceAuthorizers = 1,
+        externalCallResults = 1,
+        externalCallResultSize = 1,
+        nodeChildren = 1,
+        queryResult = 1,
+        transactionInputContracts = 1,
+        transactionRoots = 1,
+        transactionNodes = 1,
+        totalInformees = 1L,
+      )
+      val config = CantonConfig(
+        parameters = CantonParameters(nonStandardConfig = true),
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            parameters = ParticipantNodeParameterConfig(engine =
+              CantonEngineConfig(transactionLimits = transactionLimits)
             )
           )
         ),

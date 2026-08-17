@@ -1,0 +1,106 @@
+name: Ledger API Compatibility Tests
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_PASSWORD:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  ledger_api_compatibility_tests:
+    name: Ledger API Compatibility Tests (Shard ${{ matrix.shard }})
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    timeout-minutes: 180
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.shard }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+
+      - name: Run tests (Shard ${{ matrix.shard }})
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          execution_context_size: "8"
+          include_patterns: '^com\.digitalasset\.canton\.integration\.tests\.continuity\.api'
+          num_test_buckets: "5"
+          num_parallel_tasks: "1"
+          shard_index: ${{ matrix.shard }}
+          timeout: '240m'
+          test_file: test-full-class-names.log
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: ledger_api_compatibility_tests
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: ledger_api_compatibility_tests
+      runner: ${{ inputs.runner }}

@@ -7,7 +7,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.platform.execution.{ExternalCallHandler, ExternalCallMode}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.engine.ResultNeedExternalCall
+import com.digitalasset.daml.lf.engine.Result
 
 import scala.concurrent.ExecutionContext
 
@@ -27,7 +27,9 @@ class ExtensionServiceExternalCallHandler(
       configHash: String,
       input: String,
       mode: ExternalCallMode,
-  )(implicit tc: TraceContext): FutureUnlessShutdown[Either[ResultNeedExternalCall.Error, String]] =
+  )(implicit
+      tc: TraceContext
+  ): FutureUnlessShutdown[Either[Result.Need.ExternalCall.Error, String]] =
     extensionServiceManager
       .handleExternalCall(
         extensionId = extensionId,
@@ -46,7 +48,7 @@ class ExtensionServiceExternalCallHandler(
         val clientMessage =
           if (extensionError.clientActionable) extensionError.toString
           else ExtensionServiceExternalCallHandler.genericClientMessage(extensionError)
-        ResultNeedExternalCall.Error(clientMessage)
+        Result.Need.ExternalCall.Error(clientMessage)
       })
 }
 

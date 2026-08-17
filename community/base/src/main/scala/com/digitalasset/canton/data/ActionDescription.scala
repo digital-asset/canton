@@ -29,6 +29,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
@@ -369,11 +370,11 @@ object ActionDescription {
       v30.ActionDescription.ExerciseActionDescription(
         inputContractId = inputContractId.toProtoPrimitive,
         templateId = new RefIdentifierSyntax(templateId).toProtoPrimitive,
-        packagePreference = packagePreference.toSeq,
+        packagePreference = packagePreference.toSeq.map(_.toProtoUnvalidated),
         choice = choice,
         interfaceId = interfaceId.map(i => new RefIdentifierSyntax(i).toProtoPrimitive),
         chosenValue = serializedChosenValue,
-        actors = actors.toSeq,
+        actors = actors.toSeq.map(_.toProtoUnvalidated),
         byKey = byKey,
         nodeSeed = seed.toProtoPrimitive,
         failed = failed,
@@ -504,7 +505,7 @@ object ActionDescription {
     private def toFetchActionDescriptionV30: v30.ActionDescription.FetchActionDescription =
       v30.ActionDescription.FetchActionDescription(
         inputContractId = inputContractId.toProtoPrimitive,
-        actors = actors.toSeq,
+        actors = actors.toSeq.map(_.toProtoUnvalidated),
         byKey = byKey,
         templateId = new RefIdentifierSyntax(templateId).toProtoPrimitive,
         interfaceId = interfaceId.map(i => new RefIdentifierSyntax(i).toProtoPrimitive),

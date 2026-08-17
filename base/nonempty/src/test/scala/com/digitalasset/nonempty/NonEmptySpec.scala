@@ -114,6 +114,37 @@ class NonEmptySpec extends AnyWordSpec with Matchers with WordSpecCheckLaws {
     }
   }
 
+  "grouped" should {
+    import NonEmptyReturningOps.*
+
+    "produce Lists for Lists" in {
+      val g = List(1) grouped1 (5)
+      g: Iterator[NonEmpty[List[Int]]]
+    }
+
+    "produce Vectors for Vectors" in {
+      val g = Vector(1) grouped1 (1)
+      g: Iterator[NonEmpty[Vector[Int]]]
+    }
+
+    "produce Seqs for Seqs" in {
+      val g = Seq(1) grouped1 (1)
+      g: Iterator[NonEmpty[Seq[Int]]]
+    }
+
+    "produce Sets for Sets" in {
+      val g = Set(1) grouped1 (1)
+      g: Iterator[NonEmpty[Set[Int]]]
+    }
+
+    "reject maybe-mutable structures" in {
+      illTyped(
+        "col.Seq(1) grouped1 identity",
+        "(?s).*?grouped1 is not a member of (scala.collection.)?Seq.*",
+      )
+    }
+  }
+
   "toNEF" should {
     "destructure the Set type" in {
       @nowarn

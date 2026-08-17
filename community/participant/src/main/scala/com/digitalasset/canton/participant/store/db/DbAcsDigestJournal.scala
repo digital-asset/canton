@@ -20,9 +20,7 @@ import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.PositionedParameters
-import slick.jdbc.canton.SQLActionBuilder
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
@@ -37,7 +35,7 @@ class DbAcsDigestJournal[K](
     prettyKey: K => String,
     journalTable: JournalTable,
     createJournalImplicitsF: DbStorage => DbAcsDigestJournalImplicits[K],
-)(implicit ec: ExecutionContext)
+)(implicit override protected val executionContext: ExecutionContext)
     extends AcsDigestJournal[K]
     with DbStore {
 
@@ -120,6 +118,11 @@ class DbAcsDigestJournal[K](
     )
   }
 
+  override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val query = sqlu"delete from #$tableName where synchronizer_idx = $synchronizerIdx"
+    storage.update_(query, functionFullName)
+  }
+
   override def upsertDigestUpdates(
       digests: immutable.Iterable[AcsDigestStore.AcsDigestUpdate[K]]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
@@ -197,65 +200,71 @@ class DbAcsDigestJournal[K](
     )
   }
 
-  override def bulkLookup(keys: immutable.Iterable[K], toInclusive: Offset)(implicit
+  override def bulkLookup(keysUpToInclusive: immutable.Iterable[(K, Offset)])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[K, AcsDigestStore.AcsDigestUpdate[K]]] =
-    NonEmpty.from(keys) match {
-      case None => FutureUnlessShutdown.pure(Map.empty)
-      case Some(nonEmptyIterable) =>
-        // uses the ClassTag[K] - and SetParameters[Array[K]] implicits
-        val keysArray = toKeysArray(keys)
+  ): FutureUnlessShutdown[Map[(K, Offset), AcsDigestStore.AcsDigestUpdate[K]]] =
+    if (keysUpToInclusive.isEmpty) {
+      FutureUnlessShutdown.pure(Map.empty)
+    } else {
+      // uses the ClassTag[K] - and SetParameters[Array[K]] implicits
+      val keysArray = keysUpToInclusive.iterator.map(_._1).toArray
+      val toInclusiveArray = keysUpToInclusive.iterator.map(_._2.unwrap).toArray
 
-        val bulkLookupQuery: SQLActionBuilder = storage.profile match {
-          case _: DbStorage.Profile.H2 =>
-            val inClause = DbStorage.toInClause(keyColumnName, nonEmptyIterable)
-            sql"""
-            select r.#$keyColumnName, r.change_offset, r.ts, r.digest, r.trace_data, r.replaces_offset
+      import storage.DbStorageConverters.*
+
+      val bulkLookupQuery = storage.profile match {
+        case _: DbStorage.Profile.H2 =>
+          sql"""
+            select r.#$keyColumnName, r.change_offset, r.ts, r.digest, r.trace_data, r.replaces_offset, r.target_to_inclusive
             from (
               select
-                #$keyColumnName, change_offset, ts, digest, trace_data, replaces_offset,
+                s.#$keyColumnName, s.change_offset, s.ts, s.digest, s.trace_data, s.replaces_offset, k.target_to_inclusive,
                 row_number() over (
-                  partition by #$keyColumnName
+                  partition by s.#$keyColumnName, k.target_to_inclusive
                   order by change_offset desc
                 ) as rn
-              from #$tableName
-              where """ ++ inClause ++ sql"""
-                and synchronizer_idx = $synchronizerIdx
-                and change_offset <= $toInclusive
+              from #$tableName s
+                join (
+                    select kk.target_key_id, kk.target_to_inclusive
+                    from UNNEST($keysArray, $toInclusiveArray) as kk(target_key_id, target_to_inclusive)
+                  ) as k(target_key_id, target_to_inclusive)
+                on s.#$keyColumnName = k.target_key_id
+              where s.synchronizer_idx = $synchronizerIdx
+                and s.change_offset <= k.target_to_inclusive
             ) as r
             where r.rn = 1
             """
 
-          case _: DbStorage.Profile.Postgres =>
-            sql"""
-            select k.target_key_id, j.change_offset, j.ts, j.digest, j.trace_data, j.replaces_offset
-              from UNNEST($keysArray) as k(target_key_id)
+        case _: DbStorage.Profile.Postgres =>
+          sql"""
+            select k.target_key_id, j.change_offset, j.ts, j.digest, j.trace_data, j.replaces_offset, k.target_to_inclusive
+              from UNNEST($keysArray, $toInclusiveArray) as k(target_key_id, target_to_inclusive)
               cross join lateral (
                  select change_offset, ts, digest, trace_data, replaces_offset
                  from #$tableName j
                  where j.synchronizer_idx = $synchronizerIdx
                    and j.#$keyColumnName = (k.target_key_id)::int
-                   and j.change_offset <= $toInclusive
+                   and j.change_offset <= k.target_to_inclusive
                  order by j.synchronizer_idx, j.#$keyColumnName, j.change_offset desc
-                 limit 1
+                 #${storage.limit(1)}
               ) as j
             """
-        }
+      }
 
-        logger.trace(
-          s"ACS running digest bulk lookup for ${keys.size} keys to inclusive $toInclusive in $tableName..."
+      logger.trace(
+        s"ACS running digest bulk lookup for ${keysUpToInclusive.size} keys in $tableName..."
+      )
+
+      storage
+        .query(
+          action = bulkLookupQuery.as[(AcsDigestStore.AcsDigestUpdate[K], Offset)],
+          operationName = functionFullName,
         )
-
-        storage
-          .query(
-            action = bulkLookupQuery.as[AcsDigestStore.AcsDigestUpdate[K]],
-            operationName = functionFullName,
-          )
-          .map { resultSequence =>
-            resultSequence.iterator.map { update =>
-              update.digestUpdate.key -> update
-            }.toMap
-          }
+        .map { resultSequence =>
+          resultSequence.iterator.map { case (update, toInclusive) =>
+            (update.digestUpdate.key, toInclusive) -> update
+          }.toMap
+        }
     }
 
   override type SnapshotPaginationToken = SnapshotToken[K]

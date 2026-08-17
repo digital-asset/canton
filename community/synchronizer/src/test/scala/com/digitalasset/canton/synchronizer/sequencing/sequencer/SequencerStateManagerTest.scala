@@ -382,6 +382,7 @@ class SequencerStateManagerTest
         lsuSequencingBounds = None,
         parallelism = PositiveInt.two,
         enablePrevalidation = true,
+        enableAsyncLoggingWithOutcome = false,
       ),
       metrics,
       memberValidator = new SequencerMemberValidator {

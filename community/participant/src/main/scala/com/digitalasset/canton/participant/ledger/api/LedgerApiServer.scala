@@ -323,6 +323,13 @@ class LedgerApiServer(
           .activePsidForLsid(synchronizerId)
           .flatMap(psid => syncService.lookupTopologyClient(psid))
 
+      lookupSynchronizerCryptoClient = (synchronizerId: SynchronizerId) =>
+        for {
+          psid <- syncService.activePsidForLsid(synchronizerId)
+          params <- syncService.syncPersistentStateManager.staticSynchronizerParameters(psid)
+          syncCryptoClient <- syncService.syncCrypto.forSynchronizer(psid, params)
+        } yield syncCryptoClient
+
       // TODO(i21582) The prepare endpoint of the interactive submission service does not suffix
       // contract IDs of the transaction yet. This means enrichment of the transaction may fail
       // when processing unsuffixed contract IDs. For that reason we disable this requirement via the flag below.
@@ -399,6 +406,7 @@ class LedgerApiServer(
         trafficEnforcementBackendO = trafficEnforcementBackendO,
         externalCallHandler = externalCallHandler,
         lookupTopologyClient = lookupTopologyClient,
+        lookupSynchronizerCryptoClient = lookupSynchronizerCryptoClient,
         pureCryptoApi = syncService.pureCryptoApi,
       )
       _ <- startHttpApiIfEnabled(

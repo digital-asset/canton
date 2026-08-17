@@ -14,7 +14,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.TopologyManagerError.InvalidQueryTime
-import com.digitalasset.canton.topology.admin.grpc.PsidLookup
+import com.digitalasset.canton.topology.admin.grpc.PsidLookupAt
 import com.digitalasset.canton.topology.client.{
   StoreBasedSynchronizerTopologyClient,
   SynchronizerTopologyClient,
@@ -59,7 +59,7 @@ final class TopologyLookup(
     futureSupervisor: FutureSupervisor,
     private val topologyManagerO: PhysicalSynchronizerId => Option[SynchronizerTopologyManager],
     private val topologyClientO: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
-    private val psidLookup: PsidLookup,
+    private val psidLookup: PsidLookupAt,
     private val syncPersistentStateO: PhysicalSynchronizerId => Option[SyncPersistentState],
     cleanSynchronizerRecordTime: SynchronizerId => Option[CantonTimestamp],
     protected val loggerFactory: NamedLoggerFactory,
@@ -71,21 +71,25 @@ final class TopologyLookup(
     */
   def maybeOfflineAwaitTopologySnapshot(synchronizerId: SynchronizerId, ts: CantonTimestamp)(
       implicit traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, TopologySnapshot] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, TopologySnapshot] =
     for {
-      client <- maybeOfflineTopologyClient(synchronizerId)
+      psid <- EitherT.fromEither[FutureUnlessShutdown](
+        psidLookup
+          .activePsidAt(synchronizerId, ts)
+          .leftMap(err => TopologyManagerError.InternalError.Unexpected(err): TopologyManagerError)
+      )
+      client <- topologyClientO(psid).fold(offlineTopologyClient(psid))(
+        EitherT.pure[FutureUnlessShutdown, TopologyManagerError](_)
+      )
       approximateTs = client.approximateTimestamp
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         ts <= approximateTs,
-        ParticipantTopologyManagerError.IdentityManagerParentError(
-          InvalidQueryTime.Reject(
-            synchronizerId,
-            topologyKnownUntil = approximateTs,
-            queryTime = ts,
-          )
+        InvalidQueryTime.Reject(
+          synchronizerId,
+          topologyKnownUntil = approximateTs,
+          queryTime = ts,
         ),
       )
-
       snapshot <- EitherT.liftF(client.awaitSnapshot(ts))
     } yield snapshot
 
@@ -96,16 +100,16 @@ final class TopologyLookup(
       synchronizer: Synchronizer
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, CantonTimestamp] = for {
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, CantonTimestamp] = for {
     psid <- synchronizer match {
       case lsid: SynchronizerId => activePsidFor(lsid).toEitherT[FutureUnlessShutdown]
       case psid: PhysicalSynchronizerId =>
-        EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](psid)
+        EitherT.pure[FutureUnlessShutdown, TopologyManagerError](psid)
     }
 
     snapshot <- topologyClientO(psid).fold(offlineTopologyClient(psid).map(_.approximateTimestamp))(
       topologyClient =>
-        EitherT.rightT[FutureUnlessShutdown, ParticipantTopologyManagerError](
+        EitherT.rightT[FutureUnlessShutdown, TopologyManagerError](
           topologyClient.approximateTimestamp
         )
     )
@@ -118,7 +122,7 @@ final class TopologyLookup(
       synchronizer: Synchronizer
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, TopologySnapshot] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, TopologySnapshot] =
     for {
       client <- maybeOfflineTopologyClient(synchronizer)
       snapshot <- EitherT.liftF(client.currentSnapshotApproximation)
@@ -128,7 +132,7 @@ final class TopologyLookup(
       psid: PhysicalSynchronizerId
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, SynchronizerTopologyClient] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, SynchronizerTopologyClient] =
     for {
       syncPersistentState <- EitherT.fromEither[FutureUnlessShutdown](syncPersistentStateFor(psid))
       client = new StoreBasedSynchronizerTopologyClient(
@@ -158,15 +162,15 @@ final class TopologyLookup(
 
   private def maybeOfflineTopologyClient(synchronizer: Synchronizer)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, SynchronizerTopologyClient] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, SynchronizerTopologyClient] =
     for {
       psid <- synchronizer match {
         case lsid: SynchronizerId => activePsidFor(lsid).toEitherT[FutureUnlessShutdown]
         case psid: PhysicalSynchronizerId =>
-          EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](psid)
+          EitherT.pure[FutureUnlessShutdown, TopologyManagerError](psid)
       }
       client <- topologyClientO(psid).fold(offlineTopologyClient(psid))(
-        EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](_)
+        EitherT.pure[FutureUnlessShutdown, TopologyManagerError](_)
       )
     } yield client
 
@@ -174,11 +178,9 @@ final class TopologyLookup(
     * @param synchronizer
     *   If logical, the corresponding active physical synchronizer id is used.
     */
-  def topologyStore(
-      synchronizer: Synchronizer
-  )(implicit
+  def topologyStore(synchronizer: Synchronizer)(implicit
       traceContext: TraceContext
-  ): Either[ParticipantTopologyManagerError, TopologyStore[SynchronizerStore]] = for {
+  ): Either[TopologyManagerError, TopologyStore[SynchronizerStore]] = for {
     psid <- synchronizer match {
       case lsid: SynchronizerId => activePsidFor(lsid)
       case psid: PhysicalSynchronizerId => Right(psid)
@@ -194,33 +196,25 @@ final class TopologyLookup(
       ec: ExecutionContext,
   ): EitherT[
     FutureUnlessShutdown,
-    ParticipantTopologyManagerError,
+    TopologyManagerError,
     SynchronizerTopologyManager,
   ] =
     EitherT.fromOption[FutureUnlessShutdown](
       topologyManagerO(psid),
-      ParticipantTopologyManagerError.IdentityManagerParentError(
-        TopologyManagerError.TopologyStoreUnknown.Failure(SynchronizerStore(psid))
-      ),
+      TopologyManagerError.TopologyStoreUnknown.Failure(SynchronizerStore(psid)),
     )
 
   private def activePsidFor(lsid: SynchronizerId)(implicit
       traceContext: TraceContext
-  ): Either[ParticipantTopologyManagerError, PhysicalSynchronizerId] =
+  ): Either[TopologyManagerError, PhysicalSynchronizerId] =
     psidLookup
       .activePsidFor(lsid)
-      .toRight(
-        ParticipantTopologyManagerError.IdentityManagerParentError(
-          TopologyManagerError.TopologyStoreUnknown.NoActiveSynchronizer(lsid)
-        )
-      )
+      .toRight(TopologyManagerError.TopologyStoreUnknown.NoActiveSynchronizer(lsid))
 
   private def syncPersistentStateFor(psid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): Either[ParticipantTopologyManagerError.IdentityManagerParentError, SyncPersistentState] =
+  ): Either[TopologyManagerError, SyncPersistentState] =
     syncPersistentStateO(psid).toRight(
-      ParticipantTopologyManagerError.IdentityManagerParentError(
-        TopologyManagerError.TopologyStoreUnknown.Failure(SynchronizerStore(psid))
-      )
+      TopologyManagerError.TopologyStoreUnknown.Failure(SynchronizerStore(psid))
     )
 }

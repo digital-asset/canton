@@ -134,4 +134,7 @@ Caused by: java\.io\.UncheckedIOException.*No Content-Disposition header in resp
 # Known upstream issue: https://github.com/sbt/sbt-license-report/issues/92
 sbt-license-report: unable to find the value for property joda\.artifactId
 
+# Transient protoc failure due to race condition on the protocbridge script
+^\[info\] Full protoc args:.*
+
 # Make sure to have a trailing newline

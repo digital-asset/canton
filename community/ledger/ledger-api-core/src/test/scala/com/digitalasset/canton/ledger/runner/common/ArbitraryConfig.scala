@@ -55,18 +55,36 @@ object ArbitraryConfig {
 
   val limits: Gen[Limits] = for {
     contractSignatories <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
-    contractObservers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
-    choiceControllers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    contractStakeholders <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    keyMaintainers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    valueSize <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    actingParties <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     choiceObservers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     choiceAuthorizers <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    externalCallResults <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    externalCallResultSize <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    nodeChildren <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    queryResult <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
     transactionInputContracts <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    transactionRoots <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    transactionNodes <- Gen.chooseNum(Int.MinValue, Int.MaxValue)
+    totalInformees <- Gen.chooseNum(Long.MinValue, Long.MaxValue)
   } yield Limits(
     contractSignatories,
-    contractObservers,
-    choiceControllers,
+    contractStakeholders,
+    keyMaintainers,
+    valueSize,
+    actingParties,
     choiceObservers,
     choiceAuthorizers,
+    externalCallResults,
+    externalCallResultSize,
+    nodeChildren,
+    queryResult,
     transactionInputContracts,
+    transactionRoots,
+    transactionNodes,
+    totalInformees,
   )
 
   val inetSocketAddress = for {

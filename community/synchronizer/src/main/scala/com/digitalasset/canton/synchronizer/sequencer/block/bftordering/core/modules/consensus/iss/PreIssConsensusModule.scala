@@ -102,6 +102,7 @@ final class PreIssConsensusModule[E <: Env[E]](
               metrics,
               clock,
               loggerFactory,
+              config.consensusEnableLogEndOfEpochProgress,
             ),
             dependencies,
             loggerFactory,

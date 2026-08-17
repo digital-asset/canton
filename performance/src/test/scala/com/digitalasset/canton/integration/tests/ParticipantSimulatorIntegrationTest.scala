@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.{
   StorageConfig,
 }
 import com.digitalasset.canton.console.InstanceReference
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseH2,
@@ -25,8 +26,10 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.performance.util.ParticipantSimulator
+import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Observation, Submission}
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 import org.scalatest.concurrent.PatienceConfiguration
 
@@ -57,137 +60,163 @@ sealed trait ParticipantSimulatorIntegrationTest
           .focus(_.monitoring.logging.delayLoggingThreshold)
           .replace(NonNegativeFiniteDuration.ofDays(100))
       )
+      .addConfigTransforms(ConfigTransforms.disableOldAcsCommitmentProcessor)
 
-  "we can run a trivial ping" in { implicit env =>
-    import env.*
+  "simulate many participants with parties and commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    implicit env =>
+      import env.*
 
-    clue("participant1 connect") {
-      participant1.synchronizers.connect_local(sequencer1, daName)
-    }
-    clue("maybe ping") {
-      participant1.health.maybe_ping(
-        participant1,
-        timeout = 30.seconds,
-      ) shouldBe defined
-    }
+      clue("participant1 connect") {
+        participant1.synchronizers.connect_local(sequencer1, daName)
+      }
+      clue("maybe ping") {
+        participant1.health.maybe_ping(
+          participant1,
+          timeout = 30.seconds,
+        ) shouldBe defined
+      }
 
-    synchronizerOwners1.foreach(
-      _.topology.synchronizer_parameters
-        .propose_update(
-          daId,
-          _.update(reconciliationInterval = PositiveDurationSeconds.ofSeconds(1)),
-        )
-    )
-
-    participant1.dars.upload(CantonExamplesPath)
-
-    val numParties = 50
-    val numObservers = 3
-    val numParticipants = 10
-    val numContracts = 1000
-
-    require(numObservers <= numParticipants)
-
-    // copy the packages to vet from participant1
-    val packagesToVet = participant1.topology.vetted_packages
-      .list(daId, filterParticipant = participant1.filterString)
-      .loneElement
-      .item
-      .packages
-
-    val simulator = new ParticipantSimulator(
-      sequencer1,
-      Seq(sequencer1),
-      sequencer1.synchronizer_parameters.static.get().toInternal,
-      respondToAcsCommitments = true,
-      environment.loggerFactory,
-      environmentTimeouts,
-    )
-    simulator.uploadRootCert()
-
-    // onboard the participants
-    val pids = Seq.tabulate(numParticipants)(i =>
-      simulator
-        .onboardNewVirtualParticipant(s"vp-$i", packagesToVet, synchronize = None)
-        .value
-        .futureValueUS
-        .value
-    )
-
-    eventually(timeUntilSuccess = 2.minutes) {
-      sequencer1.topology.synchronizer_trust_certificates
-        .list(daId)
-        .size should be >= numParticipants
-    }
-
-    // start the virtual participant subscriptions
-    val closables = pids.map(simulator.startSubscriptionForParticipant(_, _ => {}))
-
-    // create an iterator of endless observing participant groups
-    val observerGroups = Iterator.unfold(pids.toVector) { ps =>
-      val (observers, rest) = ps.splitAt(numObservers)
-      Some(observers -> (rest ++ observers))
-    }
-
-    // allocate parties hosted with different observing participants
-    val partyIds = (1 to numParties).zip(observerGroups).map { case (partyIndex, observers) =>
-      val partyId = PartyId
-        .tryCreate(s"party-${this.getClass.getSimpleName}-$partyIndex", participant1.namespace)
-      Seq[InstanceReference](participant1, sequencer1).foreach(
-        _.topology.party_to_participant_mappings.propose(
-          partyId,
-          newParticipants = (participant1.id -> Submission) +: observers.map(_ -> Observation),
-          synchronize = None,
-          store = daId,
-        )
+      synchronizerOwners1.foreach(
+        _.topology.synchronizer_parameters
+          .propose_update(
+            daId,
+            _.update(reconciliationInterval = PositiveDurationSeconds.ofSeconds(1)),
+          )
       )
-      partyId
-    }
 
-    // make sure parties have been fully allocated from participant1' POV
-    partyIds.foreach { party =>
+      participant1.dars.upload(CantonExamplesPath)
+
+      val numParties = 50
+      val numObservers = 3
+      val numParticipants = 10
+      val numContracts = 1000
+
+      require(numObservers <= numParticipants)
+
+      // copy the packages to vet from participant1
+      val packagesToVet = participant1.topology.vetted_packages
+        .list(daId, filterParticipant = participant1.filterString)
+        .loneElement
+        .item
+        .packages
+
+      val simulator = new ParticipantSimulator(
+        sequencer1,
+        Seq(sequencer1),
+        sequencer1.synchronizer_parameters.static.get().toInternal,
+        respondToAcsCommitments = true,
+        environment.loggerFactory,
+        environmentTimeouts,
+      )
+      simulator.uploadRootCert()
+
+      // onboard the participants
+      val pids = Seq.tabulate(numParticipants)(i =>
+        simulator
+          .onboardNewVirtualParticipant(s"vp-$i", packagesToVet, synchronize = None)
+          .value
+          .futureValueUS
+          .value
+      )
+
+      eventually(timeUntilSuccess = 2.minutes) {
+        sequencer1.topology.synchronizer_trust_certificates
+          .list(daId)
+          .size should be >= numParticipants
+      }
+
+      // start the virtual participant subscriptions
+      val closables = pids.map(simulator.startSubscriptionForParticipant(_, _ => {}))
+
+      // create an iterator of endless observing participant groups
+      val observerGroups = Iterator.unfold(pids.toVector) { ps =>
+        val (observers, rest) = ps.splitAt(numObservers)
+        Some(observers -> (rest ++ observers))
+      }
+
+      // allocate parties hosted with different observing participants
+      val partyIds = (1 to numParties).zip(observerGroups).map { case (partyIndex, observers) =>
+        val partyId = PartyId
+          .tryCreate(s"party-${this.getClass.getSimpleName}-$partyIndex", participant1.namespace)
+        Seq[InstanceReference](participant1, sequencer1).foreach(
+          _.topology.party_to_participant_mappings.propose(
+            partyId,
+            newParticipants = (participant1.id -> Submission) +: observers.map(_ -> Observation),
+            synchronize = None,
+            store = daId,
+          )
+        )
+        partyId
+      }
+
+      // make sure parties have been fully allocated from participant1' POV
+      partyIds.foreach { party =>
+        eventually() {
+          participant1.parties
+            .list(party.filterString)
+            .loneElement
+            .participants should have size (numObservers.toLong + 1)
+        }
+      }
+
+      // Future for observing the expected number of contracts for all allocated parties
+      val receivedAllContracts = Future(
+        participant1.ledger_api.updates
+          .transactions(
+            partyIds.toSet,
+            completeAfter = PositiveInt.tryCreate(numContracts),
+            timeout = 10.minutes, // long timeout just to be sure
+          )
+      )
+
+      // create IOUs asynchronously. participant goes VROOOOOM
+      Iterator
+        .continually(partyIds)
+        .flatten
+        .take(numContracts)
+        .toSeq
+        .foreach { party =>
+          val createIouCmds = IouSyntax.testIou(party, party).create().commands().asScala.toSeq
+          participant1.ledger_api.javaapi.commands.submit_async(
+            Seq(party),
+            createIouCmds,
+            daId,
+          )
+        }
+
+      // wait for all contracts to be fully processed
+      // Note: futureValue timeout must be >= the inner transactions() timeout
+      val receivedContracts =
+        receivedAllContracts.futureValue(timeout = PatienceConfiguration.Timeout(10.minutes))
+      withClue(s"Expected $numContracts transactions but received ${receivedContracts.size}. ") {
+        receivedContracts should have size numContracts.toLong
+      }
+
+      // now check that we have matched commitment periods on participant1 for all lightweight participants
+      val stringInterning = participant1.underlying.value.sync
+        .connectedSynchronizerForAlias(daName)
+        .value
+        .ephemeral
+        .ledgerApiIndexer
+        .ledgerApiStore
+        .map(_.stringInterningView)
+        .value
+      val internedPids = pids.map(pid => stringInterning.participantId.internalize(pid.toLf))
+      val toLookup = internedPids.map(
+        _ -> CommitmentPeriod.create(CantonTimestamp.MinValue, CantonTimestamp.MaxValue).value
+      )
       eventually() {
-        participant1.parties
-          .list(party.filterString)
-          .loneElement
-          .participants should have size (numObservers.toLong + 1)
-      }
-    }
+        val matched = participant1.underlying.value.sync.syncPersistentStateManager
+          .get(daId)
+          .value
+          .acsCommitmentPeriodStore
+          .lookupMatched(toLookup)
+          .futureValueUS
 
-    // Future for observing the expected number of contracts for all allocated parties
-    val receivedAllContracts = Future(
-      participant1.ledger_api.updates
-        .transactions(
-          partyIds.toSet,
-          completeAfter = PositiveInt.tryCreate(numContracts),
-          timeout = 10.minutes, // long timeout just to be sure
-        )
-    )
-
-    // create IOUs asynchronously. participant goes VROOOOOM
-    Iterator
-      .continually(partyIds)
-      .flatten
-      .take(numContracts)
-      .toSeq
-      .foreach { party =>
-        val createIouCmds = IouSyntax.testIou(party, party).create().commands().asScala.toSeq
-        participant1.ledger_api.javaapi.commands.submit_async(
-          Seq(party),
-          createIouCmds,
-          daId,
-        )
+        matched.map(_.participant).toSet should contain theSameElementsAs (internedPids)
       }
 
-    // wait for all contracts to be fully processed
-    // Note: futureValue timeout must be >= the inner transactions() timeout
-    val receivedContracts =
-      receivedAllContracts.futureValue(timeout = PatienceConfiguration.Timeout(10.minutes))
-    withClue(s"Expected $numContracts transactions but received ${receivedContracts.size}. ") {
-      receivedContracts should have size numContracts.toLong
-    }
-
-    closables.foreach(_.close())
+      closables.foreach(_.close())
   }
 }
 

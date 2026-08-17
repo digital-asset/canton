@@ -40,7 +40,8 @@ import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVers
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens.*
 
-import scala.concurrent.duration.DurationInt
+import java.util.concurrent.TimeUnit
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 /** Base for all participant configs - both local and remote */
 trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
@@ -215,6 +216,9 @@ final case class LedgerApiServerConfig(
     ),
     maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
     maxInboundMetadataSize: NonNegativeInt = ServerConfig.defaultMaxInboundMetadataSize,
+    override val flowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow,
+    override val initialFlowControlWindow: Option[PositiveInt] =
+      ServerConfig.defaultInitialFlowControlWindow,
     maxConcurrentCallsPerConnection: NonNegativeInt =
       ServerConfig.defaultMaxConcurrentCallsPerConnection,
     rateLimit: Option[RateLimitingConfig] = Some(DefaultRateLimit),
@@ -313,6 +317,8 @@ object TestingTimeServiceConfig {
   *   interval, the participant will log a warning.
   * @param journalGarbageCollectionDelay
   *   How much time to delay the canton journal garbage collection
+  * @param journalGarbageCollectionMinimumGap
+  *   The minimum gap in observed sequencing times between two journal garbage collection runs.
   * @param disableUpgradeValidation
   *   Disable the package upgrade verification on DAR upload
   * @param enableStrictDarValidation
@@ -396,6 +402,8 @@ final case class ParticipantNodeParameterConfig(
     engine: CantonEngineConfig = CantonEngineConfig(),
     journalGarbageCollectionDelay: config.NonNegativeFiniteDuration =
       config.NonNegativeFiniteDuration.ofSeconds(0),
+    journalGarbageCollectionMinimumGap: config.PositiveFiniteDuration =
+      config.PositiveFiniteDuration.ofMinutes(30),
     disableUpgradeValidation: Boolean = false,
     enableStrictDarValidation: Boolean = true,
     watchdog: Option[WatchdogConfig] = None,
@@ -425,6 +433,9 @@ final case class ParticipantNodeParameterConfig(
   *
   * @param enableRunningDigestProcessor
   *   whether the new ACS digest processor should be enabled or not. Default is false.
+  * @param disableOldAcsCommitmentProcessor
+  *   whether the old ACS commitment processor should be disabled or not for protocol versions >=
+  *   [[com.digitalasset.canton.version.ProtocolVersion.acsCommitmentRedesign]]. Default is false.
   * @param maxNumUpdatesBetweenCheckpoints
   *   the maximum number of acs updates after which a checkpoint should be written.
   * @param counterpartyBatchSize
@@ -447,26 +458,52 @@ final case class ParticipantNodeParameterConfig(
   *   - parallelism (default is 10)
   * @param useSequentialDigestAccumulator
   *   whether to use the sequential or the batching digest accumulator. Default is true.
+  * @param loadBatching
+  *   the batching config for loading digests in the digest accumulator
   * @param maxNumLoadedDigests
   *   the maximum number of digests that may be loaded into memory during processing. Default is
   *   1000.
   * @param digestLoadParallelism
-  *   the maximum number of concurrent reads for loading digests. Default is 8.
-  * @param digestStoreParallelism
-  *   the maximum number of concurrent writes for persisting digests. Default is 8.
+  *   The maximum number of concurrently buffered reads for loading digests. Default is 1000. If
+  *   [[com.digitalasset.canton.participant.config.AcsCommitmentConfig.loadBatching]] enables
+  *   batching, this number should be at least as large as the batch size times the batch
+  *   parallelism; otherwise batches will not be filled up. If batching is disabled, this number
+  *   directly controls the number of parallel DB reads and should therefore be much smaller.
+  * @param digestComputeParallelism
+  *   The maximum number of parallel digest computations.
+  * @param digestPipelineBufferSize
+  *   The size of intermediate buffers in the digest processor pipeline. If the size is 0, no
+  *   buffers are added. These buffers implicitly increase the `digestLoadParallelism` by twice the
+  *   configured size. Default is 0.
+  * @param matchingParallelism
+  *   the maximum number of parallel processing of received ACS commitments for matching against
+  *   locally computed commitments. Default is 20.
+  * @param contractChangeClassificationBatchSize
+  *   the maximum number of batched contract change classifications. Should be at most
+  *   `maxNumLoadedDigests`. Default is 100. These classifications can be batched in 3 situations:
+  *   - When processing an
+  *     [[com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdate.AcsChangeUpdate]]
+  *   - When ingesting active contracts during reinitialization
+  *   - When ingesting active contracts while processing a locally onboarded party
   */
 final case class AcsCommitmentConfig(
     enableRunningDigestProcessor: Boolean = false,
+    disableOldAcsCommitmentProcessor: Boolean = false,
     maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(10_000),
     counterpartyBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
     receivedCommitmentValidationParallelism: PositiveInt = PositiveInt.tryCreate(1),
     reinitializingJournalTombstonesBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     sender: AcsCommitmentSenderConfig = AcsCommitmentSenderConfig(),
+    periodStore: AcsCommitmentPeriodConfig = AcsCommitmentPeriodConfig(),
     useSequentialDigestAccumulator: Boolean = true,
+    loadBatching: BatchAggregatorConfig = BatchAggregatorConfig(),
     maxNumLoadedDigests: PositiveInt = PositiveInt.tryCreate(1000),
-    digestLoadParallelism: PositiveInt = PositiveInt.tryCreate(8),
-    digestStoreParallelism: PositiveInt = PositiveInt.tryCreate(8),
+    digestLoadParallelism: PositiveInt = PositiveInt.tryCreate(1000),
+    digestComputeParallelism: PositiveInt = PositiveInt.tryCreate(8),
+    digestPipelineBufferSize: NonNegativeInt = NonNegativeInt.zero,
+    matchingParallelism: PositiveInt = PositiveInt.tryCreate(20),
+    contractChangeClassificationBatchSize: PositiveInt = PositiveInt.tryCreate(100),
 )
 
 /** Config for [[com.digitalasset.canton.participant.commitment.AcsCommitmentSender]]
@@ -476,15 +513,38 @@ final case class AcsCommitmentConfig(
   * @param parallelism
   *   the number of parallel threads to use when parallelism is used (at the moment signing messages
   *   only). Default is 10.
+  * @param minSendDelayFraction
+  *   the fraction of the reconciliation interval to minimally delay the sending of a commitment
+  *   beyond the period end. Default is 0.
+  * @param maxSendDelayFraction
+  *   The fraction of the reconciliation interval to maximally delay the sending of a commitment
+  *   beyond the period end. If the commitment production is delayed, this fraction may be exceeded.
+  *   Default is 0.9.
   */
 final case class AcsCommitmentSenderConfig(
     maxBatchSize: PositiveInt = AcsCommitmentSenderConfig.defaultMaxBatchSize,
     parallelism: PositiveInt = AcsCommitmentSenderConfig.defaultParallelism,
+    maxRetryDelay: config.NonNegativeFiniteDuration =
+      AcsCommitmentSenderConfig.defaultMaxRetryDelay,
+    minSendDelayFraction: Double = AcsCommitmentSenderConfig.defaultMinSendDelayFraction,
+    maxSendDelayFraction: Double = AcsCommitmentSenderConfig.defaultMaxSendDelayFraction,
 )
 
 object AcsCommitmentSenderConfig {
   lazy val defaultMaxBatchSize: PositiveInt = PositiveInt.tryCreate(100)
   lazy val defaultParallelism: PositiveInt = PositiveInt.tryCreate(10)
+  lazy val defaultMaxRetryDelay: config.NonNegativeFiniteDuration =
+    config.NonNegativeFiniteDuration(FiniteDuration(10, TimeUnit.SECONDS))
+  lazy val defaultMinSendDelayFraction: Double = 0.0d
+  lazy val defaultMaxSendDelayFraction: Double = 0.9d
+}
+
+final case class AcsCommitmentPeriodConfig(
+    writerPageSize: PositiveInt = AcsCommitmentPeriodConfig.defaultWriterPageSize
+)
+
+object AcsCommitmentPeriodConfig {
+  lazy val defaultWriterPageSize: PositiveInt = PositiveInt.tryCreate(100)
 }
 
 /** Config for LSU.

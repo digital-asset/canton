@@ -3,10 +3,16 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
+  CheckpointToBeWritten,
+  ContractChange,
+  ContractChangeBatch,
+}
 import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Started,
   Starting,
@@ -14,17 +20,23 @@ import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Stopping,
 }
 import com.digitalasset.canton.participant.commitment.DigestProcessorTestBase.PromiseKillSwitch
-import com.digitalasset.canton.participant.store.AcsDigestTestBase
+import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, TestCommitmentMetrics}
+import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  CheckpointType,
+  allCheckpointsFilter,
+}
+import com.digitalasset.canton.participant.store.{AcsDigestStore, AcsDigestTestBase}
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TryUtil
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, ReassignmentCounter}
 import org.apache.pekko.stream.KillSwitch
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Failure
 
+@AcsCommitmentTest
 class BaseDigestProcessorTest
     extends AnyWordSpec
     with AcsDigestTestBase
@@ -144,7 +156,9 @@ class BaseDigestProcessorTest
       // the various futures should be completed
       completionFutureAfterStarted.failed.futureValueUS shouldBe runningFailure
 
-      proc.stateInternal shouldBe Stopped(Failure(runningFailure))
+      eventually() {
+        proc.stateInternal shouldBe Stopped(Failure(runningFailure))
+      }
 
       proc.completionFuture.failed.futureValueUS shouldBe runningFailure
     }
@@ -180,6 +194,118 @@ class BaseDigestProcessorTest
       proc.stateInternal shouldBe Stopped(Failure(stoppingException))
     }
 
+    "write checkpoint successfully via writeCheckpointFUS" in {
+      val pipelineCompletion = Promise[Unit]()
+      val killSwitch = new PromiseKillSwitch()
+      val proc =
+        new TestDigestProcessor(FutureUnlessShutdown.pure((killSwitch, pipelineCompletion.future)))
+      val timepoint = tp(1)
+      val cpToBeWritten =
+        CheckpointToBeWritten(timepoint, CheckpointType.MaxEventsWithoutCheckpoint)
+
+      proc.writeCheckpoint(cpToBeWritten).futureValueUS
+
+      // Verify that it was actually written to the store
+      val latest = proc.acsDigestStore
+        .latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
+        .futureValueUS
+      latest.value.timepoint shouldBe timepoint
+      latest.value.checkpointType shouldBe CheckpointType.MaxEventsWithoutCheckpoint
+
+      proc.metrics.checkpointWatermark.getValue shouldBe timepoint.recordTime.toMicros
+    }
+
+    "check consistency of correct contract batches" in {
+      noException should be thrownBy
+        ContractChangeBatch.tryCreate(
+          Map(
+            party1 -> Set(participant1),
+            party2 -> Set(participant1, participant2),
+            party3 -> Set(participant1, participant2),
+          ),
+          ContractChange(
+            stakeholders = Set(party1, party2, party3),
+            locallyHostedStakeholders = Seq(party1, party2, party3),
+            cid = contractId1,
+            rc = ReassignmentCounter.Genesis,
+            isActivation = true,
+          ),
+          ContractChange(
+            stakeholders = Set(party1, party3),
+            locallyHostedStakeholders = Seq(party1, party3),
+            cid = contractId2,
+            rc = ReassignmentCounter.Genesis,
+            isActivation = true,
+          ),
+          ContractChange(
+            stakeholders = Set(party1, party2),
+            locallyHostedStakeholders = Seq(party1, party2),
+            cid = contractId2,
+            rc = ReassignmentCounter.Genesis,
+            isActivation = true,
+          ),
+        )
+    }
+
+    "check consistency of inconcistent contract batches" in {
+      loggerFactory.assertThrowsAndLogs[IllegalArgumentException](
+        // party3 is not in the party hostings map
+        ContractChangeBatch.tryCreate(
+          Map(
+            party1 -> Set(participant1),
+            party2 -> Set(participant1, participant2),
+          ),
+          ContractChange(
+            stakeholders = Set(party1, party2, party3),
+            locallyHostedStakeholders = Seq(party1, party2, party3),
+            cid = contractId1,
+            rc = ReassignmentCounter.Genesis,
+            isActivation = true,
+          ),
+          ContractChange(
+            stakeholders = Set(party1, party3),
+            locallyHostedStakeholders = Seq(party1, party3),
+            cid = contractId2,
+            rc = ReassignmentCounter.Genesis,
+            isActivation = true,
+          ),
+        ),
+        _.throwable.value.getMessage should include(
+          "Not all stakeholders are hosted or not all hosted parties are stakeholders"
+        ),
+      )
+
+      loggerFactory.assertThrowsAndLogs[IllegalArgumentException](
+        // party4 in the party hostings map is not a stakeholder in the contract changes
+        ContractChangeBatch.tryCreate(
+          Map(
+            party1 -> Set(participant1),
+            party2 -> Set(participant1, participant2),
+            party3 -> Set(participant1, participant2),
+            party4 -> Set(participant1),
+          ),
+          ContractChange(
+            stakeholders = Set(party1, party2, party3),
+            locallyHostedStakeholders = Seq(party1, party2, party3),
+            cid = contractId1,
+            rc = ReassignmentCounter.Genesis,
+            isActivation = true,
+          ),
+          ContractChange(
+            stakeholders = Set(party1, party3),
+            locallyHostedStakeholders = Seq(party1, party3),
+            cid = contractId2,
+            rc = ReassignmentCounter.Genesis,
+            isActivation = true,
+          ),
+        ),
+        _.throwable.value.getMessage should include(
+          "Not all stakeholders are hosted or not all hosted parties are stakeholders"
+        ),
+      )
+
+    }
+
   }
 
   class TestDigestProcessor(
@@ -188,17 +314,17 @@ class BaseDigestProcessorTest
     override implicit protected val executionContext: ExecutionContext =
       BaseDigestProcessorTest.this.parallelExecutionContext
 
-    // This test doesn't care about this aspect and should not access it
-    override def isReinitializingProcessor: Boolean = throw new IllegalAccessException(
-      s"the test should not have called $functionFullName"
-    )
-
     override protected def timeouts: ProcessingTimeout = BaseDigestProcessorTest.this.timeouts
 
     override def synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId
 
     override protected def loggerFactory: NamedLoggerFactory =
       BaseDigestProcessorTest.this.loggerFactory
+
+    override val acsDigestStore: AcsDigestStore =
+      mkInMemoryDigestStore()(executionContext)
+
+    override private[canton] val metrics: CommitmentMetrics = TestCommitmentMetrics()
 
     override protected def startPipelineInternal()(implicit
         traceContext: TraceContext

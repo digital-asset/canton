@@ -1,0 +1,139 @@
+name: Canton Nightly Workflow
+on:
+  # TODO(#34877): Re-enable workflow_dispatch and the separate nightly scheduler
+  # after the CircleCI migration is complete. Until then, keep this workflow
+  # limited to temporary gha-migration/* push testing.
+  # workflow_dispatch:
+  # Optional parity/testing trigger while migrating from CircleCI.
+  push:
+    branches:
+      - 'gha-migration/*'
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  compile:
+    name: Compile
+    uses: ./.github/workflows/_compile.yml
+    needs: pick_runner
+    secrets: inherit
+    with:
+      reset_classes_if_requested: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_community:
+    name: Package Community
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_community.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: true
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  build_scaladoc:
+    name: Build Scaladoc
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_build_scaladoc.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  build_docs_snippets:
+    name: Build Docs Snippets
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_build_docs_snippets.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  build_docs:
+    name: Build Docs
+    needs:
+      - build_docs_snippets
+      - build_scaladoc
+      - package_community
+      - pick_runner
+    uses: ./.github/workflows/_build_docs.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  unstable_test:
+    name: Unstable Test
+    needs: [pick_runner, package_community]
+    uses: ./.github/workflows/_unstable_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_with_java17:
+    name: Test With Java 17
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      override_java_version_for_tests: "17"
+      protocol_version: ""
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_protocol_version_34:
+    name: Test Protocol Version 34
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      override_java_version_for_tests: ""
+      protocol_version: "34"
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  ledger_api_compatibility_tests:
+    name: Ledger API Compatibility Tests
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  notify:
+    name: Notify on Failure
+    needs:
+      - pick_runner
+      - compile
+      - package_community
+      - build_scaladoc
+      - build_docs_snippets
+      - build_docs
+      - unstable_test
+      - test_with_java17
+      - test_protocol_version_34
+      - ledger_api_compatibility_tests
+    if: |
+      always() &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}
+      # Keep required-notify runner selection independent from pick_runner output to avoid
+      # issues with notify if pick_runner fails before emitting outputs.
+      # Keep repo-to-runner labels in sync with .github/actions/utils/pick_runner/action.yml.
+      runner: >-
+        ${{
+          case(
+            github.repository == 'DACH-NY/canton', 'dach-ny-canton',
+            github.repository == 'digital-asset/canton', 'digital-asset-canton',
+            'ubuntu-latest'
+          )
+        }}

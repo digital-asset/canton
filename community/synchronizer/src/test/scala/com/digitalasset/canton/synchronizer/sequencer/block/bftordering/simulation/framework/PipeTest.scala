@@ -174,7 +174,7 @@ object PipeTest {
           system.newModuleRef[Output.Message[E]](ModuleName("outputModule"))()
         val pruningModuleRef =
           system.newModuleRef[Pruning.Message](ModuleName("pruningModule"))()
-        inputModuleRef.asyncSendNoTrace("init")
+        inputModuleRef.asyncSend("init")
         SystemInitializationResult(
           inputModuleRef,
           inputModuleRef,

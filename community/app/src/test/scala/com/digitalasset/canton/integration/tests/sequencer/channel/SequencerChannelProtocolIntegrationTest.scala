@@ -178,7 +178,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
         override def handlePayload(payload: ByteString)(implicit
             traceContext: TraceContext
         ): EitherT[FutureUnlessShutdown, String, Unit] = {
-          val str = payload.toString("UTF-8")
+          val str = payload.toStringUtf8
           messagesReceivedP1 += str
           val response = ByteString.copyFromUtf8(s"Response to \"$str\"")
           sendTestPayload(s"responding to \"$str\"", response)
@@ -188,7 +188,7 @@ sealed trait SequencerChannelProtocolIntegrationTest
         override def handlePayload(payload: ByteString)(implicit
             traceContext: TraceContext
         ): EitherT[FutureUnlessShutdown, String, Unit] = {
-          val str = payload.toString("UTF-8")
+          val str = payload.toStringUtf8
           responsesReceivedP2 += str
           EitherTUtil.unitUS
         }

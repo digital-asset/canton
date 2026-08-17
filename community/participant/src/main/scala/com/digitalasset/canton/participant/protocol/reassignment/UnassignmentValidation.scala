@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.*
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -27,7 +28,6 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.{LfPackageId, LfPartyId}
 
 import scala.concurrent.ExecutionContext
 
@@ -46,6 +46,10 @@ private[reassignment] class UnassignmentValidation(
         .performValidation(
           parsedRequest
         )
+      hostedConfirmingParties <- EitherT.right[ReassignmentProcessorError](
+        parsedRequest.snapshot.ipsSnapshot
+          .canConfirm(participantId, parsedRequest.fullViewTree.confirmingParties)
+      )
       reassignmentValidation <-
         if (parsedRequest.fullViewTree.isReassigningParticipant(participantId))
           new ReassigningParticipantUnassignmentValidator(
@@ -59,7 +63,6 @@ private[reassignment] class UnassignmentValidation(
           EitherT.right[ReassignmentProcessorError](
             FutureUnlessShutdown.pure(
               ReassigningParticipantValidation(
-                hostedConfirmingReassigningParties = Set.empty,
                 assignmentExclusivity = None,
                 reassigningParticipantValidationResult =
                   UnassignmentValidationResult.ReassigningParticipantValidationResult(Nil),
@@ -70,8 +73,7 @@ private[reassignment] class UnassignmentValidation(
       unassignmentData =
         UnassignmentData(parsedRequest.fullViewTree, parsedRequest.requestTimestamp),
       rootHash = parsedRequest.rootHash,
-      hostedConfirmingReassigningParties =
-        reassignmentValidation.hostedConfirmingReassigningParties,
+      hostedConfirmingParties = hostedConfirmingParties,
       assignmentExclusivity = reassignmentValidation.assignmentExclusivity,
       commonValidationResult = commonValidationResult,
       reassigningParticipantValidationResult =
@@ -149,13 +151,6 @@ private[reassignment] object UnassignmentValidation {
       val contractValidator: ContractValidator,
       val getTopologyAtTs: GetTopologyAtTimestamp,
   )(implicit val executionContext: ExecutionContext, val traceContext: TraceContext) {
-
-    private def checkHostedConfirmingReassigningParties(
-        parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree]
-    ): ValidationErrorOr[Set[LfPartyId]] = EitherT.right(
-      parsedRequest.snapshot.ipsSnapshot
-        .canConfirm(participantId, parsedRequest.fullViewTree.confirmingParties)
-    )
 
     private def checkAssignmentExclusivity(
         fullTree: FullUnassignmentTree,
@@ -266,7 +261,6 @@ private[reassignment] object UnassignmentValidation {
           parsedRequest.fullViewTree.targetSynchronizer
         )
 
-        hostedConfirmingReassigningParties <- checkHostedConfirmingReassigningParties(parsedRequest)
         assignmentExclusivity <- checkAssignmentExclusivity(
           parsedRequest.fullViewTree,
           targetTopology,
@@ -276,7 +270,6 @@ private[reassignment] object UnassignmentValidation {
           targetTopology,
         )
       } yield ReassigningParticipantValidation(
-        hostedConfirmingReassigningParties,
         assignmentExclusivity,
         reassigningParticipantValidationResult,
       )
@@ -284,7 +277,6 @@ private[reassignment] object UnassignmentValidation {
   }
 
   private[reassignment] final case class ReassigningParticipantValidation(
-      hostedConfirmingReassigningParties: Set[LfPartyId],
       assignmentExclusivity: Option[Target[CantonTimestamp]],
       reassigningParticipantValidationResult: UnassignmentValidationResult.ReassigningParticipantValidationResult,
   )

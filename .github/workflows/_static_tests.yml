@@ -1,0 +1,89 @@
+name: Static Tests
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+jobs:
+  scala_lint:
+    name: Protobuf and Scala linting
+    runs-on: ${{ inputs.runner }}
+    env:
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+      EXECUTOR_JVM_HEAP_SIZE: 2500M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Restore SBT caches
+        id: restore_sbt_cache
+        uses: ./.github/actions/cache/restore_sbt_cache
+
+      - name: Generate protobuf sources
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: google-common-protos-scala/protocGenerate ledger-api-value/protocGenerate
+          report_to_datadog: "false"
+      - name: Run Scala linting
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: lint
+          extra_parameters: -J-Xss5M
+          report_to_datadog: "false"
+
+  check_sql:
+    name: Check SQL table definitions
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - name: Check SQL table definitions
+        uses: ./.github/actions/build/check_sql
+
+  protobuf_check:
+    name: Check Protobuf Required/Optional requirements
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - name: Check Protobuf Required/Optional requirements
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: ./scripts/ci/check-protobuf-required-optional.sh
+
+  todo_check:
+    name: Check tracked work items in the code
+    runs-on: ${{ inputs.runner }}
+    # Run the todo checker only on the private repo
+    # TODO(i30871): Enable again on all projects
+    if: github.repository == 'DACH-NY/canton'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - name: Run the todo checker
+        uses: ./.github/actions/build/todo_checker
+
+  actionlint:
+    name: Lint GitHub Actions workflows
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+      - name: Lint workflows with actionlint
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: actionlint -color

@@ -1,0 +1,20 @@
+name: Track CPU & Memory
+description: Track CPU & Memory usage
+
+outputs:
+  monitor_pid:
+    description: Monitor's PID
+    value: ${{ steps.monitor_start.outputs.monitor_pid }}
+
+runs:
+  using: composite
+  steps:
+    - name: Start memory monitor
+      id: monitor_start
+      shell: bash
+      run: |
+        echo "Starting resource monitoring..."
+        ./scripts/ci/record-memory-usage.sh &
+
+        echo "monitor_pid=$!" >> "$GITHUB_OUTPUT"
+        echo "Monitoring started with PID: $!"

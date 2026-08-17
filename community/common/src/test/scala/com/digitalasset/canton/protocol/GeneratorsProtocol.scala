@@ -103,10 +103,12 @@ final class GeneratorsProtocol(
           } yield {
             if (!isNone)
               Some(
-                new AcsCommitmentsCatchUpParameters(
-                  PositiveInt.tryCreate(skip),
-                  PositiveInt.tryCreate(trigger),
-                )
+                AcsCommitmentsCatchUpParameters
+                  .create(
+                    PositiveInt.tryCreate(skip),
+                    PositiveInt.tryCreate(trigger),
+                  )
+                  .value
               )
             else None
           }
@@ -115,6 +117,12 @@ final class GeneratorsProtocol(
         preparationTimeRecordTimeTolerance <- Gen
           .choose(0L, 10000L)
           .map(NonNegativeFiniteDuration.tryOfMicros)
+
+//        synchronizerSizeLimits <-
+//          if (protocolVersion >= ProtocolVersion.v36) Arbitrary.arbitrary[SizeLimits]
+//          else Gen.const(SizeLimits.max)
+        // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
+        synchronizerSizeLimits <- Gen.const(SizeLimits.max)
 
         dynamicSynchronizerParameters = DynamicSynchronizerParameters.tryCreate(
           confirmationResponseTimeout,
@@ -130,6 +138,7 @@ final class GeneratorsProtocol(
           acsCommitmentsCatchupConfig,
           participantSynchronizerLimits,
           preparationTimeRecordTimeTolerance,
+          synchronizerSizeLimits,
         )(representativePV)
 
       } yield dynamicSynchronizerParameters

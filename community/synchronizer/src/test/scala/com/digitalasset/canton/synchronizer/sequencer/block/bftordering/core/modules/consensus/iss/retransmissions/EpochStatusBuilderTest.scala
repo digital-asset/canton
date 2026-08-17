@@ -13,6 +13,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Consensus,
   ConsensusStatus,
 }
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AnyWordSpec
 
 class EpochStatusBuilderTest extends AnyWordSpec with BftSequencerBaseTest {
@@ -58,7 +59,7 @@ class EpochStatusBuilderTest extends AnyWordSpec with BftSequencerBaseTest {
         ConsensusStatus.EpochStatus.create(
           myId,
           epoch0,
-          Seq(inProgressSegment, completeSegment, inViewChangeSegment),
+          NonEmpty.mk(Seq, inProgressSegment, completeSegment, inViewChangeSegment),
         )
       )
     }

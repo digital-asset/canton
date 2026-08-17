@@ -1,0 +1,114 @@
+name: Prepare Rerun Command
+description: Prepares a command to rerun the current workflow with the same inputs and secrets.
+
+inputs:
+  command:
+    description: The command to run the tests, e.g. `sbt test`
+    required: true
+  test_sub_command:
+    description: The sub-command to run the tests, e.g. `testOnly`
+    required: true
+  shard_index:
+    description: The index of the current shard (0-based)
+    required: true
+  num_test_buckets:
+    description: The total number of test buckets
+    required: true
+  selected_tests_file:
+    description: Optional file with the selected class list for the current shard
+    required: false
+    default: ""
+  testcase_timeout_triggered:
+    description: Whether the first run was stopped by per-test timeout watchdog
+    required: false
+    default: 'false'
+  succeed_on_error:
+    description: Whether to succeed even if there are failed tests
+    required: false
+    default: 'false'
+
+outputs:
+  command_file:
+    description: Path to a file containing the rerun command
+    value: ${{ steps.build_failed_rerun_cmd.outputs.resolved_command_file }}
+  failed_test_classes_file:
+    description: Path to the generated file containing normalized failed test classes
+    value: ${{ steps.build_failed_rerun_cmd.outputs.failed_test_classes_file }}
+  has_failed_test_classes:
+    description: Whether there are failed test classes
+    value: ${{ steps.build_failed_rerun_cmd.outputs.has_failed_test_classes }}
+  failed_test_classes_count:
+    description: The number of failed test classes
+    value: ${{ steps.build_failed_rerun_cmd.outputs.failed_test_classes_count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build Failed Test Summary
+      env:
+        SHARD_INDEX: ${{ inputs.shard_index }}
+        NUM_TEST_BUCKETS: ${{ inputs.num_test_buckets }}
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: >
+          python3 scripts/ci/test_output/summarize_test_results.py
+          --shard-index "$SHARD_INDEX"
+          --total-shards "$([[ "$NUM_TEST_BUCKETS" == "0" ]] && echo "1" || echo "$NUM_TEST_BUCKETS")"
+          --junit-glob ".ci-test-results/first-run/**/TEST-*.xml"
+          --json-output "failed-test-summary.json"
+
+    - name: Compute failed-only rerun command
+      uses: ./.github/actions/nix/nix_script_run
+      env:
+        COMMAND_TEMPLATE: ${{ inputs.command }}
+        FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/failed-test-classes-${{ inputs.shard_index }}.txt
+        RESOLVED_COMMAND_FILE: ${{ runner.temp }}/failed-rerun-command-${{ inputs.shard_index }}.txt
+        HAS_FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/has-failed-test-classes-${{ inputs.shard_index }}.txt
+        FAILED_TEST_CLASSES_COUNT_FILE: ${{ runner.temp }}/failed-test-classes-count-${{ inputs.shard_index }}.txt
+        NUM_TEST_BUCKETS: ${{ inputs.num_test_buckets }}
+        SUMMARY_JSON: failed-test-summary.json
+        TEST_SUB_COMMAND: ${{ inputs.test_sub_command }}
+        SELECTED_TESTS_FILE: ${{ inputs.selected_tests_file }}
+        TESTCASE_TIMEOUT_TRIGGERED: ${{ inputs.testcase_timeout_triggered }}
+        JUNIT_GLOB: ".ci-test-results/first-run/**/TEST-*.xml"
+        # Scoped to .ci-test-results/first-run so stale reports from previous
+        # jobs on reused runners cannot silently drop classes from the rerun.
+      with:
+        command: |
+          python3 scripts/ci/prepare_rerun_command.py \
+            --summary-json "$SUMMARY_JSON" \
+            --failed-test-classes-file "$FAILED_TEST_CLASSES_FILE" \
+            --resolved-command-file "$RESOLVED_COMMAND_FILE" \
+            --has-failed-test-classes-file "$HAS_FAILED_TEST_CLASSES_FILE" \
+            --failed-test-classes-count-file "$FAILED_TEST_CLASSES_COUNT_FILE" \
+            --num-test-buckets "$NUM_TEST_BUCKETS" \
+            --command-template "$COMMAND_TEMPLATE" \
+            --test-sub-command "$TEST_SUB_COMMAND" \
+            --selected-tests-file "$SELECTED_TESTS_FILE" \
+            --testcase-timeout-triggered "$TESTCASE_TIMEOUT_TRIGGERED" \
+            --junit-glob "$JUNIT_GLOB"
+
+    - name: Export failed-only rerun outputs
+      id: build_failed_rerun_cmd
+      shell: bash
+      env:
+        FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/failed-test-classes-${{ inputs.shard_index }}.txt
+        RESOLVED_COMMAND_FILE: ${{ runner.temp }}/failed-rerun-command-${{ inputs.shard_index }}.txt
+        HAS_FAILED_TEST_CLASSES_FILE: ${{ runner.temp }}/has-failed-test-classes-${{ inputs.shard_index }}.txt
+        FAILED_TEST_CLASSES_COUNT_FILE: ${{ runner.temp }}/failed-test-classes-count-${{ inputs.shard_index }}.txt
+      run: |
+        has_failed_test_classes="false"
+        if [[ -f "$HAS_FAILED_TEST_CLASSES_FILE" ]]; then
+          has_failed_test_classes="$(cat "$HAS_FAILED_TEST_CLASSES_FILE")"
+        fi
+        failed_test_classes_count="0"
+        if [[ -f "$FAILED_TEST_CLASSES_COUNT_FILE" ]]; then
+          failed_test_classes_count="$(cat "$FAILED_TEST_CLASSES_COUNT_FILE")"
+        fi
+
+        {
+          echo "resolved_command_file=$RESOLVED_COMMAND_FILE"
+          echo "failed_test_classes_file=$FAILED_TEST_CLASSES_FILE"
+          echo "has_failed_test_classes=$has_failed_test_classes"
+          echo "failed_test_classes_count=$failed_test_classes_count"
+        } >> "$GITHUB_OUTPUT"

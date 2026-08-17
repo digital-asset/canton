@@ -292,6 +292,7 @@ final class OngoingStreamAuthIT
         identityProviderConfig.identityProviderId,
         Vector(aliceRight),
         primaryParty = "",
+        primaryPartyAuthentication = false,
       ).futureValue
       val ledgerEnd = stub(StateServiceGrpc.stub(channel), canBeAnAdmin.token)
         .getLedgerEnd(GetLedgerEndRequest())

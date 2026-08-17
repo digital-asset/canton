@@ -100,7 +100,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
   protected def topologyProcessor: ParticipantTopologyProcessor
   protected def trafficProcessor: TrafficControlProcessor
-  protected def legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType
+  protected def legacyAcsCommitmentProcessorO: Option[AcsCommitmentProcessor.ProcessorType]
   protected def acsCommitmentValidator: ReceivedAcsCommitmentValidator
   protected def requestCounterAllocator: RequestCounterAllocator
   protected def recordOrderPublisher: RecordOrderPublisher
@@ -117,38 +117,39 @@ trait MessageDispatcher { this: NamedLogging =>
       envelopes: Seq[DefaultOpenEnvelope],
       sc: SequencerCounter,
       ts: CantonTimestamp,
-  )(implicit traceContext: TraceContext): ProcessingResult = {
-    val acsCommitments =
-      envelopes.mapFilter(select[SignedProtocolMessage[messages.LegacyAcsCommitment]])
-    if (acsCommitments.nonEmpty) {
-      // When a participant receives an ACS commitment from a counter-participant, the counter-participant
-      // expects to receive the corresponding commitment from the local participant.
-      // However, the local participant may not have seen neither an ACS change nor a time proof
-      // since the commitment's interval end. So we signal an empty ACS change to the ACS commitment processor
-      // at the commitment sequencing time (which is after the interval end for an honest counter-participant)
-      // so that this triggers an ACS commitment computation on the local participant if necessary.
-      //
-      // This ACS commitment may be bundled with a request that may lead to a non-empty ACS change at this timestamp.
-      // It is nevertheless OK to schedule the empty ACS change
-      // because we use a different tie breaker for the empty ACS commitment.
-      // This is also why we must not tick the record order publisher here.
-      FutureUnlessShutdown
-        .lift(
-          recordOrderPublisher.scheduleEmptyAcsChangePublication(sc, ts)
-        )
-        .flatMap(_ =>
-          doProcess(
-            AcsCommitment(
-              None,
-              { () =>
-                logger.debug(s"Processing ACS commitments for timestamp $ts")
-                legacyAcsCommitmentProcessor(ts, Traced(acsCommitments))
-              },
+  )(implicit traceContext: TraceContext): ProcessingResult =
+    legacyAcsCommitmentProcessorO.fold(pureProcessingResult) { legacyAcsCommitmentProcessor =>
+      val acsCommitments =
+        envelopes.mapFilter(select[SignedProtocolMessage[messages.LegacyAcsCommitment]])
+      if (acsCommitments.nonEmpty) {
+        // When a participant receives an ACS commitment from a counter-participant, the counter-participant
+        // expects to receive the corresponding commitment from the local participant.
+        // However, the local participant may not have seen neither an ACS change nor a time proof
+        // since the commitment's interval end. So we signal an empty ACS change to the ACS commitment processor
+        // at the commitment sequencing time (which is after the interval end for an honest counter-participant)
+        // so that this triggers an ACS commitment computation on the local participant if necessary.
+        //
+        // This ACS commitment may be bundled with a request that may lead to a non-empty ACS change at this timestamp.
+        // It is nevertheless OK to schedule the empty ACS change
+        // because we use a different tie breaker for the empty ACS commitment.
+        // This is also why we must not tick the record order publisher here.
+        FutureUnlessShutdown
+          .lift(
+            recordOrderPublisher.scheduleEmptyAcsChangePublication(sc, ts)
+          )
+          .flatMap(_ =>
+            doProcess(
+              AcsCommitment(
+                None,
+                { () =>
+                  logger.debug(s"Processing ACS commitments for timestamp $ts")
+                  legacyAcsCommitmentProcessor(ts, Traced(acsCommitments))
+                },
+              )
             )
           )
-        )
-    } else pureProcessingResult
-  }
+      } else pureProcessingResult
+    }
 
   private def processAcsCommitmentEnvelopes(
       envelopes: Seq[DefaultOpenEnvelope],
@@ -1121,7 +1122,7 @@ private[participant] object MessageDispatcher {
         requestProcessors: RequestProcessors,
         topologyProcessor: ParticipantTopologyProcessor,
         trafficProcessor: TrafficControlProcessor,
-        legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+        legacyAcsCommitmentProcessorO: Option[AcsCommitmentProcessor.ProcessorType],
         acsCommitmentValidator: ReceivedAcsCommitmentValidator,
         requestCounterAllocator: RequestCounterAllocator,
         recordOrderPublisher: RecordOrderPublisher,
@@ -1141,7 +1142,7 @@ private[participant] object MessageDispatcher {
         assignmentProcessor: AssignmentProcessor,
         topologyProcessor: TopologyTransactionProcessor,
         trafficProcessor: TrafficControlProcessor,
-        legacyAcsCommitmentProcessor: AcsCommitmentProcessor.ProcessorType,
+        legacyAcsCommitmentProcessorO: Option[AcsCommitmentProcessor.ProcessorType],
         acsCommitmentValidator: ReceivedAcsCommitmentValidator,
         requestCounterAllocator: RequestCounterAllocator,
         recordOrderPublisher: RecordOrderPublisher,
@@ -1170,7 +1171,7 @@ private[participant] object MessageDispatcher {
         requestProcessors,
         topologyProcessor.processEnvelopes,
         trafficProcessor,
-        legacyAcsCommitmentProcessor,
+        legacyAcsCommitmentProcessorO,
         acsCommitmentValidator,
         requestCounterAllocator,
         recordOrderPublisher,

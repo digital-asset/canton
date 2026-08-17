@@ -117,6 +117,14 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
       description = "Records the rate and latency it takes to make progress on a view.",
       qualification = MetricQualification.Latency,
     )
+
+    private[metrics] val relativeSegmentLatency: Item = Item(
+      prefix :+ "relative-segment-latency",
+      summary = "Relative segment latency",
+      description =
+        "Records the rate and latency it takes to complete a segment after the segment led by this node completed",
+      qualification = MetricQualification.Latency,
+    )
   }
   private[metrics] val consensus = new ConsensusHistograms
 
@@ -631,6 +639,22 @@ class BftOrderingMetrics private[metrics] (
         new CacheMetrics("batch-cache", openTelemetryMetricsFactory)
     }
 
+    object outputFetch {
+      object labels {
+        val Leader = "Leader"
+      }
+
+      val missingBatchesNeedOutputFetch: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "missing-batches-need-output-fetch",
+          summary = "Missing batches that need output fetch",
+          description =
+            "Measures amount of batches from other nodes that we did not have locally so we need to fetch from network",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+    }
+
     object regression {
       object labels {
         object stage {
@@ -784,6 +808,9 @@ class BftOrderingMetrics private[metrics] (
 
     val viewChangeProgressLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.consensus.viewChangeProgressLatency.info)
+
+    val relativeSegmentLatency: Timer =
+      openTelemetryMetricsFactory.timer(histograms.consensus.relativeSegmentLatency.info)
 
     // Private constructor to avoid being instantiated multiple times by accident
     final class RetransmissionsMetrics private[BftOrderingMetrics] {
@@ -1044,14 +1071,23 @@ class BftOrderingMetrics private[metrics] (
     val queryLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.topology.queryLatency.info)
 
+    val blacklistedEpochsCounter: Counter =
+      openTelemetryMetricsFactory.counter(
+        MetricInfo(
+          prefix :+ "blacklisted-epochs",
+          "Number of epochs a node has been blacklisted for",
+          MetricQualification.Traffic,
+          "Number of epochs a node has been blacklisted for after failing to timely lead a segment",
+        )
+      )
+
     object labels {
       val sequencerId: String = "sequencer-id"
     }
-
     // We assign different values to different nodes just to make it easier to distinguish them in Grafana
     private val topologyGauges = mutable.Map[BftNodeId, Gauge[Int]]()
-    private val leadersGauges = mutable.Map[BftNodeId, Gauge[Int]]()
 
+    private val leadersGauges = mutable.Map[BftNodeId, Gauge[Int]]()
     private val maxToleratedFaultsGauge =
       openTelemetryMetricsFactory.gauge(
         MetricInfo(
@@ -1092,6 +1128,10 @@ class BftOrderingMetrics private[metrics] (
       maxToleratedFaultsGauge.updateValue(orderingTopology.maxToleratedFaults)
       weakQuorumGauge.updateValue(orderingTopology.weakQuorum)
       strongQuorumGauge.updateValue(orderingTopology.strongQuorum)
+
+      newMembership.blacklistedNodes.foreach { nodeId =>
+        blacklistedEpochsCounter.inc()(metricsContext.withExtraLabels(labels.sequencerId -> nodeId))
+      }
 
       {
         lock.exclusive {

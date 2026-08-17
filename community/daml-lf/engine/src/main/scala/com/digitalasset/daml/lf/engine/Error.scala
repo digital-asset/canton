@@ -6,6 +6,7 @@ package engine
 
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.interpretation.Error.Dev.Limit
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.transaction.NodeId
 import com.digitalasset.daml.lf.value.Value
@@ -248,6 +249,10 @@ object Error {
         mismatch: transaction.ReplayMismatch
     ) extends Error {
       override def message: String = mismatch.message
+    }
+
+    final case class TransactionLimitExceeded(errors: Set[Limit.Error]) extends Error {
+      override def message: String = s"Transaction limit exceeded: $errors"
     }
   }
 }

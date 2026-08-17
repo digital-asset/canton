@@ -39,7 +39,10 @@ import com.digitalasset.canton.platform.store.dao.events.OrderingUtils.{
   offsetOrdering,
   orderingBasedOnDescending,
 }
-import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.TopologyTransactionsStreamQueryParams
+import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.{
+  SynchronizerParametersResponse,
+  TopologyTransactionsStreamQueryParams,
+}
 import com.digitalasset.canton.platform.store.dao.events.UpdatesStreamReader.VectorOps
 import com.digitalasset.canton.platform.store.dao.{DbDispatcher, PaginatingAsyncStream}
 import com.digitalasset.canton.platform.store.utils.{
@@ -113,20 +116,24 @@ class UpdatesStreamReader(
       skipPruningChecks = skipPruningChecks,
     )
       .wireTap(_ match {
-        case (_, ProtoUpdate(getUpdatesResponse)) =>
-          getUpdatesResponse.update match {
-            case GetUpdateResponse.Update.Transaction(value) =>
-              val event = tracing.Event("update", TraceIdentifiers.fromTransaction(value))
-              Spans.addEventToSpan(event, span)
-            case GetUpdateResponse.Update.Reassignment(reassignment) =>
-              val event =
-                tracing.Event("update", TraceIdentifiers.fromReassignment(reassignment))
-              Spans.addEventToSpan(event, span)
-            case GetUpdateResponse.Update.TopologyTransaction(topologyTransaction) =>
-              val event = tracing
-                .Event("update", TraceIdentifiers.fromTopologyTransaction(topologyTransaction))
-              Spans.addEventToSpan(event, span)
-            case _ => ()
+        case (_, ProtoUpdate(getUpdatesResponseO, _)) =>
+          getUpdatesResponseO match {
+            case Some(getUpdatesResponse) =>
+              getUpdatesResponse.update match {
+                case GetUpdateResponse.Update.Transaction(value) =>
+                  val event = tracing.Event("update", TraceIdentifiers.fromTransaction(value))
+                  Spans.addEventToSpan(event, span)
+                case GetUpdateResponse.Update.Reassignment(reassignment) =>
+                  val event =
+                    tracing.Event("update", TraceIdentifiers.fromReassignment(reassignment))
+                  Spans.addEventToSpan(event, span)
+                case GetUpdateResponse.Update.TopologyTransaction(topologyTransaction) =>
+                  val event = tracing
+                    .Event("update", TraceIdentifiers.fromTopologyTransaction(topologyTransaction))
+                  Spans.addEventToSpan(event, span)
+                case _ => ()
+              }
+            case None => ()
           }
         case (_, UpdateResponse.AcsCommitment(commitment)) =>
           val event =
@@ -250,8 +257,8 @@ class UpdatesStreamReader(
     }
 
     val topologyTransactions: Source[(Offset, UpdateResponse), NotUsed] =
-      internalUpdateFormat.includeTopologyEvents.flatMap(_.participantAuthorizationFormat) match {
-        case Some(participantAuthorizationFormat) =>
+      internalUpdateFormat.includeTopologyEvents match {
+        case Some(topologyFormat) =>
           topologyTransactionsStreamReader
             .streamTopologyTransactions(
               TopologyTransactionsStreamQueryParams(
@@ -259,18 +266,29 @@ class UpdatesStreamReader(
                 descendingOrder = descendingOrder,
                 payloadQueriesLimiter = payloadQueriesLimiter,
                 idPageSizing = idPageSizing,
-                participantAuthorizationFormat = participantAuthorizationFormat,
+                topologyFormat = topologyFormat,
                 maxParallelIdQueries = maxParallelIdTopologyEventsQueries,
                 maxPagesPerIdPagesBuffer = maxPayloadsPerPayloadsPage,
                 maxPayloadsPerPayloadsPage = maxParallelPayloadTopologyEventsQueries,
                 maxParallelPayloadQueries = transactionsProcessingParallelism,
               )
             )
-            .map { case (offset, topologyTransaction) =>
+            .map { case (offset, topologyTransactionResponse) =>
               offset -> UpdateResponse.ProtoUpdate(
-                GetUpdateResponse(
-                  GetUpdateResponse.Update.TopologyTransaction(topologyTransaction)
-                ).withPrecomputedSerializedSize()
+                response = topologyTransactionResponse.toProtoTopologyTransaction.map(proto =>
+                  GetUpdateResponse(
+                    GetUpdateResponse.Update.TopologyTransaction(proto)
+                  ).withPrecomputedSerializedSize()
+                ),
+                synchronizerParametersResponse =
+                  topologyTransactionResponse.synchronizerParametersState.map(
+                    synchronizerParametersState =>
+                      SynchronizerParametersResponse(
+                        commonTopologyTransactionProperties =
+                          topologyTransactionResponse.commonTopologyTransactionProperties,
+                        synchronizerParametersState = synchronizerParametersState,
+                      )
+                  ),
               )
             }
         case None => Source.empty
@@ -309,15 +327,21 @@ class UpdatesStreamReader(
           )(reverseIfDescendingOrder(descendingOrder, rawEvents))(
             convertReassignment = reassignment =>
               Offset.tryFromLong(reassignment.offset) -> UpdateResponse.ProtoUpdate(
-                GetUpdateResponse(
-                  GetUpdateResponse.Update.Reassignment(reassignment)
-                ).withPrecomputedSerializedSize()
+                Some(
+                  GetUpdateResponse(
+                    GetUpdateResponse.Update.Reassignment(reassignment)
+                  ).withPrecomputedSerializedSize()
+                ),
+                synchronizerParametersResponse = None,
               ),
             convertTransaction = transaction =>
               Offset.tryFromLong(transaction.offset) -> UpdateResponse.ProtoUpdate(
-                GetUpdateResponse(
-                  GetUpdateResponse.Update.Transaction(transaction)
-                ).withPrecomputedSerializedSize()
+                Some(
+                  GetUpdateResponse(
+                    GetUpdateResponse.Update.Transaction(transaction)
+                  ).withPrecomputedSerializedSize()
+                ),
+                synchronizerParametersResponse = None,
               ),
           )
         )

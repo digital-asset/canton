@@ -428,7 +428,7 @@ class GrpcSequencerAdministrationService(
             new StatusRuntimeException(Status.INVALID_ARGUMENT.withDescription(err.toString))
           )
       )
-      _ <- sequencer.disableMember(member).leftMap(_.asGrpcError)
+      _ <- sequencer.disableMember(member).leftMap(_.toGrpcError)
     } yield v30.DisableMemberResponse()
 
     result.asGrpcResponse

@@ -86,3 +86,8 @@ Then:
 cd community/app/target/release/canton
 ./bin/canton --config examples/01-simple-topology/simple-topology.conf
 ```
+
+Or to have the synchronizer bootstrapped and participants connected, run:
+```
+./bin/canton --config examples/01-simple-topology/simple-topology.conf --bootstrap examples/01-simple-topology/simple-ping.canton
+```

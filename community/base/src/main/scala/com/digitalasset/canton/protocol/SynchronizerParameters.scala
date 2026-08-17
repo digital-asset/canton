@@ -14,7 +14,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters.InvalidDynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -25,6 +25,7 @@ import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, checked}
 import com.digitalasset.nonempty.NonEmpty
 
+import scala.annotation.unused
 import scala.concurrent.Future
 
 object SynchronizerParameters {
@@ -348,6 +349,8 @@ object OnboardingRestriction {
   *   the maximum absolute difference between the preparation time and the record time of a command.
   *   If the absolute difference would be larger for a command, then the command must be rejected.
   *   Defaults to [[ledgerTimeRecordTimeTolerance]] if not set when deserializing from proto.
+  * @param sizeLimits
+  *   Size limits on various collections
   * @throws DynamicSynchronizerParameters$.InvalidDynamicSynchronizerParameters
   *   if `mediatorDeduplicationTimeout` is less than twice of `preparationTimeRecordTimeTolerance`.
   */
@@ -365,6 +368,7 @@ final case class DynamicSynchronizerParameters private (
     acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
     preparationTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+    sizeLimits: SizeLimits,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       DynamicSynchronizerParameters.type
@@ -459,6 +463,7 @@ final case class DynamicSynchronizerParameters private (
       acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters] = acsCommitmentsCatchUp,
       preparationTimeRecordTimeTolerance: NonNegativeFiniteDuration =
         preparationTimeRecordTimeTolerance,
+      sizeLimits: SizeLimits = sizeLimits,
   ): DynamicSynchronizerParameters = DynamicSynchronizerParameters.tryCreate(
     confirmationResponseTimeout = confirmationResponseTimeout,
     mediatorReactionTimeout = mediatorReactionTimeout,
@@ -473,6 +478,7 @@ final case class DynamicSynchronizerParameters private (
     acsCommitmentsCatchUpParameters = acsCommitmentsCatchUp,
     participantSynchronizerLimits = ParticipantSynchronizerLimits(confirmationRequestsMaxRate),
     preparationTimeRecordTimeTolerance = preparationTimeRecordTimeTolerance,
+    sizeLimits = sizeLimits,
   )(representativeProtocolVersion)
 
   def toProtoV30: v30.DynamicSynchronizerParameters = v30.DynamicSynchronizerParameters(
@@ -492,6 +498,24 @@ final case class DynamicSynchronizerParameters private (
     preparationTimeRecordTimeTolerance = Some(preparationTimeRecordTimeTolerance.toProtoPrimitive),
   )
 
+  def toProtoV31: v31.DynamicSynchronizerParameters = v31.DynamicSynchronizerParameters(
+    confirmationResponseTimeout = Some(confirmationResponseTimeout.toProtoPrimitive),
+    mediatorReactionTimeout = Some(mediatorReactionTimeout.toProtoPrimitive),
+    assignmentExclusivityTimeout = Some(assignmentExclusivityTimeout.toProtoPrimitive),
+    ledgerTimeRecordTimeTolerance = Some(ledgerTimeRecordTimeTolerance.toProtoPrimitive),
+    mediatorDeduplicationTimeout = Some(mediatorDeduplicationTimeout.toProtoPrimitive),
+    reconciliationInterval = Some(reconciliationInterval.toProtoPrimitive),
+    maxRequestSize = maxRequestSize.unwrap,
+    onboardingRestriction = onboardingRestriction.toProtoV30,
+    participantSynchronizerLimits = Some(participantSynchronizerLimits.toProto),
+    sequencerAggregateSubmissionTimeout =
+      Some(sequencerAggregateSubmissionTimeout.toProtoPrimitive),
+    trafficControl = trafficControl.map(_.toProtoV30),
+    acsCommitmentsCatchup = acsCommitmentsCatchUp.map(_.toProtoV30),
+    preparationTimeRecordTimeTolerance = Some(preparationTimeRecordTimeTolerance.toProtoPrimitive),
+    sizeLimits = Some(sizeLimits.toProtoV31),
+  )
+
   override protected def pretty: Pretty[DynamicSynchronizerParameters] =
     prettyOfClass(
       param("confirmation response timeout", _.confirmationResponseTimeout),
@@ -508,6 +532,7 @@ final case class DynamicSynchronizerParameters private (
       param("participant synchronizer limits", _.participantSynchronizerLimits),
       param("preparation time record time tolerance", _.preparationTimeRecordTimeTolerance),
       param("onboarding restriction", _.onboardingRestriction),
+      param("size limits", _.sizeLimits),
     )
 }
 
@@ -519,7 +544,13 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
     )(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
-    )
+    ),
+    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v36)(
+      v31.DynamicSynchronizerParameters
+    )(
+      supportedProtoVersion(_)(fromProtoV31),
+      _.toProtoV31,
+    ),
   )
 
   override def name: String = "dynamic synchronizer parameters"
@@ -562,8 +593,15 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
     OnboardingRestriction.UnrestrictedOpen
 
   private val defaultAcsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters] = Some(
-    AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(5), PositiveInt.tryCreate(2))
+    AcsCommitmentsCatchUpParameters
+      .create(PositiveInt.tryCreate(5), PositiveInt.tryCreate(2))
+      .valueOr(err => throw new IllegalArgumentException(s"requirement failed: $err"))
   )
+
+  // TODO(i32231): remove @unused
+  @unused
+  private val defaultSizeLimits = SizeLimits.default
+  private val maxSizeLimits = SizeLimits.max
 
   val confirmationResponseTimeoutBounds =
     (NonNegativeFiniteDuration.tryOfSeconds(1), NonNegativeFiniteDuration.tryOfMinutes(5))
@@ -591,6 +629,7 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
       acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
       participantSynchronizerLimits: ParticipantSynchronizerLimits,
       preparationTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+      sizeLimits: SizeLimits,
   )(
       representativeProtocolVersion: RepresentativeProtocolVersion[
         DynamicSynchronizerParameters.type
@@ -611,6 +650,7 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
         acsCommitmentsCatchUp,
         participantSynchronizerLimits,
         preparationTimeRecordTimeTolerance,
+        sizeLimits,
       )(representativeProtocolVersion)
     )
 
@@ -633,6 +673,7 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
       acsCommitmentsCatchUpParameters: Option[AcsCommitmentsCatchUpParameters],
       participantSynchronizerLimits: ParticipantSynchronizerLimits,
       preparationTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+      sizeLimits: SizeLimits,
   )(
       representativeProtocolVersion: RepresentativeProtocolVersion[
         DynamicSynchronizerParameters.type
@@ -652,6 +693,7 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
       acsCommitmentsCatchUpParameters,
       participantSynchronizerLimits,
       preparationTimeRecordTimeTolerance,
+      sizeLimits,
     )(representativeProtocolVersion)
 
   /** Default dynamic synchronizer parameters for non-static clocks */
@@ -677,6 +719,9 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
       participantSynchronizerLimits =
         DynamicSynchronizerParameters.defaultParticipantSynchronizerLimits,
       preparationTimeRecordTimeTolerance = defaultPreparationTimeRecordTimeTolerance,
+//      sizeLimits = if (protocolVersion >= ProtocolVersion.v36) defaultSizeLimits else maxSizeLimits,
+      // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
+      sizeLimits = maxSizeLimits,
     )(
       protocolVersionRepresentativeFor(protocolVersion)
     )
@@ -710,6 +755,9 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
       acsCommitmentsCatchUpParameters = defaultAcsCommitmentsCatchUp,
       participantSynchronizerLimits = ParticipantSynchronizerLimits(confirmationRequestsMaxRate),
       preparationTimeRecordTimeTolerance = preparationTimeRecordTimeTolerance,
+      //      sizeLimits = if (protocolVersion >= ProtocolVersion.v36) defaultSizeLimits else maxSizeLimits,
+      // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
+      sizeLimits = maxSizeLimits,
     )(
       protocolVersionRepresentativeFor(protocolVersion)
     )
@@ -735,8 +783,8 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
       acsCommitmentCatchupConfigP,
       preparationTimeRecordTimeToleranceP,
     ) = synchronizerParametersP
-    for {
 
+    for {
       confirmationResponseTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
         "confirmationResponseTimeout"
       )(
@@ -817,6 +865,118 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
           acsCommitmentsCatchUp = acsCommitmentCatchupConfig,
           participantSynchronizerLimits = participantSynchronizerLimits,
           preparationTimeRecordTimeTolerance = preparationTimeRecordTimeTolerance,
+          // Set limits to max so that the behavior does not change
+          sizeLimits = SizeLimits.max,
+        )(rpv).leftMap(_.toProtoDeserializationError)
+    } yield synchronizerParameters
+  }
+
+  def fromProtoV31(
+      synchronizerParametersP: v31.DynamicSynchronizerParameters
+  ): ParsingResult[DynamicSynchronizerParameters] = {
+    val v31.DynamicSynchronizerParameters(
+      confirmationResponseTimeoutP,
+      mediatorReactionTimeoutP,
+      assignmentExclusivityTimeoutP,
+      ledgerTimeRecordTimeToleranceP,
+      reconciliationIntervalP,
+      mediatorDeduplicationTimeoutP,
+      maxRequestSizeP,
+      onboardingRestrictionP,
+      defaultLimitsP,
+      sequencerAggregateSubmissionTimeoutP,
+      trafficControlConfigP,
+      acsCommitmentCatchupConfigP,
+      preparationTimeRecordTimeToleranceP,
+      sizeLimitsP,
+    ) = synchronizerParametersP
+
+    for {
+      confirmationResponseTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "confirmationResponseTimeout"
+      )(
+        confirmationResponseTimeoutP
+      )
+      mediatorReactionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "mediatorReactionTimeout"
+      )(
+        mediatorReactionTimeoutP
+      )
+      assignmentExclusivityTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "assignmentExclusivityTimeout"
+      )(
+        assignmentExclusivityTimeoutP
+      )
+      ledgerTimeRecordTimeTolerance <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "ledgerTimeRecordTimeTolerance"
+      )(
+        ledgerTimeRecordTimeToleranceP
+      )
+
+      reconciliationInterval <- PositiveSeconds.fromProtoPrimitiveO(
+        "reconciliationInterval"
+      )(
+        reconciliationIntervalP
+      )
+      mediatorDeduplicationTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "mediatorDeduplicationTimeout"
+      )(
+        mediatorDeduplicationTimeoutP
+      )
+
+      maxRequestSize <- NonNegativeInt
+        .create(maxRequestSizeP)
+        .map(MaxRequestSize.apply)
+        .leftMap(InvariantViolation.toProtoDeserializationError("max_request_size", _))
+
+      sequencerAggregateSubmissionTimeout <- NonNegativeFiniteDuration.fromProtoPrimitiveO(
+        "sequencerAggregateSubmissionTimeout"
+      )(
+        sequencerAggregateSubmissionTimeoutP
+      )
+
+      trafficControlConfig <- trafficControlConfigP.traverse(TrafficControlParameters.fromProtoV30)
+
+      onboardingRestriction <- OnboardingRestriction.fromProtoV30(onboardingRestrictionP)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
+
+      acsCommitmentCatchupConfig <- acsCommitmentCatchupConfigP.traverse(
+        AcsCommitmentsCatchUpParameters.fromProtoV30
+      )
+
+      participantSynchronizerLimits <- ProtoConverter
+        .required("participant_synchronizer_limits", defaultLimitsP)
+        .flatMap(ParticipantSynchronizerLimits.fromProtoV30)
+
+      preparationTimeRecordTimeTolerance <- preparationTimeRecordTimeToleranceP
+        .traverse(
+          NonNegativeFiniteDuration.fromProtoPrimitive(
+            "preparationTimeRecordTimeTolerance"
+          )
+        )
+        // TODO(i16458) enforce this field is always set when 3.x is stable
+        .map(_.getOrElse(ledgerTimeRecordTimeTolerance))
+
+      sizeLimits <- ProtoConverter
+        .required("size_limits", sizeLimitsP)
+        .flatMap(SizeLimits.fromProtoV31)
+
+      synchronizerParameters <-
+        create(
+          confirmationResponseTimeout = confirmationResponseTimeout,
+          mediatorReactionTimeout = mediatorReactionTimeout,
+          assignmentExclusivityTimeout = assignmentExclusivityTimeout,
+          ledgerTimeRecordTimeTolerance = ledgerTimeRecordTimeTolerance,
+          mediatorDeduplicationTimeout = mediatorDeduplicationTimeout,
+          reconciliationInterval = reconciliationInterval,
+          maxRequestSize = maxRequestSize,
+          sequencerAggregateSubmissionTimeout = sequencerAggregateSubmissionTimeout,
+          trafficControl = trafficControlConfig,
+          onboardingRestriction = onboardingRestriction,
+          acsCommitmentsCatchUp = acsCommitmentCatchupConfig,
+          participantSynchronizerLimits = participantSynchronizerLimits,
+          preparationTimeRecordTimeTolerance = preparationTimeRecordTimeTolerance,
+          sizeLimits = sizeLimits,
         )(rpv).leftMap(_.toProtoDeserializationError)
     } yield synchronizerParameters
   }
@@ -1016,26 +1176,14 @@ object DynamicSynchronizerParametersHistory {
   * @throws java.lang.IllegalArgumentException
   *   when [[catchUpIntervalSkip]] * [[nrIntervalsToTriggerCatchUp]] overflows.
   */
-final case class AcsCommitmentsCatchUpParameters(
+final case class AcsCommitmentsCatchUpParameters private (
     catchUpIntervalSkip: PositiveInt,
     nrIntervalsToTriggerCatchUp: PositiveInt,
 ) extends PrettyPrinting {
 
-  require(
-    Either
-      .catchOnly[ArithmeticException](
-        Math.multiplyExact(catchUpIntervalSkip.value, nrIntervalsToTriggerCatchUp.value)
-      )
-      .isRight,
-    s"Catch up parameters ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) are too large and cause overflow when computing the catch-up interval",
-  )
-
-  require(
-    catchUpIntervalSkip.value != 1 || nrIntervalsToTriggerCatchUp.value != 1,
-    s"Catch up config ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) is ambiguous. " +
-      s"It is not possible to catch up with a single interval. Did you intend to disable catch-up " +
-      s"(please use AcsCommitmentsCatchUpConfig.disabledCatchUp()) or did you intend a different config?",
-  )
+  AcsCommitmentsCatchUpParameters
+    .validate(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+    .valueOr(err => throw new IllegalArgumentException(s"requirement failed: $err"))
 
   override protected def pretty: Pretty[AcsCommitmentsCatchUpParameters] = prettyOfClass(
     param("catchUpIntervalSkip", _.catchUpIntervalSkip),
@@ -1053,6 +1201,41 @@ final case class AcsCommitmentsCatchUpParameters(
 }
 
 object AcsCommitmentsCatchUpParameters {
+
+  /** Checks the invariants of the catch-up parameters, returning errors as a Left.
+    */
+  private[protocol] def validate(
+      catchUpIntervalSkip: PositiveInt,
+      nrIntervalsToTriggerCatchUp: PositiveInt,
+  ): Either[String, Unit] =
+    for {
+      _ <- Either.cond(
+        Either
+          .catchOnly[ArithmeticException](
+            Math.multiplyExact(catchUpIntervalSkip.value, nrIntervalsToTriggerCatchUp.value)
+          )
+          .isRight,
+        (),
+        s"Catch up parameters ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) are too large and cause overflow when computing the catch-up interval",
+      )
+      _ <- Either.cond(
+        catchUpIntervalSkip.value != 1 || nrIntervalsToTriggerCatchUp.value != 1,
+        (),
+        s"Catch up config ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) is ambiguous. " +
+          s"It is not possible to catch up with a single interval. Did you intend to disable catch-up " +
+          s"(please use AcsCommitmentsCatchUpConfig.disabledCatchUp()) or did you intend a different config?",
+      )
+    } yield ()
+
+  /** Safely creates catch-up parameters, returning invariant violations as a Left. */
+  def create(
+      catchUpIntervalSkip: PositiveInt,
+      nrIntervalsToTriggerCatchUp: PositiveInt,
+  ): Either[String, AcsCommitmentsCatchUpParameters] =
+    validate(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp).map(_ =>
+      AcsCommitmentsCatchUpParameters(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+    )
+
   def fromProtoV30(
       value: v30.AcsCommitmentsCatchUpConfig
   ): ParsingResult[AcsCommitmentsCatchUpParameters] = {
@@ -1066,7 +1249,15 @@ object AcsCommitmentsCatchUpParameters {
         "nr_intervals_to_trigger_catch_up",
         nrIntervalsToTriggerCatchUpP,
       )
-    } yield AcsCommitmentsCatchUpParameters(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+      parameters <- create(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+        .leftMap[ProtoDeserializationError](err =>
+          ProtoDeserializationError
+            .InvariantViolation(
+              field = Some("acs_commitments_catchup"),
+              error = err,
+            )
+        )
+    } yield parameters
   }
 
   def disabledCatchUp(): AcsCommitmentsCatchUpParameters =

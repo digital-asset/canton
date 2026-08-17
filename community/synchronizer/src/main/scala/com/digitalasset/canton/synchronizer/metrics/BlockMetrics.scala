@@ -51,7 +51,12 @@ class BlockMetrics private[metrics] (
   )(MetricsContext.Empty)
 
   private val labels =
-    Map("member" -> "The sender of the submission request", "type" -> "Type of request")
+    Map(
+      "member" -> "The sender of the submission request",
+      "type" -> "Type of request",
+      "outcome" -> "(If async logging is enabled) outcome of the event",
+      "sequencer" -> "The ordering sequencer id",
+    )
   val blockEvents: Meter =
     openTelemetryMetricsFactory.meter(
       MetricInfo(

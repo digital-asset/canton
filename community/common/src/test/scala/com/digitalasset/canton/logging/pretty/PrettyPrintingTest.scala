@@ -95,6 +95,17 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
   private val adHocObjectInst: ExampleAdHocObject.type = ExampleAdHocObject
   private val adHocObjectStr: String = "ExampleAdHocObject"
 
+  /** Example of a class whose own name is not descriptive, so it is renamed when pretty printing.
+    */
+  private case class ExampleAdHocNamedCaseClass(alien: ExampleAlienClass, number: Int)
+      extends PrettyPrinting {
+    override protected def pretty: Pretty[ExampleAdHocNamedCaseClass] =
+      adHocPrettyInstanceWithName(_ => "CUSTOM_NAME", showFieldNames = true)
+  }
+
+  private val adHocNamedCaseClassInst: ExampleAdHocNamedCaseClass =
+    ExampleAdHocNamedCaseClass(alienInst, 42)
+
   private case class ExampleAbstractCaseClass(content: Int) extends PrettyPrinting {
     override protected def pretty: Pretty[ExampleAbstractCaseClass] = prettyOfClass(
       param("content", _.content)
@@ -119,6 +130,15 @@ class PrettyPrintingTest extends AnyWordSpec with BaseTest {
     adHocObjectInst.show shouldBe adHocObjectStr
     abstractCaseClass.show shouldBe abstractCaseClassStr
     exampleInfix.show shouldBe exampleInfixStr
+  }
+
+  "adHoc pretty printing can rename the class and show field names" in {
+    val rendered = adHocNamedCaseClassInst.show
+    rendered should startWith("CUSTOM_NAME(")
+    rendered should include("alien = ")
+    rendered should include("number = 42")
+    rendered should not include "ExampleAdHocNamedCaseClass"
+    adHocNamedCaseClassInst.toString shouldBe rendered
   }
 
   "show interpolator is pretty" in {

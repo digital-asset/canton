@@ -42,13 +42,13 @@ class JournalGarbageCollectorTest extends BaseTestWordSpec with HasExecutionCont
   "journal cleaning" should {
     "rerun if scheduled while running" in {
       val t = new TestScheduler()
-      t.flush(TraceContext.empty)
+      t.flush()
       val promise = t.runningPromise.get()
       promise should not be None
       // flush again
-      t.flush(TraceContext.empty)
+      t.flush()
       // and flush again (multiple)
-      t.flush(TraceContext.empty)
+      t.flush()
       // complete previous promise
       promise.value.success(())
       // eventually, the second flush should have run

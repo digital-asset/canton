@@ -153,6 +153,16 @@ abstract sealed class LedgerConsistencyIntegrationTest
             _.update(reconciliationInterval = config.PositiveDurationSeconds.ofDays(100000)),
           )
 
+        // Disable automatic assignments. They are not under test here, and when they fire long after the
+        // triggering unassignment, their completions leak into the tracking window of later tests.
+        runOnAllInitializedSynchronizersForAllOwners { (owner, synchronizer) =>
+          owner.topology.synchronizer_parameters
+            .propose_update(
+              synchronizer.synchronizerId,
+              _.update(assignmentExclusivityTimeout = config.NonNegativeFiniteDuration.Zero),
+            )
+        }
+
         maliciousP1 = MaliciousParticipantNode(
           participant1,
           daId,

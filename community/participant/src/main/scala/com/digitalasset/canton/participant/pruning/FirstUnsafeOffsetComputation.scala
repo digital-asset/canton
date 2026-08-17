@@ -15,12 +15,12 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.Pruning
 import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
-import com.digitalasset.canton.participant.pruning.PruningProcessor.UnsafeOffset
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
   Active,
   HardMigratingSource,
@@ -35,8 +35,10 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Synchr
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
@@ -51,6 +53,8 @@ class FirstUnsafeOffsetComputation(
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     syncPersistentStateManager: SyncPersistentStateManager,
+    acsDigestProcessorEnabled: Boolean,
+    legacyDigestProcessorDisabled: Boolean,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -142,6 +146,12 @@ class FirstUnsafeOffsetComputation(
       unsafeLogicalSynchronizerOffsets <- MonadUtil.sequentialTraverseFilter(
         synchronizerIndexes.toSeq
       ) { case (lsid, synchronizerIndex) =>
+        val activeProtocolVersion = synchronizerConnectionConfigStore
+          .getActive(lsid)
+          .toOption
+          .flatMap(_.configuredPsid.toOption)
+          .map(_.protocolVersion)
+
         for {
           state <- logicalPersistentStates
             .get(lsid)
@@ -152,13 +162,14 @@ class FirstUnsafeOffsetComputation(
             )
             .toEitherT[FutureUnlessShutdown]
 
-          offset <- FirstUnsafeOffsetComputation.firstUnsafeLogicalOffset(
+          offset <- firstUnsafeLogicalOffset(
             state,
             synchronizerIndex,
             participantNodePersistentState.value.ledgerApiStore,
             participantNodePersistentState.value.inFlightSubmissionStore,
             pruneUptoInclusive,
             safeToPruneCommitmentState,
+            activeProtocolVersion,
           )
         } yield offset
       }
@@ -182,7 +193,7 @@ class FirstUnsafeOffsetComputation(
             .toEitherT[FutureUnlessShutdown]
 
           offset <-
-            FirstUnsafeOffsetComputation.firstUnsafePhysicalOffset(
+            firstUnsafePhysicalOffset(
               physicalSyncPersistentState,
               synchronizerIndex,
               participantNodePersistentState.value.ledgerApiStore,
@@ -193,7 +204,7 @@ class FirstUnsafeOffsetComputation(
       // Other checks
       // TODO(#33650) - Replace with unboundedTraverseFilter; safe because bound to synchronizers (1 to 10)
       unsafeIncompleteReassignmentOffsets <- logicalPersistentStates.values.toSeq.parTraverseFilter(
-        FirstUnsafeOffsetComputation.firstUnsafeReassignmentEventFor(
+        firstUnsafeReassignmentEventFor(
           _,
           participantNodePersistentState.value.ledgerApiStore,
         )
@@ -292,27 +303,23 @@ class FirstUnsafeOffsetComputation(
           UnsafeOffset(
             offset = synchronizerOffset.offset,
             synchronizerId = synchronizerOffset.synchronizerId,
-            recordTime = CantonTimestamp(synchronizerOffset.recordTime),
+            recordTime = Some(CantonTimestamp(synchronizerOffset.recordTime)),
             cause = s"max deduplication duration of $maxDedupDuration",
           )
         )
-        errorLoggingContext.debug(
+        logger.debug(
           s"First unsafe pruning offset for deduplication (computed with lower bound $dedupStartLowerBound) $result"
         )
         result
       }
   }
-}
 
-object FirstUnsafeOffsetComputation {
   private def firstUnsafeReassignmentEventFor(
       persistent: LogicalSyncPersistentState,
       ledgerApiStore: LedgerApiStore,
   )(implicit
-      executionContext: ExecutionContext,
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] = {
-    implicit val tc: TraceContext = errorLoggingContext.traceContext
     val synchronizerId = persistent.lsid
 
     for {
@@ -347,7 +354,7 @@ object FirstUnsafeOffsetComputation {
               UnsafeOffset(
                 unsafeOffsetForReassignments.offset,
                 unsafeOffsetForReassignments.synchronizerId,
-                CantonTimestamp(unsafeOffsetForReassignments.recordTime),
+                Some(CantonTimestamp(unsafeOffsetForReassignments.recordTime)),
                 s"incomplete reassignment from $synchronizerId to $targetSynchronizerId (reassignmentId $earliestIncompleteReassignmentId)",
               )
             )
@@ -355,7 +362,7 @@ object FirstUnsafeOffsetComputation {
           } yield unsafeOffsetEarliestIncompleteReassignmentO
       }
     } yield {
-      errorLoggingContext.debug(
+      logger.debug(
         s"First unsafe pruning offset from reassignment store for logical synchronizer $synchronizerId at $unsafeOffsetO"
       )
       unsafeOffsetO
@@ -372,11 +379,10 @@ object FirstUnsafeOffsetComputation {
       inFlightSubmissionStore: InFlightSubmissionStore,
       pruneUptoInclusive: Offset,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      activeProtocolVersion: Option[ProtocolVersion],
   )(implicit
-      executionContext: ExecutionContext,
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] = {
-    implicit val tc: TraceContext = errorLoggingContext.traceContext
     val synchronizerId = persistent.lsid
 
     for {
@@ -393,15 +399,22 @@ object FirstUnsafeOffsetComputation {
           Pruning.LedgerPruningOffsetUnsafeSynchronizer(synchronizerId),
         )
 
-      safeCommitmentTick <- EitherT
-        .fromOptionF[FutureUnlessShutdown, LedgerPruningError, CantonTimestamp](
-          persistent.acsCommitmentStore
-            .noOutstandingCommitments(
-              upToTimestampInclusive,
-              safeToPruneCommitmentState,
-            ),
-          Pruning.LedgerPruningOffsetUnsafeSynchronizer(synchronizerId),
-        )
+      safeCommitmentTick <-
+        if (
+          legacyDigestProcessorDisabled &&
+          activeProtocolVersion.exists(_ >= ProtocolVersion.acsCommitmentRedesign)
+        ) {
+          EitherT.pure[FutureUnlessShutdown, LedgerPruningError](CantonTimestamp.MaxValue)
+        } else {
+          EitherT
+            .fromOptionF[FutureUnlessShutdown, LedgerPruningError, CantonTimestamp](
+              persistent.acsCommitmentStore.noOutstandingCommitments(
+                upToTimestampInclusive,
+                safeToPruneCommitmentState,
+              ),
+              Pruning.LedgerPruningOffsetUnsafeSynchronizer(synchronizerId),
+            )
+        }
 
       earliestInFlight <- EitherT.right(inFlightSubmissionStore.lookupEarliest(synchronizerId))
 
@@ -413,31 +426,69 @@ object FirstUnsafeOffsetComputation {
         .map(_ -> "Synchronizer index crash recovery")
         ++ earliestInFlight.map(_ -> "inFlightSubmissionTs")
 
-      _ = errorLoggingContext
-        .debug(
-          s"Getting safe to prune timestamp for logical synchronizer $synchronizerId with data ${unsafeTimestamps.forgetNE}"
-        )
+      _ = logger.debug(
+        s"Getting safe to prune timestamp for logical synchronizer $synchronizerId with data ${unsafeTimestamps.forgetNE}"
+      )
 
-      (firstUnsafeTimestamp, cause) = unsafeTimestamps.minBy1(_._1)
+      (firstUnsafeTimestamp, causeForTimestamp) = unsafeTimestamps.minBy1(_._1)
 
-      firstUnsafeOffsetO <- EitherT.right(
+      firstUnsafeOffsetByTimestampO <- EitherT.right(
         ledgerApiStore.firstSynchronizerOffsetAfterOrAt(
           synchronizerId,
           firstUnsafeTimestamp,
         )
       )
+
+      unsafeAcsCommitmentOffsets <-
+        if (acsDigestProcessorEnabled) {
+          EitherT(for {
+            acsDigestWatermark <- persistent.acsDigestStore
+              .latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
+            acsPeriodWatermarkO <-
+              // Ignore the matching watermark if the active protocol version does not support the new commitments
+              if (activeProtocolVersion.forall(_ >= ProtocolVersion.acsCommitmentRedesign)) {
+                persistent.acsCommitmentPeriodStore.watermark().map(Some.apply)
+              } else {
+                logger.debug("Skipping first unsafe offset computation for ACS commitment matching")
+                FutureUnlessShutdown.pure(None)
+              }
+          } yield {
+            Either.Right[LedgerPruningError](
+              Seq(
+                acsDigestWatermark.fold(Offset.firstOffset -> Option.empty[CantonTimestamp])(cp =>
+                  (cp.offset, Some(cp.recordTime))
+                ) -> "ACS digest ingestion"
+              ) ++ acsPeriodWatermarkO.map { acsPeriodWatermark =>
+                acsPeriodWatermark.matching.fold(
+                  Offset.firstOffset -> Option.empty[CantonTimestamp]
+                )(
+                  _ -> None
+                ) -> "ACS commitment matching"
+              }.toList
+            )
+          })
+        } else {
+          logger.debug("Skipping first unsafe offset computation for ACS commitment stores")
+          EitherT.pure[FutureUnlessShutdown, LedgerPruningError](Seq.empty)
+        }
     } yield {
-      errorLoggingContext.debug(
-        s"First unsafe pruning offset for logical synchronizer $synchronizerId at $firstUnsafeOffsetO from $cause"
-      )
-      firstUnsafeOffsetO.map(synchronizerOffset =>
-        UnsafeOffset(
-          offset = synchronizerOffset.offset,
-          synchronizerId = synchronizerId,
-          recordTime = CantonTimestamp(synchronizerOffset.recordTime),
-          cause = cause,
-        )
-      )
+      val unsafeOffsets =
+        firstUnsafeOffsetByTimestampO.map { syncOffset =>
+          (syncOffset.offset, Some(CantonTimestamp(syncOffset.recordTime))) -> causeForTimestamp
+        }.toList
+          ++ unsafeAcsCommitmentOffsets
+      val firstUnsafeOffsetO = unsafeOffsets.minByOption { case ((offset: Offset, _), _) => offset }
+      firstUnsafeOffsetO match {
+        case None =>
+          logger.debug(s"No first unsafe pruning offset for logical synchronizer $synchronizerId")
+          None
+        case Some(((offset, recordTimeO), cause)) =>
+          logger.debug(
+            s"First unsafe pruning offset for logical synchronizer $synchronizerId at $offset / record time $recordTimeO from $cause"
+          )
+          val unsafe = UnsafeOffset(offset, synchronizerId, recordTimeO, cause)
+          Some(unsafe)
+      }
     }
   }
 
@@ -449,10 +500,8 @@ object FirstUnsafeOffsetComputation {
       synchronizerIndex: Option[SynchronizerIndex],
       ledgerApiStore: LedgerApiStore,
   )(implicit
-      executionContext: ExecutionContext,
-      errorLoggingContext: ErrorLoggingContext,
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] = {
-    implicit val tc: TraceContext = errorLoggingContext.traceContext
     val psid = persistent.psid
 
     for {
@@ -476,46 +525,42 @@ object FirstUnsafeOffsetComputation {
                 .map(_.view.map(_.sequencedTime).minOption.map(_.value))
             )
           )
-      _ = errorLoggingContext.debug(
-        s"Earliest sequenced timestamp for not-yet-effective topology transactions for synchronizer $psid: $earliestSequencedTimestampForNonEffectiveTopologyTransactions"
-      )
-
-      unsafeTimestamps = crashRecovery
-        .map(_ -> "cleanReplayTs")
-        .toList ++ earliestSequencedTimestampForNonEffectiveTopologyTransactions
-        .map(_ -> "Topology event crash recovery")
-        .toList
-
-      minUnsafe = unsafeTimestamps.minByOption(_._1)
-
-      _ = errorLoggingContext.debug(
-        s"Getting safe to prune timestamp for physical synchronizer $psid with data $unsafeTimestamps"
-      )
-
+      minUnsafe = {
+        logger.debug(
+          s"Earliest sequenced timestamp for not-yet-effective topology transactions for synchronizer $psid: $earliestSequencedTimestampForNonEffectiveTopologyTransactions"
+        )
+        val unsafeTimestamps = crashRecovery.map(_ -> "cleanReplayTs").toList ++
+          earliestSequencedTimestampForNonEffectiveTopologyTransactions
+            .map(_ -> "Topology event crash recovery")
+            .toList
+        val minimum = unsafeTimestamps.minByOption { case (ts: CantonTimestamp, _) => ts }
+        logger.debug(
+          s"Getting safe to prune timestamp for physical synchronizer $psid with data $unsafeTimestamps"
+        )
+        minimum
+      }
       result <- EitherT.right {
-        minUnsafe.fold(FutureUnlessShutdown.pure(Option.empty[UnsafeOffset])) {
-          case (firstUnsafeRecordTime, cause) =>
-            ledgerApiStore
-              .firstSynchronizerOffsetAfterOrAt(
-                psid.logical,
-                firstUnsafeRecordTime,
+        minUnsafe.traverseFilter { case (firstUnsafeRecordTime, cause) =>
+          ledgerApiStore
+            .firstSynchronizerOffsetAfterOrAt(
+              psid.logical,
+              firstUnsafeRecordTime,
+            )
+            .map { firstUnsafeOffsetO =>
+              logger.debug(
+                s"First unsafe pruning offset for physical synchronizer $psid at $firstUnsafeOffsetO from $cause"
               )
-              .map { firstUnsafeOffsetO =>
-                errorLoggingContext.debug(
-                  s"First unsafe pruning offset for physical synchronizer $psid at $firstUnsafeOffsetO from $cause"
+              firstUnsafeOffsetO.map(synchronizerOffset =>
+                UnsafeOffset(
+                  offset = synchronizerOffset.offset,
+                  synchronizerId = psid.logical,
+                  recordTime = Some(CantonTimestamp(synchronizerOffset.recordTime)),
+                  cause = cause,
                 )
-                firstUnsafeOffsetO.map(synchronizerOffset =>
-                  UnsafeOffset(
-                    offset = synchronizerOffset.offset,
-                    synchronizerId = psid.logical,
-                    recordTime = CantonTimestamp(synchronizerOffset.recordTime),
-                    cause = cause,
-                  )
-                )
-              }
+              )
+            }
         }
       }
     } yield result
   }
-
 }

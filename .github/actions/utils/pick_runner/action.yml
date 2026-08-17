@@ -1,0 +1,35 @@
+name: Pick runner
+description: >
+  Selects the appropriate GitHub Actions runner label based on the repository.
+  Returns "dach-ny-canton" for DACH-NY/canton, "digital-asset-canton" for
+  digital-asset/canton, and "ubuntu-latest" for any other repository.
+
+outputs:
+  runner:
+    description: The runner label to use for subsequent jobs
+    value: ${{ steps.pick.outputs.runner }}
+
+runs:
+  using: composite
+  steps:
+    - id: pick
+      shell: bash
+      env:
+        REPOSITORY: ${{ github.repository }}
+      run: |
+        # Keep this repo-to-runner mapping aligned with workflow jobs that
+        # resolve the runner independently from this action output.
+        if [[ "$REPOSITORY" == "DACH-NY/canton" ]]; then
+          echo "runner=dach-ny-canton" >> "$GITHUB_OUTPUT"
+        elif [[ "$REPOSITORY" == "digital-asset/canton" ]]; then
+          echo "runner=digital-asset-canton" >> "$GITHUB_OUTPUT"
+        else
+          echo "runner=ubuntu-latest" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Print selected runner
+      shell: bash
+      run: |
+        echo "Selected runner: ${{ steps.pick.outputs.runner }}"
+        echo "  Repository:  ${{ github.repository }}"
+        echo "  Event:       ${{ github.event_name }}"

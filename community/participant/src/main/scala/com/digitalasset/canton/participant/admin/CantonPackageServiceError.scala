@@ -18,8 +18,11 @@ import com.digitalasset.canton.ledger.api.VettedPackagesRef
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.admin.PackageService.DarDescription
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  PhysicalSynchronizerId,
+  SynchronizerId,
+  TopologyManagerError,
+}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -27,11 +30,11 @@ import com.digitalasset.nonempty.NonEmpty
 import io.grpc.StatusRuntimeException
 
 object CantonPackageServiceError extends PackageServiceErrorGroup {
-  final case class IdentityManagerParentError(parent: ParticipantTopologyManagerError)(implicit
+  final case class IdentityManagerParentError(parent: TopologyManagerError)(implicit
       val loggingContext: ErrorLoggingContext,
       override val code: ErrorCode,
   ) extends ContextualizedDamlError(parent.cause)
-      with ParentCantonError[ParticipantTopologyManagerError] {
+      with ParentCantonError[TopologyManagerError] {
 
     override val cause: String = parent.cause
 

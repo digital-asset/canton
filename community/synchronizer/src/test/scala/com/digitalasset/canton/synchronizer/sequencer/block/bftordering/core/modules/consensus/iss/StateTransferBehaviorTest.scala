@@ -249,7 +249,7 @@ class StateTransferBehaviorTest
               eqTo(epochNumber),
               eqTo(aMembership),
               eqTo(aFakeCryptoProviderInstance),
-              nodeThatTimedOut = eqTo(Some(otherIds.head)),
+              nodesThatTimedOut = eqTo(Seq(otherIds.head)),
             )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
             succeed
           }
@@ -421,7 +421,7 @@ class StateTransferBehaviorTest
             eqTo(anEpochInfo.number),
             eqTo(aMembership),
             eqTo(aFakeCryptoProviderInstance),
-            nodeThatTimedOut = eqTo(None),
+            nodesThatTimedOut = eqTo(Seq.empty),
           )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
 
           succeed

@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api.auth.services
 
 import com.daml.ledger.api.v2.jose_service.*
 import com.daml.ledger.api.v2.jose_service.JoseServiceGrpc.JoseService
-import com.digitalasset.canton.auth.{Authorizer, RequiredClaim}
+import com.digitalasset.canton.auth.Authorizer
 import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
@@ -21,7 +21,8 @@ final class JoseServiceAuthorization(
     with GrpcApiService {
 
   override def getJwks(request: GetJwksRequest): Future[GetJwksResponse] =
-    authorizer.rpc(service.getJwks)(RequiredClaim.Public())(request)
+    // No authorizer: this is a public endpoint (in the broadest sense).
+    service.getJwks(request)
 
   override def bindService(): ServerServiceDefinition =
     JoseServiceGrpc.bindService(this, executionContext)

@@ -416,6 +416,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
         case RestartNode(node, traceContext) =>
           implicit val tc: TraceContext = traceContext
           logger.info(s"Restarting '$node' at ${whatToDo.at}")
+          local.restartNode(node, whatToDo.at)
           restartNode(node)
         case MakeSystemHealthy(traceContext) =>
           implicit val tc: TraceContext = traceContext

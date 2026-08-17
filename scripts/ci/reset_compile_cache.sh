@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Resets compiled classes when requested or when the
-# branch is marked for full recompilation, otherwise
-# decides whether a network restore is needed. Assigns
-# var needs_network_restore either true or false.
+# Cleans compiled class outputs before each job so cache restoration is
+# deterministic on reused runners. When a clean rebuild is requested, the job
+# skips the network cache restore and recompiles from scratch. Otherwise it
+# restores precompiled outputs from the shared cache.
 
 RESET_REQUESTED="${RESET_REQUESTED:-false}"
 BRANCH_NAME="${BRANCH_NAME:-main}"
@@ -18,16 +18,13 @@ if [ -f "$FORCE_RECOMPILE_FILE" ]; then
   fi
 fi
 
+echo "Cleaning local target directories before restore/build."
+find . -type d -name target -prune -exec rm -rf {} +
+
 if [[ "$RESET_REQUESTED" == "true" || "$BRANCH_FORCE_RESET" == "true" ]]; then
-  echo "Resetting classes... wiping target folders."
-  find . -type d -name target -exec rm -rf {} \;
+  echo "Clean rebuild requested, skipping network restore."
   echo "needs_network_restore=false" >> "$GITHUB_OUTPUT"
 else
-  if [ -d "community/app/target" ] || [ -d "target" ] || [ -d "community/common/target" ]; then
-    echo "Local target folders found on ARC runner. Using incremental build."
-    echo "needs_network_restore=false" >> "$GITHUB_OUTPUT"
-  else
-    echo "No local target folders found. Network restore will be needed."
-    echo "needs_network_restore=true" >> "$GITHUB_OUTPUT"
-  fi
+  echo "Target directories cleaned, network restore will be used."
+  echo "needs_network_restore=true" >> "$GITHUB_OUTPUT"
 fi
