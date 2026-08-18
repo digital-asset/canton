@@ -40,7 +40,7 @@ final case class AssignmentValidationResult private[reassignment] (
     submitterMetadata: ReassignmentSubmitterMetadata,
     reassignmentId: ReassignmentId,
     sourcePsid: Source[PhysicalSynchronizerId],
-    hostedConfirmingReassigningParties: Set[LfPartyId],
+    hostedConfirmingParties: Set[LfPartyId],
     isReassigningParticipant: Boolean,
     commonValidationResult: CommonValidationResult,
     reassigningParticipantValidationResult: ReassigningParticipantValidationResult,
@@ -76,6 +76,7 @@ final case class AssignmentValidationResult private[reassignment] (
     reassignmentId,
     contracts.contracts,
     sourcePsid.map(_.logical),
+    completeReassignmentInStore = isReassigningParticipant,
   )
 
   // Assigning the internal contract ids to the contracts requires that all the contracts are

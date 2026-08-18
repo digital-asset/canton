@@ -8,6 +8,7 @@ import cats.syntax.bifunctor.*
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -16,9 +17,11 @@ import com.digitalasset.canton.logging.pretty.{
 import com.digitalasset.canton.participant.commitment.{AcsDigestTrace, Timepoint}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.resource.ToDbPrimitive
+import com.digitalasset.canton.store.Purgeable
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{InternedPartyId, LedgerParticipantId, LfPartyId}
+import com.digitalasset.canton.{InternedPartyId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.ParticipantId
+import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter}
@@ -26,24 +29,22 @@ import slick.jdbc.{GetResult, SetParameter}
 import scala.collection.{immutable, mutable}
 import scala.concurrent.ExecutionContext
 
-trait AcsDigestStore {
+trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =>
 
   import AcsDigestStore.*
 
   protected implicit def executionContext: ExecutionContext
 
   /** Stores running digests per party and order as sparse journal for a given synchronizer */
-  def party: DigestJournal[PartyAndOrder[InternedPartyId]] = party_
-  protected def party_ : AcsDigestJournal[PartyAndOrder[InternedPartyId]]
-  @VisibleForTesting @inline
-  private[store] final def partyInternal: AcsDigestJournal[PartyAndOrder[InternedPartyId]] =
+  def party: DigestJournal[InternedPartyId] = party_
+  protected def party_ : AcsDigestJournal[InternedPartyId]
+  @inline private[store] final def partyInternal: AcsDigestJournal[InternedPartyId] =
     party_
 
   /** Stores running digests per counterparticipant as sparse journal for a given synchronizer */
   def participant: DigestJournal[InternedParticipantId] = participant_
   protected def participant_ : AcsDigestJournal[InternedParticipantId]
-  @VisibleForTesting @inline
-  private[store] final def participantInternal: AcsDigestJournal[InternedParticipantId] =
+  @inline private[store] final def participantInternal: AcsDigestJournal[InternedParticipantId] =
     participant_
 
   /** Inserts the given offset as a checkpoint.
@@ -73,7 +74,7 @@ trait AcsDigestStore {
   protected def deleteCheckpointsAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
-  @VisibleForTesting @inline
+  @inline
   private[store] final def deleteCheckpointsAfterInternal(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = deleteCheckpointsAfter(fromExclusive)
@@ -90,29 +91,74 @@ trait AcsDigestStore {
     */
   final def deleteUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = for {
-    _ <- deleteCheckpointsUpTo(toExclusive)
-    _ <- party_.deleteUpTo(toExclusive)
-    _ <- participant_.deleteUpTo(toExclusive)
-  } yield ()
+  ): FutureUnlessShutdown[Unit] = {
+    logger.debug(s"Pruning the ACS digest store up to offset $toExclusive")
+    for {
+      _ <- deleteCheckpointsUpTo(toExclusive)
+      _ <- party_.deleteUpTo(toExclusive)
+      _ <- participant_.deleteUpTo(toExclusive)
+    } yield ()
+  }
 
   /** Deletes the checkpoints up to `toExclusive` as part of the pruning sequence in [[deleteUpTo]].
     */
   protected def deleteCheckpointsUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
-  @VisibleForTesting @inline
-  private[store] final def deleteCheckpointsUpToInternal(toExclusive: Offset)(implicit
+  @inline private[store] final def deleteCheckpointsUpToInternal(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = deleteCheckpointsUpTo(toExclusive)
 
-  /** Returns the most recent checkpoint lower than or equal to `toInclusive`, if any */
-  def latestCheckpointUpTo(toInclusive: Offset)(implicit
+  /** Deletes all data in this store */
+  override final def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    logger.debug(s"Purging the ACS digest store")
+    for {
+      _ <- purgeCheckpoints()
+      _ <- party_.purge()
+      _ <- participant_.purge()
+    } yield ()
+  }
+
+  protected def purgeCheckpoints()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  @inline private[store] final def purgeCheckpointsInternal()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = purgeCheckpoints()
+
+  /** Returns the most recent checkpoint lower than or equal to `toInclusive`, if any. If
+    * `checkpointTypes` is given, only checkpoints of the given types are considered.
+    */
+  def latestCheckpointUpTo(
+      toInclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]]
 
-  /** Returns the first checkpoint offset after `fromExclusive`, if any */
-  def firstCheckpointAfter(fromExclusive: Offset)(implicit
+  /** Returns the latest checkpoint of tick type */
+  def latestTickCheckpoint()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
+    latestCheckpointUpTo(Offset.MaxValue, checkpointTickFilter)
+
+  /** Returns the latest checkpoint of type reconciliation */
+  def latestReconciliationCheckpoint()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
+    latestCheckpointUpTo(Offset.MaxValue, checkpointReconciliationFilter)
+
+  /** Returns the latest checkpoint of type reinitialization */
+  def latestReinitializationCheckpoint()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Checkpoint]] =
+    latestCheckpointUpTo(Offset.MaxValue, checkpointReinitializationFilter)
+
+  /** Returns the first checkpoint offset after `fromExclusive`, if any. If `checkpointTypes` is
+    * given, only checkpoints of the given types are considered.
+    */
+  def firstCheckpointAfter(
+      fromExclusive: Offset,
+      checkpointTypes: Option[NonEmpty[Set[CheckpointType]]],
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[Checkpoint]]
 
@@ -127,7 +173,7 @@ trait AcsDigestStore {
   final def checkReplacesInvariant()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = for {
-    lastCheckpointO <- latestCheckpointUpTo(Offset.MaxValue)
+    lastCheckpointO <- latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
     _ <- lastCheckpointO.fold(FutureUnlessShutdown.unit) {
       case Checkpoint(Timepoint(offsetInclusive), _) =>
         for {
@@ -144,6 +190,8 @@ object AcsDigestStore {
     * [[com.digitalasset.canton.data.Offset]] as part of an [[AcsDigestStore]].
     */
   trait DigestJournal[K] {
+
+    protected def executionContext: ExecutionContext
 
     /** Upserts new entries for the given keys, i.e., inserts new entries or updates existing rows.
       *
@@ -175,7 +223,14 @@ object AcsDigestStore {
         toInclusive: Offset,
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K]]]
+    ): FutureUnlessShutdown[Map[K, AcsDigestUpdate[K]]] =
+      bulkLookup(keys.map(key => key -> toInclusive)).map(_.map { case ((key, _), update) =>
+        key -> update
+      })(executionContext)
+
+    def bulkLookup(keysUptoInclusive: immutable.Iterable[(K, Offset)])(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Map[(K, Offset), AcsDigestUpdate[K]]]
 
     /** Returns a snapshot of all entries as of a given
       * [[com.digitalasset.canton.data.Offset AtInclusive]] value. The snapshot includes the latest
@@ -420,76 +475,32 @@ object AcsDigestStore {
   /** Represents the SHA256 hash of a raw digest */
   type HashedDigest = ByteString
 
-  final case class PartyAndOrder[+Party](party: Party, order: PartyOrder) {
-    def map[A](f: Party => A): PartyAndOrder[A] = copy(party = f(party))
-  }
-
-  object PartyAndOrder {
-
-    /** Encodes an interned party and the order in a single Int. Exploits that interned party IDs
-      * are non-negative. Inverse of [[decodePartyAndOrder]]. Order is encoded into the least bit to
-      * achieve locality as both orders of a party are typically accessed and updated together.
-      */
-    def encodePartyAndOrder(pao: PartyAndOrder[InternedPartyId]): Int = {
-      val PartyAndOrder(party, order) = pao
-      require(party >= 0, "Interned party IDs must be non-negative.")
-      party * 2 + PartyOrder.toInt(order)
-    }
-
-    /** Inverse of [[encodePartyAndOrder]]. */
-    def decodePartyAndOrder(encoded: Int): PartyAndOrder[InternedPartyId] = {
-      val party = encoded / 2
-      val order = if (encoded % 2 == 0) LocalPartyFirst else RemotePartyFirst
-      PartyAndOrder(party, order)
-    }
-
-  }
-
-  type PartyAcsDigest[+Party] = AcsDigest[PartyAndOrder[Party]]
+  type PartyAcsDigest[+Party] = AcsDigest[Party]
   object PartyAcsDigest extends AcsDigestCompanion {
     def internalize(
         stringInterning: StringInterning,
         pad: PartyAcsDigest[LfPartyId],
-    ): PartyAcsDigest[InternedPartyId] = pad.map(_.map(stringInterning.party.internalize))
+    ): PartyAcsDigest[InternedPartyId] = pad.map(stringInterning.party.internalize)
 
     def externalize(
         stringInterning: StringInterning,
         pad: PartyAcsDigest[InternedPartyId],
-    ): PartyAcsDigest[LfPartyId] = pad.map(_.map(stringInterning.party.externalize))
+    ): PartyAcsDigest[LfPartyId] = pad.map(stringInterning.party.externalize)
   }
 
-  type PartyAcsDigestUpdate[+Party] = AcsDigestUpdate[PartyAndOrder[Party]]
+  type PartyAcsDigestUpdate[+Party] = AcsDigestUpdate[Party]
   object PartyAcsDigestUpdate extends AcsDigestUpdateCompanion {
     def internalize(
         stringInterning: StringInterning,
         pad: PartyAcsDigestUpdate[LfPartyId],
     ): PartyAcsDigestUpdate[InternedPartyId] =
-      pad.map(_.map(stringInterning.party.internalize))
+      pad.map(stringInterning.party.internalize)
 
     def externalize(
         stringInterning: StringInterning,
         pad: PartyAcsDigestUpdate[InternedPartyId],
     ): PartyAcsDigestUpdate[LfPartyId] =
-      pad.map(_.map(stringInterning.party.externalize))
-  }
-
-  /** Indicates whether the running digest for the party annotates the active contracts with the
-    * local parties first or with the remote parties first.
-    */
-  sealed trait PartyOrder extends Product with Serializable
-  case object LocalPartyFirst extends PartyOrder
-  case object RemotePartyFirst extends PartyOrder
-
-  object PartyOrder {
-    def toInt(order: PartyOrder): Int = order match {
-      case LocalPartyFirst => 0
-      case RemotePartyFirst => 1
-    }
-    def orderFor(
-        localParticipant: LedgerParticipantId,
-        remoteParticipant: LedgerParticipantId,
-    ): PartyOrder =
-      if (localParticipant < remoteParticipant) LocalPartyFirst else RemotePartyFirst
+      pad.map(stringInterning.party.externalize)
   }
 
   type InternedParticipantId = Int
@@ -513,12 +524,15 @@ object AcsDigestStore {
     *
     * TODO(#34334): add index for `checkpointType` depending on the usage pattern
     */
-  final case class Checkpoint(timepoint: Timepoint, checkpointType: CheckpointType) {
+  final case class Checkpoint(timepoint: Timepoint, checkpointType: CheckpointType)
+      extends PrettyPrintingFromCompanion {
     def offset: Offset = timepoint.offset
     def recordTime: CantonTimestamp = timepoint.recordTime
+
+    override def prettyCompanion: PrettyPrintingCompanion[Checkpoint] = Checkpoint
   }
 
-  object Checkpoint {
+  object Checkpoint extends PrettyPrintingCompanion[Checkpoint] {
     def apply(
         offset: Offset,
         recordTime: CantonTimestamp,
@@ -534,13 +548,19 @@ object AcsDigestStore {
         Checkpoint(Timepoint(offset)(timestamp), checkpointType)
       }
 
+    val pretty: Pretty[Checkpoint] = prettyOfClass(
+      param("offset", _.offset),
+      param("recordTime", _.recordTime),
+      param("type", _.checkpointType),
+    )
+
   }
 
   /** Describes the trigger of the checkpoint.
     *
     * TODO(#33084): resolve int value to human readable strings in the debug view
     */
-  final case class CheckpointType private (id: Int)
+  final case class CheckpointType private (id: Int)(val isTickCheckpoint: Boolean)
       extends PrettyPrintingFromCompanion
       with Product
       with Serializable {
@@ -568,8 +588,8 @@ object AcsDigestStore {
       )
 
     /** Creates a new [[CheckpointType]] with a given description */
-    def apply(id: Int, description: String): CheckpointType = {
-      val checkpointType = new CheckpointType(id)
+    def apply(id: Int, description: String, isTickCheckpoint: Boolean): CheckpointType = {
+      val checkpointType = new CheckpointType(id)(isTickCheckpoint)
       ids.put(id, (checkpointType, description)).foreach { oldDescription =>
         throw new IllegalArgumentException(
           s"requirement failed: CheckpointType with id=$id already exists for ${oldDescription._2}"
@@ -582,24 +602,33 @@ object AcsDigestStore {
     /** When a reconcilition interval boundary has been crossed.
       */
     val ReconciliationIntervalBoundary: CheckpointType =
-      CheckpointType(1, "ReconciliationIntervalBoundary")
+      CheckpointType(1, "ReconciliationIntervalBoundary", isTickCheckpoint = true)
 
     /** When an affirmation interval boundary has been crossed.
       */
     val AffirmationIntervalBoundary: CheckpointType =
-      CheckpointType(2, "AffirmationIntervalBoundary")
+      CheckpointType(2, "AffirmationIntervalBoundary", isTickCheckpoint = true)
 
     /** When a certain number of events have been processed without writing a checkpoint.
       */
-    val MaxEventsWithoutCheckpoint: CheckpointType = CheckpointType(3, "MaxEventsWithoutCheckpoint")
+    val MaxEventsWithoutCheckpoint: CheckpointType =
+      CheckpointType(3, "MaxEventsWithoutCheckpoint", isTickCheckpoint = false)
 
     /** When the hosting relation between a party and a participant have changed.
       */
-    val PartyHostingChange: CheckpointType = CheckpointType(4, "PartyHostingChange")
+    val PartyHostingChange: CheckpointType =
+      CheckpointType(4, "PartyHostingChange", isTickCheckpoint = false)
 
     /** When a reinitialization has completed.
       */
-    val Reinitialization: CheckpointType = CheckpointType(5, "Reinitialization")
+    val Reinitialization: CheckpointType =
+      CheckpointType(5, "Reinitialization", isTickCheckpoint = false)
+
+    /** When a checkpoint at the timestamp of a received commitment has been emitted to signal the
+      * progression of offsets on an idle stream
+      */
+    val ReceivedCommitmentCheckpoint: CheckpointType =
+      CheckpointType(6, "ReceivedCommitmentCheckpoint", isTickCheckpoint = false)
 
     @VisibleForTesting
     def all: Set[CheckpointType] = ids.values.map { case (tpe, _) => tpe }.toSet
@@ -617,7 +646,7 @@ object AcsDigestStore {
         )
         ._1
 
-    implicit val checkpointTypeSetParameter: ToDbPrimitive[CheckpointType, Int] =
+    implicit val checkpointTypeToDbPrimitive: ToDbPrimitive[CheckpointType, Int] =
       ToDbPrimitive(_.id)
     implicit val checkpointTypeGetResult: GetResult[CheckpointType] =
       GetResult { rs =>
@@ -625,4 +654,12 @@ object AcsDigestStore {
         tryFromId(dbInt)
       }
   }
+
+  val checkpointReconciliationFilter: Option[NonEmpty[Set[CheckpointType]]] =
+    Some(NonEmpty(Set, CheckpointType.ReconciliationIntervalBoundary))
+  val checkpointReinitializationFilter: Option[NonEmpty[Set[CheckpointType]]] =
+    Some(NonEmpty(Set, CheckpointType.Reinitialization))
+  val checkpointTickFilter: Option[NonEmpty[Set[CheckpointType]]] =
+    Some(NonEmptyUtil.fromUnsafe(CheckpointType.all.filter(_.isTickCheckpoint)))
+  def allCheckpointsFilter: Option[NonEmpty[Set[CheckpointType]]] = None
 }

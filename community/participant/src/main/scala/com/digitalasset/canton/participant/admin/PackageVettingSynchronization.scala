@@ -4,9 +4,8 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.transaction.VettedPackage
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 
@@ -16,13 +15,13 @@ import scala.concurrent.Future
 trait PackageVettingSynchronization {
   def sync(packages: Set[VettedPackage], psid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): EitherT[Future, ParticipantTopologyManagerError, Unit]
+  ): EitherT[Future, TopologyManagerError, Unit]
 }
 
 object PackageVettingSynchronization {
   object NoSync extends PackageVettingSynchronization {
     override def sync(packages: Set[VettedPackage], psid: PhysicalSynchronizerId)(implicit
         traceContext: TraceContext
-    ): EitherT[Future, ParticipantTopologyManagerError, Unit] = EitherTUtil.unit
+    ): EitherT[Future, TopologyManagerError, Unit] = EitherTUtil.unit
   }
 }

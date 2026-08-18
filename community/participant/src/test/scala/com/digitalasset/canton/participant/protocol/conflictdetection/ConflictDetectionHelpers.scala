@@ -4,10 +4,15 @@
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
 import cats.syntax.functor.*
+import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.{
+  ArchivalCommit,
+  CreationCommit,
+}
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
   Active,
   Archived,
@@ -16,6 +21,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
 }
 import com.digitalasset.canton.participant.store.memory.{
   InMemoryActiveContractStore,
+  InMemoryPartyReplicationIndexingStore,
   InMemoryReassignmentStore,
   ReassignmentCache,
 }
@@ -29,7 +35,13 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.scalatest.ScalaFuturesWithPatience
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  Namespace,
+  PartyId,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -47,8 +59,18 @@ private[protocol] trait ConflictDetectionHelpers {
 
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 2)
 
+  private lazy val namespace = Namespace(Fingerprint.tryFromString(s"default"))
+  protected lazy val alice: LfPartyId = PartyId(UniqueIdentifier.tryCreate("alice", namespace)).toLf
+  protected lazy val bob: LfPartyId = PartyId(UniqueIdentifier.tryCreate("bob", namespace)).toLf
+  protected lazy val carol: LfPartyId = PartyId(UniqueIdentifier.tryCreate("carol", namespace)).toLf
+
   def mkEmptyAcs(): ActiveContractStore =
     new InMemoryActiveContractStore(indexedStringStore, loggerFactory)(
+      parallelExecutionContext
+    )
+
+  def mkEmptyPartyReplicationIndexingStore() =
+    new InMemoryPartyReplicationIndexingStore(pauseIndexingDuringOnPR = false, loggerFactory)(
       parallelExecutionContext
     )
 
@@ -228,5 +250,17 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
           initialReassignmentCounter,
         )
       },
+      reassignments = assign.values.map { case (_, id) => id }.toSeq,
+      hostedOnboardingPartiesO = None,
     )
+
+  def mkCreation(
+      signatories: Set[LfPartyId],
+      reassignmentCounter: ReassignmentCounter = initialReassignmentCounter,
+  ) = CreationCommit(
+    ContractMetadata(Stakeholders.withSignatories(signatories)),
+    reassignmentCounter,
+  )
+
+  def mkArchival(stakeholders: Set[LfPartyId]) = ArchivalCommit(stakeholders)
 }

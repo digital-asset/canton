@@ -70,7 +70,9 @@ object AcsCommitment extends VersioningCompanionMemoization[AcsCommitment] {
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.AcsCommitment)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.acsCommitmentRedesign)(
+      v32.AcsCommitment
+    )(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
     ),

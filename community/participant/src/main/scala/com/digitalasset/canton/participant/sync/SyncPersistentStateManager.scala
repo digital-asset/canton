@@ -54,6 +54,11 @@ trait SyncPersistentStateLookup {
     */
   def getAllLogical: Map[SynchronizerId, LogicalSyncPersistentState]
 
+  /** Return the [[com.digitalasset.canton.participant.store.LogicalSyncPersistentState]] for the
+    * given [[com.digitalasset.canton.topology.SynchronizerId]], if any
+    */
+  def getLogical(synchronizerId: SynchronizerId): Option[LogicalSyncPersistentState]
+
   /** Return the latest [[com.digitalasset.canton.participant.store.SyncPersistentState]] (wrt to
     * [[com.digitalasset.canton.topology.PhysicalSynchronizerId]]) for each
     * [[com.digitalasset.canton.topology.SynchronizerId]]
@@ -102,6 +107,7 @@ trait SyncPersistentStateLookup {
 
   def acsCommitmentStore(synchronizerId: SynchronizerId): Option[AcsCommitmentStore]
   def acsDigestStore(synchronizerId: SynchronizerId): Option[AcsDigestStore]
+  def acsCommitmentPeriodStore(synchronizerId: SynchronizerId): Option[AcsCommitmentPeriodStore]
   def acsCommitmentStore(synchronizerAlias: SynchronizerAlias): Option[AcsCommitmentStore] =
     synchronizerIdForAlias(synchronizerAlias).flatMap(acsCommitmentStore)
 
@@ -372,6 +378,11 @@ class SyncPersistentStateManager(
   override def acsDigestStore(synchronizerId: SynchronizerId): Option[AcsDigestStore] =
     logicalPersistentStates.get(synchronizerId).map(_.acsDigestStore)
 
+  override def acsCommitmentPeriodStore(
+      synchronizerId: SynchronizerId
+  ): Option[AcsCommitmentPeriodStore] =
+    logicalPersistentStates.get(synchronizerId).map(_.acsCommitmentPeriodStore)
+
   override def activeContractStore(synchronizerId: SynchronizerId): Option[ActiveContractStore] =
     logicalPersistentStates.get(synchronizerId).map(_.activeContractStore)
 
@@ -417,6 +428,9 @@ class SyncPersistentStateManager(
   override def getAllLogical: Map[SynchronizerId, LogicalSyncPersistentState] =
     // just take a snapshot of the map
     logicalPersistentStates.toMap
+
+  override def getLogical(synchronizerId: SynchronizerId): Option[LogicalSyncPersistentState] =
+    logicalPersistentStates.get(synchronizerId)
 
   override def getAllFor(id: SynchronizerId): Seq[SyncPersistentState] =
     lock.withReadLock[Seq[SyncPersistentState]](
@@ -507,7 +521,7 @@ class SyncPersistentStateManager(
 
   override def close(): Unit =
     LifeCycle.close(
-      (physicalPersistentStates.values.toSeq ++
-        logicalPersistentStates.values.toSeq :+ aliasResolution)*
+      physicalPersistentStates.values.toSeq ++
+        logicalPersistentStates.values.toSeq :+ aliasResolution
     )(logger)
 }

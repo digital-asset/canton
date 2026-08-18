@@ -4,6 +4,7 @@
 package com.digitalasset.canton.performance.util
 
 import cats.data.EitherT
+import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.admin.api.client.commands.{
@@ -22,7 +23,7 @@ import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOv
 import com.digitalasset.canton.crypto.{
   HashPurpose,
   SigningKeyUsage,
-  SyncCryptoApi,
+  SyncCryptoError,
   SynchronizerCrypto,
 }
 import com.digitalasset.canton.data.CantonTimestamp
@@ -37,7 +38,10 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
+  AcsCommitment,
+  AcsCommitmentProtocolMessage,
   LegacyAcsCommitment,
+  ProtocolMessage,
   SignedProtocolMessage,
   UnsignedProtocolMessage,
 }
@@ -103,14 +107,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
-import com.digitalasset.canton.util.{
-  EitherTUtil,
-  FutureUnlessShutdownUtil,
-  HasFlushFuture,
-  MonadUtil,
-  Mutex,
-  SingleUseCell,
-}
+import com.digitalasset.canton.util.{EitherTUtil, HasFlushFuture, MonadUtil, Mutex, SingleUseCell}
 import com.digitalasset.canton.version.{ParticipantProtocolFeatureFlags, ReleaseVersion}
 import com.digitalasset.canton.{SynchronizerAlias, config as cfg}
 import com.digitalasset.nonempty.NonEmpty
@@ -121,7 +118,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.concurrent.duration.*
-import scala.concurrent.{Await, Future}
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 class ParticipantSimulatorController(
     val simulator: ParticipantSimulator,
@@ -562,7 +559,9 @@ class ParticipantSimulator(
         eventBatch.foreach { ev =>
           notifyEvent(ev.signedEvent.content.timestamp)
           if (respondToAcsCommitments)
-            respondAcsCommitment(ev.signedEvent.content, pool, syncCrypto)(ev.traceContext)
+            respondAcsCommitment(ev.signedEvent.content, pool)(
+              ev.traceContext
+            )
         }
         EitherTUtil.unitUS
       }
@@ -642,102 +641,156 @@ class ParticipantSimulator(
   private def respondAcsCommitment(
       event: DecompressedSequencedEvent[ClosedEnvelope],
       pool: SequencerConnectionPool,
-      syncCrypto: SyncCryptoApi,
   )(implicit traceContext: TraceContext): Unit =
     SequencedEvent
       .envelopesOf(event)
       .flatMap(_.toOpenEnvelope(crypto.pureCrypto, pv).toOption.toList)
-      .foreach(cc =>
-        cc.protocolMessage match {
-          case message: UnsignedProtocolMessage => logger.debug(s"UNSIGNED MESSAGE $message")
-          case SignedProtocolMessage(typedMessage, signatures) =>
-            typedMessage.content match {
-              case LegacyAcsCommitment(psid, sender, counterParticipant, period, commitment) =>
-                val payload = LegacyAcsCommitment.create(
-                  synchronizerId = this.psid,
-                  sender = counterParticipant,
-                  counterParticipant = sender,
-                  period = period,
-                  commitment = commitment,
-                  protocolVersion = pv,
-                )
-                val maxSequencingTime = event.timestamp.plusSeconds(120)
-                val signingTimestampOverrides = Some(
-                  SigningTimestampOverrides(
-                    approximateTimestamp = clock.now,
-                    validityPeriodEnd = Some(maxSequencingTime),
-                  )
-                )
-                val result = for {
-                  msg <- SignedProtocolMessage
-                    .trySignAndCreate(
-                      payload,
-                      // We create a new crypto that uses the `fixed` timestamp (i.e., end period)
-                      // as the reference timestamp, so signing here mirrors what happens in production.
-                      new FixedSyncCryptoApiForSigning(
-                        // the specific member doesn't actually matter, since all virtual participants
-                        // share the same keys
-                        managingNode.id.member,
-                        SynchronizerCrypto(managingNode.crypto, staticSynchronizerParameters),
-                        signingKey,
-                        loggerFactory,
-                        timestampOverride = period.toInclusive.forgetRefinement,
-                      ),
-                      None,
-                    )
-                  batch = Batch.closeEnvelopes(Batch.of(pv, (msg, Recipients.cc(sender))))
-                  request = SubmissionRequest.tryCreate(
-                    sender = counterParticipant,
-                    messageId = MessageId.randomMessageId(),
-                    batch = batch,
-                    maxSequencingTime = event.timestamp.plusSeconds(120),
-                    topologyTimestamp = None,
-                    aggregationRule = None,
-                    // this works if sequencer.trafficConfig.autoFillEmptyCost = true
-                    submissionCost = None,
-                    pv,
-                  )
-                  signedRequest <- EitherTUtil.toFutureUnlessShutdown(
-                    SignedContent
-                      .create(
-                        content = request,
-                        timestampOfSigningKey = None,
-                        signingTimestampOverrides = signingTimestampOverrides,
-                        protocolVersion = pv,
-                        cryptoApi = syncCrypto.pureCrypto.pureCrypto,
-                        cryptoPrivateApi = syncCrypto,
-                        purpose = HashPurpose.SubmissionRequestSignature,
-                      )
-                      .leftMap(err => new IllegalArgumentException(err.toString))
-                  )
-                  _ <- EitherTUtil.toFutureUnlessShutdown(
-                    pool.getAllConnections.headOption
-                      .map(
-                        _.sendAsync(
-                          request = signedRequest,
-                          timeout = 10.seconds,
-                        ).leftMap(err => new IllegalArgumentException(err.toString))
-                      )
-                      .getOrElse(
-                        EitherT.leftT(
-                          new IllegalArgumentException(
-                            "No valid sequencer connection for " + counterParticipant
-                          )
-                        )
-                      )
-                  )
-                } yield ()
+      .foreach { envelope =>
+        val result = for {
+          msgO <- determineMessageToSend(envelope.protocolMessage)
+          _ <- msgO.traverse_ { case (msg, (sender, recipient)) =>
+            EitherT.right[SyncCryptoError](
+              sendMessage(
+                pool,
+                msg,
+                sender = sender,
+                recipient = recipient,
+                maxSequencingTime = event.timestamp.plusSeconds(120),
+              )
+            )
+          }
+        } yield ()
 
-                FutureUnlessShutdownUtil
-                  .doNotAwaitUnlessShutdown(
-                    result,
-                    "responding to ACS commitment",
-                    level = Level.INFO,
-                  )
+        EitherTUtil.doNotAwaitUS(
+          result,
+          "responding to ACS commitment",
+          failLevel = Level.INFO,
+        )
+      }
 
-              case _ =>
-            }
+  private def determineMessageToSend(incomingMessage: ProtocolMessage)(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, SyncCryptoError, Option[
+    (ProtocolMessage, (ParticipantId, ParticipantId))
+  ]] =
+    incomingMessage match {
+      case AcsCommitmentProtocolMessage(
+            AcsCommitment(psid, sender, counterparticipant, period, digest),
+            _signature,
+          ) =>
+        val payload = AcsCommitment.create(
+          psid,
+          sender = counterparticipant,
+          counterparticipant = sender,
+          period,
+          digest,
+          pv,
+        )
+        for {
+          msg <- AcsCommitmentProtocolMessage.signImmediatelyAndCreate(syncCrypto, payload)
+        } yield Some(
+          msg -> (
+            ParticipantId(UniqueIdentifier.tryFromProtoPrimitive(counterparticipant)),
+            ParticipantId(UniqueIdentifier.tryFromProtoPrimitive(sender))
+          )
+        )
+      case _otherUnsignedProtocolMessages: UnsignedProtocolMessage =>
+        EitherT.rightT(None)
+
+      case SignedProtocolMessage(typedMessage, signatures) =>
+        typedMessage.content match {
+          case LegacyAcsCommitment(psid, sender, counterParticipant, period, commitment) =>
+            val payload = LegacyAcsCommitment.create(
+              synchronizerId = this.psid,
+              sender = counterParticipant,
+              counterParticipant = sender,
+              period = period,
+              commitment = commitment,
+              protocolVersion = pv,
+            )
+
+            for {
+              msg <- EitherT.right(
+                SignedProtocolMessage
+                  .trySignAndCreate(
+                    payload,
+                    // We create a new crypto that uses the `fixed` timestamp (i.e., end period)
+                    // as the reference timestamp, so signing here mirrors what happens in production.
+                    new FixedSyncCryptoApiForSigning(
+                      // the specific member doesn't actually matter, since all virtual participants
+                      // share the same keys
+                      managingNode.id.member,
+                      SynchronizerCrypto(managingNode.crypto, staticSynchronizerParameters),
+                      signingKey,
+                      loggerFactory,
+                      timestampOverride = period.toInclusive.forgetRefinement,
+                    ),
+                    None,
+                  )
+              )
+            } yield Some(msg -> (counterParticipant, sender))
+          case _ =>
+            EitherT.rightT(None)
         }
+    }
+
+  private def sendMessage(
+      pool: SequencerConnectionPool,
+      msg: ProtocolMessage,
+      sender: ParticipantId,
+      recipient: ParticipantId,
+      maxSequencingTime: CantonTimestamp,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val signingTimestampOverrides = Some(
+      SigningTimestampOverrides(
+        approximateTimestamp = clock.now,
+        validityPeriodEnd = Some(maxSequencingTime),
       )
+    )
+    val batch = Batch.closeEnvelopes(Batch.of(pv, (msg, Recipients.cc(recipient))))
+    val request = SubmissionRequest.tryCreate(
+      sender = sender,
+      messageId = MessageId.randomMessageId(),
+      batch = batch,
+      maxSequencingTime = maxSequencingTime,
+      topologyTimestamp = None,
+      aggregationRule = None,
+      // this works if sequencer.trafficConfig.autoFillEmptyCost = true
+      submissionCost = None,
+      pv,
+    )
+    for {
+      signedRequest <- EitherTUtil.toFutureUnlessShutdown(
+        SignedContent
+          .create(
+            content = request,
+            timestampOfSigningKey = None,
+            signingTimestampOverrides = signingTimestampOverrides,
+            protocolVersion = pv,
+            cryptoApi = syncCrypto.pureCrypto.pureCrypto,
+            cryptoPrivateApi = syncCrypto,
+            purpose = HashPurpose.SubmissionRequestSignature,
+          )
+          .leftMap(err => new IllegalArgumentException(err.toString))
+      )
+      _ <- EitherTUtil.toFutureUnlessShutdown(
+        pool.getAllConnections.headOption
+          .map(
+            _.sendAsync(
+              request = signedRequest,
+              timeout = 10.seconds,
+            ).leftMap(err => new IllegalArgumentException(err.toString))
+          )
+          .getOrElse(
+            EitherT.leftT(
+              new IllegalArgumentException(
+                "No valid sequencer connection for " + sender
+              )
+            )
+          )
+      )
+    } yield ()
+  }
 
 }

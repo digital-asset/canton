@@ -1,0 +1,31 @@
+name: Run Temp ACS Commitment Tests
+description: Run temporary ACS commitment tests
+
+inputs:
+  execution_context_size:
+    description: Scala concurrent context size
+    required: false
+    default: '8'
+
+runs:
+  using: composite
+  steps:
+    - name: Run Tests
+      uses: ./.github/actions/test/run_tests
+      with:
+        command: >-
+          dumpClassPath
+          "set LocalProject(\"transcode-schema\") / Test / testOnly := {}"
+          "set LocalProject(\"transcode-daml-lf\") / Test / testOnly := {}"
+          "set LocalProject(\"transcode-codec-json\") / Test / testOnly := {}"
+          "set LocalProject(\"transcode-codec-proto-java\") / Test / testOnly := {}"
+          "set LocalProject(\"transcode-codec-proto-scala\") / Test / testOnly := {}"
+          "set LocalProject(\"transcode-daml-examples\") / Test / testOnly := {}"
+          "set LocalProject(\"transcode-test-conformance\") / Test / testOnly := {}"
+          "set LocalProject(\"transcode-test-utils\") / Test / testOnly := {}"
+          "testOnly * -- -n com.digitalasset.canton.annotations.AcsCommitmentTest"
+        execution_context_size: ${{ inputs.execution_context_size }}
+        fail_on_error_in_output: 'true'
+        num_parallel_tasks: '1'
+        num_test_buckets: '0'
+        succeed_on_error: false

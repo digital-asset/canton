@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules
 
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.PeerNetworkStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -115,10 +116,12 @@ object P2PNetworkOut {
 
   final case class SendToRandomAuthenticated(
       message: BftOrderingNetworkMessage,
-      possibleRecipients: Seq[BftNodeId],
+      firstChoiceRecipientsPool: Seq[BftNodeId],
+      secondChoiceRecipientsPool: Option[Seq[BftNodeId]],
       workflowId: Option[WorkflowId] = None,
-      nodeThatFailed: Option[BftNodeId] = None,
-      onRecipientDecision: Option[Option[BftNodeId] => Unit] = None,
+      nodesThatFailed: Seq[BftNodeId] = Seq.empty,
+      onRecipientsDecision: Option[Seq[BftNodeId] => Unit] = None,
+      howManyRecipients: PositiveInt = PositiveInt.one,
   ) extends Message
 
   final case class EndWorkflow(workflowId: WorkflowId) extends Message

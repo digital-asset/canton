@@ -7,11 +7,10 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Module.ModuleControl
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleName
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.local.CrashFault
 import com.digitalasset.canton.tracing.TraceContext
 
-import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
-import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.Random
 
 import SimulationModuleSystem.{SimulationEnv, TraceContextGenerator}
@@ -24,54 +23,18 @@ class LocalSimulator(
 ) {
   private val random = new Random(settings.randomSeed)
 
+  private val crashFault =
+    new CrashFault(settings.crashFaultSettings, nodes, agenda, traceContextGenerator, random)
+
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var canUseFaults = true
-
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
-  private var havePermanentlyCrashedNodes = false
-
-  private val crashNodeStatus: mutable.Map[BftNodeId, LocalSimulator.CrashNodeStatus] =
-    mutable.Map.from(
-      nodes.map(node => node -> LocalSimulator.Uninitialized)
-    )
 
   @SuppressWarnings(Array("org.wartremover.warts.Return"))
   def tick(at: CantonTimestamp): Unit = {
     if (!canUseFaults) {
       return
     }
-    if (!havePermanentlyCrashedNodes) {
-      settings.permanentlyCrashNodes.foreach { numberOfNodesToPermanentlyCrash =>
-        val nodesToCrashPermanently = random.shuffle(nodes).take(numberOfNodesToPermanentlyCrash)
-        nodesToCrashPermanently.foreach { node =>
-          crashNodeStatus(node) = LocalSimulator.Permanent
-          agenda.addOne(
-            CrashNode(node, permanent = true, traceContextGenerator.newTraceContext),
-            duration = 1.microsecond,
-          )
-        }
-      }
-      havePermanentlyCrashedNodes = true
-    }
-    crashNodeStatus.mapValuesInPlace { case (node, status) =>
-      if (status.shouldUpdate(at)) {
-        val gracePeriod =
-          at.add(settings.crashRestartGracePeriod.generateRandomDuration(random).toJava)
-        if (settings.crashRestartChance.flipCoin(random)) {
-          agenda.addOne(
-            CrashNode(node, permanent = false, traceContextGenerator.newTraceContext),
-            duration = 1.microsecond,
-          )
-          agenda.addOne(
-            RestartNode(node, traceContextGenerator.newTraceContext),
-            duration = settings.crashTimeDistribution.generateRandomDuration(random),
-          )
-        }
-        LocalSimulator.Initialized(gracePeriod)
-      } else {
-        status
-      }
-    }
+    crashFault.tick(at)
   }
 
   def scheduleEvent(
@@ -134,24 +97,11 @@ class LocalSimulator(
   ): Unit =
     agenda.addOne(ClientTick(node, tickCounter, msg, traceContext), duration)
 
-  def makeHealthy(): Unit =
+  def makeHealthy(): Unit = {
     canUseFaults = false
-}
-
-object LocalSimulator {
-  private sealed trait CrashNodeStatus {
-    def shouldUpdate(at: CantonTimestamp): Boolean
+    crashFault.heal()
   }
 
-  private object Uninitialized extends CrashNodeStatus {
-    override def shouldUpdate(at: CantonTimestamp): Boolean = true
-  }
-
-  private final case class Initialized(dontUpdateUntil: CantonTimestamp) extends CrashNodeStatus {
-    override def shouldUpdate(at: CantonTimestamp): Boolean = dontUpdateUntil.isBefore(at)
-  }
-
-  private object Permanent extends CrashNodeStatus {
-    override def shouldUpdate(at: CantonTimestamp): Boolean = false
-  }
+  def restartNode(node: BftNodeId, at: CantonTimestamp): Unit =
+    crashFault.restartingNode(node, at)
 }

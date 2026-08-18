@@ -1,0 +1,29 @@
+name: Save compiled classes
+description: Save compiled classes
+
+inputs:
+  cache-hit:
+    description: If cache was found in restoring phase
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Compute Compile Hash
+      id: compute_hash
+      uses: ./.github/actions/cache/compute_build_hash
+
+    - uses: ./.github/actions/cache/save_cache
+      # Save unless the restore was an exact primary-key hit (same branch, hash
+      # and sha), the one case where the cache already holds what this build
+      # would write. A restore-key fallback, for example a branch reusing main's
+      # cache, is not up to date: the build hash covers only the build-definition
+      # files, not the source, so this sha's compiled classes still need saving
+      # for downstream jobs in the same run and later commits on this branch.
+      if: inputs.cache-hit != 'true'
+      with:
+        path: |
+          **/target
+        key: |-
+          compile-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}

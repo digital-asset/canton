@@ -380,6 +380,28 @@
             <maxLevel>INFO</maxLevel>
             <testing>true</testing>
         </rewrite>
+       
+        <!-- TeaProjectionTest feeds the projection a delta it cannot apply, so pekko-projection reports the
+             rejection on its own logger, which canton's log suppression does not reach. The in-memory backend
+             fails immediately and attaches the cause, the slick backend retries first and inlines it instead. -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>org.apache.pekko.projection.testkit.internal.TestInternalProjectionState</logger>
+            <exceptionMessage>TRAFFIC_UPDATE_OUT_OF_BOUND</exceptionMessage>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>org.apache.pekko.projection.slick.internal.SlickProjectionImpl$SlickInternalProjectionState</logger>
+            <exceptionMessage>TRAFFIC_UPDATE_OUT_OF_BOUND</exceptionMessage>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>org.apache.pekko.projection.slick.internal.SlickProjectionImpl$SlickInternalProjectionState</logger>
+            <contains>TRAFFIC_UPDATE_OUT_OF_BOUND</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
 
    </appender>
 </included>

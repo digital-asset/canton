@@ -283,7 +283,15 @@ enum ParticipantPermission {
   PARTICIPANT_PERMISSION_OBSERVATION = 3;
 }
 
-message GetLedgerEndRequest {}
+message GetLedgerEndRequest {
+  // Provide synchronizer_times for the specified synchronizers in the response.
+  // If none are specified, only offset will be present in the response.
+  // If the request includes a synchronizer for which no updates were observed, it will be omitted in the output.
+  // If the request includes a synchronizer that participant was never connected to, it will be omitted in the output.
+  //
+  // Optional: can be empty
+  repeated string synchronizer_id = 1;
+}
 
 message GetLedgerEndResponse {
   // It will always be a non-negative integer.
@@ -293,7 +301,7 @@ message GetLedgerEndResponse {
   // Optional
   int64 offset = 1;
 
-  // Final record times observed by this participant for each of the sequencers that were ever connected.
+  // Final record times observed by this participant for each of the requested synchronizers.
   // If there is no connection to a sequencer, corresponding record time can be arbitrarily far back in the past.
   //
   // Optional: can be empty

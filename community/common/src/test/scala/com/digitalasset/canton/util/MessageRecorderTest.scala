@@ -4,7 +4,9 @@
 package com.digitalasset.canton.util
 
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.util.MessageRecorderTest.{Data, Data2}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.{BaseTestWordSpec, HasTempDirectory}
 
 import java.nio.file.Path
@@ -31,6 +33,26 @@ class MessageRecorderTest extends BaseTestWordSpec with HasTempDirectory {
 
     "catch type errors" in {
       a[ClassCastException] shouldBe thrownBy(MessageRecorder.load[Data2](recordFile, logger))
+    }
+
+    "round-trip a proto message with unvalidated strings" in {
+      // A repeated `string` field boxes the `ProtoUnvalidatedString` value class, so it serializes
+      // only because the value class is `Serializable`; a scalar field erases to `String`.
+      val message = v30.RecipientsTree(
+        recipients = Seq("alice", "bob").map(_.toProtoUnvalidated),
+        children = Seq.empty,
+      )
+      val protoFile = tempDirectory.resolve("recorded-proto-data")
+      val protoRecorder = new MessageRecorder(DefaultProcessingTimeouts.testing, loggerFactory)
+
+      protoRecorder.startRecording(protoFile)
+      protoRecorder.record(message)
+      protoRecorder.stopRecording()
+
+      val loaded = MessageRecorder.load[v30.RecipientsTree](protoFile, logger)
+      loaded shouldBe List(message)
+      // The elements must come back boxed, or using them casts a String to the wrapper.
+      loaded.map(_.toByteString) shouldBe List(message.toByteString)
     }
   }
 }

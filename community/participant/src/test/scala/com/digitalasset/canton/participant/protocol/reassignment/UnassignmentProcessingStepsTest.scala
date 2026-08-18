@@ -26,10 +26,15 @@ import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, F
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
+  IncompleteLightViewTree,
+  MalformedPayload,
+}
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.{
   mkActivenessResult,
   mkActivenessSet,
@@ -204,6 +209,7 @@ final class UnassignmentProcessingStepsTest
       mock[RecordOrderPublisher],
       mock[SynchronizerTimeTracker],
       mock[InFlightSubmissionSynchronizerTracker],
+      mock[AcsCommitmentSender],
       mock[OnboardingClearanceScheduler],
       persistentState,
       ledgerApiIndexer,
@@ -904,6 +910,7 @@ final class UnassignmentProcessingStepsTest
         requestTargetTs: Target[CantonTimestamp] = targetTs,
         reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant),
         sourceSnapshot: SynchronizerSnapshotSyncCryptoApi = cryptoSnapshot,
+        malformedPayloads: Seq[MalformedPayload] = Seq.empty,
     ) = {
       val state = mkState
       val unassignmentRequest = UnassignmentRequest(
@@ -945,7 +952,7 @@ final class UnassignmentProcessingStepsTest
             Recipients.cc(submittingParticipant),
             signatureO = signature,
             snapshot = sourceSnapshot,
-          ),
+          ).copy(malformedPayloads = malformedPayloads),
           state.reassignmentCache,
           FutureUnlessShutdown.pure(
             mkActivenessResult(
@@ -1028,6 +1035,41 @@ final class UnassignmentProcessingStepsTest
       )
     }
 
+    "abstain when the participant is not reassigning" in {
+      val responses =
+        constructPendingDataAndResponseWith(
+          unassignmentProcessingSteps,
+          reassigningParticipants = Set(
+            ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("other::participant"))
+          ),
+        ).value.confirmationResponsesF.value.futureValueUS.value.value._1.responses
+      responses should matchPattern { case Seq(ConfirmationResponse(_, _: LocalAbstain, _)) =>
+      }
+    }
+
+    "reject a malformed payload" in {
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          val responses = constructPendingDataAndResponseWith(
+            unassignmentProcessingSteps,
+            malformedPayloads = Seq(IncompleteLightViewTree(ViewPosition.root)),
+          ).value.confirmationResponsesF.value.futureValueUS.value.value._1.responses
+          responses should matchPattern {
+            case Seq(ConfirmationResponse(None, reject: LocalReject, parties))
+                if reject.isMalformed && parties.isEmpty =>
+          }
+        },
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              _.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.Payloads),
+              "malformed payload",
+            )
+          )
+        ),
+      )
+    }
+
     "validate at the local target timestamp" in {
       // validation uses the local target timestamp and ignores the submitter target timestamp, so it approves.
       val responses =
@@ -1095,9 +1137,11 @@ final class UnassignmentProcessingStepsTest
       unassignmentData = UnassignmentData(fullUnassignmentTree, CantonTimestamp.Epoch),
       rootHash = fullUnassignmentTree.rootHash,
       assignmentExclusivity = Some(Target(assignmentExclusivity)),
-      hostedConfirmingReassigningParties = Set(party1),
+      hostedConfirmingParties = Set(party1),
       commonValidationResult = CommonValidationResult(
-        activenessResult = mkActivenessResult(),
+        activenessResult = mkActivenessResult(
+          prior = Map(contract.contractId -> Some(Active(initialReassignmentCounter - 1)))
+        ),
         participantSignatureVerificationResult = None,
         contractAuthenticationResultF = EitherT.right(FutureUnlessShutdown.unit),
         submitterCheckResult = None,
@@ -1122,7 +1166,7 @@ final class UnassignmentProcessingStepsTest
 
     "succeed without errors" in {
       for {
-        _ <- valueOrFail(
+        result <- valueOrFail(
           unassignmentProcessingSteps
             .getCommitSetAndContractsToBeStoredAndEventFactory(
               NoOpeningErrors(signedContent),
@@ -1133,7 +1177,7 @@ final class UnassignmentProcessingStepsTest
             )
             .failOnShutdown
         )("get commit set and contract to be stored and event")
-      } yield succeed
+      } yield result.commitSet.nonEmpty shouldBe true
     }
 
     "fail with mediator is not active anymore" in {

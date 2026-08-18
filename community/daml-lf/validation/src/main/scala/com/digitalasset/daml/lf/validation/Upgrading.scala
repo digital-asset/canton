@@ -462,13 +462,13 @@ case class TypecheckUpgrades(
       )
       _ <- tryAll(existingTemplates, checkTemplate(_))
 
-      (_ifaceDel, ifaceExisting, _ifaceNew) = extractDelExistNew(ifaceDts)
+      (_, ifaceExisting, _) = extractDelExistNew(ifaceDts)
       _ <- checkContinuedIfaces(ifaceExisting)
 
-      (_exceptionDel, exceptionExisting, _exceptionNew) = extractDelExistNew(exceptionDts)
+      (_, exceptionExisting, _) = extractDelExistNew(exceptionDts)
       _ <- checkContinuedExceptions(exceptionExisting)
 
-      (instanceDel, _instanceExisting, instanceNew) = extractDelExistNew(
+      (instanceDel, _, _) = extractDelExistNew(
         module.map(flattenInstances)
       )
       _ <- checkDeletedInstances(instanceDel)

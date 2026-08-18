@@ -387,10 +387,7 @@ private[reassignment] class AssignmentProcessingSteps(
       )
       val activenessSet = ActivenessSet(
         contracts = contractCheck,
-        reassignmentIds =
-          if (parsedRequest.fullViewTree.isReassigningParticipant(participantId))
-            Set(parsedRequest.reassignmentId)
-          else Set.empty,
+        reassignmentIds = Set(parsedRequest.reassignmentId),
       )
       Right(activenessSet)
     } else
@@ -441,19 +438,12 @@ private[reassignment] class AssignmentProcessingSteps(
 
     } yield {
       val confirmationResponseF =
-        if (assignmentValidationResult.hostedConfirmingReassigningParties.isEmpty) {
-          logger.debug(
-            "Not sending a verdict because the list of hosted confirming parties is empty"
-          )
-          FutureUnlessShutdown.pure(None)
-        } else {
-          createConfirmationResponses(
-            parsedRequest.requestId,
-            parsedRequest.malformedPayloads,
-            protocolVersion.unwrap,
-            assignmentValidationResult,
-          )
-        }
+        createConfirmationResponses(
+          parsedRequest.requestId,
+          parsedRequest.malformedPayloads,
+          protocolVersion.unwrap,
+          assignmentValidationResult,
+        )
 
       val responseF = confirmationResponseF.map(_.map((_, Recipients.cc(parsedRequest.mediator))))
 

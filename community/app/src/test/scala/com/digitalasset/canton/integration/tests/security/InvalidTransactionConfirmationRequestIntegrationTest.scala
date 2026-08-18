@@ -17,13 +17,9 @@ import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOv
 import com.digitalasset.canton.crypto.{CryptoPureApi, SecureRandomness}
 import com.digitalasset.canton.damltests.java.explicitdisclosure.PriceQuotation
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
+import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{
-  GenTransactionTree,
-  LightTransactionViewTree,
-  SubviewReferenceAndKey,
-  TransactionView,
-}
+import com.digitalasset.canton.data.{GenTransactionTree, LightTransactionViewTree, TransactionView}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
@@ -65,6 +61,7 @@ import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.{MaliciousParticipantNode, MaxBytesToDecompress}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.ContractInstanceCoder
 import com.digitalasset.daml.lf.value.Value.{ValueRecord, ValueText}
@@ -131,309 +128,176 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
   // Workaround to avoid false errors reported by IDEA.
   implicit def tagToContainer(tag: EvidenceTag): Tag = new TagContainer(tag)
 
-  "A participant" when {
+  // TODO(#32405): adapt the tests to the new transparency protocol version and remove the version check
+  if (testedProtocolVersion < ProtocolVersion.transparency) {
 
-    "an attempt is made to construct text containing the zero character" must_ { threat =>
-      "alarm, discard, and reject the view" taggedAs_ (mitigation =>
-        SecurityTest(
-          Integrity,
-          "virtual shared ledger",
-          Attack("a malicious participant", threat, mitigation),
-        )
-      ) in { implicit env =>
-        import env.*
+    "A participant" when {
 
-        val badStockName = "Below" + '\u0000'
-        val goodStockName = "Above" + '0'
+      "an attempt is made to construct text containing the zero character" must_ { threat =>
+        "alarm, discard, and reject the view" taggedAs_ (mitigation =>
+          SecurityTest(
+            Integrity,
+            "virtual shared ledger",
+            Attack("a malicious participant", threat, mitigation),
+          )
+        ) in { implicit env =>
+          import env.*
 
-        def quoteWith(name: String): data.Command =
-          new PriceQuotation(party1.toProtoPrimitive, name, 100L).create.commands
-            .overridePackageId(PriceQuotation.PACKAGE_ID)
-            .loneElement
+          val badStockName = "Below" + '\u0000'
+          val goodStockName = "Above" + '0'
 
-        val v2Cmd = Command.fromJavaProto(quoteWith(goodStockName).toProtoCommand)
+          def quoteWith(name: String): data.Command =
+            new PriceQuotation(party1.toProtoPrimitive, name, 100L).create.commands
+              .overridePackageId(PriceQuotation.PACKAGE_ID)
+              .loneElement
 
-        val command = CommandsWithMetadata(
-          commands = Seq(v2Cmd),
-          actAs = Seq(party1),
-          ledgerTime = environment.now.toLf,
-        )
+          val v2Cmd = Command.fromJavaProto(quoteWith(goodStockName).toProtoCommand)
 
-        assertThrowsAndLogsCommandFailures(
-          participant1.ledger_api.javaapi.commands
-            .submit(Seq(party1), Seq(quoteWith(badStockName))),
-          e => {
-            e.shouldBeCantonErrorCode(PreprocessingFailed)
-            e.errorMessage should include("Text contains null character")
-          },
-        )
+          val command = CommandsWithMetadata(
+            commands = Seq(v2Cmd),
+            actAs = Seq(party1),
+            ledgerTime = environment.now.toLf,
+          )
 
-        val transactionTreeInterceptor: GenTransactionTree => GenTransactionTree = tree => {
-          tree.mapUnblindedRootViews { v =>
-            val data = v.viewParticipantData.tryUnwrap
-            val contract = data.createdCore.loneElement.contract
+          assertThrowsAndLogsCommandFailures(
+            participant1.ledger_api.javaapi.commands
+              .submit(Seq(party1), Seq(quoteWith(badStockName))),
+            e => {
+              e.shouldBeCantonErrorCode(PreprocessingFailed)
+              e.errorMessage should include("Text contains null character")
+            },
+          )
 
-            val _arg: LfValue = inside(contract.inst.createArg) { case record: ValueRecord =>
-              ValueRecord(
-                None,
-                ImmArray.from(
-                  record.fields.head :: (
-                    None,
-                    ValueText(badStockName),
-                  ) :: record.fields.toList.drop(2)
+          val transactionTreeInterceptor: GenTransactionTree => GenTransactionTree = tree => {
+            tree.mapUnblindedRootViews { v =>
+              val data = v.viewParticipantData.tryUnwrap
+              val contract = data.createdCore.loneElement.contract
+
+              val _arg: LfValue = inside(contract.inst.createArg) { case record: ValueRecord =>
+                ValueRecord(
+                  None,
+                  ImmArray.from(
+                    record.fields.head :: (
+                      None,
+                      ValueText(badStockName),
+                    ) :: record.fields.toList.drop(2)
+                  ),
+                )
+              }
+              val _create = contract.inst.toCreateNode.copy(arg = _arg)
+              val _inst = LfFatContractInst.fromCreateNode(
+                _create,
+                contract.inst.createdAt,
+                contract.inst.authenticationData,
+              )
+              val _serialization = new ContractInstanceCoder(allowNullCharacters = true)
+                .encodeFatContractInstance(_inst)
+                .value
+              val _createdContract = CreatedContract.tryCreate(
+                contract = ContractInstance.createWithSerialization(
+                  _inst,
+                  contract.metadata,
+                  _serialization,
                 ),
+                consumedInCore = false,
+                rolledBack = false,
+              )
+              val _data = data.copy(createdCore = Seq(_createdContract))
+              TransactionView.tryCreate(v.hashOps)(
+                v.viewCommonData,
+                _data,
+                v.subviews,
+                testedProtocolVersion,
               )
             }
-            val _create = contract.inst.toCreateNode.copy(arg = _arg)
-            val _inst = LfFatContractInst.fromCreateNode(
-              _create,
-              contract.inst.createdAt,
-              contract.inst.authenticationData,
-            )
-            val _serialization = new ContractInstanceCoder(allowNullCharacters = true)
-              .encodeFatContractInstance(_inst)
-              .value
-            val _createdContract = CreatedContract.tryCreate(
-              contract = ContractInstance.createWithSerialization(
-                _inst,
-                contract.metadata,
-                _serialization,
-              ),
-              consumedInCore = false,
-              rolledBack = false,
-            )
-            val _data = data.copy(createdCore = Seq(_createdContract))
-            TransactionView.tryCreate(v.hashOps)(
-              v.viewCommonData,
-              _data,
-              v.subviews,
-              testedProtocolVersion,
-            )
           }
-        }
 
-        val (_, events) =
-          loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-            trackingLedgerEvents(participants.all, Seq.empty) {
-              maliciousP1
-                .submitCommand(
-                  command = command,
-                  transactionTreeInterceptor = transactionTreeInterceptor,
-                )
-                .futureValueUS
-            },
-            LogEntry.assertLogSeq(
-              mustContainWithClue = Seq(
-                (
-                  le => {
-                    le.loggerName should include("participant=participant1")
-                    le.shouldBeCantonErrorCode(MalformedRejects.Payloads)
-                    le.warningMessage should include("text contains null character")
-                  },
-                  "malformed entry",
-                )
-              ),
-              mayContain = Seq(
-                // Ignore error logged by the test
-                _.loggerName should include(
-                  "InvalidTransactionConfirmationRequestIntegrationTestPostgres"
-                )
-              ),
-            ),
-          )
-        events.assertNoTransactions()
-      }
-
-    }
-
-    "a view has missing recipients" must_ { threat =>
-      "alarm, discard, and reject the view" taggedAs_ (mitigation =>
-        SecurityTest(
-          Integrity,
-          "virtual shared ledger",
-          Attack("a malicious participant", threat, mitigation),
-        )
-      ) in { implicit env =>
-        import env.*
-
-        val rawCmd = new UniversalContract(
-          List(party1.toProtoPrimitive).asJava,
-          List.empty.asJava,
-          List(party2.toProtoPrimitive).asJava,
-          List(party1.toProtoPrimitive).asJava,
-        ).create.commands
-          .overridePackageId(UniversalContract.PACKAGE_ID)
-          .asScala
-          .toSeq
-          .map(c => Command.fromJavaProto(c.toProtoCommand))
-
-        val cmd =
-          CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
-
-        loggerFactory.assertLoggedWarningsAndErrorsSeq(
-          replacingConfirmationResult(
-            daId,
-            sequencer1,
-            mediator1,
-            withMediatorVerdict(mediatorApprove),
-          ) {
-            val (_, events2) = trackingLedgerEvents(Seq(participant2), Seq.empty) {
-              val (_, events1) = trackingLedgerEvents(Seq(participant1), Seq.empty) {
+          val (_, events) =
+            loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
+              trackingLedgerEvents(participants.all, Seq.empty) {
                 maliciousP1
                   .submitCommand(
-                    cmd,
-                    confirmationRequestInterceptor =
-                      allViewRecipients.replace(Recipients.cc(participant1)),
+                    command = command,
+                    transactionTreeInterceptor = transactionTreeInterceptor,
                   )
-                  .failOnShutdown
-              }
-
-              events1.assertNoTransactions()
-
-              clock.advance(
-                (synchronizerParameters.confirmationResponseTimeout + synchronizerParameters.mediatorReactionTimeout).asJava
-                  .plusSeconds(1)
-              )
-            }
-
-            events2.assertNoTransactions()
-          },
-          LogEntry.assertLogSeq(
-            Seq(
-              (
-                _.shouldBeCantonError(
-                  SyncServiceAlarm,
-                  _ should include("Received no encrypted view message of type TransactionViewType"),
+                  .futureValueUS
+              },
+              LogEntry.assertLogSeq(
+                mustContainWithClue = Seq(
+                  (
+                    le => {
+                      le.loggerName should include("participant=participant1")
+                      le.shouldBeCantonErrorCode(MalformedRejects.Payloads)
+                      le.warningMessage should include("text contains null character")
+                    },
+                    "malformed entry",
+                  )
                 ),
-                "p2 missing view",
-              ),
-              (
-                _.shouldBeCantonError(
-                  LocalRejectError.MalformedRejects.BadRootHashMessages,
-                  _ should include("Received no encrypted view message of type TransactionViewType"),
+                mayContain = Seq(
+                  // Ignore error logged by the test
+                  _.loggerName should include(
+                    "InvalidTransactionConfirmationRequestIntegrationTestPostgres"
+                  )
                 ),
-                "p2 root hash message check",
-              ),
-              (
-                _.shouldBeCantonError(SyncServiceAlarm, _ should include("has missing recipients")),
-                "p1 recipients check",
               ),
             )
-          ),
-        )
+          events.assertNoTransactions()
+        }
+
       }
-    }
 
-    "a view has extra recipients" must_ { threat =>
-      "alarm and process the view" taggedAs_ (mitigation =>
-        SecurityTest(
-          Privacy,
-          "virtual shared ledger",
-          Attack("a malicious participant", threat, mitigation),
-        )
-      ) in { implicit env =>
-        import env.*
-
-        val rawCmd = new UniversalContract(
-          List(party1.toProtoPrimitive).asJava,
-          List.empty.asJava,
-          List.empty.asJava,
-          List(party1.toProtoPrimitive).asJava,
-        ).create.commands
-          .overridePackageId(UniversalContract.PACKAGE_ID)
-          .asScala
-          .toSeq
-          .map(c => Command.fromJavaProto(c.toProtoCommand))
-
-        val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
-
-        val (_, events) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
-          trackingLedgerEvents(participants.all, Seq.empty) {
-            maliciousP1
-              .submitCommand(
-                cmd,
-                confirmationRequestInterceptor = allViewRecipients.replace(
-                  Recipients.cc(participant1, participant2)
-                ),
-              )
-              .futureValueUS
-          },
-          LogEntry.assertLogSeq(
-            Seq(
-              (
-                _.shouldBeCantonError(
-                  SyncServiceAlarm,
-                  _ should include("No valid root hash message in batch"),
-                ),
-                "p2 extra message",
-              ),
-              (
-                _.shouldBeCantonError(
-                  SyncServiceAlarm,
-                  _ should include("has extra recipients"),
-                ),
-                "p1 extra recipients",
-              ),
-            )
-          ),
-        )
-
-        events.assertStatusOk(participant1)
-        events.assertExactlyOneCompletion(participant1)
-        events.awaitTransactions(participant1).loneElement
-        events.awaitTransactions(participant2) shouldBe empty
-      }
-    }
-
-    "a subview envelope is missing" must_ { threat =>
-      "alarm, discard and reject all views" taggedAs_ (mitigation =>
-        SecurityTest(
-          Integrity,
-          "virtual shared ledger",
-          Attack("a malicious participant", threat, mitigation),
-        )
-      ) in { implicit env =>
-        import env.*
-
-        val createCmd = new UniversalContract(
-          List(party1.toProtoPrimitive).asJava,
-          List.empty.asJava,
-          List.empty.asJava,
-          List(party1.toProtoPrimitive).asJava,
-        ).create.commands.overridePackageId(UniversalContract.PACKAGE_ID).asScala.toSeq
-        val cid = JavaDecodeUtil
-          .decodeAllCreated(UniversalContract.COMPANION)(
-            participant1.ledger_api.javaapi.commands.submit(Seq(party1), createCmd)
+      "a view has missing recipients" must_ { threat =>
+        "alarm, discard, and reject the view" taggedAs_ (mitigation =>
+          SecurityTest(
+            Integrity,
+            "virtual shared ledger",
+            Attack("a malicious participant", threat, mitigation),
           )
-          .loneElement
-          .id
+        ) in { implicit env =>
+          import env.*
 
-        val rawCmd = cid
-          .exerciseReplace(
+          val rawCmd = new UniversalContract(
             List(party1.toProtoPrimitive).asJava,
             List.empty.asJava,
             List(party2.toProtoPrimitive).asJava,
-            List(party2.toProtoPrimitive).asJava,
-            List.empty.asJava,
-          )
-          .commands
-          .overridePackageId(UniversalContract.PACKAGE_ID)
-          .asScala
-          .toSeq
-          .map(c => Command.fromJavaProto(c.toProtoCommand))
+            List(party1.toProtoPrimitive).asJava,
+          ).create.commands
+            .overridePackageId(UniversalContract.PACKAGE_ID)
+            .asScala
+            .toSeq
+            .map(c => Command.fromJavaProto(c.toProtoCommand))
 
-        val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
-        val (_, events) =
+          val cmd =
+            CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
+
           loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            trackingLedgerEvents(participants.all, Seq.empty)(
-              maliciousP1
-                .submitCommand(
-                  cmd,
-                  confirmationRequestInterceptor =
-                    _.focus(_.viewEnvelopes).modify(_.headOption.toList),
+            replacingConfirmationResult(
+              daId,
+              sequencer1,
+              mediator1,
+              withMediatorVerdict(mediatorApprove),
+            ) {
+              val (_, events2) = trackingLedgerEvents(Seq(participant2), Seq.empty) {
+                val (_, events1) = trackingLedgerEvents(Seq(participant1), Seq.empty) {
+                  maliciousP1
+                    .submitCommand(
+                      cmd,
+                      confirmationRequestInterceptor =
+                        allViewRecipients.replace(Recipients.cc(participant1)),
+                    )
+                    .failOnShutdown
+                }
+
+                events1.assertNoTransactions()
+
+                clock.advance(
+                  (synchronizerParameters.confirmationResponseTimeout + synchronizerParameters.mediatorReactionTimeout).asJava
+                    .plusSeconds(1)
                 )
-                .futureValueUS
-            ),
+              }
+
+              events2.assertNoTransactions()
+            },
             LogEntry.assertLogSeq(
               Seq(
                 (
@@ -457,312 +321,462 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                 (
                   _.shouldBeCantonError(
                     SyncServiceAlarm,
-                    _ should include regex raw"View \S+ lists a subview with hash \S+, but I haven't received any views for this hash",
+                    _ should include("has missing recipients"),
                   ),
-                  "p1 decryption error",
+                  "p1 recipients check",
                 ),
               )
             ),
           )
-
-        events.assertNoTransactions()
+        }
       }
-    }
 
-    "the same envelope is sent twice" must_ { threat =>
-      "alarm and deduplicate the envelope" taggedAs_ (mitigation =>
-        SecurityTest(
-          Integrity,
-          "virtual shared ledger",
-          Attack("a malicious participant", threat, mitigation),
-        )
-      ) in { implicit env =>
-        import env.*
+      "a view has extra recipients" must_ { threat =>
+        "alarm and process the view" taggedAs_ (mitigation =>
+          SecurityTest(
+            Privacy,
+            "virtual shared ledger",
+            Attack("a malicious participant", threat, mitigation),
+          )
+        ) in { implicit env =>
+          import env.*
 
-        val rawCmd = new UniversalContract(
-          List(party1.toProtoPrimitive).asJava,
-          List.empty.asJava,
-          List.empty.asJava,
-          List(party1.toProtoPrimitive).asJava,
-        ).create.commands
-          .overridePackageId(UniversalContract.PACKAGE_ID)
-          .asScala
-          .toSeq
-          .map(c => Command.fromJavaProto(c.toProtoCommand))
+          val rawCmd = new UniversalContract(
+            List(party1.toProtoPrimitive).asJava,
+            List.empty.asJava,
+            List.empty.asJava,
+            List(party1.toProtoPrimitive).asJava,
+          ).create.commands
+            .overridePackageId(UniversalContract.PACKAGE_ID)
+            .asScala
+            .toSeq
+            .map(c => Command.fromJavaProto(c.toProtoCommand))
 
-        val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
-        val (_, events) =
-          loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            trackingLedgerEvents(participants.all, Seq.empty)(
+          val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
+
+          val (_, events) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
+            trackingLedgerEvents(participants.all, Seq.empty) {
               maliciousP1
                 .submitCommand(
                   cmd,
-                  confirmationRequestInterceptor =
-                    _.focus(_.viewEnvelopes).modify(envs => envs ++ envs),
+                  confirmationRequestInterceptor = allViewRecipients.replace(
+                    Recipients.cc(participant1, participant2)
+                  ),
                 )
                 .futureValueUS
-            ),
+            },
             LogEntry.assertLogSeq(
               Seq(
                 (
-                  _.warningMessage should include("DuplicateLightViewTree"),
-                  "duplicate light view tree",
-                )
+                  _.shouldBeCantonError(
+                    SyncServiceAlarm,
+                    _ should include("No valid root hash message in batch"),
+                  ),
+                  "p2 extra message",
+                ),
+                (
+                  _.shouldBeCantonError(
+                    SyncServiceAlarm,
+                    _ should include("has extra recipients"),
+                  ),
+                  "p1 extra recipients",
+                ),
               )
             ),
           )
 
-        events.assertNoTransactions()
-      }
-    }
-
-    "the root hash message recipients have an unusual structure" must_ { threat =>
-      "alarm and process the request" taggedAs_ (mitigation =>
-        SecurityTest(
-          Integrity,
-          "virtual shared ledger",
-          Attack("a malicious participant", threat, mitigation),
-        )
-      ) in { implicit env =>
-        import env.*
-
-        val tx = participant1.ledger_api.javaapi.commands.submit(
-          actAs = Seq(party1),
-          commands = mkUniversal(
-            maintainers = List(party1),
-            observers = List(party2, party3),
-          ).create.commands.overridePackageId(UniversalContract.PACKAGE_ID).asScala.toSeq,
-        )
-
-        val contractId =
-          JavaDecodeUtil.decodeAllCreated(UniversalContract.COMPANION)(tx).loneElement.id
-
-        val cmdWithMetadata =
-          // This malicious command aims at archiving the contract where party3's participant receives an unusual root hash message
-          CommandsWithMetadata(
-            contractId
-              .exerciseArchive()
-              .commands
-              .overridePackageId(UniversalContract.PACKAGE_ID)
-              .asScala
-              .toSeq
-              .map(c => Command.fromJavaProto(c.toProtoCommand)),
-            actAs = Seq(party1),
-            ledgerTime = environment.now.toLf,
-          )
-
-        val attackedParticipant = participant3.id
-
-        def modifyP3RootHashMessageRecipients(
-            envelope: DefaultOpenEnvelope
-        ): DefaultOpenEnvelope = {
-          val attackedMember: Recipient = MemberRecipient(attackedParticipant)
-
-          envelope.protocolMessage match {
-            case _: RootHashMessage[?] =>
-              envelope
-                .focus(_.recipients.trees)
-                .modify(_.map { tree =>
-                  if (tree.recipientGroup.contains(attackedMember))
-                    RecipientsTree(NonEmpty(Set, attackedMember), Seq(tree))
-                  else tree
-                })
-            case _ => envelope
-          }
-        }
-
-        val informeeParticipants = Seq(participant1, participant2, participant3)
-        val (_, events) = loggerFactory.assertLogs(
-          trackingLedgerEvents(informeeParticipants, Seq.empty) {
-            maliciousP1
-              .submitCommand(
-                cmdWithMetadata,
-                envelopeInterceptor = modifyP3RootHashMessageRecipients,
-              )
-              .futureValueUS
-          },
-          // The attacked participant raises an alarm
-          _.shouldBeCantonError(
-            SyncServiceAlarm,
-            _ should startWith regex raw"\(sequencer counter: \S+, timestamp: \S+\): The root hash message has invalid recipient groups.\nRecipients",
-            loggerAssertion = _ should include(s"participant=${attackedParticipant.uid.identifier}"),
-          ),
-        )
-
-        // All participants have nonetheless archived the contract
-        forEvery(informeeParticipants) { p =>
-          events.allArchived(UniversalContract.COMPANION)(p).loneElement shouldBe contractId
+          events.assertStatusOk(participant1)
+          events.assertExactlyOneCompletion(participant1)
+          events.awaitTransactions(participant1).loneElement
+          events.awaitTransactions(participant2) shouldBe empty
         }
       }
-    }
 
-    // TODO(#15022): After transparency is implemented, the participant should not break.
-    "a view has multiple different encryption keys" must_ { threat =>
-      "alarm, discard, and reject the view" taggedAs_ (mitigation =>
-        SecurityTest(
-          Integrity,
-          "virtual shared ledger",
-          Attack("a malicious participant", threat, mitigation),
-        )
-      ) in { implicit env =>
-        import env.*
-
-        val createCmd = new UniversalContract(
-          List(party1.toProtoPrimitive).asJava,
-          List.empty.asJava,
-          List.empty.asJava,
-          List(party1.toProtoPrimitive).asJava,
-        ).create.commands.overridePackageId(UniversalContract.PACKAGE_ID).asScala.toSeq
-        val cid = JavaDecodeUtil
-          .decodeAllCreated(UniversalContract.COMPANION)(
-            participant1.ledger_api.javaapi.commands.submit(Seq(party1), createCmd)
+      "a subview envelope is missing" must_ { threat =>
+        "alarm, discard and reject all views" taggedAs_ (mitigation =>
+          SecurityTest(
+            Integrity,
+            "virtual shared ledger",
+            Attack("a malicious participant", threat, mitigation),
           )
-          .loneElement
-          .id
+        ) in { implicit env =>
+          import env.*
 
-        val rawCmd = cid
-          .exerciseReplace(
+          val createCmd = new UniversalContract(
             List(party1.toProtoPrimitive).asJava,
             List.empty.asJava,
-            List(party2.toProtoPrimitive).asJava,
-            List(party2.toProtoPrimitive).asJava,
             List.empty.asJava,
+            List(party1.toProtoPrimitive).asJava,
+          ).create.commands.overridePackageId(UniversalContract.PACKAGE_ID).asScala.toSeq
+          val cid = JavaDecodeUtil
+            .decodeAllCreated(UniversalContract.COMPANION)(
+              participant1.ledger_api.javaapi.commands.submit(Seq(party1), createCmd)
+            )
+            .loneElement
+            .id
+
+          val rawCmd = cid
+            .exerciseReplace(
+              List(party1.toProtoPrimitive).asJava,
+              List.empty.asJava,
+              List(party2.toProtoPrimitive).asJava,
+              List(party2.toProtoPrimitive).asJava,
+              List.empty.asJava,
+            )
+            .commands
+            .overridePackageId(UniversalContract.PACKAGE_ID)
+            .asScala
+            .toSeq
+            .map(c => Command.fromJavaProto(c.toProtoCommand))
+
+          val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
+          val (_, events) =
+            loggerFactory.assertLoggedWarningsAndErrorsSeq(
+              trackingLedgerEvents(participants.all, Seq.empty)(
+                maliciousP1
+                  .submitCommand(
+                    cmd,
+                    confirmationRequestInterceptor =
+                      _.focus(_.viewEnvelopes).modify(_.headOption.toList),
+                  )
+                  .futureValueUS
+              ),
+              LogEntry.assertLogSeq(
+                Seq(
+                  (
+                    _.shouldBeCantonError(
+                      SyncServiceAlarm,
+                      _ should include(
+                        "Received no encrypted view message of type TransactionViewType"
+                      ),
+                    ),
+                    "p2 missing view",
+                  ),
+                  (
+                    _.shouldBeCantonError(
+                      LocalRejectError.MalformedRejects.BadRootHashMessages,
+                      _ should include(
+                        "Received no encrypted view message of type TransactionViewType"
+                      ),
+                    ),
+                    "p2 root hash message check",
+                  ),
+                  (
+                    _.shouldBeCantonError(
+                      SyncServiceAlarm,
+                      _ should include regex raw"View \S+ lists a subview with hash \S+, but I haven't received any views for this hash",
+                    ),
+                    "p1 decryption error",
+                  ),
+                )
+              ),
+            )
+
+          events.assertNoTransactions()
+        }
+      }
+
+      "the same envelope is sent twice" must_ { threat =>
+        "alarm and deduplicate the envelope" taggedAs_ (mitigation =>
+          SecurityTest(
+            Integrity,
+            "virtual shared ledger",
+            Attack("a malicious participant", threat, mitigation),
           )
-          .commands
-          .overridePackageId(UniversalContract.PACKAGE_ID)
-          .asScala
-          .toSeq
-          .map(c => Command.fromJavaProto(c.toProtoCommand))
+        ) in { implicit env =>
+          import env.*
 
-        val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
+          val rawCmd = new UniversalContract(
+            List(party1.toProtoPrimitive).asJava,
+            List.empty.asJava,
+            List.empty.asJava,
+            List(party1.toProtoPrimitive).asJava,
+          ).create.commands
+            .overridePackageId(UniversalContract.PACKAGE_ID)
+            .asScala
+            .toSeq
+            .map(c => Command.fromJavaProto(c.toProtoCommand))
 
-        def replaceRandomnessForLightTransactionViewTree(
-            tcr: TransactionConfirmationRequest
-        ): TransactionConfirmationRequest = {
-
-          val envelope = tcr.viewEnvelopes.headOption.valueOrFail("retrieve first view envelopes")
-
-          val message = envelope.protocolMessage
-          val recipients = envelope.recipients
-
-          val encryptedViewRandomness =
-            message.viewEncryptionKeyRandomness.headOption.valueOrFail("retrieve view key")
-          val viewRandomness = participant1.crypto.privateCrypto
-            .decrypt(
-              encryptedViewRandomness
-            )(SecureRandomness.fromByteString(message.viewEncryptionScheme.keySizeInBytes))
-            .valueOrFail("decrypt view key")
-            .futureValueUS
-
-          val viewKey = pureCrypto
-            .createSymmetricKey(viewRandomness, message.viewEncryptionScheme)
-            .valueOrFail("create view key")
-
-          def deserialize(
-              bytes: ByteString
-          ): Either[DefaultDeserializationError, LightTransactionViewTree] =
-            LightTransactionViewTree
-              .fromByteString(
-                (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
-                testedProtocolVersion,
-              )(bytes)
-              .leftMap(err => DefaultDeserializationError(err.message))
-
-          val viewTree = message match {
-            case singleViewMessage: TransactionSingleViewMessage =>
-              val encryptedViewTree = singleViewMessage.encryptedView.viewTree
-
-              EncryptedView
-                .decrypt[LightTransactionViewTree](pureCrypto, viewKey, encryptedViewTree)(
-                  deserialize,
-                  MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
+          val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
+          val (_, events) =
+            loggerFactory.assertLoggedWarningsAndErrorsSeq(
+              trackingLedgerEvents(participants.all, Seq.empty)(
+                maliciousP1
+                  .submitCommand(
+                    cmd,
+                    confirmationRequestInterceptor =
+                      _.focus(_.viewEnvelopes).modify(envs => envs ++ envs),
+                  )
+                  .futureValueUS
+              ),
+              LogEntry.assertLogSeq(
+                Seq(
+                  (
+                    _.warningMessage should include("DuplicateLightViewTree"),
+                    "duplicate light view tree",
+                  )
                 )
-                .value
-            case multipleViewsMessage: TransactionMultiViewMessage =>
-              val encryptedViewTrees = multipleViewsMessage.encryptedViews.viewTrees
+              ),
+            )
 
-              val viewTrees = EncryptedMultipleViews
-                .decrypt[LightTransactionViewTree](pureCrypto, viewKey, encryptedViewTrees)(
-                  deserialize,
-                  MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
-                )
-                .value
+          events.assertNoTransactions()
+        }
+      }
 
-              viewTrees.viewTrees.length shouldBe 1
-              viewTrees.viewTrees.head1
+      "the root hash message recipients have an unusual structure" must_ { threat =>
+        "alarm and process the request" taggedAs_ (mitigation =>
+          SecurityTest(
+            Integrity,
+            "virtual shared ledger",
+            Attack("a malicious participant", threat, mitigation),
+          )
+        ) in { implicit env =>
+          import env.*
+
+          val tx = participant1.ledger_api.javaapi.commands.submit(
+            actAs = Seq(party1),
+            commands = mkUniversal(
+              maintainers = List(party1),
+              observers = List(party2, party3),
+            ).create.commands.overridePackageId(UniversalContract.PACKAGE_ID).asScala.toSeq,
+          )
+
+          val contractId =
+            JavaDecodeUtil.decodeAllCreated(UniversalContract.COMPANION)(tx).loneElement.id
+
+          val cmdWithMetadata =
+            // This malicious command aims at archiving the contract where party3's participant receives an unusual root hash message
+            CommandsWithMetadata(
+              contractId
+                .exerciseArchive()
+                .commands
+                .overridePackageId(UniversalContract.PACKAGE_ID)
+                .asScala
+                .toSeq
+                .map(c => Command.fromJavaProto(c.toProtoCommand)),
+              actAs = Seq(party1),
+              ledgerTime = environment.now.toLf,
+            )
+
+          val attackedParticipant = participant3.id
+
+          def modifyP3RootHashMessageRecipients(
+              envelope: DefaultOpenEnvelope
+          ): DefaultOpenEnvelope = {
+            val attackedMember: Recipient = MemberRecipient(attackedParticipant)
+
+            envelope.protocolMessage match {
+              case _: RootHashMessage[?] =>
+                envelope
+                  .focus(_.recipients.trees)
+                  .modify(_.map { tree =>
+                    if (tree.recipientGroup.contains(attackedMember))
+                      RecipientsTree(NonEmpty(Set, attackedMember), Seq(tree))
+                    else tree
+                  })
+              case _ => envelope
+            }
           }
 
-          // change the randomness assigned to the first subview in the view tree
-          val subviewReference =
-            viewTree.subviewReferencesAndKeys.headOption
-              .valueOrFail("retrieve subview")
-              .subviewReference
+          val informeeParticipants = Seq(participant1, participant2, participant3)
+          val (_, events) = loggerFactory.assertLogs(
+            trackingLedgerEvents(informeeParticipants, Seq.empty) {
+              maliciousP1
+                .submitCommand(
+                  cmdWithMetadata,
+                  envelopeInterceptor = modifyP3RootHashMessageRecipients,
+                )
+                .futureValueUS
+            },
+            // The attacked participant raises an alarm
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ should startWith regex raw"\(sequencer counter: \S+, timestamp: \S+\): The root hash message has invalid recipient groups.\nRecipients",
+              loggerAssertion =
+                _ should include(s"participant=${attackedParticipant.uid.identifier}"),
+            ),
+          )
 
-          val newLtvt = LightTransactionViewTree.tryCreate(
-            viewTree.tree,
-            viewTree.subviewReferencesAndKeys.updated(
-              0,
-              SubviewReferenceAndKey(
-                subviewReference,
-                pureCrypto.generateSecureRandomness(
-                  EncryptedViewMessage.computeRandomnessLength(pureCrypto)
+          // All participants have nonetheless archived the contract
+          forEvery(informeeParticipants) { p =>
+            events.allArchived(UniversalContract.COMPANION)(p).loneElement shouldBe contractId
+          }
+        }
+      }
+
+      // TODO(#15022): After transparency is implemented, the participant should not break.
+      "a view has multiple different encryption keys" must_ { threat =>
+        "alarm, discard, and reject the view" taggedAs_ (mitigation =>
+          SecurityTest(
+            Integrity,
+            "virtual shared ledger",
+            Attack("a malicious participant", threat, mitigation),
+          )
+        ) in { implicit env =>
+          import env.*
+
+          val createCmd = new UniversalContract(
+            List(party1.toProtoPrimitive).asJava,
+            List.empty.asJava,
+            List.empty.asJava,
+            List(party1.toProtoPrimitive).asJava,
+          ).create.commands.overridePackageId(UniversalContract.PACKAGE_ID).asScala.toSeq
+          val cid = JavaDecodeUtil
+            .decodeAllCreated(UniversalContract.COMPANION)(
+              participant1.ledger_api.javaapi.commands.submit(Seq(party1), createCmd)
+            )
+            .loneElement
+            .id
+
+          val rawCmd = cid
+            .exerciseReplace(
+              List(party1.toProtoPrimitive).asJava,
+              List.empty.asJava,
+              List(party2.toProtoPrimitive).asJava,
+              List(party2.toProtoPrimitive).asJava,
+              List.empty.asJava,
+            )
+            .commands
+            .overridePackageId(UniversalContract.PACKAGE_ID)
+            .asScala
+            .toSeq
+            .map(c => Command.fromJavaProto(c.toProtoCommand))
+
+          val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
+
+          def replaceRandomnessForLightTransactionViewTree(
+              tcr: TransactionConfirmationRequest
+          ): TransactionConfirmationRequest = {
+
+            val envelope = tcr.viewEnvelopes.headOption.valueOrFail("retrieve first view envelopes")
+
+            val message = envelope.protocolMessage
+            val recipients = envelope.recipients
+
+            val encryptedViewRandomness =
+              message.viewEncryptionKeyRandomness.headOption.valueOrFail("retrieve view key")
+            val viewRandomness = participant1.crypto.privateCrypto
+              .decrypt(
+                encryptedViewRandomness
+              )(SecureRandomness.fromByteString(message.viewEncryptionScheme.keySizeInBytes))
+              .valueOrFail("decrypt view key")
+              .futureValueUS
+
+            val viewKey = pureCrypto
+              .createSymmetricKey(viewRandomness, message.viewEncryptionScheme)
+              .valueOrFail("create view key")
+
+            def deserialize(
+                bytes: ByteString
+            ): Either[DefaultDeserializationError, LightTransactionViewTree] =
+              LightTransactionViewTree
+                .fromByteString(
+                  (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+                  testedProtocolVersion,
+                )(bytes)
+                .leftMap(err => DefaultDeserializationError(err.message))
+
+            val viewTree = message match {
+              case singleViewMessage: TransactionSingleViewMessage =>
+                val encryptedViewTree = singleViewMessage.encryptedView.viewTree
+
+                EncryptedView
+                  .decrypt[LightTransactionViewTree](pureCrypto, viewKey, encryptedViewTree)(
+                    deserialize,
+                    MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
+                  )
+                  .value
+              case multipleViewsMessage: TransactionMultiViewMessage =>
+                val encryptedViewTrees = multipleViewsMessage.encryptedViews.viewTrees
+
+                val viewTrees = EncryptedMultipleViews
+                  .decrypt[LightTransactionViewTree](
+                    testedProtocolVersionValidation,
+                    pureCrypto,
+                    viewKey,
+                    encryptedViewTrees,
+                  )(
+                    deserialize,
+                    MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
+                  )
+                  .value
+
+                viewTrees.viewTrees.length shouldBe 1
+                viewTrees.viewTrees.head1
+            }
+
+            // change the randomness assigned to the first subview in the view tree
+            val subviewReference =
+              viewTree.subviewReferencesAndKeys.headOption
+                .valueOrFail("retrieve subview")
+                .subviewReference
+
+            val newLtvt = LightTransactionViewTree.tryCreate(
+              viewTree.tree,
+              viewTree.subviewReferencesAndKeys.updated(
+                0,
+                SubviewReferenceAndKey(
+                  subviewReference,
+                  pureCrypto.generateSecureRandomness(
+                    EncryptedViewMessage.computeRandomnessLength(pureCrypto)
+                  ),
                 ),
               ),
-            ),
-            testedProtocolVersion,
-          )
-
-          val crypto = participant1.underlying.value.sync.syncCrypto
-            .tryForSynchronizer(daId, defaultStaticSynchronizerParameters)
-            .currentSnapshotApproximation
-            .futureValueUS
-
-          val newMessage = EncryptedViewMessageFactory
-            .encryptView(TransactionViewType)(
-              newLtvt,
-              (viewKey, message.viewEncryptionKeyRandomness),
-              crypto,
-              createTimestampsOverrideWithDefaultOffset(
-                clock
-              ), // re-sign with new timestamps; does not affect the test
               testedProtocolVersion,
             )
-            .valueOrFail("create new envelope")
-            .futureValueUS
 
-          val newEnvelope = OpenEnvelope(newMessage, recipients)(testedProtocolVersion)
+            val crypto = participant1.underlying.value.sync.syncCrypto
+              .tryForSynchronizer(daId, defaultStaticSynchronizerParameters)
+              .currentSnapshotApproximation
+              .futureValueUS
 
-          tcr.focus(_.viewEnvelopes).modify(_.updated(0, newEnvelope))
-        }
-
-        loggerFactory.suppress(SuppressionRule.Level(Level.ERROR)) {
-          maliciousP1
-            .submitCommand(
-              cmd,
-              confirmationRequestInterceptor = replaceRandomnessForLightTransactionViewTree,
-            )
-          eventually() {
-            val logEntries = loggerFactory.fetchRecordedLogEntries
-            logEntries.size shouldBe >=(3)
-            val logMessages = logEntries.map(_.message)
-            logMessages.exists(_.contains("Failed to process request")) shouldBe true
-            logMessages.exists(
-              _.contains(
-                "Asynchronous event processing failed for event batch with sequencing timestamps"
+            val newMessage = EncryptedViewMessageFactory
+              .encryptView(TransactionViewType)(
+                newLtvt,
+                (viewKey, message.viewEncryptionKeyRandomness),
+                crypto,
+                createTimestampsOverrideWithDefaultOffset(
+                  clock
+                ), // re-sign with new timestamps; does not affect the test
+                testedProtocolVersion,
               )
-            ) shouldBe true
-            logMessages should contain("An internal error has occurred.")
-            assert(
-              logEntries
-                .map(_.throwable.value.getMessage)
-                .exists(_.contains("has different encryption keys associated with it."))
-            )
+              .valueOrFail("create new envelope")
+              .futureValueUS
+
+            val newEnvelope = OpenEnvelope(newMessage, recipients)(testedProtocolVersion)
+
+            tcr.focus(_.viewEnvelopes).modify(_.updated(0, newEnvelope))
           }
+
+          loggerFactory.suppress(SuppressionRule.Level(Level.ERROR)) {
+            maliciousP1
+              .submitCommand(
+                cmd,
+                confirmationRequestInterceptor = replaceRandomnessForLightTransactionViewTree,
+              )
+            eventually() {
+              val logEntries = loggerFactory.fetchRecordedLogEntries
+              logEntries.size shouldBe >=(3)
+              val logMessages = logEntries.map(_.message)
+              logMessages.exists(_.contains("Failed to process request")) shouldBe true
+              logMessages.exists(
+                _.contains(
+                  "Asynchronous event processing failed for event batch with sequencing timestamps"
+                )
+              ) shouldBe true
+              logMessages should contain("An internal error has occurred.")
+              assert(
+                logEntries
+                  .map(_.throwable.value.getMessage)
+                  .exists(_.contains("has different encryption keys associated with it."))
+              )
+            }
+          }
+
         }
-
       }
-    }
 
+    }
   }
 
   def mkUniversal(

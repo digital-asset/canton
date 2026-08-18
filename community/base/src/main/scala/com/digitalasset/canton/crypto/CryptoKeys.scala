@@ -19,11 +19,14 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanionE,
   HasVersionedWrapperE,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
 }
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -301,7 +304,7 @@ trait PublicKeyWithName
     publicKey.toProtoPublicKeyV30.map(proto =>
       v30.PublicKeyWithName(
         publicKey = Some(proto),
-        name = name.map(_.unwrap).getOrElse(""),
+        name = name.map(_.unwrap).getOrElse("").toProtoUnvalidated,
       )
     )
 
@@ -309,7 +312,7 @@ trait PublicKeyWithName
     publicKey.toProtoPublicKeyV31.map(proto =>
       v31.PublicKeyWithName(
         publicKey = Some(proto),
-        name = name.map(_.unwrap).getOrElse(""),
+        name = name.map(_.unwrap).getOrElse("").toProtoUnvalidated,
       )
     )
 
@@ -334,7 +337,10 @@ object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName
         "public_key",
         key.publicKey,
       )
-      name <- KeyName.fromProtoPrimitive(key.name)
+      // TODO(#34479): validate the crypto key name once the negotiated pvv is threaded here.
+      name <- ProtoValidation
+        .validate(key.name, Some("name"), ProtocolVersionValidation.NoValidation)
+        .flatMap(KeyName.fromProtoPrimitive)
     } yield {
       (publicKey: @unchecked) match {
         case k: SigningPublicKey => SigningPublicKeyWithName(k, name.emptyStringAsNone)
@@ -349,7 +355,10 @@ object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName
         "public_key",
         key.publicKey,
       )
-      name <- KeyName.fromProtoPrimitive(key.name)
+      // TODO(#34479): validate the crypto key name once the negotiated pvv is threaded here.
+      name <- ProtoValidation
+        .validate(key.name, Some("name"), ProtocolVersionValidation.NoValidation)
+        .flatMap(KeyName.fromProtoPrimitive)
     } yield {
       (publicKey: @unchecked) match {
         case k: SigningPublicKey => SigningPublicKeyWithName(k, name.emptyStringAsNone)
@@ -505,8 +514,8 @@ object CryptoKeyFormat {
   }
 
   def fromProtoEnum(
-      field: String,
       formatP: v30.CryptoKeyFormat,
+      field: String,
   ): ParsingResult[CryptoKeyFormat] =
     formatP match {
       case v30.CryptoKeyFormat.CRYPTO_KEY_FORMAT_UNSPECIFIED =>
@@ -562,8 +571,8 @@ object KeyPurpose {
   }
 
   def fromProtoEnum(
-      field: String,
       purposeP: v30.KeyPurpose,
+      field: String,
   ): ParsingResult[KeyPurpose] =
     purposeP match {
       case v30.KeyPurpose.KEY_PURPOSE_UNSPECIFIED =>

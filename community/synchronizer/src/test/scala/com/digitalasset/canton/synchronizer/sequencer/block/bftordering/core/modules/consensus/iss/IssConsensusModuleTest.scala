@@ -85,7 +85,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Commit,
   PrePrepare,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.EpochStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.{
+  EpochStatus,
+  SegmentStatus,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
@@ -99,6 +102,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import org.scalatest.TryValues
 import org.scalatest.exceptions.TestFailedException
@@ -267,6 +271,12 @@ class IssConsensusModuleTest
           ),
           Seq.empty,
         )
+        val epochStateEpoch =
+          EpochState.Epoch(
+            latestCompletedEpochFromStore.info,
+            currentMembership = membership,
+            previousMembership = membership,
+          )
         val completedBlocks: Seq[Block] =
           (aStartEpoch.startBlockNumber until aStartEpoch.startBlockNumber + epochLength).map {
             idx =>
@@ -291,7 +301,7 @@ class IssConsensusModuleTest
           .thenReturn(() => Some(latestCompletedEpochFromStore))
         when(epochStore.latestEpoch(includeInProgress = eqTo(true))(any[TraceContext]))
           .thenReturn(() => Some(latestCompletedEpochFromStore))
-        when(epochStore.loadEpochProgress(latestCompletedEpochFromStore.info)).thenReturn(() =>
+        when(epochStore.loadEpochProgress(epochStateEpoch)).thenReturn(() =>
           EpochInProgress(
             completedBlocks = completedBlocks,
             pbftMessagesForIncompleteBlocks = Seq.empty,
@@ -370,7 +380,13 @@ class IssConsensusModuleTest
             epochLength,
             TestBootstrapTopologyActivationTime,
           )
-        when(epochStore.loadEpochProgress(activeStartingEpochInfo)).thenReturn(() =>
+        val epochStateEpoch =
+          EpochState.Epoch(
+            activeStartingEpochInfo,
+            currentMembership = aMembership,
+            previousMembership = aMembership,
+          )
+        when(epochStore.loadEpochProgress(epochStateEpoch)).thenReturn(() =>
           EpochStore.EpochInProgress(
             Seq.empty,
             Seq.empty,
@@ -795,7 +811,13 @@ class IssConsensusModuleTest
                 .thenReturn(() => Some(latestCompletedEpochFromStore))
               when(epochStore.latestEpoch(includeInProgress = eqTo(true))(any[TraceContext]))
                 .thenReturn(() => Some(epoch1))
-              when(epochStore.loadEpochProgress(epoch1.info)).thenReturn(() =>
+              val epochStateEpoch =
+                EpochState.Epoch(
+                  epoch1.info,
+                  currentMembership = aMembership,
+                  previousMembership = aMembership,
+                )
+              when(epochStore.loadEpochProgress(epochStateEpoch)).thenReturn(() =>
                 EpochStore.EpochInProgress(
                   completedBlocks,
                   pbftMessagesForIncompleteBlocks = Seq.empty,
@@ -1087,7 +1109,9 @@ class IssConsensusModuleTest
           ),
           RetransmissionsMessage.VerifiedNetworkMessage(
             RetransmissionsMessage.RetransmissionRequest(
-              EpochStatus.create(allIds(1), EpochNumber.First, Seq.empty).fakeSign
+              EpochStatus
+                .create(allIds(1), EpochNumber.First, NonEmpty.mk(Seq, SegmentStatus.Complete))
+                .fakeSign
             )
           ),
         ).forEvery { message =>
@@ -1519,7 +1543,7 @@ class IssConsensusModuleTest
             epoch,
             failingCryptoProvider,
             latestCompletedEpochFromStore.lastBlockCommits,
-            epochStore.loadEpochProgress(latestEpochFromStore.info)(TraceContext.empty)(),
+            epochStore.loadEpochProgress(epoch)(TraceContext.empty)(),
             traceContext,
           )
           new EpochState[ProgrammableUnitTestEnv](
@@ -1558,6 +1582,7 @@ class IssConsensusModuleTest
             metrics,
             clock,
             loggerFactory,
+            logEndOfEpochProgress = true,
           )
         ),
         dependencies,

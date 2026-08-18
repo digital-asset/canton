@@ -964,7 +964,11 @@ sealed trait RepairServiceIntegrationTestLF23 extends RepairServiceIntegrationTe
             val contractIdSuffixer =
               new ContractIdSuffixer(pureCrypto, authenticatedContractIdVersion)
             val contractIdAbsolutizer =
-              new ContractIdAbsolutizer(pureCrypto, ContractIdAbsolutizationDataV1)
+              new ContractIdAbsolutizer(
+                testedProtocolVersionValidation,
+                pureCrypto,
+                ContractIdAbsolutizationDataV1,
+              )
 
             // We can't create the contract with Canton, so we have to hand-craft it.
             val module = "BasicKeys"

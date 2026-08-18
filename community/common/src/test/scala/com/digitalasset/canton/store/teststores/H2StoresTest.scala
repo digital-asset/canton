@@ -51,7 +51,7 @@ trait H2StoresTest
     storage.update_(
       DBIO.seq(tables.map(table => sqlu"delete from #$table")*),
       functionFullName,
-    )(tc, closeContext, implicitly)
+    )(tc, closeContext)
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.Var", "org.wartremover.warts.Null"))

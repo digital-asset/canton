@@ -48,8 +48,7 @@ final case class ViewMessageDecrypter(
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
     LightTransactionViewTree
   ]] =
-    if (protocolVersion >= ProtocolVersion.transparency)
-      // TODO(#32393): Change to [[ViewMessageDecrypterV2]] after implementing the new decryption logic.
+    if (protocolVersion < ProtocolVersion.transparency)
       new ViewMessageDecrypterImplV1(
         participantId,
         sessionKeyStore,
@@ -59,7 +58,7 @@ final case class ViewMessageDecrypter(
         loggerFactory,
       ).decryptViews(batch)
     else
-      new ViewMessageDecrypterImplV1(
+      new ViewMessageDecrypterImplV2(
         participantId,
         sessionKeyStore,
         snapshot,
@@ -67,4 +66,5 @@ final case class ViewMessageDecrypter(
         futureSupervisor,
         loggerFactory,
       ).decryptViews(batch)
+
 }

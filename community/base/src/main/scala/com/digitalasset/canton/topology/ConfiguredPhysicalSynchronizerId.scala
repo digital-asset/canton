@@ -25,7 +25,7 @@ final case class KnownPhysicalSynchronizerId(psid: PhysicalSynchronizerId)
 
 case object UnknownPhysicalSynchronizerId extends ConfiguredPhysicalSynchronizerId {
   override protected def pretty: Pretty[UnknownPhysicalSynchronizerId.type] =
-    prettyOfString(_ => "UnknownPhysicalSynchronizerId")
+    prettyOfObject[UnknownPhysicalSynchronizerId.type]
 
   override def toOption: Option[PhysicalSynchronizerId] = None
 }

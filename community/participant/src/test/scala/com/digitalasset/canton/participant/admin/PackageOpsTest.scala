@@ -32,6 +32,7 @@ import com.digitalasset.canton.participant.topology.{
 import com.digitalasset.canton.store.{IndexedPhysicalSynchronizer, IndexedSynchronizer}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.admin.grpc.PsidLookupAt
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
@@ -391,6 +392,15 @@ class PackageOpsTest extends PackageOpsTestBase {
         .assertFromLong(1339L)),
     )
 
+    object TestPsidLookup extends PsidLookupAt {
+      override def activePsidFor(lsid: SynchronizerId): Option[PhysicalSynchronizerId] =
+        topologyTestSetup.keySet.find(_.logical == lsid)
+      override def activePsidAt(
+          synchronizerId: SynchronizerId,
+          timestamp: CantonTimestamp,
+      ): Either[String, PhysicalSynchronizerId] = Left("Not implemented for the test")
+    }
+
     val packageOps = new PackageOpsImpl(
       participantId = participantId1,
       stateManager = stateManager,
@@ -401,7 +411,7 @@ class PackageOpsTest extends PackageOpsTestBase {
         futureSupervisor: FutureSupervisor,
         cleanSynchronizerRecordTime = _ => None,
         topologyManagerO = topologyTestSetup.get(_).map(_._1),
-        psidLookup = lsid => topologyTestSetup.keySet.find(_.logical == lsid),
+        psidLookup = TestPsidLookup,
         topologyClientO = topologyTestSetup.view.mapValues(_._3).get,
         syncPersistentStateO = topologyTestSetup.get(_).map(_._2),
         loggerFactory = loggerFactory,

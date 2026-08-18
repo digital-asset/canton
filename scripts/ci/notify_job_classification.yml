@@ -1,0 +1,43 @@
+# Classification of every canton_build_required job for the red-main Slack alert.
+# Single source of truth shared by _notify.yml (alerts on non-test failures) and
+# check_canton_build_required_gate.py (fails CI if a job is left unclassified, so
+# this list cannot drift from the workflow).
+#
+# test_jobs: failures are NOT alerted here. The flaky pipeline
+#   (report_failing_tests.py -> manage_flaky_issues.py -> alert_slack.py) tracks
+#   them as `[main] Flaky <test>` issues and pings the Flaky Canton rota.
+# infra_jobs: build/infra failures that block main and ARE alerted here.
+#
+# `notify` and `canton_build_required_gate` are excluded (they report status, not
+# build health), like the guard excludes them from the aggregators' `needs`.
+test_jobs:
+  - test
+  - sequential_test
+  - test_protocol_version_36
+  - test_protocol_version_dev
+  - ledger_api_compatibility_tests
+  - protocol_continuity_test_latest
+  - smoke_test
+  - temp_acs_commitment_tests_pv_dev
+  - test_data_continuity_dumps
+  - toxiproxy_test_fast
+  - unstable_test
+  - variations_test
+  - variations_test_selected_users
+infra_jobs:
+  - pick_runner
+  - setup_and_validation
+  - static_tests
+  - compile
+  - build_docs
+  - build_docs_snippets
+  - build_scaladoc
+  - package_community
+  - protobuf_continuity
+  - scalafix
+  # Image build + compose ping smoke test, not run_tests/cleanup_test_job, so its
+  # failures never reach the flaky pipeline and would be silent if not alerted.
+  - test_docker_images
+  # Runs cleanup_test_job with report_to_datadog: false, so it never feeds the
+  # flaky pipeline. Alert here, otherwise its failures would be silent.
+  - crash_recovery_test

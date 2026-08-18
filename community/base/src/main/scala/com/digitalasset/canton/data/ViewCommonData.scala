@@ -4,7 +4,6 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -15,6 +14,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.NoCopy
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.common.annotations.VisibleForTesting
@@ -53,7 +53,7 @@ final case class ViewCommonData private (
   def toProtoV30: v30.ViewCommonData = {
     val informees = viewConfirmationParameters.informees.toSeq
     v30.ViewCommonData(
-      informees = informees,
+      informees = informees.map(_.toProtoUnvalidated),
       quorums = viewConfirmationParameters.quorums.map(
         _.tryToProtoV30(informees)
       ),
@@ -136,13 +136,24 @@ object ViewCommonData
       viewCommonDataP: v30.ViewCommonData,
   )(bytes: ByteString): ParsingResult[ViewCommonData] =
     for {
-      informees <- ProtoValidation.validateThen(viewCommonDataP.informees, "informees", pvv)(
+      informees <- ProtoValidation.validateThen(
+        viewCommonDataP.informees,
+        "informees",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )(
         ProtoConverter.parseLfPartyId
       )
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", viewCommonDataP.salt)
         .leftMap(_.inField("salt"))
-      quorums <- viewCommonDataP.quorums.traverse(Quorum.fromProtoV30(_, informees))
+      quorums <- ProtoValidation
+        .validateLengthThen(
+          viewCommonDataP.quorums,
+          "quorums",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => Quorum.fromProtoV30(pvv, element, informees))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       viewConfirmationParameters <- ViewConfirmationParameters.create(informees.toSet, quorums)
     } yield new ViewCommonData(viewConfirmationParameters, salt)(

@@ -17,7 +17,6 @@ import com.digitalasset.canton.participant.util.TimeOfRequest
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.collection.MapsUtil
-import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -112,11 +111,11 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
     Future.unit
   }
 
-  @VisibleForTesting
   @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
-  private[store] override def pruneInternal(
+  override def prune(
       beforeInclusive: CantonTimestamp
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    logger.debug(s"Pruning request journal store up to $beforeInclusive")
     val before = requestTable.size
     val after = requestTable
       .filterInPlace((_, result) => result.requestTimestamp.isAfter(beforeInclusive))

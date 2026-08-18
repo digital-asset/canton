@@ -6,7 +6,6 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, Signature, SignatureCheckError, SyncCryptoApi}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -28,6 +27,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress, MonadUtil}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -61,7 +61,8 @@ final case class ClosedUncompressedEnvelope private[protocol] (
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       ClosedUncompressedEnvelope.type
-    ]
+    ],
+    pvv: ProtocolVersionValidation,
 ) extends ClosedEnvelope
     with HasProtocolVersionedWrapper[ClosedUncompressedEnvelope] {
 
@@ -75,7 +76,7 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     NonEmpty.from(signatures) match {
       case Some(signaturesNE) =>
         TypedSignedProtocolMessageContent
-          .fromByteStringPVV(ProtocolVersionValidation.PV(protocolVersion), bytes)
+          .fromByteString(ProtocolVersionValidation.PV(protocolVersion), bytes)
           .map { typedMessage =>
             OpenEnvelope(
               SignedProtocolMessage(typedMessage, signaturesNE),
@@ -152,7 +153,8 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     )(
       DecompressionBudget(
         MaxBytesToDecompress(NonNegativeInt.tryCreate(uncompressed.size))
-      )
+      ),
+      pvv,
     )
   }
 
@@ -175,7 +177,13 @@ final case class ClosedUncompressedEnvelope private[protocol] (
       recipients: Recipients = this.recipients,
       signatures: Seq[Signature] = this.signatures,
   ): ClosedUncompressedEnvelope =
-    ClosedUncompressedEnvelope.create(bytes, recipients, signatures, representativeProtocolVersion)
+    ClosedUncompressedEnvelope.create(
+      bytes,
+      recipients,
+      signatures,
+      representativeProtocolVersion,
+      pvv,
+    )
 
   def verifySignatures(
       snapshot: SyncCryptoApi,
@@ -231,13 +239,20 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
         "recipients",
         recipientsP,
       )
-      signatures <- signaturesP.traverse(Signature.fromProtoV30)
+      signatures <- ProtoValidation
+        .validateLengthThen(
+          signaturesP,
+          "signatures",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => Signature.fromProtoV30(element))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       closedEnvelope = create(
         contentP,
         recipients,
         signatures,
         rpv,
+        pvv,
       )
     } yield closedEnvelope
   }
@@ -286,8 +301,9 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
       recipients: Recipients,
       signatures: Seq[Signature],
       representativeProtocolVersion: RepresentativeProtocolVersion[ClosedUncompressedEnvelope.type],
+      pvv: ProtocolVersionValidation,
   ): ClosedUncompressedEnvelope =
-    ClosedUncompressedEnvelope(bytes, recipients, signatures)(representativeProtocolVersion)
+    ClosedUncompressedEnvelope(bytes, recipients, signatures)(representativeProtocolVersion, pvv)
 
   def create(
       bytes: ByteString,
@@ -295,5 +311,11 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
       signatures: Seq[Signature],
       protocolVersion: ProtocolVersion,
   ): ClosedUncompressedEnvelope =
-    create(bytes, recipients, signatures, protocolVersionRepresentativeFor(protocolVersion))
+    create(
+      bytes,
+      recipients,
+      signatures,
+      protocolVersionRepresentativeFor(protocolVersion),
+      ProtocolVersionValidation.PV(protocolVersion),
+    )
 }

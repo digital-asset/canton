@@ -8,15 +8,19 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.data.SynchronizerPredecessor
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.{
+  AcsCommitmentPeriodStore,
+  AcsCommitmentSenderWatermarkStore,
   AcsCounterParticipantConfigStore,
+  AcsDigestStore,
   AcsInspection,
+  BatchingAcsDigestStore,
   ContractStore,
   LogicalSyncPersistentState,
   PhysicalSyncPersistentState,
@@ -65,10 +69,28 @@ class InMemoryLogicalSyncPersistentState(
       loggerFactory,
     )
 
-  override val acsDigestStore: InMemoryAcsDigestStore = InMemoryAcsDigestStore.create(
-    ledgerApiStore.map(_.stringInterningView),
-    loggerFactory,
-  )
+  override val acsDigestStore: AcsDigestStore = {
+    val underlying = InMemoryAcsDigestStore.create(
+      ledgerApiStore.map(_.stringInterningView),
+      loggerFactory,
+    )
+    new BatchingAcsDigestStore(
+      underlying,
+      parameters.acsCommitments.loadBatching,
+      parameters.processingTimeouts,
+      loggerFactory,
+    )
+  }
+
+  override val acsCommitmentPeriodStore: AcsCommitmentPeriodStore =
+    new InMemoryAcsCommitmentPeriodStore(
+      ledgerApiStore.map(_.stringInterningView),
+      loggerFactory,
+      enableAdditionalConsistencyChecks,
+    )
+
+  override val acsCommitmentSenderWatermarkStore: AcsCommitmentSenderWatermarkStore =
+    new InMemoryAcsCommitmentSenderWatermarkStore(loggerFactory)
 
   override val acsInspection: AcsInspection =
     new AcsInspection(
@@ -93,7 +115,13 @@ class InMemoryLogicalSyncPersistentState(
       )
     )
 
-  override def close(): Unit = ()
+  override def close(): Unit =
+    LifeCycle.close(
+      acsCommitmentStore,
+      acsDigestStore,
+      acsCommitmentPeriodStore,
+      pendingOnboardingClearanceStore,
+    )(logger)
 }
 
 class InMemoryPhysicalSyncPersistentState(
@@ -109,11 +137,12 @@ class InMemoryPhysicalSyncPersistentState(
 
   override val pureCryptoApi: CryptoPureApi = crypto.pureCrypto
 
-  val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory, timeouts)
-  val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-  val connectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
-  val sendTrackerStore = new InMemorySendTrackerStore()
-  val submissionTrackerStore = new InMemorySubmissionTrackerStore(psid, loggerFactory, timeouts)
+  override val sequencedEventStore = new InMemorySequencedEventStore(loggerFactory, timeouts)
+  override val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
+  override val connectivityStatusStore = new InMemorySynchronizerConnectivityStatusStore()
+  override val sendTrackerStore = new InMemorySendTrackerStore()
+  override val submissionTrackerStore =
+    new InMemorySubmissionTrackerStore(psid, loggerFactory, timeouts)
 
   override val topologyStore =
     new InMemoryTopologyStore(

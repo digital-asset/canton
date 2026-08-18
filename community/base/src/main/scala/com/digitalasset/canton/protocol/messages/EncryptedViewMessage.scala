@@ -184,6 +184,7 @@ object EncryptedMultipleViews {
   }
 
   def decrypt[View <: ViewTree with HasToByteString](
+      pvv: ProtocolVersionValidation,
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       encryptedViewTrees: Encrypted[CompressedView[MultipleViewTrees[View]]],
@@ -198,7 +199,17 @@ object EncryptedMultipleViews {
       ProtoConverter
         .protoParser(v31.EncryptedMultipleViewsMessage.UncompressedViewTrees.parseFrom)(bytestring)
         .leftMap(err => DefaultDeserializationError(err.message))
-        .flatMap(protoTrees => protoTrees.viewTrees.traverse(deserialize))
+        .flatMap { protoTrees =>
+          ProtoValidation
+            .validateLength(
+              protoTrees.viewTrees,
+              Some("view_trees"),
+              pvv,
+              ProtoValidation.MaxCollectionSize,
+            )
+            .leftMap(err => DefaultDeserializationError(err.message))
+            .flatMap(_.traverse(deserialize))
+        }
         .flatMap { viewTrees =>
           NonEmpty
             .from(viewTrees)
@@ -558,7 +569,12 @@ object EncryptedViewMessage {
     for {
       decryptedMultiView <- eitherT(
         EncryptedMultipleViews
-          .decrypt(pureCrypto, viewKey, encrypted.encryptedViews.viewTrees)(
+          .decrypt(
+            ProtocolVersionValidation.PV(encrypted.psid.protocolVersion),
+            pureCrypto,
+            viewKey,
+            encrypted.encryptedViews.viewTrees,
+          )(
             deserialize,
             maxBytesToDecompress = maxBytesToDecompress,
           )
@@ -678,17 +694,23 @@ object EncryptedSingleViewMessage
     for {
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       viewEncryptionScheme <- SymmetricKeyScheme.fromProtoEnum(
-        "encryptionScheme",
         encryptionSchemeP,
+        "encryptionScheme",
       )
       signature <- signatureP.traverse(Signature.fromProtoV30)
       viewTree = Encrypted.fromByteString[CompressedView[viewType.View]](viewTreeP)
       encryptedView = EncryptedView(viewType)(viewTree)
       viewHash <- ViewHash.fromProtoPrimitive(viewHashP)
+      sessionKeyLookupSeqP <- ProtoValidation.validateLength(
+        sessionKeyLookupP,
+        Some("session_key_lookup"),
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )
       viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
         EncryptedViewMessage.deserializeEncryptedRandomness,
         "session key",
-        sessionKeyLookupP,
+        sessionKeyLookupSeqP,
       )
       synchronizerId <- ProtoValidation.validateThen(
         synchronizerIdP,
@@ -754,6 +776,8 @@ object EncryptedViewMessageError {
   final case class InvalidContractIdInView(error: String) extends EncryptedViewMessageError
 
   final case class TooManyViews(error: String) extends EncryptedViewMessageError
+
+  final case class InvalidSubviewReferenceError(error: String) extends EncryptedViewMessageError
 }
 
 final case class EncryptedMultipleViewsMessage[+VT <: ViewType](
@@ -887,21 +911,33 @@ object EncryptedMultipleViewsMessage
     for {
       viewType <- ViewType.fromProtoEnum(viewTypeP)
       viewEncryptionScheme <- SymmetricKeyScheme.fromProtoEnum(
-        "encryptionScheme",
         encryptionSchemeP,
+        "encryptionScheme",
       )
 
       signature <- signatureP.traverse(Signature.fromProtoV30)
+      viewHashesSeqP <- ProtoValidation.validateLength(
+        viewHashesP,
+        Some("view_hashes"),
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )
       viewHashes <- parseRequiredNonEmpty(
         ViewHash.fromProtoPrimitive,
         "view_hashes",
-        viewHashesP,
+        viewHashesSeqP,
       )
 
+      sessionKeyLookupSeqP <- ProtoValidation.validateLength(
+        sessionKeyLookupP,
+        Some("session_key_lookup"),
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )
       viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
         EncryptedViewMessage.deserializeEncryptedRandomness,
         "session_key_lookup",
-        sessionKeyLookupP,
+        sessionKeyLookupSeqP,
       )
       synchronizerId <- ProtoValidation.validateThen(
         synchronizerIdP,

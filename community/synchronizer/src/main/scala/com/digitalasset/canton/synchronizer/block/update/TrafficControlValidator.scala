@@ -59,12 +59,10 @@ private[update] class TrafficControlValidator(
     lazy val metricsContext = SequencerMetrics
       .submissionTypeMetricsContext(
         submissionRequest.sender,
+        orderingSequencerId,
         submissionRequest.requestType,
         logger,
         warnOnUnexpected = false,
-      )
-      .withExtraLabels(
-        "sequencer" -> orderingSequencerId.member.toProtoPrimitive
       )
     submissionValidation
       .flatMap {

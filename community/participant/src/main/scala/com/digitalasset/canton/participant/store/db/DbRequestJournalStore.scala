@@ -27,7 +27,6 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil, TryUtil}
 import com.digitalasset.nonempty.NonEmpty
-import com.google.common.annotations.VisibleForTesting
 import slick.jdbc.*
 
 import java.util.ConcurrentModificationException
@@ -311,16 +310,17 @@ class DbRequestJournalStore(
     )
   }
 
-  @VisibleForTesting
-  private[store] override def pruneInternal(
+  override def prune(
       beforeInclusive: CantonTimestamp
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    logger.debug(s"Pruning request journal store up to $beforeInclusive")
     storage.update_(
       sqlu"""
         delete from par_journal_requests where request_timestamp <= $beforeInclusive and physical_synchronizer_idx = $physicalSynchronizerIdx
       """,
       functionFullName,
     )
+  }
 
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     storage.update_(

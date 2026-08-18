@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -58,7 +59,10 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
     val packages = DarDecoder.assertReadArchive(resource, new ZipInputStream(stream))
     val (mainPkgId, mainPkg) = packages.main
     assert(
-      compiledPackages.addPackage(mainPkgId, mainPkg).consume(pkgs = packages.all.toMap).isRight
+      compiledPackages
+        .addPackage(mainPkgId, mainPkg)
+        .consume(lookupHandler(pkgs = packages.all.toMap))
+        .isRight
     )
     (mainPkgId, mainPkg, packages.all.toMap)
   }
@@ -97,7 +101,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
           signatories = List(party),
         ),
     )
-    def consume[X](x: Result[X]) = x.consume(contracts, allInterfacesPkgs)
+    def consume[X](x: Result[X]) = x.consume(lookupHandler(contracts, allInterfacesPkgs))
 
     def preprocessApi(cmd: ApiCommand) = consume(preprocessor.preprocessApiCommand(Map.empty, cmd))
     def run[Cmd](cmd: Cmd)(preprocess: Cmd => Result[speedy.Command]) =

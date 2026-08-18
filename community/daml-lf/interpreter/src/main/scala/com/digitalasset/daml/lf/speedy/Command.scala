@@ -73,6 +73,12 @@ private[lf] object Command {
       choiceId: ChoiceName,
       choiceArgument: SValue,
   ) extends ApiCommand
+
+  final case class QueryNByKey(
+      templateId: Identifier,
+      n: SInt64,
+      key: SValue,
+  ) extends Command
 }
 
 final case class InterfaceView(

@@ -964,7 +964,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
           assertInContext(
             "daml.sequencer.traffic-control.wasted-sequencing",
             "sequencer",
-            sequencerId.toProtoPrimitive,
+            sequencerId.uid.toProtoPrimitive,
           )
           assertInContext(
             "daml.sequencer.traffic-control.wasted-sequencing",

@@ -310,9 +310,9 @@ final class P2PGrpcConnectionState(
   }
 
   // Only used to simulate a restart
-  def clear(): Unit = {
+  def clear()(implicit traceContext: TraceContext): Unit = {
     val prevState = stateRef.getAndUpdate(_ => State())
-    logger.info(s"P2P connection state before `clear`: $prevState")(TraceContext.empty)
+    logger.info(s"P2P connection state before `clear`: $prevState")
   }
 }
 
@@ -362,7 +362,7 @@ object P2PGrpcConnectionState {
         param(
           "peerSenderToBftNodeId",
           _.peerSenderToBftNodeId.map { case (sender, bftNodeId) =>
-            System.identityHashCode(sender) -> bftNodeId.doubleQuoted
+            sender.toString.unquoted -> bftNodeId.doubleQuoted
           },
         ),
         param(

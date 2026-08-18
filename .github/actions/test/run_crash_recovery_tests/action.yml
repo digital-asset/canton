@@ -1,0 +1,103 @@
+name: Run Crash Recovery Tests
+description: RunCrash Recovery Tests
+
+inputs:
+  exclude_unstable_tests:
+    description: |
+      Exclude unstable tests from selection, based on the CircleCI filter configuration for the current branch.
+      Unstable filters are injected automatically when this is true.
+    default: "false"
+    required: false
+  exclude_patterns:
+    description: |
+      Newline-separated regex patterns to exclude from test selection.
+      Mirrors the grep -e patterns from the CircleCI filter.
+      When empty, the built-in defaults from split_tests.py are used.
+    default: ''
+    required: false
+  include_patterns:
+    description: |
+      Newline-separated regex patterns to include in test selection.
+      When set, only matching tests are selected.
+    default: ''
+    required: false
+  num_test_buckets:
+    description: Number of test shards
+    required: false
+    default: '1'
+  shard_index:
+    description: Index of test shard, required when num_test_buckets is not 0
+    required: false
+    default: "0"
+  skip_cleanup:
+    description: Skip cleanup/reporting step
+    required: false
+    default: 'false'
+  succeed_on_error:
+    description: Succeed even if the test command fails
+    required: false
+    default: 'false'
+  test_file:
+    description: Input test file for sharding
+    required: false
+    default: 'test-full-class-names.log'
+  timings_file:
+    description: Historical timings JSON file
+    default: ""
+    required: false
+  execution_context_size:
+    description: Scala concurrent context size
+    required: false
+    default: '8'
+
+runs:
+  using: composite
+  steps:
+    - name: Build SBT command
+      id: build-sbt-command
+      shell: bash
+      env:
+        EXCLUDE_UNSTABLE_TESTS: ${{ inputs.exclude_unstable_tests }}
+      run: |
+        if [[ "$EXCLUDE_UNSTABLE_TESTS" == "true" ]]; then
+          UNSTABLE_FLAGS="-l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
+          CMD="dumpClassPath \"\$RUN_SPLITTED_TESTS_CMD -- $UNSTABLE_FLAGS\""
+        else
+          CMD='dumpClassPath "$RUN_SPLITTED_TESTS_CMD"'
+        fi
+        echo "command=$CMD" >> "$GITHUB_OUTPUT"
+
+    - name: Run tests
+      uses: ./.github/actions/test/run_tests
+      id: run_sbt_tests
+      with:
+        command: ${{ steps.build-sbt-command.outputs.command }}
+        execution_context_size: ${{ inputs.execution_context_size }}
+        fail_on_error_in_output: 'false'
+        exclude_patterns: ${{ inputs.exclude_patterns }}
+        include_patterns: ${{ inputs.include_patterns }}
+        num_parallel_tasks: '1'
+        num_test_buckets: ${{ inputs.num_test_buckets }}
+        shard_index: ${{ inputs.shard_index }}
+        skip_cleanup: true
+        succeed_on_error: ${{ inputs.succeed_on_error }}
+        test_file: ${{ inputs.test_file }}
+        timeout: 240m
+        timings_file: ${{ inputs.timings_file }}
+
+    - name: Pack external log files into single file
+      if: always()
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: find log -name "external-*" | xargs --no-run-if-empty tar cvf log/all-external-jobs.tar
+
+    - name: Cleanup Test Job
+      if: always() && inputs.skip_cleanup != 'true'
+      uses: ./.github/actions/test/cleanup_test_job
+      with:
+        monitor_pid: ${{ steps.run_sbt_tests.outputs.monitor_pid }}
+        num_test_buckets: ${{ inputs.num_test_buckets }}
+        shard_index: ${{ inputs.shard_index }}
+        collect_postgres_query_stats: "true"
+        report_to_datadog: "false"
+        test_job_success: ${{ steps.run_sbt_tests.outcome == 'success' }}

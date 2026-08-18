@@ -39,6 +39,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -376,9 +377,14 @@ object Signature
 
   def fromProtoV30(signatureP: v30.Signature): ParsingResult[Signature] =
     for {
-      format <- SignatureFormat.fromProtoEnum("format", signatureP.format)
+      format <- SignatureFormat.fromProtoEnum(signatureP.format, "format")
       signature = signatureP.signature
-      longTermKeyId <- Fingerprint.fromProtoPrimitive(signatureP.signedBy)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      longTermKeyId <- ProtoValidation.validateThen(
+        signatureP.signedBy,
+        "signed_by",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
       // ensures compatibility with previous signature versions where the signing algorithm specification is not set
       signingAlgorithmSpecO <- SigningAlgorithmSpec.fromProtoEnumOption(
         "signing_algorithm_spec",
@@ -628,7 +634,7 @@ object SignatureDelegation extends PrettyPrintingCompanion[SignatureDelegation] 
       longTermKeyId: Fingerprint,
   ): ParsingResult[SignatureDelegation] =
     for {
-      scheme <- SigningKeySpec.fromProtoEnum("session_key_spec", signatureP.sessionKeySpec)
+      scheme <- SigningKeySpec.fromProtoEnum(signatureP.sessionKeySpec, "session_key_spec")
       sessionKey <- SigningPublicKey
         .create(
           CryptoKeyFormat.DerX509Spki,
@@ -654,7 +660,7 @@ object SignatureDelegation extends PrettyPrintingCompanion[SignatureDelegation] 
       // so calling Positive.create method here is unnecessary.
       periodLength = PositiveFiniteDuration.ofSeconds(validityPeriodDurationSeconds.value.toLong)
       signatureRaw = signatureP.signature
-      signatureFormat <- SignatureFormat.fromProtoEnum("format", signatureP.format)
+      signatureFormat <- SignatureFormat.fromProtoEnum(signatureP.format, "format")
       signatureAlgorithmSpecO <- SigningAlgorithmSpec.fromProtoEnumOption(
         "signing_algorithm_spec",
         signatureP.signingAlgorithmSpec,
@@ -748,8 +754,8 @@ object SignatureFormat extends PrettyPrintingCompanion[SignatureFormat] {
     }
 
   def fromProtoEnum(
-      field: String,
       formatP: v30.SignatureFormat,
+      field: String,
   ): ParsingResult[SignatureFormat] =
     formatP match {
       case v30.SignatureFormat.SIGNATURE_FORMAT_UNSPECIFIED =>
@@ -907,8 +913,8 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     */
   @nowarn("msg=SIGNING_KEY_USAGE_IDENTITY_DELEGATION in object SigningKeyUsage is deprecated")
   def fromProtoEnumV30(
-      field: String,
       usageP: v30.SigningKeyUsage,
+      field: String,
   ): ParsingResult[Option[SigningKeyUsage]] =
     usageP match {
       case v30.SigningKeyUsage.SIGNING_KEY_USAGE_UNSPECIFIED =>
@@ -926,8 +932,8 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     }
 
   def fromProtoEnumV31(
-      field: String,
       usageP: v31.SigningKeyUsage,
+      field: String,
   ): ParsingResult[Option[SigningKeyUsage]] =
     usageP match {
       case v31.SigningKeyUsage.SIGNING_KEY_USAGE_UNSPECIFIED =>
@@ -950,8 +956,14 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   def fromProtoListWithDefaultV30(
       usages: Seq[v30.SigningKeyUsage]
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
-    usages
-      .traverse(usageAux => SigningKeyUsage.fromProtoEnumV30("usage", usageAux))
+    ProtoValidation
+      // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
+      .validateLengthThen(
+        usages,
+        "usage",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )(SigningKeyUsage.fromProtoEnumV30)
       .map(listUsages => NonEmpty.from(listUsages.flatten.toSet).getOrElse(SigningKeyUsage.All))
 
   /** Deserializes signing key usages without applying a default. Fails if no usages are specified.
@@ -960,8 +972,14 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   def fromProtoListWithoutDefaultV30(
       usages: Seq[v30.SigningKeyUsage]
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
-    usages
-      .traverse(usageAux => SigningKeyUsage.fromProtoEnumV30("usage", usageAux))
+    ProtoValidation
+      // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
+      .validateLengthThen(
+        usages,
+        "usage",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )(SigningKeyUsage.fromProtoEnumV30)
       .flatMap(listUsages =>
         // for commands, we should not default to All; instead, the request should fail because usage is now a mandatory parameter.
         NonEmpty
@@ -972,8 +990,14 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
   def fromProtoListWithoutDefaultV31(
       usages: Seq[v31.SigningKeyUsage]
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
-    usages
-      .traverse(usageAux => SigningKeyUsage.fromProtoEnumV31("usage", usageAux))
+    ProtoValidation
+      // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
+      .validateLengthThen(
+        usages,
+        "usage",
+        ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
+      )(SigningKeyUsage.fromProtoEnumV31)
       .flatMap(listUsages =>
         // for commands, we should not default to All; instead, the request should fail because usage is now a mandatory parameter.
         NonEmpty
@@ -1097,8 +1121,8 @@ object SigningKeySpec extends PrettyPrintingCompanion[SigningKeySpec] {
   }
 
   def fromProtoEnum(
-      field: String,
       schemeP: v30.SigningKeySpec,
+      field: String,
   ): ParsingResult[SigningKeySpec] =
     schemeP match {
       case v30.SigningKeySpec.SIGNING_KEY_SPEC_UNSPECIFIED =>
@@ -1128,9 +1152,9 @@ object SigningKeySpec extends PrettyPrintingCompanion[SigningKeySpec] {
     )
       Left(ProtoDeserializationError.FieldNotSet("key_spec and scheme"))
     else
-      SigningKeySpec.fromProtoEnum("key_spec", keySpecP).leftFlatMap {
+      SigningKeySpec.fromProtoEnum(keySpecP, "key_spec").leftFlatMap {
         case ProtoDeserializationError.FieldNotSet(_) =>
-          SigningKeySpec.fromProtoEnumSigningKeyScheme("scheme", keySchemeP)
+          SigningKeySpec.fromProtoEnumSigningKeyScheme(keySchemeP, "scheme")
         case err => Left(err)
       }
 
@@ -1138,8 +1162,8 @@ object SigningKeySpec extends PrettyPrintingCompanion[SigningKeySpec] {
     * with existing data.
     */
   private def fromProtoEnumSigningKeyScheme(
-      field: String,
       schemeP: v30.SigningKeyScheme,
+      field: String,
   ): ParsingResult[SigningKeySpec] =
     schemeP match {
       case v30.SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED =>
@@ -1278,8 +1302,8 @@ object SigningAlgorithmSpec extends PrettyPrintingCompanion[SigningAlgorithmSpec
     }
 
   def fromProtoEnum(
-      field: String,
       schemeP: v30.SigningAlgorithmSpec,
+      field: String,
   ): ParsingResult[SigningAlgorithmSpec] =
     schemeP match {
       case v30.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_UNSPECIFIED =>
@@ -1325,20 +1349,30 @@ object RequiredSigningSpecs extends PrettyPrintingCompanion[RequiredSigningSpecs
     param("keys", _.keys),
   )
   def fromProtoV30(
-      requiredSigningSpecsP: v30.RequiredSigningSpecs
+      pvv: ProtocolVersionValidation,
+      requiredSigningSpecsP: v30.RequiredSigningSpecs,
   ): ParsingResult[RequiredSigningSpecs] =
     for {
-      keySpecs <- requiredSigningSpecsP.keys.traverse(keySpec =>
-        SigningKeySpec.fromProtoEnum("keys", keySpec)
-      )
-      algorithmSpecs <- requiredSigningSpecsP.algorithms
-        .traverse(algorithmSpec => SigningAlgorithmSpec.fromProtoEnum("algorithms", algorithmSpec))
+      keySpecs <- ProtoValidation
+        .validateLengthThen(
+          requiredSigningSpecsP.keys,
+          "keys",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )(SigningKeySpec.fromProtoEnum)
+      algorithmSpecs <- ProtoValidation
+        .validateLengthThen(
+          requiredSigningSpecsP.algorithms,
+          "algorithms",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )(SigningAlgorithmSpec.fromProtoEnum)
       keySpecsNE <- NonEmpty
         .from(keySpecs.toSet)
         .toRight(
           ProtoDeserializationError.InvariantViolation(
             "keys",
-            "no required signing algorithm specification",
+            "no required signing key specification",
           )
         )
       algorithmSpecsNE <- NonEmpty
@@ -1346,7 +1380,7 @@ object RequiredSigningSpecs extends PrettyPrintingCompanion[RequiredSigningSpecs
         .toRight(
           ProtoDeserializationError.InvariantViolation(
             "algorithms",
-            "no required signing key specification",
+            "no required signing algorithm specification",
           )
         )
     } yield RequiredSigningSpecs(algorithmSpecsNE, keySpecsNE)
@@ -1665,7 +1699,7 @@ object SigningPublicKey
       publicKeyP: v30.SigningPublicKey
   ): ParsingResult[SigningPublicKey] =
     for {
-      format <- CryptoKeyFormat.fromProtoEnum("format", publicKeyP.format)
+      format <- CryptoKeyFormat.fromProtoEnum(publicKeyP.format, "format")
       keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(
         publicKeyP.keySpec,
         publicKeyP.scheme,
@@ -1689,7 +1723,7 @@ object SigningPublicKey
       publicKeyP: v31.SigningPublicKey
   ): ParsingResult[SigningPublicKey] =
     for {
-      format <- CryptoKeyFormat.fromProtoEnum("format", publicKeyP.format)
+      format <- CryptoKeyFormat.fromProtoEnum(publicKeyP.format, "format")
       keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(publicKeyP.keySpec)
       usage <- SigningKeyUsage.fromProtoListWithoutDefaultV31(publicKeyP.usage)
       signingPublicKey <- SigningPublicKey
@@ -1901,8 +1935,13 @@ object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey
       privateKeyP: v30.SigningPrivateKey
   ): ParsingResult[SigningPrivateKey] =
     for {
-      id <- Fingerprint.fromProtoPrimitive(privateKeyP.id)
-      format <- CryptoKeyFormat.fromProtoEnum("format", privateKeyP.format)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      id <- ProtoValidation.validateThen(
+        privateKeyP.id,
+        "id",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
+      format <- CryptoKeyFormat.fromProtoEnum(privateKeyP.format, "format")
       keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(
         privateKeyP.keySpec,
         privateKeyP.scheme,
@@ -1921,8 +1960,13 @@ object SigningPrivateKey extends HasVersionedMessageCompanionE[SigningPrivateKey
       privateKeyP: v31.SigningPrivateKey
   ): ParsingResult[SigningPrivateKey] =
     for {
-      id <- Fingerprint.fromProtoPrimitive(privateKeyP.id)
-      format <- CryptoKeyFormat.fromProtoEnum("format", privateKeyP.format)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      id <- ProtoValidation.validateThen(
+        privateKeyP.id,
+        "id",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
+      format <- CryptoKeyFormat.fromProtoEnum(privateKeyP.format, "format")
       keySpec <- SigningKeySpec.fromProtoEnumWithDefaultScheme(privateKeyP.keySpec)
       usage <- SigningKeyUsage.fromProtoListWithoutDefaultV31(privateKeyP.usage)
       key <- SigningPrivateKey
@@ -2543,14 +2587,22 @@ object SigningKeysWithThreshold {
     createFromSeq(keys, threshold).valueOr(err => throw new IllegalArgumentException((err)))
 
   def fromProtoV30(
-      value: v30.SigningKeysWithThreshold
+      pvv: ProtocolVersionValidation,
+      value: v30.SigningKeysWithThreshold,
   ): ParsingResult[SigningKeysWithThreshold] =
     for {
+      keysSeqP <- ProtoValidation
+        .validateLength(
+          value.keys,
+          Some("keys"),
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )
       keysNE <-
         ProtoConverter.parseRequiredNonEmpty(
           SigningPublicKey.fromProtoV30,
           "keys",
-          value.keys,
+          keysSeqP,
         )
       threshold <- PositiveInt
         .create(value.threshold)
@@ -2564,14 +2616,22 @@ object SigningKeysWithThreshold {
     } yield signingKeysWithThreshold
 
   def fromProtoV31(
-      value: v31.SigningKeysWithThreshold
+      pvv: ProtocolVersionValidation,
+      value: v31.SigningKeysWithThreshold,
   ): ParsingResult[SigningKeysWithThreshold] =
     for {
+      keysSeqP <- ProtoValidation
+        .validateLength(
+          value.keys,
+          Some("keys"),
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )
       keysNE <-
         ProtoConverter.parseRequiredNonEmpty(
           SigningPublicKey.fromProtoV31,
           "keys",
-          value.keys,
+          keysSeqP,
         )
       threshold <- PositiveInt
         .create(value.threshold)

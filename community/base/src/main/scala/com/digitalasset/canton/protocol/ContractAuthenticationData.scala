@@ -14,7 +14,8 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.util.collection.IterableUtil
-import com.digitalasset.canton.version.v1
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersionValidation, v1}
 import com.digitalasset.canton.{admin, crypto}
 import com.digitalasset.daml.lf.data.Bytes as LfBytes
 import com.google.protobuf.ByteString
@@ -110,6 +111,7 @@ object ContractAuthenticationData {
     ): ParsingResult[ContractAuthenticationDataV1]
 
     protected def versionV2(
+        pvv: ProtocolVersionValidation,
         version: CantonContractIdV2Version,
         bytes: ByteString,
     ): ParsingResult[ContractAuthenticationDataV2]
@@ -117,6 +119,7 @@ object ContractAuthenticationData {
     // Helper method to turn the type member into a type variable that the compiler can reason about
     @inline
     private def parseInternal[CAD <: ContractAuthenticationData](
+        pvv: ProtocolVersionValidation,
         version: CantonContractIdVersion { type AuthenticationData = CAD },
         bytes: ByteString,
     ): ParsingResult[CAD] =
@@ -129,24 +132,27 @@ object ContractAuthenticationData {
         case AuthenticatedContractIdVersionV10 =>
           versionV1(AuthenticatedContractIdVersionV10, bytes)
         case CantonContractIdV2Version0 =>
-          versionV2(CantonContractIdV2Version0, bytes)
+          versionV2(pvv, CantonContractIdV2Version0, bytes)
       }
 
     def parse(
+        pvv: ProtocolVersionValidation,
         version: CantonContractIdVersion,
         bytes: ByteString,
     ): ParsingResult[version.AuthenticationData] =
-      parseInternal[version.AuthenticationData](version, bytes)
+      parseInternal[version.AuthenticationData](pvv, version, bytes)
   }
 
   /** Parsing method for [[ContractAuthenticationData.toLfBytes]] */
   def fromLfBytes(
+      pvv: ProtocolVersionValidation,
       contractIdVersion: CantonContractIdVersion,
       bytes: LfBytes,
   ): ParsingResult[contractIdVersion.AuthenticationData] =
-    LfBytesContractAuthenticationDataParser.parse(contractIdVersion, bytes.toByteString)
+    LfBytesContractAuthenticationDataParser.parse(pvv, contractIdVersion, bytes.toByteString)
 
   private def versionV2Parser(
+      pvv: ProtocolVersionValidation,
       version: CantonContractIdV2Version,
       bytes: ByteString,
   ): ParsingResult[ContractAuthenticationDataV2] = version match {
@@ -156,15 +162,22 @@ object ContractAuthenticationData {
         v31.ContractAuthenticationData(saltP, creatingUpdateIdP, relativeArgumentSuffixesP) =
           proto
         creatingUpdateId <- creatingUpdateIdP.traverse(UpdateId.fromProtoPrimitive)
+        // Bound before the sortedness scan: that scan walks the whole collection.
+        relativeArgumentSuffixes <- ProtoValidation.validateLength(
+          relativeArgumentSuffixesP,
+          Some("relative_argument_suffixes"),
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )
         _ <- Either.cond(
-          IterableUtil.isSorted(relativeArgumentSuffixesP)(ByteStringUtil.orderingByteString),
+          IterableUtil.isSorted(relativeArgumentSuffixes)(ByteStringUtil.orderingByteString),
           (),
           ContractDeserializationError("Relative argument suffixes are not sorted"),
         )
       } yield ContractAuthenticationDataV2(
         LfBytes.fromByteString(saltP),
         creatingUpdateId,
-        relativeArgumentSuffixesP.map(LfBytes.fromByteString),
+        relativeArgumentSuffixes.map(LfBytes.fromByteString),
       )(version)
   }
 
@@ -191,18 +204,24 @@ object ContractAuthenticationData {
       } yield valueClass
 
     override protected def versionV2(
+        pvv: ProtocolVersionValidation,
         version: CantonContractIdV2Version,
         bytes: ByteString,
     ): ParsingResult[ContractAuthenticationDataV2] =
-      versionV2Parser(version, bytes)
+      versionV2Parser(pvv, version, bytes)
   }
 
   /** Parsing method for [[ContractAuthenticationData.toSerializableContractProtoV30]] */
   def fromSerializableContractProtoV30(
+      pvv: ProtocolVersionValidation,
       contractIdVersion: CantonContractIdVersion,
       authenticationDataP: ByteString,
   ): ParsingResult[ContractAuthenticationData] =
-    SerializableContractAuthenticationDataParser.parse(contractIdVersion, authenticationDataP)
+    SerializableContractAuthenticationDataParser.parse(
+      pvv,
+      contractIdVersion,
+      authenticationDataP,
+    )
 
   private object SerializableContractAuthenticationDataParser
       extends ContractAuthenticationDataParser {
@@ -217,18 +236,21 @@ object ContractAuthenticationData {
       } yield ContractAuthenticationDataV1(salt)(version)
 
     override protected def versionV2(
+        pvv: ProtocolVersionValidation,
         version: CantonContractIdV2Version,
         bytes: ByteString,
     ): ParsingResult[ContractAuthenticationDataV2] =
-      versionV2Parser(version, bytes)
+      versionV2Parser(pvv, version, bytes)
   }
 
   /** Parsing method for [[ContractAuthenticationData.toSerializableContractAdminProtoV30]] */
   def fromSerializableContractAdminProtoV30(
+      pvv: ProtocolVersionValidation,
       contractIdVersion: CantonContractIdVersion,
       authenticationDataP: ByteString,
   ): ParsingResult[contractIdVersion.AuthenticationData] =
     SerializableContractAdminContractAuthenticationDataParser.parse(
+      pvv,
       contractIdVersion,
       authenticationDataP,
     )
@@ -244,9 +266,10 @@ object ContractAuthenticationData {
     } yield ContractAuthenticationDataV1(salt)(version)
 
     override protected def versionV2(
+        pvv: ProtocolVersionValidation,
         version: CantonContractIdV2Version,
         bytes: ByteString,
     ): ParsingResult[ContractAuthenticationDataV2] =
-      versionV2Parser(version, bytes)
+      versionV2Parser(pvv, version, bytes)
   }
 }

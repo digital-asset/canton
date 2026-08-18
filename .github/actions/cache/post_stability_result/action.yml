@@ -1,0 +1,21 @@
+name: Post Stability result
+description: Post Stability result
+
+inputs:
+  test_job_success:
+    description: Whether the test job succeeded
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/cache/post_to_datadog
+      if: always()
+      with:
+        data: >-
+          canton.stability.successes=${{ inputs.test_job_success == 'true' && '1' || '0' }}
+          canton.stability.failures=${{ inputs.test_job_success == 'true' && '0' || '1' }}
+          canton.stability.total=1
+        label: Post canton.stability.* metrics to Datadog
+        metric_type: count
+        use_commit_time: false

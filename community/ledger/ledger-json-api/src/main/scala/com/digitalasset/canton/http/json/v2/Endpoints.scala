@@ -15,7 +15,7 @@ import com.digitalasset.canton.ledger.error.{JsonApiErrors, LedgerApiErrors}
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CallMetadata
-import com.digitalasset.canton.tracing.{TraceContext, W3CTraceContext}
+import com.digitalasset.canton.tracing.{HeaderName, TraceContext, W3CTraceContext}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Error.Preprocessing
 import com.digitalasset.daml.lf.language.Ast.TVar
@@ -463,7 +463,9 @@ object Endpoints {
             )
           )
             .map { case (headersList: Seq[Header], addr) =>
-              val z = W3CTraceContext.fromHeaders(headersList.map(h => (h.name, h.value)).toMap)
+              val z = W3CTraceContext.fromHeaders(
+                headersList.map(h => (HeaderName(h.name), h.value)).toMap
+              )
               (z.map(_.toTraceContext), addr)
             } { case (tc1, addr) =>
               (

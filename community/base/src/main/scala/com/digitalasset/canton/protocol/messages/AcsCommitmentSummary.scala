@@ -5,7 +5,6 @@ package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
 import cats.syntax.option.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -17,7 +16,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.{
 }
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -66,7 +66,7 @@ final case class AcsCommitmentSummary(
   private[messages] def toProtoV32: v32.AcsCommitmentSummary = v32.AcsCommitmentSummary(
     physicalSynchronizerId = psid.toProtoPrimitive,
     commitmentTick = commitmentTick.toProtoPrimitive,
-    addressedCounterparticipants = addressedCounterparticipants,
+    addressedCounterparticipants = addressedCounterparticipants.map(_.toProtoUnvalidated),
     unsentDigests = unsentDigests.map(_.toProtoV32),
     batchIndex = batchIndex.value,
     lastBatch = lastBatch,
@@ -118,15 +118,25 @@ object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitment
       pvv,
     )(PhysicalSynchronizerId.fromProtoPrimitive)
     commitmentTick <- CantonTimestamp.fromProtoPrimitive(protoMsg.commitmentTick)
+    addressedCounterparticipantsP <- ProtoValidation.validateLength(
+      protoMsg.addressedCounterparticipants,
+      Some("addressed_counterparticipants"),
+      pvv,
+      ProtoValidation.MaxCollectionSize,
+    )
     addressedCounterparticipants <- parseRequiredNonEmpty(
-      (p: String) =>
+      (p: ProtoUnvalidatedString) =>
         ProtoValidation.validateThen(p, "addressed_counterparticipants", pvv)(parseLfParticipantId),
       "addressed_counterparticipants",
-      protoMsg.addressedCounterparticipants,
+      addressedCounterparticipantsP,
     )
-    unsentDigests <- protoMsg.unsentDigests.traverse(
-      DigestForCounterparticipant.fromProtoV32(pvv, _)
-    )
+    unsentDigests <- ProtoValidation
+      .validateLengthThen(
+        protoMsg.unsentDigests,
+        "unsent_digests",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )((element, _) => DigestForCounterparticipant.fromProtoV32(pvv, element))
     batchIndex <- NonNegativeInt.create(protoMsg.batchIndex).leftMap { error =>
       ProtoDeserializationError.InvariantViolation("batch_index", error)
     }

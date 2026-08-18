@@ -1,0 +1,20 @@
+name: Restore Generated Snippets
+description: |
+  Restore the snippet JSON generated in parallel by `build_docs_snippets` into
+  the location the docs build expects (`docs-open/target/snippet_json_data`).
+
+runs:
+  using: composite
+  steps:
+    - name: Clean snippet JSON data directory
+      shell: bash
+      run: |
+        rm -rf docs-open/target/snippet_json_data
+        mkdir -p docs-open/target/snippet_json_data
+
+    - name: Restore generated snippet JSON data
+      uses: actions/download-artifact@v7
+      with:
+        pattern: docs-snippets-shard-*
+        path: docs-open/target/snippet_json_data
+        merge-multiple: true

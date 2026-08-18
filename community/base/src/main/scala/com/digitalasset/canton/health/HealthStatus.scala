@@ -20,4 +20,12 @@ object HealthStatus {
   val healthy: HealthStatus = Healthy
 
   val unhealthy: HealthStatus = Unhealthy
+
+  def fromComponentHealthState(componentHealthState: ComponentHealthState): HealthStatus =
+    componentHealthState match {
+      case ComponentHealthState.Ok(_) => HealthStatus.healthy
+      case ComponentHealthState.Degraded(_) => HealthStatus.healthy
+      case ComponentHealthState.Failed(_) => HealthStatus.unhealthy
+      case ComponentHealthState.Fatal(_) => HealthStatus.unhealthy
+    }
 }

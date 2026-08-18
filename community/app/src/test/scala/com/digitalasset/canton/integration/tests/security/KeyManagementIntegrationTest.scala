@@ -14,6 +14,7 @@ import com.digitalasset.canton.crypto.SigningKeyUsage.matchesRelevantUsages
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
@@ -415,7 +416,17 @@ sealed trait KeyManagementIntegrationTest
     "download and upload private keys locally" in { implicit env =>
       import env.*
       val (keyName, cryptoKeyPair) = getCryptoKeyPair(sequencer1, None)
-      downloadUploadTest(sequencer1, cryptoKeyPair, cryptoKeyPair.privateKey.id, keyName)
+      loggerFactory.assertLogsUnorderedOptional(
+        downloadUploadTest(sequencer1, cryptoKeyPair, cryptoKeyPair.privateKey.id, keyName),
+        (
+          LogEntryOptionality.OptionalMany,
+          // CantonBFT produces empty blocks every 250ms, and if the key above is the signing key, and we try to create
+          // the empty block while the signing key is removed we can get this error log
+          _.errorMessage should include(
+            "Can't sign pbft message ConsensusSegment.ConsensusMessage.PrePrepare: KeyNotAvailable"
+          ),
+        ),
+      )
     }
 
     // This test covers a scenario where an older key, exported from a different Canton version,

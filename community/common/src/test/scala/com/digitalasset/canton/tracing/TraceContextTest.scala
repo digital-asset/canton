@@ -59,6 +59,38 @@ class TraceContextTest extends AnyWordSpec with Matchers with OptionValues with 
       spansAreEqual(Span.fromContextOrNull(ctx3.context), childSpan)
     }
 
+    "deserialize and re-serialize a concrete W3C trace context" in {
+      val traceParent = "00-6a61d0a2000000002ea86a24cff7cfcd-7358c6deaed4868f-01"
+      val traceState = "dd=s:1;p:7358c6deaed4868f;t.dm:-1;t.tid:6a61d0a200000000;t.ksr:1"
+
+      val headers = Map(
+        W3CTraceContext.TraceparentHeader -> traceParent,
+        W3CTraceContext.TracestateHeader -> traceState,
+      )
+
+      // deserialize the headers into a W3CTraceContext
+      val w3c = W3CTraceContext.fromHeaders(headers).value
+      w3c.parent shouldBe traceParent
+      w3c.state.value shouldBe traceState
+
+      // it exposes the same headers again
+      w3c.asHeaders shouldBe headers
+
+      // round-trip through a TraceContext and back preserves the span identifiers
+      val traceContext = w3c.toTraceContext
+      traceContext.traceId.value shouldBe "6a61d0a2000000002ea86a24cff7cfcd"
+      traceContext.spanId.value shouldBe "7358c6deaed4868f"
+
+      val roundTripped = traceContext.asW3CTraceContext.value
+      roundTripped.parent shouldBe traceParent
+      roundTripped.state.value shouldBe traceState
+      roundTripped shouldBe w3c
+
+      W3CTraceContext.extractHeaders(traceContext).map { case (k, v) =>
+        HeaderName(k) -> v
+      } shouldBe headers
+    }
+
     "convert back and forth from W3C trace context" in {
       val rootSpan = testTelemetrySetup.tracer.spanBuilder("test").startSpan()
       val childSpan = testTelemetrySetup.tracer

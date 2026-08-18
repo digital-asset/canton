@@ -7,12 +7,14 @@ import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{ViewHash, v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseNonNegativeInt}
 import com.digitalasset.canton.util.RoseTree
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import monocle.PLens
 
@@ -78,16 +80,13 @@ sealed abstract case class LightTransactionViewTree private[data] (
     _ <- super[TransactionViewTree].validated
     // Check subview hashes only if subview references include view hashes.
     _ <-
-      if (
-        representativeProtocolVersion <= LightTransactionViewTree.protocolRepViewHashEncryption
-        // TODO(#32393): remove dev pv check
-        || representativeProtocolVersion == LightTransactionViewTree.protocolRepDev
-      ) {
+      if (representativeProtocolVersion < LightTransactionViewTree.rpvCiphertextIdEncryption) {
         val subviewHashes = subviewReferences.collect { case ByViewHash(vh) => vh }
         if (subviewHashes.sizeCompare(subviewReferences) != 0)
           throw new IllegalStateException(
-            "Expected all subview references to be view hashes for protocol versions <= v35, " +
-              s"but found a different type of reference."
+            s"Expected all subview references to be view hashes for protocol " +
+              s"versions < ${LightTransactionViewTree.rpvCiphertextIdEncryption}, but found " +
+              s"a different type of reference."
           )
         Either.cond(
           view.subviewHashesConsistentWith(subviewHashes),
@@ -114,7 +113,6 @@ sealed abstract case class LightTransactionViewTree private[data] (
       },
     )
 
-  @unused
   def toProtoV31: v31.LightTransactionViewTree =
     v31.LightTransactionViewTree(
       tree = Some(tree.toProtoV30),
@@ -127,7 +125,7 @@ sealed abstract case class LightTransactionViewTree private[data] (
           )
         case SubviewReferenceAndKey(_: ByViewHash, _) =>
           throw new IllegalStateException(
-            "ViewHash-based subview references cannot be serialized to proto V31."
+            "ViewHash-based subview references cannot be serialized to proto V31"
           )
       },
     )
@@ -146,21 +144,18 @@ object LightTransactionViewTree
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.LightTransactionViewTree)(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30,
-    )
-    // TODO(#32393): enable after fully implementing CiphertextId-based subview references in LightTransactionViewTree
-    /*ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v36)(v31.LightTransactionViewTree)(
+    ),
+    ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.transparency)(
+      v31.LightTransactionViewTree
+    )(
       supportedProtoVersion(_)((context, proto) => fromProtoV31(context)(proto)),
       _.toProtoV31,
-    ),*/
+    ),
   )
 
-  // v35 is the last protocol version where view hashes are used for encryption.
-  // From v36 onwards, ciphertext IDs are introduced instead.
-  private val protocolRepViewHashEncryption =
-    LightTransactionViewTree.protocolVersionRepresentativeFor(ProtocolVersion.v35)
-  // TODO(#32393): remove this dev pv reference
-  private val protocolRepDev =
-    LightTransactionViewTree.protocolVersionRepresentativeFor(ProtocolVersion.dev)
+  // From v`transparency` onwards, ciphertext IDs are used.
+  private val rpvCiphertextIdEncryption =
+    LightTransactionViewTree.protocolVersionRepresentativeFor(ProtocolVersion.transparency)
 
   final case class InvalidLightTransactionViewTree(message: String)
       extends RuntimeException(message)
@@ -196,8 +191,13 @@ object LightTransactionViewTree
       protoTree <- ProtoConverter.required("tree", protoT.tree)
       ((hashOps, expectedLength), protocolVersion) = context
       tree <- GenTransactionTree.fromProtoV30((hashOps, protocolVersion), protoTree)
-      subviewReferencesAndKeys <- protoT.subviewHashesAndKeys.traverse {
-        case v30.ViewHashAndKey(viewHashT, keyT) =>
+      subviewReferencesAndKeys <- ProtoValidation
+        .validateLengthThen(
+          protoT.subviewHashesAndKeys,
+          "subview_hashes_and_keys",
+          ProtocolVersionValidation.PV(protocolVersion),
+          ProtoValidation.MaxCollectionSize,
+        ) { case (v30.ViewHashAndKey(viewHashT, keyT), _) =>
           for {
             viewHash <- ByViewHash.fromProtoPrimitive(viewHashT)
             key <- SecureRandomness
@@ -206,7 +206,7 @@ object LightTransactionViewTree
                 ProtoDeserializationError.CryptoDeserializationError.apply
               )
           } yield SubviewReferenceAndKey(viewHash, key)
-      }
+        }
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       result <- LightTransactionViewTree
         .create(tree, subviewReferencesAndKeys, rpv)
@@ -224,8 +224,13 @@ object LightTransactionViewTree
       protoTree <- ProtoConverter.required("tree", protoT.tree)
       ((hashOps, expectedLength), protocolVersion) = context
       tree <- GenTransactionTree.fromProtoV30((hashOps, protocolVersion), protoTree)
-      subviewReferencesAndKeys <- protoT.subviewKeysByCiphertextId.traverse {
-        case v31.CiphertextIdAndKey(ciphertextIdT, indexT, keyT) =>
+      subviewReferencesAndKeys <- ProtoValidation
+        .validateLengthThen(
+          protoT.subviewKeysByCiphertextId,
+          "subview_keys_by_ciphertext_id",
+          ProtocolVersionValidation.PV(protocolVersion),
+          ProtoValidation.MaxCollectionSize,
+        ) { case (v31.CiphertextIdAndKey(ciphertextIdT, indexT, keyT), _) =>
           for {
             ciphertextId <- Hash.fromProtoPrimitive(ciphertextIdT)
             index <- parseNonNegativeInt("index", indexT)
@@ -235,7 +240,7 @@ object LightTransactionViewTree
                 ProtoDeserializationError.CryptoDeserializationError.apply
               )
           } yield SubviewReferenceAndKey(ByCiphertextId(ciphertextId, index), key)
-      }
+        }
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
       result <- LightTransactionViewTree
         .create(tree, subviewReferencesAndKeys, rpv)
@@ -449,19 +454,18 @@ object LightTransactionViewTree
   ): Either[String, LightTransactionViewTree] =
     fromTransactionViewTree(tvt, subviewKeys, Some(byCiphertextIdMap), protocolVersion)
 
+  /** A view hash and its corresponding encryption key.
+    *
+    * @param subviewReference
+    *   identifies the subview this key applies to. It can either be a view hash or a ciphertext ID,
+    *   depending on how the view was referenced during encryption/decryption.
+    * @param viewEncryptionKeyRandomness
+    *   the view key is encoded as SecureRandomness to have a portable representation.
+    *   [[com.digitalasset.canton.crypto.SynchronizerCryptoPureApi.createSymmetricKey]] is used to
+    *   derive the symmetric key.
+    */
+  final case class SubviewReferenceAndKey(
+      subviewReference: ViewReference,
+      viewEncryptionKeyRandomness: SecureRandomness,
+  )
 }
-
-/** A view hash and its corresponding encryption key.
-  *
-  * @param subviewReference
-  *   identifies the subview this key applies to. It can either be a view hash or a ciphertext ID,
-  *   depending on how the view was referenced during encryption/decryption.
-  * @param viewEncryptionKeyRandomness
-  *   the view key is encoded as SecureRandomness to have a portable representation.
-  *   [[com.digitalasset.canton.crypto.SynchronizerCryptoPureApi.createSymmetricKey]] is used to
-  *   derive the symmetric key.
-  */
-final case class SubviewReferenceAndKey(
-    subviewReference: ViewReference,
-    viewEncryptionKeyRandomness: SecureRandomness,
-)

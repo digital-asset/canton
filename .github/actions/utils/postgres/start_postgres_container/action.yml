@@ -1,0 +1,132 @@
+name: Start Postgres Container
+description: Start the CI Postgres container and wait until it becomes ready
+
+inputs:
+  shard-index:
+    description: Test shard index used to make the container name unique
+    required: true
+  postgres-db:
+    description: Postgres database name
+    required: true
+  postgres-initdb-args:
+    description: Postgres initdb args
+    required: true
+  postgres-password:
+    description: Postgres password
+    required: true
+  postgres-port:
+    description: Host port mapped to container port 5432
+    required: true
+  postgres-user:
+    description: Postgres username
+    required: true
+  image:
+    description: Postgres Docker image. When empty, defaults to the pinned query-stats image below.
+    required: false
+    default: ""
+  enable-query-stats:
+    description: Whether to start Postgres with the pg_store_plans/pg_stat_statements flags. Disable this for vanilla postgres images that lack those extensions.
+    required: false
+    default: "true"
+  initdb-mount-path:
+    description: Action-relative path to directory mounted to /docker-entrypoint-initdb.d. If empty, no initdb directory is mounted.
+    required: false
+    default: ""
+  username:
+    description: DockerHub username
+    required: false
+    default: ""
+  password:
+    description: DockerHub password
+    required: false
+    default: ""
+
+outputs:
+  container-name:
+    description: Started Postgres container name
+    value: ${{ steps.start.outputs.container-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Login to DockerHub for Postgres image
+      uses: ./.github/actions/utils/dockerhub_login
+      with:
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Start Postgres container
+      id: start
+      shell: bash
+      env:
+        SHARD_INDEX: ${{ inputs.shard-index }}
+        INITDB_MOUNT_PATH: ${{ inputs.initdb-mount-path }}
+        ACTION_PATH: ${{ github.action_path }}
+        RUN_ID: ${{ github.run_id }}
+        POSTGRES_DB: ${{ inputs.postgres-db }}
+        POSTGRES_INITDB_ARGS: ${{ inputs.postgres-initdb-args }}
+        POSTGRES_PASSWORD: ${{ inputs.postgres-password }}
+        POSTGRES_USER: ${{ inputs.postgres-user }}
+        POSTGRES_PORT: ${{ inputs.postgres-port }}
+        IMAGE: ${{ inputs.image }}
+        ENABLE_QUERY_STATS: ${{ inputs.enable-query-stats }}
+      run: |
+        CONTAINER_NAME="canton-postgres-${RUN_ID}-${SHARD_INDEX}"
+
+        # Single source of truth for the pinned image, kept in sync by hand (the build-image
+        # bump script only rewrites .circleci/config). Callers can override via the image input.
+        if [[ -z "$IMAGE" ]]; then
+          IMAGE="digitalasset/query-stats-postgres:17-343483aee440"
+        fi
+
+        INITDB_VOLUME_ARG=""
+        if [[ -n "$INITDB_MOUNT_PATH" ]]; then
+          INITDB_PATH="$INITDB_MOUNT_PATH"
+          if [[ "$INITDB_PATH" != /* ]]; then
+            INITDB_PATH="$ACTION_PATH/$INITDB_PATH"
+          fi
+          INITDB_VOLUME_ARG="-v $INITDB_PATH:/docker-entrypoint-initdb.d:ro"
+        fi
+
+        # Base flags supported by any Postgres image. The pg_store_plans/pg_stat_statements
+        # flags below require the custom query-stats image, so they are only appended when
+        # ENABLE_QUERY_STATS is true (a vanilla postgres:NN would fail to start otherwise).
+        PG_ARGS=(-c max_connections=1000 -c max_wal_size=4GB -c checkpoint_timeout=60min)
+        if [[ "$ENABLE_QUERY_STATS" == "true" ]]; then
+          PG_ARGS+=(
+            -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+            -c pg_store_plans.plan_format=json
+            -c pg_store_plans.max=100000
+            -c pg_store_plans.max_plan_length=10240
+            -c pg_stat_statements.max=100000
+          )
+        fi
+
+        echo "container-name=$CONTAINER_NAME" >> "$GITHUB_OUTPUT"
+        docker run -d \
+          --name "$CONTAINER_NAME" \
+          -e POSTGRES_DB="$POSTGRES_DB" \
+          -e POSTGRES_INITDB_ARGS="$POSTGRES_INITDB_ARGS" \
+          -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+          -e POSTGRES_USER="$POSTGRES_USER" \
+          $INITDB_VOLUME_ARG \
+          -p "$POSTGRES_PORT:5432" \
+          "$IMAGE" \
+          postgres "${PG_ARGS[@]}"
+
+    - name: Wait for Postgres readiness
+      shell: bash
+      env:
+        CONTAINER_NAME: ${{ steps.start.outputs.container-name }}
+        POSTGRES_USER: ${{ inputs.postgres-user }}
+        POSTGRES_DB: ${{ inputs.postgres-db }}
+      run: |
+        for _ in $(seq 1 60); do
+          if docker exec "$CONTAINER_NAME" pg_isready -h localhost -U "$POSTGRES_USER" -d "$POSTGRES_DB"; then
+            exit 0
+          fi
+          sleep 2
+        done
+        docker logs "$CONTAINER_NAME"
+        echo "Postgres did not become ready in time"
+        exit 1

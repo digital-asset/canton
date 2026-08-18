@@ -1,0 +1,124 @@
+name: Test Data Continuity Dumps
+on:
+  workflow_call:
+    inputs:
+      full_coverage:
+        description: >-
+          Run the full data continuity coverage (both suites, full release history). When false the
+          run is scoped down to Basic only against the latest release of the current line, which is
+          what regular PRs use. main and release-line branches pass true.
+        type: boolean
+        default: true
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_PASSWORD:
+        required: true
+      DATADOG_API_KEY:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  test_data_continuity_dumps:
+    name: Test Data Continuity Dumps
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        # Full runs exercise both suites (8 classes). Scoped PR runs keep only the 4 Basic classes,
+        # so they use 4 shards to avoid empty buckets, which would otherwise fall back to running the
+        # whole module. Keep this in sync with num_test_buckets below.
+        shard_index: ${{ fromJSON(inputs.full_coverage && '[0, 1, 2, 3, 4, 5, 6, 7]' || '[0, 1, 2, 3]') }}
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+      # Scoped-down runs test only the latest release of the current line, read by
+      # SplitReleaseVersion in DataContinuitySplitTest. 'false' on full-coverage runs.
+      # (An empty true-branch would collapse to 'true' here, since '' is falsy in GHA expressions.)
+      DATA_CONTINUITY_LATEST_ONLY: ${{ inputs.full_coverage && 'false' || 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: start_postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.shard_index }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Download test names artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: test-full-class-names
+
+      - name: Resolve previous timings artifact run
+        id: previous_timings
+        uses: ./.github/actions/utils/resolve_previous_artifact_run
+        with:
+          artifact-name: test_data_continuity_dumps-timings-latest
+
+      - name: Download timings
+        if: always() && steps.previous_timings.outputs.run-id != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: test_data_continuity_dumps-timings-latest
+          path: ${{ github.job }}/.timings
+          run-id: ${{ steps.previous_timings.outputs.run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Set Docker bind mount permissions
+        run: |
+          mkdir -p /tmp/canton/data-continuity-dumps
+          chmod 777 /tmp/canton/data-continuity-dumps
+        shell: bash
+
+      - name: Run Data Continuity Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          # Full runs keep both suites (all DataContinuityTestPostgres classes). Scoped runs keep
+          # only the Basic classes and drop the costlier SynchronizerChange ones.
+          exclude_patterns: >-
+            ${{ inputs.full_coverage
+            && '^(?!.*com\.digitalasset\.canton\.integration\.tests\.manual\..*DataContinuityTestPostgres).*$'
+            || '^(?!.*com\.digitalasset\.canton\.integration\.tests\.manual\..*BasicDataContinuityTestPostgres).*$' }}
+          execution_context_size: "8"
+          num_parallel_tasks: '1'
+          num_test_buckets: ${{ inputs.full_coverage && '8' || '4' }}
+          shard_index: ${{ matrix.shard_index }}
+          test_file: test-full-class-names.log
+          timeout: '240m'
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.start_postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: test_data_continuity_dumps
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: test_data_continuity_dumps
+      runner: ${{ inputs.runner }}
+      protocol_version: ""

@@ -7,6 +7,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.transaction.{
   ContractInstanceCoder,
   CreationTime,
@@ -42,8 +43,10 @@ sealed trait GenContractInstance extends PrettyPrinting {
 
   def encoded: ByteString = serialization
 
-  def contractAuthenticationData: Either[String, ContractAuthenticationData] =
-    ContractInstance.contractAuthenticationData(inst)
+  def contractAuthenticationData(
+      pvv: ProtocolVersionValidation
+  ): Either[String, ContractAuthenticationData] =
+    ContractInstance.contractAuthenticationData(pvv, inst)
 
   def traverseCreatedAt[NewCreatedAtTime <: CreationTime](
       f: InstCreatedAtTime => Either[String, NewCreatedAtTime]
@@ -78,19 +81,21 @@ object ContractInstance {
     Some((contractInstance.inst, contractInstance.metadata, contractInstance.serialization))
 
   def contractAuthenticationData(
-      inst: FatContractInstance
+      pvv: ProtocolVersionValidation,
+      inst: FatContractInstance,
   ): Either[String, ContractAuthenticationData] =
     CantonContractIdVersion
       .extractCantonContractIdVersion(inst.contractId)
-      .flatMap(contractAuthenticationData(_, inst))
+      .flatMap(contractAuthenticationData(pvv, _, inst))
 
   private[protocol] def contractAuthenticationData(
+      pvv: ProtocolVersionValidation,
       contractIdVersion: CantonContractIdVersion,
       inst: FatContractInstance,
   ): Either[String, contractIdVersion.AuthenticationData] =
     if (inst.authenticationData.toByteArray.nonEmpty)
       ContractAuthenticationData
-        .fromLfBytes(contractIdVersion, inst.authenticationData)
+        .fromLfBytes(pvv, contractIdVersion, inst.authenticationData)
         .leftMap(err => s"Failed parsing disclosed contract authentication data: $err")
     else Left("Missing authentication data in provided disclosed contract")
 

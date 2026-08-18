@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.config
 
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
+import com.digitalasset.daml.lf.interpretation
 
 import java.nio.file.Path
 
@@ -13,6 +14,8 @@ import java.nio.file.Path
   *   If true, DAMLe stack traces will be enabled
   * @param iterationsBetweenInterruptions
   *   Number of engine iterations between forced interruptions (outside needs of information).
+  * @param transactionLimits
+  *   Transaction limits for engine interpretation
   * @param submissionPhaseLogging
   *   Configuration for logging in phase one (command submission) of canton transaction processing
   * @param validationPhaseLogging
@@ -38,6 +41,7 @@ final case class CantonEngineConfig(
     enableEngineStackTraces: Boolean = false,
     iterationsBetweenInterruptions: Long =
       10000, // 10000 is the default value in the engine configuration
+    transactionLimits: interpretation.Limits = interpretation.Limits.Lenient,
     submissionPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(enabled = true),
     validationPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(enabled = false),
     enableAdditionalConsistencyChecks: Boolean = false,

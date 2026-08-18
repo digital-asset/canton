@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
-import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.{HashOps, Signature}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
@@ -11,7 +10,8 @@ import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
@@ -22,7 +22,9 @@ final case class ClosedCompressedEnvelope(
     algorithm: CompressionAlgorithm,
 )(
     // Moved the deferred decompression to a separate argument group, so it doesn't affect "equals"
-    deferredDecompression: DeferredDecompression
+    deferredDecompression: DeferredDecompression,
+    // The negotiated validation from the batch this envelope was parsed out of.
+    pvv: ProtocolVersionValidation,
 ) extends ClosedEnvelope {
   // Internal cache in case we need to uncompress more than once.
   private lazy val uncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
@@ -44,7 +46,13 @@ final case class ClosedCompressedEnvelope(
     protoEnvelope <- ProtoConverter.protoParser(v31.EnvelopeWithoutRecipients.parseFrom)(
       decompressed
     )
-    signatures <- protoEnvelope.signatures.traverse(Signature.fromProtoV30)
+    signatures <- ProtoValidation
+      .validateLengthThen(
+        protoEnvelope.signatures,
+        "signatures",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )((element, _) => Signature.fromProtoV30(element))
   } yield ClosedUncompressedEnvelope.create(
     protoEnvelope.content,
     recipients,
@@ -65,13 +73,14 @@ final case class ClosedCompressedEnvelope(
   @VisibleForTesting
   override def withRecipients(newRecipients: Recipients): ClosedCompressedEnvelope =
     // Share the deferred decompression, so that copies draw the budget at most once
-    ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(deferredDecompression)
+    ClosedCompressedEnvelope(bytes, newRecipients, algorithm)(deferredDecompression, pvv)
 
   override private[protocol] def withDecompressionBudget(
       decompressionBudget: DecompressionBudget
   ): ClosedCompressedEnvelope =
     ClosedCompressedEnvelope(bytes, recipients, algorithm)(
-      DeferredDecompression(bytes, decompressionBudget)
+      DeferredDecompression(bytes, decompressionBudget),
+      pvv,
     )
 }
 
@@ -83,10 +92,12 @@ object ClosedCompressedEnvelope {
     )
 
   def create(bytes: ByteString, recipients: Recipients, algorithm: CompressionAlgorithm)(
-      decompressionBudget: DecompressionBudget
+      decompressionBudget: DecompressionBudget,
+      pvv: ProtocolVersionValidation,
   ): ClosedCompressedEnvelope =
     ClosedCompressedEnvelope(bytes, recipients, algorithm)(
-      DeferredDecompression(bytes, decompressionBudget)
+      DeferredDecompression(bytes, decompressionBudget),
+      pvv,
     )
 }
 

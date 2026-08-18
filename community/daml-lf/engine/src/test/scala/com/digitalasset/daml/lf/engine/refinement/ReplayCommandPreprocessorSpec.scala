@@ -75,7 +75,7 @@ class ReplayCommandPreprocessorSpec
   private[this] val compiledPackage = ConcurrentCompiledPackages(
     Compiler.Config.Default
   )
-  assert(compiledPackage.addPackage(defaultPackageId, pkg) == Result.Unit)
+  assert(compiledPackage.addPackage(defaultPackageId, pkg) == Result.unit)
 
   private[this] val valueParties = ValueList(FrontStack(ValueParty("Alice")))
 

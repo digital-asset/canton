@@ -67,6 +67,7 @@ final class SerializationDeserializationTest
 
   forAll(Table("protocol version", ProtocolVersion.supported*)) { version =>
     val generators = new CommonGenerators(version)
+    val pvv = ProtocolVersionValidation(version)
     val sequencerGenerators =
       new GeneratorsSequencer(
         version,
@@ -109,9 +110,9 @@ final class SerializationDeserializationTest
         test(DynamicSynchronizerParameters, version)
         test(SequencingParameters, version)
 
-        if (version >= ProtocolVersion.v36) {
+        if (version >= ProtocolVersion.acsCommitmentRedesign) {
           test(AcsCommitment, version)
-          testContext(AcsCommitmentProtocolMessage, ProtocolVersionValidation.PV(version), version)
+          test(AcsCommitmentProtocolMessage, version)
 
           test(AcsCommitmentSummary, version)
           testContext(AcsCommitmentSummaryProtocolMessage, version, version)
@@ -126,12 +127,8 @@ final class SerializationDeserializationTest
         test(LsuSequencingTestMessageContent, version)
         test(Verdict, version)
         test(ConfirmationResponses, version)
-        testContext(
-          TypedSignedProtocolMessageContent,
-          ProtocolVersionValidation.PV(version),
-          version,
-        )
-        testContext(SignedProtocolMessage, ProtocolVersionValidation.PV(version), version)
+        test(TypedSignedProtocolMessageContent, version)
+        test(SignedProtocolMessage, version)
         test(ProtocolSymmetricKey, version)
         test(LocalVerdict, version)
         testContext(
@@ -171,7 +168,7 @@ final class SerializationDeserializationTest
         )
         testContext(
           UnassignmentMediatorMessage,
-          (TestHash, Source(ProtocolVersionValidation.PV(version))),
+          (TestHash, Source(pvv)),
           version,
         )(
           unassignmentMediatorMessageArb,
@@ -195,8 +192,8 @@ final class SerializationDeserializationTest
 
         test(TopologyTransaction, version)
         testContext(TopologyTransactionsBroadcast, version, version)
-        testContext(SignedTopologyTransaction, ProtocolVersionValidation(version), version)
-        testContext(SignedTopologyTransactions, ProtocolVersionValidation(version), version)
+        test(SignedTopologyTransaction, version)
+        test(SignedTopologyTransactions, version)
         testContext(SequencerSnapshot, version, version)
         test(OnboardingStateForSequencer, version)
         test(OnboardingStateForSequencerV2, version)
@@ -244,7 +241,7 @@ final class SerializationDeserializationTest
               .fromTrustedByteStringCompressed(bytes)
               .flatMap(
                 SequencedEvent
-                  .decompress(_, ProtocolVersionValidation(version), defaultDecompressionPolicy)
+                  .decompress(_, pvv, defaultDecompressionPolicy)
               ),
         )
         test(SignedContent, version)
@@ -268,7 +265,7 @@ final class SerializationDeserializationTest
         testContextTaggedProtocolVersion(AssignmentViewTree, TestHash, Target(version))
         testContext(
           UnassignmentViewTree,
-          (TestHash, Source(ProtocolVersionValidation.PV(version))),
+          (TestHash, Source(pvv)),
           version,
         )
 
@@ -289,19 +286,33 @@ final class SerializationDeserializationTest
             "ContractAuthenticationData to LfBytes",
             _.toLfBytes.toByteString,
             bytes =>
-              ContractAuthenticationData.fromLfBytes(contractIdVersion, Bytes.fromByteString(bytes)),
+              ContractAuthenticationData.fromLfBytes(
+                pvv,
+                contractIdVersion,
+                Bytes.fromByteString(bytes),
+              ),
           )
 
           testContractVersion[ContractAuthenticationData](
             "ContractAuthenticationData to v30.SerializableContractId",
             _.toSerializableContractProtoV30,
-            ContractAuthenticationData.fromSerializableContractProtoV30(contractIdVersion, _),
+            ContractAuthenticationData
+              .fromSerializableContractProtoV30(
+                pvv,
+                contractIdVersion,
+                _,
+              ),
           )
 
           testContractVersion[ContractAuthenticationData](
             "ContractAuthenticationData to admin.SerializableContractId",
             _.toSerializableContractAdminProtoV30,
-            ContractAuthenticationData.fromSerializableContractAdminProtoV30(contractIdVersion, _),
+            ContractAuthenticationData
+              .fromSerializableContractAdminProtoV30(
+                pvv,
+                contractIdVersion,
+                _,
+              ),
           )
         }
       }

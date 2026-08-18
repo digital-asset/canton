@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
@@ -88,7 +89,7 @@ class TransactionViewTest
       output = externalCallResult.output.toByteString,
       exerciseIndex = exerciseIndex,
       callIndex = callIndex,
-      checkingParties = externalCallCheckingParties.toSeq.sorted,
+      checkingParties = externalCallCheckingParties.toSeq.sorted.map(_.toProtoUnvalidated),
     )
 
   /** Traverses all unblinded subviews `v1, v2, v3, ...` in pre-order and yields `f(...f(f(z, v1), *

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.traverse.*
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
@@ -14,6 +13,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
@@ -125,13 +125,14 @@ object Verdict
   ) extends Verdict {
 
     private[messages] override def toProtoV30: v30.Verdict = {
-      val reasonsP = v30.ParticipantReject(reasons.map { case (parties, participantId, message) =>
-        v30.RejectionReason(
-          parties.toSeq,
-          Some(message.toProtoV30),
-          participantId.toProtoPrimitive,
-        )
-      })
+      val reasonsP =
+        v30.ParticipantReject(reasons.map { case (parties, participantId, message) =>
+          v30.RejectionReason(
+            parties.toSeq.map(_.toProtoUnvalidated),
+            Some(message.toProtoV30),
+            participantId.toProtoPrimitive,
+          )
+        })
       v30.Verdict(someVerdict = v30.Verdict.SomeVerdict.ParticipantReject(reasonsP))
     }
 
@@ -192,7 +193,10 @@ object Verdict
         pvv: ProtocolVersionValidation,
     ): ParsingResult[ParticipantReject] =
       for {
-        reasons <- reasonsP.traverse(fromProtoReasonV30(_, pvv))
+        reasons <- ProtoValidation
+          .validateLengthThen(reasonsP, "reasons", pvv, ProtoValidation.MaxCollectionSize)(
+            (element, _) => fromProtoReasonV30(element, pvv)
+          )
         reasonsNE <- NonEmpty
           .from(reasons.toList)
           .toRight(InvariantViolation("reasons", "must not be empty!"))
@@ -236,7 +240,9 @@ object Verdict
     val v30.RejectionReason(partiesP, rejectP, participantIdP) = protoReason
     for {
       parties <- ProtoValidation
-        .validateThen(partiesP, "parties", pvv)(ProtoConverter.parseLfPartyId)
+        .validateThen(partiesP, "parties", pvv, ProtoValidation.MaxCollectionSize)(
+          ProtoConverter.parseLfPartyId
+        )
         .map(_.toSet)
       localVerdict <- ProtoConverter.parseRequired(LocalVerdict.fromProtoV30, "reject", rejectP)
       nonPositiveVerdict <- localVerdict match {

@@ -365,6 +365,42 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
     }
   }
 
+  "the batch should in total not be bigger than max-request-size" in {
+    val batchCreatedCell =
+      new AtomicReference[Option[Availability.LocalDissemination.LocalBatchCreated]](
+        None
+      )
+    val availability =
+      fakeCellModule[Availability.Message[
+        UnitTestEnv
+      ], Availability.LocalDissemination.LocalBatchCreated](
+        batchCreatedCell
+      )
+    val mempoolState = createMempoolState()
+    val mempool =
+      createMempool(
+        availability,
+        maxRequestsInBatch = 2,
+        mempoolState = mempoolState,
+        maxRequestPayloadBytes = 9,
+      )
+
+    val request = Mempool.OrderRequest(
+      Traced(OrderingRequest(BlockFormat.SendTag, messageId = "", ByteString.copyFromUtf8("b" * 5)))
+    )
+    mempool.receiveInternal(request)
+    mempool.receiveInternal(request)
+
+    mempool.receiveInternal(Mempool.CreateLocalBatches(1))
+
+    val batchCreated = batchCreatedCell
+      .get()
+      .getOrElse(fail("No batch sent"))
+    batchCreated.requests.size should be(1)
+    mempoolState.receivedOrderRequests.map(_._1) should contain only request
+    mempoolState.toBeProvidedToAvailability shouldBe 0
+  }
+
   "it receives a P2P connectivity update" should {
     "update its state" in {
       val mempoolState = createMempoolState()

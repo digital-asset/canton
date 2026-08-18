@@ -693,6 +693,40 @@ fileComments:
               The unique identifier used to track the add party request.
 
               Required
+      AuthorizePartyUpdateRequest:
+        message:
+          comments: null
+          fieldComments:
+            signatures: |-
+              External signatures authorizing the topology transaction.
+
+              Must be provided for external parties where the namespace keys are held externally.
+              If empty, the local participant will simply append its own node signature to authorize
+              or propose the transaction.
+
+              Optional: can be empty
+            synchronizer_id: |-
+              The synchronizer where the party is being replicated.
+
+              Required
+            user_id: |-
+              If provided, the local user is provisioned and the quota is checked.
+              If omitted, no IAM user provisioning occurs.
+
+              Optional
+            transaction: |-
+              The serialized PartyToParticipant topology transaction.
+
+              Required: must be non-empty
+            identity_provider_id: |-
+              The id of the Identity Provider on the target participant.
+              If not set, assumes the default IDP or uses the token's 'iss' field.
+
+              Optional
+      AuthorizePartyUpdateResponse:
+        message:
+          comments: null
+          fieldComments: {}
       ExportPartyAcsRequest:
         message:
           comments: null
@@ -733,6 +767,38 @@ fileComments:
               Contains raw binary Ledger API active contract messages wrapped in `ActiveContract`.
 
               Optional: can be empty
+      GeneratePartyTopologyUpdateRequest:
+        message:
+          comments: null
+          fieldComments:
+            party_id: |-
+              The party to replicate.
+
+              Required
+            synchronizer_id: |-
+              The synchronizer in which to replicate the party.
+
+              Required
+            target_participant_uid: |-
+              The unique identifier of the target participant where the party will be replicated.
+
+              Required
+            participant_permission: |-
+              The permission level of the party on the target participant.
+
+              Required
+      GeneratePartyTopologyUpdateResponse:
+        message:
+          comments: null
+          fieldComments:
+            transaction: |-
+              The serialized topology transaction which needs to be signed.
+
+              Required: must be non-empty
+            hash: |-
+              The hash that needs be signed (to sign the topology transaction).
+
+              Required: must be non-empty
       GetAddPartyStatusRequest:
         message:
           comments: null
@@ -817,13 +883,51 @@ fileComments:
       AddPartyArguments: {}
       AddPartyWithAcsRequest: {}
       AddPartyWithAcsResponse: {}
+      AuthorizePartyUpdateRequest: {}
+      AuthorizePartyUpdateResponse: {}
       ExportPartyAcsRequest: {}
       ExportPartyAcsResponse: {}
+      GeneratePartyTopologyUpdateRequest: {}
+      GeneratePartyTopologyUpdateResponse: {}
       GetAddPartyStatusRequest: {}
       GetAddPartyStatusResponse: {}
       PartyReplicationStatus: {}
     services:
       PartyManagementAlphaService:
+      - name: GeneratePartyTopologyUpdate
+        comments: |-
+          Generates a PartyToParticipant mapping topology transaction to onboard an already hosted
+          party to a target participant which does not yet host the party.
+
+          For external parties, the returned transaction hash can be signed externally.
+          The transaction and any signatures are then submitted using the AuthorizePartyUpdate RPC.
+          For local (internal) parties, the transaction can be passed directly to AuthorizePartyUpdate
+          without external signatures.
+
+          Note that for external parties, setting a permission other than Confirmation or
+          Observation does not make sense.
+
+          Returns the serialized PartyToParticipant mapping topology transaction along with the
+          hash to sign.
+          Returns INVALID_ARGUMENT if the parameters are invalid or inconsistent with the current
+          topology state.
+      - name: AuthorizePartyUpdate
+        comments: |-
+          Submits a PartyToParticipant mapping topology transaction to onboard an already hosted
+          party to a new target participant.
+
+          This endpoint can be called on the target participant, as well as on any source
+          participant(s) already hosting the party, to collect the necessary signatures
+          to reach the required authorization thresholds.
+
+          The transaction bytes are expected to be generated via GeneratePartyTopologyUpdate RPC.
+
+          Additionally, local user rights and identity provider mapping will be provisioned if
+          provided. Note: IAM user provisioning only occurs if this endpoint is invoked on the
+          target participant.
+
+          Returns INVALID_ARGUMENT if the parameters are invalid or inconsistent with the current
+          topology state.
       - name: ExportPartyAcs
         comments: |-
           Exports the specified party's Active Contract Set (ACS) in the specified synchronizer so that the party
@@ -868,6 +972,9 @@ fileComments:
           "party already hosted" error.
       - name: GetAddPartyStatus
         comments: |-
+          TODO(#31414): There's no add_party_request_id; querying the status must be trivial like:
+           By querying the status using semantic data—"What is the status of Party X moving to Target Participant Y on Synchronizer Z?"
+
           Status endpoint that given an 'add_party_request_id' returns status information about progress,
           completion, or errors of a previous call to 'AddPartyWithAcs' on the target participant.
   admin/party_management_service.proto:
@@ -4588,7 +4695,14 @@ fileComments:
       GetLedgerEndRequest:
         message:
           comments: null
-          fieldComments: {}
+          fieldComments:
+            synchronizer_id: |-
+              Provide synchronizer_times for the specified synchronizers in the response.
+              If none are specified, only offset will be present in the response.
+              If the request includes a synchronizer for which no updates were observed, it will be omitted in the output.
+              If the request includes a synchronizer that participant was never connected to, it will be omitted in the output.
+
+              Optional: can be empty
       GetLedgerEndResponse:
         message:
           comments: null
@@ -4600,7 +4714,7 @@ fileComments:
 
               Optional
             synchronizer_times: |-
-              Final record times observed by this participant for each of the sequencers that were ever connected.
+              Final record times observed by this participant for each of the requested synchronizers.
               If there is no connection to a sequencer, corresponding record time can be arbitrarily far back in the past.
 
               Optional: can be empty

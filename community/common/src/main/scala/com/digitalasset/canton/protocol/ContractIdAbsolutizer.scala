@@ -9,6 +9,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.ContractIdAbsolutizer.ContractIdAbsolutizationData
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -19,6 +20,7 @@ import scala.collection.immutable.SortedSet
 /** Replaces all relative contract IDs in a contract ID container with their absolutized version
   */
 class ContractIdAbsolutizer(
+    pvv: ProtocolVersionValidation,
     hashOps: HashOps,
     absolutizationData: ContractIdAbsolutizationData,
 ) {
@@ -88,7 +90,11 @@ class ContractIdAbsolutizer(
         .extractCantonContractIdVersion(fci.contractId)
         .leftMap(err => s"Invalid contract ID version: $err")
       authenticationData <- ContractAuthenticationData
-        .fromLfBytes(contractIdVersion, fci.authenticationData)
+        .fromLfBytes(
+          pvv,
+          contractIdVersion,
+          fci.authenticationData,
+        )
         .leftMap(_.toString)
 
       absolutizedAuthenticationData <- absolutizationData

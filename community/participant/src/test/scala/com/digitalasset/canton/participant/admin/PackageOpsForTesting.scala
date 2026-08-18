@@ -16,9 +16,14 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.PackageInUse
-import com.digitalasset.canton.participant.topology.{PackageOps, ParticipantTopologyManagerError}
+import com.digitalasset.canton.participant.topology.PackageOps
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
-import com.digitalasset.canton.topology.{ForceFlags, ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{
+  ForceFlags,
+  ParticipantId,
+  PhysicalSynchronizerId,
+  TopologyManagerError,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -61,12 +66,12 @@ class PackageOpsForTesting(
       psid: PhysicalSynchronizerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     EitherT.rightT(())
 
   override def getVettedPackages(
       opts: ListVettedPackagesOpts
-  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Seq[
+  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, TopologyManagerError, Seq[
     ParticipantVettedPackages
   ]] =
     EitherT.rightT(Seq())
@@ -83,7 +88,7 @@ class PackageOpsForTesting(
       tc: TraceContext
   ): EitherT[
     FutureUnlessShutdown,
-    ParticipantTopologyManagerError,
+    TopologyManagerError,
     (Option[ParticipantVettedPackages], Option[ParticipantVettedPackages]),
   ] =
     EitherT.rightT((None, None))

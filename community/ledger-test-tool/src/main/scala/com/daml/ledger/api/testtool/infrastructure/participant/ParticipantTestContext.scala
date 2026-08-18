@@ -109,7 +109,7 @@ trait ParticipantTestContext extends UserManagementTestContext {
     */
   def currentEnd(): Future[Long]
 
-  def getLedgerEnd(): Future[GetLedgerEndResponse]
+  def getLedgerEnd(synchronizerIds: Seq[String]): Future[GetLedgerEndResponse]
 
   /** Returns an absolute offset (positive integer) that is beyond the current ledger end.
     *

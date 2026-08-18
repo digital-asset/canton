@@ -662,6 +662,11 @@ object Generators {
       .addAllConnectedSynchronizers(synchronizers.asJava)
       .build()
 
+  def getLedgerEndRequestGen: Gen[GetLedgerEndRequest] =
+    for {
+      synchronizerIds <- Gen.listOf(Gen.identifier)
+    } yield new GetLedgerEndRequest(synchronizerIds.asJava)
+
   def getLedgerEndResponseGen: Gen[v2.StateServiceOuterClass.GetLedgerEndResponse] =
     for {
       offset <- Gen.option(Arbitrary.arbLong.arbitrary)

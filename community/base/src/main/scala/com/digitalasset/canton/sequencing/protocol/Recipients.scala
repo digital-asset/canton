@@ -4,12 +4,12 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.reducible.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 
@@ -63,7 +63,13 @@ object Recipients {
       proto: v30.Recipients,
   ): ParsingResult[Recipients] =
     for {
-      trees <- proto.recipientsTree.traverse(RecipientsTree.fromProtoV30(pvv, _))
+      trees <- ProtoValidation
+        .validateLengthThen(
+          proto.recipientsTree,
+          "recipients_tree",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => RecipientsTree.fromProtoV30(pvv, element))
       recipients <- NonEmpty
         .from(trees)
         .toRight(

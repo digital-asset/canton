@@ -65,6 +65,21 @@ if [ -z "${EXECUTION_CONTEXT_SIZE##*[!0-9]*}" ]; then
   EXECUTION_CONTEXT_SIZE=${EXECUTOR_NUM_CPUS}
 fi
 
+# The GHA ARC runner pods have no CPU limit, request or cpuset, so the JVM detects the whole node
+# CPU count (e.g. 96) and sizes CPU-derived pools to it, far above the few cores a shard actually
+# uses. The Scala global execution context is already pinned below via scala.concurrent.context.*,
+# so this value covers what that setting does not reach: GC threads, JIT compiler threads, the JVM
+# common ForkJoinPool and libraries that read availableProcessors directly (Netty, Pekko, gRPC).
+# Applied on GHA only (see the gated block below), because CircleCI declares EXECUTOR_NUM_CPUS per
+# resource class and its pods have CPU limits. Defaults to EXECUTION_CONTEXT_SIZE with a floor of 4:
+# a job that dials the Scala execution context right down (the sequential deadlock-discovery run uses
+# EC=1, protobuf continuity uses 2) is making a test-serialization choice, not declaring the shard's
+# real CPU budget, so we keep a few threads for GC and JIT rather than starving them. An explicit
+# override is taken as-is. Per-job tuning of this value can be a follow-up if the floor is too coarse.
+if [[ -z "${EXECUTOR_ACTIVE_PROCESSOR_COUNT:-}" ]]; then
+  EXECUTOR_ACTIVE_PROCESSOR_COUNT=$(( 10#${EXECUTION_CONTEXT_SIZE} > 4 ? 10#${EXECUTION_CONTEXT_SIZE} : 4 ))
+fi
+
 # SBT output mode
 DEBUG="${DEBUG:-false}"
 # Use Azure DevOps Maven mirror for dependencies
@@ -72,12 +87,18 @@ USE_MAVEN_MIRROR="${USE_MAVEN_MIRROR:-false}"
  # Init vars and assign values or default values
 if [[ "$IS_GHA" == "true" ]]; then
   EXECUTOR_JVM_HEAP_SIZE="${EXECUTOR_JVM_HEAP_SIZE:-6500M}"
-  EXECUTOR_JVM_METASPACE_SIZE="${EXECUTOR_JVM_METASPACE_SIZE:-4000M}"
+  # A GHA test shard runs a couple hundred suites in a single sbt JVM, so the
+  # loaded-class footprint accumulates until Metaspace is exhausted and the JVM
+  # aborts with OutOfMemoryError (exit 134). 4000M sat right at the edge and
+  # tipped over intermittently across shards, so give it headroom. The runners
+  # already provision 14000M of heap, so this extra Metaspace is cheap.
+  EXECUTOR_JVM_METASPACE_SIZE="${EXECUTOR_JVM_METASPACE_SIZE:-6000M}"
 else
   EXECUTOR_JVM_HEAP_SIZE="${EXECUTOR_JVM_HEAP_SIZE:-6500M}"
   EXECUTOR_JVM_METASPACE_SIZE="${EXECUTOR_JVM_METASPACE_SIZE:-2500M}"
 fi
 TIMEOUT="${TIMEOUT:-25m}"
+MAX_SINGLE_TEST_MINUTES="${MAX_SINGLE_TEST_MINUTES:-0}"
 SUCCEED_ON_ERROR="${SUCCEED_ON_ERROR:-0}"
 RETRY_FETCH="${RETRY_FETCH:-0}"
 REPORT_TO_DATADOG="${REPORT_TO_DATADOG:-true}"
@@ -91,6 +112,7 @@ if [[ "${DEBUG,,}" == "true" || "${DEBUG,,}" == "1" ]]; then
 fi
 
 CODE=0
+WATCHDOG_TIMEOUT_TRIGGERED=false
 
 # Print variable and value
 print_var() {
@@ -121,9 +143,15 @@ on_exit() {
     # GHA MIGRATION: Added new CODE export for GHA
     if [[ "$IS_GHA" == "true" ]]; then
             echo "STATUS=$CODE" >> "$GITHUB_ENV"
+            if [[ "$WATCHDOG_TIMEOUT_TRIGGERED" == "true" ]]; then
+                echo "TESTCASE_TIMEOUT_TRIGGERED=true" >> "$GITHUB_ENV"
+            fi
         fi
     if [[ "$IS_CCI" == "true" ]]; then
         echo "export STATUS=$CODE" >> "$BASH_ENV"
+        if [[ "$WATCHDOG_TIMEOUT_TRIGGERED" == "true" ]]; then
+            echo "export TESTCASE_TIMEOUT_TRIGGERED=true" >> "$BASH_ENV"
+        fi
     fi
     # Provide some explanation on exit
     if [ "$CODE" == 0 ]
@@ -152,6 +180,10 @@ on_exit() {
           then
             err "sbt has been killed because it has allocated too much memory or it has ignored the TERM signal after $TIMEOUT."
             HINT_MSG="likely used too much memory or ignored TERM signal"
+        elif [ "$CODE" == 190 ]
+          then
+            err "sbt has been stopped by the per-test watchdog after MAX_SINGLE_TEST_MINUTES=$MAX_SINGLE_TEST_MINUTES."
+            HINT_MSG="single test timeout watchdog"
         else
             err "The script has failed with exit code $CODE."
         fi
@@ -190,9 +222,11 @@ _print_header "${c_white}Running parameters:${c_reset}"
 for i in EXECUTION_CONTEXT_SIZE \
          MAX_CONCURRENT_SBT_TEST_TASKS \
          EXECUTOR_NUM_CPUS \
+         EXECUTOR_ACTIVE_PROCESSOR_COUNT \
          EXECUTOR_JVM_HEAP_SIZE \
          EXECUTOR_JVM_METASPACE_SIZE \
          TIMEOUT \
+         MAX_SINGLE_TEST_MINUTES \
          SUCCEED_ON_ERROR \
          REPORT_TO_DATADOG \
          RETRY_FETCH \
@@ -210,6 +244,12 @@ for i in EXECUTION_CONTEXT_SIZE \
 print_var $i
 done
 info ""
+
+if ! [[ "$MAX_SINGLE_TEST_MINUTES" =~ ^[0-9]+$ ]]; then
+  err "MAX_SINGLE_TEST_MINUTES must be a non-negative integer, got: $MAX_SINGLE_TEST_MINUTES"
+  CODE=1
+  exit 1
+fi
 
 # Define sbt command
 SBT_CMD=("sbt")
@@ -288,6 +328,19 @@ SBT_CMD+=("-J-XX:+HeapDumpOnOutOfMemoryError")
 SBT_CMD+=("-J-Dscala.concurrent.context.numThreads=${EXECUTION_CONTEXT_SIZE}")
 SBT_CMD+=("-J-Dscala.concurrent.context.maxThreads=${EXECUTION_CONTEXT_SIZE}")
 
+# Pin the JVM's view of the available CPU count so GC threads, JIT compiler threads, the JVM common
+# ForkJoinPool and availableProcessors-based library pools (Netty, Pekko, gRPC) are sized to the
+# intended parallelism rather than the full (uncapped) node CPU count. This does not touch the Scala
+# global execution context, which scala.concurrent.context.numThreads/maxThreads above already pins.
+# Gated to GHA to avoid changing CircleCI behavior in this PR: CircleCI declares EXECUTOR_NUM_CPUS per
+# resource class and its pods have CPU limits, so the uncapped-node problem this solves does not apply
+# there. Only applied when the value resolves to a positive integer, so a non-numeric override leaves
+# the JVM default untouched. The 10# prefix forces base-10 so a value with leading zeros (e.g. 08) is
+# not misread as octal.
+if [[ "$IS_GHA" == "true" && "${EXECUTOR_ACTIVE_PROCESSOR_COUNT}" =~ ^[0-9]+$ && "$((10#${EXECUTOR_ACTIVE_PROCESSOR_COUNT}))" -gt 0 ]]; then
+  SBT_CMD+=("-J-XX:ActiveProcessorCount=${EXECUTOR_ACTIVE_PROCESSOR_COUNT}")
+fi
+
 # Print JVM arguments
 SBT_CMD+=("-J-XX:+PrintCommandLineFlags")
 
@@ -325,6 +378,152 @@ done
 #   false | true
 #   echo "${PIPESTATUS[0]} ${PIPESTATUS[1]}"
 attempt=1
+
+# Parses the elapsed time from a ScalaTest slowpoke warning line emitted by sbt.
+# The format is produced by ScalaTest's -W flag (houserules.sbt) and looks like:
+#
+#   [info] *** Test still running after 23 minutes, 53 seconds: suite name: Foo, test name: bar.
+#
+# The leading "[info] *** " prefix is matched by the glob wildcard, so it does not
+# need to be stripped explicitly. If ScalaTest ever changes this format the match
+# silently stops firing, so the self-test below locks in the expected input shape.
+extract_slowpoke_seconds() {
+  local line="$1"
+  local duration
+  local hours=0
+  local minutes=0
+  local seconds=0
+
+  [[ "$line" == *"Test still running after "* ]] || return 1
+
+  duration="${line#*Test still running after }"
+  duration="${duration%%:*}"
+
+  if [[ "$duration" =~ ([0-9]+)[[:space:]]+hour ]]; then
+    hours="${BASH_REMATCH[1]}"
+  fi
+  if [[ "$duration" =~ ([0-9]+)[[:space:]]+minute ]]; then
+    minutes="${BASH_REMATCH[1]}"
+  fi
+  if [[ "$duration" =~ ([0-9]+)[[:space:]]+second ]]; then
+    seconds="${BASH_REMATCH[1]}"
+  fi
+
+  echo $((hours * 3600 + minutes * 60 + seconds))
+}
+
+# Self-test: feed a known slowpoke line through extract_slowpoke_seconds to catch
+# any future format drift early, before the watchdog silently stops working.
+_self_test_extract_slowpoke_seconds() {
+  local sample="[info] *** Test still running after 23 minutes, 53 seconds: suite name: Foo, test name: bar."
+  local expected=1433  # 23*60 + 53
+  local got
+  got=$(extract_slowpoke_seconds "$sample") || {
+    err "extract_slowpoke_seconds self-test: function returned non-zero for a valid line"
+    exit 1
+  }
+  if [[ "$got" != "$expected" ]]; then
+    err "extract_slowpoke_seconds self-test failed: expected $expected seconds, got $got"
+    exit 1
+  fi
+}
+_self_test_extract_slowpoke_seconds
+
+emit_retry_fetch_tokens() {
+  local retries="${RETRY_FETCH:-0}"
+  local i=0
+
+  if ! [[ "$retries" =~ ^[0-9]+$ ]]; then
+    echo "RETRY_FETCH must be a non-negative integer, got: $retries" >&2
+    return 1
+  fi
+
+  while [[ "$i" -lt "$retries" ]]; do
+    echo r
+    i=$((i + 1))
+  done
+}
+
+run_sbt_with_optional_single_test_watchdog() {
+  local current_attempt="$1"
+  local enabled="false"
+  local watchdog_seconds=0
+  local pipe_path="${TEMPDIR}/sbt-output-${current_attempt}.pipe"
+  local job_pid=0
+
+  if (( MAX_SINGLE_TEST_MINUTES > 0 )); then
+    enabled="true"
+    watchdog_seconds=$((MAX_SINGLE_TEST_MINUTES * 60))
+    info "Single-test watchdog enabled: ${MAX_SINGLE_TEST_MINUTES} minute(s)"
+  fi
+
+  : > "${SBT_OUTPUT_FILE}"
+
+  # Fast path: when the watchdog is disabled, avoid the FIFO/per-line read loop.
+  # Keep live logs on stdout and append to file with a single tee process.
+  if [[ "$enabled" != "true" ]]; then
+    (
+      set -o pipefail
+      emit_retry_fetch_tokens | \
+        timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | tee -a "${SBT_OUTPUT_FILE}"
+    )
+    CODE=$?
+    return
+  fi
+
+  rm -f "$pipe_path"
+  mkfifo "$pipe_path"
+
+  if ! command -v setsid >/dev/null 2>&1; then
+    err "setsid is required for watchdog process-group cleanup but was not found in the CI environment"
+    exit 1
+  fi
+
+  # Launch timeout as the session leader and keep its child in the same foreground process group.
+  # This lets the watchdog kill timeout -> sbt -> JVM and all descendants with one group signal,
+  # instead of only terminating an outer shell while timeout keeps the FIFO open until TIMEOUT.
+  export -f emit_retry_fetch_tokens
+  export RETRY_FETCH
+  setsid timeout --foreground --kill-after=30s "${TIMEOUT}" \
+    bash -c 'set -o pipefail; emit_retry_fetch_tokens | "$@"' -- "${SBT_CMD[@]}" \
+    >"$pipe_path" 2>&1 &
+  job_pid=$!
+
+  # Slow path: watchdog enabled, keep one fd open for file appends to avoid
+  # spawning printf|tee processes for every log line.
+  exec 3>>"${SBT_OUTPUT_FILE}"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '%s\n' "$line"
+    printf '%s\n' "$line" >&3
+
+    if [[ "$enabled" == "true" && "$WATCHDOG_TIMEOUT_TRIGGERED" == "false" ]]; then
+      if elapsed_seconds=$(extract_slowpoke_seconds "$line"); then
+        if (( elapsed_seconds >= watchdog_seconds )); then
+          WATCHDOG_TIMEOUT_TRIGGERED=true
+          err "Detected test case running for ${elapsed_seconds}s, exceeding MAX_SINGLE_TEST_MINUTES=${MAX_SINGLE_TEST_MINUTES}. Stopping this shard run."
+          # Kill the entire process group so timeout, the JVM and all descendants go down together.
+          # job_pid is the setsid leader (timeout), so its PGID == job_pid.
+          kill -TERM -- "-$job_pid" 2>/dev/null || true
+          sleep 5
+          kill -KILL -- "-$job_pid" 2>/dev/null || true
+        fi
+      fi
+    fi
+  done <"$pipe_path"
+
+  exec 3>&-
+
+  wait "$job_pid"
+  CODE=$?
+
+  rm -f "$pipe_path"
+
+  if [[ "$WATCHDOG_TIMEOUT_TRIGGERED" == "true" ]]; then
+    # Dedicated code to distinguish a per-test watchdog timeout from other sbt failures.
+    CODE=190
+  fi
+}
+
 # Note: RETRY_FETCH pipes newlines into sbt to prompt it to resume stalled dependency downloads
 # (in-process, single run). The outer bootstrap retry loop below is complementary: it re-invokes
 # the entire sbt process when the resolver itself is throttled (429) or the sbt launcher fails to
@@ -332,12 +531,7 @@ attempt=1
 # Worst-case wall clock time is SBT_BOOTSTRAP_RETRY_ATTEMPTS x TIMEOUT (default: 2 x 25m = 50m).
 # Ensure the GHA job's timeout-minutes is set to at least that value.
 while true; do
-  python3 -c "import os; print ('r\n' * int(os.environ.get('RETRY_FETCH', 0)))" | \
-    timeout --kill-after=30s "${TIMEOUT}" "${SBT_CMD[@]}" 2>&1 | \
-    tee "${SBT_OUTPUT_FILE}"
-
-  # save sbt command exit code for use on exit
-  CODE=${PIPESTATUS[1]}
+  run_sbt_with_optional_single_test_watchdog "$attempt"
 
   # Retry only for transient bootstrap and repository throttling errors.
   if [[ "$CODE" != 0 ]] && grep -E -q "${SBT_BOOTSTRAP_RETRY_PATTERN}" "${SBT_OUTPUT_FILE}"; then
@@ -356,7 +550,7 @@ done
 #   reset text formatting: '\e[m'
 #   colors: '\e[1;34m' '\e[90m' '\e[97m' '\e[0m'
 #   foreground and background colors: '\e[30;41m'
-cat "${SBT_OUTPUT_FILE}" | ./scripts/ci/ansi2txt.sh > "temp_sbt_output" && \
+./scripts/ci/ansi2txt.sh < "${SBT_OUTPUT_FILE}" > "temp_sbt_output" && \
   mv "temp_sbt_output" "${SBT_OUTPUT_FILE}" && \
   info_done "Remove control symbols from logfile"
 

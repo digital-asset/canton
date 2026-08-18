@@ -81,8 +81,8 @@ object HashAlgorithm extends PrettyPrintingCompanion[HashAlgorithm] {
     } yield algo
 
   def fromProtoEnum(
-      field: String,
       hashAlgorithmP: v30.HashAlgorithm,
+      field: String,
   ): ParsingResult[HashAlgorithm] =
     hashAlgorithmP match {
       case v30.HashAlgorithm.HASH_ALGORITHM_UNSPECIFIED =>

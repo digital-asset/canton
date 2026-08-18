@@ -511,9 +511,7 @@ trait EventStorageBackend {
       eventSequentialIds: SequentialIdBatch
   )(connection: Connection): Vector[RawParticipantAuthorization]
 
-  def fetchDynamicSynchronizerParametersEventIds(
-      eventSequentialIds: SequentialIdBatch
-  )(connection: Connection): Vector[Long]
+  def fetchDynamicSynchronizerParametersEventIds: IdPageQuery
 
   def dynamicSynchronizerParametersBatch(
       eventSequentialIds: SequentialIdBatch
@@ -869,6 +867,14 @@ object EventStorageBackend {
       publicationTime: Timestamp,
   )
 
+  sealed trait RawTopologyEvent extends Product with Serializable {
+    def offset: Offset
+    def updateId: String
+    def synchronizerId: String
+    def recordTime: Timestamp
+    def traceContext: Array[Byte]
+  }
+
   final case class RawParticipantAuthorization(
       offset: Offset,
       updateId: String,
@@ -878,7 +884,7 @@ object EventStorageBackend {
       recordTime: Timestamp,
       synchronizerId: String,
       traceContext: Array[Byte],
-  )
+  ) extends RawTopologyEvent
 
   final case class RawDynamicSynchronizerParameters(
       offset: Offset,
@@ -888,7 +894,7 @@ object EventStorageBackend {
       recordTime: Timestamp,
       payload: Array[Byte],
       traceContext: Array[Byte],
-  )
+  ) extends RawTopologyEvent
 
   final case class RawAcsCommitment(
       offset: Offset,

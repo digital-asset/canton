@@ -271,7 +271,9 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
         ),
         _.warningMessage should include(expectedError), // connection pool
         // failure of the command
-        _.errorMessage should (include(expectedError) and include("FAILED_LSU")),
+        _.errorMessage should (include(expectedError) and include(
+          "LSU_SYNCHRONIZER_CONNECTION_ERROR"
+        )),
       )
 
       participant2.synchronizers.modify(

@@ -11,6 +11,7 @@ import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
   Fixture,
   getLsuStatusMetricValues,
@@ -19,11 +20,13 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{UniquePortGenerator, config}
 import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
 import java.time.Duration
+import scala.annotation.nowarn
 
 /*
 The goal of this test is to ensure that metrics representing the status of LSU are correctly updated:
@@ -36,6 +39,7 @@ Topology:
   - p1 connected to s1
   - p2 connected to s1 and s2 with threshold 2
  */
+@nowarn("msg=dead code following this construct")
 final class LsuMetricsIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-metrics"
@@ -43,19 +47,51 @@ final class LsuMetricsIntegrationTest extends LsuBase {
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
-      MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
+      MultiSynchronizer.tryCreate(
+        Set("sequencer1", "sequencer2"),
+        Set("sequencer3", "sequencer4"),
+        Set("sequencer5", "sequencer6"),
+      ),
     )
   )
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected lazy val newOldSequencers: Map[String, String] =
-    Map("sequencer3" -> "sequencer1", "sequencer4" -> "sequencer2")
+    throw new IllegalAccessException("Use fixtures instead")
   override protected lazy val newOldMediators: Map[String, String] =
-    Map("mediator3" -> "mediator1", "mediator4" -> "mediator2")
-  override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
+    throw new IllegalAccessException("Use fixtures instead")
+  override protected lazy val upgradeTime: CantonTimestamp = throw new IllegalAccessException(
+    "Use fixtures instead"
+  )
+
+  override protected def configTransforms: List[ConfigTransform] = {
+    val allNewNodes = Set(
+      "sequencer3",
+      "sequencer4",
+      "sequencer5",
+      "sequencer6",
+      "mediator3",
+      "mediator4",
+      "mediator5",
+      "mediator6",
+    )
+
+    List(
+      ConfigTransforms.disableAutoInit(allNewNodes),
+      ConfigTransforms.useStaticTime,
+    ) ++ ConfigTransforms.enableAlphaVersionSupport
+  }
+
+  private lazy val upgradeTime1: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
+  private lazy val upgradeTime2: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(60)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2S4M4_Config
+    EnvironmentDefinition
+      .buildBaseEnvironmentDefinition(
+        numParticipants = 2,
+        numSequencers = 6,
+        numMediators = 6,
+      )
       .withNetworkBootstrap { implicit env =>
         new NetworkBootstrapper(S2M2)
       }
@@ -96,10 +132,11 @@ final class LsuMetricsIntegrationTest extends LsuBase {
         )
       )
       .addConfigTransforms(configTransforms*)
+      .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
       .withSetup { implicit env =>
         import env.*
 
-        defaultEnvironmentSetup(connectParticipants = false)
+        setDefaultsDynamicSynchronizerParameters(daId, synchronizerOwners1)
 
         participant1.synchronizers.connect_by_config(defaultSynchronizerConnectionConfig())
 
@@ -113,10 +150,44 @@ final class LsuMetricsIntegrationTest extends LsuBase {
 
         participant1.health.ping(participant2)
 
-        fixture = fixtureWithDefaults()
+        fixture1 = Fixture(
+          currentPsid = daId,
+          upgradeTime = upgradeTime1,
+          oldSynchronizerNodes =
+            SynchronizerNodes(Seq(sequencer1, sequencer2), Seq(mediator1, mediator2)),
+          newSynchronizerNodes =
+            SynchronizerNodes(Seq(sequencer3, sequencer4), Seq(mediator3, mediator4)),
+          newOldNodesResolution = Map(
+            "sequencer3" -> "sequencer1",
+            "sequencer4" -> "sequencer2",
+            "mediator3" -> "mediator1",
+            "mediator4" -> "mediator2",
+          ),
+          oldSynchronizerOwners = synchronizerOwners1,
+          newPV = ProtocolVersion.dev,
+          newSerial = daId.serial.increment.toNonNegative,
+        )
+
+        fixture2 = Fixture(
+          currentPsid = fixture1.newPsid,
+          upgradeTime = upgradeTime2,
+          oldSynchronizerNodes = fixture1.newSynchronizerNodes,
+          newSynchronizerNodes =
+            SynchronizerNodes(Seq(sequencer5, sequencer6), Seq(mediator5, mediator6)),
+          newOldNodesResolution = Map(
+            "sequencer5" -> "sequencer3",
+            "sequencer6" -> "sequencer4",
+            "mediator5" -> "mediator3",
+            "mediator6" -> "mediator4",
+          ),
+          oldSynchronizerOwners = Set(sequencer3, sequencer4),
+          newPV = ProtocolVersion.dev,
+          newSerial = fixture1.newPsid.serial.increment.toNonNegative,
+        )
       }
 
-  private var fixture: Fixture = _
+  private var fixture1: Fixture = _
+  private var fixture2: Fixture = _
 
   /** Performs the check restart participants, performs check again. The goal is to ensure the
     * metric value is correctly set after a restart.
@@ -143,16 +214,16 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       // Nothing is set yet
       getLsuStatusMetricValues(participant1) shouldBe empty
 
-      fixture.oldSynchronizerOwners.foreach(
-        _.topology.lsu.announcement.propose(fixture.newPsid, fixture.upgradeTime)
+      fixture1.oldSynchronizerOwners.foreach(
+        _.topology.lsu.announcement.propose(fixture1.newPsid, fixture1.upgradeTime)
       )
 
       // Ensure all nodes see the announcement
       eventually() {
-        forAll(fixture.oldSynchronizerNodes.all ++ participants.local)(
+        forAll(fixture1.oldSynchronizerNodes.all ++ participants.local)(
           _.topology.lsu.announcement
-            .list(store = Some(fixture.currentPsid))
-            .filter(_.item.successorSynchronizerId == fixture.newPsid)
+            .list(store = Some(fixture1.currentPsid))
+            .filter(_.item.successorSynchronizerId == fixture1.newPsid)
             .loneElement
         )
       }
@@ -160,7 +231,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_) shouldBe Map(
-            fixture.newPsid -> ParticipantMetrics.LsuStatus.LsuAnnounced
+            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuAnnounced
           )
         )
       )
@@ -169,20 +240,20 @@ final class LsuMetricsIntegrationTest extends LsuBase {
     "when sequencer successors are announced" in { implicit env =>
       import env.*
 
-      migrateSynchronizerNodes(fixture)
+      migrateSynchronizerNodes(fixture1)
 
       // No handshake was done yet
-      forAll(fixture.newSynchronizerNodes.sequencers)(
+      forAll(fixture1.newSynchronizerNodes.sequencers)(
         getParticipantHandshakesMetricValues(_) shouldBe empty
       )
 
       // prevent the handshake from succeeding so that we really control the steps
-      fixture.newSynchronizerNodes.all.stop()
+      fixture1.newSynchronizerNodes.all.stop()
 
       sequencer1.topology.lsu.sequencer_successors.propose_successor(
         sequencerId = sequencer1.id,
         endpoints = sequencer3.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-        successorSynchronizerId = fixture.newPsid,
+        successorSynchronizerId = fixture1.newPsid,
       )
 
       // participants see the announcement
@@ -197,19 +268,19 @@ final class LsuMetricsIntegrationTest extends LsuBase {
 
       checkLsuStatusMetrics(_ =>
         getLsuStatusMetricValues(participant1) shouldBe Map(
-          fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+          fixture1.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
         )
       )
 
       // P2 still needs to see the successor of sequencer2
       getLsuStatusMetricValues(participant2) shouldBe Map(
-        fixture.newPsid -> ParticipantMetrics.LsuStatus.LsuAnnounced
+        fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuAnnounced
       )
 
       sequencer2.topology.lsu.sequencer_successors.propose_successor(
         sequencerId = sequencer2.id,
         endpoints = sequencer4.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-        successorSynchronizerId = fixture.newPsid,
+        successorSynchronizerId = fixture1.newPsid,
       )
 
       // participants see the announcement
@@ -222,10 +293,10 @@ final class LsuMetricsIntegrationTest extends LsuBase {
         )
 
         getLsuStatusMetricValues(participant1) shouldBe Map(
-          fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+          fixture1.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
         )
         getLsuStatusMetricValues(participant2) shouldBe Map(
-          fixture.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+          fixture1.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
         )
       }
     }
@@ -233,13 +304,13 @@ final class LsuMetricsIntegrationTest extends LsuBase {
     "when handshake/topology copy is done" in { implicit env =>
       import env.*
 
-      fixture.newSynchronizerNodes.all.start()
+      fixture1.newSynchronizerNodes.all.start()
 
       // Checking handshake and local copy independently is too difficult
       checkLsuStatusMetrics(_ =>
         forAll(participants.local) { p =>
           getLsuStatusMetricValues(p)
-            .get(fixture.newPsid)
+            .get(fixture1.newPsid)
             .value should be >= ParticipantMetrics.LsuStatus.LocalCopyDone
         }
       )
@@ -264,44 +335,87 @@ final class LsuMetricsIntegrationTest extends LsuBase {
     "when LSU is done" in { implicit env =>
       import env.*
 
-      environment.simClock.foreach(_.advanceTo(upgradeTime.immediateSuccessor))
-      transferTraffic()
+      environment.simClock.foreach(_.advanceTo(upgradeTime1.immediateSuccessor))
+      transferTraffic(Some(fixture1))
 
       eventually() {
         environment.simClock.foreach(_.advance(Duration.ofSeconds(1)))
-        participants.all.forall(_.synchronizers.is_connected(fixture.newPsid)) shouldBe true
-        participants.all.forall(_.synchronizers.is_connected(fixture.currentPsid)) shouldBe false
+        participants.all.forall(_.synchronizers.is_connected(fixture1.newPsid)) shouldBe true
+        participants.all.forall(_.synchronizers.is_connected(fixture1.currentPsid)) shouldBe false
       }
 
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_)
-            .get(fixture.newPsid)
+            .get(fixture1.newPsid)
             .value shouldBe ParticipantMetrics.LsuStatus.LsuDone
         )
       )
 
-      oldSynchronizerNodes.all.stop()
-      waitForTargetTimeOnSequencer(sequencer3, upgradeTime.immediateSuccessor, logger)
+      fixture1.oldSynchronizerNodes.all.stop()
+      waitForTargetTimeOnSequencer(sequencer3, upgradeTime1.immediateSuccessor, logger)
 
       participant1.health.ping(participant2)
     }
 
-    "Second LSU is announced" in { implicit env =>
+    "Only the last successful LSU is reported" in { implicit env =>
       import env.*
 
-      val psid3 = fixture.newPsid.incrementSerial
-      fixture.newSynchronizerNodes.sequencers.foreach(
+      fixture2.newSynchronizerNodes.all.start()
+
+      performSynchronizerNodesLsu(fixture2)
+
+      eventually() {
+        participant1.underlying.value.sync.getLsuStatusMetrics().futureValueUS.value shouldBe Set(
+          fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+          fixture2.newPsid -> ParticipantMetrics.LsuStatus.LocalCopyDone,
+        )
+      }
+
+      environment.simClock.value.advanceTo(fixture2.upgradeTime.immediateSuccessor)
+      transferTraffic(Some(fixture2))
+      eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
+        participants.all.forall(_.synchronizers.is_connected(fixture2.newPsid)) shouldBe true
+      }
+
+      fixture2.oldSynchronizerNodes.all.stop()
+      waitForTargetTimeOnSequencer(sequencer5, upgradeTime2.immediateSuccessor, logger)
+
+      /*
+       Only the last successful LSU is reported.
+       Note we cannot directly inspect metrics because it takes a while for the old metric to be garbage collected
+       by prometheus.
+       */
+      participant1.underlying.value.sync.getLsuStatusMetrics().futureValueUS.value shouldBe Set(
+        fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone
+      )
+
+      checkLsuStatusMetrics(_ =>
+        forAll(participants.local)(
+          getLsuStatusMetricValues(_) shouldBe Map(
+            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+            fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+          )
+        )
+      )
+    }
+
+    "Third LSU is announced" in { implicit env =>
+      import env.*
+
+      val psid4 = fixture2.newPsid.incrementSerial
+      fixture2.newSynchronizerNodes.sequencers.foreach(
         _.topology.lsu.announcement
-          .propose(psid3, fixture.upgradeTime.plusSeconds(86400))
+          .propose(psid4, fixture2.upgradeTime.plusSeconds(86400))
       )
 
       // Ensure participants see the LSU announcement
       eventually() {
         forAll(participants.local)(
           _.topology.lsu.announcement
-            .list(store = Some(fixture.newPsid))
-            .filter(_.item.successorSynchronizerId == psid3)
+            .list(store = Some(fixture2.newPsid))
+            .filter(_.item.successorSynchronizerId == psid4)
             .loneElement
         )
       }
@@ -309,28 +423,29 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_) shouldBe Map(
-            fixture.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-            psid3 -> ParticipantMetrics.LsuStatus.LsuAnnounced,
+            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+            fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+            psid4 -> ParticipantMetrics.LsuStatus.LsuAnnounced,
           )
         )
       )
     }
 
-    "Second LSU is cancelled" in { implicit env =>
+    "Third LSU is cancelled" in { implicit env =>
       import env.*
 
-      val psid3 = fixture.newPsid.incrementSerial
-      fixture.newSynchronizerNodes.sequencers.foreach(
+      val psid4 = fixture2.newPsid.incrementSerial
+      fixture2.newSynchronizerNodes.sequencers.foreach(
         _.topology.lsu.announcement
-          .revoke(psid3, fixture.upgradeTime.plusSeconds(86400))
+          .revoke(psid4, fixture2.upgradeTime.plusSeconds(86400))
       )
 
       // Ensure participants see the LSU cancellation
       eventually() {
         forAll(participants.local)(
           _.topology.lsu.announcement
-            .list(store = Some(fixture.newPsid))
-            .filter(_.item.successorSynchronizerId == psid3)
+            .list(store = Some(fixture2.newPsid))
+            .filter(_.item.successorSynchronizerId == psid4)
             shouldBe empty
         )
       }
@@ -338,8 +453,9 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_) shouldBe Map(
-            fixture.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-            psid3 -> ParticipantMetrics.LsuStatus.NoLsu,
+            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+            fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+            psid4 -> ParticipantMetrics.LsuStatus.NoLsu,
           )
         )
       )

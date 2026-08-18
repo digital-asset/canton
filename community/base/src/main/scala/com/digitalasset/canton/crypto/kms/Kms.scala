@@ -20,6 +20,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
@@ -54,6 +55,9 @@ object KmsKeyId extends PrettyPrintingCompanion[KmsKeyId] {
   def create(str: String): Either[String, KmsKeyId] = String300.create(str).map(KmsKeyId.apply)
 
   def tryCreate(str: String): KmsKeyId = KmsKeyId(String300.tryCreate(str))
+
+  def fromProtoPrimitive(str: String, field: String): ParsingResult[KmsKeyId] =
+    String300.fromProtoPrimitive(str, field).map(KmsKeyId.apply)
 }
 
 // a wrapper type for a KMS key id

@@ -456,8 +456,23 @@ private[reassignment] trait ReassignmentProcessingSteps[
       protocolVersion: ProtocolVersion,
       validationResult: ReassignmentValidationResult,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[ConfirmationResponses]] =
-    NonEmpty.from(validationResult.hostedConfirmingReassigningParties).traverse {
-      hostedConfirmingParties =>
+    NonEmpty.from(validationResult.hostedConfirmingParties).traverse { hostedConfirmingParties =>
+      if (!validationResult.isReassigningParticipant) {
+        logger.debug(
+          s"Sending an abstain verdict for reassignment ${validationResult.reassignmentId}: the participant is not reassigning"
+        )
+        FutureUnlessShutdown.pure(
+          responseWithVerdict(
+            requestId,
+            validationResult,
+            protocolVersion,
+            LocalAbstainError.CannotPerformAllValidations
+              .Abstain("The participant is not a reassigning participant")
+              .toLocalAbstain(protocolVersion),
+            hostedConfirmingParties.forgetNE,
+          )
+        )
+      } else
         for {
           contractAuthenticationResult <-
             validationResult.commonValidationResult.contractAuthenticationResultF.value
@@ -531,27 +546,41 @@ private[reassignment] trait ReassignmentProcessingSteps[
               LocalApprove(protocolVersion) -> hostedConfirmingParties.forgetNE
             )
 
-          val confirmationResponses = checked(
-            ConfirmationResponses.tryCreate(
-              requestId,
-              validationResult.rootHash,
-              psid.unwrap,
-              participantId,
-              NonEmpty.mk(
-                Seq,
-                ConfirmationResponse
-                  .tryCreate(
-                    Some(ViewPosition.root),
-                    localVerdict,
-                    parties,
-                  ),
-              ),
-              protocolVersion,
-            )
+          responseWithVerdict(
+            requestId,
+            validationResult,
+            protocolVersion,
+            localVerdict,
+            parties,
           )
-          confirmationResponses
         }
     }
+
+  private def responseWithVerdict(
+      requestId: RequestId,
+      validationResult: ReassignmentValidationResult,
+      protocolVersion: ProtocolVersion,
+      localVerdict: LocalVerdict,
+      parties: Set[LfPartyId],
+  ): ConfirmationResponses =
+    checked(
+      ConfirmationResponses.tryCreate(
+        requestId,
+        validationResult.rootHash,
+        psid.unwrap,
+        participantId,
+        NonEmpty.mk(
+          Seq,
+          ConfirmationResponse
+            .tryCreate(
+              Some(ViewPosition.root),
+              localVerdict,
+              parties,
+            ),
+        ),
+        protocolVersion,
+      )
+    )
 
   /** During phase 7, the validations that should be checked are the validations that can be done on
     * all participants, whether reassigning or non-reassigning participants. These checks include:
@@ -563,6 +592,10 @@ private[reassignment] trait ReassignmentProcessingSteps[
     *   - Is the reassignment id consistent with the reassignment data?
     *   - the multi-synchronizer topology feature flag should be set on all participants hosting a
     *     stakeholder.
+    *
+    * TODO(#34870): Handle a failed activeness check here: log a warning, or crash if
+    * `commitAfterFailedActivenessCheck` is set. A local activeness failure must not turn into a
+    * rejection, as participants do not agree on the activeness result.
     */
   def checkPhase7Validations(
       commonValidationResult: ReassignmentValidationResult.CommonValidationResult

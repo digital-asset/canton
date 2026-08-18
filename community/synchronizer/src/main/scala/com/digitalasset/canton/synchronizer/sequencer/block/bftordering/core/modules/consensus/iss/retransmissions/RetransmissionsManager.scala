@@ -46,10 +46,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.time.Instant
 import scala.concurrent.duration.*
 import scala.util.{Failure, Success}
 
 import RetransmissionsManager.{
+  EndOfEpochRetransmissionRequestPeriod,
   HowManyEpochsToKeep,
   MaxRetransmissionRequestBurstFactorPerNode,
   NodeRoundRobin,
@@ -65,6 +67,7 @@ class RetransmissionsManager[E <: Env[E]](
     metrics: BftOrderingMetrics,
     clock: Clock,
     override val loggerFactory: NamedLoggerFactory,
+    logEndOfEpochProgress: Boolean,
     // Passed only in tests
     previousEpochsRetransmissionsTrackerO: Option[PreviousEpochsRetransmissionsTracker] = None,
 )(implicit
@@ -76,6 +79,7 @@ class RetransmissionsManager[E <: Env[E]](
   private var validator: Option[RetransmissionMessageValidator] = None
 
   private var periodicStatusCancellable: Option[CancellableEvent] = None
+  private var waitingForEpochCompletionSince: Option[Instant] = None
   private var epochStatusBuilder: Option[EpochStatusBuilder] = None
 
   private val roundRobin = new NodeRoundRobin()
@@ -122,6 +126,17 @@ class RetransmissionsManager[E <: Env[E]](
       )
   }
 
+  def segmentEnded(now: Instant)(implicit
+      context: E#ActorContextT[Consensus.Message[E]],
+      traceContext: TraceContext,
+  ): Unit = currentEpoch match {
+    case Some(epoch) =>
+      waitingForEpochCompletionSince = Some(now)
+      stopRequesting()
+      rescheduleStatusBroadcast(EndOfEpochRetransmissionRequestPeriod)(context)
+    case _ =>
+  }
+
   def epochEnded(
       commitCertificates: Seq[CommitCertificate],
       initInProgress: Boolean = false,
@@ -131,6 +146,7 @@ class RetransmissionsManager[E <: Env[E]](
         previousEpochsRetransmissionsTracker.endEpoch(epoch.epoch.info.number, commitCertificates)
         currentEpoch = None
         validator = None
+        waitingForEpochCompletionSince = None
         if (!initInProgress) {
           stopRequesting()
           recordMetricsAndResetRequestCounts()
@@ -254,25 +270,52 @@ class RetransmissionsManager[E <: Env[E]](
     // periodic event where we broadcast our status in order to request retransmissions
     case Consensus.RetransmissionsMessage.PeriodicStatusBroadcast =>
       startRetransmissionsRequest()
+
     // each segment provides its own status so that the epoch status can be built
     case segStatus: Consensus.RetransmissionsMessage.SegmentStatus =>
       epochStatusBuilder.foreach(_.receive(segStatus))
-      epochStatusBuilder.flatMap(_.epochStatus).foreach { epochStatus =>
-        logger.debug(
-          s"Broadcasting epoch status at epoch ${epochStatus.epochNumber} in order to request retransmissions"
-        )
+      epochStatusBuilder.flatMap(_.epochStatus).zip(currentEpoch).foreach {
+        case (epochStatus, epoch) =>
+          logger.debug(
+            s"Broadcasting epoch status at epoch ${epochStatus.epochNumber} in order to request retransmissions"
+          )
 
-        currentEpoch.foreach { e =>
           // after gathering the segment status from all segments,
           // we can send our whole epoch status
           // and effectively request retransmissions of missing messages
-          sendStatus(topologyInfo.currentCryptoProvider, epochStatus, e.epoch.currentMembership)
-        }
+          sendStatus(topologyInfo.currentCryptoProvider, epochStatus, epoch.epoch.currentMembership)
 
-        epochStatusBuilder = None
-        rescheduleStatusBroadcast(context)
+          waitingForEpochCompletionSince.foreach { since =>
+            if (isEpochIncomplete(epochStatus.epochNumber)) {
+              val durationMillis = java.time.Duration.between(since, Instant.now()).toMillis
+              val msg =
+                s"Still waiting for epoch ${epochStatus.epochNumber} to complete for $durationMillis millis. \n" +
+                  s"Current nodes: ${epoch.epoch.currentMembership.sortedNodes.mkString(", ")} \n" +
+                  s"Current segment states:\n ${epoch.epoch.segments
+                      .zip(epochStatus.segments)
+                      .map { case (segment, segStatus) =>
+                        s"Segment (${segment.firstBlockNumber}, ${segment.originalLeader}): $segStatus"
+                      }
+                      .mkString("\n")}"
+              if (logEndOfEpochProgress) logger.info(msg) else logger.debug(msg)
+            }
+          }
+
+          epochStatusBuilder = None
+          rescheduleStatusBroadcast(
+            if (waitingForEpochCompletionSince.isDefined) EndOfEpochRetransmissionRequestPeriod
+            else RetransmissionRequestPeriod
+          )(context)
+
       }
   }
+
+  private def isEpochIncomplete(epochNumber: EpochNumber): Boolean =
+    currentEpoch match {
+      case Some(epochState) =>
+        epochState.epoch.info.number == epochNumber && epochState.epochCompletionStatus == EpochState.Incomplete
+      case None => false
+    }
 
   private def validateUnverifiedNetworkMessage(
       msg: RetransmissionsNetworkMessage
@@ -390,13 +433,13 @@ class RetransmissionsManager[E <: Env[E]](
         None
     }
 
-  private def rescheduleStatusBroadcast(
+  private def rescheduleStatusBroadcast(delay: FiniteDuration)(
       context: E#ActorContextT[Consensus.Message[E]]
   )(implicit traceContext: TraceContext): Unit = {
     periodicStatusCancellable.foreach(_.cancel())
     periodicStatusCancellable = Some(
       context.delayedEvent(
-        RetransmissionRequestPeriod,
+        delay,
         Consensus.RetransmissionsMessage.PeriodicStatusBroadcast,
       )
     )
@@ -405,6 +448,8 @@ class RetransmissionsManager[E <: Env[E]](
 
 object RetransmissionsManager {
   val RetransmissionRequestPeriod: FiniteDuration = 3.seconds
+  val EndOfEpochRetransmissionRequestPeriod = 500.millis
+
   val MaxRetransmissionRequestBurstFactorPerNode: Double = 6.toDouble
 
   // TODO(#24443): unify this value with catch up and pass it as config

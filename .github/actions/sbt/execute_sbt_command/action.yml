@@ -1,0 +1,153 @@
+name: Execute SBT command
+description: A context within which SBT commands can be run correctly for Cantons needs
+
+inputs:
+  cmd:
+    required: false
+    default: ""
+    description: Inline SBT command (kept for backward compatibility)
+  cmd_file:
+    required: false
+    default: ""
+    description: Path to a file containing the SBT command to execute
+  custom_java_home:
+    default: ""
+    description: Custom Java Home
+  debug:
+    default: "false"
+    description: Debug mode Boolean as string
+  execution_context_size:
+    default: "2"
+    description: Execution context size
+  extra_parameters:
+    default: ""
+    description: Extra parameters for SBT command
+  fail_on_error_in_output:
+    default: "true"
+    description: Fail on error in output Boolean as string
+  log_immediate_flush:
+    default: "true"
+    description: Log immediate flush
+  matrix_shard:
+    default: "0"
+    description: Matrix shard. Optional value
+  override_java_version_for_tests:
+    default: ""
+    description: Override Java version for tests
+  retry_fetch:
+    default: "0"
+    description: Retry fetch
+  report_to_datadog:
+    default: "true"
+    description: Report unexpected sbt failures to Datadog
+  succeed_on_error:
+    default: "false"
+    description: Succeed on error Boolean as string
+  timeout:
+    default: "240m"
+    description: Timeout
+  use_maven_mirror:
+    default: "true"
+    description: Use Maven Mirror Boolean as string
+  sbt_output_file:
+    default: "sbt_output"
+    description: Output file for SBT logs
+
+outputs:
+  sbt-log-file:
+    description: Path to the SBT output log file
+    value: ${{ steps.execute_sbt.outputs.sbt-log-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check override java version parameter
+      if: inputs.override_java_version_for_tests != ''
+      run: |
+        nix_java_home=`nix-build ./nix/nixpkgs.nix -A "pkgs.openjdk${{ inputs.override_java_version_for_tests }}" --no-out-link`
+        echo "JAVA_HOME_FOR_TESTS=$nix_java_home" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Prepare parsed SBT args file
+      id: parse_sbt_cmd
+      run: |
+        args_file="$RUNNER_TEMP/sbt-cmd-args.txt"
+        echo "args_file=$args_file" >> "$GITHUB_OUTPUT"
+      shell: bash
+
+    - name: Resolve SBT command source
+      id: resolve_sbt_cmd
+      shell: bash
+      env:
+        CMD_INLINE: ${{ inputs.cmd }}
+        CMD_FILE_INPUT: ${{ inputs.cmd_file }}
+      run: |
+        if [[ -n "$CMD_FILE_INPUT" ]]; then
+          if [[ ! -f "$CMD_FILE_INPUT" ]]; then
+            echo "cmd_file does not exist: $CMD_FILE_INPUT" >&2
+            exit 1
+          fi
+          cmd_file="$CMD_FILE_INPUT"
+        elif [[ -n "$CMD_INLINE" ]]; then
+          cmd_file="$RUNNER_TEMP/sbt-cmd-input.txt"
+          printf '%s\n' "$CMD_INLINE" > "$cmd_file"
+        else
+          echo "One of 'cmd' or 'cmd_file' must be provided." >&2
+          exit 1
+        fi
+
+        echo "cmd_file=$cmd_file" >> "$GITHUB_OUTPUT"
+
+    - name: Parse SBT command
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: python3 ./scripts/ci/parse_sbt_cmd.py --cmd-file "$SBT_CMD_FILE" --output-file "$PARSED_ARGS_FILE"
+      env:
+        SBT_CMD_FILE: ${{ steps.resolve_sbt_cmd.outputs.cmd_file }}
+        PARSED_ARGS_FILE: ${{ steps.parse_sbt_cmd.outputs.args_file }}
+
+    - name: Display and execute SBT command
+      id: execute_sbt
+      run: |
+        echo "::group::Full SBT command"
+        # Fail loud if the resolved command file did not propagate into this step's env.
+        # A per-step env block is easy to forget when adding a consumer, and an unset or
+        # missing SBT_CMD_FILE would otherwise slip through. Validate at the point of use,
+        # like resolve_sbt_cmd does for its inputs.
+        if [[ ! -f "$SBT_CMD_FILE" ]]; then
+          echo "SBT_CMD_FILE is unset or points to a missing file: '${SBT_CMD_FILE:-}'" >&2
+          exit 1
+        fi
+        # Assign on its own line so a failing cat trips set -e. Folding this back into the
+        # echo argument as "$(cat ...)" would bury the failure and keep the step green.
+        full_cmd="$(cat "$SBT_CMD_FILE")"
+        echo "sbt $full_cmd"
+        echo "::endgroup::"
+
+        sbt_cmd_args=()
+        # Load pre-parsed argv tokens into a bash array for safe execution.
+        while IFS= read -r token; do
+          sbt_cmd_args+=("$token")
+        done < "$PARSED_ARGS_FILE"
+
+        .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh "${sbt_cmd_args[@]}"
+      shell: bash
+      env:
+        SBT_CMD_FILE: ${{ steps.resolve_sbt_cmd.outputs.cmd_file }}
+        PARSED_ARGS_FILE: ${{ steps.parse_sbt_cmd.outputs.args_file }}
+        CUSTOM_JAVA_HOME: ${{ inputs.custom_java_home || env.CUSTOM_JAVA_HOME }}
+        DATADOG_API_KEY: ${{ env.DATADOG_API_KEY }}
+        DEBUG: ${{ inputs.debug }}
+        EXECUTION_CONTEXT_SIZE: ${{ inputs.execution_context_size }}
+        EXTRA_PARAMETERS: ${{ inputs.extra_parameters }}
+        FAIL_ON_ERROR_IN_OUTPUT: ${{ inputs.fail_on_error_in_output }}
+        LOG_IMMEDIATE_FLUSH: ${{ inputs.log_immediate_flush }}
+        MATRIX_SHARD: ${{ inputs.matrix_shard }}
+        OVERRIDE_JAVA_VERSION_FOR_TESTS: ${{ inputs.override_java_version_for_tests }}
+        REPORT_TO_DATADOG: ${{ inputs.report_to_datadog }}
+        RETRY_FETCH: ${{ inputs.retry_fetch }}
+        SBT_OUTPUT_FILE: ${{ inputs.sbt_output_file }}
+        SUCCEED_ON_ERROR: ${{ inputs.succeed_on_error }}
+        TERM: dumb
+        TIMEOUT: ${{ inputs.timeout }}
+        USE_MAVEN_MIRROR: ${{ inputs.use_maven_mirror }}

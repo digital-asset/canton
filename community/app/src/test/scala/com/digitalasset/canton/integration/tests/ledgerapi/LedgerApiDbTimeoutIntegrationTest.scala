@@ -25,7 +25,6 @@ trait LedgerApiDbTimeoutIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with DbLockingSupport {
-  import scala.language.reflectiveCalls
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1

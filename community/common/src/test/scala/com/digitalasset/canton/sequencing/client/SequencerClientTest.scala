@@ -7,8 +7,8 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.base.error.ErrorCode
 import com.digitalasset.base.error.utils.DecodedCantonError
+import com.digitalasset.base.error.{ErrorCode, RpcError}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{
@@ -34,7 +34,12 @@ import com.digitalasset.canton.health.HealthQuasiComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances}
-import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, TracedLogger}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  LogEntry,
+  NamedLoggerFactory,
+  TracedLogger,
+}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, TrafficConsumptionMetrics}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcError}
@@ -58,7 +63,11 @@ import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.{
   ClientShutdown,
   UnrecoverableError,
 }
-import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
+import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator.NoTrafficCostValidation
+import com.digitalasset.canton.sequencing.client.SequencerClient.{
+  SequencerTransports,
+  TrafficCostValidator,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
   ApplicationHandlerException,
   EventValidationError,
@@ -86,6 +95,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.{
   EventCostCalculator,
   TrafficConsumed,
+  TrafficControlErrors,
   TrafficReceipt,
   TrafficStateController,
 }
@@ -175,6 +185,7 @@ final class SequencerClientTest
   private lazy val materializer: Materializer = Materializer(actorSystem)
   private lazy val topologyWithTrafficControl =
     TestingTopology(Set(DefaultTestIdentities.physicalSynchronizerId))
+      .withSimpleParticipants(participant1)
       .withDynamicSynchronizerParameters(
         DefaultTestIdentities.defaultDynamicSynchronizerParameters.tryUpdate(
           trafficControlParameters = Some(
@@ -1203,6 +1214,39 @@ final class SequencerClientTest
         testF.futureValueUS
         env.client.close()
       }
+
+      "reject with the RpcError produced by traffic enforcement when traffic cost validation fails" in {
+        val env = RichEnvFactory.create(
+          topologyO = Some(topologyWithTrafficControl)
+        )
+        implicit val errorLoggingContext: ErrorLoggingContext =
+          ErrorLoggingContext.fromTracedLogger(logger)
+        val rejection: RpcError = TrafficControlErrors.TrafficStateNotFound.Error()
+        val rejectingValidator = new TrafficCostValidator {
+          override def validate(
+              trafficCost: Long,
+              traceContext: TraceContext,
+          ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+            EitherT.leftT(rejection)
+        }
+
+        val result = env
+          .sendAsync(
+            Batch.of(
+              testedProtocolVersion,
+              (new TestProtocolMessage(), Recipients.cc(participant1)),
+            ),
+            trafficCostValidator = rejectingValidator,
+          )
+          .value
+          .futureValueUS
+
+        result shouldBe Left(SendAsyncClientError.TrafficEnforcementRejected(rejection))
+        // the rejection happens before trackSend/performSend, so the mock transport is never invoked
+        env.pool.connection.lastSend.get() shouldBe None
+
+        env.client.close()
+      }
     }
 
     "a synchronous error" should {
@@ -1655,6 +1699,7 @@ final class SequencerClientTest
         messageId: MessageId = client.generateMessageId,
         amplify: Boolean = false,
         useConfirmationResponseAmplificationParameters: Boolean = false,
+        trafficCostValidator: TrafficCostValidator = NoTrafficCostValidation,
     )(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
@@ -1665,6 +1710,7 @@ final class SequencerClientTest
         amplify = amplify,
         useConfirmationResponseAmplificationParameters =
           useConfirmationResponseAmplificationParameters,
+        trafficCostValidator = trafficCostValidator,
       )
     }
 

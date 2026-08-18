@@ -24,11 +24,13 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   OriginalByteString,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
   VersioningCompanionMemoization2,
@@ -132,7 +134,7 @@ object SignedContent
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SignedContent)(
-      supportedProtoVersionMemoized(_)(fromProtoV30),
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -264,17 +266,20 @@ object SignedContent
       .valueOr(err => throw new IllegalStateException(s"Failed to create signed content: $err"))
 
   def fromProtoV30(
-      signedValueP: v30.SignedContent
+      pvv: ProtocolVersionValidation,
+      signedValueP: v30.SignedContent,
   )(
       bytes: ByteString
   ): ParsingResult[SignedContent[BytestringWithCryptographicEvidence]] = {
     val v30.SignedContent(content, signatures, timestampOfSigningKey) = signedValueP
     for {
       contentB <- ProtoConverter.required("content", content)
+      signaturesSeq <- ProtoValidation
+        .validateLength(signatures, Some("signature"), pvv, ProtoValidation.MaxCollectionSize)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "signature",
-        signatures,
+        signaturesSeq,
       )
       ts <- timestampOfSigningKey.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))

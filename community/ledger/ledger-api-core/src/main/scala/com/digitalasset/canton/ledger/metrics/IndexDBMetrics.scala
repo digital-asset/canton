@@ -174,6 +174,12 @@ trait UpdateStreamsDbMetrics {
 
     val fetchTopologyPartyEventPayloads: DatabaseMetrics =
       createDbMetrics("fetch_topology_party_event_payloads")
+
+    val fetchDynamicSynchronizerParametersEventIds: DatabaseMetrics =
+      createDbMetrics("fetch_dynamic_synchronizer_parameters_event_ids")
+
+    val fetchDynamicSynchronizerParametersEventPayloads: DatabaseMetrics =
+      createDbMetrics("fetch_dynamic_synchronizer_parameters_event_payloads")
   }
 
   val topologyTransactionsStream: TopologyTransactionsStreamMetrics =

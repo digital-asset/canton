@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import cats.implicits.*
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
@@ -21,17 +22,7 @@ import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.speedy.SValue.{SAnyException, SArithmeticError, SRecord, SText}
 import com.digitalasset.daml.lf.speedy.metrics.{MetricPlugin, StepCount}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  GlobalKey,
-  GlobalKeyWithMaintainers,
-  IncompleteTransaction as IncompleteTx,
-  NeedKeyProgression,
-  Node,
-  NodeId,
-  SerializationVersion,
-  SubmittedTransaction,
-}
+import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value.ValueArithmeticError
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value as V}
 
@@ -170,14 +161,6 @@ private[lf] object Speedy {
   private[speedy] def throwLimitError(location: String, error: IError.Dev.Limit.Error): Nothing =
     throw SError.SErrorDamlException(interpretation.Error.Dev(location, IError.Dev.Limit(error)))
 
-  private[this] def enforceLimit(
-      location: String,
-      actual: Int,
-      limit: Int,
-      error: Int => IError.Dev.Limit.Error,
-  ): Unit =
-    if (actual > limit) throwLimitError(location, error(limit))
-
   // See implementation of UpdateMachine.handleException to see use of UnwindResult
   sealed trait UnwindResult
   object UnwindResult {
@@ -215,7 +198,7 @@ private[lf] object Speedy {
       initialEnvSize: Int,
       initialKontStackSize: Int,
       metricPlugins: Seq[MetricPlugin],
-      logger: MachineLogger,
+      val logger: MachineLogger,
   ) extends Machine[Question.Update](
         costModel = costModel,
         initialGasBudget = initialGasBudget,
@@ -227,6 +210,9 @@ private[lf] object Speedy {
 
     private[this] var contractLookupCache =
       Map.empty[V.ContractId, (FatContractInstance, Hash.HashingMethod, Hash => Boolean)]
+
+    private[this] def getContractLookupCache: Map[V.ContractId, FatContractInstance] =
+      contractLookupCache.view.mapValues(_._1).toMap
 
     // To handle continuation exceptions, as continuations run outside the interpreter loop.
     // Here we delay the throw to the interpreter loop, but it would be probably better
@@ -381,13 +367,18 @@ private[lf] object Speedy {
             contractLookupCache =
               contractLookupCache.updated(coid, (coinst, hashingMethod, idValidator))
             entry
-          }
+          }(Control.`Defer Control`)
       }
 
     private[speedy] override def asUpdateMachine(location: String)(
         f: UpdateMachine => Control[Question.Update]
     ): Control[Question.Update] =
       f(this)
+
+    private[speedy] override def asCmdMachine(location: String)(
+        f: CmdMachine => Control[Question.Cmd]
+    ): Control[Question.Update] =
+      throw SErrorCrash(location, "unexpected update machine in cmd context")
 
     /** unwindToHandler is called when an exception is thrown by the builtin SBThrow or re-thrown by
       * the builtin SBTryHandler. If a rollback of an effectful node is attempted, we error out with
@@ -418,12 +409,6 @@ private[lf] object Speedy {
               }
             case KCloseExercise =>
               unwind(ptx.abortExercises)
-            case k: KCheckChoiceGuard =>
-              // We must abort, because the transaction has failed in a way that is
-              // unrecoverable (it depends on the state of an input contract that
-              // we may not have the authority to fetch).
-              abort()
-              k.abort()
             case KPreventException() =>
               UnwindResult.Unhandled
             case converting: KConvertingException[Question.Update] =>
@@ -458,8 +443,6 @@ private[lf] object Speedy {
 
     // global contract discriminators, that are discriminators from contract created in previous transactions
 
-    private[this] var numInputContracts: Int = 0
-
     def getTimeBoundaries: Time.Range =
       timeBoundaries
 
@@ -472,7 +455,7 @@ private[lf] object Speedy {
         SVisibleToStakeholders.fromSubmitters(committers, readAs)
       }
 
-    def incompleteTransaction: IncompleteTx = ptx.finishIncomplete
+    def incompleteTransaction: IncompleteTransaction = ptx.finishIncomplete
     def nodesToString: String = ptx.nodesToString
 
     /** Local Contract Store: Maps contract-id to type+svalue, for LOCALLY-CREATED contracts.
@@ -517,90 +500,6 @@ private[lf] object Speedy {
       else
         needPackage(loc, packageId, ref)
 
-    private[speedy] def enforceLimitSignatoriesAndObservers(
-        cid: V.ContractId,
-        contract: ContractInfo,
-    ): Unit = {
-      enforceLimit(
-        NameOf.qualifiedNameOfCurrentFunc,
-        contract.signatories.size,
-        limits.contractSignatories,
-        IError.Dev.Limit
-          .ContractSignatories(
-            cid,
-            contract.templateId,
-            contract.createArg,
-            contract.signatories,
-            _,
-          ),
-      )
-      enforceLimit(
-        NameOf.qualifiedNameOfCurrentFunc,
-        contract.observers.size,
-        limits.contractObservers,
-        IError.Dev.Limit
-          .ContractObservers(
-            cid,
-            contract.templateId,
-            contract.createArg,
-            contract.observers,
-            _,
-          ),
-      )
-    }
-
-    private[speedy] def enforceLimitAddInputContract(): Unit = {
-      numInputContracts += 1
-      enforceLimit(
-        NameOf.qualifiedNameOfCurrentFunc,
-        numInputContracts,
-        limits.transactionInputContracts,
-        IError.Dev.Limit.TransactionInputContracts.apply,
-      )
-    }
-
-    private[speedy] def enforceChoiceControllersLimit(
-        controllers: Set[Party],
-        cid: V.ContractId,
-        templateId: TypeConId,
-        choiceName: ChoiceName,
-        arg: V,
-    ): Unit =
-      enforceLimit(
-        NameOf.qualifiedNameOfCurrentFunc,
-        controllers.size,
-        limits.choiceControllers,
-        IError.Dev.Limit.ChoiceControllers(cid, templateId, choiceName, arg, controllers, _),
-      )
-
-    private[speedy] def enforceChoiceObserversLimit(
-        observers: Set[Party],
-        cid: V.ContractId,
-        templateId: TypeConId,
-        choiceName: ChoiceName,
-        arg: V,
-    ): Unit =
-      enforceLimit(
-        NameOf.qualifiedNameOfCurrentFunc,
-        observers.size,
-        limits.choiceObservers,
-        IError.Dev.Limit.ChoiceObservers(cid, templateId, choiceName, arg, observers, _),
-      )
-
-    private[speedy] def enforceChoiceAuthorizersLimit(
-        authorizers: Set[Party],
-        cid: V.ContractId,
-        templateId: TypeConId,
-        choiceName: ChoiceName,
-        arg: V,
-    ): Unit =
-      enforceLimit(
-        NameOf.qualifiedNameOfCurrentFunc,
-        authorizers.size,
-        limits.choiceAuthorizers,
-        IError.Dev.Limit.ChoiceAuthorizers(cid, templateId, choiceName, arg, authorizers, _),
-      )
-
     @throws[IllegalArgumentException]
     def zipSameLength[X, Y](xs: ImmArray[X], ys: ImmArray[Y]): ImmArray[(X, Y)] = {
       val n1 = xs.length
@@ -614,6 +513,7 @@ private[lf] object Speedy {
     def finish: Either[SErrorCrash, UpdateMachine.Result] = ptx.finish.map { case (tx, seeds) =>
       UpdateMachine.Result(
         tx,
+        getContractLookupCache,
         ptx.locationInfo(),
         zipSameLength(seeds, ptx.actionNodeSeeds.toImmArray),
         ptx.csmJournal.keyInputs.transform((_, v) => v.queue),
@@ -665,10 +565,13 @@ private[lf] object Speedy {
             s"in fetch-by-key command ${prettyTypeId(tmplId)} on key ${prettyValue(key)}."
           case Command.CreateAndExercise(tmplId, _, choiceId, _) =>
             s"in create-and-exercise command ${prettyTypeId(tmplId)}:$choiceId."
+          case Command.QueryNByKey(tmplId, n, key) =>
+            s"in query-by-key command ${prettyTypeId(tmplId)} on key ${prettyValue(key)}."
         }
         .foreach(addLine)
       stringBuilder.result()
     }
+
   }
 
   object UpdateMachine {
@@ -730,6 +633,7 @@ private[lf] object Speedy {
 
     private[lf] final case class Result(
         tx: SubmittedTransaction,
+        inputContracts: Map[V.ContractId, FatContractInstance],
         locationInfo: Map[NodeId, Location],
         seeds: NodeSeeds,
         globalKeyMapping: Map[GlobalKey, Vector[V.ContractId]],
@@ -760,6 +664,11 @@ private[lf] object Speedy {
         f: UpdateMachine => Control[Question.Update]
     ): Nothing =
       throw SErrorCrash(location, "unexpected pure machine")
+
+    private[speedy] override def asCmdMachine(location: String)(
+        f: CmdMachine => Control[Question.Cmd]
+    ): Nothing =
+      throw SErrorCrash(location, "unexpected pure machine in cmd context")
 
     /** Pure Machine does not handle exceptions */
     private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] =
@@ -957,6 +866,10 @@ private[lf] object Speedy {
 
     private[speedy] def asUpdateMachine(location: String)(
         f: UpdateMachine => Control[Question.Update]
+    ): Control[Q]
+
+    private[speedy] def asCmdMachine(location: String)(
+        f: CmdMachine => Control[Question.Cmd]
     ): Control[Q]
 
     @inline
@@ -1250,6 +1163,23 @@ private[lf] object Speedy {
 
     @throws[PackageNotFound]
     @throws[CompilationError]
+    def fromCmdSExpr(
+        compiledPackages: CompiledPackages,
+        expr: SExpr,
+        logger: MachineLogger,
+        iterationsBetweenInterruptions: Long = Long.MaxValue,
+        profile: Profile = newProfile,
+    ): CmdMachine =
+      new CmdMachine(
+        sexpr = expr,
+        compiledPackages = compiledPackages,
+        profile = profile,
+        iterationsBetweenInterruptions = iterationsBetweenInterruptions,
+        logger = logger,
+      )
+
+    @throws[PackageNotFound]
+    @throws[CompilationError]
     // Construct a machine for running an update expression, only used for
     // testing
     def fromUpdateExpr(
@@ -1391,6 +1321,40 @@ private[lf] object Speedy {
           throw SErrorDamlException(IError.ContractIdInContractKey(keyValue.toUnnormalizedValue))
         )
 
+  }
+
+  final class CmdMachine(
+      override val sexpr: SExpr,
+      override var compiledPackages: CompiledPackages,
+      override val profile: Profile,
+      override val iterationsBetweenInterruptions: Long,
+      logger: MachineLogger,
+  ) extends Machine[Question.Cmd](
+        costModel = CostModel.Empty,
+        initialGasBudget = None,
+        initialEnvSize = 512,
+        initialKontStackSize = 128,
+        metricPlugins = Seq.empty,
+        logger = logger,
+      ) {
+
+    private[speedy] override def asUpdateMachine(location: String)(
+        f: UpdateMachine => Control[Question.Update]
+    ): Control[Question.Cmd] =
+      throw SErrorCrash(location, "unexpected cmd machine in update context")
+
+    private[speedy] override def asCmdMachine(location: String)(
+        f: CmdMachine => Control[Question.Cmd]
+    ): Control[Question.Cmd] =
+      f(this)
+
+    // Exception handling is not supported in the command path. A Daml exception (an uncaught
+    // `throw`) that reaches the CmdMachine crashes instead of being converted to a failure status.
+    private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] =
+      throw SErrorCrash(
+        NameOf.qualifiedNameOfCurrentFunc,
+        s"exception handling not available in the command path: $excep",
+      )
   }
 
   // Environment
@@ -1721,35 +1685,6 @@ private[lf] object Speedy {
         machine.currentActuals,
         handler: SExpr,
       )
-  }
-
-  private[speedy] final case class KCheckChoiceGuard(
-      coid: V.ContractId,
-      templateId: TypeConId,
-      choiceName: ChoiceName,
-      byInterface: Option[TypeConId],
-  ) extends Kont[Question.Update] {
-    def abort(): Nothing =
-      throw SErrorDamlException(
-        IError.Dev(
-          NameOf.qualifiedNameOfCurrentFunc,
-          IError.Dev.ChoiceGuardFailed(coid, templateId, choiceName, byInterface),
-        )
-      )
-
-    override def execute(machine: Machine[Question.Update], v: SValue): Control.Value = {
-      machine.updateGasBudget(_.KCheckChoiceGuard.cost)
-
-      v match {
-        case SValue.SBool(b) =>
-          if (b)
-            Control.Value(SValue.SUnit)
-          else
-            abort()
-        case _ =>
-          throw SErrorCrash("KCheckChoiceGuard", "Expected SBool value.")
-      }
-    }
   }
 
   /** Continuation produced by [[SELabelClosure]] expressions. This is only used during profiling.

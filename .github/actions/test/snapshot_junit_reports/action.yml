@@ -1,0 +1,59 @@
+name: Snapshot JUnit Reports
+description: Copy JUnit XML reports to a snapshot directory for deterministic post-processing.
+
+inputs:
+  output_dir:
+    required: true
+    description: Destination directory for copied JUnit XML files
+  junit_glob:
+    required: false
+    default: "**/target/**/TEST-*.xml"
+    description: >
+      Glob pattern used to discover JUnit XML files. Defaults to sbt standard output paths
+      to avoid pulling stale reports from previous jobs on reused runners.
+
+runs:
+  using: composite
+  steps:
+    - name: Clean output directory
+      env:
+        OUTPUT_DIR: ${{ inputs.output_dir }}
+      shell: bash
+      run: |
+        rm -rf "$OUTPUT_DIR"
+
+    - name: Snapshot JUnit XML files
+      env:
+        JUNIT_GLOB: ${{ inputs.junit_glob }}
+        OUTPUT_DIR: ${{ inputs.output_dir }}
+      uses: ./.github/actions/nix/nix_script_run
+      with:
+        command: |
+          python3 - <<'PY'
+          import glob
+          import os
+          import shutil
+
+          output_dir = os.environ["OUTPUT_DIR"]
+          junit_glob = os.environ["JUNIT_GLOB"]
+          working_directory = os.getcwd()
+
+          copied = 0
+          for path in sorted(glob.glob(junit_glob, recursive=True)):
+              if not os.path.isfile(path):
+                  continue
+              normalized_path = os.path.relpath(os.path.abspath(path), start=working_directory)
+              if normalized_path == os.pardir or normalized_path.startswith(os.pardir + os.sep):
+                  raise ValueError(
+                      f"JUnit report path must be inside the working directory: {path}"
+                  )
+              destination = os.path.join(output_dir, normalized_path)
+              os.makedirs(os.path.dirname(destination), exist_ok=True)
+              shutil.copy2(path, destination)
+              copied += 1
+
+          if copied == 0:
+              print("::warning::No JUnit XML files were found to snapshot.")
+
+          print(f"Snapshot JUnit reports to '{output_dir}': copied {copied} files")
+          PY

@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParamete
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.error.LsuError
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -16,6 +17,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.{PartyId, TopologyManagerError}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -193,6 +195,11 @@ final class LsuCancellationIntegrationTest extends LsuBase {
         _.shouldBeCantonErrorCode(SequencerError.NoLsuAnnounced),
       )
 
+      // Psid connection is expected to be marked Inactive for the cancelled LSU
+      val connectionStore = participant1.underlying.value.sync.synchronizerConnectionConfigStore
+      val cancelledLsuConnection = connectionStore.get(fixture1.newPsid).value
+      cancelledLsuConnection.status shouldBe SynchronizerConnectionConfigStore.Inactive
+
       sequencer2.stop()
       mediator2.stop()
 
@@ -222,10 +229,16 @@ final class LsuCancellationIntegrationTest extends LsuBase {
           .value
           .futureValueUS
           .left
-          .value shouldBe "No synchronizer upgrade ongoing"
+          .value shouldBe LsuError.Internal.Error("No synchronizer upgrade ongoing")
       }
 
       bob = participant1.parties.enable("Bob")
+
+      clue("participant restart after an LSU cancellation should work") {
+        participant1.stop()
+        participant1.start()
+        participant1.synchronizers.reconnect_all()
+      }
     }
 
     "second LSU" in { implicit env =>
@@ -237,6 +250,12 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       mediator3.start()
 
       performSynchronizerNodesLsu(fixture2)
+
+      clue("participant restart after a new LSU is announced should work") {
+        participant1.stop()
+        participant1.start()
+        participant1.synchronizers.reconnect_all()
+      }
 
       clock.advanceTo(upgradeTime2.immediateSuccessor)
       transferTraffic(Some(fixture2))
@@ -256,6 +275,28 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       participant1.topology.party_to_participant_mappings
         .list(fixture2.newPsid, filterParty = bob.filterString)
         .loneElement
+
+      clue("second LSU should complete") {
+        eventually() {
+          environment.simClock.foreach(_.advance(Duration.ofSeconds(1)))
+          participants.all.forall(_.synchronizers.is_connected(fixture2.newPsid)) shouldBe true
+          participants.all.forall(_.synchronizers.is_connected(fixture2.currentPsid)) shouldBe false
+        }
+      }
+
+      clue(s"ping should work on ${fixture2.newPsid}") {
+        participant1.health.ping(participant1)
+      }
+
+      clue("participant restart after a successful LSU should work") {
+        participant1.stop()
+        participant1.start()
+        participant1.synchronizers.reconnect_all()
+      }
+
+      clue(s"ping should work on ${fixture2.newPsid} after the restart") {
+        participant1.health.ping(participant1)
+      }
     }
   }
 }

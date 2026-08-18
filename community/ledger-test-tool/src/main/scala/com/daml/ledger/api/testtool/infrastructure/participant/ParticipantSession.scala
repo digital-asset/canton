@@ -56,7 +56,7 @@ private[infrastructure] final class ParticipantSession private (
   ): Future[ParticipantTestContext] =
     for {
       end <- services.state
-        .getLedgerEnd(new GetLedgerEndRequest())
+        .getLedgerEnd(new GetLedgerEndRequest(Seq()))
         .map(_.offset)
       participantId <- services.partyManagement
         .getParticipantId(new GetParticipantIdRequest())

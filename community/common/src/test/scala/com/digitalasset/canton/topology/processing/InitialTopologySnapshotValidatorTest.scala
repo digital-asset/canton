@@ -23,7 +23,7 @@ import com.digitalasset.canton.topology.transaction.{
   DecentralizedNamespaceDefinition,
   SignedTopologyTransaction,
 }
-import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersionValidation}
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -158,7 +158,7 @@ abstract class InitialTopologySnapshotValidatorTest
 
         SignedTopologyTransaction
           .fromProtoV30(
-            ProtocolVersionValidation.NoValidation,
+            testedProtocolVersionValidation,
             protoWithDuplicateSig,
           )
           .value

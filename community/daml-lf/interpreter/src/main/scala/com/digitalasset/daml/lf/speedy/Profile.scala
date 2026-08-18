@@ -192,6 +192,7 @@ object Profile {
   }
 
   final case class CreateAndExerciseLabel(tplId: Ref.DefinitionRef, choiceId: Ref.ChoiceName)
+  final case class QueryNByKeyLabel(tplId: Ref.DefinitionRef)
 
   sealed abstract class ScenarioLabel extends Product with Serializable
 
@@ -242,6 +243,7 @@ object Profile {
       implicit val interfaceChoiceDefRef: Allowed[InterfaceChoiceDefRef] = allowAll
       implicit val choiceControllerDefRef: Allowed[ChoiceControllerDefRef] = allowAll
       implicit val choiceObserverDefRef: Allowed[ChoiceObserverDefRef] = allowAll
+      implicit val choiceAuthorizersDefRef: Allowed[ChoiceAuthorizersDefRef] = allowAll
       implicit val fetchTemplateDefRef: Allowed[FetchTemplateDefRef] = allowAll
       implicit val fetchInterfaceDefRef: Allowed[FetchInterfaceDefRef] = allowAll
       implicit val choiceByKeyDefRef: Allowed[ChoiceByKeyDefRef] = allowAll
@@ -250,7 +252,20 @@ object Profile {
 
       implicit val contractKeyWithMaintainersDefRef: Allowed[ContractKeyWithMaintainersDefRef] =
         allowAll
+      implicit val contractKeyDefRef: Allowed[ContractKeyDefRef] = allowAll
+      implicit val keyMaintainersDefRef: Allowed[KeyMaintainersDefRef] = allowAll
+      implicit val cmdCreateDefRef: Allowed[CmdCreateDefRef] = allowAll
+      implicit val cmdFetchTemplateDefRef: Allowed[CmdFetchTemplateDefRef] = allowAll
+      implicit val cmdFetchInterfaceDefRef: Allowed[CmdFetchInterfaceDefRef] = allowAll
+      implicit val cmdFetchByKeyDefRef: Allowed[CmdFetchByKeyDefRef] = allowAll
+      implicit val cmdQueryNByKeyDefRef: Allowed[CmdQueryNByKeyDefRef] = allowAll
+      implicit val cmdExerciseTemplateDefRef: Allowed[CmdExerciseTemplateDefRef] = allowAll
+      implicit val cmdExerciseInterfaceDefRef: Allowed[CmdExerciseInterfaceDefRef] = allowAll
+      implicit val cmdExerciseByKeyDefRef: Allowed[CmdExerciseByKeyDefRef] = allowAll
+      implicit val cmdChoiceBodyDefRef: Allowed[CmdChoiceBodyDefRef] = allowAll
+      implicit val cmdInterfaceChoiceBodyDefRef: Allowed[CmdInterfaceChoiceBodyDefRef] = allowAll
       implicit val createAndExerciseLabel: Allowed[CreateAndExerciseLabel] = allowAll
+      implicit val queryNByKeyLabel: Allowed[QueryNByKeyLabel] = allowAll
       implicit val exceptionMessageDefRef: Allowed[ExceptionMessageDefRef] = allowAll
       implicit val scenarioLabel: Allowed[ScenarioLabel] = allowAll
       implicit val exprVarName: Allowed[Ast.ExprVarName] = allowAll
@@ -270,6 +285,23 @@ object Profile {
           case SignatoriesDefRef(tmplRef) => s"signatories @${tmplRef.qualifiedName}"
           case ObserversDefRef(tmplRef) => s"observers @${tmplRef.qualifiedName}"
           case ContractKeyWithMaintainersDefRef(tmplRef) => s"key @${tmplRef.qualifiedName}"
+          case ContractKeyDefRef(tmplRef) => s"keyBody @${tmplRef.qualifiedName}"
+          case KeyMaintainersDefRef(tmplRef) => s"maintainers @${tmplRef.qualifiedName}"
+          case CmdCreateDefRef(tmplRef) => s"cmdCreate @${tmplRef.qualifiedName}"
+          case CmdFetchTemplateDefRef(tmplRef) => s"cmdFetch @${tmplRef.qualifiedName}"
+          case CmdFetchInterfaceDefRef(ifaceRef) => s"cmdFetchInterface @${ifaceRef.qualifiedName}"
+          case CmdFetchByKeyDefRef(tmplRef) => s"cmdFetchByKey @${tmplRef.qualifiedName}"
+          case CmdQueryNByKeyDefRef(tmplRef) => s"cmdQueryNByKey @${tmplRef.qualifiedName}"
+          case CmdExerciseTemplateDefRef(tmplRef, name) =>
+            s"cmdExercise @${tmplRef.qualifiedName} $name"
+          case CmdExerciseInterfaceDefRef(ifaceRef, name) =>
+            s"cmdExerciseInterface @${ifaceRef.qualifiedName} $name"
+          case CmdExerciseByKeyDefRef(tmplRef, name) =>
+            s"cmdExerciseByKey @${tmplRef.qualifiedName} $name"
+          case CmdChoiceBodyDefRef(tmplRef, name) =>
+            s"cmdChoiceBody @${tmplRef.qualifiedName} $name"
+          case CmdInterfaceChoiceBodyDefRef(ifaceRef, name) =>
+            s"cmdInterfaceChoiceBody @${ifaceRef.qualifiedName} $name"
           case ToContractInfoDefRef(tmplRef) => s"toAnyContract @${tmplRef.qualifiedName}"
           case InterfaceInstanceMethodDefRef(ii, methodName) =>
             s"interfaceInstanceMethod @${ii.parent.qualifiedName} @${ii.interfaceId.qualifiedName} @${ii.templateId.qualifiedName} $methodName"

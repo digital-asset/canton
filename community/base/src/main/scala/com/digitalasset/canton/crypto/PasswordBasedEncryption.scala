@@ -61,10 +61,10 @@ object PasswordBasedEncrypted extends HasVersionedMessageCompanion[PasswordBased
   ): ParsingResult[PasswordBasedEncrypted] =
     for {
       symmetricKeyScheme <- SymmetricKeyScheme.fromProtoEnum(
-        "symmetric_key_scheme",
         encryptedP.symmetricKeyScheme,
+        "symmetric_key_scheme",
       )
-      pbkdfScheme <- PbkdfScheme.fromProtoEnum("pbkdf_scheme", encryptedP.pbkdfScheme)
+      pbkdfScheme <- PbkdfScheme.fromProtoEnum(encryptedP.pbkdfScheme, "pbkdf_scheme")
       // Validate that the salt has the expected length for the PBKDF scheme.
       // An empty or short salt defeats the purpose of password-based key derivation by
       // enabling precomputation attacks (rainbow tables) against the password.
@@ -167,8 +167,8 @@ object PbkdfScheme {
   }
 
   def fromProtoEnum(
-      field: String,
       schemeP: v30.PbkdfScheme,
+      field: String,
   ): ParsingResult[PbkdfScheme] =
     schemeP match {
       case v30.PbkdfScheme.PBKDF_SCHEME_UNSPECIFIED =>

@@ -15,6 +15,10 @@ object NonEmptyReturningOps {
   implicit final class `NE Iterable Ops`[A, CC[_], C](
       private val self: IterableOps[A, CC, C with imm.Iterable[A]]
   ) extends AnyVal {
+
+    def grouped1(size: Int): Iterator[NonEmpty[C]] =
+      NonEmptyColl.Instance.subst[Lambda[`f[_]` => Iterator[f[C]]]](self.grouped(size))
+
     def groupBy1[K](f: A => K): Map[K, NonEmpty[C]] =
       NonEmptyColl.Instance.subst[Lambda[`f[_]` => Map[K, f[C]]]](self groupBy f)
 

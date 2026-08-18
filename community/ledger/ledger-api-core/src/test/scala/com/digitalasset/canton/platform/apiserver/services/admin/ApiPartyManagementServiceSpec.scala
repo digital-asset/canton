@@ -144,6 +144,7 @@ class ApiPartyManagementServiceSpec
     oneHour,
     createSubmissionId,
     mock[PartyAllocation.Tracker],
+    new PendingPartyAllocations,
     loggerFactory = loggerFactory,
   )
 
@@ -367,7 +368,7 @@ class ApiPartyManagementServiceSpec
                       )
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(_).value)
+                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -408,7 +409,7 @@ class ApiPartyManagementServiceSpec
                       )
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(_).value)
+                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -447,7 +448,7 @@ class ApiPartyManagementServiceSpec
                       _.partyToParticipant.optionalPartySigningKeys.set(None)
                     )
                 )
-                .map(TopologyMapping.fromProtoV30(_).value)
+                .map(TopologyMapping.fromProtoV30(testedProtocolVersionValidation, _).value)
                 .map(
                   TopologyTransaction.tryCreate(
                     TopologyChangeOp.Replace,
@@ -821,6 +822,7 @@ class ApiPartyManagementServiceSpec
         oneHour,
         createSubmissionId,
         partyAllocationTracker,
+        new PendingPartyAllocations,
         loggerFactory = loggerFactory,
       )
 

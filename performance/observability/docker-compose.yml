@@ -66,9 +66,11 @@ services:
     container_name: performance_tests_observability_node_exporter
 
   postgres-exporter:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # PostgreSQL Server Exporter
     # https://github.com/prometheus-community/postgres_exporter/blob/master/CHANGELOG.md
-    image: quay.io/prometheuscommunity/postgres-exporter:v0.14.0
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
     container_name: performance_tests_observability_postgres_exporter
     # The database collector does not work very well with databases that are dropped/restored making the entire exporter die.
     # Disabling it does not have effect on the Postgres dashboard.
@@ -76,6 +78,6 @@ services:
     environment:
       DATA_SOURCE_USER: "${OBSERVABILITY_POSTGRES_USER}"
       DATA_SOURCE_PASS: "${OBSERVABILITY_POSTGRES_PASS}"
-      DATA_SOURCE_URI: "${OBSERVABILITY_POSTGRES_HOST}:5432/postgres"
+      DATA_SOURCE_URI: "host.docker.internal:5432/postgres?sslmode=disable"
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: true
     volumes: []

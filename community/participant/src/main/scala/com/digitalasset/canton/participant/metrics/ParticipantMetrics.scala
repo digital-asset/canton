@@ -19,6 +19,7 @@ import com.digitalasset.canton.http.metrics.{HttpApiHistograms, HttpApiMetrics}
 import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.participant.metrics.PruningMetrics as ParticipantPruningMetrics
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 
 import scala.collection.concurrent.TrieMap
@@ -135,6 +136,9 @@ class ParticipantMetrics(
 
   val httpApiServer: HttpApiMetrics =
     new HttpApiMetrics(inventory.httpApi, openTelemetryMetricsFactory)
+
+  val trafficEnforcement: TrafficEnforcementMetrics =
+    new TrafficEnforcementMetrics(prefix, openTelemetryMetricsFactory)
 
   private val clients = TrieMap[SynchronizerAlias, Eval[ConnectedSynchronizerMetrics]]()
 

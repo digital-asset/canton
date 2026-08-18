@@ -8,10 +8,12 @@ import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   UnsupportedProtoCodec,
   VersionedProtoCodec,
@@ -92,10 +94,17 @@ object LegacyAcsCommitmentProtocolMessage
     val v30.AcsCommitmentProtocolMessage(acsCommitmentP, signaturesP) = message
     for {
       acsCommitment <- LegacyAcsCommitment.fromByteString(expectedProtocolVersion, acsCommitmentP)
+      signaturesSeqP <- ProtoValidation
+        .validateLength(
+          signaturesP,
+          Some("signatures"),
+          ProtocolVersionValidation.PV(expectedProtocolVersion),
+          ProtoValidation.MaxCollectionSize,
+        )
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "signatures",
-        signaturesP,
+        signaturesSeqP,
       )
     } yield LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures)
   }

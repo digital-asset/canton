@@ -22,7 +22,8 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorId, Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -520,17 +521,17 @@ final case class AggregationRule(
     input match {
       case AggregationRuleInput.Resolved(eligibleSenders, threshold) =>
         v30.AggregationRule(
-          eligibleMembers = eligibleSenders.map(_.toProtoPrimitive),
+          eligibleMembers = eligibleSenders.map(_.toProtoPrimitive.toProtoUnvalidated),
           threshold = threshold.value,
         )
       case AggregationRuleInput.MediatorGroup(index) =>
         v30.AggregationRule(
-          eligibleMembers = Seq(MediatorGroupRecipient(index).toProtoPrimitive),
+          eligibleMembers = Seq(MediatorGroupRecipient(index).toProtoPrimitive.toProtoUnvalidated),
           threshold = 0, // ignored
         )
       case AggregationRuleInput.SequencerGroup =>
         v30.AggregationRule(
-          eligibleMembers = Seq(SequencersOfSynchronizer.toProtoPrimitive),
+          eligibleMembers = Seq(SequencersOfSynchronizer.toProtoPrimitive.toProtoUnvalidated),
           threshold = 0, // ignored
         )
       case AggregationRuleInput.SenderDedup =>
@@ -632,14 +633,21 @@ object AggregationRule
 
     if (useMemberIdsAsEligibleMembers.v) {
       for {
+        eligibleMembersSeqP <- ProtoValidation
+          .validateLength(
+            eligibleMembersP,
+            Some("eligible_members"),
+            pvv,
+            ProtoValidation.MaxCollectionSize,
+          )
         eligibleMembers <- ProtoConverter.parseRequiredNonEmpty(
-          (member: String) =>
+          (member: ProtoUnvalidatedString) =>
             ProtoValidation
               .validateThen(member, "eligible_members", pvv)(
                 Member.fromProtoPrimitive
               ),
           "eligible_members",
-          eligibleMembersP,
+          eligibleMembersSeqP,
         )
         threshold <- ProtoConverter.parsePositiveInt("threshold", thresholdP)
         rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
@@ -682,6 +690,7 @@ object AggregationRule
           eligibleMembersP,
           "eligible_members",
           pvv,
+          ProtoValidation.MaxCollectionSize,
         )(
           Recipient.fromProtoPrimitive
         )

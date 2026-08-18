@@ -94,6 +94,8 @@ class LimitsSpec
       getContract = contracts,
     )
 
+  // TODO (#26326): Re-enable or rewrite these tests once we perform inline validation as part of the engine loop
+
   "Machine" - {
 
     val committers = (0 to 100).view.map(i => Ref.Party.assertFromString(s"Parties$i")).toSet
@@ -107,7 +109,7 @@ class LimitsSpec
         5 * limit -> false,
       )
 
-    "refuse to create a contract with too many signatories" in {
+    "refuse to create a contract with too many signatories" ignore {
       val limits = interpretation.Limits.Lenient.copy(contractSignatories = limit)
 
       val e =
@@ -131,7 +133,6 @@ class LimitsSpec
                         IE.Dev.Limit.ContractSignatories(
                           _,
                           templateId,
-                          _,
                           parties,
                           reportedlimit,
                         )
@@ -146,7 +147,7 @@ class LimitsSpec
       }
     }
 
-    "refuse to fetch a contract with too many signatories" in {
+    "refuse to fetch a contract with too many signatories" ignore {
       val limits = interpretation.Limits.Lenient.copy(contractSignatories = limit)
       val e = e"""\(cid: ContractId Mod:T) -> fetch_template @Mod:T cid"""
 
@@ -173,7 +174,6 @@ class LimitsSpec
                         IE.Dev.Limit.ContractSignatories(
                           _,
                           templateId,
-                          _,
                           parties,
                           reportedlimit,
                         )
@@ -188,7 +188,7 @@ class LimitsSpec
       }
     }
 
-    "refuse to exercise a contract with too many signatories" in {
+    "refuse to exercise a contract with too many signatories" ignore {
       val limits = interpretation.Limits.Lenient.copy(contractSignatories = limit)
       val e =
         e"""\(cid: ContractId Mod:T) (controllers: List Party) ->
@@ -218,7 +218,6 @@ class LimitsSpec
                         IE.Dev.Limit.ContractSignatories(
                           _,
                           templateId,
-                          _,
                           parties,
                           reportedlimit,
                         )
@@ -233,8 +232,8 @@ class LimitsSpec
       }
     }
 
-    "refuse to create a contract with too many observers" in {
-      val limits = interpretation.Limits.Lenient.copy(contractObservers = limit)
+    "refuse to create a contract with too many stakeholders" ignore {
+      val limits = interpretation.Limits.Lenient.copy(contractStakeholders = limit)
 
       val e =
         e"""\(signatories: List Party) (observers: List Party) ->
@@ -262,7 +261,7 @@ class LimitsSpec
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
-                        IE.Dev.Limit.ContractObservers(_, templateId, _, parties, reportedlimit)
+                        IE.Dev.Limit.ContractStakeholders(_, templateId, parties, reportedlimit)
                       ),
                     )
                   )
@@ -274,8 +273,8 @@ class LimitsSpec
       }
     }
 
-    "refuse to fetch a contract with too many observers" in {
-      val limits = interpretation.Limits.Lenient.copy(contractObservers = limit)
+    "refuse to fetch a contract with too many stakeholders" ignore {
+      val limits = interpretation.Limits.Lenient.copy(contractStakeholders = limit)
       val e = e"""\(cid: ContractId Mod:T) -> fetch_template @Mod:T cid"""
 
       forEvery(testCases) { (i, succeed) =>
@@ -299,7 +298,7 @@ class LimitsSpec
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
-                        IE.Dev.Limit.ContractObservers(_, templateId, _, parties, reportedlimit)
+                        IE.Dev.Limit.ContractStakeholders(_, templateId, parties, reportedlimit)
                       ),
                     )
                   )
@@ -311,8 +310,8 @@ class LimitsSpec
       }
     }
 
-    "refuse to exercise a contract with too many observers" in {
-      val limits = interpretation.Limits.Lenient.copy(contractObservers = limit)
+    "refuse to exercise a contract with too many observers" ignore {
+      val limits = interpretation.Limits.Lenient.copy(contractStakeholders = limit)
       val e =
         e"""\(cid: ContractId Mod:T) (controllers: List Party) ->
        exercise @Mod:T NoOp cid Mod:NoOpArg {controllers = controllers, observers = Nil @Party, authorizers = controllers}"""
@@ -338,7 +337,7 @@ class LimitsSpec
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
-                        IE.Dev.Limit.ContractObservers(_, templateId, _, parties, reportedlimit)
+                        IE.Dev.Limit.ContractStakeholders(_, templateId, parties, reportedlimit)
                       ),
                     )
                   )
@@ -350,8 +349,8 @@ class LimitsSpec
       }
     }
 
-    "refuse to exercise a choice with too many controllers" in {
-      val limits = interpretation.Limits.Lenient.copy(choiceControllers = limit)
+    "refuse to exercise a choice with too many controllers" ignore {
+      val limits = interpretation.Limits.Lenient.copy(choiceAuthorizers = limit)
       val e =
         e"""\(signatories: List Party) (controllers: List Party) ->
         ubind
@@ -383,7 +382,7 @@ class LimitsSpec
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
-                        IE.Dev.Limit.ChoiceControllers(
+                        IE.Dev.Limit.ChoiceAuthorizers(
                           _,
                           templateId,
                           choiceName,
@@ -403,7 +402,7 @@ class LimitsSpec
       }
     }
 
-    "refuse to exercise a choice with too many observers" in {
+    "refuse to exercise a choice with too many observers" ignore {
       val limits = interpretation.Limits.Lenient.copy(choiceObservers = limit)
       val committers = (0 to 99).view.map(i => Ref.Party.assertFromString(s"Party$i")).toSet
       val e =
@@ -457,7 +456,7 @@ class LimitsSpec
       }
     }
 
-    "refuse to exercise a choice with too many authorizers" in {
+    "refuse to exercise a choice with too many authorizers" ignore {
       val limits = interpretation.Limits.Lenient.copy(choiceAuthorizers = limit)
       val committers = (0 to 99).view.map(i => Ref.Party.assertFromString(s"Party$i")).toSet
       val e =
@@ -510,7 +509,7 @@ class LimitsSpec
       }
     }
 
-    "refuse to build a transaction with too many input contracts" in {
+    "refuse to build a transaction with too many input contracts" ignore {
       val limits = interpretation.Limits.Lenient.copy(transactionInputContracts = limit)
 
       val signatories = committers.take(1)

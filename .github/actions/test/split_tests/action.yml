@@ -1,0 +1,156 @@
+name: Split Tests Evenly
+description: Split test list evenly for parallelism equivalent
+
+inputs:
+  test_file:
+    description: Input test file
+    default: 'test-full-class-names.log'
+    required: false
+  timings_file:
+    description: Historical timings JSON file
+    default: ''
+    required: false
+  total_shards:
+    description: Total number of shards
+    default: '12'
+    required: false
+  shard_index:
+    description: Current shard index
+    required: true
+  # Note: @UnstableTest filtering is applied at test execution time (e.g., sbt tag filters),
+  # not in this splitter, because the splitter only sees class names.
+  exclude_patterns:
+    description: >
+      Newline-separated regex patterns to exclude from test selection.
+      When empty, the built-in defaults from split_tests.py are used.
+    default: ''
+    required: false
+  include_patterns:
+    description: >
+      Newline-separated regex patterns to include in test selection.
+      When set, only matching tests are selected.
+    default: ''
+    required: false
+  fallback_test_time:
+    description: Default test duration in seconds for unknown tests
+    default: '300'
+    required: false
+  debug_split_tests:
+    description: Print split_tests.py shard distribution debug output
+    default: 'false'
+    required: false
+
+outputs:
+  selected_tests_file:
+    description: File containing the space-separated test list for this shard
+    value: ${{ steps.export.outputs.selected_tests_file }}
+  tests_per_shard:
+    description: Number of tests per shard
+    value: ${{ steps.export.outputs.tests_per_shard }}
+  total_tests:
+    description: Total filtered tests
+    value: ${{ steps.export.outputs.total_tests }}
+
+runs:
+  using: composite
+  steps:
+    - name: Split Tests
+      id: split
+      uses: ./.github/actions/nix/nix_script_run
+      env:
+        DEBUG_SPLIT_TESTS: ${{ inputs.debug_split_tests }}
+        FALLBACK_TEST_TIME: ${{ inputs.fallback_test_time }}
+        EXCLUDE_PATTERNS: ${{ inputs.exclude_patterns }}
+        INCLUDE_PATTERNS: ${{ inputs.include_patterns }}
+        SHARD_INDEX: ${{ inputs.shard_index }}
+        TEST_FILE: ${{ inputs.test_file }}
+        TIMINGS_FILE: ${{ inputs.timings_file }}
+        TOTAL_SHARDS: ${{ inputs.total_shards }}
+      with:
+        output-name: result
+        command: |
+          echo "::group::Split Tests Evenly"
+          # Build --exclude-patterns array from newline-separated input.
+          # Each pattern is a separate element so whitespace/special chars are safe.
+          EXTRA_ARGS=()
+          if [[ -n "$EXCLUDE_PATTERNS" && -n "$INCLUDE_PATTERNS" ]]; then
+            echo "::error::Only one of exclude_patterns or include_patterns can be provided"
+            exit 1
+          fi
+
+          if [[ -n "$EXCLUDE_PATTERNS" ]]; then
+            EXTRA_ARGS+=("--exclude-patterns")
+            while IFS= read -r pattern; do
+              [[ -z "$pattern" ]] && continue
+              EXTRA_ARGS+=("$pattern")
+            done <<< "$EXCLUDE_PATTERNS"
+          fi
+
+          if [[ -n "$INCLUDE_PATTERNS" ]]; then
+            INCLUDE_ARGS=()
+            while IFS= read -r pattern; do
+              [[ -z "$pattern" ]] && continue
+              INCLUDE_ARGS+=("$pattern")
+            done <<< "$INCLUDE_PATTERNS"
+            if [[ "${#INCLUDE_ARGS[@]}" -eq 0 ]]; then
+              echo "::error::include_patterns was provided but contained no non-empty patterns"
+              exit 1
+            fi
+            EXTRA_ARGS+=("--include-patterns" "${INCLUDE_ARGS[@]}")
+          fi
+
+          TMP_OUTPUT_FILE=$(mktemp)
+
+          if [[ "$DEBUG_SPLIT_TESTS" == "true" ]]; then
+            EXTRA_ARGS+=("--debug")
+          fi
+
+          python3 "$GITHUB_WORKSPACE/scripts/ci/split-tests/split_tests.py" \
+            "$TOTAL_SHARDS" \
+            "$SHARD_INDEX" \
+            "$TEST_FILE" \
+            "$TIMINGS_FILE" \
+            "$FALLBACK_TEST_TIME" \
+            "$TMP_OUTPUT_FILE" \
+            "${EXTRA_ARGS[@]}"
+
+          # nix_script_run can expose one output key. Return the temp file path only,
+          # so we don't hit GitHub's argument/env size limits on large test sets.
+          echo "result=$TMP_OUTPUT_FILE" >> "$GITHUB_OUTPUT"
+          echo "::endgroup::"
+
+    - name: Export split outputs
+      id: export
+      shell: bash
+      env:
+        SPLIT_RESULT_PATH: ${{ steps.split.outputs.result }}
+        SHARD_INDEX: ${{ inputs.shard_index }}
+      run: |
+        echo "::group::Split Tests outputs"
+        split_result_path="${SPLIT_RESULT_PATH:-}"
+
+        if [[ -z "$split_result_path" ]]; then
+          echo "::error::SPLIT_RESULT_PATH is empty"
+          exit 1
+        fi
+
+        if [[ ! -f "$split_result_path" ]]; then
+          echo "::error::Split result file does not exist: $split_result_path"
+          exit 1
+        fi
+
+        selected_tests=$(grep '^selected_tests=' "$split_result_path" | sed 's/^selected_tests=//')
+        tests_per_shard=$(grep '^tests_per_shard=' "$split_result_path" | sed 's/^tests_per_shard=//')
+        total_tests=$(grep '^total_tests=' "$split_result_path" | sed 's/^total_tests=//')
+        selected_tests_file="$RUNNER_TEMP/selected_tests_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${SHARD_INDEX}"
+        printf '%s' "$selected_tests" > "$selected_tests_file"
+
+        DELIM="EOF_${RANDOM}_$(date +%s%N)"
+        {
+          echo "selected_tests_file=$selected_tests_file"
+          echo "tests_per_shard=$tests_per_shard"
+          echo "total_tests=$total_tests"
+        } >> "$GITHUB_OUTPUT"
+
+        rm -f "$split_result_path"
+        echo "::endgroup::"

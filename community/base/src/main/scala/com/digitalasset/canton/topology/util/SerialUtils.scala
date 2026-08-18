@@ -12,12 +12,15 @@ import com.digitalasset.canton.topology.store.TopologyTransactionRejection
 
 object SerialUtils {
   implicit class EnhancedPositiveInt(val value: PositiveInt) extends AnyVal {
-    def nextSerial: Either[TopologyTransactionRejection, RequireTypes.PositiveNumeric[Int]] =
+    // NOTE: distinct names, not overloads: as an overload pair the parameterless and
+    // implicit-param variants are indistinguishable at the call site (-Xsource:3 lints this).
+    def nextSerialOrRejection
+        : Either[TopologyTransactionRejection, RequireTypes.PositiveNumeric[Int]] =
       value.increment.leftMap(_ => TopologyTransactionRejection.Processor.MaxSerialReached)
 
     def nextSerial(implicit
         elc: ErrorLoggingContext
     ): Either[TopologyManagerError, RequireTypes.PositiveNumeric[Int]] =
-      this.nextSerial.leftMap(_.toTopologyManagerError)
+      this.nextSerialOrRejection.leftMap(_.toTopologyManagerError)
   }
 }

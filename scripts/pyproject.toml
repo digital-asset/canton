@@ -16,6 +16,10 @@ target-version = "py313"
 quote-style = "preserve"
 
 [tool.pytest.ini_options]
+# Convention for new Python tests anywhere in the repo: write plain pytest-style
+# assert statements, not unittest.TestCase. pytest still runs the few remaining
+# unittest.TestCase files (e.g. scripts/ci/test_todo_refs.py and the docs-open
+# tests), so those can be migrated opportunistically rather than all at once.
 # Tests live inline in the scripts themselves (def test_* alongside the code),
 # so collect from every module rather than only test_*.py files.
 # NOTE: because python_files matches every *.py, pytest imports each module during

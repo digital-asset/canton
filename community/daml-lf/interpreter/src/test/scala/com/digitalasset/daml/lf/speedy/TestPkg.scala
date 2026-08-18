@@ -4,13 +4,23 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName, TypeConId}
-import com.digitalasset.daml.lf.language.Ast.TTyCon
-import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.daml.lf.data.Freer.Step
+import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
+import com.digitalasset.daml.lf.speedy
+import com.digitalasset.daml.lf.speedy.TransactionConductor.Upd
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import com.digitalasset.daml.lf.transaction.SerializationVersion
+import com.digitalasset.daml.lf.transaction.{
+  FatContractInstance,
+  GlobalKey,
+  NeedKeyProgression,
+  SerializationVersion,
+}
+import com.digitalasset.daml.lf.value.Value
+
+import scala.collection.immutable.ArraySeq
 
 /** Shared Daml-LF package definition and common constants used by both [[EvaluationOrderTest]] and
   * [[AuthorizationTest]].
@@ -18,15 +28,42 @@ import com.digitalasset.daml.lf.transaction.SerializationVersion
 object TestPkg {
   val packageId: Ref.PackageId = Ref.PackageId.assertFromString("-pkg-")
 
-  private[speedy] def tuple2TyCon: String = {
-    val Tuple2 =
-      com.digitalasset.daml.lf.stablepackages.StablePackages.stablePackages.Tuple2
-    s"'${Tuple2.packageId}':${Tuple2.qualifiedName}"
+  object CmdFlow extends data.Freer.Companion {
+    sealed class F[A]
+    type E = Throwable
+    object F {
+      case class Submit(cmd: Command) extends F[SValue]
+    }
+    def submit(cmd: Command): CmdFlow[SValue] = lift(F.Submit(cmd))
   }
+  type CmdFlow[X] = CmdFlow.T[X]
+
+  implicit class RecordOps(val record: SValue.SRecord) extends AnyVal {
+    def update(field: String, value: SValue): SValue.SRecord = {
+      val idx = record.fields.indexWhere(_ == field)
+      if (idx < 0) throw new RuntimeException(s"Field $field not found in record $record")
+      record.copy(values = record.values.updated(idx, value))
+    }
+  }
+  implicit class CmdFlowOps[X](val flow: this.CmdFlow[X]) extends AnyVal {
+    def withFilter(f: X => Boolean): CmdFlow[X] =
+      flow.flatMap(x =>
+        if (f(x)) CmdFlow.pure(x)
+        else CmdFlow.raise(new RuntimeException("Filter failed"))
+      )
+  }
+
+  lazy val seed = crypto.Hash.hashPrivateKey("seed")
+
+  def asSCid(value: SValue): SValue.SContractId = value match {
+    case SValue.SContractId(coid) => SValue.SContractId(coid)
+    case _ => throw new RuntimeException(s"Expected SContractId, got $value")
+  }
+
 }
 
-class TestPkg(withKey: Boolean, languageVersion: LanguageVersion) {
-  import TestPkg.{packageId, tuple2TyCon}
+class TestPkg(withKey: Boolean, languageVersion: LanguageVersion, cmdMode: Boolean) {
+  import TestPkg.packageId
 
   val serializationVersion: SerializationVersion = SerializationVersion.assign(hasKey = true)
 
@@ -38,90 +75,65 @@ class TestPkg(withKey: Boolean, languageVersion: LanguageVersion) {
     p"""  metadata ( 'evaluation-order-test' : '1.0.0' )
       module M {
 
-        record @serializable MyUnit = {};
-
-        record @serializable TKey = { maintainers : List Party, optCid : Option (ContractId Unit), nested: M:Nested };
-
-        record @serializable Nested = { f : Option M:Nested };
-
-        val buildNested : Int64 -> M:Nested = \(i: Int64) ->
-          case (EQUAL @Int64 i 0) of
-            True -> M:Nested { f = None @M:Nested }
-            | _ -> M:Nested { f = Some @M:Nested (M:buildNested (SUB_INT64 i 1)) };
-
-        val toKey : Party -> M:TKey = \(p : Party) ->
-           M:TKey { maintainers = Cons @Party [p] (Nil @Party), optCid = None @(ContractId Unit), nested = M:buildNested 0 };
-        val keyNoMaintainers : M:TKey = M:TKey { maintainers = Nil @Party, optCid = None @(ContractId Unit), nested = M:buildNested 0 };
-        val toKeyWithCid : Party -> ContractId Unit -> M:TKey = \(p : Party) (cid : ContractId Unit) -> M:TKey { maintainers = Cons @Party [p] (Nil @Party), optCid = Some @(ContractId Unit) cid, nested = M:buildNested 0 };
+        record @serializable TKey = { maintainers : List Party, optCid : Option (ContractId Unit), nat: M:Nat };
 
         variant @serializable Either (a:*) (b:*) = Left: a | Right : b;
 
-        interface (this : I1) =  { viewtype M:MyUnit; };
+        variant @serializable Nat =
+          Z : Unit
+        | S : M:Nat;
 
-        interface (this: Person) = {
-          viewtype M:MyUnit;
-          method asParty: Party;
-          method getCtrl: Party;
-          method getName: Text;
-          choice @nonConsuming Nap (self) (i : Int64): Int64
-            , controllers TRACE @(List Party) "interface choice controllers" (Cons @Party [call_method @M:Person getCtrl this] (Nil @Party))
-            , observers TRACE @(List Party) "interface choice observers" (Nil @Party)
-            to upure @Int64 (TRACE @Int64 "choice body" i);
-        } ;
+        val intToNat : Int64 -> M:Nat = \(i: Int64) ->
+          case (EQUAL @Int64 i 0) of
+            True -> M:Nat:Z ()
+          | _ -> M:Nat:S (M:intToNat (SUB_INT64 i 1));
 
-        record @serializable T = { signatory : Party, observer : Party, precondition : Bool, key: M:TKey, nested: M:Nested };
+        record @serializable IView = { nat: M:Nat };
+
+        interface (this: I) = {
+          viewtype M:IView;
+          method getCtrls: List Party;
+          choice @nonConsuming Choice (self) (arg: M:Either M:Nat Int64): M:Nat
+          , controllers TRACE @(List Party) "interface choice controllers" (call_method @M:I getCtrls this)
+          , observers TRACE @(List Party) "interface choice observers" (Nil @Party)
+          to upure @M:Nat (TRACE @M:Nat "choice body" (case arg of M:Either:Right i -> M:intToNat i | M:Either:Left x -> x));
+        };
+
+        record @serializable T = {
+          signatory : Party,
+          observer : Party,
+          maintainers : List Party,
+          precondition : Bool,
+          input: M:Nat,
+          keySize: Int64,
+          keyCidOpt: Option (ContractId Unit),
+          viewSize: Int64
+        };
         template (this: T) = {
           precondition TRACE @Bool "precondition" (M:T {precondition} this);
           signatories TRACE @(List Party) "contract signatories" (Cons @Party [M:T {signatory} this] (Nil @Party));
           observers TRACE @(List Party) "contract observers" (Cons @Party [M:T {observer} this] (Nil @Party));
-          choice Choice (self) (arg: M:Either M:Nested Int64) : M:Nested,
+          choice Choice (self) (arg: M:Either M:Nat Int64) : M:Nat,
             controllers TRACE @(List Party) "template choice controllers" (Cons @Party [M:T {signatory} this] (Nil @Party)),
             observers TRACE @(List Party) "template choice observers" (Nil @Party),
             authorizers TRACE @(List Party) "template choice authorizers" (Cons @Party [M:T {signatory} this] (Nil @Party))
-            to upure @M:Nested (TRACE @M:Nested "choice body" (M:buildNested (case arg of M:Either:Right i -> i | _ -> 0)));
+            to upure @M:Nat (TRACE @M:Nat "choice body" (case arg of M:Either:Right i -> M:intToNat i | M:Either:Left x -> x));
           choice Archive (self) (arg: Unit): Unit,
             controllers Cons @Party [M:T {signatory} this] (Nil @Party)
             to upure @Unit (TRACE @Unit "archive" ());
           choice @nonConsuming Divulge (self) (divulgee: Party): Unit,
             controllers Cons @Party [divulgee] (Nil @Party)
             to upure @Unit ();
-$ifKey    key @M:TKey
-$ifKey       (TRACE @M:TKey "key" (M:T {key} this))
-$ifKey       (\(key : M:TKey) -> TRACE @(List Party) "maintainers" (M:TKey {maintainers} key));
-        };
-
-        record @serializable MyException = { message: Text } ;
-
-        exception MyException = {
-          message \(e: M:MyException) -> M:MyException {message} e
-        };
-
-        record @serializable TExcept = { signatory : Party, observer : Party, precondition : Bool, key: M:TKey, nested: M:Nested };
-        template (this: TExcept) = {
-          precondition TRACE @Bool "precondition" (M:TExcept {precondition} this);
-          signatories TRACE @(List Party) "contract signatories" (Cons @Party [M:TExcept {signatory} this] (Nil @Party));
-          observers TRACE @(List Party) "contract observers" (Cons @Party [M:TExcept {observer} this] (Nil @Party));
-$ifKey    key @M:TKey
-$ifKey       (TRACE @M:TKey "key" (M:TExcept {key} this))
-$ifKey       (\(key : M:TKey) -> TRACE @(List Party) "maintainers" (throw @(List Party) @M:MyException (M:MyException {message = "thrown as part of maintainers expr"})));
-        };
-
-        record @serializable Human = { person: Party, obs: Party, ctrl: Party, precond: Bool, key: M:TKey, nested: M:Nested };
-        template (this: Human) = {
-          precondition TRACE @Bool "precondition" (M:Human {precond} this);
-          signatories TRACE @(List Party) "contract signatories" (Cons @Party [M:Human {person} this] (Nil @Party));
-          observers TRACE @(List Party) "contract observers" (Cons @Party [M:Human {obs} this] (Nil @Party));
-          choice Archive (self) (arg: Unit): Unit,
-            controllers Cons @Party [M:Human {person} this] (Nil @Party)
-            to upure @Unit (TRACE @Unit "archive" ());
-          implements M:Person {
-            view = TRACE @M:MyUnit "view" (M:MyUnit {});
-            method asParty = M:Human {person} this;
-            method getName = "foobar";
-            method getCtrl = M:Human {ctrl} this;
+            implements M:I {
+              view = TRACE @M:IView "view" (M:IView { nat = M:intToNat (M:T {viewSize} this) });
+              method getCtrls = Cons @Party [M:T {signatory} this] (Nil @Party);
             };
 $ifKey    key @M:TKey
-$ifKey       (TRACE @M:TKey "key" (M:Human {key} this))
+$ifKey       (TRACE @M:TKey "key" (M:TKey {
+$ifKey          maintainers = M:T {maintainers} this,
+$ifKey          optCid = M:T {keyCidOpt} this,
+$ifKey          nat = M:intToNat (M:T {keySize} this)
+$ifKey        }))
 $ifKey       (\(key : M:TKey) -> TRACE @(List Party) "maintainers" (M:TKey {maintainers} key));
         };
 
@@ -135,236 +147,331 @@ $ifKey       (\(key : M:TKey) -> TRACE @(List Party) "maintainers" (M:TKey {main
             to upure @Unit ();
         };
 
-        val foldl: forall (a: *) (b: *). (a -> b -> a) -> a -> List b -> a = /\ (a: *) (b: *).
-          \(f: a -> b -> a) (acc: a) (xs: List b) ->
-            case xs of
-              Nil -> acc
-            | Cons x xs -> M:foldl @a @b f (f acc x) xs;
-
-        val foldr: forall (a: *) (b: *). (b -> a -> a) -> a -> List b -> a = /\ (a: *) (b: *).
-          \(f: b -> a -> a) (acc: a) (xs: List b) ->
-            case xs of
-              Nil -> acc
-           | Cons x xs -> f x (M:foldr @a @b f acc xs);
-
       }
 
-      module Test {
-        val noParty: Option Party = None @Party;
-        val someParty: Party -> Option Party = \(p: Party) -> Some @Party p;
-        val noCid: Option (ContractId Unit) = None @(ContractId Unit);
-        val someCid: ContractId Unit -> Option (ContractId Unit) = \(cid: ContractId Unit) -> Some @(ContractId Unit) cid;
-
-        val run: forall (t: *). Update t -> Update Unit =
-          /\(t: *). \(u: Update t) ->
-            ubind x:Unit <- upure @Unit (TRACE @Unit "starts test" ())
-            in ubind y:t <- u
-            in upure @Unit (TRACE @Unit "ends test" ());
-
-        val create: M:T -> Update Unit =
-          \(arg: M:T) -> Test:run @(ContractId M:T) (create @M:T arg);
-
-        val create_interface: M:Human -> Update Unit =
-          \(arg: M:Human) -> Test:run @(ContractId M:Person) (create_by_interface @M:Person (to_interface @M:Person @M:Human arg));
-
-        val exercise_by_id: Party -> ContractId M:T -> M:Either Int64 Int64 -> Update Unit =
-          \(exercisingParty: Party) (cId: ContractId M:T) (argParams: M:Either Int64 Int64) ->
-            let arg: Test:ExeArg = Test:ExeArg {
-              id = cId,
-              argParams = argParams
-            }
-            in ubind
-              helperId: ContractId Test:Helper <- Test:createHelper exercisingParty;
-              x: M:Nested <-exercise @Test:Helper Exe helperId arg
-            in upure @Unit ();
-
-        val exercise_interface_with_guard: Party -> ContractId M:Person -> Update Unit =
-          \(exercisingParty: Party) (cId: ContractId M:Person) ->
-            Test:run @Int64 (exercise_interface_with_guard @M:Person Nap cId 42 (\(x: M:Person) -> TRACE @Bool "interface guard" True));
-
-        val exercise_interface: Party -> ContractId M:Person -> Update Unit =
-          \(exercisingParty: Party) (cId: ContractId M:Person) ->
-            Test:run @Int64 (exercise_interface @M:Person Nap cId 42);
-
-$ifKey  val exercise_by_key: Party -> Option Party -> Option (ContractId Unit) -> Int64 -> M:Either Int64 Int64 -> Update Unit =
-$ifKey    \(exercisingParty: Party) (maintainers: Option Party) (optCid: Option (ContractId Unit)) (nesting: Int64) (argParams: M:Either Int64 Int64) ->
-$ifKey      let arg: Test:ExeByKeyArg = Test:ExeByKeyArg {
-$ifKey        key = Test:TKeyParams {maintainers = Test:optToList @Party maintainers, optCid = optCid, nesting = nesting},
-$ifKey        argParams = argParams
-$ifKey      }
-$ifKey      in ubind
-$ifKey        helperId: ContractId Test:Helper <- Test:createHelper exercisingParty;
-$ifKey        x: M:Nested <- exercise @Test:Helper ExeByKey helperId arg
-$ifKey      in upure @Unit ();
-
-        val fetch_by_id: Party -> ContractId M:T -> Update Unit =
-          \(fetchingParty: Party) (cId: ContractId M:T) ->
-            ubind helperId: ContractId Test:Helper <- Test:createHelper fetchingParty
-            in exercise @Test:Helper FetchById helperId cId;
-
-        val fetch_interface: Party -> ContractId M:Person -> Update Unit =
-          \(fetchingParty: Party) (cId: ContractId M:Person) ->
-            ubind helperId: ContractId Test:Helper <- Test:createHelper fetchingParty
-            in exercise @Test:Helper FetchByInterface helperId cId;
-
-$ifKey  val fetch_by_key: Party -> Option Party -> Option (ContractId Unit) -> Int64 -> Update Unit =
-$ifKey    \(fetchingParty: Party) (maintainers: Option Party) (optCid: Option (ContractId Unit)) (nesting: Int64) ->
-$ifKey       ubind helperId: ContractId Test:Helper <- Test:createHelper fetchingParty
-$ifKey       in exercise @Test:Helper FetchByKey helperId (Test:TKeyParams {maintainers = Test:optToList @Party maintainers, optCid = optCid, nesting = nesting});
-
-$ifKey  val query_n_by_key: Int64 -> Party -> Option Party -> Option (ContractId Unit) -> Int64 -> Update Unit =
-$ifKey    \(n: Int64) (lookingParty: Party) (maintainers: Option Party) (optCid: Option (ContractId Unit)) (nesting: Int64) ->
-$ifKey       ubind helperId: ContractId Test:Helper <- Test:createHelper lookingParty
-$ifKey       in exercise @Test:Helper QueryNByKey helperId ($tuple2TyCon @Int64 @Test:TKeyParams {_1 = n, _2 = Test:TKeyParams {maintainers = Test:optToList @Party maintainers, optCid = optCid, nesting = nesting}});
-
-$ifKey  val query_n_by_key_except: Int64 -> Party -> Option Party -> Option (ContractId Unit) -> Int64 -> Update Unit =
-$ifKey    \(n: Int64) (lookingParty: Party) (maintainers: Option Party) (optCid: Option (ContractId Unit)) (nesting: Int64) ->
-$ifKey       ubind helperId: ContractId Test:Helper <- Test:createHelper lookingParty
-$ifKey       in exercise @Test:Helper QueryNByKeyExcept helperId ($tuple2TyCon @Int64 @Test:TKeyParams {_1 = n, _2 = Test:TKeyParams {maintainers = Test:optToList @Party maintainers, optCid = optCid, nesting = nesting}});
-
-        val createHelper: Party -> Update (ContractId Test:Helper) =
-          \(party: Party) -> create @Test:Helper Test:Helper { sig = party, obs = party };
-
-        val optToList: forall(t:*). Option t -> List t  =
-          /\(t:*). \(opt: Option t) ->
-            case opt of
-               None -> Nil @t
-             | Some x -> Cons @t [x] (Nil @t);
-
-        record @serializable TKeyParams = { maintainers : List Party, optCid : Option (ContractId Unit), nesting: Int64 };
-        val buildTKey: (Test:TKeyParams) -> M:TKey =
-          \(params: Test:TKeyParams) -> M:TKey {
-              maintainers = Test:TKeyParams {maintainers} params,
-              optCid = Test:TKeyParams {optCid} params,
-              nested = M:buildNested (Test:TKeyParams {nesting} params)
-            };
-
-        record @serializable ExeArg = {
-          id: ContractId M:T,
-          argParams: M:Either Int64 Int64
-        };
-
-        record @serializable ExeByKeyArg = {
-          key: Test:TKeyParams,
-          argParams: M:Either Int64 Int64
-        };
-
-        record @serializable Helper = { sig: Party, obs: Party };
-        template (this: Helper) = {
-          precondition True;
-          signatories Cons @Party [Test:Helper {sig} this] (Nil @Party);
-          observers Nil @Party;
-          choice CreateNonvisibleKey (self) (arg: Unit): ContractId M:T,
-            controllers Cons @Party [Test:Helper {obs} this] (Nil @Party),
-            observers Nil @Party
-             to let sig: Party = Test:Helper {sig} this
-             in create @M:T M:T { signatory = sig, observer = sig, precondition = True, key = M:toKey sig, nested = M:buildNested 0 };
-          choice Exe (self) (arg: Test:ExeArg): M:Nested,
-            controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-            observers Nil @Party
-            to
-              let choiceArg: M:Either M:Nested Int64 = case (Test:ExeArg {argParams} arg) of
-                  M:Either:Left n -> M:Either:Left @M:Nested @Int64 (M:buildNested n)
-                | M:Either:Right n -> M:Either:Right @M:Nested @Int64 n
-              in ubind
-                x:Unit <- upure @Unit (TRACE @Unit "starts test" ());
-                res: M:Nested <- exercise @M:T Choice (Test:ExeArg {id} arg) choiceArg;
-                y:Unit <- upure @Unit (TRACE @Unit "ends test" ())
-              in upure @M:Nested res;
-$ifKey    choice ExeByKey (self) (arg: Test:ExeByKeyArg): M:Nested,
-$ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-$ifKey      observers Nil @Party
-$ifKey      to
-$ifKey        let choiceArg: M:Either M:Nested Int64 = case (Test:ExeByKeyArg {argParams} arg) of
-$ifKey            M:Either:Left n -> M:Either:Left @M:Nested @Int64 (M:buildNested n)
-$ifKey          | M:Either:Right n -> M:Either:Right @M:Nested @Int64 n
-$ifKey       in ubind
-$ifKey          x:Unit <- upure @Unit (TRACE @Unit "starts test" ());
-$ifKey          res: M:Nested <- exercise_by_key @M:T Choice (Test:buildTKey (Test:ExeByKeyArg {key} arg)) choiceArg;
-$ifKey          y:Unit <- upure @Unit (TRACE @Unit "ends test" ())
-$ifKey        in upure @M:Nested res;
-          choice FetchById (self) (cId: ContractId M:T): Unit,
-            controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-            observers Nil @Party
-            to Test:run @M:T (fetch_template @M:T cId);
-          choice FetchByInterface (self) (cId: ContractId M:Person): Unit,
-            controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-            observers Nil @Party
-            to Test:run @M:Person (fetch_interface @M:Person cId);
-$ifKey    choice FetchByKey (self) (params: Test:TKeyParams): Unit,
-$ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-$ifKey      observers Nil @Party
-$ifKey      to let key: M:TKey = Test:buildTKey params
-$ifKey         in Test:run @($tuple2TyCon (ContractId M:T) M:T) (fetch_by_key @M:T key);
-
-$ifKey    choice QueryNByKey (self) (paramsAndInt: ($tuple2TyCon Int64 Test:TKeyParams)): Unit,
-$ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-$ifKey      observers Nil @Party
-$ifKey      to let n: Int64 = $tuple2TyCon @Int64 @Test:TKeyParams {_1} paramsAndInt
-$ifKey         in let params: Test:TKeyParams = $tuple2TyCon @Int64 @Test:TKeyParams {_2} paramsAndInt
-$ifKey            in let key: M:TKey = Test:buildTKey params
-$ifKey               in Test:run @(Option (List ($tuple2TyCon (ContractId M:T) M:T))) (query_n_by_key @M:T n key);
-
-$ifKey    choice QueryNByKeyExcept (self) (paramsAndInt: ($tuple2TyCon Int64 Test:TKeyParams)): Unit,
-$ifKey      controllers Cons @Party [Test:Helper {sig} this] (Nil @Party),
-$ifKey      observers Nil @Party
-$ifKey      to let n: Int64 = $tuple2TyCon @Int64 @Test:TKeyParams {_1} paramsAndInt
-$ifKey         in let params: Test:TKeyParams = $tuple2TyCon @Int64 @Test:TKeyParams {_2} paramsAndInt
-$ifKey            in let key: M:TKey = Test:buildTKey params
-$ifKey               in Test:run @(Option (List ($tuple2TyCon (ContractId M:TExcept) M:TExcept))) (query_n_by_key @M:TExcept n key);
-        };
-
-        val f: Text -> Text -> Text =
-          \(x: Text) -> TRACE @(Text -> Text) x \(y: Text) -> TRACE @Text y (APPEND_TEXT x y);
-
-        val testFold: ((Text -> Text -> Text) -> Text -> List Text -> Text) -> Update Unit =
-          \(fold: (Text -> Text -> Text) -> Text -> List Text -> Text)  ->
-            ubind x:Unit <- upure @Unit (TRACE @Unit "starts test" ())
-            in ubind y:Text <- upure @Text (fold Test:f "0" (Cons @Text ["1", "2", "3"] (Nil @Text)))
-            in upure @Unit (TRACE @Unit "ends test" ());
-      }
   """
   }
 
-  val pkgs: PureCompiledPackages = SpeedyTestLib.typeAndCompile(pkg)
+  val pkgs: PureCompiledPackages = SpeedyTestLib.typeAndCompile(pkg, cmdMode)
 
-  val packageNameMap: Map[PackageName, PackageId] = Map(pkg.pkgName -> packageId)
+  val packageNameMap: Map[Ref.PackageName, Ref.PackageId] = Map(pkg.pkgName -> packageId)
 
   val List(alice, bob, charlie): List[Ref.Party] =
     List("alice", "bob", "charlie").map(Ref.Party.assertFromString)
 
-  val T: TypeConId = t"M:T" match {
-    case TTyCon(tycon) => tycon
-    case _ => sys.error("unexpected error")
+  private def assertTTyCon(typ: Ast.Type): Ref.TypeConId =
+    typ match {
+      case Ast.TTyCon(tycon) => tycon
+      case _ => sys.error("unexpected error")
+    }
+
+  val T: Ref.TypeConId = assertTTyCon(t"M:T")
+  val I: Ref.TypeConId = assertTTyCon(t"M:I")
+  val Dummy: Ref.TypeConId = assertTTyCon(t"M:Dummy")
+
+  val TKey: Ref.TypeConId = assertTTyCon(t"M:TKey")
+
+  object SNat {
+    val T: Ref.TypeConId = assertTTyCon(t"M:Nat")
+    val Z = Ref.Name.assertFromString("Z")
+    val S = Ref.Name.assertFromString("S")
+    def fromInt(int: Int): SValue.SVariant =
+      if (int == 0)
+        SValue.SVariant(T, Z, 0, SValue.SUnit)
+      else
+        SValue.SVariant(T, S, 1, fromInt(int - 1))
   }
 
-  val TExcept: TypeConId = t"M:TExcept" match {
-    case TTyCon(tycon) => tycon
-    case _ => sys.error("unexpected error")
+  object SEither {
+    val T: Ref.TypeConId = assertTTyCon(t"M:Either")
+
+    def Left(svalue: SValue) =
+      SValue.SVariant(T, n"Left", 0, svalue)
+
+    def Right(svalue: SValue) =
+      SValue.SVariant(T, n"Right", 1, svalue)
   }
 
-  val TKey: TypeConId = t"M:TKey" match {
-    case TTyCon(tycon) => tycon
-    case _ => sys.error("unexpected error")
-  }
+  val cId: Value.ContractId = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test"))
+  val cId2: Value.ContractId = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test2"))
+  val cId3: Value.ContractId = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test3"))
+  val cId4: Value.ContractId = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test4"))
+  val cId5: Value.ContractId = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test5"))
 
-  val Nested: TypeConId = t"M:Nested" match {
-    case TTyCon(tycon) => tycon
-    case _ => sys.error("unexpected error")
-  }
+  val keySValue: SValue.SRecord = SValue.SRecord(
+    TKey,
+    ImmArray("maintainers", "optCid", "nat").map(Ref.Name.assertFromString),
+    ArraySeq(
+      SValue.SList(FrontStack(SValue.SParty(alice))),
+      SValue.SOptional(None),
+      SNat.fromInt(0),
+    ),
+  )
 
-  val Human: TypeConId = t"M:Human" match {
-    case TTyCon(tycon) => tycon
-    case _ => sys.error("unexpected error")
-  }
+  val keyValue: Value.ValueRecord = Value.ValueRecord(
+    None,
+    ImmArray(
+      None -> Value.ValueList(FrontStack(Value.ValueParty(alice))),
+      None -> Value.ValueNone,
+      None -> SNat.fromInt(0).toNormalizedValue,
+    ),
+  )
 
-  val Person: TypeConId = t"M:Person" match {
-    case TTyCon(tycon) => tycon
-    case _ => sys.error("unexpected error")
-  }
+  val normalizedKeyValue: Value.ValueRecord = keyValue
 
-  val Dummy: TypeConId = t"M:Dummy" match {
-    case TTyCon(tycon) => tycon
-    case _ => sys.error("unexpected error")
+  def payload(signatory: Ref.Party, observer: Ref.Party): SValue.SRecord =
+    SValue.SRecord(
+      T,
+      ImmArray(
+        "signatory",
+        "observer",
+        "maintainers",
+        "precondition",
+        "input",
+        "keySize",
+        "keyCidOpt",
+        "viewSize",
+      ).map(Ref.Name.assertFromString),
+      ArraySeq(
+        SValue.SParty(signatory),
+        SValue.SParty(observer),
+        SValue.SList(FrontStack(SValue.SParty(signatory))),
+        SValue.SBool(true),
+        SNat.fromInt(0),
+        SValue.SInt64(0L),
+        SValue.SOptional(None),
+        SValue.SInt64(0L),
+      ),
+    )
+
+  val defaultPayload: SValue.SRecord = payload(alice, bob)
+
+}
+
+trait CmdFlowRunner {
+  import TestPkg.*
+  protected def cmdMode: Boolean
+  protected def runCmdFlow(
+      pkgs: CompiledPackages,
+      setup: CmdFlow[SValue] = CmdFlow.pure(SValue.SUnit),
+      test: SValue => CmdFlow[SValue],
+      parties: Set[Ref.Party],
+      readAs: Set[Ref.Party] = Set.empty,
+      packageResolution: Map[Ref.PackageName, Ref.PackageId],
+      getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
+      authorizationChecker: RecordingMachineLogger => AuthorizationChecker =
+        new AuthorizationCheckerLogger(_),
+  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, SValue], Seq[String])
+}
+
+// Trait providing UpdateMachine implementation
+trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
+
+  import TestPkg.*
+
+  final override protected def cmdMode: Boolean = false
+  final override protected def runCmdFlow(
+      pkgs: CompiledPackages,
+      setup: CmdFlow[SValue],
+      test: SValue => CmdFlow[SValue],
+      parties: Set[Ref.Party],
+      readAs: Set[Ref.Party],
+      packageResolution: Map[Ref.PackageName, Ref.PackageId],
+      getContract: PartialFunction[Value.ContractId, FatContractInstance],
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
+      authorizationChecker: RecordingMachineLogger => AuthorizationChecker,
+  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, SValue], Seq[String]) = {
+    val recordingLogger = new RecordingMachineLogger(MachineLogger())
+    val machine = Speedy.UpdateMachine(
+      compiledPackages = pkgs,
+      preparationTime = Time.Timestamp.MinValue,
+      initialSeeding = InitialSeeding.TransactionSeed(seed),
+      expr = SExpr.SEValue(SValue.SUnit),
+      committers = parties,
+      readAs = readAs,
+      packageResolution = packageResolution,
+      limits = interpretation.Limits.Lenient,
+      authorizationChecker = authorizationChecker(recordingLogger),
+      iterationsBetweenInterruptions = 10000,
+      interpretationConfig = interpretation.InterpretationConfig.Default,
+      logger = recordingLogger,
+    )
+    import cats.~>
+
+    val handler = new ~>[CmdFlow.F, Either[Throwable, *]] {
+      override def apply[A](fa: CmdFlow.F[A]): Either[Throwable, A] =
+        fa match {
+          case CmdFlow.F.Submit(cmd) =>
+            scala.util
+              .Try {
+                val se = pkgs.compiler.unsafeCompileCommand(cmd)
+                machine.kontStack.keep(0)
+                machine.kontStack.push(Speedy.KPure(Speedy.Control.Complete(_)))
+                machine.setControl(
+                  Speedy.Control.Expression(SExpr.SEApp(se, ArraySeq(SValue.SToken)))
+                )
+                SpeedyTestLib.run(
+                  machine,
+                  getContract =
+                    recordingLogger.tracePartialFunction("queries contract", getContract),
+                  getKeys = recordingLogger.tracePartialFunction("queries key", getKeys),
+                )
+              }
+              .toEither
+              .flatten
+        }
+    }
+
+    setup.consume(handler) match {
+      case Left(value) =>
+        throw new Error(s"Setup failed with exception: $value")
+      case Right(x) =>
+        recordingLogger.llTrace("starts test")
+        val result = test(x).consume(handler).map { x =>
+          recordingLogger.llTrace("ends test")
+          x
+        }
+
+        result ->
+          recordingLogger.recordedMessages.dropWhile(_ != "starts test")
+    }
+  }
+}
+
+// Trait providing TransactionConductor implementation
+trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
+
+  import TestPkg.*
+
+  final override protected def cmdMode: Boolean = true
+
+  final override protected def runCmdFlow(
+      pkgs: CompiledPackages,
+      setup: CmdFlow[SValue],
+      test: SValue => CmdFlow[SValue],
+      parties: Set[Ref.Party],
+      readAs: Set[Ref.Party],
+      packageResolution: Map[Ref.PackageName, Ref.PackageId],
+      getContract: PartialFunction[Value.ContractId, FatContractInstance],
+      getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
+      authorizationChecker: RecordingMachineLogger => AuthorizationChecker,
+  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, SValue], Seq[String]) = {
+    val recordingLogger = new RecordingMachineLogger(MachineLogger())
+    val conductor = TransactionConductor(
+      compiledPackages = pkgs,
+      preparationTime = Time.Timestamp.MinValue,
+      initialSeeding = InitialSeeding.TransactionSeed(seed),
+      committers = parties,
+      readAs = readAs,
+      packageResolution = packageResolution,
+      limits = interpretation.Limits.Lenient,
+      authorizationChecker = authorizationChecker(recordingLogger),
+      iterationsBetweenInterruptions = 10000,
+      interpretationConfig = interpretation.InterpretationConfig.Default,
+      logger = recordingLogger,
+    )
+
+    def getContract_ = recordingLogger.tracePartialFunction("queries contract", getContract)
+    def getKeys_ = recordingLogger.tracePartialFunction("queries key", getKeys)
+
+    def wrapContract[X](contract: X) =
+      (contract, crypto.Hash.HashingMethod.TypedNormalForm, (_: crypto.Hash) => true)
+
+    def loop0[X](y: TransactionConductor.Upd.Step[X]): Either[Throwable, X] =
+      y match {
+        case Step.Pure(value) => Right(value)
+        case Step.Error(error) => Left(SError.SErrorDamlException(error))
+        case impure: speedy.TransactionConductor.Upd.Step.Impure[x, X] =>
+          impure.fx match {
+            case Upd.NeedTime =>
+              Left(SpeedyTestLib.UnexpectedSResultNeedTime)
+            case Upd.NeedContract(contractId, committers) =>
+              getContract_.lift(contractId) match {
+                case Some(coinst) =>
+                  loop0(impure.resume(wrapContract(coinst)))
+                case None =>
+                  Left(SpeedyTestLib.UnknownContract(contractId))
+              }
+            case Upd.NeedPackage(pkg, context) =>
+              Left(SpeedyTestLib.UnknownPackage(pkg))
+            case Upd.NeedKey(key, n, canContinue, _) =>
+              val (returned, hasStarted) =
+                NeedKeyProgression.takeN(canContinue, n, getKeys_.lift(key).getOrElse(Vector.empty))
+              loop0(impure.resume((returned.map(wrapContract), hasStarted)))
+            case Upd.NeedExternalCall(extensionId, functionId, configHash, input) =>
+              Left(new RuntimeException("External calls are not supported in this test"))
+          }
+      }
+
+    def loop[X](y: CmdFlow.Step[X]): Either[Throwable, X] =
+      y match {
+        case CmdFlow.Step.Pure(value) => Right(value)
+        case CmdFlow.Step.Error(error) => Left(error)
+        case impure: CmdFlow.Step.Impure[x, X] =>
+          val upd = impure.fx match {
+            case CmdFlow.F.Submit(cmd) =>
+              cmd match {
+                case Command.Create(templateId, argument) =>
+                  conductor.handleCommand(
+                    Question.Cmd.Create(templateId, argument.asInstanceOf[SValue.SRecord])
+                  )
+                case Command.ExerciseTemplate(templateId, contractId, choiceId, argument) =>
+                  conductor.handleCommand(
+                    Question.Cmd.ExerciseTemplate(templateId, choiceId, contractId.value, argument)
+                  )
+                case Command.ExerciseInterface(interfaceId, contractId, choiceId, argument) =>
+                  conductor.handleCommand(
+                    Question.Cmd
+                      .ExerciseInterface(interfaceId, choiceId, contractId.value, argument)
+                  )
+                case Command.ExerciseByKey(templateId, contractKey, choiceId, argument) =>
+                  conductor.handleCommand(
+                    Question.Cmd.ExerciseByKey(templateId, choiceId, contractKey, argument)
+                  )
+                case Command.CreateAndExercise(
+                      templateId,
+                      createArgument,
+                      choiceId,
+                      choiceArgument,
+                    ) =>
+                  for {
+                    cid <- conductor.handleCommand(
+                      Question.Cmd.Create(templateId, createArgument.asInstanceOf[SValue.SRecord])
+                    )
+                    res <- conductor.handleCommand(
+                      Question.Cmd
+                        .ExerciseTemplate(templateId, choiceId, asSCid(cid).value, choiceArgument)
+                    )
+                  } yield res
+                case Command.FetchTemplate(templateId, coid) =>
+                  conductor.handleCommand(Question.Cmd.FetchTemplate(templateId, coid.value))
+                case Command.FetchInterface(interfaceId, coid) =>
+                  conductor.handleCommand(Question.Cmd.FetchInterface(interfaceId, coid.value))
+                case Command.FetchByKey(templateId, key) =>
+                  conductor.handleCommand(Question.Cmd.FetchByKey(templateId, key))
+                case Command.QueryNByKey(templateId, n, key) =>
+                  conductor.handleCommand(
+                    Question.Cmd.QueryContractKey(templateId, key, n.value.toInt)
+                  )
+              }
+          }
+          for {
+            z <- scala.util.Try(loop0(upd.start)).toEither.flatten
+            y <- loop(impure.resume(z.asInstanceOf[x]))
+          } yield y
+      }
+
+    val flow = for {
+      setupValue <- setup
+      _ = recordingLogger.llTrace("starts test")
+      testValue <- test(setupValue)
+    } yield {
+      recordingLogger.llTrace("ends test")
+      testValue
+    }
+
+    loop(flow.start) ->
+      recordingLogger.recordedMessages.dropWhile(_ != "starts test")
   }
 }

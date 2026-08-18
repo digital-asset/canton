@@ -8,6 +8,7 @@ import cats.data.{Chain, EitherT, NonEmptyChain}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -23,7 +24,6 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTra
   ReassignmentsStoreError,
   RequestTrackerStoreError,
 }
-import com.digitalasset.canton.participant.store.ActiveContractStore
 import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.ReassignmentStore.{
   AssignmentStartingBeforeUnassignment,
@@ -31,6 +31,10 @@ import com.digitalasset.canton.participant.store.ReassignmentStore.{
   UnknownReassignmentId,
 }
 import com.digitalasset.canton.participant.store.memory.ReassignmentCache
+import com.digitalasset.canton.participant.store.{
+  ActiveContractStore,
+  PartyReplicationIndexingStore,
+}
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange, TimeOfRequest}
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -44,6 +48,7 @@ import com.digitalasset.canton.util.{
   SimpleExecutionQueue,
 }
 import com.digitalasset.canton.{ReassignmentCounter, RequestCounter}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.concurrent.TrieMap
@@ -67,6 +72,7 @@ import scala.concurrent.{ExecutionContext, Future}
 // so that we are always aware of when a context switch may happen.
 private[participant] class ConflictDetector(
     private val acs: ActiveContractStore,
+    partyReplicationIndexingStoreIfOnPREnabled: Option[PartyReplicationIndexingStore],
     private val reassignmentCache: ReassignmentCache,
     protected override val loggerFactory: NamedLoggerFactory,
     private val checkedInvariant: Boolean,
@@ -382,7 +388,7 @@ private[participant] class ConflictDetector(
           .remove(rc)
           .getOrElse(throw new IllegalArgumentException(s"Request $rc is not in-flight."))
 
-      val CommitSet(archivals, creations, unassignments, assignments) = commitSet
+      val CommitSet(archivals, creations, unassignments, assignments, reassignments, _) = commitSet
 
       val unlockedChanges = Seq(
         UnlockedChanges(creations.keySet -- lockedContracts, "Creations"),
@@ -461,19 +467,14 @@ private[participant] class ConflictDetector(
           }
         }
 
-        /* Complete only those reassignments that have been checked for activeness in Phase 3
-         * Non-reassigning participants will not check for reassignments being active,
-         * but nevertheless record that the contract was assigned from a certain synchronizer.
-         */
-        val reassignmentsToComplete =
-          assignments.values.filter(t => checkedReassignments.contains(t.reassignmentId))
+        val reassignmentsToComplete = reassignments.filter(checkedReassignments.contains)
 
         // Synchronously complete all reassignments in the ReassignmentCache.
         // (Use a List rather than a Stream to ensure synchronicity!)
         // Writes to the ReassignmentStore are still asynchronous.
         val pendingReassignmentWrites =
-          reassignmentsToComplete.toList.map(t =>
-            reassignmentCache.completeReassignment(t.reassignmentId, tor.timestamp)
+          reassignmentsToComplete.toList.map(id =>
+            reassignmentCache.completeReassignment(id, tor.timestamp)
           )
 
         pendingEvictions
@@ -522,6 +523,7 @@ private[participant] class ConflictDetector(
                 .to(LazyList)
             )
           val reassignmentCompletions = pendingReassignmentWrites.sequence_
+          val partyOnboardingWrites = writePartyOnboardingActivationChanges(commitSet, tor)
 
           // Collect the results from the above futures run in parallel.
           // A for comprehension does not work due to the explicit type parameters.
@@ -529,7 +531,9 @@ private[participant] class ConflictDetector(
           val acsFuture =
             monad.flatMap(archivalWrites)(_ =>
               monad.flatMap(creationWrites)(_ =>
-                monad.flatMap(unassignmentWrites)(_ => assignmentWrites)
+                monad.flatMap(partyOnboardingWrites)(_ =>
+                  monad.flatMap(unassignmentWrites)(_ => assignmentWrites)
+                )
               )
             )
 
@@ -574,6 +578,82 @@ private[participant] class ConflictDetector(
           }(executionContext)
       }
     }
+
+  /** If online party replication is enabled, persist any party-onboarding specific changes for
+    * deferred indexing.
+    *
+    * The purpose of deferred indexing is to ensure that an onboarding party's ACS is properly
+    * reflected in the LAPI index db by the time the party is fully onboarded. This involves feeding
+    * the indexer contract activation changes at artificial record times convenient to wedge in such
+    * updates among events arising from "regular" activity. The point of the onboarding-related
+    * change activations is not to simulate regular activity, so transient contracts are not
+    * considered for deferred indexing even when the indexer tracks transient contracts from regular
+    * activity.
+    */
+  private def writePartyOnboardingActivationChanges(commitSet: CommitSet, tor: TimeOfRequest)(
+      implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): CheckedT[FutureUnlessShutdown, AcsError, AcsWarning, Unit] = {
+    val CommitSet(archivals, creations, _, _, _, hostedOnboardingPartiesO) = commitSet
+
+    partyReplicationIndexingStoreIfOnPREnabled
+      .zip(hostedOnboardingPartiesO)
+      .traverse_ { case (onprIndexingStore, hostedOnboardingParties) =>
+        // TODO(#23097): Once we support multiple concurrent OnPRs, avoid indexing the
+        //  same change multiple times on behalf of multiple onboarding parties while
+        //  providing the ability to track party-level indexing progress.
+        ErrorUtil.requireState(
+          hostedOnboardingParties.hostedOnboardingParties.tail1.isEmpty,
+          "concurrent onboarding of multiple parties to same participant/synchronizer not yet supported",
+        )
+        // TODO(#29855): Potentially revisit exclusion of transient contracts from deferred OnPR
+        //  indexing once the definition of transient is less in flux. Until then see the justification
+        //  for skipping transient contracts in the function header.
+        val transients = creations.keySet intersect archivals.keySet
+
+        // TODO(#32594): Add assignments to activations.
+        val onprActivations = (creations -- transients)
+          .mapFilter { case CommitSet.CreationCommit(metadata, ctr) =>
+            hostedOnboardingParties
+              .hostedPartiesIfAllOnboarding(metadata.stakeholders)
+              .map(_ =>
+                (ActiveContractStore.ChangeType.Activation: ActiveContractStore.ChangeType, ctr)
+              )
+          }
+
+        // TODO(#32594): Add unassignments to deactivations.
+        val onprDeactivations = (archivals -- transients)
+          .mapFilter { case CommitSet.ArchivalCommit(stakeholders) =>
+            hostedOnboardingParties
+              .hostedPartiesIfAllOnboarding(stakeholders)
+              .map(_ =>
+                (
+                  ActiveContractStore.ChangeType.Deactivation,
+                  // TODO(#32464): Make reassignment counter optional in OnPRIndexingStore for archives
+                  //  for which reassignment counters are costly to retrieve.
+                  ReassignmentCounter.Genesis,
+                )
+              )
+          }
+
+        // Persist OnPR-specific activations and deactivations.
+        NonEmpty
+          .from(onprActivations ++ onprDeactivations)
+          .traverse_ { onprRelevantChanges =>
+            logger.trace(
+              withRC(tor.rc, s"Commit set with onboarding party changes $onprRelevantChanges")
+            )
+
+            CheckedT.result[AcsError, AcsWarning](
+              onprIndexingStore.addContractActivationChanges(
+                tor.timestamp,
+                onprRelevantChanges.toSeq,
+              )
+            )
+          }
+      }
+  }
 
   /** Returns the internal state of the contract: <ul> <li>`Some(cs)` if the contract is in memory
     * with state `cs`.</li> <li>`None` signifies that the contract state is not held in memory (it

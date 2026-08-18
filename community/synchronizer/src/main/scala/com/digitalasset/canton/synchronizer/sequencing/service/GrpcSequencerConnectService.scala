@@ -31,6 +31,7 @@ import com.digitalasset.canton.sequencer.api.v30.SequencerConnect.{
   VerifyActiveResponse,
 }
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerLimits
 import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.IdentityContextHelper
 import com.digitalasset.canton.synchronizer.service.HandshakeValidator
@@ -47,6 +48,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import io.grpc.{Status, StatusRuntimeException}
 
@@ -64,6 +66,7 @@ class GrpcSequencerConnectService(
     cryptoApi: SynchronizerCryptoClient,
     clock: Clock,
     lsuSequencingBounds: Option[LsuSequencingBounds],
+    sequencerLimits: SequencerLimits,
     sanitizePublicErrorMessages: Boolean,
     disableReleaseVersionHandshakeCheck: Boolean,
     metrics: SequencerMetrics,
@@ -141,23 +144,40 @@ class GrpcSequencerConnectService(
       metrics.publicApi.handshakes.mark()(MetricsContext("member" -> member, "status" -> status))
     }
 
+    val maxClientProtocolVersions = sequencerLimits.maxClientProtocolVersions.value
+
     mapErrorEither(
-      HandshakeValidator
-        .clientIsCompatible(
-          serverProtocolVersion,
-          request.clientProtocolVersions,
-          request.minimumProtocolVersion,
-          OptionUtil.emptyStringAsNone(request.clientVersion),
-          disableReleaseVersionHandshakeCheck,
+      for {
+        _ <- EitherUtil.condUnit(
+          request.clientProtocolVersions.sizeCompare(maxClientProtocolVersions) <= 0,
+          invalidArgument(
+            s"Too many client protocol versions. Limit: $maxClientProtocolVersions, Found: ${request.clientProtocolVersions.size}"
+          ),
         )
-        .tap(reportHandshakeStatus)
-        .map { _ =>
-          HandshakeResponse(
-            serverProtocolVersion.toProtoPrimitive,
-            HandshakeResponse.Value
-              .Success(SequencerConnect.HandshakeResponse.Success()),
+        clientVersion <- ProtoValidation
+          .validate(
+            request.clientVersion,
+            Some("client_version"),
+            ProtocolVersionValidation.AlwaysValidation,
           )
-        }
+          .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
+        response <- HandshakeValidator
+          .clientIsCompatible(
+            serverProtocolVersion,
+            request.clientProtocolVersions,
+            request.minimumProtocolVersion,
+            OptionUtil.emptyStringAsNone(clientVersion),
+            disableReleaseVersionHandshakeCheck,
+          )
+          .tap(reportHandshakeStatus)
+          .map { _ =>
+            HandshakeResponse(
+              serverProtocolVersion.toProtoPrimitive,
+              HandshakeResponse.Value
+                .Success(SequencerConnect.HandshakeResponse.Success()),
+            )
+          }
+      } yield response
     )
   }
 

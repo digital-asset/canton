@@ -82,7 +82,7 @@ class TlsIT extends CantonFixture {
       recoverToSucceededIf[io.grpc.StatusRuntimeException](
         LedgerClient
           .insecureSingleHost(serverHost, serverPort.unwrap, baseConfig, loggerFactory)
-          .flatMap(_.stateService.getLedgerEnd())
+          .flatMap(_.stateService.getLedgerEnd(Seq()))
       ).futureValue
     }
 
@@ -91,7 +91,7 @@ class TlsIT extends CantonFixture {
       val serverPort = participant1.config.ledgerApi.clientConfig.port
 
       (for {
-        _ <- clientF(serverPort).flatMap(_.stateService.getLedgerEnd())
+        _ <- clientF(serverPort).flatMap(_.stateService.getLedgerEnd(Seq()))
       } yield succeed).futureValue
     }
   }

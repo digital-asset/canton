@@ -223,7 +223,7 @@ class SynchronizerOnboardingOutboxTest
       client.recorded.get() shouldBe Some(provided)
     }
 
-    // TODO(i33335): enable this test.
+    // TODO(i32231): enable this test.
     "re-sign store onboarding transactions for the synchronizer's protocol version" ignore {
       // sanity: stored transactions are not yet in the synchronizer's protocol version
       forEvery(storeTxsV35)(_.transaction.isEquivalentTo(synchronizerPv) shouldBe false)
@@ -235,7 +235,7 @@ class SynchronizerOnboardingOutboxTest
       forEvery(dispatched)(_.transaction.isEquivalentTo(synchronizerPv) shouldBe true)
     }
 
-    // TODO(i33335): enable this test.
+    // TODO(i32231): enable this test.
     "fail to re-sign store onboarding transactions when the signing key is unavailable" ignore {
       val unavailableKeyCrypto = SynchronizerCrypto(
         SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory),

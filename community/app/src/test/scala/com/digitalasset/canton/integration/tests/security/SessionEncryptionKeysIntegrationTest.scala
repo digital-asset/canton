@@ -307,6 +307,7 @@ trait SessionKeyIntegrationTest
 
           EncryptedMultipleViews
             .decrypt[LightTransactionViewTree](
+              testedProtocolVersionValidation,
               pureCrypto,
               sessionKeyGroupTx,
               message.encryptedViews.viewTrees,

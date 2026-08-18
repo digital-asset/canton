@@ -259,7 +259,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
           .queryAndUpdate(
             queryAndDelete.transactionally,
             functionFullName,
-          )(traceContext, closeContext, { case (numRowsDeleted, _) => numRowsDeleted > 0 })
+          )(traceContext, closeContext)
           .map { case (_, existingConfigO) => existingConfigO }
       )
       .flatMap {
@@ -611,7 +611,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
         .queryAndUpdate(
           queries.value.transactionally.withTransactionIsolation(TransactionIsolation.Serializable),
           functionFullName,
-        )(traceContext, closeContext, _.exists { case (altered, _) => altered > 0 })
+        )(traceContext, closeContext)
         .map(_.map { case (_, config) => config })
 
     EitherT(result).map { newStoredConfig =>
@@ -675,7 +675,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
         .queryAndUpdate(
           queries.value.transactionally.withTransactionIsolation(TransactionIsolation.Serializable),
           functionFullName,
-        )(traceContext, closeContext, _.exists { case (updated, _) => updated > 0 })
+        )(traceContext, closeContext)
         .map(_.map { case (_, config) => config })
 
     EitherT(result).map { newConfig =>
@@ -710,14 +710,19 @@ class DbSynchronizerConnectionConfigStore private[store] (
   override def getAll(): Seq[StoredSynchronizerConnectionConfig] =
     synchronizerConfigCache.values.flatMap(_.values).toSeq
 
+  override def getByAlias(
+      alias: SynchronizerAlias
+  ): Map[ConfiguredPhysicalSynchronizerId, StoredSynchronizerConnectionConfig] =
+    synchronizerConfigCache.getOrElse(alias, Map.empty)
+
   override def getAllFor(
       alias: SynchronizerAlias
   ): Either[UnknownAlias, NonEmpty[Seq[StoredSynchronizerConnectionConfig]]] =
     synchronizerConfigCache
       .get(alias)
       .map(_.values.toSeq)
+      .flatMap(NonEmpty.from)
       .toRight(UnknownAlias(alias))
-      .flatMap(NonEmpty.from(_).toRight(UnknownAlias(alias)))
 
   override def setStatus(
       alias: SynchronizerAlias,

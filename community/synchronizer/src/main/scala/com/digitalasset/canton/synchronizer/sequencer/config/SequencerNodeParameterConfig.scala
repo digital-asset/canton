@@ -72,6 +72,9 @@ final case class AsyncWriterConfig(
   * @param enablePrevalidation
   *   If true (as of 3.6), we will use pre-validation to move the signature validation into a
   *   separate parallel stage instead of the sequential step.
+  * @param enableAsyncSequencerLogging
+  *   If true, then we will use the async logging with outcomes (but potentially out of order log
+  *   messages)
   */
 final case class SequencerNodeParameterConfig(
     override val devVersionSupport: Boolean = false,
@@ -95,6 +98,7 @@ final case class SequencerNodeParameterConfig(
     disableAggregationRuleSizeCheckForTesting: Boolean = false,
     disableReleaseVersionHandshakeCheck: Boolean = false,
     enablePrevalidation: Boolean = true,
+    enableAsyncSequencerLogging: Boolean = false,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 

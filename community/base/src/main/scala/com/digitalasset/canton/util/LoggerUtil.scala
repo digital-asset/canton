@@ -172,14 +172,6 @@ object LoggerUtil {
         throw e
     }
 
-  def logOnThrow_(task: => Unit)(implicit loggingContext: ErrorLoggingContext): Unit =
-    try {
-      task
-    } catch {
-      case NonFatal(e) =>
-        loggingContext.error("Unhandled exception thrown!", e)
-    }
-
   /** truncates a string
     *
     * @param maxLines

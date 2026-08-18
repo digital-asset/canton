@@ -8,6 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -51,7 +52,7 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
 
   def newEngine(config: EngineConfig = Engine.DevConfig): Engine = {
     val engine = new Engine(config, loggerFactory)
-    engine.preloadPackage(pkgId, pkg).consume() shouldBe Right(())
+    engine.preloadPackage(pkgId, pkg).consume(lookupHandler()) shouldBe Right(())
     engine
   }
 
@@ -84,59 +85,65 @@ class ExternalCallEngineTest extends AnyWordSpec with Matchers with Inside with 
       ("populated", "Call", "0a0b", "c0ff", "beef"),
       ("empty", "CallEmptyPayloads", "", "", ""),
     ).foreach { case (label, choice, expectedConfig, expectedInput, expectedOutput) =>
-      s"emit ResultNeedExternalCall and record the result for $label payloads" in {
-        val result = submit(newEngine(), choice)
-
-        inside(result) {
-          case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
-            extensionId shouldBe "ext"
-            functionId shouldBe "fun"
-            configHash shouldBe expectedConfig
-            input shouldBe expectedInput
-
-            inside(resume(Right(expectedOutput)).consume()) { case Right((tx, _)) =>
-              val exerciseNodes = tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
-              exerciseNodes should have size 1
-              exerciseNodes.head.externalCallResults shouldBe ImmArray(
-                ExternalCallResult(
-                  extensionId = "ext",
-                  functionId = "fun",
-                  config = data.Bytes.assertFromString(expectedConfig),
-                  input = data.Bytes.assertFromString(expectedInput),
-                  output = data.Bytes.assertFromString(expectedOutput),
-                )
-              )
+      s"emit an external-call request and record the result for $label payloads" in {
+        val handler = new Result.Handler {
+          def apply[X](need: Result.Need[X]): Either[Error, X] =
+            need match {
+              case Result.Need.ExternalCall(extensionId, functionId, configHash, input) =>
+                extensionId shouldBe "ext"
+                functionId shouldBe "fun"
+                configHash shouldBe expectedConfig
+                input shouldBe expectedInput
+                Right(Right(expectedOutput))
+              case other => lookupHandler().apply(other)
             }
+        }
+
+        inside(submit(newEngine(), choice).consume(handler)) { case Right((tx, _)) =>
+          val exerciseNodes = tx.nodes.collect { case (_, exercise: Node.Exercise) => exercise }
+          exerciseNodes should have size 1
+          exerciseNodes.head.externalCallResults shouldBe ImmArray(
+            ExternalCallResult(
+              extensionId = "ext",
+              functionId = "fun",
+              config = data.Bytes.assertFromString(expectedConfig),
+              input = data.Bytes.assertFromString(expectedInput),
+              output = data.Bytes.assertFromString(expectedOutput),
+            )
+          )
         }
       }
     }
 
     "surface external call failures through the engine continuation" in {
-      val result = submit(newEngine())
+      val handler = new Result.Handler {
+        def apply[X](need: Result.Need[X]): Either[Error, X] =
+          need match {
+            case Result.Need.ExternalCall(_, _, _, _) =>
+              Right(Left(Result.Need.ExternalCall.Error("upstream unavailable")))
+            case other => lookupHandler().apply(other)
+          }
+      }
 
-      inside(result) { case ResultNeedExternalCall(_, _, _, _, resume) =>
-        inside(
-          resume(Left(ResultNeedExternalCall.Error("upstream unavailable"))).consume()
-        ) {
-          case Left(
-                err @ Error.Interpretation(
-                  Error.Interpretation.DamlException(
-                    IE.ExternalCall(
-                      IE.ExternalCall.ExecutionFailed(
-                        "ext",
-                        "fun",
-                        IE.ExternalCall.ExecutionFailed.CallFailed(message),
-                      )
+      inside(submit(newEngine()).consume(handler)) {
+        case Left(
+              err @ Error.Interpretation(
+                Error.Interpretation.DamlException(
+                  IE.ExternalCall(
+                    IE.ExternalCall.ExecutionFailed(
+                      "ext",
+                      "fun",
+                      IE.ExternalCall.ExecutionFailed.CallFailed(message),
                     )
-                  ),
-                  _,
-                )
-              ) =>
-            message shouldBe "upstream unavailable"
-            err.message should include("External call execution failed")
-            err.message should include("extensionId=ext")
-            err.message should include("functionId=fun")
-        }
+                  )
+                ),
+                _,
+              )
+            ) =>
+          message shouldBe "upstream unavailable"
+          err.message should include("External call execution failed")
+          err.message should include("extensionId=ext")
+          err.message should include("functionId=fun")
       }
     }
   }

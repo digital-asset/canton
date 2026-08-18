@@ -20,7 +20,8 @@ import com.digitalasset.canton.protocol.{v30, v31, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{
   LfCommand,
@@ -394,8 +395,10 @@ final case class ViewParticipantData private (
   private[ViewParticipantData] def toProtoV30: v30.ViewParticipantData = v30.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
     createdCore = createdCore.map(_.toProtoV30),
-    createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
-    resolvedKeys = Seq.empty, // Always empty, see checkKeyResolution
+    createdInSubviewArchivedInCore =
+      createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive.toProtoUnvalidated),
+    resolvedKeys =
+      Seq.empty[v30.ViewParticipantData.ResolvedKey], // Always empty, see checkKeyResolution
     actionDescription = Some(actionDescription.toProtoV30),
     rollbackContext = checked(tryToProtoV30RollbackContext),
     salt = Some(salt.toProtoV30),
@@ -404,7 +407,8 @@ final case class ViewParticipantData private (
   private[ViewParticipantData] def toProtoV31: v31.ViewParticipantData = v31.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
     createdCore = createdCore.map(_.toProtoV30),
-    createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
+    createdInSubviewArchivedInCore =
+      createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive.toProtoUnvalidated),
     resolvedKeys = keyResolution.toList.map { case (k, v) =>
       KeyResolutionWithMaintainers.toProtoV31(k, v)
     },
@@ -416,7 +420,8 @@ final case class ViewParticipantData private (
   private[ViewParticipantData] def toProtoV32: v32.ViewParticipantData = v32.ViewParticipantData(
     coreInputs = coreInputs.values.map(_.toProtoV30).toSeq,
     createdCore = createdCore.map(_.toProtoV31),
-    createdInSubviewArchivedInCore = createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive),
+    createdInSubviewArchivedInCore =
+      createdInSubviewArchivedInCore.toSeq.map(_.toProtoPrimitive.toProtoUnvalidated),
     resolvedKeys = keyResolution.toList.map { case (k, v) =>
       KeyResolutionWithMaintainers.toProtoV31(k, v)
     },
@@ -588,13 +593,26 @@ object ViewParticipantData
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV30(pvv, _))
       rollbackContext <- PathRollbackContext
-        .fromProtoV30(rbContextP)
+        .fromProtoV30(pvv, rbContextP)
         .leftMap(_.inField("rollback_context"))
+      resolvedKeysSeqP <- ProtoValidation
+        .validateLength(
+          resolvedKeysP,
+          Some("resolved_keys"),
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )
       _ <- EitherUtil.condUnit( // Invariant violation, see checkKeyResolution
-        resolvedKeysP.isEmpty,
+        resolvedKeysSeqP.isEmpty,
         InvariantViolation(Some("resolved-keys"), "Unexpected contract keys"),
       )
-      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV30)
+      createdCore <- ProtoValidation
+        .validateLengthThen(
+          createdCoreP,
+          "created_core",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => CreatedContract.fromProtoV30(element))
       viewParticipantData <- fromProto(
         pvv,
         hashOps,
@@ -634,16 +652,26 @@ object ViewParticipantData
     ) = dataP
 
     for {
-      keyResolution <- resolvedKeysP.traverse(
-        KeyResolutionWithMaintainers.fromProtoV31(pvv, _)
-      )
+      keyResolution <- ProtoValidation
+        .validateLengthThen(
+          resolvedKeysP,
+          "resolved_keys",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => KeyResolutionWithMaintainers.fromProtoV31(pvv, element))
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV31(pvv, _))
       rollbackContext <- PathRollbackContext
-        .fromProtoV30(rbContextP)
+        .fromProtoV30(pvv, rbContextP)
         .leftMap(_.inField("rollback_context"))
-      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV30)
+      createdCore <- ProtoValidation
+        .validateLengthThen(
+          createdCoreP,
+          "created_core",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => CreatedContract.fromProtoV30(element))
       viewParticipantData <- fromProto(
         pvv,
         hashOps,
@@ -682,16 +710,30 @@ object ViewParticipantData
     ) = dataP
 
     for {
-      keyResolution <- resolvedKeysP.traverse(
-        KeyResolutionWithMaintainers.fromProtoV31(pvv, _)
-      )
+      keyResolution <- ProtoValidation
+        .validateLengthThen(
+          resolvedKeysP,
+          "resolved_keys",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => KeyResolutionWithMaintainers.fromProtoV31(pvv, element))
       actionDescription <- ProtoConverter
         .required("action_description", actionDescriptionP)
         .flatMap(ActionDescription.fromProtoV31(pvv, _))
-      externalCallResults <- externalCallResultsP.traverse(
-        ViewExternalCallResult.fromProtoV32(pvv, _)
-      )
-      createdCore <- createdCoreP.traverse(CreatedContract.fromProtoV31)
+      externalCallResults <- ProtoValidation
+        .validateLengthThen(
+          externalCallResultsP,
+          "external_call_results",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => ViewExternalCallResult.fromProtoV32(pvv, element))
+      createdCore <- ProtoValidation
+        .validateLengthThen(
+          createdCoreP,
+          "created_core",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => CreatedContract.fromProtoV31(element))
       viewParticipantData <- fromProto(
         pvv,
         hashOps,
@@ -722,11 +764,17 @@ object ViewParticipantData
   )(
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
       coreInputsP: Seq[v30.InputContract],
-      createdInSubviewArchivedInCoreP: Seq[String],
+      createdInSubviewArchivedInCoreP: Seq[ProtoUnvalidatedString],
       externalCallResults: Seq[ViewExternalCallResult],
   ): ParsingResult[ViewParticipantData] =
     for {
-      coreInputsSeq <- coreInputsP.traverse(InputContract.fromProtoV30)
+      coreInputsSeq <- ProtoValidation
+        .validateLengthThen(
+          coreInputsP,
+          "core_inputs",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => InputContract.fromProtoV30(element))
       coreInputs = coreInputsSeq.view
         .map(inputContract => inputContract.contract.contractId -> inputContract)
         .toMap
@@ -734,6 +782,7 @@ object ViewParticipantData
         createdInSubviewArchivedInCoreP,
         "created_in_subview_archived_in_core",
         pvv,
+        ProtoValidation.MaxCollectionSize,
       )(ProtoConverter.parseLfContractId)
       salt <- ProtoConverter
         .parseRequired(Salt.fromProtoV30, "salt", saltP)
@@ -789,7 +838,7 @@ object ViewParticipantData
         output = result.output.toByteString,
         exerciseIndex = exerciseIndex.unwrap,
         callIndex = callIndex.unwrap,
-        checkingParties = checkingParties.toSeq.sorted,
+        checkingParties = checkingParties.toSeq.sorted.map(_.toProtoUnvalidated),
       )
   }
 
@@ -822,7 +871,12 @@ object ViewParticipantData
           pvv,
         )
         checkingParties <- ProtoValidation
-          .validateThen(checkingPartiesP, "checking_parties", pvv)(
+          .validateThen(
+            checkingPartiesP,
+            "checking_parties",
+            pvv,
+            ProtoValidation.MaxCollectionSize,
+          )(
             ProtoConverter.parseLfPartyId
           )
       } yield ViewExternalCallResult(

@@ -14,6 +14,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   TransactionAccepted,
 }
 import com.digitalasset.canton.ledger.participant.state.{
+  IndexingWatermark,
   Reassignment,
   ReassignmentInfo,
   RepairIndex,
@@ -142,7 +143,7 @@ class ParallelIndexerSubscriptionSpec
         ),
       )
     ),
-    genericTopologyEvents = Nil, // TODO(i33326)
+    genericTopologyEvents = Nil,
     synchronizerId = deadbeefSynchronizer,
     effectiveTime = CantonTimestamp.assertFromInstant(someTime),
   )
@@ -2539,7 +2540,7 @@ class ParallelIndexerSubscriptionSpec
     TopologyTransactionEffective(
       updateId = TestUpdateId("16000"),
       events = Set.empty,
-      genericTopologyEvents = Nil, // TODO(i33326)
+      genericTopologyEvents = Nil,
       synchronizerId = someSynchronizerId,
       effectiveTime = recordTime,
     )(TraceContext.empty)
@@ -3098,7 +3099,7 @@ class ParallelIndexerSubscriptionSpec
       reassignment = reassignmentBatch(contracts),
       recordTime = someRecordTime1,
       synchronizerId = someSynchronizerId,
-      repairCounter = RepairCounter.Genesis,
+      watermark = IndexingWatermark.fromTimestamp(someRecordTime1),
       acsChangeFactory = TestAcsChangeFactory(),
     )
 

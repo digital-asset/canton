@@ -3,17 +3,21 @@
 
 package com.daml.grpc.adapter.utils
 
-import io.grpc.stub.StreamObserver
+import io.grpc.stub.{ClientCallStreamObserver, ClientResponseObserver}
 
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.Promise
 
-class BufferingObserver[T](limit: Option[Int] = None) extends StreamObserver[T] {
+class BufferingObserver[T](limit: Option[Int] = None) extends ClientResponseObserver[Any, T] {
   private val promise = Promise[Vector[T]]()
+  private val requestStream = new AtomicReference[ClientCallStreamObserver[Any]]()
   val buffer = new ConcurrentLinkedQueue[T]()
   val size = new AtomicInteger(0)
   def resultsF = promise.future
+
+  override def beforeStart(stream: ClientCallStreamObserver[Any]): Unit =
+    requestStream.set(stream)
 
   override def onError(t: Throwable): Unit = {
     val _ = promise.tryFailure(t)
@@ -30,6 +34,7 @@ class BufferingObserver[T](limit: Option[Int] = None) extends StreamObserver[T] 
     size.updateAndGet { curr =>
       if (limit.fold(false)(_ <= curr)) {
         onCompleted()
+        Option(requestStream.get()).foreach(_.cancel("limit reached", null))
         curr
       } else {
         buffer.add(value)

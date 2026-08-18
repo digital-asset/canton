@@ -535,7 +535,7 @@ class GrpcPartyManagementService(
 
         } yield ImportPartyAcsResponse()
 
-        EitherTUtil.toFutureUnlessShutdown(resultET.leftMap(_.asGrpcError))
+        EitherTUtil.toFutureUnlessShutdown(resultET.leftMap(_.toGrpcError))
     }
   }
 

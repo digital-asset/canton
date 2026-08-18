@@ -75,6 +75,8 @@ class RecoveringIndexComponentTest extends AnyFlatSpec with IndexComponentTest w
           uncommittedGauge = maxUncommittedGauge,
         ),
         consumerFactory = consumerFactory,
+        consumerName = "indexer",
+        healthStateChanged = () => (),
       )
     })
 

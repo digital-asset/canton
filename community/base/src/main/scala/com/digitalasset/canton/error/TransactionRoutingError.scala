@@ -217,6 +217,31 @@ object TransactionRoutingError extends RoutingErrorGroup {
     }
 
     @Explanation(
+      """This error indicates that one or more submitters are hosted with Submission permission on a
+    participant and at the same time have a confirmation threshold greater than 1 in their
+    PartyToParticipant mapping."""
+    )
+    @Resolution(
+      """Use an external submission instead: give the party its own signing key so
+    that the submission authorization is independent of any hosting participant, and the threshold is
+    satisfied by confirmations from independent participants."""
+    )
+    object DecentralizedPartyCannotSubmit
+        extends ErrorCode(
+          id = "DECENTRALIZED_PARTY_CANNOT_SUBMIT",
+          ErrorCategory.InvalidGivenCurrentSystemStateOther,
+        ) {
+
+      final case class Error(partyIds: Seq[LfPartyId])
+          extends TransactionErrorImpl(
+            cause =
+              s"Submission is not supported for parties that are hosted with Submission permission and have a confirmation threshold greater than 1: ${partyIds
+                  .mkString(", ")}."
+          )
+          with TransactionRoutingError
+    }
+
+    @Explanation(
       """This error indicates that the transaction is referring to some submitters that are not known on any connected synchronizer."""
     )
     @Resolution(

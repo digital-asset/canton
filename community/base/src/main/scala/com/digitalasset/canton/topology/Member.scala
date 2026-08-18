@@ -405,6 +405,13 @@ object ParticipantId {
   def tryFromProtoPrimitive(str: String): ParticipantId =
     fromProtoPrimitive(str, "").valueOr(err => throw new IllegalArgumentException(err.message))
 
+  /** Parse a participant from a bare unique identifier (no `PAR::` member prefix). */
+  def fromProtoPrimitiveUid(
+      uid: String,
+      fieldName: String,
+  ): ParsingResult[ParticipantId] =
+    UniqueIdentifier.fromProtoPrimitive(uid, fieldName).map(ParticipantId(_))
+
   // Instances for slick (db) queries
   implicit val getResultParticipantId: GetResult[ParticipantId] =
     UniqueIdentifier.getResult.andThen(ParticipantId(_))
@@ -538,6 +545,9 @@ object MediatorId {
   def tryCreate(identifier: String, namespace: Namespace): MediatorId =
     MediatorId(UniqueIdentifier.tryCreate(identifier, namespace))
 
+  def fromProtoPrimitiveUid(mediatorUid: String, fieldName: String): ParsingResult[MediatorId] =
+    UniqueIdentifier.fromProtoPrimitive(mediatorUid, fieldName).map(MediatorId(_))
+
   def fromProtoPrimitive(
       mediatorId: String,
       fieldName: String,
@@ -580,6 +590,9 @@ object SequencerId {
 
   def tryCreate(identifier: String, namespace: Namespace): SequencerId =
     SequencerId(UniqueIdentifier.tryCreate(identifier, namespace))
+
+  def fromProtoPrimitiveUid(sequencerUid: String, fieldName: String): ParsingResult[SequencerId] =
+    UniqueIdentifier.fromProtoPrimitive(sequencerUid, fieldName).map(SequencerId(_))
 
   def fromProtoPrimitive(
       proto: String,

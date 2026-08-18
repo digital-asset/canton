@@ -81,9 +81,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     ): Unit =
       msg
         .asInstanceOf[P2PNetworkOut.SendToRandomAuthenticated]
-        .onRecipientDecision
+        .onRecipientsDecision
         .foreach(
-          _.apply(Some(otherId))
+          _.apply(Seq(otherId))
         )
   }
 
@@ -147,7 +147,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         startEpoch,
         aMembershipBeforeOnboarding,
         ProgrammableUnitTestEnv.noSignatureCryptoProvider,
-        nodeThatTimedOut = None,
+        nodesThatTimedOut = Seq.empty,
       )(abort = fail(_))
       context.runPipedMessages()
 
@@ -555,15 +555,18 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
           msg match {
             case P2PNetworkOut.SendToRandomAuthenticated(
                   message,
-                  `possibleRecipients`,
+                  `possibleRecipients`, // firstChoiceRecipientsPool
+                  None, // secondChoiceRecipientsPool
                   Some(workflowId),
-                  None,
-                  Some(_),
+                  Seq(), // nodeThatFailed
+                  Some(_), // onRecipientDecision
+                  howManyRecipients,
                 )
-                if workflowId == WorkflowId(
-                  "test-workflow-id"
-                ) && message == P2PNetworkOut.BftOrderingNetworkMessage
-                  .StateTransferMessage(blockTransferRequest) =>
+                if howManyRecipients.value == 1 &&
+                  workflowId == WorkflowId(
+                    "test-workflow-id"
+                  ) && message == P2PNetworkOut.BftOrderingNetworkMessage
+                    .StateTransferMessage(blockTransferRequest) =>
               true
             case _ => false
           }
@@ -577,15 +580,18 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
             msg match {
               case P2PNetworkOut.SendToRandomAuthenticated(
                     message,
-                    `possibleRecipients`,
+                    `possibleRecipients`, // firstChoiceRecipientsPool
+                    None, // secondChoiceRecipientsPool
                     Some(workflowId),
-                    Some(`otherId`),
-                    Some(_),
+                    Seq(`otherId`), // nodeThatFailed
+                    Some(_), // onRecipientDecision
+                    howManyRecipients,
                   )
-                  if workflowId == WorkflowId(
-                    "test-workflow-id"
-                  ) && message == P2PNetworkOut.BftOrderingNetworkMessage
-                    .StateTransferMessage(blockTransferRequest) =>
+                  if howManyRecipients.value == 1 &&
+                    workflowId == WorkflowId(
+                      "test-workflow-id"
+                    ) && message == P2PNetworkOut.BftOrderingNetworkMessage
+                      .StateTransferMessage(blockTransferRequest) =>
                 true
               case _ => false
             }

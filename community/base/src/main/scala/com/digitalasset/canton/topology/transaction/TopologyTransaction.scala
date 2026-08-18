@@ -23,6 +23,7 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.SetParameter
 
+import scala.annotation.unused
 import scala.reflect.ClassTag
 
 /** Replace or Remove */
@@ -131,8 +132,8 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
   def nextSerial(implicit elc: ErrorLoggingContext): Either[TopologyManagerError, PositiveInt] =
     serial.nextSerial
 
-  def nextSerial: Either[TopologyTransactionRejection, PositiveInt] =
-    serial.nextSerial
+  def nextSerialOrRejection: Either[TopologyTransactionRejection, PositiveInt] =
+    serial.nextSerialOrRejection
 
   @VisibleForTesting
   def reverse: TopologyTransaction[TopologyChangeOp, M] = {
@@ -243,9 +244,14 @@ object TopologyTransaction
   val versioningTable: VersioningTable =
     VersioningTable(
       ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v34)(v30.TopologyTransaction)(
-        supportedProtoVersionMemoized(_)(fromProtoV30),
+        supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
         _.toProtoV30,
       )
+      // TODO(i32231): enable protoV31
+//      ProtoVersion(31) -> VersionedProtoCodec.applyE(ProtocolVersion.v36)(v31.TopologyTransaction)(
+//        supportedProtoVersionMemoized(_)(fromProtoV31),
+//        _.toProtoV31,
+//      ),
     )
 
   def create[Op <: TopologyChangeOp, M <: TopologyMapping](
@@ -283,12 +289,19 @@ object TopologyTransaction
     transaction.toByteString.map(_ => TopologyTransaction[Op, M](op, serial, mapping)(rpv, None))
   }
 
-  private def fromProtoV30(transactionP: v30.TopologyTransaction)(
+  private def fromProtoV30(
+      pvv: ProtocolVersionValidation,
+      transactionP: v30.TopologyTransaction,
+  )(
       bytes: ByteString
   ): ParsingResult[TopologyTransaction[TopologyChangeOp, TopologyMapping]] = {
     val v30.TopologyTransaction(opP, serialP, mappingP) = transactionP
     for {
-      mapping <- ProtoConverter.parseRequired(TopologyMapping.fromProtoV30, "mapping", mappingP)
+      mapping <- ProtoConverter.parseRequired(
+        TopologyMapping.fromProtoV30(pvv, _),
+        "mapping",
+        mappingP,
+      )
       serial <- ProtoConverter.parsePositiveInt("serial", serialP)
       op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
@@ -304,13 +317,21 @@ object TopologyTransaction
     } yield tx
   }
 
-  // TODO(i32231): Note: can be made private when we add v31 support to the versioningTable
-  protected def fromProtoV31(transactionP: v31.TopologyTransaction)(
+  // TODO(i32231): remove @unused
+  @unused
+  private def fromProtoV31(
+      pvv: ProtocolVersionValidation,
+      transactionP: v31.TopologyTransaction,
+  )(
       bytes: ByteString
   ): ParsingResult[TopologyTransaction[TopologyChangeOp, TopologyMapping]] = {
     val v31.TopologyTransaction(opP, serialP, mappingP) = transactionP
     for {
-      mapping <- ProtoConverter.parseRequired(TopologyMapping.fromProtoV31, "mapping", mappingP)
+      mapping <- ProtoConverter.parseRequired(
+        TopologyMapping.fromProtoV31(pvv, _),
+        "mapping",
+        mappingP,
+      )
       serial <- ProtoConverter.parsePositiveInt("serial", serialP)
       op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))

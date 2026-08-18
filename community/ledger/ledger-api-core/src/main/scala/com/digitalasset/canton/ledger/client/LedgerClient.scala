@@ -137,7 +137,7 @@ object LedgerClient {
       // requesting ledger end validates the token, thus guaranteeing that the client is operable
       _ <- new StateServiceClient(
         StateServiceGrpc.stub(channel)
-      ).getLedgerEnd(config.token())
+      ).getLedgerEndOffset(config.token())
     } yield new LedgerClient(channel, config, loggerFactory)
 
   def withoutToken(

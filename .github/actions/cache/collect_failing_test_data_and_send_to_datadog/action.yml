@@ -1,0 +1,27 @@
+name: Collect Failing Data and send to Datadog
+description: Collect Failing Data and send to Datadog
+
+inputs:
+  matrix-shard:
+    description: The matrix shard to run the command on
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Step-level env is not visible inside the nix_run composite, only
+    # $GITHUB_ENV is. Export GH_TOKEN here so gh (used by
+    # report_failing_tests.py to file flaky issues) is authenticated.
+    - name: Make GH_TOKEN available to the nix_run composite
+      if: always()
+      shell: bash
+      run: echo "GH_TOKEN=${{ github.token }}" >> "$GITHUB_ENV"
+
+    - name: Send name of each failing test to datadog
+      if: always()
+      uses: ./.github/actions/nix/nix_run
+      env:
+        DATADOG_API_KEY: ${{ env.DATADOG_API_KEY }}
+        MATRIX_SHARD: ${{ inputs.matrix-shard }}
+      with:
+        command: python3 ./scripts/ci/report_failing_tests.py
