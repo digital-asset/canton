@@ -48,19 +48,18 @@ object LedgerApiJdbcUrl {
 
     /** Read a string value from either the main config or the properties config within it. */
     def getDbConfig(key: String): Option[String] =
-      config
-        .getOptionalString(key)
+      getOptionalString(key)
         .orElse(getDbProperties.flatMap(_.getOptionalString(key)))
 
     /** Read the properties configuration */
-    def getDbProperties: Option[Config] = config.getOptionalConfig("properties")
+    def getDbProperties: Option[Config] = getOptionalConfig("properties")
 
     /** Read the properties configuration as an object */
-    def getDbPropertiesObject: Option[ConfigObject] = config.getOptionalConfigObject("properties")
+    def getDbPropertiesObject: Option[ConfigObject] = getOptionalConfigObject("properties")
 
     /** Read a string value only from the driver properties */
     def getDbProperty(key: String): Option[String] =
-      config.getDbProperties.flatMap(_.getOptionalString(key))
+      getDbProperties.flatMap(_.getOptionalString(key))
 
     def getOptionalInt(key: String): Option[Int] =
       if (config.hasPath(key)) Some(config.getInt(key))

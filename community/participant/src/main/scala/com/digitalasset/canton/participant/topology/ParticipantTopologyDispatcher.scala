@@ -100,7 +100,7 @@ class ParticipantTopologyDispatcher(
   )(implicit traceContext: TraceContext): Unit =
     synchronizers.remove(synchronizerId) match {
       case Some(outboxes) =>
-        LifeCycle.close(outboxes*)(logger)
+        LifeCycle.close(outboxes)(logger)
       case None =>
         logger.debug(s"Topology pusher already disconnected from $synchronizerId")
     }

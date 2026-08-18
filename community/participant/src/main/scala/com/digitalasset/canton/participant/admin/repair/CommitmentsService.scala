@@ -82,7 +82,7 @@ final class CommitmentsService(
         NoExceptionRetryPolicy,
       )
 
-  def reinitializeCommitmentsUsingAcs(
+  def reinitializeLegacyCommitmentsUsingAcs(
       paramSynchronizerIds: Set[SynchronizerId],
       filterCounterParticipants: Seq[ParticipantId],
       filterParties: Seq[PartyId],
@@ -113,8 +113,13 @@ final class CommitmentsService(
       val reinitRecordTime = SyncEphemeralStateFactory.currentTimeOfChange(synchronizerIndex)
       val statusPerSynchronizer =
         for {
+          processor <- EitherT.fromOption[FutureUnlessShutdown](
+            synchronizer.acsCommitmentProcessorO,
+            s"Commitment reinitialization is disabled for ${synchronizer.psid} because the old ACS commitment processor is turned off.",
+          )
+
           _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-            synchronizer.acsCommitmentProcessor.reinitializeCommitments(reinitRecordTime),
+            processor.reinitializeCommitments(reinitRecordTime),
             s"Reinitialization is already scheduled or in progress for ${synchronizer.psid}.",
           )
 

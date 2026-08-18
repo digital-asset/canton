@@ -35,6 +35,7 @@ import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmptyUtil
@@ -194,7 +195,7 @@ final case class ResponseAggregation[VKEY](
       loggingContext.debug(
         s"Nothing to do upon response from $sender for $requestId($keyName $viewKey) because no new responders"
       )
-      Either.right[MediatorVerdict, Map[VKEY, ViewState]](statesOfViews)
+      Either.Right[MediatorVerdict](statesOfViews)
     } else {
 
       // log if a participant has already responded with a different verdict for a party

@@ -18,7 +18,7 @@ exportDirectory.createDirectoryIfNotExists()
 
 // -----------------------------------------------------
 // Bootstrap
-val clock = consoleEnvironment.environment.clock.asInstanceOf[com.digitalasset.canton.time.SimClock]
+val clock = consoleEnvironment.environment.clock
 implicit val traceContext = TraceContext.empty
 
 sequencer1.start()
@@ -63,7 +63,7 @@ val currentPhysicalSynchronizerId = sequencer1.physical_synchronizer_id
 val currentSynchronizerId = sequencer1.synchronizer_id
 val currentStaticSynchronizerParameters = sequencer1.synchronizer_parameters.static.get
 val newStaticSynchronizerParameters =
-  currentStaticSynchronizerParameters.copy(protocolVersion = ProtocolVersion.dev)
+  currentStaticSynchronizerParameters.copy(protocolVersion = ProtocolVersion.alpha.head)
 val newPhysicalSynchronizerId =
   PhysicalSynchronizerId(currentSynchronizerId, newStaticSynchronizerParameters.toInternal)
 
@@ -99,13 +99,10 @@ def writeAuthorizeStoreToFile(node: InstanceReference): Unit = {
   )
 }
 
-def writeSequencerGenesisState(sequencer: SequencerReference): Unit = {
-  val genesisState = sequencer.topology.transactions.logical_upgrade_state()
-  BinaryFileUtil.writeByteStringToFile(
-    s"${exportDirectory / sequencer.name}-genesis-state",
-    genesisState,
+def writeSequencerGenesisState(sequencer: SequencerReference): Unit =
+  sequencer.topology.transactions.sequencer_lsu_state(
+    s"${exportDirectory / sequencer.name}-genesis-state"
   )
-}
 
 def writeSynchronizerNodesDataToFiles() = {
   println("Writing identities of sequencer1 and mediator1 to file")
@@ -122,6 +119,7 @@ def writeSynchronizerNodesDataToFiles() = {
 def migrateNode(
     migratedNode: InstanceReference,
     oldNodeName: String,
+    sequencer: SequencerReference,
 ): Unit = {
   val nodeName = migratedNode.name
 
@@ -153,8 +151,8 @@ def migrateNode(
         (exportDirectory / s"$oldNodeName-genesis-state").canonicalPath
       )
       newSequencer.health.wait_for_ready_for_initialization()
-      newSequencer.setup.initialize_from_synchronizer_predecessor(
-        genesisState,
+      newSequencer.setup.initialize_from_lsu_predecessor(
+        s"${exportDirectory / sequencer.name}-genesis-state",
         newStaticSynchronizerParameters,
       )
 
@@ -166,7 +164,10 @@ def migrateNode(
           Seq(sequencer2)
             .map(s => s.sequencerConnection.withAlias(SequencerAlias.tryCreate(s.name))),
           PositiveInt.one,
+          NonNegativeInt.zero,
           SubmissionRequestAmplification.NoAmplification,
+          SequencerConnectionPoolDelays.default,
+          SubscriptionLivenessLimits.default,
         ),
       )
 

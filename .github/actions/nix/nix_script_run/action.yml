@@ -1,0 +1,55 @@
+name: Nix Script Run
+description: |
+  Wraps a multiline command execution inside a Nix environment.
+  NOTE: The input command is wrapped in a shell script and the caller must ensure that untrusted input is not passed in unsanitized.
+
+inputs:
+  command:
+    default: ""
+    required: true
+    description: Bash multiline command with args to be run
+  working_directory:
+    default: "."
+    required: false
+    description: Directory where the command should be executed
+  output-name:
+    default: ''
+    required: false
+    description: Name of output to forward
+
+outputs:
+  result:
+    description: The captured output of the command
+    value: ${{ steps.json.outputs.result}}
+
+runs:
+  using: composite
+  steps:
+    - name: Prepare script
+      id: prepare
+      shell: bash
+      run: |
+        TMPFILE=$(mktemp)
+        echo "tmpfile=$TMPFILE" >> "$GITHUB_OUTPUT"
+        cat > "$TMPFILE" <<'__EOF__'
+        set -eo pipefail
+        ${{ inputs.command }}
+        __EOF__
+
+    - name: Run command in nix-shell
+      id: exec
+      run: |
+        PROJECT_ROOT=$(git rev-parse --show-toplevel)
+        trap 'rm -f "${{ steps.prepare.outputs.tmpfile }}"' EXIT
+        "$PROJECT_ROOT/.ci/nix-exec" bash "${{ steps.prepare.outputs.tmpfile }}"
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+
+    - name: Forward output to result
+      id: json
+      if: ${{ inputs.output-name != '' }}
+      run: |
+        JSON_OUTPUTS='${{ toJSON(steps.exec.outputs) }}'
+        SELECTED_VALUE=$(echo "$JSON_OUTPUTS" | jq -r ".[\"${{ inputs.output-name }}\"] // empty")
+        echo "result=$SELECTED_VALUE" >> $GITHUB_OUTPUT
+      shell: bash

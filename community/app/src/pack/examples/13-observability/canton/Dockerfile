@@ -1,4 +1,4 @@
-FROM azul/zulu-openjdk-debian:17
+FROM azul/zulu-openjdk-debian:21.0.10-21.48
 
 # Clean up remaining python3 installs from the base image
 RUN dpkg --purge python3 python3.9-minimal libpython3.9-minimal
@@ -30,6 +30,7 @@ WORKDIR /canton
 # only copy fat jar and simple topology configuration
 COPY bin/canton bin/canton
 COPY lib/canton-*.jar lib/
+
 COPY examples/01-simple-topology/simple-topology.conf .
 
 # pre-compile ammonite's dynamic scala by launching the REPL with no stdin

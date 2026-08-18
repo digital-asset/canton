@@ -133,8 +133,8 @@ class SyncCryptoApiParticipantProvider(
     }
 
   override def close(): Unit = {
-    val instances: Seq[AutoCloseable] = synchronizerCryptoClientCache.values.toSeq :+ ips
-    LifeCycle.close(instances*)(logger)
+    val instances = synchronizerCryptoClientCache.values.toSeq :+ ips
+    LifeCycle.close(instances)(logger)
   }
 
 }

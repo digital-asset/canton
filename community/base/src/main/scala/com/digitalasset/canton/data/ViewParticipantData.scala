@@ -20,7 +20,8 @@ import com.digitalasset.canton.protocol.{v30, v31, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.EitherUtil
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{
   LfCommand,
@@ -722,7 +723,7 @@ object ViewParticipantData
   )(
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
       coreInputsP: Seq[v30.InputContract],
-      createdInSubviewArchivedInCoreP: Seq[String],
+      createdInSubviewArchivedInCoreP: Seq[ProtoUnvalidatedString],
       externalCallResults: Seq[ViewExternalCallResult],
   ): ParsingResult[ViewParticipantData] =
     for {
@@ -789,7 +790,7 @@ object ViewParticipantData
         output = result.output.toByteString,
         exerciseIndex = exerciseIndex.unwrap,
         callIndex = callIndex.unwrap,
-        checkingParties = checkingParties.toSeq.sorted,
+        checkingParties = checkingParties.toSeq.sorted.map(_.toProtoUnvalidated),
       )
   }
 

@@ -763,7 +763,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-8ec094096423 \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-98176b11a35b \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1098,32 +1098,61 @@ commands:
             - run:
                 command: |
                     FIXED="<< parameters.fixed_volunteer >>"
+                    # The usual suspects to ping when no live rota person can be selected. Mirrors the
+                    # fallback_pool in scripts/ci/roster_people.json (Thibault Bene, Soren Bleikertz,
+                    # Rafael Guglielmetti), inlined here because the no-checkout path below has no repo
+                    # to read that file from.
+                    USUAL_SUSPECTS="U0AHRL04HPV,U276HDDB6,U020XUXADCP"
+                    # Reason line appended to the alert. The rota wording is the default, 2.x
+                    # maintenance lines override it below.
+                    PING_REASON="You are on rota, so please take a look."
+                    # Choosing a volunteer must never fail this step. It runs with
+                    # `when: always` on an already-red build, and some jobs invoke it from a
+                    # working directory that has no repo checkout (no .ci/nix-exec, no
+                    # scripts/), so guard on the files actually being present and treat every
+                    # selection path as best-effort, degrading to the usual suspects below.
                     if [ -n "$FIXED" ]; then
                       SELECTED_VOLUNTEER="$FIXED"
-                    elif command -v nix-shell >/dev/null 2>&1; then
-                      SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB")
-                    else
-                      # Machine executors (e.g. test_ping_arm) have no nix, so nix-exec cannot run.
-                      # select_rota.py needs cryptography to sign the Google auth JWT; install it
-                      # best-effort so we still ping the live rota person. If the install fails the
+                    elif printf '%s' "$CIRCLE_BRANCH" | grep -q '^release-line-2\.'; then
+                      # The 2.x lines are in maintenance and have no rota column, so ping the
+                      # usual suspects who own them directly instead of a rota volunteer.
+                      SELECTED_VOLUNTEER="$USUAL_SUSPECTS"
+                      PING_REASON="This is a 2.x maintenance line, so pinging the usual suspects."
+                    elif [ -x .ci/nix-exec ] && command -v nix-shell >/dev/null 2>&1; then
+                      # Nix executors: run through the nix wrapper so select_rota.py gets its deps.
+                      SELECTED_VOLUNTEER=$(.ci/nix-exec python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB" || true)
+                    elif [ -f scripts/ci/select_rota.py ]; then
+                      # Machine executors (e.g. test_ping_arm) have no nix, so run python3 directly.
+                      # select_rota.py needs cryptography to sign the Google auth JWT, so install it
+                      # best-effort and still ping the live rota person. If the install fails the
                       # script degrades to its deterministic roster fallback rather than breaking.
-                      # The plain install covers older pip; the retry adds --break-system-packages
+                      # The plain install covers older pip, and the retry adds --break-system-packages
                       # (pip 23+) for images that mark the system Python externally managed (PEP 668).
                       python3 -m pip install -q --user cryptography \
                         || python3 -m pip install -q --user --break-system-packages cryptography \
-                        || echo "warning: cryptography install failed; select_rota will use its roster fallback" >&2
-                      SELECTED_VOLUNTEER=$(python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB")
+                        || echo "warning: cryptography install failed, select_rota will use its roster fallback" >&2
+                      SELECTED_VOLUNTEER=$(python3 scripts/ci/select_rota.py --job "$CIRCLE_JOB" || true)
+                    else
+                      echo "warning: no repo checkout in $(pwd), falling back to the usual suspects" >&2
+                      SELECTED_VOLUNTEER=""
+                    fi
+
+                    # Never ping nobody on a red build: if nothing was selected (no checkout, or
+                    # select_rota errored above), fall back to the usual suspects.
+                    if [ -z "$SELECTED_VOLUNTEER" ]; then
+                      SELECTED_VOLUNTEER="$USUAL_SUSPECTS"
                     fi
 
                     echo "$SELECTED_VOLUNTEER"
                     echo "export SELECTED_VOLUNTEER=\"${SELECTED_VOLUNTEER}\"" >> $BASH_ENV
+                    echo "export PING_REASON=\"${PING_REASON}\"" >> $BASH_ENV
                 name: Choose volunteer
                 when: always
             - slack/status:
                 fail_only: true
-                failure_message: '*[CircleCI]* A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. You are on rota, so please take a look.'
+                failure_message: '*[CircleCI]* A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`. $PING_REASON'
                 mentions: ${SELECTED_VOLUNTEER}
-                only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
+                only_for_branches: main,release-line-2.0,release-line-2.1,release-line-2.2,release-line-2.3,release-line-2.3.10,release-line-2.4,release-line-2.5,release-line-2.6,release-line-2.7,release-line-2.8,release-line-2.9,release-line-2.10,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
                 webhook: << parameters.webhook_url >>
     split_tests_for_parallel_run:
         description: split tests for parallel execution
@@ -2402,8 +2431,6 @@ jobs:
                 is_manual: << parameters.is_manual >>
                 is_nightly_workflow: << parameters.is_nightly_workflow >>
             - publish_release_on_s3
-            - publish_release_on_artifactory:
-                nightly_release: << parameters.is_nightly_workflow >>
             - publish_release_on_oci_registry:
                 nightly_release: << parameters.is_nightly_workflow >>
             - when:
@@ -2911,22 +2938,6 @@ jobs:
             - run_variations_tests:
                 exclude_unstable_tests: true
                 override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-    verify_circleci_config:
-        executor: canton-small-docker
-        steps:
-            - checkout:
-                method: blobless
-            - check_pr_skip_ci
-            - run:
-                command: |
-                    cd .circleci
-                    circleci config pack config > config.yml.new
-                    if ! diff -q -I '^#' config.yml config.yml.new; then # Ignore full-line comments as part of the check
-                      echo "ERROR: Committed config.yml is stale, please run build-config.sh in .circleci"
-                      exit 1
-                    fi
-                name: Generate and check circleci config with committed one
-            - slack_red_main_with_volunteer
 orbs:
     slack: circleci/slack@3.3.0
 parameters:
@@ -2979,407 +2990,6 @@ parameters:
         type: string
 version: 2.1
 workflows:
-    canton_build_required:
-        jobs:
-            - compile:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gha-migration\/.*/
-                    tags:
-                        only: /^v.*/
-            - package_community:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
-            - test_docker_images:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - package_community
-            - verify_circleci_config:
-                filters:
-                    branches:
-                        ignore:
-                            - main
-                            - /^release-line.*/
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-            - static_tests:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gha-migration\/.*/
-            - check_todos:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gha-migration\/.*/
-                            - main
-            - protobuf_continuity:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                requires:
-                    - compile
-            - build_scaladoc:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - build_docs_snippets:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - build_docs:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - package_community
-                    - build_scaladoc
-                    - build_docs_snippets
-            - test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - smoke_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        only:
-                            - /^gh-readonly-queue\/main\/.*/
-                requires:
-                    - compile
-            - test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                name: test_protocol_version_36
-                protocol_version: "36"
-                requires:
-                    - compile
-            - test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                name: test_protocol_version_dev
-                protocol_version: DEV
-                requires:
-                    - test_protocol_version_36
-            - temp_acs_commitment_tests_pv_dev:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - main
-                            - /^release-line.*/
-                            - /^gh-readonly-queue\/main\/.*/
-                name: temp_acs_commitment_tests_pv_dev
-                requires:
-                    - compile
-            - unstable_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - package_community
-            - variations_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - variations_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - main
-                            - /^release-line.*/
-                            - /^gh-readonly-queue\/main\/.*/
-                name: variation_test_selected_users_only
-                only_for_selected_users: true
-                requires:
-                    - compile
-            - ledger_api_compatibility_tests:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - protocol_continuity_test_latest:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - da-images
-                    - maven-mirror
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - scalafix:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - sequential_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-                    - test
-            - crash_recovery_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - toxiproxy_test_fast:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - compile
-            - test_data_continuity_dumps:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore:
-                            - /^gh-readonly-queue\/main\/.*/
-                requires:
-                    - compile
-        max_auto_reruns: 1
-        when:
-            and:
-                - not: << pipeline.parameters.test_to_run_many_times >>
-                - equal:
-                    - none
-                    - << pipeline.parameters.manual_job >>
     manual_adhoc_daml_update:
         jobs:
             - daml_upgrade_pr:

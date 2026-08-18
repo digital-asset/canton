@@ -23,7 +23,7 @@ class MemoryTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaP
 
   override protected def createBackend()(implicit system: ActorSystem[?]): Backend = {
     implicit val ec: ExecutionContext = system.executionContext
-    val memoryStore = new TeaMemoryTrafficStore()
+    val memoryStore = new TeaMemoryTrafficStore(loggerFactory)
     new Backend {
       override val store: TeaTrafficStore = memoryStore
       override def newProjection(): TeaProjectionFactory =

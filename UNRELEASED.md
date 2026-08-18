@@ -17,6 +17,39 @@ Added experimental support for ML-DSA. Currently only ML-DSA-65 is supported. Ex
 Re-implemented the Sequencer Aggregator to be more resilient to misbehaving sequencers. Switching between the old and new implementation is controlled by the `sequencer-client.use-new-aggregator` configuration option, which defaults to `true`.
 One of the improvements allows the aggregator to detect sequencers that provide an incorrect event after that event has already reached consensus with sufficiently many other sequencers. A cache of past processed events is kept for that purpose, whose size is controlled by the `sequencer-client.past-events-cache-size` configuration option (default: 1000).
 
+### Traffic Enforcement App
+- Added `reject-multi-party-submissions` to the participant's traffic enforcement configuration.
+  Multi-party submissions normally bypass traffic enforcement, since TEA accounts are bound to a
+  single party. Setting this to `true` rejects them instead. Disabled by default.
+
+  ```
+  canton.participants.participant1.traffic-enforcement {
+    enabled = true
+    reject-multi-party-submissions = true
+  }
+  ```
+- Added `allow-submissions-on-degradation` to the participant's traffic enforcement
+  configuration. When the balance can't be determined, for example during a database outage, this
+  lets the submission proceed unchecked instead of failing it, logged at WARN. The submission is
+  still charged, so an account without enough traffic ends up with a negative balance until it is
+  topped up. Does not apply when the traffic service itself refuses the request. Disabled by
+  default.
+- Added `database-query-timeout` (default 1 second) and `account-lookup-timeout` (default 20
+  seconds) to the internal traffic enforcement server's configuration, bounding the database read
+  behind `GetAccount` and the overall call respectively. The former must be at least one
+  millisecond and the latter must be strictly larger so a timed-out query still leaves room for a retry.
+
+  ```
+  canton.participants.participant1.traffic-enforcement {
+    enabled = true
+    allow-submissions-on-degradation = true
+    traffic-enforcement-server {
+      database-query-timeout = "1s"
+      account-lookup-timeout = "20s"
+    }
+  }
+  ```
+
 ### Topic A
 Template for a bigger topic
 #### Background
@@ -49,8 +82,26 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
 - The Ledger API now exposes a `GetJwks` endpoint. This can be used to obtain public keys for specific parties in JWK format.
   * gRPC: `JoseService.GetJwks`
   * JSON API: `GET /v2/jose/jwks/synchronizer/<synchronizer-id>/party/<party-id>`
+- A `type = party-jwt` can be added to `participants.<participant>.ledger-api.auth-services` to enable this feature.
+
+### Removal of the legacy JSON API endpoints and fields
+
+*BREAKING*: The Ledger JSON API has been cleaned up of endpoints and fields pertaining to streaming queries
+that have been deprecated since 3.4 and announced for removal in 3.5:
+
+- `POST /v2/commands/submit-and-wait-for-transaction-tree` has been removed. Use
+  `POST /v2/commands/submit-and-wait-for-transaction` with `transactionFormat.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+  instead. Note that the response carries a flat `transaction.events` array rather than a `transactionTree.eventsById` map.
+- `(WebSocket) GET /v2/updates` and `POST /v2/updates` no longer accept the `filter` and `verbose` fields. `updateFormat` is now required.
+- `(WebSocket) GET /v2/state/active-contracts` and `POST /v2/state/active-contracts` no longer accept the `filter` and `verbose` fields.
+  `eventFormat` is now required.
+
+The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, `JsTransactionTree` and
+`JsSubmitAndWaitForTransactionTreeResponse` schemas have been dropped from the OpenAPI and AsyncAPI definitions.
 
 ### Minor Improvements
+- Security. The HTTP server now rejects too deeply nested json structures. The check uses the same values as the already existing gRPC check for nested daml records. This means
+    that the Ledger JSON API client may now observe an error from HTTP (BadRequest) where previously the `INVALID_ARGUMENT/COMMAND_PREPROCESSING_FAILED` or  `INVALID_ARGUMENT/VALUE_NESTING` error was returned.
 - The submitter does not have to be a stakeholder of all contracts during automatic reassignment, only of those that are actually reassigned to a target synchronizer. The previous check was considered too strict: it required the submitter to be a stakeholder of all involved contracts, even ones that were, for instance, disclosed contracts already on the target synchronizer.
 - The HTTP server for the Ledger JSON API is now explicitly configured with a maximum content length. A new config option `http-ledger-api.max-inbound-message-size` has been added. If not configured, the gRPC setting `ledger-api.max-inbound-message-size` will be used.
     Previously, an implicit limit of 8 MB was used, so this change should not affect existing configurations.
@@ -77,6 +128,9 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
     - Add a `psid` label, populated if it is provided when connecting. This should be the case starting from the second connection to a synchronizer, or upon LSU.
     - Close the `connection-health` and `subscription-health` metrics associated to the `psid` when the pool is closed, instead of closing all the existing ones when the pool is started.
 - Updated com.google.protobuf libs from 3.25.5 --> 3.25.9
+- Updated com.google.cloud:google-cloud-kms from 2.63.0 --> 2.97.0 and google-cloud-storage from
+  2.50.0 --> 2.70.0. These require com.google.protobuf libs 4.x, which are now used (4.35.1)
+  instead of 3.25.9.
 - A call to `AcknowledgeSigned` with a timestamp before the upgrade time returns immediately, without any acknowledgement being done.
 - (Potentially) *BREAKING*: Aggregatable submissions are now rejected eagerly to preserve bandwidth.
   This means that the submission error code `SEQUENCER_AGGREGATE_SUBMISSION_ALREADY_SENT` may now also
@@ -111,7 +165,7 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
 - *BREAKING*: Removed the deprecated `GetPreferredPackageVersion` endpoint of the `InteractiveSubmissionService`. Clients should use `GetPreferredPackages` instead, which resolves the preferred packages for one or more package-name vetting requirements in a single call. This affects both the Ledger API (gRPC `InteractiveSubmissionService.GetPreferredPackageVersion`) and the Ledger JSON API (`GET /v2/interactive-submission/preferred-package-version`). The `GetPreferredPackages` endpoint (gRPC and `POST /v2/interactive-submission/preferred-packages`) is now considered stable.
 - *BREAKING*: Updated the list of default cipher suites according to the current OWASP recommendations.
 
-  The list of removed suites:
+The list of removed suites:
   - `TLS_DHE_RSA_WITH_AES_256_GCM_SHA384`
   - `TLS_DHE_RSA_WITH_AES_128_GCM_SHA256`
   - `TLS_DHE_RSA_WITH_AES_256_CBC_SHA256`
@@ -183,6 +237,17 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
 - Subview package vetting, checked at submission time, is now verified during confirmation request validation.
 - *Console BREAKING*: The `com.digitalasset.canton.config.PositiveInt.increment` method now returns an `Either[InvariantViolation, PositiveInt]` instead of a `PositiveInt`.
   This is relevant as this class can be used in the console and scripts. Such usages must be updated to account for this change.
+- **BREAKING**: Public API servers now reject client connections using TLS 1.0 and 1.1. Clients must use
+**TLS 1.2 or higher**. This security enforcement aligns all public APIs with the existing Admin API
+requirement. For details on TLS version deprecations, see [RFC 8996](https://www.rfc-editor.org/info/rfc8996).
+
+#### Improved Sequencer Logging
+On the sequencer, the log line mentioning all events in a block now also can contain the outcome of the event.
+By setting `canton.sequencers.sequencer.parameters.enable-async-sequencer-logging = true`, the logging will be
+moved to the end of the block processing, but will include the outcome of the events in the block. The default
+remains `false` to preserve the current behavior.
+Note that as part of this change, the sequencer-id of the traffic control metrics and of the block event processor
+metrics dropped the superfluous leading "SEQ::" string.
 
 ### Preview Features
 - preview feature

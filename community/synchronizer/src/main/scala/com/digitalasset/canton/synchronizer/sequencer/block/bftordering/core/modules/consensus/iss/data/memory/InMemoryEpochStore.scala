@@ -9,6 +9,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   PekkoEnv,
   PekkoFutureUnlessShutdown,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.{
   Block,
   Epoch,
@@ -209,14 +210,14 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
     }
   }
 
-  override def loadEpochProgress(activeEpochInfo: EpochInfo)(implicit
+  override def loadEpochProgress(activeEpoch: EpochState.Epoch)(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[EpochInProgress] =
-    createFuture(loadEpochProgressActionName(activeEpochInfo)) { () =>
+    createFuture(loadEpochProgressActionName(activeEpoch.info)) { () =>
       Try {
         val blocksInEpoch = blocks.view
           .filter { case (_, CompletedBlock(prePrepare, _)) =>
-            prePrepare.message.blockMetadata.epochNumber == activeEpochInfo.number
+            prePrepare.message.blockMetadata.epochNumber == activeEpoch.info.number
           }
           .values
           .toSeq
@@ -231,7 +232,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
 
         val preparesForIncompleteBlocks = preparesMap.view
           .filter { case (blockNumber, _) =>
-            blockNumber >= activeEpochInfo.startBlockNumber
+            blockNumber >= activeEpoch.info.startBlockNumber
           }
           .values
           .flatMap(_.values)
@@ -243,7 +244,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
             mapView: MapView[BlockNumber, TrieMap[ViewNumber, SignedMessage[M]]]
         ): List[SignedMessage[PbftNetworkMessage]] = mapView
           .filter { case (blockNumber, _) =>
-            blockNumber >= activeEpochInfo.startBlockNumber
+            blockNumber >= activeEpoch.info.startBlockNumber
           }
           .values
           .flatMap(_.values)

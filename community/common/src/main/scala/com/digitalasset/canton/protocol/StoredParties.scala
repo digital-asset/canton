@@ -3,16 +3,18 @@
 
 package com.digitalasset.canton.protocol
 
-import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedMessageCompanionDbHelpers,
   HasVersionedWrapper,
   ProtoVersion,
   ProtocolVersion,
+  ProtocolVersionValidation,
 }
 
 import scala.collection.immutable.SortedSet
@@ -22,7 +24,9 @@ final case class StoredParties(parties: SortedSet[LfPartyId])
 
   override protected def companionObj = StoredParties
 
-  protected def toProtoV30: v30.StoredParties = v30.StoredParties(parties.toList)
+  protected def toProtoV30: v30.StoredParties = v30.StoredParties(
+    parties.toList.map(_.toProtoUnvalidated)
+  )
 }
 
 object StoredParties
@@ -45,7 +49,11 @@ object StoredParties
   def fromProtoV30(proto0: v30.StoredParties): ParsingResult[StoredParties] = {
     val v30.StoredParties(partiesP) = proto0
     for {
-      parties <- partiesP.traverse(ProtoConverter.parseLfPartyId(_, "parties"))
+      parties <- ProtoValidation.validateThen(
+        partiesP,
+        "parties",
+        ProtocolVersionValidation.NoValidation,
+      )(ProtoConverter.parseLfPartyId)
     } yield StoredParties.fromIterable(parties)
   }
 }

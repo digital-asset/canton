@@ -61,6 +61,7 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
               None,
               parallelism = PositiveInt.two,
               enablePrevalidation = true,
+              enableAsyncLoggingWithOutcome = false,
             ),
             SequencerTestMetrics(this.getClass.getSimpleName),
             memberValidatorMock,

@@ -15,7 +15,6 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdatesPageResponse,
   GetUpdatesResponse,
 }
-import com.daml.metrics.InstrumentedGraph.*
 import com.daml.tracing.{Event, SpanAttribute, Spans}
 import com.digitalasset.base.error.DamlErrorWithDefiniteAnswer
 import com.digitalasset.base.error.utils.DecodedCantonError
@@ -81,6 +80,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.PackageResolution
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.HexString
+import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.{ReassignmentCounter, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{FullIdentifier, Identifier, NameTypeConRef, PackageId}
@@ -220,7 +220,7 @@ private[index] class IndexServiceImpl(
           .mapError(shutdownError)
           .buffered(metrics.index.updatesBufferSize, LedgerApiStreamsBufferSize)
       }.wireTap {
-        case ProtoUpdates(protoUpdate) =>
+        case ProtoUpdates(Some(protoUpdate), _) =>
           protoUpdate.update match {
             case GetUpdatesResponse.Update.Transaction(transaction) =>
               Spans.addEventToCurrentSpan(
@@ -726,7 +726,7 @@ private[index] class IndexServiceImpl(
         descendingOrder = getUpdatesPageRequest.descendingOrder,
         skipPruningChecks = skipPruningChecks,
       ).take(limit.toLong)
-        .collect { case ProtoUpdates(response) => response }
+        .collect { case ProtoUpdates(Some(response), _) => response }
         .runWith(Sink.seq)(materializer)
         .map(_.flatMap(getUpdatesResponseToGetUpdateResponse))
     }
@@ -1317,7 +1317,8 @@ object IndexServiceImpl {
       offsetCheckpoint: OffsetCheckpoint
   ): UpdatesResponse =
     UpdatesResponse.ProtoUpdates(
-      GetUpdatesResponse.defaultInstance.withOffsetCheckpoint(offsetCheckpoint.toApi)
+      Some(GetUpdatesResponse.defaultInstance.withOffsetCheckpoint(offsetCheckpoint.toApi)),
+      synchronizerParametersResponse = None,
     )
 
   private def completionsResponse(

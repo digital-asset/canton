@@ -17,6 +17,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 
@@ -57,7 +58,8 @@ final case class UnassignmentData(
         reassign.counter.toProtoPrimitive,
       )
     },
-    reassigningParticipantUids = reassigningParticipants.map(p => p.uid.toProtoPrimitive).toSeq,
+    reassigningParticipantUids =
+      reassigningParticipants.map(_.uid.toProtoPrimitive.toProtoUnvalidated).toSeq,
     sourcePhysicalSynchronizerId = sourcePsid.unwrap.toProtoPrimitive,
     targetPhysicalSynchronizerId = targetPsid.unwrap.toProtoPrimitive,
     targetTimestamp = targetTimestamp.unwrap.toProtoTimestamp.some,

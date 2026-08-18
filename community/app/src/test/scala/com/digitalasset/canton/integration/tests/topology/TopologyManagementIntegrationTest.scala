@@ -352,7 +352,7 @@ trait TopologyManagementIntegrationTest
           logEntries should not be empty
           logEntries.exists(_.message.contains("Processing 0/")) shouldBe true
           logEntries.exists(
-            _.message.contains(s"Ignoring existing transactions: ${Seq(tx).toVector}")
+            _.message.contains(s"Ignoring existing transactions: ${Seq(tx).toList}")
           ) shouldBe true
         },
       )
@@ -384,7 +384,7 @@ trait TopologyManagementIntegrationTest
         { logEntries =>
           logEntries should not be empty
           logEntries.exists(
-            _.message.contains(s"Ignoring existing transactions: ${Seq(tx).toVector}")
+            _.message.contains(s"Ignoring existing transactions: ${Seq(tx).toList}")
           ) shouldBe true
         },
       )
@@ -510,7 +510,9 @@ trait TopologyManagementIntegrationTest
         Seq(partyKey.toProtoV30.valueOrFail("serializing public key")),
       )
 
-      PartyToKeyMapping.fromProtoV30(ptkProto).isRight shouldBe true
+      PartyToKeyMapping
+        .fromProtoV30(testedProtocolVersionValidation, ptkProto)
+        .isRight shouldBe true
     }
 
     "deserialize a PTK with duplicate keys" in { implicit env =>

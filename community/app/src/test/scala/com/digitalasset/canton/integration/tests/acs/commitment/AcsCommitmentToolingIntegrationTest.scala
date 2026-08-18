@@ -100,6 +100,8 @@ trait AcsCommitmentToolingIntegrationTest
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxCommandDeduplicationDuration),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        // TODO(#34818) Enable the new pipeline
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

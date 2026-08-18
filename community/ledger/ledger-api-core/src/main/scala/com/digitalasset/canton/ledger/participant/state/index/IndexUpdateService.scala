@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.AcsChange
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
+import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.SynchronizerParametersResponse
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.google.protobuf.ByteString
@@ -56,7 +57,10 @@ object IndexUpdateService {
   sealed trait UpdatesResponse extends Product with Serializable
 
   object UpdateResponse {
-    final case class ProtoUpdate(response: GetUpdateResponse) extends UpdateResponse
+    final case class ProtoUpdate(
+        response: Option[GetUpdateResponse],
+        synchronizerParametersResponse: Option[SynchronizerParametersResponse],
+    ) extends UpdateResponse
     final case class AcsCommitment(commitment: ReceivedAcsCommitment)
         extends UpdateResponse
         with UpdatesResponse
@@ -64,30 +68,35 @@ object IndexUpdateService {
 
     def expandToGetUpdatesResponse(response: UpdateResponse): UpdatesResponse =
       response match {
-        case ProtoUpdate(response) =>
-          response.update match {
-            case GetUpdateResponse.Update.Empty =>
-              UpdatesResponse.ProtoUpdates(GetUpdatesResponse(GetUpdatesResponse.Update.Empty))
-            case GetUpdateResponse.Update.Transaction(value) =>
-              UpdatesResponse.ProtoUpdates(
-                GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(value))
-              )
-            case GetUpdateResponse.Update.Reassignment(value) =>
-              UpdatesResponse.ProtoUpdates(
-                GetUpdatesResponse(GetUpdatesResponse.Update.Reassignment(value))
-              )
-            case GetUpdateResponse.Update.TopologyTransaction(value) =>
-              UpdatesResponse.ProtoUpdates(
-                GetUpdatesResponse(GetUpdatesResponse.Update.TopologyTransaction(value))
-              )
-          }
+        case ProtoUpdate(response, synchronizerParametersResponse) =>
+          val responseUpdates =
+            response.map {
+              _.update match {
+                case GetUpdateResponse.Update.Empty =>
+                  GetUpdatesResponse.Update.Empty
+                case GetUpdateResponse.Update.Transaction(value) =>
+                  GetUpdatesResponse.Update.Transaction(value)
+                case GetUpdateResponse.Update.Reassignment(value) =>
+                  GetUpdatesResponse.Update.Reassignment(value)
+                case GetUpdateResponse.Update.TopologyTransaction(value) =>
+                  GetUpdatesResponse.Update.TopologyTransaction(value)
+              }
+            }
+          UpdatesResponse.ProtoUpdates(
+            responseUpdates.map(GetUpdatesResponse.apply),
+            synchronizerParametersResponse,
+          )
+
         case v: AcsCommitment => v
         case v: AcsChange => v
       }
   }
 
   object UpdatesResponse {
-    final case class ProtoUpdates(response: GetUpdatesResponse) extends UpdatesResponse
+    final case class ProtoUpdates(
+        response: Option[GetUpdatesResponse],
+        synchronizerParametersResponse: Option[SynchronizerParametersResponse],
+    ) extends UpdatesResponse
     type AcsCommitment = UpdateResponse.AcsCommitment
     val AcsCommitment = UpdateResponse.AcsCommitment
     type AcsChange = UpdateResponse.AcsChange

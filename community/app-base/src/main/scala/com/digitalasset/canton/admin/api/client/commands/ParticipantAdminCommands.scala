@@ -85,6 +85,7 @@ import com.digitalasset.canton.util.{
   PathUtils,
   ResourceUtil,
 }
+import com.digitalasset.canton.validation.ProtoUnvalidated.chimney.*
 import com.digitalasset.canton.{ReassignmentCounter, SequencerCounter, SynchronizerAlias, config}
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp
@@ -99,7 +100,6 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, MILLISECONDS}
-import scala.util.chaining.*
 
 object ParticipantAdminCommands {
 
@@ -1651,32 +1651,37 @@ object ParticipantAdminCommands {
         GrpcAdminCommand.CustomClientTimeout(NonNegativeDuration.ofMinutes(10))
 
       override protected def createRequest(): Either[String, v30.PerformManualLsuRequest] = {
-        val conf: PerformManualLsuRequest.SuccessorConnectionConfiguration =
+        val confE: Either[String, PerformManualLsuRequest.SuccessorConnectionConfiguration] =
           successorConnectionConfiguration.fold(
             successors =>
-              v30.PerformManualLsuRequest.SuccessorConnectionConfiguration
-                .SequencerSuccessors(
-                  successors
-                    .map { case (sequencerId, connection) =>
-                      sequencerId.toProtoPrimitive -> connection.toProtoV30
-                        .transformInto[v30.PerformManualLsuRequest.SequencerConnection]
-                    }
-                    .pipe(v30.PerformManualLsuRequest.SequencerSuccessors(_))
+              successors.toSeq
+                .traverse { case (sequencerId, connection) =>
+                  connection.toProtoV30
+                    .transformIntoPartial[v30.PerformManualLsuRequest.SequencerConnection]
+                    .toEitherString
+                    .map(sequencerId.toProtoPrimitive -> _)
+                }
+                .map(pairs =>
+                  v30.PerformManualLsuRequest.SuccessorConnectionConfiguration.SequencerSuccessors(
+                    v30.PerformManualLsuRequest.SequencerSuccessors(pairs.toMap)
+                  )
                 ),
             newConfig =>
-              v30.PerformManualLsuRequest.SuccessorConnectionConfiguration.Config(
-                newConfig.toInternal.toProtoV30
+              Right(
+                v30.PerformManualLsuRequest.SuccessorConnectionConfiguration.Config(
+                  newConfig.toInternal.toProtoV30
+                )
               ),
           )
 
-        v30
-          .PerformManualLsuRequest(
+        confE.map(conf =>
+          v30.PerformManualLsuRequest(
             physicalSynchronizerId = currentPsid.toProtoPrimitive,
             successorPhysicalSynchronizerId = successorPsid.toProtoPrimitive,
             upgradeTime = upgradeTime.map(_.toProtoTimestamp),
             successorConnectionConfiguration = conf,
           )
-          .asRight
+        )
       }
 
       override protected def submitRequest(
@@ -2265,14 +2270,15 @@ object ParticipantAdminCommands {
           Seq[CommitmentReinitializationInfo],
         ] {
 
-      override protected def createRequest() = Right(
-        v30.RepairCommitmentsUsingAcsRequest(
-          synchronizerIds.map(_.toProtoPrimitive),
-          counterParticipants.map(_.toProtoPrimitive),
-          partyIds.map(_.toProtoPrimitive),
-          Some(timeout.toProtoPrimitive),
+      override protected def createRequest(): Right[String, RepairCommitmentsUsingAcsRequest] =
+        Right(
+          v30.RepairCommitmentsUsingAcsRequest(
+            synchronizerIds.map(_.toProtoPrimitive),
+            counterParticipants.map(_.toProtoPrimitive),
+            partyIds.map(_.toProtoPrimitive),
+            Some(timeout.toProtoPrimitive),
+          )
         )
-      )
 
       override protected def submitRequest(
           service: ParticipantRepairServiceStub,
@@ -2306,6 +2312,52 @@ object ParticipantAdminCommands {
       }.sequence
 
       override def timeoutType: TimeoutType = ServerEnforcedTimeout
+    }
+
+    final case class DigestCommitmentReinitializationInfo(
+        errorOrReinitTimestamp: Either[String, CantonTimestamp]
+    )
+
+    final case class ReinitializeDigestCommitments(
+        synchronizerId: SynchronizerId,
+        runningDigestProcessorShouldStartAfter: Boolean,
+    ) extends Base[
+          v30.ReinitializeDigestCommitmentsRequest,
+          v30.ReinitializeDigestCommitmentsResponse,
+          DigestCommitmentReinitializationInfo,
+        ] {
+
+      override protected def createRequest()
+          : Right[String, v30.ReinitializeDigestCommitmentsRequest] =
+        Right(
+          v30.ReinitializeDigestCommitmentsRequest(
+            synchronizerId.toProtoPrimitive,
+            runningDigestProcessorShouldStartAfter,
+          )
+        )
+
+      override protected def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: v30.ReinitializeDigestCommitmentsRequest,
+      ): Future[v30.ReinitializeDigestCommitmentsResponse] =
+        service.reinitializeDigestCommitments(request)
+
+      override protected def handleResponse(
+          response: v30.ReinitializeDigestCommitmentsResponse
+      ): Either[String, DigestCommitmentReinitializationInfo] =
+        for {
+          errorOrTs <- response.status match {
+            case v30.ReinitializeDigestCommitmentsResponse.Status.ErrorMessage(err) =>
+              Right(Left(err))
+            case v30.ReinitializeDigestCommitmentsResponse.Status
+                  .CompletedReinitTimestamp(tsProto) =>
+              CantonTimestamp.fromProtoTimestamp(tsProto).bimap(_.toString, Right(_))
+            case v30.ReinitializeDigestCommitmentsResponse.Status.Empty =>
+              Left("Either error_message or completed_reinit_timestamp must be set.")
+          }
+        } yield DigestCommitmentReinitializationInfo(errorOrTs)
+
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
   }
 

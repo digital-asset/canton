@@ -119,6 +119,8 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
   protected val MembershipNode0 = Membership.forTesting(Node0, OrderingTopologyNode0)
   protected val Node0Ack = AvailabilityAck(from = Node0, Signature.noSignature)
   protected val Node0Acks = Set(Node0Ack)
+  protected val Node1Ack = AvailabilityAck(from = Node1, Signature.noSignature)
+  protected val Node1Acks = Set(Node1Ack)
   protected val AnInProgressBatchMetadata =
     DisseminationStatus.InProgress(
       membership = Membership.forTesting(Node0, OrderingTopologyNode0),
@@ -256,6 +258,11 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
     Node0Acks.toSeq,
     anEpochNumber,
   )
+  protected val ProofOfAvailabilityNode1AckNode1InTopology = ProofOfAvailability(
+    ABatchId,
+    Node1Acks.toSeq,
+    anEpochNumber,
+  )
   protected val ProofOfAvailabilityNode1And2AcksNode1And2InTopology = ProofOfAvailability(
     ABatchId,
     Node1And2Acks,
@@ -350,6 +357,14 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       Seq(ProofOfAvailability4NodesQuorumVotesNodes0To3InTopology)
     ),
   )
+  protected val AMissingBatchStatusNode1Ack =
+    MissingBatchStatus(
+      ABatchId,
+      ProofOfAvailabilityNode1AckNode1InTopology,
+      numberOfAttempts = 1,
+      jitterStream = jitterStream,
+      orderingMode = OrderingMode.Consensus,
+    )
   protected val AMissingBatchStatusNode1And2Acks =
     MissingBatchStatus(
       ABatchId,

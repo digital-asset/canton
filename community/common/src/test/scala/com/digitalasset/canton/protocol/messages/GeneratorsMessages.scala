@@ -116,7 +116,7 @@ final class GeneratorsMessages(
       digest <- byteStringArb.arbitrary
       counterparticipant <- Arbitrary.arbitrary[ParticipantId]
     } yield DigestForCounterparticipant(
-      Digest.hashDigest(digest),
+      Digest.hashDigest(digest).getCryptographicEvidence,
       counterparticipant.toLf,
     )
   )
@@ -416,12 +416,12 @@ final class GeneratorsMessages(
         classOf[LegacyAcsCommitmentProtocolMessage],
       ),
       GeneratorForClass(
-        if (protocolVersion < ProtocolVersion.v36) Gen.fail
+        if (protocolVersion < ProtocolVersion.acsCommitmentRedesign) Gen.fail
         else acsCommitmentProtocolMessageArb.arbitrary,
         classOf[AcsCommitmentProtocolMessage],
       ),
       GeneratorForClass(
-        if (protocolVersion < ProtocolVersion.v36) Gen.fail
+        if (protocolVersion < ProtocolVersion.acsCommitmentRedesign) Gen.fail
         else acsCommitmentSummaryProtocolMessageArb.arbitrary,
         classOf[AcsCommitmentSummaryProtocolMessage],
       ),

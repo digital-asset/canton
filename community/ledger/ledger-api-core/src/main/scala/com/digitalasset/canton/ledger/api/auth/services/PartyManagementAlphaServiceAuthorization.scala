@@ -49,6 +49,22 @@ final class PartyManagementAlphaServiceAuthorization(
       request: GetAddPartyStatusRequest
   ): Future[GetAddPartyStatusResponse] =
     authorizer.rpc(service.getAddPartyStatus)(getAddPartyStatusClaims*)(request)
+
+  /** Generates a PartyToParticipant mapping topology transaction to onboard an already hosted
+    * party.
+    */
+  override def generatePartyTopologyUpdate(
+      request: GeneratePartyTopologyUpdateRequest
+  ): Future[GeneratePartyTopologyUpdateResponse] =
+    authorizer.rpc(service.generatePartyTopologyUpdate)(generatePartyTopologyUpdateClaims*)(request)
+
+  /** Submits an optionally signed PartyToParticipant mapping topology transaction to onboard a
+    * party.
+    */
+  override def authorizePartyUpdate(
+      request: AuthorizePartyUpdateRequest
+  ): Future[AuthorizePartyUpdateResponse] =
+    authorizer.rpc(service.authorizePartyUpdate)(authorizePartyUpdateClaims*)(request)
 }
 
 object PartyManagementAlphaServiceAuthorization {
@@ -62,5 +78,15 @@ object PartyManagementAlphaServiceAuthorization {
   def getAddPartyStatusClaims: List[RequiredClaim[GetAddPartyStatusRequest]] =
     RequiredClaims(
       RequiredClaim.AdminOrIdpAdmin[GetAddPartyStatusRequest]()
+    )
+
+  def generatePartyTopologyUpdateClaims: List[RequiredClaim[GeneratePartyTopologyUpdateRequest]] =
+    RequiredClaims(
+      RequiredClaim.AdminOrIdpAdmin[GeneratePartyTopologyUpdateRequest]()
+    )
+
+  def authorizePartyUpdateClaims: List[RequiredClaim[AuthorizePartyUpdateRequest]] =
+    RequiredClaims(
+      RequiredClaim.AdminOrIdpAdmin[AuthorizePartyUpdateRequest]()
     )
 }

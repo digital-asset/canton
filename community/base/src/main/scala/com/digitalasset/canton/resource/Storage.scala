@@ -349,7 +349,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A]
 
   def query[A](
@@ -369,6 +368,33 @@ trait DbStorage extends Storage { self: NamedLogging =>
   ): OptionT[FutureUnlessShutdown, A] =
     OptionT(query(action, operationName, maxRetries))
 
+  /** Read action running on the read pool, whose statements PostgreSQL aborts after
+    * `statementTimeout`. H2 has no transaction-scoped equivalent, so no deadline is enforced there.
+    *
+    * The timeout is rounded up to at least one millisecond, because PostgreSQL reads
+    * `statement_timeout = 0` as no timeout at all.
+    */
+  def queryWithStatementTimeout[A](
+      action: DbAction.ReadTransactional[A],
+      statementTimeout: PositiveFiniteDuration,
+      operationName: String,
+      maxRetries: Int = defaultMaxRetries,
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+    profile match {
+      case _: Profile.Postgres =>
+        import profile.DbStorageAPI.jdbcActionExtensionMethods
+        val millis = Math.max(1L, statementTimeout.underlying.toMillis)
+        // Function form of SET LOCAL, so the timeout can be bound rather than spliced. It only
+        // reads transaction state, which keeps the combined action a read.
+        val bounded = sql"select set_config('statement_timeout', ${millis.toString}, true)"
+          .as[String]
+          .andThen(action)
+          .transactionally
+        runRead(bounded, operationName, maxRetries)
+      case _: Profile.H2 =>
+        runRead(action, operationName, maxRetries)
+    }
+
   /** Write-only action, possibly transactional
     *
     * The action must be idempotent because it may be retried multiple times. Only the result of the
@@ -383,7 +409,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     runWrite(action, operationName, maxRetries)
 
@@ -397,7 +422,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[Unit] =
     runWrite(action, operationName, maxRetries).map(_ => ())
 
@@ -418,7 +442,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     runWrite(action, operationName, maxRetries)
 
@@ -426,21 +449,6 @@ trait DbStorage extends Storage { self: NamedLogging =>
 }
 
 object DbStorage {
-  // Type class for return types that allows us know whether any rows were altered,
-  // i.e. updated, inserted or deleted.
-  trait RowsAltered[A] { def apply(a: A): Boolean }
-
-  object RowsAltered {
-    implicit val ofInt: RowsAltered[Int] = _ > 0
-    implicit val ofUnit: RowsAltered[Unit] = (_ => false)
-
-    implicit def ofSeq[A](implicit r: RowsAltered[A]): RowsAltered[Seq[A]] = _.exists(r(_))
-    implicit def ofArray[A](implicit r: RowsAltered[A]): RowsAltered[Array[A]] = _.exists(r(_))
-
-    implicit def ofEither[Err, A](implicit r: RowsAltered[A]): RowsAltered[Either[Err, A]] =
-      _.fold(_ => false, r(_))
-  }
-
   val healthName: String = "db-storage"
 
   // sql prepared statement have a limit of 65535 parameters

@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.component
 import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.api.TransactionShape.LedgerEffects
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
+import com.google.protobuf.ByteString
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -42,7 +43,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         skipPruningChecks = false,
       )
       val updates = updatesStream
-        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(Some(response), _) => response }
         .runWith(Sink.seq)
         .futureValue
       updates.flatMap(
@@ -65,7 +66,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         skipPruningChecks = false,
       )
       val updates = updatesStream
-        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(Some(response), _) => response }
         .runWith(Sink.seq)
         .futureValue
       updates.map(
@@ -80,8 +81,8 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       val createContractsFirst =
         Vector.tabulate(3)(_ => creates(nextRecordTime, 10)(1))
       ingestUpdates(createContractsFirst*)
-      ingestPartyOnboarding(Set("new-party-1"), nextRecordTime())
-      ingestPartyOnboarding(Set("new-party-2"), nextRecordTime())
+      ingestTopologyEvents(parties = Set("new-party-1"), recordTime = nextRecordTime())
+      ingestTopologyEvents(parties = Set("new-party-2"), recordTime = nextRecordTime())
       val createContractsSecond =
         Vector.tabulate(2)(_ => creates(nextRecordTime, 10)(1))
       val rangeEnd = ingestUpdates(createContractsSecond*)
@@ -92,7 +93,9 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         updateFormat = updateFormat(LedgerEffects).copy(includeTopologyEvents =
           Some(
             TopologyFormat(
-              Some(ParticipantAuthorizationFormat(None))
+              Some(ParticipantAuthorizationFormat(None)),
+              synchronizerParametersFormat = false,
+              synchronizerId = None,
             )
           )
         ),
@@ -101,12 +104,47 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       )
 
       val updates = updatesStream
-        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(Some(response), _) => response }
         .runWith(Sink.seq)
         .futureValue
 
       updates.map(_.update.isTopologyTransaction) should contain theSameElementsInOrderAs (Seq(
         false, false, true, true, false, false, false))
+    }
+
+    "deliver synchronizer parameters as an empty update with a synchronizer parameters response" in {
+      val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
+      ingestTopologyEvents(
+        synchronizerParametersPayloads = Seq("synchronizer-parameters"),
+        synchronizerId = synchronizer1,
+        recordTime = nextRecordTime(),
+      )
+      val rangeEnd = index.currentLedgerEnd().value.lastOffset
+
+      val updatesStream = index.updates(
+        begin = rangeStart,
+        endAt = Some(rangeEnd),
+        updateFormat = updateFormat(LedgerEffects).copy(includeTopologyEvents =
+          Some(
+            TopologyFormat(
+              Some(ParticipantAuthorizationFormat(None)),
+              synchronizerParametersFormat = true,
+              synchronizerId = Some(synchronizer1),
+            )
+          )
+        ),
+        descendingOrder = false,
+        skipPruningChecks = false,
+      )
+
+      val responses = updatesStream
+        .collect { case response: UpdatesResponse.ProtoUpdates => response }
+        .runWith(Sink.seq)
+        .futureValue
+
+      val synchronizerParamsResponse = responses.loneElement
+      synchronizerParamsResponse.response shouldBe empty
+      synchronizerParamsResponse.synchronizerParametersResponse should not be empty
     }
 
     "property order create events interleaved with reassignments" in {
@@ -153,7 +191,7 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
       )
 
       val updates = updatesStream
-        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
+        .collect { case UpdatesResponse.ProtoUpdates(Some(response), _) => response }
         .runWith(Sink.seq)
         .futureValue
 
@@ -173,12 +211,12 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
 
     }
 
-    "preserve order of 2 creates, 2 topology events and 2 reassignments interleaved" in {
+    "preserve order of updates interleaved" in {
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
       val create1 = creates(nextRecordTime, 10)(1)
 
       ingestUpdates(create1)
-      ingestPartyOnboarding(Set("new-party-1"), nextRecordTime())
+      ingestTopologyEvents(parties = Set("new-party-1"), recordTime = nextRecordTime())
       val reassignment1 = mkReassignmentAccepted(
         dsoParty.value,
         "upd-id-ra-interleave-1",
@@ -189,7 +227,11 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
 
       val create2 = creates(nextRecordTime, 10)(1)
       ingestUpdates(create2)
-      ingestPartyOnboarding(Set("new-party-2"), nextRecordTime())
+      ingestTopologyEvents(
+        parties = Set("new-party-2"),
+        synchronizerParametersPayloads = Seq("synchronizer-parameters-2"),
+        recordTime = nextRecordTime(),
+      )
       val reassignment2 = mkReassignmentAccepted(
         dsoParty.value,
         "upd-id-ra-interleave-2",
@@ -197,6 +239,11 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
         create2._2,
       )
       ingestUpdateSync(reassignment2)
+
+      ingestTopologyEvents(
+        synchronizerParametersPayloads = Seq("synchronizer-parameters-3"),
+        recordTime = nextRecordTime(),
+      )
 
       val rangeEnd = index.currentLedgerEnd().value.lastOffset
       val updatesStream = index.updates(
@@ -212,48 +259,67 @@ class UpdateStreamComponentTest extends AnyWordSpec with IndexComponentTest {
               )
             ),
             includeTopologyEvents = Some(
-              TopologyFormat(Some(ParticipantAuthorizationFormat(None)))
+              TopologyFormat(
+                Some(ParticipantAuthorizationFormat(parties = None)),
+                synchronizerParametersFormat = true,
+                synchronizerId = Some(synchronizer1),
+              )
             ),
           ),
         descendingOrder = true,
         skipPruningChecks = false,
       )
 
-      val updates = updatesStream
-        .collect { case UpdatesResponse.ProtoUpdates(response) => response }
+      val updatesWithSynchronizerParameters = updatesStream
+        .collect { case u: UpdatesResponse.ProtoUpdates => u }
         .runWith(Sink.seq)
         .futureValue
 
-      updates should have size 6
-      updates.map(u =>
-        (u.update.isReassignment, u.update.isTopologyTransaction, u.update.transaction.isDefined)
-      ) should contain theSameElementsInOrderAs Seq(
-        (true, false, false), // reassignment2
-        (false, true, false), // topology2
-        (false, false, true), // create2
-        (true, false, false), // reassignment1
-        (false, true, false), // topology1
-        (false, false, true), // create1
+      updatesWithSynchronizerParameters should have size 7
+      updatesWithSynchronizerParameters.map { u =>
+        val responseKind = u.response.map { r =>
+          val upd = r.update
+          (upd.isReassignment, upd.isTopologyTransaction, upd.transaction.isDefined)
+        }
+        (responseKind, u.synchronizerParametersResponse.isDefined)
+      } should contain theSameElementsInOrderAs Seq(
+        (None, true), // synchronizer parameters only
+        (Some((true, false, false)), false), // reassignment2
+        (Some((false, true, false)), true), // topology2 (party events + synchronizer parameters)
+        (Some((false, false, true)), false), // create2
+        (Some((true, false, false)), false), // reassignment1
+        (Some((false, true, false)), false), // topology1 (party events only)
+        (Some((false, false, true)), false), // create1
       )
 
-      updates(
+      updatesWithSynchronizerParameters(
         0
-      ).update.reassignment.value.events.loneElement.event.assigned.value.createdEvent.value.contractId shouldEqual create2._2.loneElement.contractId.coid
-      updates(
-        1
-      ).update.topologyTransaction.value.events.loneElement.getParticipantAuthorizationOnboarding.partyId shouldEqual "new-party-2"
-      updates(
+      ).synchronizerParametersResponse.value.synchronizerParametersState.payload shouldEqual ByteString
+        .copyFromUtf8("synchronizer-parameters-3")
+      updatesWithSynchronizerParameters(
         2
-      ).update.transaction.value.events.loneElement.getCreated.contractId shouldEqual create2._2.loneElement.contractId.coid
-      updates(
+      ).synchronizerParametersResponse.value.synchronizerParametersState.payload shouldEqual ByteString
+        .copyFromUtf8("synchronizer-parameters-2")
+
+      // Event-level assertions
+      updatesWithSynchronizerParameters(
+        1
+      ).response.value.update.reassignment.value.events.loneElement.event.assigned.value.createdEvent.value.contractId shouldEqual create2._2.loneElement.contractId.coid
+      updatesWithSynchronizerParameters(
+        2
+      ).response.value.update.topologyTransaction.value.events.loneElement.getParticipantAuthorizationOnboarding.partyId shouldEqual "new-party-2"
+      updatesWithSynchronizerParameters(
         3
-      ).update.reassignment.value.events.loneElement.event.assigned.value.createdEvent.value.contractId shouldEqual create1._2.loneElement.contractId.coid
-      updates(
+      ).response.value.update.transaction.value.events.loneElement.getCreated.contractId shouldEqual create2._2.loneElement.contractId.coid
+      updatesWithSynchronizerParameters(
         4
-      ).update.topologyTransaction.value.events.loneElement.getParticipantAuthorizationOnboarding.partyId shouldEqual "new-party-1"
-      updates(
+      ).response.value.update.reassignment.value.events.loneElement.event.assigned.value.createdEvent.value.contractId shouldEqual create1._2.loneElement.contractId.coid
+      updatesWithSynchronizerParameters(
         5
-      ).update.transaction.value.events.loneElement.getCreated.contractId shouldEqual create1._2.loneElement.contractId.coid
+      ).response.value.update.topologyTransaction.value.events.loneElement.getParticipantAuthorizationOnboarding.partyId shouldEqual "new-party-1"
+      updatesWithSynchronizerParameters(
+        6
+      ).response.value.update.transaction.value.events.loneElement.getCreated.contractId shouldEqual create1._2.loneElement.contractId.coid
     }
   }
 }

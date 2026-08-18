@@ -1,0 +1,43 @@
+name: Build ScalaDoc
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+
+jobs:
+  build_scaladoc:
+    name: Build ScalaDoc
+    runs-on: ${{ inputs.runner }}
+    env:
+      EXECUTOR_JVM_HEAP_SIZE: 4500M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Build ScalaDoc
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: unidoc
+          # The sbt sphinx plugin cannot authenticate against the mirror from Python.
+          use_maven_mirror: "false"
+          report_to_datadog: 'false'
+          execution_context_size: "4"
+
+      - name: Create ScalaDoc archive
+        shell: bash
+        run: |
+          tar -czf target/scaladoc.tar.gz -C target/scala-2.13/unidoc .
+
+      - name: Upload ScalaDoc artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: scaladoc.tar.gz
+          path: target/scaladoc.tar.gz
+          retention-days: 7

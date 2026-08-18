@@ -6,6 +6,7 @@ package com.digitalasset.canton.tracing
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.v30
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
@@ -33,7 +34,7 @@ final case class SerializableTraceContext(traceContext: TraceContext)
     val w3cTraceContext = traceContext.asW3CTraceContext
     v30.TraceContext(
       w3cTraceContext.map(w => w.parent),
-      w3cTraceContext.flatMap(_.state),
+      w3cTraceContext.flatMap(_.state).map(_.toProtoUnvalidated),
     )
   }
 }

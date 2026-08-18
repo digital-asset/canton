@@ -36,16 +36,17 @@ abstract class P2PGrpcStreamingReceiver(
     isAuthenticationEnabled: Boolean,
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit executionContext: ExecutionContext, metricsContext: MetricsContext)
-    extends StreamObserver[BftOrderingMessage]
+)(implicit
+    traceContext: TraceContext,
+    executionContext: ExecutionContext,
+    metricsContext: MetricsContext,
+) extends StreamObserver[BftOrderingMessage]
     with NamedLogging
     with AutoCloseable {
 
   override def toString: String = objIdC(this)
 
   def shutdown(): Unit
-
-  private implicit val traceContext: TraceContext = TraceContext.empty
 
   private[grpc] val remotePeerId: String =
     maybeP2PEndpointId
@@ -122,7 +123,9 @@ abstract class P2PGrpcStreamingReceiver(
       .discard
   }
 
-  private def validateNodeId(message: BftOrderingMessage, sequencerId: SequencerId): Boolean = {
+  private def validateNodeId(message: BftOrderingMessage, sequencerId: SequencerId)(implicit
+      traceContext: TraceContext
+  ): Boolean = {
     def emitNonCompliance(
         metrics: BftOrderingMetrics
     )(from: BftNodeId)(implicit mc: MetricsContext): Unit = {

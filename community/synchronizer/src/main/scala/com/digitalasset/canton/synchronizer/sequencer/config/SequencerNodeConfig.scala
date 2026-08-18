@@ -37,6 +37,8 @@ import monocle.macros.syntax.lens.*
   *   configuration for the topology service of the sequencer
   * @param trafficConfig
   *   Configuration for the traffic purchased entry manager.
+  * @param sequencerLimits
+  *   Local request size limits for the public sequencer API.
   */
 final case class SequencerNodeConfig(
     override val init: InitConfig = InitConfig(),
@@ -53,6 +55,7 @@ final case class SequencerNodeConfig(
     replication: Option[ReplicationConfig] = None,
     override val topology: TopologyConfig = TopologyConfig(),
     trafficConfig: SequencerTrafficConfig = SequencerTrafficConfig(),
+    sequencerLimits: SequencerLimits = SequencerLimits(),
     // 45 seconds before the default ack interval on participants is 1 minute
     // So slightly below to maximize the chance of them going through
     acknowledgementsConflateWindow: Option[PositiveFiniteDuration] = Some(

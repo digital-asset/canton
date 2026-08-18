@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import com.daml.ledger.api.v2.offset_checkpoint
 import com.daml.ledger.api.v2.state_service.{GetActiveContractsResponse, ParticipantPermission}
 import com.daml.ledger.api.v2.topology_transaction.{TopologyEvent, TopologyTransaction}
 import com.daml.ledger.api.v2.trace_context.TraceContext as LedgerApiTraceContext
@@ -27,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   AuthorizationLevel,
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
+import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.CommonTopologyTransactionProperties
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -100,7 +102,9 @@ object InternalIndexService {
 
   object AcsUpdateContainer {
 
-    def fromUpdatesResponse(updateResponse: UpdatesResponse): Option[AcsUpdateContainer] =
+    def fromUpdatesResponse(
+        synchronizerId: SynchronizerId
+    )(updateResponse: UpdatesResponse): Option[AcsUpdateContainer] =
       updateResponse match {
         case UpdatesResponse.AcsChange(acsChange) =>
           Some(
@@ -120,24 +124,60 @@ object InternalIndexService {
               traceContext = commitment.traceContext,
             )
           )
-        case UpdatesResponse.ProtoUpdates(protoUpdate) =>
-          protoUpdate.update match {
-            case GetUpdatesResponse.Update.TopologyTransaction(topologyTransaction) =>
-              Some(
+        case UpdatesResponse.ProtoUpdates(protoUpdate, synchronizerParametersResponse) =>
+          protoUpdate.map(_.update) match {
+            case Some(GetUpdatesResponse.Update.OffsetCheckpoint(checkpoint)) =>
+              offsetCheckpointContainer(synchronizerId, checkpoint)
+            case updateO =>
+              val topologyTransactionO = updateO.flatMap(_.topologyTransaction)
+              // check if a topology transaction can be formed by combining the synchronizer parameters response and the update
+              val commonTopologyTransactionPropertiesO =
+                synchronizerParametersResponse
+                  .map(_.commonTopologyTransactionProperties)
+                  .orElse(
+                    topologyTransactionO
+                      .map(CommonTopologyTransactionProperties.fromProto)
+                  )
+              commonTopologyTransactionPropertiesO.map(commonProperties =>
                 topologyAcsUpdateContainer(
                   acsUpdate = AcsUpdate.EffectiveTopologyUpdate(
-                    partyToParticipantMappings =
-                      effectivePartyToParticipantMappings(topologyTransaction),
-                    synchronizerParameterState = None, // TODO(i33326)
+                    partyToParticipantMappings = topologyTransactionO
+                      .fold(Set.empty[PartyToParticipantAuthorization])(
+                        effectivePartyToParticipantMappings
+                      ),
+                    synchronizerParameterState =
+                      synchronizerParametersResponse.map(_.synchronizerParametersState),
                   ),
-                  recordTime = topologyTransaction.recordTime,
-                  offset = topologyTransaction.offset,
-                  traceContext = topologyTransaction.traceContext,
+                  recordTime = commonProperties.recordTime,
+                  offset = commonProperties.offset,
+                  traceContext = commonProperties.traceContext,
                 )
               )
-            case _ => None
           }
       }
+
+    private def offsetCheckpointContainer(
+        synchronizerId: SynchronizerId,
+        checkpoint: offset_checkpoint.OffsetCheckpoint,
+    ): Option[AcsUpdateContainer] =
+      for {
+        synchronizerTime <- checkpoint.synchronizerTimes
+          .find(_.synchronizerId == synchronizerId.toProtoPrimitive)
+        recordTime <- synchronizerTime.recordTime
+      } yield AcsUpdateContainer(
+        acsUpdate = AcsUpdate.OffsetCheckpoint,
+        synchronizerTime = CantonTimestamp
+          .fromProtoTimestamp(recordTime)
+          .fold(
+            err =>
+              throw new IllegalStateException(
+                s"Could not parse offset checkpoint record time: $err"
+              ),
+            identity,
+          ),
+        offset = Offset.tryFromLong(checkpoint.offset),
+        traceContext = TraceContext.empty,
+      )
 
     private def topologyAcsUpdateContainer(
         acsUpdate: AcsUpdate,
@@ -237,6 +277,8 @@ object InternalIndexService {
     final case class AcsChangeUpdate(
         acsChange: AcsChange
     ) extends AcsUpdate
+
+    case object OffsetCheckpoint extends AcsUpdate
   }
 
   final case class ActiveContract(

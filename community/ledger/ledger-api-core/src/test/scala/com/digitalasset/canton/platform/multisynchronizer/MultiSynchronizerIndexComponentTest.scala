@@ -5,11 +5,11 @@ package com.digitalasset.canton.platform.multisynchronizer
 
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
-import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.messages.state.{AcsContinuationToken, AcsRangeInfo}
 import com.digitalasset.canton.ledger.api.{CumulativeFilter, EventFormat}
 import com.digitalasset.canton.ledger.participant.state.{
+  IndexingWatermark,
   Reassignment,
   ReassignmentInfo,
   TestAcsChangeFactory,
@@ -349,6 +349,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       contracIds: Seq[Value.ContractId],
   ) = {
     val updateId = TestUpdateId(updateIdS)
+    val rt = recordTime()
     Update.OnPRReassignmentAccepted(
       workflowId = None,
       updateId = updateId,
@@ -383,8 +384,8 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
           )
         )*
       ),
-      repairCounter = RepairCounter.Genesis,
-      recordTime = recordTime(),
+      watermark = IndexingWatermark.fromTimestamp(rt),
+      recordTime = rt,
       synchronizerId = synchronizer2,
       acsChangeFactory = TestAcsChangeFactory(),
     )

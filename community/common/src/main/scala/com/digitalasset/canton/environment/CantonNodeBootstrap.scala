@@ -966,11 +966,7 @@ abstract class CantonNodeBootstrapImpl[
               .flatMap { bytes =>
                 SignedTopologyTransaction
                   .fromByteString(
-                    // no validation of the protocol version, as the local topology manager is not tied to a specific version.
-                    // this is consistent with the behaviour if you just add topology transactions into the authorized store
-                    // (which is what we do here).
-                    ProtocolVersionValidation.NoValidation,
-                    ProtocolVersionValidation.NoValidation,
+                    ProtocolVersionValidation.AlwaysValidation,
                     bytes,
                   )
                   .leftMap(_.message)

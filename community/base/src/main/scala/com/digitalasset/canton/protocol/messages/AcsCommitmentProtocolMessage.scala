@@ -30,8 +30,9 @@ import com.digitalasset.canton.version.{
   RepresentativeProtocolVersion,
   UnsupportedProtoCodec,
   VersionedProtoCodec,
-  VersioningCompanionContext,
+  VersioningCompanion,
 }
+import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
 
@@ -73,20 +74,16 @@ final case class AcsCommitmentProtocolMessage(
     v32.EnvelopeContent.SomeEnvelopeContent.AcsCommitmentProtocolMessage(toProtoV32)
 }
 
-object AcsCommitmentProtocolMessage
-    extends VersioningCompanionContext[
-      AcsCommitmentProtocolMessage,
-      ProtocolVersionValidation,
-    ] {
+object AcsCommitmentProtocolMessage extends VersioningCompanion[AcsCommitmentProtocolMessage] {
 
   override def name: String = "AcsCommitmentProtocolMessage"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.acsCommitmentRedesign)(
       v32.AcsCommitmentProtocolMessage
     )(
-      supportedProtoVersion(_)(fromProtoV32),
+      supportedProtoVersionPVV(_)(fromProtoV32),
       _.toProtoV32,
     ),
   )
@@ -120,6 +117,22 @@ object AcsCommitmentProtocolMessage
     for {
       snapshot <- EitherT.liftF(cryptoApi.awaitSnapshot(acsCommitment.period.toInclusive))
       signature <- snapshot.sign(hash, SigningKeyUsage.ProtocolOnly, None)
+    } yield AcsCommitmentProtocolMessage(acsCommitment, signature)
+  }
+
+  @VisibleForTesting
+  private[canton] def signImmediatelyAndCreate(
+      cryptoApi: SyncCryptoApi,
+      acsCommitment: AcsCommitment,
+  )(implicit
+      traceContext: TraceContext,
+      executionContext: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, SyncCryptoError, AcsCommitmentProtocolMessage] = {
+    val hashPurpose = HashPurpose.AcsCommitment
+    val serialization = acsCommitment.getCryptographicEvidence
+    val hash = cryptoApi.pureCrypto.digest(hashPurpose, serialization)
+    for {
+      signature <- cryptoApi.sign(hash, SigningKeyUsage.ProtocolOnly, None)
     } yield AcsCommitmentProtocolMessage(acsCommitment, signature)
   }
 

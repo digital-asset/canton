@@ -4,10 +4,11 @@
 package com.digitalasset.daml.lf
 package interpretation
 
-import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, Party, TypeConId}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.transaction.{
+  ExternalCallResult,
   GlobalKey,
   GlobalKeyWithMaintainers,
   Node as TxNode,
@@ -309,20 +310,6 @@ object Error {
 
     sealed abstract class Error extends Serializable with Product
 
-    sealed case class Conformance(
-        provided: TxNode.Create,
-        recomputed: TxNode.Create,
-        details: String,
-    ) extends Error
-
-    /** A choice guard returned false, invalidating some expectation. */
-    final case class ChoiceGuardFailed(
-        coid: ContractId,
-        templateId: TypeConId,
-        choiceName: ChoiceName,
-        byInterface: Option[TypeConId],
-    ) extends Error
-
     final case class Limit(error: Limit.Error) extends Error
 
     object Limit {
@@ -332,25 +319,63 @@ object Error {
       final case class ContractSignatories(
           coid: Value.ContractId,
           templateId: TypeConId,
-          arg: Value,
           signatories: Set[Party],
           limit: Int,
       ) extends Error
 
-      final case class ContractObservers(
+      final case class ContractStakeholders(
           coid: Value.ContractId,
           templateId: TypeConId,
-          arg: Value,
-          observers: Set[Party],
+          stakeholders: Set[Party],
           limit: Int,
       ) extends Error
 
-      final case class ChoiceControllers(
-          cid: Value.ContractId,
+      final case class KeyMaintainers(
+          ref: String,
           templateId: TypeConId,
-          choiceName: ChoiceName,
-          arg: Value,
-          controllers: Set[Party],
+          maintainers: Set[Party],
+          limit: Int,
+      ) extends Error
+
+      object KeyMaintainers {
+        def apply(
+            coid: Value.ContractId,
+            templateId: TypeConId,
+            maintainers: Set[Party],
+            limit: Int,
+        ): KeyMaintainers = new KeyMaintainers(
+          ref = coid.toString,
+          templateId = templateId,
+          maintainers = maintainers,
+          limit = limit,
+        )
+      }
+
+      final case class ValueSize(
+          ref: String,
+          templateId: TypeConId,
+          value: Value,
+          limit: Int,
+      ) extends Error
+
+      object ValueSize {
+        def apply(
+            coid: Value.ContractId,
+            templateId: TypeConId,
+            value: Value,
+            limit: Int,
+        ): ValueSize = new ValueSize(
+          ref = coid.toString,
+          templateId = templateId,
+          value = value,
+          limit = limit,
+        )
+      }
+
+      final case class ActingParties(
+          coid: Value.ContractId,
+          templateId: TypeConId,
+          actingParties: Set[Party],
           limit: Int,
       ) extends Error
 
@@ -368,11 +393,50 @@ object Error {
           templateId: TypeConId,
           choiceName: ChoiceName,
           arg: Value,
-          observers: Set[Party],
+          authorizers: Set[Party],
+          limit: Int,
+      ) extends Error
+
+      final case class ExternalCallResults(
+          cid: Value.ContractId,
+          templateId: TypeConId,
+          choiceName: ChoiceName,
+          arg: Value,
+          externalCallResults: ImmArray[ExternalCallResult],
+          limit: Int,
+      ) extends Error
+
+      final case class ExternalCallResultSize(
+          cid: Value.ContractId,
+          templateId: TypeConId,
+          choiceName: ChoiceName,
+          arg: Value,
+          externalCallResult: ExternalCallResult,
+          limit: Int,
+      ) extends Error
+
+      final case class NodeChildren(
+          cid: Value.ContractId,
+          templateId: TypeConId,
+          choiceName: ChoiceName,
+          arg: Value,
+          limit: Int,
+      ) extends Error
+
+      final case class QueryResult(
+          templateId: TypeConId,
+          key: GlobalKeyWithMaintainers,
+          result: Vector[ContractId],
           limit: Int,
       ) extends Error
 
       final case class TransactionInputContracts(limit: Int) extends Error
+
+      final case class TransactionRoots(limit: Int) extends Error
+
+      final case class TransactionNodes(limit: Int) extends Error
+
+      final case class TotalInformees(limit: Long) extends Error
     }
 
     sealed case class Cost(error: Cost.Error) extends Error

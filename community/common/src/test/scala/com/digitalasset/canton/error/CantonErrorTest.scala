@@ -117,7 +117,7 @@ class CantonErrorTest extends BaseTestWordSpec {
     "not expose any details through GRPC" in {
       val myAlarm = TestAlarmErrorCode.MyAlarm()
 
-      val sre = myAlarm.asGrpcError
+      val sre = myAlarm.toGrpcError
       sre.getMessage shouldBe s"INVALID_ARGUMENT: ${LogEntry.SECURITY_SENSITIVE_MESSAGE_ON_API} <no-correlation-id> with tid <no-tid>"
 
       val status = sre.getStatus

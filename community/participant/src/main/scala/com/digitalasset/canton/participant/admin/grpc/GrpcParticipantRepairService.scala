@@ -3,8 +3,10 @@
 
 package com.digitalasset.canton.participant.admin.grpc
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.all.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.{
   OtherError,
@@ -32,6 +34,7 @@ import com.digitalasset.canton.participant.admin.data.{
 }
 import com.digitalasset.canton.participant.admin.grpc.GrpcParticipantRepairService.ValidExportAcsRequest
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
+import com.digitalasset.canton.participant.commitment.AcsCommitmentProcessorManager
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceUnknownSynchronizer.UnknownPhysicalSynchronizerId
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
@@ -71,6 +74,7 @@ import scala.util.{Success, Try}
 
 final class GrpcParticipantRepairService(
     sync: CantonSyncService,
+    evalAcsDigestProcessorManagerO: Option[Eval[AcsCommitmentProcessorManager]],
     parameters: ParticipantNodeParameters,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -107,7 +111,7 @@ final class GrpcParticipantRepairService(
     } yield ()
 
     res.fold(
-      err => Future.failed(err.asGrpcError),
+      err => Future.failed(err.toGrpcError),
       _ => Future.successful(PurgeContractsResponse()),
     )
   }
@@ -434,7 +438,7 @@ final class GrpcParticipantRepairService(
     EitherTUtil
       .toFutureUnlessShutdown(
         result.bimap(
-          _.asGrpcError,
+          _.toGrpcError,
           _ => ChangeAssignationResponse(),
         )
       )
@@ -577,7 +581,7 @@ final class GrpcParticipantRepairService(
 
       timeoutSeconds <- wrapErrUS(
         ProtoConverter.parseRequired(
-          NonNegativeFiniteDuration.fromProtoPrimitive("initialRetryDelay"),
+          NonNegativeFiniteDuration.fromProtoPrimitive("timeout_seconds"),
           "timeoutSeconds",
           request.timeoutSeconds,
         )
@@ -586,7 +590,7 @@ final class GrpcParticipantRepairService(
       res <- EitherT
         .right[RpcError](
           sync.commitmentsService
-            .reinitializeCommitmentsUsingAcs(
+            .reinitializeLegacyCommitmentsUsingAcs(
               synchronizerIds.toSet,
               counterParticipantsIds,
               partyIds,
@@ -635,8 +639,9 @@ final class GrpcParticipantRepairService(
 
       _ <- sync
         .performLateLsu(validatedRequest)
-        .leftMap[RpcError](
-          RepairServiceError.SynchronizerUpgradeError.Error(validatedRequest.successorPsid, _)
+        .leftMap[RpcError](err =>
+          RepairServiceError.SynchronizerUpgradeError
+            .Error(validatedRequest.successorPsid, err.toString)
         )
     } yield PerformLateLsuResponse()
 
@@ -730,6 +735,64 @@ final class GrpcParticipantRepairService(
     CantonGrpcUtil.mapErrNewEUS(result)
   }
 
+  override def reinitializeDigestCommitments(
+      request: ReinitializeDigestCommitmentsRequest
+  ): Future[ReinitializeDigestCommitmentsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val result =
+      for {
+        evalAcsDigestProcessorManager <- EitherT
+          .fromOption[FutureUnlessShutdown](
+            evalAcsDigestProcessorManagerO,
+            RepairServiceError.InvalidState
+              .Error(
+                "ACS digest processor is disabled. Enable 'enable-running-digest-processor' in configuration."
+              )
+              .toCantonRpcError,
+          )
+
+        synchronizerId <- wrapErrUS(
+          SynchronizerId.fromProtoPrimitive(
+            request.synchronizerId,
+            "synchronizer_id",
+          )
+        )
+
+        response <- EitherT.right[RpcError] {
+          val acsDigestProcessorManager = evalAcsDigestProcessorManager.value
+
+          logger.debug(
+            s"Called $functionFullName, reinitializing on synchronizer -> ${request.synchronizerId}"
+          )
+
+          acsDigestProcessorManager
+            .getOrCreate(synchronizerId)
+            .digestProcessorManager
+            .startReinitializationDigestProcessor(request.runningDigestProcessorShouldStartAfter)
+            .map {
+              case Right(Some(ts)) =>
+                v30.ReinitializeDigestCommitmentsResponse(
+                  v30.ReinitializeDigestCommitmentsResponse.Status
+                    .CompletedReinitTimestamp(ts.toProtoTimestamp)
+                )
+              case Right(None) =>
+                v30.ReinitializeDigestCommitmentsResponse(
+                  v30.ReinitializeDigestCommitmentsResponse.Status.ErrorMessage(
+                    "Reinitialization completed but did not report a completion timestamp."
+                  )
+                )
+              case Left(errStatus) =>
+                v30.ReinitializeDigestCommitmentsResponse(
+                  v30.ReinitializeDigestCommitmentsResponse.Status
+                    .ErrorMessage(s"${errStatus.getCode}: ${errStatus.getMessage}")
+                )
+            }
+        }
+      } yield response
+
+    CantonGrpcUtil.mapErrNewEUS(result)
+  }
 }
 
 object GrpcParticipantRepairService {

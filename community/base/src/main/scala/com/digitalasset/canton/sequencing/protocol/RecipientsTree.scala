@@ -10,6 +10,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
@@ -72,7 +73,8 @@ final case class RecipientsTree(
   }
 
   def toProtoV30: v30.RecipientsTree = {
-    val recipientsP = recipientGroup.toSeq.map(_.toProtoPrimitive).sorted
+    val recipientsP =
+      recipientGroup.toSeq.map(_.toProtoPrimitive).sorted.map(_.toProtoUnvalidated)
     val childrenP = children.map(_.toProtoV30)
     new v30.RecipientsTree(recipientsP, childrenP)
   }

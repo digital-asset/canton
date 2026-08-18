@@ -1,0 +1,78 @@
+name: Python scripts CI
+
+# Lint, format-check, and unit-test the repo's Python helpers (see issues #33211, #33657).
+# Runs ruff and pytest from the pinned nix toolchain so CI matches local dev.
+# ruff is scoped to scripts/, where the ruff config lives. pytest additionally covers the
+# docs-open and release helpers, whose unit tests previously ran in no CI job.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'scripts/**'
+      - 'docs-open/src/main/resources/*.py'
+      - 'release/*.py'
+      # The release/ tests assert against the real dependabot config, so a drift there
+      # should re-run them.
+      - '.github/dependabot.yml'
+      - '.github/workflows/lint_and_test_py_scripts.yml'
+      # Re-run when the pinned toolchain changes, so a broken ruff/pytest env is caught here.
+      - 'shell.nix'
+
+permissions:
+  contents: read
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  lint-and-test:
+    name: Lint (ruff) and unit-test (pytest) scripts/
+    needs: pick_runner
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: ruff check
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: ruff check .
+          working_directory: scripts
+
+      - name: ruff format --check
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: ruff format --check .
+          working_directory: scripts
+
+      - name: pytest (scripts)
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 -m pytest
+          working_directory: scripts
+
+      # docs-open and release have no pytest config of their own, so pytest uses its
+      # defaults (collect test_*.py from the working directory). Their tests import
+      # sibling modules by bare name, which resolves because pytest prepends the test
+      # file's directory to sys.path.
+      - name: pytest (docs-open helpers)
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 -m pytest
+          working_directory: docs-open/src/main/resources
+
+      - name: pytest (release helpers)
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 -m pytest
+          working_directory: release

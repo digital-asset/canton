@@ -200,8 +200,7 @@ trait HttpTestFuns extends HttpJsonApiTestBase with HttpServiceUserFixture {
       getUniquePartyTokenUserIdAndAuthHeaders("Alice", uri).map { case (_, jwt, _, _) => jwt }
 
     def getUniquePartyAndAuthHeaders(name: String): Future[(Party, List[HttpHeader])] =
-      self
-        .getUniquePartyTokenUserIdAndAuthHeaders(name)
+      getUniquePartyTokenUserIdAndAuthHeaders(name)
         .map { case (p, _, _, h) => (p, h) }
 
     def getStream[T](

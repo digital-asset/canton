@@ -119,9 +119,9 @@ private[protocol] object TopologyTransactionDiff {
     val afterSynchronizerParams = currentRelevantState.view
       .maxByOption(_.serial)
       .flatMap(_.transaction.selectMapping[SynchronizerParametersState])
-    // TODO(#33326): this way of checking doesn't work in the general case for all mappings, because store.findEffectiveStateChanges doesn't return
-    //               topology transactions with operation=REMOVE. For synchronizer parameters we know that they will (or rather should) never be removed,
-    //               because that would pretty much render the synchronizer in a broken state.
+    // this way of checking doesn't work in the general case for all mappings, because store.findEffectiveStateChanges doesn't return
+    // topology transactions with operation=REMOVE. For synchronizer parameters we know that they will (or rather should) never be removed,
+    // because that would pretty much render the synchronizer in a broken state.
     if (beforeSynchronizerParams.map(_.mapping) != afterSynchronizerParams.map(_.mapping))
       afterSynchronizerParams.map(
         GenericTopologyEvent.SynchronizerParametersState.fromTopologyTransaction

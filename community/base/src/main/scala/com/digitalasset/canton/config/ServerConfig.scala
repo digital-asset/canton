@@ -7,7 +7,7 @@ import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.{TlsClientConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChannelParams}
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
@@ -98,6 +98,17 @@ trait ServerConfig extends Product with Serializable {
 
   def maxConcurrentCallsPerConnection: NonNegativeInt
 
+  /** Switches to manual gRPC flow control and sets its window; if `None`, then it is not configured
+    * and the implementation default is used.
+    */
+  def flowControlWindow: Option[PositiveInt]
+
+  /** Switches to automatic gRPC flow control and sets its initial window; if `None`, then it is not
+    * configured and the implementation default is used. If present, it is set after the
+    * `flowControlWindow` parameters, so it overrides it.
+    */
+  def initialFlowControlWindow: Option[PositiveInt]
+
   /** maximum expiration time accepted for tokens */
   def maxTokenLifetime: NonNegativeDuration
 
@@ -112,6 +123,8 @@ object ServerConfig {
   val defaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(10 * 1024 * 1024)
   val defaultMaxInboundMetadataSize: NonNegativeInt = NonNegativeInt.tryCreate(8 * 1024)
   val defaultMaxConcurrentCallsPerConnection: NonNegativeInt = NonNegativeInt.tryCreate(100000)
+  val defaultFlowControlWindow: Option[PositiveInt] = None
+  val defaultInitialFlowControlWindow: Option[PositiveInt] = None
 }
 
 /** A variant of [[ServerConfig]] that by default listens to connections only on the loopback
@@ -126,6 +139,9 @@ final case class AdminServerConfig(
       BasicKeepAliveServerConfig()
     ),
     override val maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
+    override val flowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow,
+    override val initialFlowControlWindow: Option[PositiveInt] =
+      ServerConfig.defaultInitialFlowControlWindow,
     override val maxConcurrentCallsPerConnection: NonNegativeInt =
       ServerConfig.defaultMaxConcurrentCallsPerConnection,
     override val authServices: Seq[AuthServiceConfig] = Seq.empty,
@@ -146,6 +162,7 @@ final case class AdminServerConfig(
         maxInboundMessageSize = maxInboundMessageSize,
         keepAliveClient = keepAliveServer.map(_.clientConfigFor),
         flowControlWindow = ClientChannelParams.DefaultFlowControlWindow,
+        initialFlowControlWindow = ClientChannelParams.DefaultInitialFlowControlWindow,
         traceContextPropagation = TracingConfig.Propagation.Enabled,
       ),
     )

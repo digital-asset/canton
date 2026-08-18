@@ -10,6 +10,8 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.util.BytesUnit
 import com.digitalasset.nonempty.NonEmpty
 
+import scala.language.reflectiveCalls
+
 sealed trait CommitMode {
   private[sequencer] val postgresSettings: NonEmpty[Seq[String]]
 }

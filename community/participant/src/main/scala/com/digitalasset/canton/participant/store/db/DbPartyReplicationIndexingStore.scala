@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -107,18 +107,23 @@ class DbPartyReplicationIndexingStore(
   ): FutureUnlessShutdown[Option[ContractActivationChangeBatch]] = for {
     previousWatermarkO <- storage.query(
       sql"""
-            select ts, change_counter
+            select ts, change_counter, acs_commitment_tiebreaker
             from par_party_replication_indexing_watermarks
-            where synchronizer_idx = $indexedSynchronizer""".as[Watermark].headOption,
+            where synchronizer_idx = $indexedSynchronizer"""
+        .as[(Watermark, NonNegativeInt)]
+        .headOption,
       functionFullName + " look up indexing watermark",
     )
+    nextTiebreaker = previousWatermarkO.fold(NonNegativeInt.zero) { case (_, prev) =>
+      prev.increment.toNonNegative
+    }
     activationChanges <- storage
       .query(
         (sql"""
         select ts, change_counter, contract_id, change, reassignment_counter
         from par_party_replication_indexing
         where synchronizer_idx = $indexedSynchronizer""" ++ previousWatermarkO.fold(sql"") {
-          case Watermark(ts, counter) => sql""" and (ts, change_counter) > ($ts, $counter)"""
+          case (Watermark(ts, counter), _) => sql""" and (ts, change_counter) > ($ts, $counter)"""
         } ++ sql"""
         order by synchronizer_idx, ts, change_counter
         #${storage.limit(maxBatchSize.unwrap)}
@@ -147,19 +152,19 @@ class DbPartyReplicationIndexingStore(
           val upsertWatermark = storage.profile match {
             case _: DbStorage.Profile.Postgres =>
               sqlu"""
-            insert into par_party_replication_indexing_watermarks(synchronizer_idx, ts, change_counter)
-            values ($indexedSynchronizer, $ts, $counter)
-            on conflict (synchronizer_idx) do update set ts = $ts, change_counter = $counter
+            insert into par_party_replication_indexing_watermarks(synchronizer_idx, ts, change_counter, acs_commitment_tiebreaker)
+            values ($indexedSynchronizer, $ts, $counter, $nextTiebreaker)
+            on conflict (synchronizer_idx) do update set ts = $ts, change_counter = $counter, acs_commitment_tiebreaker = $nextTiebreaker
             """
             case _: DbStorage.Profile.H2 =>
               sqlu"""
             merge into par_party_replication_indexing_watermarks using dual
               on (synchronizer_idx = $indexedSynchronizer)
               when matched then
-                update set ts = $ts, change_counter = $counter
+                update set ts = $ts, change_counter = $counter, acs_commitment_tiebreaker = $nextTiebreaker
               when not matched then
-                insert (synchronizer_idx, ts, change_counter)
-                values ($indexedSynchronizer, $ts, $counter)
+                insert (synchronizer_idx, ts, change_counter, acs_commitment_tiebreaker)
+                values ($indexedSynchronizer, $ts, $counter, $nextTiebreaker)
             """
           }
           storage.update_(upsertWatermark, functionFullName + " upsert indexing watermark").map {
@@ -171,6 +176,7 @@ class DbPartyReplicationIndexingStore(
                       contractId -> (change, reassignmentCounter)
                   },
                   batchWatermark,
+                  nextTiebreaker,
                 )
               )
           }

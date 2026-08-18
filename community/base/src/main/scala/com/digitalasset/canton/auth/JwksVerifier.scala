@@ -4,22 +4,18 @@
 package com.digitalasset.canton.auth
 
 import com.auth0.jwk.{JwkException, UrlJwkProvider}
-import com.auth0.jwt.algorithms.Algorithm
 import com.daml.jwt.{
   DecodedJwt,
-  ECDSAVerifier,
   Error,
   Jwt,
   JwtTimestampLeeway,
   JwtVerifier,
   JwtVerifierBase,
-  RSA256Verifier,
   WithExecuteUnsafe,
 }
 import com.google.common.cache.{Cache, CacheBuilder}
 
 import java.net.{URI, URL}
-import java.security.interfaces.{ECPublicKey, RSAPublicKey}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
@@ -69,27 +65,10 @@ class JwksVerifier(
     .expireAfterWrite(cacheExpiration.toSeconds, TimeUnit.SECONDS)
     .build()
 
-  @SuppressWarnings(
-    Array("org.wartremover.warts.Null")
-  )
   private[this] def getVerifier(keyId: String): Either[Error, JwtVerifier] =
     try {
       val jwk = http.get(keyId)
-      val publicKey = jwk.getPublicKey
-      publicKey match {
-        case rsa: RSAPublicKey => RSA256Verifier(rsa, jwtTimestampLeeway, maxTokenLife)
-        case ec: ECPublicKey if ec.getParams.getCurve.getField.getFieldSize == 256 =>
-          ECDSAVerifier(Algorithm.ECDSA256(ec, null), jwtTimestampLeeway, maxTokenLife)
-        case ec: ECPublicKey if ec.getParams.getCurve.getField.getFieldSize == 521 =>
-          ECDSAVerifier(Algorithm.ECDSA512(ec, null), jwtTimestampLeeway, maxTokenLife)
-        case key =>
-          Left(
-            Error(
-              Symbol("JwksVerifier.getVerifier"),
-              s"Unsupported public key format ${key.getFormat}",
-            )
-          )
-      }
+      JwtVerifier.fromPublicKey(jwk.getPublicKey, jwtTimestampLeeway, maxTokenLife)
     } catch {
       case e: JwkException =>
         Left(Error(Symbol("JwksVerifier.getVerifier"), s"Couldn't get jwk from http: $e"))

@@ -1,0 +1,19 @@
+name: Stop Toxiproxy Container
+description: Dump logs and stop the CI Toxiproxy container if it exists
+
+inputs:
+  container-name:
+    description: Toxiproxy container name
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Stop Toxiproxy container
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.container-name }}" ]]; then
+          docker logs "${{ inputs.container-name }}" || true
+          docker rm -f "${{ inputs.container-name }}" || true
+        fi

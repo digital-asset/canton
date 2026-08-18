@@ -167,10 +167,8 @@ class MutablePackageMetadataViewImpl(
           .asGrpcError
       )
 
-  override def onClosed(): Unit = {
-    LifeCycle.close(mutatePackageMetadataExecutionQueue)(logger)
-    LifeCycle.close(packageStore)(logger)
-  }
+  override def onClosed(): Unit =
+    LifeCycle.close(mutatePackageMetadataExecutionQueue, packageStore)(logger)
 
   private def decodePackageMetadata(
       archive: DamlLf.Archive

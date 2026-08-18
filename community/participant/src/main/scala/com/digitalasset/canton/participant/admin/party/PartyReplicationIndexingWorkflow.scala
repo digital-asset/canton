@@ -10,7 +10,12 @@ import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
-import com.digitalasset.canton.ledger.participant.state.{Reassignment, ReassignmentInfo, Update}
+import com.digitalasset.canton.ledger.participant.state.{
+  IndexingWatermark,
+  Reassignment,
+  ReassignmentInfo,
+  Update,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -23,13 +28,15 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationIndexingW
 import com.digitalasset.canton.participant.event.{AcsChangeSupport, RecordOrderPublisher}
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.store.ActiveContractStore.ChangeType
-import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.ContractActivationChangeBatch
+import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.{
+  ContractActivationChangeBatch,
+  Watermark,
+}
 import com.digitalasset.canton.participant.store.{
   ContractStore,
   PartyReplicationIndexingStore,
   PersistedContractInstance,
 }
-import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, UpdateId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{
@@ -38,20 +45,12 @@ import com.digitalasset.canton.util.{
   MonadUtil,
   ReassignmentTag,
 }
-import com.digitalasset.canton.{ReassignmentCounter, RepairCounter, checked}
+import com.digitalasset.canton.{ReassignmentCounter, checked}
 import com.digitalasset.nonempty.NonEmpty
 import org.slf4j.event.Level
 
 import scala.concurrent.ExecutionContext
 import scala.util.chaining.scalaUtilChainingOps
-
-// Not sealed for testing
-trait GeneratesUniqueUpdateIds {
-  def uniqueUpdateId(
-      onprBatchCounter: NonNegativeLong,
-      batch: Seq[(TimeOfChange, LfContractId, ChangeType, ReassignmentCounter)],
-  ): UpdateId
-}
 
 /** Target participant ACS indexing functionality shared between the OnPR sequencer channel target
   * processor and the file-based ACS importer.
@@ -100,7 +99,7 @@ class PartyReplicationIndexingWorkflow(
         indexingStore.consumeNextActivationChangesBatch(indexingBatchSize)
       )
       numContractsIndexedO <- nextBatchO.traverse {
-        case ContractActivationChangeBatch(contractActivationChanges, batchWatermark) =>
+        case ContractActivationChangeBatch(contractActivationChanges, batchWatermark, tiebreaker) =>
           // Add the onpr batch counter to the hash to arrive at unique per-OPR updateIds.
           val hash = contractActivationChanges
             .foldLeft {
@@ -121,7 +120,7 @@ class PartyReplicationIndexingWorkflow(
           val updateId = UpdateId(hash)
           indexContractActivationChangeBatch(
             contractActivationChanges,
-            batchWatermark.counter,
+            batchWatermark.toIndexingWatermark(tiebreaker),
             updateId,
             params,
             recordOrderPublisher,
@@ -160,7 +159,7 @@ class PartyReplicationIndexingWorkflow(
     */
   private def indexContractActivationChangeBatch(
       contractActivationChanges: NonEmpty[Seq[(LfContractId, (ChangeType, ReassignmentCounter))]],
-      onprIndexingCounter: NonNegativeLong,
+      watermarkToIndexUpTo: IndexingWatermark,
       updateId: UpdateId,
       params: PartyReplicationStatus.ReplicationParams,
       recordOrderPublisher: RecordOrderPublisher,
@@ -201,14 +200,14 @@ class PartyReplicationIndexingWorkflow(
         NonEmpty
           .from(activationChanges)
           .toRight(
-            s"OnPR indexing batch $onprIndexingCounter with update $updateId not expected to be empty"
+            s"OnPR indexing batch up to $watermarkToIndexUpTo with update $updateId not expected to be empty"
           )
       )
       _ <- EitherT.right[String](
         FutureUnlessShutdown.lift(
           recordOrderPublisher.schedulePublishAddContracts(
             indexerEventFromActivationChanges(
-              onprIndexingCounter,
+              watermarkToIndexUpTo,
               updateId,
               activationChangesNE,
               params,
@@ -223,8 +222,8 @@ class PartyReplicationIndexingWorkflow(
     }
 
   /** Determines the indexer event corresponding to the contract activation changes
-    * @param onprIndexingCounter
-    *   the batch counter used for a unique updateId
+    * @param watermark
+    *   the watermark used to track indexing progress
     * @param activationChanges
     *   the contract activation changes (activations and deactivations) to publish
     * @param timestamp
@@ -233,7 +232,7 @@ class PartyReplicationIndexingWorkflow(
     *   the event to publish
     */
   private def indexerEventFromActivationChanges(
-      onprIndexingCounter: NonNegativeLong,
+      watermark: IndexingWatermark,
       updateId: UpdateId,
       activationChanges: NonEmpty[Seq[ContractActivationChange]],
       params: PartyReplicationStatus.ReplicationParams,
@@ -268,6 +267,7 @@ class PartyReplicationIndexingWorkflow(
           artificialReassignmentInfo.reassignmentId,
           reassignmentsNE,
           artificialReassignmentInfo.sourceSynchronizer,
+          completeReassignmentInStore = false,
         )
       )
       .copy(unassignments =
@@ -323,17 +323,14 @@ class PartyReplicationIndexingWorkflow(
           }
         ),
         recordTime = timestamp,
-        // TODO(#30678): Replace OnPR repair counter with an indexer-generated OnPR counter
-        repairCounter = RepairCounter.apply(onprIndexingCounter.unwrap),
+        watermark = watermark,
         synchronizerId = params.synchronizerId,
         acsChangeFactory = acsChangeFactory,
       )
       .tap(update =>
         // TODO(#30121): Move indexer confirmation to indexer post-processing
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-          indexingStore.markContractActivationChangesAsIndexed(
-            PartyReplicationIndexingStore.Watermark(timestamp, onprIndexingCounter)
-          ),
+          indexingStore.markContractActivationChangesAsIndexed(Watermark.fromIndexing(watermark)),
           s"Failed to mark update ${update.updateId} indexed",
           level = Level.WARN,
         )

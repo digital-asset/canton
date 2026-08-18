@@ -8,15 +8,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   DefaultSegmentLength,
   SegmentLength,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.{
-  PowerDistribution,
-  SimulationSettings,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationSettings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering.TopologySettings.{
   defaultKeyAdditionDistribution,
   defaultKeyExpirationDistribution,
   defaultOffboardDistribution,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.PowerDistribution
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}

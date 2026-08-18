@@ -7,10 +7,20 @@ import better.files.File
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.jwt.{AuthServiceJWTCodec, JwksUrl, Jwt, JwtDecoder, StandardJWTPayload}
+import com.daml.jwt.{
+  AuthServiceJWTCodec,
+  JwksUrl,
+  Jwt,
+  JwtDecoder,
+  PartyJWTPayload,
+  StandardJWTPayload,
+}
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.daml.ledger.api.v2.admin.package_management_service.PackageDetails
-import com.daml.ledger.api.v2.admin.party_management_alpha_service.ExportPartyAcsResponse
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
+  ExportPartyAcsResponse,
+  GeneratePartyTopologyUpdateResponse,
+}
 import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyResponse
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract, PrefetchContractKey}
 import com.daml.ledger.api.v2.completion.Completion
@@ -145,7 +155,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
   private[canton] lazy val userId: String = token
     .flatMap(encodedToken => JwtDecoder.decode(Jwt(encodedToken)).toOption)
     .flatMap(decodedToken => AuthServiceJWTCodec.readFromString(decodedToken.payload).toOption)
-    .map { case s: StandardJWTPayload => s.userId }
+    .map {
+      case s: StandardJWTPayload => s.userId
+      case s: PartyJWTPayload => s.userId
+    }
     .getOrElse(LedgerApiCommands.defaultUserId)
 
   private def eventFormatAllParties(includeCreatedEventBlob: Boolean = false): Option[EventFormat] =
@@ -2413,6 +2426,95 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             )
           }
         }
+
+      @Help.Summary(
+        "Generate a topology transaction to onboard an already hosted party to a new participant",
+        FeatureFlag.Preview,
+      )
+      @Help.Description(
+        """Generates a PartyToParticipant mapping topology transaction to add an already hosted
+          |party to a target participant which does not yet host the party.
+          |
+          |For external parties, the returned transaction hash can be signed externally.
+          |The transaction and any signatures are then submitted using the `authorize_party_update`
+          |command. Note that for external parties, setting a permission other than Confirmation or
+          |Observation does not make sense.
+          |
+          |For local (internal) parties, the transaction can be passed directly to
+          |`authorize_party_update` without external signatures.
+          |
+          |Parameters:
+          |- partyId: The party to replicate.
+          |- synchronizerId: The synchronizer on which the party should be replicated.
+          |- targetParticipantId: The identifier of the participant that will host the party.
+          |- participantPermission: The permission level of the party on the target participant.
+          """
+      )
+      def generate_party_topology_update(
+          partyId: PartyId,
+          synchronizerId: SynchronizerId,
+          targetParticipantId: ParticipantId,
+          participantPermission: ParticipantPermission,
+      ): GeneratePartyTopologyUpdateResponse = check(FeatureFlag.Preview) {
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementAlphaService.GeneratePartyTopologyUpdate(
+              partyId,
+              synchronizerId,
+              targetParticipantId,
+              participantPermission,
+            )
+          )
+        }
+      }
+
+      @Help.Summary(
+        "Authorize a topology change to onboard an already hosted party to another participant",
+        FeatureFlag.Preview,
+      )
+      @Help.Description(
+        """Submits a PartyToParticipant mapping topology transaction to onboard an already hosted
+          |party to a new target participant. The transaction bytes are expected to be generated via
+          |the `generate_party_topology_update` command.
+          |
+          |This command can be called on the target participant, as well as on any source
+          |participant(s) already hosting the party, to collect the necessary node signatures
+          |to reach the required authorization thresholds.
+          |
+          |Additionally, local user rights and identity provider mapping will be provisioned if
+          |provided. Note: IAM user provisioning only occurs if this endpoint is invoked on the
+          |target participant.
+          |
+          |Parameters:
+          |- transaction: The raw PartyToParticipant mapping topology transaction bytes.
+          |- signatures: External signatures authorizing the topology transaction. Required for
+          |  external parties where the namespace keys are held externally.
+          |  If empty, the local participant will simply append its own node signature.
+          |- synchronizerId: The synchronizer on which the party should be replicated.
+          |- userId: (Optional) The local user to provision IAM rights for (target participant
+          |  only).
+          |- identityProviderId: (Optional) The IDP ID for the provisioned user.
+          """
+      )
+      def authorize_party_update(
+          transaction: ByteString,
+          signatures: Seq[Signature],
+          synchronizerId: SynchronizerId,
+          userId: String = "",
+          identityProviderId: String = "",
+      ): Unit = check(FeatureFlag.Preview) {
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementAlphaService.AuthorizePartyUpdate(
+              transaction,
+              signatures,
+              synchronizerId,
+              userId,
+              identityProviderId,
+            )
+          )
+        }
+      }
     }
 
     @Help.Summary("Manage packages")
@@ -3716,7 +3818,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       @Help.Description(
         """Update the account details (by adding the balance delta) for the specified account-id.
           |If unset, the balance will not be updated
-          |subsequent balance updates with the same deduplicationId will be ignored"""
+          |subsequent balance updates with the same deduplicationId will be ignored.
+          |If a failed update needs to be retried, pass the same deduplicationId again; the default
+          |generates a fresh id per invocation, so re-running this command after a failure without
+          |passing the original id might apply the delta a second time."""
       )
       def update_account(
           accountId: String,

@@ -146,6 +146,10 @@ class FixedSyncCryptoApiForSigning(
         traceContext: TraceContext
     ): FutureUnlessShutdown[Boolean] = notImplementedUS
 
+    override def activeParticipants(participantIds: Seq[ParticipantId])(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Seq[ParticipantId]] = notImplementedUS
+
     override def participantsWithSupportedFeature(
         participants: Set[ParticipantId],
         feature: SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag,

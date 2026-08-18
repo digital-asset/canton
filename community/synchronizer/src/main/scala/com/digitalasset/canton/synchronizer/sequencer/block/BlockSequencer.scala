@@ -709,7 +709,7 @@ class BlockSequencer(
     logger.debug(s"Request for member ${req.member} to acknowledge timestamp ${req.timestamp}")
     for {
       _ <- EitherTUtil.toFutureUnlessShutdown(
-        rejectAcknowledgementIfOverloaded().leftMap(_.asGrpcError)
+        rejectAcknowledgementIfOverloaded().leftMap(_.toGrpcError)
       )
 
       waitForAcknowledgementF = stateManager.waitForAcknowledgementToComplete(

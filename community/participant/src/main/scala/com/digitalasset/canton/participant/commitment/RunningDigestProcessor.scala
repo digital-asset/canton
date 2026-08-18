@@ -5,8 +5,10 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
+import com.daml.metrics.api.MetricHandle.Gauge
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdateContainer
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   ChangedTo,
@@ -24,54 +26,111 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
+import com.digitalasset.canton.participant.commitment.RunningDigestProcessorImpl.CheckpointingState
+import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.{
+  TickListener,
+  TickSignaller,
+}
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
-import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReceivedCommitmentCheckpoint
+import com.digitalasset.canton.participant.store.AcsDigestStore.{
+  CheckpointType,
+  allCheckpointsFilter,
+}
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, LfContractId}
 import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{
+  SignedTopologyTransaction,
   SynchronizerParametersState,
   TopologyTransaction,
 }
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.digitalasset.canton.util.signalling.Notification
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
+import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
-import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, RestartSource, Sink, Source}
+import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer, RestartSettings}
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
+
+trait RunningDigestProcessor extends BaseDigestProcessor
+
+object RunningDigestProcessor {
+
+  def acsUpdatesWithRetries(
+      indexService: InternalIndexService,
+      synchronizerId: SynchronizerId,
+      startingOffset: Option[Offset],
+  )(implicit errorLoggingContext: ErrorLoggingContext) = {
+    implicit val traceContext: TraceContext = errorLoggingContext.traceContext
+    import scala.concurrent.duration.DurationInt
+    val restartSettings = RestartSettings(
+      minBackoff = 1.millisecond,
+      maxBackoff = 10.milliseconds,
+      randomFactor = 0.2,
+    ).withRestartOn {
+      case ex: com.digitalasset.base.error.ErrorCode.LoggedApiException
+          if ex.getMessage.contains(
+            com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning.code.id
+          ) && ex.getMessage.contains("Ledger API offset dispatcher") =>
+        errorLoggingContext.info("ACS update sources has failed. Restarting the source.", ex)
+        true
+      case _ => false
+    }
+    val startingOffsetRef = new AtomicReference[Option[Offset]](startingOffset)
+    RestartSource.withBackoff(restartSettings) { () =>
+      indexService
+        .acsUpdates(synchronizerId, startingOffsetRef.get)
+        .map { element =>
+          startingOffsetRef.set(Some(element.offset))
+          element
+        }
+    }
+  }
+}
 
 /** Builds the pipeline for processing events that trigger a change in the ACS commitment, namely
   *   - contract activations/deactivations
   *   - party onboarding to or offboarding from this or a remote participant
   */
 // TODO(#33084): expose health status and metrics
-class RunningDigestProcessor(
+class RunningDigestProcessorImpl(
     thisParticipant: ParticipantId,
     override val synchronizerId: SynchronizerId,
     acsCommitmentConfig: AcsCommitmentConfig,
     digestAccumulator: DigestAccumulator,
-    acsDigestStore: AcsDigestStore,
+    protected override val acsDigestStore: AcsDigestStore,
+    tickSignaller: TickSignaller,
     indexService: InternalIndexService,
     getTopologySnapshot: Traced[CantonTimestamp] => FutureUnlessShutdown[TopologySnapshot],
+    enableAdditionalConsistencyChecks: Boolean,
+    periodWriter: AcsCommitmentPeriodWriter,
+    override private[canton] val metrics: CommitmentMetrics,
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit
     val executionContext: ExecutionContext,
     mat: Materializer,
 ) extends NamedLogging
-    with BaseDigestProcessor {
+    with RunningDigestProcessor {
 
   private val thisLfParticipant = thisParticipant.toLf
-
-  override def isReinitializingProcessor: Boolean = false
 
   /** Inserts a checkpointing fence into the processing pipeline in the following scenarios:
     *   - after a topology event with the same time as the event
@@ -82,95 +141,139 @@ class RunningDigestProcessor(
       startingRecordTimeO: Option[CantonTimestamp],
       // intentionally not implicit to not accidentally be used instead of the update's TraceContext
       traceContext: TraceContext,
-  ): Flow[Checkpointing_Input, Checkpointing_Output, NotUsed] =
-    Flow[Checkpointing_Input]
+  ): Flow[Checkpointing_Input, Checkpointing_Output, NotUsed] = {
+    val mainCheckpointingFlow = Flow[Checkpointing_Input]
       .statefulMapAsyncUSAndDrain(
-        (
-          // numEventsSinceLastCheckpointFence
-          0,
-          // previously processed record time
-          startingRecordTimeO.getOrElse(CantonTimestamp.MinValue),
+        CheckpointingState(
+          numEventsSinceLastCheckpoint = 0,
+          previousRecordTime = startingRecordTimeO.getOrElse(CantonTimestamp.MinValue),
+          // The pipeline always starts at a checkpoint. So we never have to emit a checkpoint
+          // before the first event.
+          previousEventCheckpoint = None,
         )
-      ) {
-        case (
-              (numEventsSinceLastCheckpoint, previousRecordTime),
-              context @ ProcessingContext(timepoint, event),
-            ) =>
-          implicit val traceContext: TraceContext = context.traceContext
-          val recordTime = timepoint.recordTime
-          for {
-            topologySnapshot <- getTopologySnapshot(Traced(recordTime))
-            dynamicParameters <- getDynamicSynchronizerParametersOrFail(topologySnapshot)
-          } yield {
-            val (updatedNumEventsSinceLastCheckpoint, result) = event match {
-              case InternalIndexService.AcsUpdate.AcsChangeUpdate(_) =>
-                // emit a checkpoint at the record time's predecessor after maxNumUpdatesBetweenCheckpoints events have been emitted
-                @inline def checkpointByNumProcessedEvents = Option.when(
-                  numEventsSinceLastCheckpoint >= acsCommitmentConfig.maxNumUpdatesBetweenCheckpoints.unwrap
-                )(
+      ) { (state, context) =>
+        implicit val traceContext: TraceContext = context.traceContext
+        val CheckpointingState(numEventsSinceLastCheckpoint, previousRecordTime, _) = state
+        val ProcessingContext(timepoint, event) = context
+        val recordTime = timepoint.recordTime
+        for {
+          topologySnapshot <- getTopologySnapshot(Traced(recordTime))
+          dynamicParameters <- getDynamicSynchronizerParametersOrFail(topologySnapshot)
+        } yield {
+          // first determine whether the event should be emitted at all, and whether it triggers a checkpoint
+          val (eventToEmit, postEventTopologyCheckpoint) = event match {
+            case InternalIndexService.AcsUpdate.AcsChangeUpdate(_) =>
+              (Some(context.withValue(NotCheckpointFence(topologySnapshot, event))), None)
+
+            case InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
+                  partyTopologyEvents,
+                  newSynchronizerParamsO,
+                ) =>
+              // only propagate the ACS update if there is a party hosting change
+              val (partyHostingChangeEvent, partyHostingChangeCheckpoint) = Option
+                .when(partyTopologyEvents.nonEmpty)(
                   (
-                    recordTime.immediatePredecessor,
-                    CheckpointFence(CheckpointType.MaxEventsWithoutCheckpoint),
+                    NotCheckpointFence(topologySnapshot, event),
+                    CheckpointType.PartyHostingChange,
                   )
                 )
-                val offset = timepoint.offset
-                // emit a checkpoint fence after crossing a reconciliation interval boundary
-                val crossedReconciliationIntervalBoundary =
-                  determineCheckpointAtReconciliationBoundary(
-                    recordTime = recordTime,
-                    previouslyProcessedRecordTime = previousRecordTime,
-                    dynamicParameters,
-                  )
-                val maybeFence = crossedReconciliationIntervalBoundary
-                  .orElse(checkpointByNumProcessedEvents)
-                  .zip(offset.decrement)
-                  .map { case ((checkpointRecordTime, checkpointFence), checkpointOffset) =>
-                    val checkpointTimepoint = Timepoint(checkpointOffset)(checkpointRecordTime)
-                    ProcessingContext(checkpointTimepoint, checkpointFence)
-                  }
+                .unzip
 
-                val acsEvent =
-                  List(context.withValue(NotCheckpointFence(topologySnapshot, event)))
-                maybeFence
-                  // if a checkpoint fence is about to be emitted, it is emitted BEFORE the AcsChange,
-                  // so we reset the counter to 1 instead of 0, to correctly count the AcsChange emitted
-                  // after the checkpoint fence
-                  .map(fence => (1, fence :: acsEvent))
-                  // otherwise increase the counter and emit just the AcsChange
-                  .getOrElse((numEventsSinceLastCheckpoint + 1, acsEvent))
+              val tickIntervalChangeCheckpoint =
+                newSynchronizerParamsO.flatMap(hasTickIntervalChanged(_, dynamicParameters))
 
-              case InternalIndexService.AcsUpdate.EffectiveTopologyUpdate(
-                    partyTopologyEvents,
-                    newSynchronizerParamsO,
-                  ) =>
-                // only propagate the ACS update if there is a party hosting change
-                val (partyHostingChangeEvent, partyHostingChangeCheckpoint) = Option
-                  .when(partyTopologyEvents.nonEmpty)(
-                    (NotCheckpointFence(topologySnapshot, event), CheckpointType.PartyHostingChange)
-                  )
-                  .unzip
+              val postEventCheckpoint = tickIntervalChangeCheckpoint
+                .orElse(partyHostingChangeCheckpoint)
+                .map(checkpointType => context.withValue(CheckpointFence(checkpointType)))
 
-                val tickIntervalChangeCheckpoint =
-                  newSynchronizerParamsO.flatMap(hasTickIntervalChanged(_, dynamicParameters))
+              (partyHostingChangeEvent.map(context.withValue), postEventCheckpoint)
 
-                val events = partyHostingChangeEvent.toList ++
-                  // emit a checkpoint fence depending on the topology update.
-                  // A change in synchronizer parameters has higher priority than a party hosting change
-                  tickIntervalChangeCheckpoint
-                    .orElse(partyHostingChangeCheckpoint)
-                    .map(CheckpointFence(_))
+            case InternalIndexService.AcsUpdate.AcsCommitment(_) =>
+              // the running digest processor persists a checkpoint for received commitments
+              // to ensure that they can quickly be matched.
+              (None, Some(context.withValue(CheckpointFence(ReceivedCommitmentCheckpoint))))
 
-                // the checkpoint is emitted AFTER the topology change, so we reset the counter to 0
-                (0, events.map(context.withValue))
+            case InternalIndexService.AcsUpdate.OffsetCheckpoint =>
+              // Don't do anything with checkpoints other than them triggering the checkpoint of the previous event
+              // In particular, do not emit a checkpoint because multiple checkpoints can be received for the same offset
+              // and we'd like to avoid overwriting checkpoints for the same offset.
+              (None, None)
+          }
 
-              case InternalIndexService.AcsUpdate.AcsCommitment(_) =>
-                (numEventsSinceLastCheckpoint, Seq.empty)
+          // determine whether the event crossed a reconciliation interval boundary
+          val crossedReconciliationIntervalBoundary =
+            determineCheckpointAtReconciliationBoundary(
+              timepoint = timepoint,
+              previouslyProcessedRecordTime = previousRecordTime,
+              dynamicParameters,
+            ).map { case (checkpointTimepoint, checkpointType) =>
+              ProcessingContext(checkpointTimepoint, CheckpointFence(checkpointType))
             }
 
-            (updatedNumEventsSinceLastCheckpoint, recordTime) -> result
+          val preEventCheckpoint = crossedReconciliationIntervalBoundary
+            .orElse(state.previousEventCheckpoint)
+
+          // determine whether the event is the event that reaches the limit of maxNumUpdatesBetweenCheckpoints
+          @inline def checkpointByNumProcessedEvents: Option[ProcessingContext[CheckpointFence]] =
+            Option.when(
+              numEventsSinceLastCheckpoint + 1 == acsCommitmentConfig.maxNumUpdatesBetweenCheckpoints.unwrap
+            )(context.withValue(CheckpointFence(CheckpointType.MaxEventsWithoutCheckpoint)))
+
+          val postEventCheckpoint =
+            postEventTopologyCheckpoint.orElse(checkpointByNumProcessedEvents)
+
+          // determine the next `numEventsSinceLastCheckpoint` and the output elements to emit
+          val updatedNumEventsSinceLastCheckpoint = preEventCheckpoint match {
+            case Some(_) => 1
+            case None => numEventsSinceLastCheckpoint + 1
           }
+          val result = preEventCheckpoint.toList ++ eventToEmit.toList
+          val newState =
+            CheckpointingState(updatedNumEventsSinceLastCheckpoint, recordTime, postEventCheckpoint)
+          newState -> result
+        }
       }(NamedLoggingContext(loggerFactory, traceContext))
       .mapConcat(identity)
+      .map(updateMetric(metrics.runningDigestProcessor.latestCheckpointedRecordTime, _))
+
+    if (enableAdditionalConsistencyChecks) {
+      validateCheckpointConsistency(mainCheckpointingFlow)
+    } else {
+      mainCheckpointingFlow
+    }
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private def validateCheckpointConsistency(
+      mainCheckpointingFlow: Flow[Checkpointing_Input, Checkpointing_Output, NotUsed]
+  ): Flow[Checkpointing_Input, Checkpointing_Output, NotUsed] = {
+    noTracingLogger.debug("wiring up checkpoint consistency checks")
+    mainCheckpointingFlow.statefulMapConcat { () =>
+      var mostRecentCheckpoint: Option[(Timepoint, CheckpointType)] = None
+
+      currentEvent => {
+        implicit val tc = currentEvent.traceContext
+        currentEvent.value match {
+          case CheckpointFence(cpType) =>
+            mostRecentCheckpoint.foreach { case (lastCheckpoint, lastCheckpointType) =>
+              // tick checkpoints must not be overwritten
+              ErrorUtil.requireState(
+                !(lastCheckpointType.isTickCheckpoint && lastCheckpoint.offset == currentEvent.offset),
+                s"Previous checkpoint $lastCheckpointType at $lastCheckpoint must not be overwritten by $cpType at ${currentEvent.timepoint}.",
+              )
+              // both offset and record time must increase monotonically
+              ErrorUtil.requireState(
+                currentEvent.offset >= lastCheckpoint.offset && currentEvent.recordTime >= lastCheckpoint.recordTime,
+                s"The previous checkpoint was observed at ${lastCheckpoint.tupled}, and new checkpoint at ${currentEvent.timepoint.tupled} seems to go back in time ",
+              )
+            }
+            mostRecentCheckpoint = Some((currentEvent.timepoint, cpType))
+            Seq(currentEvent)
+          case _ => Seq(currentEvent)
+        }
+      }
+    }
+  }
 
   /** Enriches the incoming events (acs change or topology change) with the data that is needed to
     * determine which digests need to be loaded and updated during a later stages of the pipeline.
@@ -239,11 +342,15 @@ class RunningDigestProcessor(
                   .flatten
                   .map(classification => other.withValue(classification))
               case InternalIndexService.AcsUpdate.AcsCommitment(_) =>
-                // ignore incoming acs commitements for now
+                // ignore incoming acs commitments for now
+                Source.empty
+              case InternalIndexService.AcsUpdate.OffsetCheckpoint =>
+                // ignore incoming offset checkpoints for now
                 Source.empty
             }
         }
       }
+      .map(updateMetric(metrics.runningDigestProcessor.latestClassifiedRecordTime, _))
 
   /** Determines the classification for a topology event and register the corresponding change in
     * the topology change tracker.
@@ -342,27 +449,44 @@ class RunningDigestProcessor(
     val (updatedTracker, topologyChangeForThisLfParticipant) =
       classificationForTopologyChange(ptp, changeTracker)
 
+    // Reset the metrics for the local party change processing
+    metrics.runningDigestProcessor.localPartyChangeContractChanges.updateValue(0)
+    metrics.runningDigestProcessor.localPartyChangeCounterparties.updateValue(0)
+
     val acsUpdates = indexService
       // load the ACS of the party to determine the counterparties that need to have their digest updated
       .counterParties(synchronizerId, offset, Some(partyAffectedByTopologyChange))
       .grouped(acsCommitmentConfig.counterpartyBatchSize.unwrap)
       .flatMapConcat { counterparties =>
+        metrics.runningDigestProcessor.localPartyChangeCounterparties.updateValue(
+          _ + counterparties.size
+        )
+        val counterpartiesSet = counterparties.toSet
+
         // for a group of counterparties, load the acs that is shared with the locally onboarded party
         // and emit the corresponding classification
         indexService
           .acs(
             synchronizerId,
             offset,
-            counterparties.toSet,
+            counterpartiesSet,
             Set(partyAffectedByTopologyChange),
           )
-          .mapAsyncAndDrainUS(1) { activeContractOfCounterparty =>
-            val stakeholdersOfContract = activeContractOfCounterparty.stakeholders
+          .batch(
+            max = acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap.toLong,
+            Vector(_),
+          )(_ :+ _)
+          .mapAsyncAndDrainUS(1) { activeContractsOfCounterparties =>
+            metrics.runningDigestProcessor.localPartyChangeContractChanges.updateValue(
+              _ + activeContractsOfCounterparties.size
+            )
+            val stakeholdersOfContracts =
+              activeContractsOfCounterparties.iterator.flatMap(_.stakeholders).toSet
 
             for {
               partyToParticipant <- getOnboardedParticipantsOfParties(
                 topologySnapshot,
-                stakeholdersOfContract,
+                stakeholdersOfContracts,
               )
                 // see scaladoc of this method as to why we don't apply the updated topology changes for added parties,
                 // but we do for removed parties.
@@ -371,27 +495,40 @@ class RunningDigestProcessor(
                   else updatedTracker.applyPendingTopologyChanges
                 )
             } yield {
-              // emit the classification update for all stakeholders of the current stakeholder batch
-              // of the contract and their respective hosting participants.
-              val stakeholdersToHostingParticipants = stakeholdersOfContract.view
-                .filter(counterparties.contains)
-                .map(sh => sh -> partyToParticipant.getOrElse(sh, Set.empty))
+              val contractChanges = activeContractsOfCounterparties.map {
+                activeContractOfCounterparty =>
+                  // emit the classification update for all stakeholders of the current stakeholder batch
+                  // of the contract and their respective hosting participants.
+                  val counterpartiesStakeholders =
+                    activeContractOfCounterparty.stakeholders.iterator
+                      .filter(counterpartiesSet.contains)
+                      .toSet
+
+                  ContractChange(
+                    counterpartiesStakeholders,
+                    // only emit the on-/offboarded party as local party. Other locally hosted stakeholders will have already
+                    // been processed by other events (e.g. an AcsChange or their own party onboarding event).
+                    Seq(partyAffectedByTopologyChange),
+                    activeContractOfCounterparty.contractId,
+                    activeContractOfCounterparty.reassignmentCounter,
+                    isActivation = isPartyBeingAdded,
+                  )
+              }
+
+              val counterpartiesToParticipant = activeContractsOfCounterparties.iterator
+                .flatMap(_.stakeholders)
+                .distinct
+                .filter(counterpartiesSet)
+                .map(party => party -> partyToParticipant.getOrElse(party, Set.empty))
                 .toMap
 
-              Seq(
-                AcsUpdate(
-                  stakeholdersToHostingParticipants,
-                  // only emit the onboarded party as local party. Other locally hosted stakeholders will have already
-                  // been processed by other events (e.g. an AcsChange or their own party onboarding event).
-                  Seq(partyAffectedByTopologyChange),
-                  activeContractOfCounterparty.contractId,
-                  activeContractOfCounterparty.reassignmentCounter,
-                  isActivation = isPartyBeingAdded,
-                )
+              ContractChangeBatch.create(
+                counterpartiesToParticipant,
+                contractChanges,
+                enableAdditionalConsistencyChecks,
               )
             }
           }
-          .mapConcat(identity)
       }
 
     (
@@ -406,7 +543,7 @@ class RunningDigestProcessor(
   private def determineRequiredDigestChangesFromAcsChange(
       topologySnapshot: TopologySnapshot,
       acsChange: AcsChange,
-  )(implicit traceContext: TraceContext): Source[AcsUpdate, NotUsed] = {
+  )(implicit traceContext: TraceContext): Source[ContractChangeBatch, NotUsed] = {
     val allStakeholders = acsChange.activations.values.flatMap(_.stakeholders) ++
       acsChange.deactivations.values.flatMap(_.stakeholders)
 
@@ -418,7 +555,22 @@ class RunningDigestProcessor(
     } yield {
       val changes = toAcsChange(acsChange.activations, partyToParticipants, isActivation = true) ++
         toAcsChange(acsChange.deactivations, partyToParticipants, isActivation = false)
-      Source(changes)
+      Source.fromIterator(() =>
+        changes
+          .grouped(acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap)
+          .map { contractChanges =>
+            val partyHostingsForBatch = contractChanges.iterator
+              .flatMap(_.stakeholders)
+              .distinct
+              .map(party => party -> partyToParticipants.getOrElse(party, Set.empty))
+              .toMap
+            ContractChangeBatch.create(
+              partyHostingsForBatch,
+              contractChanges,
+              enableAdditionalConsistencyChecks,
+            )
+          }
+      )
     }
     PekkoUtil.futureSourceUS(futureSource)
   }
@@ -427,7 +579,7 @@ class RunningDigestProcessor(
       change: Map[LfContractId, ContractStakeholdersAndReassignmentCounter],
       partyToParticipants: Map[LfPartyId, Set[LedgerParticipantId]],
       isActivation: Boolean,
-  ): immutable.Iterable[AcsUpdate] =
+  ): immutable.Iterable[ContractChange] =
     change.flatMap {
       case (
             cid,
@@ -441,13 +593,9 @@ class RunningDigestProcessor(
         // simply ignore the change. Once the party onboarding has completed, the corresponding topology change will trigger the appropriate digest updates.
         if (locallyHostedStakeholders.isEmpty) Seq.empty
         else {
-          val stakeholdersToHostingParticipants = stakeholders.view
-            .map(sh => sh -> partyToParticipants.getOrElse(sh, Set.empty))
-            .toMap
           Seq(
-            AcsUpdate(
-              // update the digest for these stakeholders and their respective hosting participants
-              stakeholdersToHostingParticipants,
+            ContractChange(
+              stakeholders,
               // with all locally hosted parties
               locallyHostedStakeholders,
               // for this contract
@@ -461,24 +609,67 @@ class RunningDigestProcessor(
         }
     }
 
-  def pipeline(startingRecordTimeO: Option[CantonTimestamp])(implicit
+  def pipeline(
+      startingRecordTimeO: Option[CantonTimestamp],
+      priorReconciliationTick: Option[CantonTimestamp],
+  )(implicit
       traceContext: TraceContext
-  ): Flow[Checkpointing_Input, DigestAccumulator_Output, NotUsed] =
+  ): Flow[Checkpointing_Input, DigestAccumulator_Output, NotUsed] = {
+    val bufferSize = acsCommitmentConfig.digestPipelineBufferSize.unwrap
+    metrics.bufferDigestPipelineSize.updateValue(bufferSize.toLong)
     Flow[Checkpointing_Input].async
+      .buffered(metrics.bufferDigestPipelineCheckpointing, bufferSize)
       .via(checkpointing(startingRecordTimeO, traceContext))
       .async
+      .buffered(metrics.bufferDigestPipelineBeforeClassification, bufferSize)
       .via(classification)
       .async
+      .buffered(metrics.bufferDigestPipelineBeforeAccumulation, bufferSize)
       .via(digestAccumulator.flow())
+      .buffered(metrics.bufferDigestPipelineBeforeOutstanding, bufferSize)
+      .statefulMapAsyncUSAndDrain(priorReconciliationTick.getOrElse(CantonTimestamp.MinValue))(
+        writeOutstandingAndCheckpoint
+      )
+      .map { cp =>
+        if (cp.checkpointType.isTickCheckpoint)
+          tickSignaller.notify(Notification.All, cp.offsetInclusive)
+        else if (cp.checkpointType == CheckpointType.ReceivedCommitmentCheckpoint)
+          tickSignaller.notify(
+            Notification
+              .Keys(NonEmpty(Set, TickListener.TicksAndReceivedCommitmentCheckpointsListener)),
+            cp.offsetInclusive,
+          )
+        cp
+      }
+  }
+
+  private def updateMetric[A](
+      gauge: Gauge[Long],
+      elem: ProcessingContext[A],
+  ): ProcessingContext[A] = {
+    gauge.updateValue(elem.recordTime.toMicros)
+    elem
+  }
+
+  private def updateMetric[A](
+      gauge: Gauge[Long],
+      acsUpdate: AcsUpdateContainer,
+  ): AcsUpdateContainer = {
+    gauge.updateValue(acsUpdate.synchronizerTime.toMicros)
+    acsUpdate
+  }
 
   override protected def startPipelineInternal()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] =
     for {
-      latestCheckpointO <- acsDigestStore.latestCheckpointUpTo(Offset.MaxValue)
-      (startingOffsetO, startingRecordTimeO) = latestCheckpointO
-        .map(_.timepoint.tupled)
-        .unzip
+      latestCheckpointO <- acsDigestStore.latestCheckpointUpTo(
+        Offset.MaxValue,
+        allCheckpointsFilter,
+      )
+      latestReconciliatioCheckpointO <- acsDigestStore.latestReconciliationCheckpoint()
+      startingOffsetO = latestCheckpointO.map(_.offset)
+      startingRecordTimeO = latestCheckpointO.map(_.recordTime)
       _ <- startingOffsetO.traverse { startingOffset =>
         logger.info(
           s"Deleting ACS digest data after latest checkpoint $latestCheckpointO before starting the processing pipeline"
@@ -487,14 +678,18 @@ class RunningDigestProcessor(
       }
     } yield {
       logger.info(s"Starting ACS digest processor from latest checkpoint $latestCheckpointO.")
-      val graph = indexService
-        .acsUpdates(synchronizerId, startingOffsetO)
+      val graph = RunningDigestProcessor
+        .acsUpdatesWithRetries(indexService, synchronizerId, startingOffsetO)
+        // we ignore acs updates at topology initialization time, because the topology snapshot is empty, and we cannot do
+        // any meaningful topology inspection.
+        .dropWhile(_.synchronizerTime <= SignedTopologyTransaction.InitialTopologySequencingTime)
+        .map(updateMetric(metrics.runningDigestProcessor.latestAcsUpdate, _))
         .viaMat(KillSwitches.single)(Keep.right)
         .map { update =>
           val timepoint = Timepoint(update.offset)(update.synchronizerTime)
           ProcessingContext(timepoint, update.acsUpdate)(update.traceContext)
         }
-        .via(pipeline(startingRecordTimeO))
+        .via(pipeline(startingRecordTimeO, latestReconciliatioCheckpointO.map(_.recordTime)))
         .toMat(
           Sink.foreach(cp =>
             logger.debug(
@@ -507,13 +702,36 @@ class RunningDigestProcessor(
       (ks, doneF.void)
     }
 
+  private def writeOutstandingAndCheckpoint(
+      priorReconciliationTick: CantonTimestamp,
+      cp: CheckpointToBeWritten,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[(CantonTimestamp, DigestAccumulator_Output)] =
+    for {
+      isReconciliationTick <- periodWriter.writeOutstandingAtTick(
+        cp,
+        priorReconciliationTick,
+        acsCommitmentConfig.periodStore.writerPageSize,
+      )
+      _ <- writeCheckpoint(cp)
+    } yield {
+      if (cp.checkpointType.isTickCheckpoint) {
+        metrics.tickWatermark.updateValue(cp.recordTimeInclusive.toMicros)
+      }
+
+      val reconciliationTick =
+        if (isReconciliationTick) cp.recordTimeInclusive else priorReconciliationTick
+      reconciliationTick -> cp.toCheckpointWritten
+    }
+
   /** Helper method to calculate the most recent reconciliation/affirmation interval tick up to and
     * including the given record time.
     */
   private def mostRecentIntervalTickUpToInclusive(
       recordTime: CantonTimestamp,
       interval: RefinedDuration,
-  ) =
+  ): CantonTimestamp =
     CantonTimestamp.assertFromLong(
       recordTime.toMicros - (recordTime.toMicros % interval.toScala.toMicros)
     )
@@ -522,22 +740,25 @@ class RunningDigestProcessor(
     * processed timestamp and before the currently processed timestamp.
     */
   private def determineCheckpointAtReconciliationBoundary(
-      recordTime: CantonTimestamp,
+      timepoint: Timepoint,
       previouslyProcessedRecordTime: CantonTimestamp,
       dynamicParameters: DynamicSynchronizerParameters,
-  ): Option[(CantonTimestamp, CheckpointFence)] = {
+  ): Option[(Timepoint, CheckpointType)] = {
     val boundary =
       mostRecentIntervalTickUpToInclusive(
-        recordTime,
+        timepoint.recordTime,
         dynamicParameters.reconciliationInterval,
       )
-    Option.when(previouslyProcessedRecordTime <= boundary && boundary < recordTime)(
-      (boundary, CheckpointFence(CheckpointType.ReconciliationIntervalBoundary))
-    )
+    if (previouslyProcessedRecordTime <= boundary && boundary < timepoint.recordTime)
+      timepoint.offset.decrement.map(offsetPredecessor =>
+        (Timepoint(offsetPredecessor)(boundary), CheckpointType.ReconciliationIntervalBoundary)
+      )
+    else None
+
   }
 
-  /** Gets the dynamic synchronizer parameters from the topology snapshot of fails with an
-    * exception. This should never really happen.
+  /** Gets the dynamic synchronizer parameters from the topology snapshot. If no parameters are
+    * found, this fails with an exception, but this should never really happen.
     */
   private def getDynamicSynchronizerParametersOrFail(topologySnapshot: TopologySnapshot)(implicit
       traceContext: TraceContext
@@ -587,4 +808,13 @@ class RunningDigestProcessor(
     }
 
   override def toString: String = s"RunningDigestProcessor($synchronizerId)"
+}
+
+object RunningDigestProcessorImpl {
+
+  private final case class CheckpointingState(
+      numEventsSinceLastCheckpoint: Int,
+      previousRecordTime: CantonTimestamp,
+      previousEventCheckpoint: Option[ProcessingContext[CheckpointFence]],
+  )
 }

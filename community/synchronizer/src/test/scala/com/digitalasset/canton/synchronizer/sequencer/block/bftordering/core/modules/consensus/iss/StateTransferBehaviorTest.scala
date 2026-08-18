@@ -156,9 +156,14 @@ class StateTransferBehaviorTest
       "hand it to the state transfer manager" in {
         val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
         val epochStoreMock = mock[EpochStore[ProgrammableUnitTestEnv]]
+        val epochStateEpoch = EpochState.Epoch(
+          anEpochStoreEpoch.info,
+          aTopologyInfo.currentMembership,
+          aTopologyInfo.previousMembership,
+        )
         when(epochStoreMock.latestEpoch(any[Boolean])(any[TraceContext]))
           .thenReturn(() => Some(anEpochStoreEpoch))
-        when(epochStoreMock.loadEpochProgress(eqTo(anEpochStoreEpoch.info))(any[TraceContext]))
+        when(epochStoreMock.loadEpochProgress(eqTo(epochStateEpoch))(any[TraceContext]))
           .thenReturn(() => EpochInProgress())
         when(
           stateTransferManagerMock.handleStateTransferMessage(
@@ -225,9 +230,14 @@ class StateTransferBehaviorTest
           ).forEvery { (newEpochTopologyMessage, minimumEndEpoch) =>
             val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
             val epochStoreMock = mock[EpochStore[ProgrammableUnitTestEnv]]
+            val epochStateEpoch = EpochState.Epoch(
+              anEpochStoreEpoch.info,
+              aTopologyInfo.currentMembership,
+              aTopologyInfo.previousMembership,
+            )
             when(epochStoreMock.latestEpoch(any[Boolean])(any[TraceContext]))
               .thenReturn(() => Some(anEpochStoreEpoch))
-            when(epochStoreMock.loadEpochProgress(eqTo(anEpochStoreEpoch.info))(any[TraceContext]))
+            when(epochStoreMock.loadEpochProgress(eqTo(epochStateEpoch))(any[TraceContext]))
               .thenReturn(() => EpochInProgress())
             val (context, stateTransferBehavior) =
               createStateTransferBehavior(
@@ -249,7 +259,7 @@ class StateTransferBehaviorTest
               eqTo(epochNumber),
               eqTo(aMembership),
               eqTo(aFakeCryptoProviderInstance),
-              nodeThatTimedOut = eqTo(Some(otherIds.head)),
+              nodesThatTimedOut = eqTo(Seq(otherIds.head)),
             )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
             succeed
           }
@@ -265,9 +275,14 @@ class StateTransferBehaviorTest
         ).forEvery { minimumEndEpoch =>
           val epochStoreMock = mock[EpochStore[ProgrammableUnitTestEnv]]
           val p2pNetworkOutModuleRefMock = mock[ModuleRef[P2PNetworkOut.Message]]
+          val epochStateEpoch = EpochState.Epoch(
+            anEpochInfo,
+            aTopologyInfo.currentMembership,
+            aTopologyInfo.previousMembership,
+          )
           when(epochStoreMock.latestEpoch(any[Boolean])(any[TraceContext]))
             .thenReturn(() => Some(anEpochStoreEpoch))
-          when(epochStoreMock.loadEpochProgress(eqTo(anEpochInfo))(any[TraceContext]))
+          when(epochStoreMock.loadEpochProgress(eqTo(epochStateEpoch))(any[TraceContext]))
             .thenReturn(() => EpochInProgress())
           val (context, stateTransferBehavior) =
             createStateTransferBehavior(
@@ -321,7 +336,12 @@ class StateTransferBehaviorTest
       when(epochStoreMock.latestEpoch(anyBoolean)(anyTraceContext)) thenReturn (() =>
         Some(anEpochStoreEpoch)
       )
-      when(epochStoreMock.loadEpochProgress(eqTo(anEpochStoreEpoch.info))(anyTraceContext))
+      val epochStateEpoch = EpochState.Epoch(
+        anEpochStoreEpoch.info,
+        aTopologyInfo.currentMembership,
+        aTopologyInfo.previousMembership,
+      )
+      when(epochStoreMock.loadEpochProgress(eqTo(epochStateEpoch))(anyTraceContext))
         .thenReturn(() => EpochInProgress())
       val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
       val availabilityMock = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
@@ -421,7 +441,7 @@ class StateTransferBehaviorTest
             eqTo(anEpochInfo.number),
             eqTo(aMembership),
             eqTo(aFakeCryptoProviderInstance),
-            nodeThatTimedOut = eqTo(None),
+            nodesThatTimedOut = eqTo(Seq.empty),
           )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
 
           succeed
@@ -530,7 +550,7 @@ class StateTransferBehaviorTest
             epoch,
             failingCryptoProvider,
             latestCompletedEpochFromStore.lastBlockCommits,
-            epochStore.loadEpochProgress(latestEpochFromStore.info)(TraceContext.empty)(),
+            epochStore.loadEpochProgress(epoch)(TraceContext.empty)(),
             traceContext,
           )
           new EpochState[ProgrammableUnitTestEnv](

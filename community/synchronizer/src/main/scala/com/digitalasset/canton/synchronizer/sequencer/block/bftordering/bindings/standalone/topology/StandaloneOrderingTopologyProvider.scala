@@ -1,0 +1,184 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.standalone.topology
+
+import better.files.File as BFile
+import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.config.RequireTypes.PositiveLong
+import com.digitalasset.canton.crypto.{CryptoPureApi, SigningPrivateKey, SigningPublicKey, v30}
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.{
+  PekkoEnv,
+  PekkoFutureUnlessShutdown,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.standalone.crypto.FixedKeysCryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.{
+  OrderingTopologyProvider,
+  TopologyActivationTime,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftKeyId,
+  BftNodeId,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  OrderingTopology,
+  SequencingParameters,
+}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.DelayUtil
+import com.digitalasset.canton.version.ProtocolVersion
+
+import java.io.File
+import java.util.concurrent.ThreadLocalRandom
+import scala.concurrent.ExecutionContext
+import scala.util.Random
+
+class StandaloneOrderingTopologyProvider(
+    standaloneConfig: BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig,
+    crypto: CryptoPureApi,
+    metrics: BftOrderingMetrics,
+)(implicit executionContext: ExecutionContext, synchronizerProtocolVersion: ProtocolVersion)
+    extends OrderingTopologyProvider[PekkoEnv] {
+
+  import StandaloneOrderingTopologyProvider.*
+
+  private val pubKey = readSigningPublicKey(standaloneConfig.signingPublicKeyProtoFile)
+
+  private val segmentLength = SegmentLength(PositiveLong.tryCreate(standaloneConfig.segmentLength))
+
+  private val privKey =
+    SigningPrivateKey
+      .fromProtoV30(
+        v30.SigningPrivateKey
+          .parseFrom(BFile(standaloneConfig.signingPrivateKeyProtoFile.getAbsolutePath).byteArray)
+      )
+      .getOrElse(throw new IllegalArgumentException("Failed to parse signing private key"))
+
+  private val peerSigningPublicKeys =
+    standaloneConfig.peers.map { peerConfig =>
+      BftNodeId(peerConfig.sequencerId) ->
+        readSigningPublicKey(peerConfig.signingPublicKeyProtoFile)
+    }.toMap + (BftNodeId(standaloneConfig.thisSequencerId) -> pubKey)
+
+  private def generateOrderingTopology(
+      activationTime: Option[TopologyActivationTime],
+      checkPendingChanges: Boolean,
+  ) = {
+    val rng = new Random(ThreadLocalRandom.current())
+    OrderingTopology(
+      Map(
+        BftNodeId(standaloneConfig.thisSequencerId) ->
+          OrderingTopology.NodeTopologyInfo(
+            Set(BftKeyId(pubKey.fingerprint.toProtoPrimitive))
+          )
+      ) ++ standaloneConfig.peers.map { peerConfig =>
+        BftNodeId(peerConfig.sequencerId) ->
+          OrderingTopology.NodeTopologyInfo(
+            Set(
+              BftKeyId(
+                peerSigningPublicKeys(
+                  BftNodeId(peerConfig.sequencerId)
+                ).fingerprint.toProtoPrimitive
+              )
+            )
+          )
+      },
+      segmentLength.epochLength(1 + standaloneConfig.peers.size.toLong),
+      SequencingParameters.Default.update(
+        pbftViewChangeTimeout =
+          PositiveFiniteDuration.tryFromDuration(standaloneConfig.pbftViewChangeTimeout).toInternal,
+        segmentLength = segmentLength,
+        blacklistLeaderSelectionPolicyConfig =
+          standaloneConfig.blacklistLeaderSelectionPolicyConfig,
+        maxRequestsInBatch = standaloneConfig.maxRequestsInBatch,
+        maxBatchesPerBlockProposal = standaloneConfig.maxBatchesPerBlockProposal,
+      ),
+      DynamicSynchronizerParameters.defaultMaxRequestSize.value,
+      ConventionalBootstrapTopologyActivationTime,
+      areTherePendingCantonTopologyChanges = Option.when(activationTime.isDefined)(
+        standaloneConfig.pendingTopologyChangesProbability.fold(false)(prob =>
+          checkPendingChanges && prob.flipCoin(rng)
+        )
+      ),
+    )
+  }
+
+  override def getOrderingTopologyAt(
+      activationTime: Option[TopologyActivationTime],
+      checkPendingChanges: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): PekkoEnv#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[PekkoEnv])]] =
+    standaloneConfig.getOrderingTopologyDelay
+      .fold[PekkoEnv#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[PekkoEnv])]]](
+        PekkoFutureUnlessShutdown.pure(
+          Some(
+            (
+              generateOrderingTopology(activationTime, checkPendingChanges),
+              new FixedKeysCryptoProvider(privKey, peerSigningPublicKeys, crypto, metrics),
+            )
+          )
+        )
+      ) { delayDistribution =>
+        PekkoFutureUnlessShutdown(
+          "",
+          () =>
+            FutureUnlessShutdown
+              .outcomeF(
+                DelayUtil
+                  .delay(
+                    delayDistribution.generateRandomDuration(
+                      new Random(ThreadLocalRandom.current())
+                    )
+                  )
+              )
+              .map { _ =>
+                Option(
+                  (
+                    generateOrderingTopology(activationTime, checkPendingChanges),
+                    new FixedKeysCryptoProvider(privKey, peerSigningPublicKeys, crypto, metrics),
+                  )
+                )
+              },
+        )
+      }
+
+  override def getFirstKnownAt(activationTime: TopologyActivationTime)(implicit
+      traceContext: TraceContext
+  ): PekkoFutureUnlessShutdown[Option[Map[BftNodeId, TopologyActivationTime]]] =
+    PekkoFutureUnlessShutdown.pure(
+      Some(
+        Map(
+          BftNodeId(standaloneConfig.thisSequencerId) ->
+            ConventionalBootstrapTopologyActivationTime
+        ) ++ standaloneConfig.peers.map { peerConfig =>
+          BftNodeId(peerConfig.sequencerId) ->
+            ConventionalBootstrapTopologyActivationTime
+        }
+      )
+    )
+
+  private def readSigningPublicKey(signingPublicKeyProtoFile: File) =
+    SigningPublicKey
+      .fromProtoV30(
+        v30.SigningPublicKey.parseFrom(
+          BFile(signingPublicKeyProtoFile.getAbsolutePath).byteArray
+        )
+      )
+      .getOrElse(
+        throw new IllegalArgumentException("Failed to parse signing public key")
+      )
+}
+
+object StandaloneOrderingTopologyProvider {
+
+  private val ConventionalBootstrapTopologyActivationTime =
+    TopologyActivationTime(CantonTimestamp.MinValue)
+}

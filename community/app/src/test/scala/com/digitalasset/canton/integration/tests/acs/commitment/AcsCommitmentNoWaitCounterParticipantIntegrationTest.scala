@@ -83,6 +83,8 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
+        // TODO(#34818) Enable the new pipeline
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay)

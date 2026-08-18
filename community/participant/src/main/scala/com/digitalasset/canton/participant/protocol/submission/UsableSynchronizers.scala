@@ -238,28 +238,46 @@ object UsableSynchronizers {
       ec: ExecutionContext,
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, UnknownPackage, Unit] =
+    checkRequiredPackagesByParty(
+      synchronizerId.protocolVersion,
+      snapshot,
+      requiredPackagesByParty,
+      ledgerTime,
+    )
+      .leftMap(unknownPackages => UnknownPackage(synchronizerId, unknownPackages))
+
+  private[protocol] def checkRequiredPackagesByParty(
+      protocolVersion: ProtocolVersion,
+      snapshot: TopologySnapshot,
+      requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]],
+      ledgerTime: CantonTimestamp,
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[FutureUnlessShutdown, NonEmpty[List[PackageUnknownTo]], Unit] =
     resolveParticipants(snapshot, requiredPackagesByParty)
       .flatMap(
-        checkPackagesVetted(synchronizerId, snapshot, ledgerTime, _)
+        checkRequiredPackagesByParticipant(protocolVersion, snapshot, ledgerTime, _)
       )
 
-  private def checkPackagesVetted(
-      synchronizerId: PhysicalSynchronizerId,
+  private def checkRequiredPackagesByParticipant(
+      protocolVersion: ProtocolVersion,
       snapshot: TopologySnapshot,
       ledgerTime: CantonTimestamp,
       requiredPackages: Map[ParticipantId, Set[LfPackageId]],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, UnknownPackage, Unit] = {
-    val checkPackageDependencies = synchronizerId.protocolVersion <= ProtocolVersion.v34
+  ): EitherT[FutureUnlessShutdown, NonEmpty[List[PackageUnknownTo]], Unit] = {
+
+    val checkPackageDependencies = protocolVersion <= ProtocolVersion.v34
     EitherT(
       requiredPackages.toList
         .parTraverse(unknownPackages(snapshot, ledgerTime, checkPackageDependencies))
         .map(_.combineAll.unknownOrUnvetted.toList.flatMap { case (participantId, packageIds) =>
           packageIds.toSeq.map(packageId => PackageUnknownTo(packageId, participantId))
         })
-        .map(u => NonEmpty.from(u).map(UnknownPackage(synchronizerId, _)).toLeft(()))
+        .map(u => NonEmpty.from(u).toLeft(()))
     )
   }
 

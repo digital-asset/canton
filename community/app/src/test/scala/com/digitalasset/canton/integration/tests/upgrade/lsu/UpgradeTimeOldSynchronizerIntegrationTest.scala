@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.error.LsuError
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.SingleSynchronizer
 import com.digitalasset.canton.integration.plugins.{
@@ -143,7 +144,9 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
             ),
             (
               _.errorMessage should include(
-                "failed: No sequencer successor was found"
+                s"""failed: ${LsuError.MalformedRequest.Error(
+                    "No sequencer successor was found"
+                  )}"""
               ),
               "automatic upgrade error due to sequencer successor missing",
             ),

@@ -1,0 +1,19 @@
+name: Cache Save
+description: Save cache
+
+inputs:
+  path:
+    description: Cache paths (multiline)
+    required: true
+  key:
+    description: Primary cache key from restore
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Save cache
+      uses: actions/cache/save@v5
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.key }}

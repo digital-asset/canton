@@ -15,6 +15,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
+import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -73,6 +74,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
     val factory =
       new BftSequencerFactory(
         BftBlockOrdererConfig(),
+        PublicServerConfig(),
         BlockSequencerConfig(),
         producePostOrderingTopologyTicks = false,
         health = None,

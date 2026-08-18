@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.tea.projection
 
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -39,6 +39,11 @@ trait TeaProjectionFactory { this: NamedLogging =>
       grpcSourceFactory: Option[Long] => Source[Traced[ProjectionEvent], ?],
   ): Behavior[ProjectionBehavior.Command]
 
+  /** Test-only hook called after each event right after the projection has committed it. Default
+    * no-op so production behavior is unaffected.
+    */
+  protected val onEventCommitted: () => Unit = () => ()
+
   // Logging observer to get insights into the lifecycle of the projection
   protected val loggingObserver: StatusObserver[Traced[ProjectionEvent]] =
     new StatusObserver[Traced[ProjectionEvent]] {
@@ -61,10 +66,12 @@ trait TeaProjectionFactory { this: NamedLogging =>
       override def afterProcess(
           projectionId: ProjectionId,
           envelope: Traced[ProjectionEvent],
-      ): Unit =
+      ): Unit = {
+        onEventCommitted()
         logger.trace(s"Processed event ${envelope.value} for projectionId $projectionId")(
           envelope.traceContext
         )
+      }
       override def offsetProgress(projectionId: ProjectionId, env: Traced[ProjectionEvent]): Unit =
         logger.info(s"Stored offset ${env.value.event.offset} for projectionId $projectionId")(
           env.traceContext
@@ -118,18 +125,28 @@ object TeaProjectionFactory {
       config: ProjectionConfig,
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
+      databaseQueryTimeout: PositiveFiniteDuration,
+      onEventCommitted: () => Unit = () => (),
   )(implicit system: ActorSystem[?]): (TeaProjectionFactory, TeaTrafficStore) = {
     import system.executionContext
 
     storage match {
       case db: DbStorage =>
-        val store = new TeaDbTrafficStore(db, loggerFactory, timeouts)
+        val store = new TeaDbTrafficStore(db, loggerFactory, timeouts, databaseQueryTimeout)
         val projection: TeaProjectionFactory =
-          new TeaDbProjectionFactory(db, loggerFactory, store, eventSource, config)
+          new TeaDbProjectionFactory(
+            db,
+            loggerFactory,
+            store,
+            eventSource,
+            config,
+            onEventCommitted,
+          )
         (projection, store)
       case _: MemoryStorage =>
-        val store = new TeaMemoryTrafficStore()
-        val projection: TeaProjectionFactory = new TeaMemoryProjectionFactory(loggerFactory, store)
+        val store = new TeaMemoryTrafficStore(loggerFactory)
+        val projection: TeaProjectionFactory =
+          new TeaMemoryProjectionFactory(loggerFactory, store, onEventCommitted)
         (projection, store)
     }
   }

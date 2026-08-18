@@ -1,0 +1,96 @@
+name: Check TODOs on issue close
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  check-todos:
+    name: Reopen if TODOs still reference closed issue
+    needs: pick_runner
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    permissions:
+      issues: write
+      contents: read
+    env:
+      ISSUE_NUM: ${{ github.event.issue.number }}
+      GH_TOKEN: ${{ github.token }}
+      CLOSER: ${{ github.event.sender.login }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: "Search for TODOs referencing issue #${{ github.event.issue.number }}"
+        id: search
+        uses: ./.github/actions/nix/nix_script_run
+        with:
+          output-name: found
+          command: |
+            # Patterns, issue-reference forms and excludes are owned by the
+            # shared scripts/ci/todo_refs.py (single source of truth across the
+            # todo checker, this workflow, and the stale-flake closer).
+            rc=0
+            python3 scripts/ci/todo_refs.py references "$ISSUE_NUM" > /tmp/todo-matches-${GITHUB_RUN_ID}.txt || rc=$?
+            case $rc in
+              0) echo "found=true" >> "$GITHUB_OUTPUT" ;;
+              1) echo "found=false" >> "$GITHUB_OUTPUT" ;;
+              *) echo "todo_refs.py failed (exit $rc)" >&2; exit 1 ;;
+            esac
+
+      - name: Check for existing warning comment
+        if: steps.search.outputs.result == 'true'
+        id: dedup
+        uses: ./.github/actions/nix/nix_script_run
+        with:
+          output-name: already_commented
+          command: |
+            EXISTING=$(gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUM/comments" \
+              --paginate \
+              --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | startswith("⚠️"))] | length')
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "already_commented=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "already_commented=false" >> "$GITHUB_OUTPUT"
+            fi
+
+      - name: Reopen issue
+        if: steps.search.outputs.result == 'true'
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: gh issue reopen "$ISSUE_NUM" --repo "$GITHUB_REPOSITORY"
+
+      - name: Post warning comment
+        if: steps.search.outputs.result == 'true' && steps.dedup.outputs.result == 'false'
+        uses: ./.github/actions/nix/nix_script_run
+        with:
+          command: |
+            MATCHES_FILE="/tmp/todo-matches-${GITHUB_RUN_ID}.txt"
+            # Truncate if over 50KB to stay under GitHub's 65,536-char comment limit.
+            if [ "$(wc -c < "$MATCHES_FILE")" -gt 50000 ]; then
+              { head -c 50000 "$MATCHES_FILE"; echo ""; echo "...(output truncated)"; } > "${MATCHES_FILE}.tmp"
+              mv "${MATCHES_FILE}.tmp" "$MATCHES_FILE"
+            fi
+
+            {
+              echo "⚠️ @${CLOSER} this issue was closed but TODOs still reference it in the codebase. Reopening automatically."
+              echo ""
+              echo '```'
+              cat "$MATCHES_FILE"
+              echo '```'
+              echo ""
+              echo "Please fix the TODOs before closing this issue again. Leaving them as-is will fail the CI TODO checker on the next PR."
+            } > /tmp/body.md
+
+            gh issue comment "$ISSUE_NUM" --repo "$GITHUB_REPOSITORY" --body-file /tmp/body.md

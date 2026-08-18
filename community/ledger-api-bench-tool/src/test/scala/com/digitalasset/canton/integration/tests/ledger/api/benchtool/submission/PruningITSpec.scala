@@ -7,6 +7,7 @@ import com.daml.ledger.javaapi.data.Party
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
+import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.ledger.api.benchtool.config.{Config, WorkflowConfig}
 import com.digitalasset.canton.ledger.api.benchtool.services.LedgerApiServices
 import com.digitalasset.canton.ledger.api.benchtool.submission.{
@@ -32,6 +33,12 @@ class PruningITSpec
     with Checkpoints {
   registerPlugin(NoAuthPlugin(loggerFactory))
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition.addConfigTransforms(
+      // TODO(#34818) Enable the new pipeline
+      ConfigTransforms.disableNewAcsCommitmentProcessorPipeline
+    )
 
   private var system: ActorSystem[SpawnProtocol.Command] = _
 

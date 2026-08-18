@@ -332,7 +332,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
           .disableMember(SequencerId(UniqueIdentifier.tryFromProtoPrimitive("seq::other")))
           .valueOrFail("Can disable other sequencer")
       } yield {
-        err.asGrpcError.getMessage should include("CANNOT_DISABLE_LOCAL_SEQUENCER_MEMBER")
+        err.toGrpcError.getMessage should include("CANNOT_DISABLE_LOCAL_SEQUENCER_MEMBER")
       }
     }
   }

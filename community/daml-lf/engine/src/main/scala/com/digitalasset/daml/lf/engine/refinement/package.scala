@@ -15,12 +15,12 @@ package object refinement {
 
     def start(first: Boolean): Result[X] =
       try {
-        ResultDone(unsafeRun)
+        Result.done(unsafeRun)
       } catch {
         case Error.Preprocessing.Lookup(LookupError.MissingPackage(_, _)) if first =>
           handleMissingPackages.flatMap(_ => start(false))
         case e: Error.Preprocessing.Error =>
-          ResultError(e)
+          Result.error(e)
       }
 
     start(first = true)

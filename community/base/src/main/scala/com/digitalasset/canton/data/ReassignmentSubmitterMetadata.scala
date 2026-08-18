@@ -9,6 +9,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, UniqueIdentifier}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 
@@ -33,9 +34,9 @@ final case class ReassignmentSubmitterMetadata(
       submitter = submitter,
       submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
       commandId = commandId,
-      submissionId = submissionId.getOrElse(""),
+      submissionId = submissionId.getOrElse("").toProtoUnvalidated,
       userId = userId,
-      workflowId = workflowId.getOrElse(""),
+      workflowId = workflowId.getOrElse("").toProtoUnvalidated,
     )
 
   override protected def pretty: Pretty[ReassignmentSubmitterMetadata] = prettyOfClass(

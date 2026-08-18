@@ -49,7 +49,12 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
   // The store is a stateless query wrapper; data isolation between tests is provided by cleanDb.
   // The execution context comes from HasExecutionContext (mixed in via DbTest).
   private lazy val dbStore: TeaDbTrafficStore =
-    new TeaDbTrafficStore(storage, loggerFactory, timeouts)
+    new TeaDbTrafficStore(
+      storage,
+      loggerFactory,
+      timeouts,
+      TrafficEnforcementServerConfig.Internal().databaseQueryTimeout,
+    )
 
   override protected def createBackend()(implicit system: ActorSystem[?]): Backend =
     new Backend {
@@ -60,7 +65,7 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
           storage.underlying,
           loggerFactory,
           dbStore,
-          EventSource.LedgerAPI,
+          EventSource.LedgerAPICompletions,
           ProjectionConfig(),
         )
     }

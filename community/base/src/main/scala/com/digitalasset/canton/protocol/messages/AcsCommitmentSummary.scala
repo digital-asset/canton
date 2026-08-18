@@ -17,7 +17,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.{
 }
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -66,7 +67,7 @@ final case class AcsCommitmentSummary(
   private[messages] def toProtoV32: v32.AcsCommitmentSummary = v32.AcsCommitmentSummary(
     physicalSynchronizerId = psid.toProtoPrimitive,
     commitmentTick = commitmentTick.toProtoPrimitive,
-    addressedCounterparticipants = addressedCounterparticipants,
+    addressedCounterparticipants = addressedCounterparticipants.map(_.toProtoUnvalidated),
     unsentDigests = unsentDigests.map(_.toProtoV32),
     batchIndex = batchIndex.value,
     lastBatch = lastBatch,
@@ -119,7 +120,7 @@ object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitment
     )(PhysicalSynchronizerId.fromProtoPrimitive)
     commitmentTick <- CantonTimestamp.fromProtoPrimitive(protoMsg.commitmentTick)
     addressedCounterparticipants <- parseRequiredNonEmpty(
-      (p: String) =>
+      (p: ProtoUnvalidatedString) =>
         ProtoValidation.validateThen(p, "addressed_counterparticipants", pvv)(parseLfParticipantId),
       "addressed_counterparticipants",
       protoMsg.addressedCounterparticipants,

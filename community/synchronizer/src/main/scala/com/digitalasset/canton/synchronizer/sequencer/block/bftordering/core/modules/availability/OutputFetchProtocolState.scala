@@ -4,7 +4,10 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability
 
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
+  BlockNumber,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.{
   BatchId,
   ProofOfAvailability,
@@ -67,7 +70,7 @@ final class MainOutputFetchProtocolState {
       missingBatchId: BatchId
   ): Option[ProofOfAvailability] = for {
     batchesRequest <- pendingBatchesRequests.find(_.missingBatches.contains(missingBatchId))
-    proof <- batchesRequest.blockForOutput.orderedBlock.batchRefs.find(_.batchId == missingBatchId)
+    proof <- batchesRequest.proofs.find(_.batchId == missingBatchId)
   } yield proof
 
   def removeRequestsWithNoMissingBatches(): Unit = {
@@ -75,8 +78,30 @@ final class MainOutputFetchProtocolState {
   }
 }
 
-final class BatchesRequest(
+sealed trait BatchesRequest {
+  def traceContext: TraceContext
+  def proofs: Seq[ProofOfAvailability]
+  def orderingMode: OrderingMode
+  def originalLeader: BftNodeId
+
+  lazy val missingBatches: mutable.SortedSet[BatchId] =
+    mutable.SortedSet.from(proofs.map(_.batchId))
+}
+
+final class OrderedBlockBatchesRequest(
     val blockForOutput: OrderedBlockForOutput,
-    val missingBatches: mutable.SortedSet[BatchId],
     val traceContext: TraceContext,
-)
+) extends BatchesRequest {
+  override val proofs: Seq[ProofOfAvailability] = blockForOutput.orderedBlock.batchRefs
+  override val orderingMode: OrderingMode = blockForOutput.orderingMode
+  override val originalLeader: BftNodeId = blockForOutput.originalLeader
+}
+
+final class UnorderedBlockBatchesRequest(
+    val blockNumber: BlockNumber,
+    val originalLeader: BftNodeId,
+    val proofs: Seq[ProofOfAvailability],
+    val traceContext: TraceContext,
+) extends BatchesRequest {
+  override val orderingMode: OrderingMode = OrderingMode.Consensus
+}

@@ -192,6 +192,7 @@ object Profile {
   }
 
   final case class CreateAndExerciseLabel(tplId: Ref.DefinitionRef, choiceId: Ref.ChoiceName)
+  final case class QueryNByKeyLabel(tplId: Ref.DefinitionRef)
 
   sealed abstract class ScenarioLabel extends Product with Serializable
 
@@ -251,6 +252,7 @@ object Profile {
       implicit val contractKeyWithMaintainersDefRef: Allowed[ContractKeyWithMaintainersDefRef] =
         allowAll
       implicit val createAndExerciseLabel: Allowed[CreateAndExerciseLabel] = allowAll
+      implicit val queryNByKeyLabel: Allowed[QueryNByKeyLabel] = allowAll
       implicit val exceptionMessageDefRef: Allowed[ExceptionMessageDefRef] = allowAll
       implicit val scenarioLabel: Allowed[ScenarioLabel] = allowAll
       implicit val exprVarName: Allowed[Ast.ExprVarName] = allowAll

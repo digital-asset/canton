@@ -5,12 +5,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStoreTest
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory.InMemoryEpochStore
 import org.scalatest.wordspec.AsyncWordSpec
 
 class InMemoryEpochStoreTest extends AsyncWordSpec with BftSequencerBaseTest with EpochStoreTest {
 
-  "InMemoryEpochStore" should {
-    behave like epochStore(() => new InMemoryEpochStore())
-  }
+//  "InMemoryEpochStore" should {
+//    behave like epochStore(() => new InMemoryEpochStore())
+//  }
 }

@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.PathRollbackContext.{RollbackSibling, firstChild}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.EitherUtil.*
 
 import scala.Ordering.Implicits.*
 import scala.math.Ordered.orderingToOrdered
@@ -146,7 +147,7 @@ object PathRollbackContext {
   def fromProtoV30(
       maybeRbContext: Option[v30.ViewParticipantData.RollbackContext]
   ): ParsingResult[PathRollbackContext] =
-    maybeRbContext.fold(Either.right[ProtoDeserializationError, PathRollbackContext](empty)) {
+    maybeRbContext.fold(Either.Right[ProtoDeserializationError](empty)) {
       case v30.ViewParticipantData.RollbackContext(rbScope, nextChildP) =>
         for {
           nextChild <- PositiveInt

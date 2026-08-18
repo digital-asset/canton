@@ -1,8 +1,8 @@
 // Linting plugins
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.6.1")
-addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.14.0")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.14.6")
 addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.5.8")
-addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.4.4")
+addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.4.5")
 addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage
@@ -43,7 +43,7 @@ addDependencyTreePlugin
 addSbtPlugin("com.github.cb372" % "sbt-explicit-dependencies" % "0.3.1")
 
 // Allows using some convenient Cats syntax in build files
-libraryDependencies += "org.typelevel" %% "cats-core" % "2.9.0"
+libraryDependencies += "org.typelevel" %% "cats-core" % "2.13.0"
 
 libraryDependencies ++= Seq(
   "io.circe" %% "circe-core" % "0.14.2",
@@ -52,7 +52,7 @@ libraryDependencies ++= Seq(
 )
 
 // JMH for benchmarking purposes
-addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.3")
+addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.8")
 
 addSbtPlugin("org.jetbrains.scala" % "sbt-ide-settings" % "1.1.4")
 

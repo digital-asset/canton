@@ -65,16 +65,12 @@ import scala.concurrent.ExecutionContext
   * @param parallel
   *   to flag if view processing is done in parallel or sequentially. Intended to be set only during
   *   tests to enforce determinism, otherwise it is always set to true.
-  *
-  * TODO(#32393): Remove `useNewEncryptionAlgorithm` and refactor to have separate paths for v1 and
-  * v2 encryption algorithms.
   */
 class TransactionConfirmationRequestFactory(
     submitterNode: ParticipantId,
     loggingConfig: LoggingConfig,
     val loggerFactory: NamedLoggerFactory,
     parallel: Boolean = true,
-    useNewEncryptionAlgorithm: Boolean = false,
 )(val transactionTreeFactory: TransactionTreeFactory, seedGenerator: SeedGenerator)(implicit
     executionContext: ExecutionContext
 ) extends NamedLogging {
@@ -338,7 +334,8 @@ class TransactionConfirmationRequestFactory(
     ]] = {
       require(
         protocolVersion >= ProtocolVersion.transparency,
-        s"Ciphertext ID-based subview references are only supported for protocol versions > v35 (got $protocolVersion)",
+        s"Ciphertext ID-based subview references are only supported for protocol " +
+          s"versions >= v${ProtocolVersion.transparency} (got $protocolVersion)",
       )
 
       // Build light view trees for a recipient group, using the subview references generated for
@@ -487,11 +484,10 @@ class TransactionConfirmationRequestFactory(
     ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, Seq[
       OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]
     ]] = {
-      // TODO(#32393): Make sure this is only executed for protocol versions that support viewHash-based encryption
-      /*require(
+      require(
         protocolVersion < ProtocolVersion.transparency,
-        s"ViewHash-based encryption is only supported for protocol versions <= v35 (got $protocolVersion)",
-      )*/
+        s"ViewHash-based encryption is only supported for protocol versions < v${ProtocolVersion.transparency} (got $protocolVersion)",
+      )
 
       def makeLightTransactionViewTreeWithRecipient(
           viewWithWitnessesAndRecipients: ViewWithWitnessesAndRecipients
@@ -624,7 +620,7 @@ class TransactionConfirmationRequestFactory(
       )
 
       envelopes <-
-        if (!useNewEncryptionAlgorithm)
+        if (protocolVersion < ProtocolVersion.transparency)
           createOpenEnvelopesWithTransactionV1(
             viewsWithWitnessesAndRecipientsNE,
             viewsKeyDataMap,
@@ -669,7 +665,9 @@ object TransactionConfirmationRequestFactory {
     )
   }
 
-  // Accumulator for ciphertext IDs + final envelopes
+  // Accumulator for ciphertext IDs + final envelopes.
+  // NOTE: @unused works around a 2.13.18 -Wunused false positive; used in nested defs below.
+  @unused
   final private case class ViewEncryptionAccumulator(
       byCiphertextIdMap: Map[ViewHash, ByCiphertextId],
       envelopes: Chain[OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]],

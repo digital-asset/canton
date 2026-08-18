@@ -1,0 +1,63 @@
+name: Test Docker Images
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  test_docker_images:
+    name: Test Docker Images
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Set up workspace path
+        shell: bash
+        run: |
+          TMP_WORKSPACE="${{ runner.temp }}/workspace-${{ github.run_id }}"
+          mkdir -p "$TMP_WORKSPACE"
+          echo "TMP_WORKSPACE=$TMP_WORKSPACE" >> "$GITHUB_ENV"
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Restore packaged release
+        uses: ./.github/actions/cache/restore_packaged_release
+        with:
+          workspace-path: ${{ env.TMP_WORKSPACE }}
+
+      - name: Obtain release suffix
+        id: obtain_release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: false
+          is_manual: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4.2.0
+        with:
+          driver: docker
+
+      - name: Build and test docker images (without publishing)
+        uses: ./.github/actions/nix/nix_run
+        env:
+          CANTON_ARTEFACT_DIR: ${{ env.TMP_WORKSPACE }}/community-release
+          RELEASE_SUFFIX: ${{ steps.obtain_release_suffix.outputs.release_suffix }}
+        with:
+          command: ./docker/canton/build_canton_image.sh false
+
+      - name: Store artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-ping-test-logs
+          path: docker/canton/tests/ping/ci-artifacts/compose-logs

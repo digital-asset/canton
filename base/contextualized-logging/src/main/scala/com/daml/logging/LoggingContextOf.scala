@@ -33,7 +33,6 @@ import scala.language.implicitConversions
 object LoggingContextOf {
 
   def label[P]: label[P] = new label(())
-  @nowarn("msg=dubious usage of method hashCode with unit value")
   final class label[P] private[LoggingContextOf] (private val ignored: Unit) extends AnyVal
 
   @nowarn("msg=parameter label .* is never used") // Proxy only

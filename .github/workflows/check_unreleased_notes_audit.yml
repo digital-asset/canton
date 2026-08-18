@@ -1,0 +1,129 @@
+name: Audit release-notes check
+
+# Observe-only backstop for the per-PR "Check release notes" workflow
+# (check_unreleased_notes.yml), which runs on pull_request events.
+#
+# If GitHub ever fails to start a run on a PR's head commit (e.g. a missed
+# synchronize), the check is left with no result on that head. On release-line*
+# that stalls the required gate with no self-healing path, cleared today only by
+# manually toggling the no-release-note label. On main the check is a
+# non-blocking reminder (#33711), so a gap loses a reminder rather than stalling
+# the PR, but coverage is still worth tracking.
+#
+# This sweep runs on a schedule (default branch only) and reports any open PR
+# targeting release-line* or main whose head is missing the check, capturing PR
+# state (mergeable_state, draft, head-commit age) so a recurrence can be
+# investigated. It does NOT post any status and does NOT fail, it only logs
+# warnings + a job summary. If we later decide to self-heal, this is where to
+# post the check-run.
+on:
+  schedule:
+    # Every 30 min, offset off the hour to dodge scheduled-run congestion.
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  audit:
+    name: Audit release-notes check coverage
+    needs: pick_runner
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    steps:
+      - name: Find PRs missing the release-notes check
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const CHECK_NAME = 'Require UNRELEASED.md update';
+            // Ignore very fresh heads still within the normal run window, to
+            // avoid flagging PRs whose pull_request run simply has not finished.
+            const GRACE_MS = 10 * 60 * 1000;
+            const { owner, repo } = context.repo;
+            const now = Date.now();
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+            // Observe both the required release-line* gate and the non-blocking
+            // main reminder (#33711).
+            const targeted = prs.filter(pr => pr.base.ref === 'main' || /^release-line/.test(pr.base.ref));
+
+            const missing = [];
+            for (const pr of targeted) {
+              // Guard per-PR API calls so one failing PR warns and is skipped
+              // rather than aborting the (observe-only, never-failing) sweep.
+              try {
+                const head = pr.head.sha;
+                const { data: cr } = await github.rest.checks.listForRef({
+                  owner, repo, ref: head, check_name: CHECK_NAME, per_page: 100,
+                });
+                if (cr.total_count > 0) continue;
+
+                // Give the normal pull_request run a chance before flagging.
+                let headAgeMs = null;
+                try {
+                  const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: head });
+                  headAgeMs = now - new Date(commit.commit.committer.date).getTime();
+                } catch (e) {
+                  core.warning(`getCommit failed for ${head}: ${e.message}`);
+                }
+                if (headAgeMs !== null && headAgeMs < GRACE_MS) continue;
+
+                const { data: fresh } = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+                missing.push({
+                  pr: pr.number, head, base: pr.base.ref,
+                  draft: fresh.draft, mergeable: fresh.mergeable,
+                  mergeable_state: fresh.mergeable_state,
+                  head_age_min: headAgeMs === null ? null : Math.round(headAgeMs / 60000),
+                  url: pr.html_url,
+                });
+              } catch (e) {
+                core.warning(`audit failed for PR #${pr.number} (head ${pr.head.sha.slice(0, 8)}): ${e.message}; skipping`);
+              }
+            }
+
+            if (missing.length === 0) {
+              core.info(`OK: all ${targeted.length} open targeted PR(s) have the '${CHECK_NAME}' check on their head.`);
+              return;
+            }
+
+            for (const m of missing) {
+              core.warning(
+                `PR #${m.pr} (${m.base}) is MISSING the '${CHECK_NAME}' check on head ${m.head.slice(0, 8)} ` +
+                `[mergeable=${m.mergeable} state=${m.mergeable_state} draft=${m.draft} head_age=${m.head_age_min}min] ${m.url}`
+              );
+            }
+
+            const table = [[
+              { data: 'PR', header: true }, { data: 'base', header: true },
+              { data: 'head', header: true }, { data: 'mergeable', header: true },
+              { data: 'mergeable_state', header: true }, { data: 'draft', header: true },
+              { data: 'head age (min)', header: true },
+            ]];
+            for (const m of missing) {
+              table.push([
+                `#${m.pr}`, m.base, m.head.slice(0, 8), String(m.mergeable),
+                String(m.mergeable_state), String(m.draft), String(m.head_age_min),
+              ]);
+            }
+            await core.summary
+              .addHeading('PRs missing the release-notes check', 3)
+              .addTable(table)
+              .write();
+            core.notice(`${missing.length} targeted PR(s) missing the release-notes check, see warnings above.`);

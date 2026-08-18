@@ -102,7 +102,7 @@ final class LsuSessionSigningKeysIntegrationTest
           SessionSigningKeysConfig.enabled.keyValidityDuration.asJava
         )
         // TODO(#31053): Remove after static clock synchronization is fixed.
-        Threading.sleep(500)
+        Threading.sleep(1500)
 
         // second ping: this will trigger creation and usage of a new session signing key
         participant1.health.ping(participant1)
@@ -113,7 +113,7 @@ final class LsuSessionSigningKeysIntegrationTest
           // which forces the creation of new session keys on the participant
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
           // TODO(#31053): Remove after static clock synchronization is fixed.
-          Threading.sleep(500)
+          Threading.sleep(1500)
 
           transferTraffic()
           eventually() {
@@ -138,7 +138,7 @@ final class LsuSessionSigningKeysIntegrationTest
           SessionSigningKeysConfig.enabled.keyValidityDuration.asJava
         )
         // TODO(#31053): Remove after static clock synchronization is fixed.
-        Threading.sleep(500)
+        Threading.sleep(1500)
         participant1.health.ping(participant1)
 
         // Verify that no fallback to long-term signing keys occurred during the test.

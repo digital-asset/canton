@@ -20,7 +20,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   PekkoFutureUnlessShutdown,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.{
   Block,
   Epoch,
@@ -30,11 +29,16 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   EpochStore,
   EpochStoreReader,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.{
+  EpochState,
+  IssConsensusModule,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
   EpochLength,
   EpochNumber,
+  ViewNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
@@ -60,6 +64,7 @@ import com.digitalasset.canton.util.BatchAggregator
 import com.digitalasset.canton.{ProtoDeserializationError, RichGeneratedMessage}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
+import slick.dbio.DBIOAction
 import slick.jdbc.{GetResult, PositionedResult, SetParameter}
 
 import scala.collection.immutable
@@ -404,34 +409,131 @@ class DbEpochStore(
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  override def loadEpochProgress(activeEpochInfo: EpochInfo)(implicit
+  override def loadEpochProgress(activeEpoch: EpochState.Epoch)(implicit
       traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[EpochInProgress] =
-    createFuture(loadEpochProgressActionName(activeEpochInfo), orderingStage = functionFullName) {
+    createFuture(loadEpochProgressActionName(activeEpoch.info), orderingStage = functionFullName) {
+      import DbStorage.Implicits.BuilderChain.*
       storage
         .query(
           for {
             completeBlockMessages <-
               sql"""select message
                     from ord_pbft_messages_completed
-                    where epoch_number = ${activeEpochInfo.number}
+                    where epoch_number = ${activeEpoch.info.number}
                     order by from_sequencer_id, block_number
                  """.as[SignedMessage[PbftNetworkMessage]](readPbftMessage)
-            pbftMessagesForIncompleteBlocks <-
-              sql"""select message
-                    from ord_pbft_messages_in_progress
-                    where epoch_number = ${activeEpochInfo.number}
-                    order by from_sequencer_id, block_number, discriminator, view_number
-                 """
-                // had to set the GetResult explicitly because for some reason it was picking the one for commit messages
-                .as[SignedMessage[PbftNetworkMessage]](readPbftMessage)
+
+            // for each block in epoch, highest view quorum of prepares
+            prepares <-
+              sql"""
+                select m.message
+                from ord_pbft_messages_in_progress m
+                join (
+                  select block_number, max(view_number) as view_number
+                  from ord_pbft_messages_in_progress
+                  where epoch_number = ${activeEpoch.info.number}
+                    and discriminator = $PrepareMessageDiscriminator
+                  group by block_number
+                ) latest
+                  on m.block_number = latest.block_number
+                 and m.view_number = latest.view_number
+                where m.epoch_number = ${activeEpoch.info.number}
+                  and m.discriminator = $PrepareMessageDiscriminator
+                order by m.block_number, m.from_sequencer_id
+              """.as[SignedMessage[PbftNetworkMessage]](readPbftMessage)
+
+            // all pre-prepares for view 0
+            initialPrePreparesPerBlock <-
+              sql"""
+                select message
+                from ord_pbft_messages_in_progress
+                where epoch_number = ${activeEpoch.info.number}
+                  and view_number = 0
+                  and discriminator = $PrePrepareMessageDiscriminator
+              """.as[SignedMessage[PbftNetworkMessage]](readPbftMessage)
+
+            // for each segment find the highest view number of a new-view
+            highestNewViewsPerSegment <-
+              sql"""
+                select block_number, max(view_number) as highest_view_number
+                from ord_pbft_messages_in_progress
+                where epoch_number = ${activeEpoch.info.number}
+                  and discriminator = $NewViewDiscriminator
+                group by block_number
+              """
+                .as[(Long, Long)]
+                // we get a map from block number that represents a segment (first slot in segment) to highest view of a new view
+                .map(_.map { case (blockNumber, viewNumber) =>
+                  (BlockNumber(blockNumber), ViewNumber(viewNumber))
+                }.toMap)
+
+            // compute for each segment the view numbers we want to find new views for
+            // the ones where there is a prepare quorum and the one for the highest new view for that segment
+            highestPrepareQuorumViewNumberPerBlockNumber = prepares
+              .map(_.message)
+              .map(m => m.blockMetadata.blockNumber -> m.viewNumber)
+              .distinct
+              .toMap
+            segmentToViews = activeEpoch.segments
+              .map { segment =>
+                val headOfSegment = segment.slotNumbers.head1
+                val highestNewViewViewNumberForSegmentOption =
+                  highestNewViewsPerSegment.get(headOfSegment)
+                val prepareViewNumbersForSegment = segment.slotNumbers.forgetNE.flatMap(
+                  highestPrepareQuorumViewNumberPerBlockNumber.get
+                )
+                headOfSegment -> NonEmpty.from(
+                  highestNewViewViewNumberForSegmentOption.toList ++ prepareViewNumbersForSegment
+                )
+              }
+              .collect { case (headOfSegment, Some(relevantViewsNonEmptyList)) =>
+                headOfSegment -> relevantViewsNonEmptyList
+              }
+
+            // for each segment, all new-views where we have a highest view prepare quorum for and highest view new-view
+            newViews <- DBIOAction.sequence(segmentToViews.map {
+              case (segmentFirstBlock, newViewNumbersToLoad) =>
+                (sql"""
+                select message
+                from ord_pbft_messages_in_progress
+                where epoch_number =  ${activeEpoch.info.number}
+                  and block_number = $segmentFirstBlock
+                  and discriminator = $NewViewDiscriminator
+                  and """ ++ DbStorage
+                  .toInClause("view_number", newViewNumbersToLoad.map(_.toLong)))
+                  .as[SignedMessage[PbftNetworkMessage]](readPbftMessage)
+            })
+
+            // per segment highest view view-change message and the one from one view before that if it exists
+            viewChangeMessages <-
+              sql"""
+              select m.message
+              from ord_pbft_messages_in_progress m
+              join (
+                select block_number, max(view_number) as highest_view_number
+                from ord_pbft_messages_in_progress
+                where epoch_number = ${activeEpoch.info.number}
+                  and discriminator = $ViewChangeDiscriminator
+                group by block_number
+              ) highest
+                on m.block_number = highest.block_number
+               and m.view_number in (
+                 highest.highest_view_number,
+                 highest.highest_view_number - 1
+               )
+              where m.epoch_number = ${activeEpoch.info.number}
+                and m.discriminator = $ViewChangeDiscriminator
+            """.as[SignedMessage[PbftNetworkMessage]](readPbftMessage)
           } yield {
+            val pbftMessagesForIncompleteBlocks =
+              prepares ++ initialPrePreparesPerBlock ++ newViews.flatten ++ viewChangeMessages
             val commits = getCommits(completeBlockMessages)
             val sortedBlocks = completeBlockMessages
               .collect { case s @ SignedMessage(pp: PrePrepare, _) =>
                 val blockNumber = pp.blockMetadata.blockNumber
                 Block(
-                  activeEpochInfo.number,
+                  activeEpoch.info.number,
                   blockNumber,
                   CommitCertificate(
                     s.asInstanceOf[SignedMessage[PrePrepare]],

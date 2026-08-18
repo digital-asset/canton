@@ -49,7 +49,6 @@ import com.digitalasset.canton.http.json.v2.JsEventServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.JsIdentityProviderCodecs.*
 import com.digitalasset.canton.http.json.v2.JsPackageCodecs.*
 import com.digitalasset.canton.http.json.v2.JsPartyManagementCodecs.*
-import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.{JsCantonError, JsEvent}
 import com.digitalasset.canton.http.json.v2.JsStateServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUpdateServiceCodecs.*
@@ -64,9 +63,7 @@ import com.digitalasset.canton.http.json.v2.{
   JsGetUpdatesResponse,
   JsSubmitAndWaitForTransactionRequest,
   JsSubmitAndWaitForTransactionResponse,
-  JsSubmitAndWaitForTransactionTreeResponse,
   JsUpdate,
-  LegacyDTOs,
 }
 import com.digitalasset.canton.http.util.ClientUtil.uniqueId
 import com.digitalasset.canton.http.{Party, WebsocketConfig}
@@ -678,19 +675,32 @@ class JsonV2Tests
         for {
           _ <- loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.DEBUG))(
             postJsonRequest(
-              uri =
-                fixture.uri.withPath(Uri.Path("/v2/commands/submit-and-wait-for-transaction-tree")),
-              json = jsCommands(createJsCommand).asJson,
+              uri = fixture.uri.withPath(Uri.Path("/v2/commands/submit-and-wait-for-transaction")),
+              json = JsSubmitAndWaitForTransactionRequest(
+                jsCommands(createJsCommand),
+                Some(
+                  TransactionFormat(
+                    eventFormat = Some(
+                      EventFormat(
+                        filtersByParty = Map(alice.unwrap -> Filters(Nil)),
+                        filtersForAnyParty = None,
+                        verbose = true,
+                      )
+                    ),
+                    transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+                  )
+                ),
+              ).asJson,
               headers = headers ++ testContextHeaders,
             ).map { case (statusCode, result) =>
               statusCode should be(StatusCodes.OK)
-              val transactionTreeResponse =
-                decode[JsSubmitAndWaitForTransactionTreeResponse](result.toString())
-              inside(transactionTreeResponse) { case Right(response) =>
-                response.transactionTree.eventsById should not be empty
+              val transactionResponse =
+                decode[JsSubmitAndWaitForTransactionResponse](result.toString())
+              inside(transactionResponse) { case Right(response) =>
+                response.transaction.events should not be empty
                 val resultTraceId = SerializableTraceContextConverter
                   .fromDamlProtoSafeOpt(loggerWithoutTracing(logger))(
-                    response.transactionTree.traceContext
+                    response.transaction.traceContext
                   )
                   .traceContext
                   .traceId
@@ -699,7 +709,7 @@ class JsonV2Tests
             },
             evs =>
               atLeast(1, evs.map(_.message)) should include(
-                "POST /v2/commands/submit-and-wait-for-transaction-tree"
+                "POST /v2/commands/submit-and-wait-for-transaction"
               ),
           )
           // check wrong template error
@@ -995,96 +1005,6 @@ class JsonV2Tests
         }
       }
     }
-    "return active contracts (legacy fields)" in httpTestFixture { fixture =>
-      fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
-        for {
-          jwt <- jwtForParties(fixture.uri)(List(alice), List())
-          _ <- createCommand(fixture, alice, headers)
-          endOffset <- fixture.client.stateService.getLedgerEndOffset()
-          result <- {
-            val webSocketFlow =
-              websocket(fixture.uri.withPath(Uri.Path("/v2/state/active-contracts")), jwt)
-            val req = LegacyDTOs
-              .GetActiveContractsRequest(
-                filter = Some(allTransactionsFilter),
-                activeAtOffset = endOffset,
-                verbose = true,
-                eventFormat = None,
-                streamContinuationToken = None,
-              )
-
-            val message = TextMessage(
-              req.asJson.noSpaces
-            )
-            Source
-              .single(
-                message
-              )
-              .concatMat(Source.maybe[Message])(Keep.left)
-              .via(webSocketFlow)
-              .take(1)
-              .collect { case m: TextMessage =>
-                m.getStrictText
-              }
-              .toMat(Sink.seq)(Keep.right)
-              .run()
-              .map(s => decode[JsGetActiveContractsResponse](s.head))
-          }
-        } yield {
-          inside(result.value.contractEntry) { case ac: JsActiveContract =>
-            IdentifierConverter.toJson(ac.createdEvent.templateId) should endWith("Iou:Iou")
-          }
-        }
-      }
-    }
-    "return active contracts (empty fields)" in httpTestFixture { fixture =>
-      fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
-        for {
-          jwt <- jwtForParties(fixture.uri)(List(alice), List())
-          _ <- createCommand(fixture, alice, headers)
-          endOffset <- fixture.client.stateService.getLedgerEndOffset()
-          _ <- {
-            val webSocketFlow =
-              websocket(fixture.uri.withPath(Uri.Path("/v2/state/active-contracts")), jwt)
-            val req = LegacyDTOs
-              .GetActiveContractsRequest(
-                filter = None,
-                activeAtOffset = endOffset,
-                eventFormat = None,
-                streamContinuationToken = None,
-              )
-
-            val message = TextMessage(
-              req.asJson.noSpaces
-            )
-            Source
-              .single(
-                message
-              )
-              .concatMat(Source.maybe[Message])(Keep.left)
-              .via(webSocketFlow)
-              .take(1)
-              .collect { case m: TextMessage =>
-                m.getStrictText
-              }
-              .toMat(Sink.seq)(Keep.right)
-              .run()
-              .map { value =>
-                value
-                  .map(decode[JsCantonError])
-                  .collect { case Right(error) =>
-                    error.errorCategory shouldBe ErrorCategory.InvalidIndependentOfSystemState.asInt
-                    error.code should include("INVALID_ARGUMENT")
-                    error.cause should include(
-                      "Either filter/verbose or event_format is required. Please use either backwards compatible arguments (filter and verbose) or event_format."
-                    )
-                  }
-                  .head
-              }
-          }
-        } yield ()
-      }
-    }
     "return active contracts list" in httpTestFixture { fixture =>
       fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
         for {
@@ -1114,73 +1034,6 @@ class JsonV2Tests
           }
         }
       }
-    }
-    "return active contracts list (event_format and verbose fields set)" in httpTestFixture {
-      fixture =>
-        fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
-          for {
-            _ <- createCommand(fixture, alice, headers)
-            endOffset <- fixture.client.stateService.getLedgerEndOffset()
-            _ <- fixture
-              .postJsonRequest(
-                Uri.Path("/v2/state/active-contracts"),
-                LegacyDTOs
-                  .GetActiveContractsRequest(
-                    filter = None,
-                    activeAtOffset = endOffset,
-                    verbose = true,
-                    eventFormat = Some(allTransactionsFormat),
-                    streamContinuationToken = None,
-                  )
-                  .asJson,
-                headers,
-              )
-              .map { case (status, result) =>
-                status should be(StatusCodes.BadRequest)
-                val cantonError =
-                  decode[JsCantonError](result.toString())
-                cantonError.value.errorCategory should be(
-                  ErrorCategory.InvalidIndependentOfSystemState.asInt
-                )
-                cantonError.value.cause should include(
-                  "Both event_format and verbose are set. Please use either backwards compatible arguments (filter and verbose) or event_format, but not both."
-                )
-              }
-          } yield ()
-        }
-    }
-    "return active contracts list (event_format and filter fields set)" in httpTestFixture {
-      fixture =>
-        fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
-          for {
-            _ <- createCommand(fixture, alice, headers)
-            endOffset <- fixture.client.stateService.getLedgerEndOffset()
-            _ <- fixture
-              .postJsonRequest(
-                Uri.Path("/v2/state/active-contracts"),
-                LegacyDTOs
-                  .GetActiveContractsRequest(
-                    filter = Some(allTransactionsFilter),
-                    activeAtOffset = endOffset,
-                    eventFormat = Some(allTransactionsFormat),
-                    streamContinuationToken = None,
-                  )
-                  .asJson,
-                headers,
-              )
-              .map { case (status, result) =>
-                status should be(StatusCodes.BadRequest)
-                val cantonError =
-                  decode[JsCantonError](result.toString())
-                cantonError.value.errorCategory should be(
-                  ErrorCategory.InvalidIndependentOfSystemState.asInt
-                )
-                cantonError.value.cause should include(
-                  "Both event_format and filter are set. Please use either backwards compatible arguments (filter and verbose) or event_format, but not both."
-                )
-              }
-          } yield ()
-        }
     }
     "handle offset after ledger end for active contracts list" in httpTestFixture { fixture =>
       fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
@@ -1333,23 +1186,6 @@ class JsonV2Tests
                   ("stream_idle_timeout_ms", "500")
                 ),
                 updatesRequest.asJson.noSpaces,
-                headers,
-              )
-              .map { case (status, result) =>
-                status should be(StatusCodes.OK)
-
-                val responses = decode[Seq[JsGetUpdatesResponse]](result.toString()).value
-                responses.size should be >= 1
-                assertAcsDeltaEvents(responses)
-              }
-          }
-          _ <- {
-            fixture
-              .postJsonStringRequest(
-                fixture.uri withPath Uri.Path("/v2/updates") withQuery Query(
-                  ("stream_idle_timeout_ms", "500")
-                ),
-                updatesRequestLegacy.asJson.toString(),
                 headers,
               )
               .map { case (status, result) =>
@@ -1634,22 +1470,6 @@ class JsonV2Tests
     )
   }
 
-  private val allTransactionsFilter = LegacyDTOs.TransactionFilter(
-    filtersByParty = Map.empty,
-    filtersForAnyParty = Some(
-      transaction_filter.Filters(
-        cumulative = Seq(
-          transaction_filter.CumulativeFilter(
-            identifierFilter = transaction_filter.CumulativeFilter.IdentifierFilter
-              .WildcardFilter(
-                transaction_filter.WildcardFilter(includeCreatedEventBlob = true)
-              )
-          )
-        )
-      )
-    ),
-  )
-
   private val allTransactionsFormat = transaction_filter.EventFormat(
     filtersByParty = Map.empty,
     filtersForAnyParty = Some(
@@ -1665,14 +1485,6 @@ class JsonV2Tests
       )
     ),
     verbose = false,
-  )
-
-  private val updatesRequestLegacy = LegacyDTOs.GetUpdatesRequest(
-    beginExclusive = 0,
-    endInclusive = None,
-    filter = Some(allTransactionsFilter),
-    verbose = true,
-    updateFormat = None,
   )
 
   private val updatesRequest = update_service.GetUpdatesRequest(
