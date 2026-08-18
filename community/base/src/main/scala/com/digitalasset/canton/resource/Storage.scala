@@ -324,6 +324,33 @@ trait DbStorage extends Storage { self: NamedLogging =>
   ): OptionT[FutureUnlessShutdown, A] =
     OptionT(query(action, operationName, maxRetries))
 
+  /** Read action running on the read pool, whose statements PostgreSQL aborts after
+    * `statementTimeout`. H2 has no transaction-scoped equivalent, so no deadline is enforced there.
+    *
+    * The timeout is rounded up to at least one millisecond, because PostgreSQL reads
+    * `statement_timeout = 0` as no timeout at all.
+    */
+  def queryWithStatementTimeout[A](
+      action: DbAction.ReadTransactional[A],
+      statementTimeout: PositiveFiniteDuration,
+      operationName: String,
+      maxRetries: Int = defaultMaxRetries,
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+    profile match {
+      case _: Profile.Postgres =>
+        import profile.DbStorageAPI.jdbcActionExtensionMethods
+        val millis = Math.max(1L, statementTimeout.underlying.toMillis)
+        // Function form of SET LOCAL, so the timeout can be bound rather than spliced. It only
+        // reads transaction state, which keeps the combined action a read.
+        val bounded = sql"select set_config('statement_timeout', ${millis.toString}, true)"
+          .as[String]
+          .andThen(action)
+          .transactionally
+        runRead(bounded, operationName, maxRetries)
+      case _: Profile.H2 =>
+        runRead(action, operationName, maxRetries)
+    }
+
   /** Write-only action, possibly transactional
     *
     * The action must be idempotent because it may be retried multiple times. Only the result of the

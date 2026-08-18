@@ -8,6 +8,7 @@ import cats.data.{EitherT, Nested}
 import cats.implicits.catsSyntaxOptionId
 import cats.syntax.alternative.*
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -16,6 +17,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout, TestingConfigInternal}
@@ -481,9 +483,9 @@ abstract class SequencerClientImpl(
             .checkSenderAndRecipientsAreRegistered(request, snapshot)
             .leftMap(_.toSendAsyncClientError)
           acceptableSequencersO <- EitherT.right(getAcceptableSequencers(snapshot))
-          _ <- EitherT.liftF(
-            cost.parTraverse_(c => trafficCostValidator.validate(c.cost.unwrap, traceContext))
-          )
+          _ <- cost
+            .traverse_(c => trafficCostValidator.validate(c.cost.unwrap, traceContext))
+            .leftMap[SendAsyncClientError](SendAsyncClientError.TrafficEnforcementRejected.apply)
           latestAttemptRef <- EitherT.fromEither[FutureUnlessShutdown](trackSend)
           _ = recorderO.foreach(_.recordSubmission(request))
           res <- performSend(
@@ -2356,7 +2358,10 @@ object SequencerClient {
       * Practically, this is relevant for requests from submitting participants that perform traffic
       * enforcement against local user traffic accounts.
       */
-    def validate(trafficCost: Long, traceContext: TraceContext): FutureUnlessShutdown[Unit]
+    def validate(
+        trafficCost: Long,
+        traceContext: TraceContext,
+    ): EitherT[FutureUnlessShutdown, RpcError, Unit]
   }
 
   object TrafficCostValidator {
@@ -2364,8 +2369,10 @@ object SequencerClient {
       override def validate(
           @unused trafficCost: Long,
           @unused traceContext: TraceContext,
-      ): FutureUnlessShutdown[Unit] =
-        FutureUnlessShutdown.unit
+      ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
+        EitherT[FutureUnlessShutdown, RpcError, Unit](
+          FutureUnlessShutdown.pure(Right(()))
+        )
     }
   }
 }

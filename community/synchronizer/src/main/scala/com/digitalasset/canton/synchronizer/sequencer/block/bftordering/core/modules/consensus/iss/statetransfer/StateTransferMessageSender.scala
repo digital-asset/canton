@@ -49,8 +49,8 @@ final class StateTransferMessageSender[E <: Env[E]](
   def sendBlockTransferRequest(
       blockTransferRequest: SignedMessage[StateTransferMessage.BlockTransferRequest],
       possibleRecipients: Seq[BftNodeId],
-      nodeThatTimedOut: Option[BftNodeId],
-      onRecipientDecision: Option[Option[BftNodeId] => Unit],
+      nodesThatTimedOut: Seq[BftNodeId],
+      onRecipientDecision: Option[Seq[BftNodeId] => Unit],
   )(implicit traceContext: TraceContext): Unit =
     // Ask a single node for an entire epoch of blocks to compromise between noise for different nodes
     //  and load balancing. Note that we're shuffling (instead of round-robin), so the same node might be chosen
@@ -62,8 +62,10 @@ final class StateTransferMessageSender[E <: Env[E]](
       P2PNetworkOut.SendToRandomAuthenticated(
         wrapSignedMessage(blockTransferRequest),
         possibleRecipients,
+        // Already considering all nodes that were in the relevant topology
+        secondChoiceRecipientsPool = None,
         Some(workflowId),
-        nodeThatTimedOut,
+        nodesThatTimedOut,
         onRecipientDecision,
       )
     )

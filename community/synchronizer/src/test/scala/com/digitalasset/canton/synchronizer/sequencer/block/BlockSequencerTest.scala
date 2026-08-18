@@ -199,6 +199,7 @@ final class BlockSequencerTest
           lsuSequencingBounds = None,
           parallelism = PositiveInt.two,
           enablePrevalidation = true,
+          enableAsyncLoggingWithOutcome = false,
         ),
         parameters = SequencerNodeParameters(
           general = MockedNodeParameters.cantonNodeParameters(
@@ -216,6 +217,7 @@ final class BlockSequencerTest
           enableRejectDeliveredAggregationsOnPv35 = Seq.empty,
           lsuConfig = SequencerLsuConfig(),
           enablePrevalidation = true,
+          enableAsyncSequencerLogging = false,
         ),
         metrics = SequencerMetrics.noop(this.getClass.getName),
         loggerFactory = loggerFactory,

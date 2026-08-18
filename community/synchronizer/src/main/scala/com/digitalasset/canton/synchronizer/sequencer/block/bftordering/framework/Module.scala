@@ -157,7 +157,8 @@ trait ModuleRef[-AcceptedMessageT] {
 /** An abstraction of the network for deterministic simulation testing purposes.
   */
 trait P2PNetworkRef[-P2PMessageT] extends FlagCloseable {
-  def asyncP2PSend(createMessage: Option[Instant] => P2PMessageT)(implicit
+  def asyncP2PSend(recipientBftNodeId: BftNodeId, createMessage: Option[Instant] => P2PMessageT)(
+      implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
   ): Unit

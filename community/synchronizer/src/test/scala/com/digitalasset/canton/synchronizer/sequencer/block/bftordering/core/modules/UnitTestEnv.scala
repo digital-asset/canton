@@ -510,6 +510,9 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
     */
   def lastCancelledEvent: Option[(Int, MessageT)] = lastCancelledEventCell
 
+  def resetLastCancelledEvent(): Unit =
+    lastCancelledEventCell = None
+
   def sizeOfPipedMessages: Int = pipedQueue.size
 
   def blockingAwait[X](future: () => X)(implicit traceContext: TraceContext): X =

@@ -18,6 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SystemInitializationResult,
   SystemInitializer,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Output,
   P2PNetworkOut,
@@ -92,7 +93,7 @@ final case class Ping[E <: Env[E]](
     message match {
       case "init" =>
         context.delayedEvent(5.seconds, "tick")
-        otherNode.asyncP2PSend(_ => "ping")
+        otherNode.asyncP2PSend(BftNodeId("recipient"), _ => "ping")
       case "tick" =>
         val helperRef = context.newModuleRef[String](ModuleName("ping-helper"))()
         val helper = PingHelper[E](context.self, recorder, loggerFactory, timeouts)
@@ -100,7 +101,7 @@ final case class Ping[E <: Env[E]](
         helper.ready(helperRef)
         helperRef.asyncSend("tick")
       case "tick-ack" =>
-        otherNode.asyncP2PSend(_ => "ping-tick")
+        otherNode.asyncP2PSend(BftNodeId("recipient"), _ => "ping-tick")
       case "pong" =>
         recorder.pingActorReceivedClientPing = true
         context.become(copy[E](state = state.copy(clientPing = true)))
@@ -117,7 +118,7 @@ final case class Ping[E <: Env[E]](
       self: ModuleRef[String]
   )(implicit traceContext: TraceContext): Unit =
     if (state.clientPing && state.clockPing) {
-      otherNode.asyncP2PSend(_ => "complete")
+      otherNode.asyncP2PSend(BftNodeId("recipient"), _ => "complete")
       self.asyncSend("complete")
     }
 }
@@ -137,9 +138,9 @@ final case class Pong[E <: Env[E]](
   ): Unit =
     message match {
       case "ping" =>
-        otherNode.asyncP2PSend(_ => "pong")
+        otherNode.asyncP2PSend(BftNodeId("recipient"), _ => "pong")
       case "ping-tick" =>
-        otherNode.asyncP2PSend(_ => "pong-tick")
+        otherNode.asyncP2PSend(BftNodeId("recipient"), _ => "pong-tick")
       case "complete" =>
         recorder.pongActorStopped = true
         context.stop()

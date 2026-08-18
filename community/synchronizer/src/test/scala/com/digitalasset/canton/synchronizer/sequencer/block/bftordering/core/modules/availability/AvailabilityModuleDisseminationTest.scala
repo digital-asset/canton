@@ -49,7 +49,6 @@ import org.slf4j.event.Level
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
-import scala.collection.mutable
 
 class AvailabilityModuleDisseminationTest
     extends AnyWordSpec
@@ -627,7 +626,7 @@ class AvailabilityModuleDisseminationTest
       canAcceptBatch(secondBatchId) shouldBe false
 
       // once the batch data is retrieved (and ready to send to output module), the spot becomes available
-      val request = new BatchesRequest(block, mutable.SortedSet(ABatchId), traceContext)
+      val request = new OrderedBlockBatchesRequest(block, traceContext)
       availability.receive(
         Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
           request,

@@ -562,7 +562,9 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
     OnboardingRestriction.UnrestrictedOpen
 
   private val defaultAcsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters] = Some(
-    AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(5), PositiveInt.tryCreate(2))
+    AcsCommitmentsCatchUpParameters
+      .create(PositiveInt.tryCreate(5), PositiveInt.tryCreate(2))
+      .valueOr(err => throw new IllegalArgumentException(s"requirement failed: $err"))
   )
 
   val confirmationResponseTimeoutBounds =
@@ -1016,26 +1018,14 @@ object DynamicSynchronizerParametersHistory {
   * @throws java.lang.IllegalArgumentException
   *   when [[catchUpIntervalSkip]] * [[nrIntervalsToTriggerCatchUp]] overflows.
   */
-final case class AcsCommitmentsCatchUpParameters(
+final case class AcsCommitmentsCatchUpParameters private (
     catchUpIntervalSkip: PositiveInt,
     nrIntervalsToTriggerCatchUp: PositiveInt,
 ) extends PrettyPrinting {
 
-  require(
-    Either
-      .catchOnly[ArithmeticException](
-        Math.multiplyExact(catchUpIntervalSkip.value, nrIntervalsToTriggerCatchUp.value)
-      )
-      .isRight,
-    s"Catch up parameters ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) are too large and cause overflow when computing the catch-up interval",
-  )
-
-  require(
-    catchUpIntervalSkip.value != 1 || nrIntervalsToTriggerCatchUp.value != 1,
-    s"Catch up config ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) is ambiguous. " +
-      s"It is not possible to catch up with a single interval. Did you intend to disable catch-up " +
-      s"(please use AcsCommitmentsCatchUpConfig.disabledCatchUp()) or did you intend a different config?",
-  )
+  AcsCommitmentsCatchUpParameters
+    .validate(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+    .valueOr(err => throw new IllegalArgumentException(s"requirement failed: $err"))
 
   override protected def pretty: Pretty[AcsCommitmentsCatchUpParameters] = prettyOfClass(
     param("catchUpIntervalSkip", _.catchUpIntervalSkip),
@@ -1053,6 +1043,41 @@ final case class AcsCommitmentsCatchUpParameters(
 }
 
 object AcsCommitmentsCatchUpParameters {
+
+  /** Checks the invariants of the catch-up parameters, returning errors as a Left.
+    */
+  private[protocol] def validate(
+      catchUpIntervalSkip: PositiveInt,
+      nrIntervalsToTriggerCatchUp: PositiveInt,
+  ): Either[String, Unit] =
+    for {
+      _ <- Either.cond(
+        Either
+          .catchOnly[ArithmeticException](
+            Math.multiplyExact(catchUpIntervalSkip.value, nrIntervalsToTriggerCatchUp.value)
+          )
+          .isRight,
+        (),
+        s"Catch up parameters ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) are too large and cause overflow when computing the catch-up interval",
+      )
+      _ <- Either.cond(
+        catchUpIntervalSkip.value != 1 || nrIntervalsToTriggerCatchUp.value != 1,
+        (),
+        s"Catch up config ($catchUpIntervalSkip, $nrIntervalsToTriggerCatchUp) is ambiguous. " +
+          s"It is not possible to catch up with a single interval. Did you intend to disable catch-up " +
+          s"(please use AcsCommitmentsCatchUpConfig.disabledCatchUp()) or did you intend a different config?",
+      )
+    } yield ()
+
+  /** Safely creates catch-up parameters, returning invariant violations as a Left. */
+  def create(
+      catchUpIntervalSkip: PositiveInt,
+      nrIntervalsToTriggerCatchUp: PositiveInt,
+  ): Either[String, AcsCommitmentsCatchUpParameters] =
+    validate(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp).map(_ =>
+      AcsCommitmentsCatchUpParameters(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+    )
+
   def fromProtoV30(
       value: v30.AcsCommitmentsCatchUpConfig
   ): ParsingResult[AcsCommitmentsCatchUpParameters] = {
@@ -1066,7 +1091,15 @@ object AcsCommitmentsCatchUpParameters {
         "nr_intervals_to_trigger_catch_up",
         nrIntervalsToTriggerCatchUpP,
       )
-    } yield AcsCommitmentsCatchUpParameters(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+      parameters <- create(catchUpIntervalSkip, nrIntervalsToTriggerCatchUp)
+        .leftMap[ProtoDeserializationError](err =>
+          ProtoDeserializationError
+            .InvariantViolation(
+              field = Some("acs_commitments_catchup"),
+              error = err,
+            )
+        )
+    } yield parameters
   }
 
   def disabledCatchUp(): AcsCommitmentsCatchUpParameters =

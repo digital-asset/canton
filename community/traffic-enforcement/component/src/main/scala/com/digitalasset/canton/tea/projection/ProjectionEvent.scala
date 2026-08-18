@@ -8,29 +8,93 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapperCompanion,
   String255,
 }
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import slick.jdbc.{GetResult, SetParameter}
+
+/** Core data model for traffic accounting used by the projection and its persistence layer.
+  *
+  * Everything is expressed as append-only deltas that are folded into a per-account state:
+  *
+  *   - [[TrafficDelta]] is the atomic change to apply. Rather than a single signed balance, it
+  *     carries an [[EventType]] (credit vs debit) so that the same value can be routed to either
+  *     the total credits or the total debits column (see `debitAndCreditDeltas`). This keeps
+  *     credits and debits auditable independently while still allowing negative values (clawbacks /
+  *     refunds).
+  *   - [[DeltaEvent]] wraps a [[TrafficDelta]] with the metadata needed to persist and interpret
+  *     it: the CantonTimestamp and the [[EventSource]] (where the event originated, e.g. Ledger API
+  *     completions or the TEA API).
+  *   - [[OffsetDeltaEvent]] adds the input-stream `offset`, and [[ProjectionEvent]] ties that event
+  *     to an [[AccountId]]. These are the units flowing through the ingestion sources and the Pekko
+  *     projection.
+  *   - [[AccountState]] is the derived, cumulative view: total debits, total credits and the last
+  *     update time for an account, with `balance = totalCredits - totalDebits`.
+  */
+object TrafficDelta {
+
+  /** Constructs a TrafficDelta which value is to be added the [[AccountState.totalDebits]] balance
+    * of the account.
+    * @param value
+    *   delta value by which to move the [[AccountState.totalDebits]] of the account. Can be
+    *   negative.
+    * @return
+    *   a TrafficDelta
+    */
+  def debitBalanceDelta(value: Long): TrafficDelta = TrafficDelta(value, EventType.TotalDebitDelta)
+
+  /** Constructs a TrafficDelta which value is to be added the [[AccountState.totalCredits]] balance
+    * of the account.
+    * @param value
+    *   delta value by which to move the [[AccountState.totalCredits]] of the account. Can be
+    *   negative.
+    * @return
+    *   a TrafficDelta
+    */
+  def creditBalanceDelta(value: Long): TrafficDelta =
+    TrafficDelta(value, EventType.TotalCreditDelta)
+}
+
+/** A traffic delta to be applied to an account
+  * @param value
+  *   value to apply to the balance. Can be negative
+  * @param eventType
+  *   type of event: encodes how the event should be applied to the balance.
+  */
+final case class TrafficDelta(value: Long, eventType: EventType) extends PrettyPrinting {
+  override protected def pretty: Pretty[TrafficDelta] =
+    prettyOfClass(
+      param("value", _.value),
+      param("eventType", _.eventType),
+    )
+
+  def debitAndCreditDeltas: (Long, Long) = eventType match {
+    case EventType.TotalCreditDelta => (0L, value)
+    case EventType.TotalDebitDelta => (value, 0L)
+  }
+}
 
 /** Event changing the balance of an account
   *
   * @param delta
-  *   amount by which the balance changes. Positive for credits, negative for debits.
+  *   delta to apply to the balance
   * @param timestamp
   *   timestamp of the event
   */
 final case class DeltaEvent(
-    delta: Long,
+    delta: TrafficDelta,
     timestamp: CantonTimestamp,
-    eventType: EventType,
     eventSource: EventSource,
 )
+
 object DeltaEvent {
   implicit val getDeltaEvent: GetResult[DeltaEvent] = GetResult { r =>
     val delta = r.<<[Long]
     val updatedAt = r.<<[CantonTimestamp]
     val eventType = r.<<[EventType]
     val eventSource = r.<<[EventSource]
-    DeltaEvent(delta, updatedAt, eventType, eventSource)
+
+    DeltaEvent(TrafficDelta(delta, eventType), updatedAt, eventSource)
   }
 }
 
@@ -62,46 +126,77 @@ final case class ProjectionEvent(account: AccountId, event: OffsetDeltaEvent)
   */
 final case class AccountState(
     account: AccountId,
-    totalDebits: Long,
-    totalCredits: Long,
+    totalDebits: NonNegativeLong,
+    totalCredits: NonNegativeLong,
     updatedAt: CantonTimestamp,
 ) {
 
   /** Traffic balance
     */
-  def balance: Long = totalCredits - totalDebits
+  def balance: Long = totalCredits.value - totalDebits.value
 }
 object AccountState {
-  def apply(account: AccountId, balance: Long, updatedAt: CantonTimestamp): AccountState =
+  def credits(
+      account: AccountId,
+      balance: NonNegativeLong,
+      updatedAt: CantonTimestamp,
+  ): AccountState =
     AccountState(
       account = account,
-      totalDebits = if (balance < 0) -balance else 0L,
-      totalCredits = if (balance > 0) balance else 0L,
+      totalDebits = NonNegativeLong.zero,
+      totalCredits = balance,
+      updatedAt = updatedAt,
+    )
+
+  def debits(
+      account: AccountId,
+      balance: NonNegativeLong,
+      updatedAt: CantonTimestamp,
+  ): AccountState =
+    AccountState(
+      account = account,
+      totalDebits = balance,
+      totalCredits = NonNegativeLong.zero,
       updatedAt = updatedAt,
     )
 
   implicit val getAccountStateResult: GetResult[AccountState] = GetResult { r =>
     val account = r.<<[AccountId]
-    val totalDebits = r.<<[Long]
-    val totalCredits = r.<<[Long]
+    val totalDebits = r.<<[NonNegativeLong]
+    val totalCredits = r.<<[NonNegativeLong]
     val updatedAt = r.<<[CantonTimestamp]
     AccountState(account, totalDebits, totalCredits, updatedAt)
   }
 }
 
-/** Represents a type of event. For now only "Usage" is supported which describes standard traffic
-  * usage.
+/** Indicates how an event should be applied to the account state and how it affects its balance.
   * @param code
-  *   unique code per event type
+  *   unique code per balance type
   */
-sealed abstract class EventType(val code: Short)
+sealed abstract class EventType(val code: Short) extends PrettyPrinting
 object EventType {
 
-  /** Standard traffic usage from transaction processing
+  /** Event type that models a delta to be applied to the [[AccountState.totalCredits]] of the
+    * account. Associated to a positive value, it is a standard debit (typically traffic credited to
+    * the account): it ADDS to [[AccountState.totalCredits]] Associated to a negative value, it is a
+    * credit clawback: it REMOVES from [[AccountState.totalCredits]]
     */
-  case object Usage extends EventType(0)
+  case object TotalCreditDelta extends EventType(0) {
+    override protected def pretty: Pretty[TotalCreditDelta.this.type] =
+      prettyOfString(_ => "credit_delta")
+  }
 
-  val values: Set[EventType] = Set(Usage)
+  /** Event type that models a delta to be applied to the [[AccountState.totalDebits]] of the
+    * account. Associated to a positive value, it is a standard debit (typically traffic consumed on
+    * the account): it ADDS to [[AccountState.totalDebits]] Associated to a negative value, it is a
+    * debit refund: it REMOVES from [[AccountState.totalDebits]]
+    */
+  case object TotalDebitDelta extends EventType(1) {
+    override protected def pretty: Pretty[TotalDebitDelta.this.type] =
+      prettyOfString(_ => "debit_delta")
+  }
+
+  val values: Set[EventType] = Set(TotalCreditDelta, TotalDebitDelta)
   private def fromCode(code: Short): EventType =
     values
       .find(_.code == code)
@@ -127,15 +222,16 @@ object EventType {
 sealed abstract class EventSource(val code: Short)
 object EventSource {
 
-  /** Events coming from the Ledger API (completion streams for debits so far)
+  /** Events coming from the Ledger API completions: records traffic consumed on an account from
+    * ledger events.
     */
-  case object LedgerAPI extends EventSource(0)
+  case object LedgerAPICompletions extends EventSource(0)
 
   /** Events coming from the TEA API (UpdateAccount RPC)
     */
   case object TeaAPI extends EventSource(1)
 
-  val values: Set[EventSource] = Set(LedgerAPI, TeaAPI)
+  val values: Set[EventSource] = Set(LedgerAPICompletions, TeaAPI)
 
   private def fromCode(code: Short): EventSource =
     values

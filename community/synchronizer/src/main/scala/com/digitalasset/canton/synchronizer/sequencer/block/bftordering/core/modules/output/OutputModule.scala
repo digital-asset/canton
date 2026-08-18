@@ -48,6 +48,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BlockNumber,
   EpochNumber,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
@@ -57,6 +58,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   CompleteBlockData,
   OrderingRequest,
+  OrderingRequestBatch,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.NewEpochMembership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Output.Admin.GetOrderingTopologyResponse
@@ -68,9 +70,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Output.{
   AddMessageChunkFromRestart,
   AsyncException,
+  BlockConsensusStarted,
   BlockDataFetched,
   BlockDataStored,
   BlockOrdered,
+  EarlyBlockDataFetched,
   Message,
   MetadataStoredForNewEpoch,
   NoTopologyAvailable,
@@ -200,6 +204,9 @@ class OutputModule[E <: Env[E]](
     )
 
   private val blocksBeingFetched = mutable.Map[BlockNumber, Instant]()
+  private val earlyFetchedBatchesForBlock =
+    mutable.Map[BlockNumber, Seq[(BatchId, OrderingRequestBatch)]]()
+  private val orderedBlocksWaitingEarlyFetch = mutable.Map[BlockNumber, OrderedBlockForOutput]()
 
   // Used to ensure ordered blocks from an epoch are processed only after the transition to that epoch
   //  has completed, so that epoch-related transient state in this module, which is updated
@@ -566,31 +573,56 @@ class OutputModule[E <: Env[E]](
 
           case ProcessNewEpochTopologyMessagesIfPossible =>
             scheduleBackpressureCheck(context)
-            val isSequencerCoreSlow = blockSubscription.isSequencerCoreSlow
-            val backpressureBufferSize = blockSubscription.bufferSize
-            logger.info(
-              "Checking if sequencer core is still slow or if we can process new epoch topology messages " +
-                s"(backPressureStartInstant = $backPressureStartInstant, " +
-                s"from block subscription: isSequencerCoreSlow = $isSequencerCoreSlow, " +
-                s"bufferSize = $backpressureBufferSize)"
-            )
             processNewEpochTopologyMessagesIfPossible()
 
           // From local consensus
-          case BlockOrdered(
-                orderedBlockForOutput @ OrderedBlockForOutput(
-                  orderedBlock,
-                  _,
-                  _,
-                  _,
-                  mode,
+          case BlockConsensusStarted(blockNumber, originalLeader, block) =>
+            // It is possible to be informed of the same block more than once.
+            // For example, once in view 0 and again as part of a NewView message.
+            // Therefore, if we already have been informed of this block once, we don't need to fetch it again
+            if (
+              !blocksBeingFetched
+                .contains(blockNumber) && !earlyFetchedBatchesForBlock.contains(blockNumber)
+            ) {
+              availability.asyncSend(
+                Availability.LocalOutputFetch
+                  .EarlyFetchBlockData(blockNumber, originalLeader, block)
+              )
+              blocksBeingFetched.put(blockNumber, Instant.now()).discard
+            }
+
+          // From availability
+          case EarlyBlockDataFetched(blockNumber, batches) =>
+            blocksBeingFetched.remove(blockNumber).foreach(emitFetchLatency)
+            orderedBlocksWaitingEarlyFetch.remove(blockNumber) match {
+              case Some(orderedBlockForOutput) =>
+                logger.debug(
+                  s"Received early fetched data for block $blockNumber after block was ordered, processing it."
                 )
-              ) =>
-            if (leaderSelectionPolicy.currentEpoch.exists(_ < orderedBlock.metadata.epochNumber)) {
+                completeBlock(CompleteBlockData(orderedBlockForOutput, batches))
+              case _ =>
+                // before the fetch completed, the block could have ended up completing empty (because of a view change),
+                // in which case we don't need the early fetched data, so we just drop it.
+                // Otherwise, we keep track of it for when the block is ordered, so that we can process it then.
+                if (!completedBlocksPeanoQueue.alreadyInserted(blockNumber)) {
+                  earlyFetchedBatchesForBlock.put(blockNumber, batches).discard
+                }
+            }
+
+          // From local consensus
+          case BlockOrdered(orderedBlockForOutput) =>
+            val orderedBlock = orderedBlockForOutput.orderedBlock
+            val epochNumber = orderedBlock.metadata.epochNumber
+            if (leaderSelectionPolicy.currentEpoch.exists(_ < epochNumber)) {
               // Leader Selection wants us to process epochs in order and this block is from a future one, so we delay it
               blocksRecoveredFromConsensus.addMessages(Seq(orderedBlockForOutput))
             } else {
               val blockNumber = orderedBlock.metadata.blockNumber
+              val viewNumber = orderedBlockForOutput.viewNumber
+              val orderedBatchIds = orderedBlockForOutput.orderedBlock.batchRefs.map(_.batchId)
+              val mode = orderedBlockForOutput.orderingMode
+              val earlyFetchedBlockO = earlyFetchedBatchesForBlock.remove(blockNumber)
+
               val newTraceContext: TraceContext = if (orderedBlock.batchRefs.nonEmpty) {
                 val (span, tc) = startSpan(s"BftOrderer.Output")
                 blockSpanMap
@@ -603,15 +635,25 @@ class OutputModule[E <: Env[E]](
                 s"Output received from local consensus ordered block (mode = $mode) with batch IDs ${orderedBlock.batchRefs
                     .map(_.batchId)}"
               )
+              if (!completedBlocksPeanoQueue.alreadyInserted(blockNumber))
+                leaderSelectionPolicy.addBlock(epochNumber, blockNumber, viewNumber)
+
               if (completedBlocksPeanoQueue.alreadyInserted(blockNumber)) {
                 // This can happen if we start catching up in the middle of an epoch, as state transfer has epoch granularity.
                 logger.debug(s"Skipping block $blockNumber as it's been provided already")
+              } else if (orderedBatchIds.isEmpty) {
+                logger.debug(s"Output received block $blockNumber with no batches, processing it")
+                val completedBlockData = CompleteBlockData(orderedBlockForOutput, Seq.empty)
+                completeBlock(completedBlockData)
+              } else if (earlyFetchedBlockO.exists(_.map(_._1) == orderedBatchIds)) {
+                earlyFetchedBlockO.foreach { batches =>
+                  logger.debug(
+                    s"Output received block $blockNumber with early fetched data, processing it"
+                  )
+                  val completedBlockData = CompleteBlockData(orderedBlockForOutput, batches)
+                  completeBlock(completedBlockData)
+                }
               } else if (!blocksBeingFetched.contains(blockNumber)) {
-                leaderSelectionPolicy.addBlock(
-                  orderedBlockForOutput.orderedBlock.metadata.epochNumber,
-                  blockNumber,
-                  orderedBlockForOutput.viewNumber,
-                )
                 // Block batches will be fetched by the availability module either from the local store or,
                 //  if unavailable, from remote nodes.
                 //  We need to fetch the batches to provide requests, and their BFT sequencing time,
@@ -624,26 +666,21 @@ class OutputModule[E <: Env[E]](
                 )(newTraceContext, mc)
                 blocksBeingFetched.put(blockNumber, Instant.now()).discard
               } else {
+                // potentially an early fetch is in progress
+                orderedBlocksWaitingEarlyFetch.put(blockNumber, orderedBlockForOutput).discard
                 logger.debug(s"Block $blockNumber is already being fetched")
               }
             }
 
           // From availability
           case BlockDataFetched(completedBlockData) =>
-            val orderedBlock = completedBlockData.orderedBlockForOutput.orderedBlock
-            val blockNumber = orderedBlock.metadata.blockNumber
-            blocksBeingFetched
-              .remove(blockNumber)
-              .foreach(emitFetchLatency)
-            logger.debug(
-              s"Output received completed block; epoch: ${orderedBlock.metadata.epochNumber}, " +
-                s"blockID: $blockNumber, batchIDs: ${completedBlockData.batches.map(_._1)}"
-            )
-            logger.debug(
-              s"Inserting block $blockNumber into Peano queue (head=${completedBlocksPeanoQueue.head})"
-            )
-            completedBlocksPeanoQueue.insert(blockNumber, completedBlockData)
-            processFetchedBlocks()
+            val blockNumber = {
+              val orderedBlock = completedBlockData.orderedBlockForOutput.orderedBlock
+              orderedBlock.metadata.blockNumber
+            }
+            orderedBlocksWaitingEarlyFetch.remove(blockNumber).discard
+            blocksBeingFetched.remove(blockNumber).foreach(emitFetchLatency)
+            completeBlock(completedBlockData)
 
           case BlockDataStored(
                 orderedBlockData,
@@ -837,7 +874,7 @@ class OutputModule[E <: Env[E]](
       if (cancellableEvent.cancel())
         logger.debug(s"Backpressure check was already scheduled, cancelled it")
     }
-    logger.info(s"Scheduling backpressure check in $interval")
+    logger.debug(s"Scheduling backpressure check in $interval")
     backPressureDelayedEvent = Some(
       context
         .delayedEvent(
@@ -884,6 +921,22 @@ class OutputModule[E <: Env[E]](
       case Output.Admin.SetPerformanceMetricsEnabled(enabled) =>
         metrics.performance.enabled = enabled
     }
+
+  private def completeBlock(
+      completedBlockData: CompleteBlockData
+  )(implicit context: E#ActorContextT[Message[E]], traceContext: TraceContext): Unit = {
+    val metadata = completedBlockData.orderedBlockForOutput.orderedBlock.metadata
+    val blockNumber = metadata.blockNumber
+    logger.debug(
+      s"Output received completed block; epoch: ${metadata.epochNumber}, " +
+        s"blockID: $blockNumber, batchIDs: ${completedBlockData.batches.map(_._1)}"
+    )
+    logger.debug(
+      s"Inserting block $blockNumber into Peano queue (head=${completedBlocksPeanoQueue.head})"
+    )
+    completedBlocksPeanoQueue.insert(blockNumber, completedBlockData)
+    processFetchedBlocks()
+  }
 
   private def processFetchedBlocks()(implicit
       context: E#ActorContextT[Message[E]],
@@ -1175,19 +1228,22 @@ class OutputModule[E <: Env[E]](
       } { startInstant =>
         val duration = Duration.between(startInstant, Instant.now())
         logger.info(
-          s"The sequencer core is still slow after $duration, not processing new epoch topology messages yet"
+          s"The sequencer core is still slow after $duration (current buffer size: $backpressureBufferSize), " +
+            "not processing new epoch topology messages yet"
         )
       }
     } else {
       if (isSequencerCoreSlow)
         logger.info(
           "The subscription reported that the sequencer core is slow but " +
-            "the buffer size is below our resume threshold, processing new epoch topology messages regardless"
+            s"the buffer size $backpressureBufferSize is below our resume threshold " +
+            s"${OutputModule.BackpressureBufferResumeThreshold}, processing new epoch topology messages regardless"
         )
 
       if (backPressureStartInstant.isDefined) {
         logger.info(
-          s"The sequencer core has caught up enough, processing new epoch topology messages"
+          s"The subscription reported that the sequencer core is not slow anymore " +
+            s"(current buffer size: $backpressureBufferSize), processing new epoch topology messages"
         )
         backPressureStartInstant = None
       }
@@ -1201,7 +1257,6 @@ class OutputModule[E <: Env[E]](
       logger.debug(
         s"Polled NewEpochTopology messages: $newEpochTopologyMessages from Peano queue"
       )
-
       logger.info(
         s"Processing ${newEpochTopologyMessages.size} new epoch topology messages"
       )

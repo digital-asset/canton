@@ -8,14 +8,18 @@ import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.synchronizer.sequencer.AuthenticationServices
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.P2PEndpointConfig
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.stub.StreamObserver
 
+import scala.concurrent.ExecutionContextExecutor
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -129,6 +133,18 @@ object P2PGrpcNetworking {
       serverToClientAuthenticationEndpoint: Option[P2PEndpoint],
       clock: Clock,
   )
+
+  private[grpc] def createNettyClientChannelBuilder(
+      clientChannelBuilder: ClientChannelBuilder,
+      endpointConfig: P2PEndpointConfig,
+  )(implicit executionContextExecutor: ExecutionContextExecutor) =
+    clientChannelBuilder.create(
+      endpoint = Endpoint(endpointConfig.address, endpointConfig.port),
+      useTls = endpointConfig.tlsConfig.exists(_.enabled),
+      executor = executionContextExecutor,
+      trustCertificate = endpointConfig.tlsConfig.flatMap(_.trustCollectionFile).map(_.pemBytes),
+      params = endpointConfig.channel,
+    )
 
   private[grpc] def completeGrpcStreamObserver(
       streamObserver: StreamObserver[?],

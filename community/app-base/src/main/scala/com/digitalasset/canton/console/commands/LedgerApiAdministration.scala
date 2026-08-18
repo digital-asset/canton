@@ -3593,7 +3593,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       @Help.Description(
         """Update the account details (by adding the balance delta) for the specified account-id.
           |If unset, the balance will not be updated
-          |subsequent balance updates with the same deduplicationId will be ignored"""
+          |subsequent balance updates with the same deduplicationId will be ignored.
+          |If a failed update needs to be retried, pass the same deduplicationId again; the default
+          |generates a fresh id per invocation, so re-running this command after a failure without
+          |passing the original id might apply the delta a second time."""
       )
       def update_account(
           accountId: String,

@@ -652,6 +652,10 @@ class ParticipantNodeBootstrap(
                   FutureUnlessShutdown.pure(
                     TrafficEnforcementBackend(
                       enforceCostOnSubmissions = config.trafficEnforcement.enforceCostOnSubmissions,
+                      rejectMultiPartySubmissions =
+                        config.trafficEnforcement.rejectMultiPartySubmissions,
+                      allowSubmissionsOnDegradation =
+                        config.trafficEnforcement.allowSubmissionsOnDegradation,
                       trafficEnforcementServerConfig =
                         config.trafficEnforcement.trafficEnforcementServer,
                       instanceName = name,

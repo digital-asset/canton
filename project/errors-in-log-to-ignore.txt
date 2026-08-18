@@ -43,4 +43,11 @@ ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.spee
 # Ignore expected download failures from ledger-api-test-tool (older versions may not be available)
 ERROR c\.d\.c\.i\.p\.UseLedgerApiTestTool.*Failed to download from.*
 
+# Intermittent, benign shutdown races in MediatorReplayBenchmark teardown. Both patterns are
+# scoped to the benchmark via its logger tag (:MediatorReplayBenchmark/), so the same warnings
+# still fail the log check in any other test.
+# TODO(#29833): drop the first pattern once BFT orderer shutdown is improved.
+WARN  c\.d\.c\.s\.s\.DynamicGrpcServer:MediatorReplayBenchmark/.*\(PublicServer\): shutdown did not complete gracefully in allotted .* seconds\.
+WARN  c\.d\.c\.s\.c\.PeriodicAcknowledgements:MediatorReplayBenchmark/.* - Failed to acknowledge clean timestamp \(usually because sequencer is down\):
+
 # Make sure to have a trailing newline

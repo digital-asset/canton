@@ -259,7 +259,7 @@ final class StateTransferBehavior[E <: Env[E]](
           newEpochInfo.number,
           membership,
           initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
-          nodeThatTimedOut = None,
+          nodesThatTimedOut = Seq.empty,
         )(abort)
 
       case Consensus.ConsensusMessage.AsyncException(e) =>
@@ -376,7 +376,7 @@ final class StateTransferBehavior[E <: Env[E]](
               currentEpochNumber,
               activeTopologyInfo.currentMembership,
               initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
-              nodeThatTimedOut = Some(from),
+              nodesThatTimedOut = Seq(from),
             )(abort)
         }
     }
@@ -490,6 +490,7 @@ final class StateTransferBehavior[E <: Env[E]](
         metrics,
         clock,
         loggerFactory,
+        config.consensusEnableLogEndOfEpochProgress,
       ),
       dependencies,
       loggerFactory,

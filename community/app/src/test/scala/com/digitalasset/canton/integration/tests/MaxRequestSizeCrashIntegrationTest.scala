@@ -95,7 +95,8 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
   // High request size
   private val overrideMaxRequestSize = NonNegativeInt.tryCreate(30_000)
   // Too low to allow create command to succeed. High enough for parameters to be updatable.
-  private val lowMaxRequestSize = NonNegativeInt.tryCreate(500)
+  // But not too low to not allow time-advancing messages
+  private val lowMaxRequestSize = NonNegativeInt.tryCreate(800)
 
   "Canton" should {
     "recover from failure due to too small request size " in { implicit env =>
@@ -201,10 +202,17 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
       restart
 
       // Use the old env (without the override), submission should work
-      eventually() {
+      eventually(retryOnTestFailuresOnly = false) {
         // CantonBFT might still be in the epoch before the new topology is active, so we might have to retry until it goes to next epoch
-        val (_, submissionF) = submitCommand(participant1)
-        submissionF.futureValue.discard
+        loggerFactory.assertLogsUnorderedOptional(
+          {
+            val (_, submissionF) = submitCommand(participant1)
+            submissionF.futureValue.discard
+          },
+          LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
+            s"but it exceeds the maximum (${lowMaxRequestSize.value}), rejecting"
+          )),
+        )
       }
     }
   }

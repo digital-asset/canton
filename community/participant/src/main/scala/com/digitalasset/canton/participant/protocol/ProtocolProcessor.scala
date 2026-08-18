@@ -12,6 +12,7 @@ import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.TestingConfigInternal
@@ -458,9 +459,9 @@ abstract class ProtocolProcessor[
   )(
       trafficCost: Long,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[Unit] =
+  ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     // TODO(#33681): Remove default implementation
-    FutureUnlessShutdown.unit
+    EitherT.rightT(())
 
   /** Submit the batch to the sequencer. Also registers `submissionParam` as pending submission.
     */

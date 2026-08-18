@@ -50,6 +50,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.ConsensusMessage.PbftVerifiedNetworkMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.Internal.WarnWaitingForNewEpochTopology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.NewEpochMembership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftNetworkMessage.headerFromProto
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftSignedNetworkMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus.EpochStatus
@@ -413,8 +414,27 @@ final class IssConsensusModule[E <: Env[E]](
 
   private def handleLocalAvailabilityMessage(
       localAvailabilityMessage: Consensus.LocalAvailability
-  )(implicit traceContext: TraceContext): Unit =
+  )(implicit traceContext: TraceContext): Unit = {
+    informOutputOfLocalBlockConsensusStart(localAvailabilityMessage)
     epochState.localAvailabilityMessageReceived(localAvailabilityMessage)
+  }
+
+  private def informOutputOfLocalBlockConsensusStart(
+      localAvailabilityMessage: Consensus.LocalAvailability
+  )(implicit traceContext: TraceContext): Unit = {
+    val currentEpoch = epochState.epoch.info
+    localAvailabilityMessage match {
+      case Consensus.LocalAvailability.ProposalCreated(forBlock, orderingBlock)
+          if forBlock >= currentEpoch.startBlockNumber =>
+        // Inform output module that consensus has started on this block so it can start fetching
+        // the batches data pre-emptively. This is not going to do a network fetch, as we already have the batch,
+        // but it will load the data from the local DB and have it ready to go in output module.
+        dependencies.output.asyncSend(
+          Output.BlockConsensusStarted(forBlock, thisNode, orderingBlock)
+        )
+      case _ => ()
+    }
+  }
 
   private def handleConsensusMessage(
       consensusMessage: Consensus.ConsensusMessage
@@ -508,7 +528,10 @@ final class IssConsensusModule[E <: Env[E]](
 
           if (hasCompletedLedSegment) {
             logger.debug(s"Locally-led segment in epoch $thisNodeEpochNumber is complete")
-            consensusWaitingForEpochCompletionSince = Some(Instant.now())
+            val now = Instant.now()
+            consensusWaitingForEpochCompletionSince = Some(now)
+            retransmissionsManager.segmentEnded(now)
+            epochState.notifyLedSegmentCompletionToSegments(epochNumber, now)
           }
 
           epochState.confirmBlockCompleted(orderedBlock.metadata, commitCertificate)
@@ -821,9 +844,26 @@ final class IssConsensusModule[E <: Env[E]](
         s"Discarded verified PBFT message $messageType about block $blockNumber " +
           s"at epoch $epochNumber because we've moved to later epoch ($thisNodeEpochNumber) during signature verification"
       )
-    } else
+    } else {
+      informOutputOfBlockConsensusStart(pbftMessage.message)
       epochState.processPbftMessage(PbftSignedNetworkMessage(pbftMessage))
+    }
   }
+
+  private def informOutputOfBlockConsensusStart(
+      pbftMessage: ConsensusSegment.ConsensusMessage.PbftNetworkMessage
+  )(implicit traceContext: TraceContext): Unit =
+    // Inform output module that consensus has started on this block so it can start fetching
+    // the batches data pre-emptively.
+    pbftMessage match {
+      case pp: ConsensusMessage.PrePrepare if pp.block.proofs.nonEmpty =>
+        dependencies.output.asyncSend(
+          Output.BlockConsensusStarted(pp.blockMetadata.blockNumber, pp.from, pp.block)
+        )
+      case nv: ConsensusMessage.NewView =>
+        nv.prePrepares.map(_.message).foreach(informOutputOfBlockConsensusStart)
+      case _ => ()
+    }
 
   private def startCatchupIfNeeded(
       updatedEpoch: Boolean,

@@ -99,6 +99,31 @@ object ConsistencyErrors extends ConsistencyErrorGroup {
   }
 
   @Explanation(
+    """This rejection is made by a participant if the contract id formatting is unsupported."""
+  )
+  @Resolution("Submit the contract to a participant that supports the contract id format.")
+  object UnsupportedContractId
+      extends ErrorCode(
+        id = "UNSUPPORTED_CONTRACT_ID",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+      ) {
+
+    final case class Reject(
+        override val cause: String,
+        cid: Value.ContractId,
+    )(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause = cause
+        ) {
+      override def resources: Seq[(ErrorResource, String)] = Seq(
+        (ErrorResource.ContractId, cid.coid)
+      )
+    }
+
+  }
+
+  @Explanation(
     "An input contract key was re-assigned to a different contract by a concurrent transaction submission."
   )
   @Resolution("Retry the transaction submission.")

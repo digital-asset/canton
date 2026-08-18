@@ -499,6 +499,8 @@ private[continuity] object ProtocolContinuityConformanceTest {
         s"$base.parameters.disable-release-version-handshake-check",
         s"$base.parameters.enable-prevalidation",
         s"$base.parameters.enable-reject-delivered-aggregations-on-pv-35",
+        // introduced with 3.5.2
+        s"$base.parameters.enable-async-sequencer-logging",
         s"$base.public-api.max-concurrent-calls-per-connection",
         s"$base.public-api.jwks-cache-config.auto-refresh-after",
         s"$base.sequencer-client.amplify-on-max-sequencing-time-too-far",

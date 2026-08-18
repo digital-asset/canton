@@ -100,6 +100,12 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, SynchronizerHandle] = {
     import sequencerAggregatedInfo.psid
 
+    if (logger.underlying.isDebugEnabled) {
+      logger.debug(
+        s"About to getSynchronizerHandle $config, predecessor $synchronizerPredecessor, info $sequencerAggregatedInfo"
+      )
+    }
+
     val synchronizerHandleET = for {
       _ <- EitherT
         .fromEither[Future](verifySynchronizerId(config, psid))
@@ -113,6 +119,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           synchronizerPredecessor,
         )
 
+      _ = logger.debug("Copy topology state from predecessor if needed")
+
       _ <- SynchronizerRegistryHelpers.copyTopologyStateFromLocalPredecessorIfNeeded(
         synchronizerPredecessor,
         persistentState,
@@ -124,6 +132,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       _ <- EitherTUtil.ifThenET(!config.initializeFromTrustedSynchronizer)(
         topologyDispatcher.trustSynchronizer(psid)
       )
+
+      _ = logger.debug(s"SynchronizerTrustCertificate in place for $psid")
 
       synchronizerLoggerFactory = loggerFactory.append("psid", psid.toString)
 
@@ -137,6 +147,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         )
         .toEitherT[FutureUnlessShutdown]
 
+      _ = logger.debug(s"Creating topology client for $psid")
+
       topologyClient <- EitherT.right(
         synchronizeWithClosing("create caching client")(
           topologyFactory.createTopologyClient(
@@ -145,6 +157,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           )
         )
       )
+
+      _ = logger.debug(s"Initializing synchronizer crypto for $psid")
 
       // If the connection to a synchronizer fails, the topology client and crypto cache are not removed from the cache.
       // This is why we want to clear the topology client and crypto caches before creating the new clients.

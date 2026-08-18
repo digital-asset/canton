@@ -102,6 +102,7 @@ final class PreIssConsensusModule[E <: Env[E]](
               metrics,
               clock,
               loggerFactory,
+              config.consensusEnableLogEndOfEpochProgress,
             ),
             dependencies,
             loggerFactory,
@@ -157,7 +158,13 @@ final class PreIssConsensusModule[E <: Env[E]](
   ): Unit =
     context.pipeToSelf(
       context.futureContext.zipFuture(
-        epochStore.loadEpochProgress(latestEpoch.info),
+        epochStore.loadEpochProgress(
+          Epoch(
+            latestEpoch.info,
+            bootstrapTopologyInfo.currentMembership,
+            bootstrapTopologyInfo.previousMembership,
+          )
+        ),
         epochStore.loadCompleteBlocks(
           EpochNumber(
             latestCompletedEpoch.info.number - RetransmissionsManager.HowManyEpochsToKeep + 1

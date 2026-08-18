@@ -19,6 +19,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   SimulationTestStageSettings,
   TopologySettings,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  PowerDistribution,
+  Probability,
+}
 import org.scalatest.Assertion
 
 import scala.collection.immutable.TreeMap
