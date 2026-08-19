@@ -65,12 +65,12 @@ object ExternalCallConsistencyChecker {
       )
   }
 
-  /** An external-call result recorded in a view that this participant has received. */
-  private final case class VisibleExternalCallOccurrence(
-      key: ExternalCallKey,
-      output: Bytes,
-      occurrence: ExternalCallOccurrence,
-  )
+  /** The output recorded at one visible occurrence of an external call: unlike
+    * [[ExternalCallOccurrence]], which only locates a recorded call within the transaction, this
+    * also carries the output recorded there. The call's identity travels alongside as the
+    * [[com.digitalasset.canton.data.ExternalCallKey]] that [[check]] groups by.
+    */
+  private final case class RecordedOutput(output: Bytes, occurrence: ExternalCallOccurrence)
 
   private implicit val orderBytes: Order[Bytes] =
     Order.by[Bytes, ByteString](_.toByteString)(ByteStringUtil.orderByteString)
@@ -92,9 +92,9 @@ object ExternalCallConsistencyChecker {
 
   private def inconsistencyFor(
       key: ExternalCallKey,
-      outputsAndOccurrences: Seq[(Bytes, ExternalCallOccurrence)],
+      recordedOutputs: Seq[RecordedOutput],
   ): Option[Inconsistency] = {
-    val occurrencesByOutput = outputsAndOccurrences.groupMap(_._1)(_._2)
+    val occurrencesByOutput = recordedOutputs.groupMap(_.output)(_.occurrence)
     Option.when(occurrencesByOutput.sizeCompare(1) > 0)(
       Inconsistency(
         key,
@@ -104,9 +104,9 @@ object ExternalCallConsistencyChecker {
     )
   }
 
-  private def visibleOccurrences(
+  private def visibleRecordedOutputs(
       views: Map[ViewPosition, ParticipantTransactionView]
-  ): Seq[VisibleExternalCallOccurrence] =
+  ): Seq[(ExternalCallKey, RecordedOutput)] =
     views.toSeq
       .sortBy(_._1)(ViewPosition.orderViewPosition.toOrdering)
       .flatMap { case (viewPosition, view) =>
@@ -116,11 +116,8 @@ object ExternalCallConsistencyChecker {
             externalCallResult.exerciseIndex,
             externalCallResult.callIndex,
           )
-          VisibleExternalCallOccurrence(
-            ExternalCallKey.fromResult(externalCallResult.result),
-            externalCallResult.result.output,
-            occurrence,
-          )
+          ExternalCallKey.fromResult(externalCallResult.result) ->
+            RecordedOutput(externalCallResult.result.output, occurrence)
         }
       }
 
@@ -128,11 +125,9 @@ object ExternalCallConsistencyChecker {
     * deterministically (by key, then outputs, then occurrences).
     */
   def check(views: Map[ViewPosition, ParticipantTransactionView]): Seq[Inconsistency] =
-    visibleOccurrences(views)
-      .groupMap(_.key)(occurrence => occurrence.output -> occurrence.occurrence)
+    visibleRecordedOutputs(views)
+      .groupMap(_._1)(_._2)
       .toSeq
-      .flatMap { case (key, outputsAndOccurrences) =>
-        inconsistencyFor(key, outputsAndOccurrences)
-      }
+      .flatMap { case (key, recordedOutputs) => inconsistencyFor(key, recordedOutputs) }
       .sorted(orderInconsistency)
 }
