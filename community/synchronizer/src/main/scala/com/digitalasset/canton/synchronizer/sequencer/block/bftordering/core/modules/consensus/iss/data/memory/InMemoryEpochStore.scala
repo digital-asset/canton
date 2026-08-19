@@ -9,6 +9,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   PekkoEnv,
   PekkoFutureUnlessShutdown,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.{
   Block,
   Epoch,
@@ -45,7 +46,6 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.nonempty.NonEmpty
 
-import scala.collection.MapView
 import scala.collection.concurrent.TrieMap
 import scala.util.{Failure, Success, Try}
 
@@ -209,14 +209,14 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
     }
   }
 
-  override def loadEpochProgress(activeEpochInfo: EpochInfo)(implicit
+  override def loadEpochProgress(activeEpoch: EpochState.Epoch)(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[EpochInProgress] =
-    createFuture(loadEpochProgressActionName(activeEpochInfo)) { () =>
+    createFuture(loadEpochProgressActionName(activeEpoch.info)) { () =>
       Try {
         val blocksInEpoch = blocks.view
           .filter { case (_, CompletedBlock(prePrepare, _)) =>
-            prePrepare.message.blockMetadata.epochNumber == activeEpochInfo.number
+            prePrepare.message.blockMetadata.epochNumber == activeEpoch.info.number
           }
           .values
           .toSeq
@@ -228,31 +228,93 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
             )
           }
           .sortWith(_.blockNumber < _.blockNumber)
+        val completeBlockNumbers = blocksInEpoch.map(_.blockNumber)
 
-        val preparesForIncompleteBlocks = preparesMap.view
+        val highestViewPreparesByIncompleteBlock = preparesMap.view
           .filter { case (blockNumber, _) =>
-            blockNumber >= activeEpochInfo.startBlockNumber
+            blockNumber >= activeEpoch.info.startBlockNumber
+            && !completeBlockNumbers.contains(blockNumber)
+          }
+          .map { case (blockNumber, viewMap) =>
+            blockNumber -> viewMap
+              .maxByOption { case (viewNumber, _) => viewNumber }
+              .map(_._2)
+              .getOrElse(Seq.empty)
+          }
+          .filter(_._2.nonEmpty)
+          .toMap
+
+        val preparesForIncompleteBlocks =
+          highestViewPreparesByIncompleteBlock.values.flatten.toList.sortBy(pbftEventSortData)
+
+        val prePreparesForIncompleteBlocks = prePreparesMap.view
+          .filter { case (blockNumber, _) =>
+            blockNumber >= activeEpoch.info.startBlockNumber
+            && !completeBlockNumbers.contains(blockNumber)
           }
           .values
-          .flatMap(_.values)
-          .flatten
+          .flatMap(_.get(ViewNumber.First))
           .toList
           .sortBy(pbftEventSortData)
 
-        def messagesForIncompleteBlocks[M <: PbftNetworkMessage](
-            mapView: MapView[BlockNumber, TrieMap[ViewNumber, SignedMessage[M]]]
-        ): List[SignedMessage[PbftNetworkMessage]] = mapView
-          .filter { case (blockNumber, _) =>
-            blockNumber >= activeEpochInfo.startBlockNumber
-          }
-          .values
-          .flatMap(_.values)
-          .toList
-          .sortBy(pbftEventSortData)
+        val completeSegmentBlockNumbers = activeEpoch.segments.collect {
+          case segment if segment.slotNumbers.forall(completeBlockNumbers.contains) =>
+            segment.slotNumbers.head1
+        }
 
-        val prePreparesForIncompleteBlocks = messagesForIncompleteBlocks(prePreparesMap.view)
-        val viewChangesForIncompleteSegments = messagesForIncompleteBlocks(viewChangesMap.view)
-        val newViewsForIncompleteSegments = messagesForIncompleteBlocks(newViewsMap.view)
+        val highestNewViewsPerSegment = activeEpoch.segments
+          .map(_.slotNumbers.head1)
+          .filter(!completeSegmentBlockNumbers.contains(_))
+          .flatMap { headOfSegment =>
+            newViewsMap
+              .get(headOfSegment)
+              .flatMap(_.keys.maxOption.map(headOfSegment -> _))
+          }
+          .toMap
+
+        val newViewsForIncompleteSegments = {
+          val highestPrepareQuorumViewNumberPerBlockNumber =
+            highestViewPreparesByIncompleteBlock.flatMap { case (blockNumber, prepares) =>
+              prepares.headOption.map(prepare => blockNumber -> prepare.message.viewNumber)
+            }
+          activeEpoch.segments
+            .flatMap { segment =>
+              val headOfSegment = segment.slotNumbers.head1
+              val highestNewViewViewNumberForSegmentOption =
+                highestNewViewsPerSegment.get(headOfSegment)
+              val prepareViewNumbersForSegment =
+                segment.slotNumbers.forgetNE.flatMap(
+                  highestPrepareQuorumViewNumberPerBlockNumber.get
+                )
+              val newViewNumbersToLoad =
+                (highestNewViewViewNumberForSegmentOption.toList ++ prepareViewNumbersForSegment).distinct
+              newViewsMap
+                .get(headOfSegment)
+                .toList
+                .flatMap(viewMap => newViewNumbersToLoad.flatMap(viewMap.get))
+            }
+            .sortBy(pbftEventSortData)
+        }
+
+        val viewChangesForIncompleteSegments: Seq[SignedMessage[PbftNetworkMessage]] =
+          activeEpoch.segments
+            .map(_.slotNumbers.head1)
+            .filter(!completeSegmentBlockNumbers.contains(_))
+            .flatMap { headOfSegment =>
+              val highestNewViewForSegment =
+                highestNewViewsPerSegment.getOrElse(headOfSegment, ViewNumber.First)
+              viewChangesMap
+                .get(headOfSegment)
+                .toList
+                .flatMap { viewMap =>
+                  viewMap.keys.maxOption.toList.flatMap { highestViewNumber =>
+                    List(highestViewNumber, ViewNumber(highestViewNumber - 1L)).distinct
+                      .filter(_ > highestNewViewForSegment)
+                      .flatMap(viewMap.get)
+                  }
+                }
+            }
+            .sortBy(pbftEventSortData)
 
         val pbftMessagesForIncompleteBlocks =
           viewChangesForIncompleteSegments ++ newViewsForIncompleteSegments ++

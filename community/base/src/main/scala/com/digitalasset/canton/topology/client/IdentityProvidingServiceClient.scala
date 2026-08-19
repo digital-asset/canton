@@ -25,6 +25,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
   SequencingParametersWithValidity,
+  SizeLimits,
   StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
@@ -89,10 +90,8 @@ class IdentityProvidingServiceClient(
   def forSynchronizer(synchronizerId: PhysicalSynchronizerId): Option[SynchronizerTopologyClient] =
     synchronizers.get(synchronizerId)
 
-  override def close(): Unit = {
-    val instances: Seq[AutoCloseable] = synchronizers.values.toSeq
-    LifeCycle.close(instances*)(logger)
-  }
+  override def close(): Unit =
+    LifeCycle.close(synchronizers.values)(logger)
 
 }
 
@@ -271,6 +270,26 @@ trait SynchronizerTopologyClient extends TopologyClientApi[TopologySnapshot] wit
   def awaitUS(condition: TopologySnapshot => FutureUnlessShutdown[Boolean], timeout: Duration)(
       implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
+
+  /** Return the size limits valid at the given timestamp, to be used for validating collection
+    * sizes on this synchronizer
+    *
+    * @param validAt
+    *   the timestamp at which the size limits are valid
+    */
+  def getSizeLimits(validAt: CantonTimestamp, warnOnUsingDefault: Boolean = true)(implicit
+      loggingContext: ErrorLoggingContext,
+      ec: ExecutionContext,
+  ): FutureUnlessShutdown[SizeLimits] =
+    // This implementation currently takes the limits from the dynamic synchronizer parameters, but allows the
+    // flexibility to take them from static synchronizer parameters in the future, or a mix of both
+    for {
+      snapshot <- awaitSnapshotUSSupervised(s"Retrieving size limits valid at $validAt")(validAt)
+      dynamicSynchronizerParameters <- snapshot.findDynamicSynchronizerParametersOrDefault(
+        protocolVersion,
+        warnOnUsingDefault,
+      )(loggingContext.traceContext)
+    } yield dynamicSynchronizerParameters.sizeLimits
 }
 
 trait BaseTopologySnapshotClient {
@@ -471,6 +490,10 @@ trait ParticipantTopologySnapshotClient {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
 
+  def activeParticipants(participantIds: Seq[ParticipantId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[ParticipantId]]
+
   def participantsWithSupportedFeature(
       participants: Set[ParticipantId],
       feature: SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag,
@@ -487,7 +510,6 @@ trait ParticipantTopologySnapshotClient {
       participantId: ParticipantId,
       timestamp: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
-
 }
 
 /** The subset of the topology client providing mediator state information */
@@ -681,7 +703,12 @@ trait MembersTopologySnapshotClient {
   )
   def knownMembers()(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[Member]]
 
-  /** Convenience method to check `isMemberKnown` for several members. */
+  /** Determines if the members are known on the synchronizer (through a
+    * [[com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate]],
+    * [[com.digitalasset.canton.topology.transaction.MediatorSynchronizerState]], or
+    * [[com.digitalasset.canton.topology.transaction.SequencerSynchronizerState]]). Note that a
+    * "known" member is not necessarily authorized to use the synchronizer.
+    */
   def areMembersKnown(members: Set[Member])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[Member]]
@@ -900,6 +927,13 @@ private[client] trait ParticipantTopologySnapshotLoader extends ParticipantTopol
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
     findParticipantState(participantId).map(_.isDefined)
+
+  override def activeParticipants(
+      participantIds: Seq[ParticipantId]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[ParticipantId]] =
+    loadParticipantStates(participantIds).map { loadedStates =>
+      participantIds.filter(loadedStates.isDefinedAt)
+    }
 
   override def participantsWithSupportedFeature(
       participants: Set[ParticipantId],

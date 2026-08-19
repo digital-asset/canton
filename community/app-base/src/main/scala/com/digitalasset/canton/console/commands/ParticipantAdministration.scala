@@ -12,7 +12,11 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Pruning.*
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.ReinitCommitments.{
   CommitmentReinitializationInfo,
+  DigestCommitmentReinitializationInfo,
+  DigestCommitmentReinitializationStatusInfo,
   ReinitializeCommitments,
+  ReinitializeDigestCommitments,
+  ReinitializeDigestCommitmentsStatus,
 }
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Resources.{
   GetResourceLimits,
@@ -701,7 +705,7 @@ class ParticipantPruningAdministrationGroup(
   )
   def find_safe_offset(beforeOrAt: Instant = Instant.now()): Option[Long] = {
     val ledgerEnd = consoleEnvironment.run(
-      ledgerApiCommand(LedgerApiCommands.StateService.LedgerEnd())
+      ledgerApiCommand(LedgerApiCommands.StateService.LedgerEnd(Seq()))
     )
 
     consoleEnvironment
@@ -1595,6 +1599,67 @@ class CommitmentsAdministrationGroup(
       )
     )
   )
+
+  @Help.Summary(
+    "Kicks off a reinitialization of ACS digests for the given synchronizer"
+  )
+  @Help.Description(
+    """Starts a reinitialization of the ACS digest for the given synchronizer
+      |on this participant and then - depending on the flag - starts/continues
+      |the running digest processor.
+      |Useful for recovering when participant commitments have become corrupted.
+      |
+      |The target reinitialization timestamp is derived from the current ledger end.
+      |
+      |Default for `runningDigestProcessorShouldStartAfter` is true.
+      |If it is `false`, the running digest processor is not started after the
+      |reinitialization.
+      |
+      |Since this command doesn't wait until the reinitialization completes,
+      |the operator should query the status of the reinitialization using
+      |`digest_commitments_reinitialization_status`.
+      |
+      |If reinitialization is already in progress for the synchronizer, resubmitting
+      |this command joins the ongoing run.
+      |
+      |Returns the target reinitialization timestamp or an error."""
+  )
+  def reinitialize_digest_commitments(
+      synchronizerId: SynchronizerId,
+      runningDigestProcessorShouldStartAfter: Boolean = true,
+  ): DigestCommitmentReinitializationInfo =
+    consoleEnvironment.run(
+      runner.adminCommand(
+        ReinitializeDigestCommitments(
+          synchronizerId,
+          runningDigestProcessorShouldStartAfter,
+        )
+      )
+    )
+
+  @Help.Summary(
+    "Gets the latest completed ACS digest reinitialization timestamp"
+  )
+  @Help.Description(
+    """Retrieves the record timestamp of the most recent finished ACS digest
+      |reinitialization for the specified synchronizer.
+      |
+      |Useful for verifying the completion of the latest run
+      |started by `reinitialize_digest_commitments`.
+      |
+      |Returns either the last completed timestamp or `None` if no
+      |reinitialization has finished yet or an error."""
+  )
+  def digest_commitments_reinitialization_status(
+      synchronizerId: SynchronizerId
+  ): DigestCommitmentReinitializationStatusInfo =
+    consoleEnvironment.run(
+      runner.adminCommand(
+        ReinitializeDigestCommitmentsStatus(
+          synchronizerId
+        )
+      )
+    )
 
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
   private implicit val ec: ExecutionContext = consoleEnvironment.environment.executionContext

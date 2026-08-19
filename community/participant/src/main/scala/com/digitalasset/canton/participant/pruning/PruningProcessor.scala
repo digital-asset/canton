@@ -21,6 +21,11 @@ import com.digitalasset.canton.lifecycle.{
   HasCloseContext,
   LifeCycle,
 }
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{
   HasLoggerName,
   NamedLoggerFactory,
@@ -78,6 +83,8 @@ class PruningProcessor(
     metrics: PruningMetrics,
     exitOnFatalFailures: Boolean,
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
+    legacyAcsCommitmentProcessorDisabled: Boolean,
+    acsDigestProcessorEnabled: Boolean,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -101,6 +108,8 @@ class PruningProcessor(
     participantNodePersistentState,
     synchronizerConnectionConfigStore,
     syncPersistentStateManager,
+    acsDigestProcessorEnabled = acsDigestProcessorEnabled,
+    legacyDigestProcessorDisabled = legacyAcsCommitmentProcessorDisabled,
     timeouts,
     loggerFactory,
   )
@@ -289,6 +298,7 @@ class PruningProcessor(
                 .map { synchronizerOffset =>
                   PruningCutoffs.SynchronizerOffset(
                     lsid = lsid,
+                    offset = synchronizerOffset.offset,
                     lastRecordTime = CantonTimestamp(synchronizerOffset.recordTime),
                   )
                 }
@@ -348,26 +358,31 @@ class PruningProcessor(
   private def pruneSynchronizer(synchronizerOffset: PruningCutoffs.SynchronizerOffset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    val PruningCutoffs.SynchronizerOffset(lsid, lastRecordTime) = synchronizerOffset
+    val PruningCutoffs.SynchronizerOffset(lsid, offset, lastRecordTime) = synchronizerOffset
 
-    def logical(): EitherT[FutureUnlessShutdown, LedgerPruningInternalError, Unit] = for {
-      state <- syncPersistentStateManager.getAllLogical
-        .get(lsid)
-        .toRight(LedgerPruningInternalError(s"Unable to get persistent state for $lsid"))
-        .toEitherT[FutureUnlessShutdown]
+    def pruneLogical(): FutureUnlessShutdown[Unit] =
+      syncPersistentStateManager.getLogical(lsid) match {
+        case Some(state) =>
+          for {
+            _ <- state.acsCommitmentStore.prune(lastRecordTime)
+            _ <- MonadUtil.when(acsDigestProcessorEnabled) {
+              for {
+                _ <- state.acsDigestStore.deleteUpTo(offset)
+                _ <- state.acsCommitmentPeriodStore.prune(lastRecordTime)
+              } yield ()
+            }
+            // TODO(#2600) Prune the reassignment store
+          } yield ()
+        case None =>
+          val error = LedgerPruningInternalError(s"Unable to get persistent state for $lsid")
+          logger.warn(s"Unable to prune $lsid: $error")
+          FutureUnlessShutdown.unit
+      }
 
-      _ <- EitherT.liftF(state.acsCommitmentStore.prune(lastRecordTime))
-      // TODO(#2600) Prune the reassignment store
-    } yield ()
-
-    def physical(): FutureUnlessShutdown[Unit] =
+    def prunePhysical(): FutureUnlessShutdown[Unit] =
       MonadUtil.sequentialTraverse_(syncPersistentStateManager.getAllFor(lsid)) { state =>
-        logger.debug(s"Pruning sequenced event store of ${state.psid}")
-
         for {
           _ <- state.sequencedEventStore.prune(lastRecordTime)
-
-          _ = logger.debug(s"Pruning request journal store of ${state.psid}")
           _ <- state.requestJournalStore.prune(lastRecordTime)
         } yield ()
       }
@@ -375,11 +390,8 @@ class PruningProcessor(
     logger.info(s"Pruning $lsid up to $lastRecordTime")
 
     for {
-      _ <- physical()
-      _ <- logical().fold(
-        err => logger.warn(s"Unable to prune $lsid: $err"),
-        _ => (),
-      )
+      _ <- prunePhysical()
+      _ <- pruneLogical()
     } yield ()
   }
 
@@ -388,16 +400,24 @@ class PruningProcessor(
   private def purgeSynchronizer(lsid: SynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    def logical(): EitherT[FutureUnlessShutdown, LedgerPruningInternalError, Unit] = for {
-      state <- syncPersistentStateManager.getAllLogical
-        .get(lsid)
-        .toRight(LedgerPruningInternalError(s"Unable to get persistent state for $lsid"))
-        .toEitherT[FutureUnlessShutdown]
-
-      _ <- EitherT.liftF(state.activeContractStore.purge())
-
-      // TODO(#2600) Purge the reassignment store
-    } yield ()
+    def logical(): FutureUnlessShutdown[Unit] =
+      syncPersistentStateManager.getLogical(lsid) match {
+        case Some(state) =>
+          for {
+            _ <- state.activeContractStore.purge()
+            _ <- MonadUtil.when(acsDigestProcessorEnabled) {
+              for {
+                _ <- state.acsDigestStore.purge()
+                _ <- state.acsCommitmentPeriodStore.purge()
+              } yield ()
+            }
+            // TODO(#2600) Purge the reassignment store
+          } yield ()
+        case None =>
+          val error = LedgerPruningInternalError(s"Unable to get persistent state for $lsid")
+          logger.warn(s"Unable to purge $lsid: $error")
+          FutureUnlessShutdown.unit
+      }
 
     def physical(): FutureUnlessShutdown[Unit] =
       MonadUtil.sequentialTraverse_(syncPersistentStateManager.getAllFor(lsid)) { state =>
@@ -418,10 +438,7 @@ class PruningProcessor(
 
     for {
       _ <- physical()
-      _ <- logical().fold(
-        err => logger.warn(s"Unable to purge $lsid: $err"),
-        _ => (),
-      )
+      _ <- logical()
     } yield ()
   }
 
@@ -537,16 +554,14 @@ private[pruning] object PruningProcessor extends HasLoggerName {
       // Only acs commitment ticks whose ACS commitment fully matches all counter participant ACS commitments are safe,
       // so look for the most recent such tick before latestTickBeforeOrAt if any.
       tsSafeToPruneUpTo <- commitmentsPruningBound match {
-        case CommitmentsPruningBound.Outstanding(noOutstandingCommitmentsF) =>
-          noOutstandingCommitmentsF(latestTickBeforeOrAt.forgetRefinement)
-            .flatMap(
-              _.traverse(getTickBeforeOrAt)
-            )
         case CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF) =>
           for {
             lastComputedAndSentO <- lastComputedAndSentF
             tickBeforeLastComputedAndSentO <- lastComputedAndSentO.traverse(getTickBeforeOrAt)
           } yield tickBeforeLastComputedAndSentO.map(_.min(latestTickBeforeOrAt))
+        case CommitmentsPruningBound.DisabledLegacyAcsCommitmentProcessor =>
+          // Legacy commitments are disabled, so don't constrain pruning by legacy commitment state.
+          FutureUnlessShutdown.pure(Some(latestTickBeforeOrAt))
       }
 
       _ = loggingContext.debug {
@@ -577,8 +592,7 @@ private[pruning] object PruningProcessor extends HasLoggerName {
       acsCommitmentStore: AcsCommitmentStore,
       inFlightSubmissionStore: InFlightSubmissionStore,
       synchronizerId: SynchronizerId,
-      // TODO(#30038) remove checkForOutstandingCommitments, because all callers set it to false
-      checkForOutstandingCommitments: Boolean,
+      disableLegacyAcsCommitmentProcessor: Boolean,
   )(implicit
       ec: ExecutionContext,
       loggingContext: NamedLoggingContext,
@@ -589,10 +603,8 @@ private[pruning] object PruningProcessor extends HasLoggerName {
       .map(_.getOrElse(CantonTimestamp.MinValue))
 
     val commitmentsPruningBound =
-      if (checkForOutstandingCommitments)
-        CommitmentsPruningBound.Outstanding(ts =>
-          acsCommitmentStore.noOutstandingCommitments(ts, None)
-        )
+      if (disableLegacyAcsCommitmentProcessor)
+        CommitmentsPruningBound.DisabledLegacyAcsCommitmentProcessor
       else
         CommitmentsPruningBound.LastComputedAndSent(
           acsCommitmentStore.lastComputedAndSent.map(_.map(_.forgetRefinement))
@@ -612,9 +624,19 @@ private[pruning] object PruningProcessor extends HasLoggerName {
   final case class UnsafeOffset(
       offset: Offset,
       synchronizerId: SynchronizerId,
-      recordTime: CantonTimestamp,
+      recordTime: Option[CantonTimestamp],
       cause: String,
-  )
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[UnsafeOffset] = UnsafeOffset
+  }
+  object UnsafeOffset extends PrettyPrintingCompanion[UnsafeOffset] {
+    override protected val pretty: Pretty[UnsafeOffset] = prettyOfClass(
+      param("offset", _.offset),
+      param("synchronizerId", _.synchronizerId),
+      paramIfDefined("recordTime", _.recordTime),
+      param("cause", _.cause.unquoted),
+    )
+  }
 
   /** PruningCutoffs captures two "formats" of the same pruning cutoff: The global offset and
     * per-synchronizer local offsets.
@@ -631,11 +653,14 @@ private[pruning] object PruningProcessor extends HasLoggerName {
     /** @param lsid
       *   The id of the synchronizer. It is logical despite referring to a sequencing timestamp
       *   (which is physical) because it comes from the indexer.
+      * @param offset
+      *   The last offset of the synchronizer before or at the pruning target.
       * @param lastRecordTime
-      *   Last sequencing timestamp/record time below the given globalOffset
+      *   The sequencing timestamp/record time of the offset
       */
     final case class SynchronizerOffset(
         lsid: SynchronizerId,
+        offset: Offset,
         lastRecordTime: CantonTimestamp,
     )
   }

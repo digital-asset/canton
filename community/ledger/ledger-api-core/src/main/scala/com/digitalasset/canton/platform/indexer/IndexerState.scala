@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.indexer
 import cats.arrow.FunctionK
 import cats.data.EitherT
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.health.HealthStatus
+import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, SynchronizerUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -17,7 +17,7 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, RecoveringFutureQueue}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{Mutex, PekkoUtil, TryUtil, retry}
+import com.digitalasset.canton.util.{Mutex, PekkoUtil, StateChangedCallback, TryUtil, retry}
 import org.apache.pekko.Done
 
 import scala.concurrent.duration.DurationInt
@@ -27,19 +27,27 @@ import scala.util.{Failure, Success, Try}
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 class IndexerState(
-    recoveringIndexerFactory: () => RecoveringFutureQueue[Update],
+    recoveringIndexerFactory: StateChangedCallback => RecoveringFutureQueue[Update],
     repairIndexerFactory: () => Future[FutureQueue[Update]],
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
   import IndexerState.*
 
-  private var state: State = Normal(recoveringIndexerFactory(), shutdownInitiated = false)
   private val lock = new Mutex()
-
   private implicit val traceContext: TraceContext = TraceContext.empty
 
-  def healthStatus: HealthStatus = state.healthStatus
+  @volatile
+  private var healthStateChangedCallback: StateChangedCallback =
+    () => () // We ignore health state changes until we are bound to upstream element
+  @volatile
+  private var state: State =
+    Normal(recoveringIndexerFactory(() => propagateHealthState()), shutdownInitiated = false)
+
+  private def propagateHealthState(): Unit = healthStateChangedCallback()
+  def componentHealthState: ComponentHealthState = state.componentHealthState
+  def replaceHealthStateChangedCallback(callback: StateChangedCallback): Unit =
+    healthStateChangedCallback = callback
 
   // Requesting a Repair Indexer turns off normal indexing, therefore it needs to be ensured, before calling:
   //   - no synchronizers are connected
@@ -79,10 +87,12 @@ class IndexerState(
         } yield new RepairQueueProxy(repairIndexer, () => onRepairFinished(), loggerFactory)
         val result = repairIndexerF.transformWith {
           case Failure(t) =>
+            propagateHealthState()
             logger.info("Repair Indexer initialization failed, resuming normal indexing...", t)
             onRepairFinished().transform(_ => Failure(t))
 
           case Success(repairIndexer) =>
+            propagateHealthState()
             logger.info("Repair Indexer initialized, executing repair operation...")
             executeRepairOperation(repairIndexer, repairOperation)
         }
@@ -91,6 +101,7 @@ class IndexerState(
           result.transform(_ => TryUtil.unit),
           shutdownInitiated = false,
         )
+        propagateHealthState()
         result
     }
   )
@@ -108,7 +119,7 @@ class IndexerState(
       .applyFut(
         withStateUnlessShutdown(_ =>
           if (queue.uncommittedQueueSnapshot.nonEmpty)
-            Future.failed(new Exception(s"Still indexing"))
+            Future.failed(new Exception("Still indexing"))
           else
             Future.unit
         ),
@@ -140,8 +151,9 @@ class IndexerState(
 
     case Repair(_, _, _) =>
       logger.info("Switched to Normal Mode")
-      val normalIndexer = recoveringIndexerFactory()
+      val normalIndexer = recoveringIndexerFactory(() => propagateHealthState())
       state = Normal(normalIndexer, shutdownInitiated = false)
+      propagateHealthState()
       normalIndexer.firstSuccessfulConsumerInitialization.thereafter {
         case Success(_) =>
           logger.info("Normal indexing successfully initialized")
@@ -164,14 +176,14 @@ class IndexerState(
     def commitRepair(): Future[Right[Nothing, Unit]] = withStateUnlessShutdown(_ =>
       repairIndexer.commit().transformWith {
         case Failure(t) =>
-          logger.warn(s"Committing repair changes failed, resuming normal indexing...", t)
+          logger.warn("Committing repair changes failed, resuming normal indexing...", t)
           repairIndexer.shutdown()
           waitForRepairIndexerToTerminateUnlessShutdownAndThenReturn(
             Failure(new Exception("Committing repair changes failed", t))
           )
 
         case Success(_) =>
-          logger.info(s"Committing repair changes succeeded, resuming normal indexing...")
+          logger.info("Committing repair changes succeeded, resuming normal indexing...")
           waitForRepairIndexerToTerminateUnlessShutdownAndThenReturn(Success(Right(())))
       }
     )
@@ -188,7 +200,7 @@ class IndexerState(
         waitForRepairIndexerToTerminateAndThenReturnUnlessShutdown(Success(Left(failure)))
 
       case Success(Right(_)) =>
-        logger.info(s"Repair operation succeeded, committing changes...")
+        logger.info("Repair operation succeeded, committing changes...")
         commitRepair()
     }
   }
@@ -226,7 +238,9 @@ class IndexerState(
           shutdownInitiated = true,
         )
       }
-      queueF.flatMap(_.done).transform(handleShutdownDoneResult)
+      val r = queueF.flatMap(_.done).transform(handleShutdownDoneResult)
+      propagateHealthState()
+      r
   }
 
   def ensureNoProcessingForSynchronizer(synchronizerId: SynchronizerId): Future[Unit] =
@@ -340,7 +354,7 @@ class RepairQueueProxy(
 
   override def shutdown(): Unit = repairQueue.shutdown()
 
-  override def done: Future[Done] =
+  override val done: Future[Done] =
     repairQueue.done.transformWith { repairDoneResult =>
       repairDoneResult match {
         case Failure(t) => logger.warn("Repair Indexer finished with error", t)
@@ -360,12 +374,12 @@ class RepairQueueProxy(
 object IndexerState {
   sealed trait State {
     def shutdownInitiated: Boolean
-    def healthStatus: HealthStatus
+    def componentHealthState: ComponentHealthState
   }
 
   final case class Normal(queue: RecoveringFutureQueue[Update], shutdownInitiated: Boolean)
       extends State {
-    override def healthStatus: HealthStatus = queue.healthStatus
+    override def componentHealthState: ComponentHealthState = queue.componentHealthState
 
   }
 
@@ -374,11 +388,22 @@ object IndexerState {
       repairDone: Future[Unit],
       shutdownInitiated: Boolean,
   ) extends State {
-    override def healthStatus: HealthStatus = queue.value match {
-      case Some(Success(q)) if !q.done.isCompleted =>
-        HealthStatus.healthy // We report healthy status when repair indexer is running to prevet pod being torn down during long repair operation
-      case _ => HealthStatus.unhealthy
-    }
+    override def componentHealthState: ComponentHealthState =
+      if (shutdownInitiated) ComponentHealthState.ShutdownState
+      else {
+        queue.value match {
+          case None => ComponentHealthState.failed("Initializing repair indexer")
+          case Some(res) =>
+            res match {
+              case Success(indexerQueue) =>
+                indexerQueue.done.value match {
+                  case Some(_) => ComponentHealthState.failed("Repair indexer finished")
+                  case None => ComponentHealthState.degraded("Repair indexer is running")
+                }
+              case Failure(_) => ComponentHealthState.failed("Initializing repair indexer failed")
+            }
+        }
+      }
   }
 
   // repairDone should never fail, and only complete if normal indexing is resumed

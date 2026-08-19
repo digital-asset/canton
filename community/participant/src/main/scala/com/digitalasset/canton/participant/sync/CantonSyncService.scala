@@ -114,6 +114,7 @@ import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.{GenericPendingOperationStore, PendingOperationStore}
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
+import com.digitalasset.canton.topology.admin.grpc.PsidLookupAt
 import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClientWithInit,
   TopologySnapshot,
@@ -295,10 +296,10 @@ class CantonSyncService(
     new PackageVettingSynchronization {
       override def sync(packages: Set[VettedPackage], psid: PhysicalSynchronizerId)(implicit
           traceContext: TraceContext
-      ): EitherT[Future, ParticipantTopologyManagerError, Unit] =
+      ): EitherT[Future, TopologyManagerError, Unit] =
         // wait for packages to be vetted on the currently connected synchronizers
         EitherT
-          .right[ParticipantTopologyManagerError](
+          .right[TopologyManagerError](
             connectedSynchronizersLookup.get(psid).traverse { connectedSynchronizer =>
               connectedSynchronizer.topologyClient
                 .await(
@@ -314,16 +315,14 @@ class CantonSyncService(
                 .map(connectedSynchronizer.psid -> _)
             }
           )
-          .map { result =>
-            result.foreach { case (synchronizerId, successful) =>
+          .map {
+            _.foreach { case (synchronizerId, successful) =>
               if (!successful)
                 logger.info(
                   s"Waiting for vetting of packages $packages on synchronizer $synchronizerId either timed out or the synchronizer got disconnected."
                 )
             }
-            result
           }
-          .void
     }
 
   /** Vets the admin workflow dars on the specified synchronizer */
@@ -396,11 +395,33 @@ class CantonSyncService(
     */
   def activePsidForLsid(
       id: SynchronizerId
-  ): Option[PhysicalSynchronizerId] =
-    synchronizerConnectionConfigStore
-      .getActive(id)
-      .toOption
-      .flatMap(_.configuredPsid.toOption)
+  ): Option[PhysicalSynchronizerId] = activePsidLookup.activePsidFor(id)
+
+  @inline def activePsidLookup: PsidLookupAt = ActivePsidLookup
+  private object ActivePsidLookup extends PsidLookupAt {
+    override def activePsidFor(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId] =
+      synchronizerConnectionConfigStore
+        .getActive(synchronizerId)
+        .toOption
+        .flatMap(_.configuredPsid.toOption)
+
+    override def activePsidAt(
+        synchronizerId: SynchronizerId,
+        timestamp: CantonTimestamp,
+    ): Either[String, PhysicalSynchronizerId] =
+      synchronizerConnectionConfigStore
+        .getActiveAt(synchronizerId, timestamp)
+        .leftMap(_.message)
+        .flatMap {
+          _.configuredPsid match {
+            case KnownPhysicalSynchronizerId(psid) => Right(psid)
+            case UnknownPhysicalSynchronizerId =>
+              Left(
+                s"Unknown physical synchronizer ID for synchronizer $synchronizerId at $timestamp."
+              )
+          }
+        }
+  }
 
   // A connected synchronizer is ready if recovery has succeeded
   private[canton] def readyConnectedSynchronizerById(
@@ -1263,7 +1284,7 @@ class CantonSyncService(
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Unit] =
+  ): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     connectionsManager.performLsu(currentPsid, synchronizerSuccessor)
 
   /** Complete unfinished LSUs.
@@ -1365,9 +1386,12 @@ class CantonSyncService(
     )
   }
 
-  /** Set the values for the LSU status metrics after a restart.
+  /** Get the values of the LSU metrics to be set after a restart. Splitting the computation and
+    * setting the metrics allows for easier testing
     */
-  def setLsuStatusMetrics()(implicit traceContext: TraceContext): Unit = {
+  def getLsuStatusMetrics()(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Set[(PhysicalSynchronizerId, NonNegativeInt)]] = {
     import ParticipantMetrics.LsuStatus.*
 
     val topologyLookup = new TopologyLookup(
@@ -1376,7 +1400,7 @@ class CantonSyncService(
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
       topologyManagerO = lookupTopologyManager,
-      psidLookup = activePsidForLsid _,
+      psidLookup = activePsidLookup,
       topologyClientO = lookupTopologyClient,
       syncPersistentStateO = syncPersistentStateManager.get,
       cleanSynchronizerRecordTime = lsid =>
@@ -1407,28 +1431,80 @@ class CantonSyncService(
     def getHandshakeDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
       syncPersistentStateManager.get(successor.psid).map(_ => HandshakeDone)
 
+    def getLocalCopyDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+      syncPersistentStateManager
+        .get(successor.psid)
+        .flatMap(state =>
+          Option.when(state.connectivityStatusStore.isTopologyInitialized)(LocalCopyDone)
+        )
+
     def isLsuDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
       synchronizerConnectionConfigStore
         .get(successor.psid)
-        .fold(_ => None, config => Option.when(config.status.isActive)(LsuDone))
+        .fold(
+          _ => None,
+          config =>
+            Option.when(
+              config.status.isActive || config.status == SynchronizerConnectionConfigStore.LsuSource
+            )(LsuDone),
+        )
 
-    syncPersistentStateManager.getAll.values.foreach { persistentState =>
-      val resET = getLsuAnnounced(persistentState).map {
-        case Some(successor) =>
-          val lsuStatus = Seq(
-            getSequencerSuccessorsKnown(successor),
-            getHandshakeDone(successor),
-            isLsuDone(successor),
-          ).maxOption.flatten.getOrElse(LsuAnnounced)
+    def getAllLsuStatuses()
+        : EitherT[FutureUnlessShutdown, String, Seq[(PhysicalSynchronizerId, NonNegativeInt)]] =
+      MonadUtil
+        .parTraverseFilterWithLimit(parameters.batchingConfig.parallelism)(
+          syncPersistentStateManager.getAll.values.toSeq
+        ) { persistentState =>
+          getLsuAnnounced(persistentState).map {
+            _.map { successor =>
+              val lsuStatus = Seq(
+                getSequencerSuccessorsKnown(successor),
+                getHandshakeDone(successor),
+                getLocalCopyDone(successor),
+                isLsuDone(successor),
+              ).maxOption.flatten.getOrElse(LsuAnnounced)
 
-          metrics.setLsuStatus(lsuStatus, successor.psid)
+              (successor.psid, lsuStatus)
+            }
+          }
+        }
 
-        case None => () // nothing to do
+    getAllLsuStatuses()
+      .map { allLsuStatuses =>
+        /*
+          We don't want to support report metrics for old LSUs.
+          Steps:
+          - Group by lsid
+          - Sort statuses by psid for each lsid
+          - Keep the last two entries only if they are not both LSU done and the last one otherwise
+         */
+        allLsuStatuses
+          .groupBy { case (psid, _) => psid.logical }
+          .values
+          .view
+          .map(_.sortBy { case (psid, _) =>
+            psid
+          }(implicitly[Ordering[PhysicalSynchronizerId]].reverse))
+          .map(_.take(2))
+          .flatMap { lsuStatuses =>
+            val allDone = lsuStatuses.forall { case (_, status) =>
+              status == ParticipantMetrics.LsuStatus.LsuDone
+            }
+
+            lsuStatuses.take(if (allDone) 1 else 2).toSet
+          }
+          .toSet
       }
+  }
 
-      EitherTUtil.doNotAwaitUS(resET, s"Set LSU metrics for ${persistentState.psid}")
-    }
+  /** Set the values for the LSU status metrics after a restart.
+    */
+  def setLsuStatusMetrics()(implicit traceContext: TraceContext): Unit = {
+    val resET = getLsuStatusMetrics().map(_.foreach { case (psid, lsuStatus) =>
+      metrics.setLsuStatus(lsuStatus, psid)
+    })
 
+    EitherTUtil.doNotAwaitUS(resET, s"Set LSU metrics")
   }
 
   /* Verify that specified synchronizer has inactive status and prune synchronizer stores.
@@ -1542,12 +1618,12 @@ class CantonSyncService(
 
   def performLateLsu(
       request: LateLsuRequest
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     connectionsManager.performLateLsu(request)
 
   def performManualLsu(
       request: ManualLsuRequest
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuError, Unit] =
     connectionsManager.performManualLsu(request)
 
   def logout(synchronizerAlias: SynchronizerAlias)(implicit
@@ -1663,7 +1739,7 @@ class CantonSyncService(
       participantNodePersistentState.value,
     )
 
-    LifeCycle.close(instances*)(logger)
+    LifeCycle.close(instances)(logger)
   }
 
   override def toString: String = s"CantonSyncService($participantId)"

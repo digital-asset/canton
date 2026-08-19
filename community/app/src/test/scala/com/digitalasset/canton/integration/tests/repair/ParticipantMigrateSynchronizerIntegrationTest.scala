@@ -106,7 +106,11 @@ final class ParticipantMigrateSynchronizerIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
-      .addConfigTransform(ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration))
+      .addConfigTransforms(
+        ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
+        // TODO(#34818) Enable the new pipeline
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
+      )
       .addConfigTransforms(ConfigTransforms.setProtocolVersion(targetProtocol)*)
 
   private val remedy = operabilityTest("Participant.RepairService")("ProtocolVersion") _
@@ -564,23 +568,31 @@ final class ParticipantMigrateSynchronizerCrashRecoveryIntegrationTest
   private val reconciliationInterval = PositiveSeconds.tryOfDays(365 * 10)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1_S1M1.withSetup { implicit env =>
-      import env.*
+    EnvironmentDefinition.P3_S1M1_S1M1
+      .addConfigTransforms(
+        // TODO(#34818) Enable the new pipeline
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline
+      )
+      .withSetup { implicit env =>
+        import env.*
 
-      Seq(participant1, participant2, participant3).foreach { participant =>
-        participant.synchronizers.connect_local(sequencer1, daName)
-        participant.synchronizers.connect_local(sequencer2, acmeName)
-        participant.dars.upload(CantonExamplesPath, synchronizerId = daId)
-        participant.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
-        participant.dars.upload(CantonTestsPath, synchronizerId = daId).discard
-        participant.dars.upload(CantonTestsPath, synchronizerId = acmeId).discard
+        Seq(participant1, participant2, participant3).foreach { participant =>
+          participant.synchronizers.connect_local(sequencer1, daName)
+          participant.synchronizers.connect_local(sequencer2, acmeName)
+          participant.dars.upload(CantonExamplesPath, synchronizerId = daId)
+          participant.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
+          participant.dars.upload(CantonTestsPath, synchronizerId = daId).discard
+          participant.dars.upload(CantonTestsPath, synchronizerId = acmeId).discard
+        }
+
+        sequencer1.topology.synchronizer_parameters
+          .propose_update(daId, _.update(reconciliationInterval = reconciliationInterval.toConfig))
+        sequencer2.topology.synchronizer_parameters
+          .propose_update(
+            acmeId,
+            _.update(reconciliationInterval = reconciliationInterval.toConfig),
+          )
       }
-
-      sequencer1.topology.synchronizer_parameters
-        .propose_update(daId, _.update(reconciliationInterval = reconciliationInterval.toConfig))
-      sequencer2.topology.synchronizer_parameters
-        .propose_update(acmeId, _.update(reconciliationInterval = reconciliationInterval.toConfig))
-    }
 
   private def authorizeOnP3(party: PartyId)(implicit env: TestConsoleEnvironment) = {
     import env.*

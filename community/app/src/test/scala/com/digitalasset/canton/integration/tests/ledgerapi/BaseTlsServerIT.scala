@@ -116,7 +116,7 @@ abstract class BaseTlsServerIT(minimumServerProtocolVersion: Option[TlsVersion])
 
     // when
     recoverToSucceededIf[StatusRuntimeException] {
-      createLedgerClient(clientChannelConfig).flatMap(_.stateService.getLedgerEnd())
+      createLedgerClient(clientChannelConfig).flatMap(_.stateService.getLedgerEnd(Seq()))
     }.transform(
       identity,
       prependClueMsg,
@@ -141,7 +141,7 @@ abstract class BaseTlsServerIT(minimumServerProtocolVersion: Option[TlsVersion])
 
     // when
     val response: Future[GetLedgerEndResponse] =
-      createLedgerClient(clientConfig).flatMap(_.stateService.getLedgerEnd())
+      createLedgerClient(clientConfig).flatMap(_.stateService.getLedgerEnd(Seq()))
 
     // then
     response.value

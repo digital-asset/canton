@@ -4,6 +4,13 @@ CI Usage
 Canton uses CircleCI for continuous integration and deployment.
 The configuration for the CI/CD pipeline lives in [.circleci](../.circleci).
 
+Canton is gradually migrating CI pipelines from CircleCI to GitHub Actions.
+`canton_build_required` has already been migrated and runs on GitHub Actions.
+The remaining pipelines will follow.
+
+For GitHub Actions CI usage (including `canton_build_required`),
+see [7_ci-github-actions-usage.md](7_ci-github-actions-usage.md).
+
 # CI Cost
 
 Keep in mind that our CI cost is quite high, and we appreciate any help to reduce it!
@@ -17,7 +24,7 @@ To prevent creating corrupted builds, CircleCi will only load class files:
 - that are built from the same branch or from the main branch.
 
 Sometimes incremental compilation fails to compile,
-in that case add the name of your branch to `.circleci/branches_to_be_fully_recompiled_in_ci.txt` to force a full compilation.
+in that case add the name of your branch to `.ci/branches_to_be_fully_recompiled_in_ci.txt` to force a full compilation.
 
 # Test Execution
 

@@ -10,6 +10,9 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.PathRollbackContext.{RollbackSibling, firstChild}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.util.EitherUtil.*
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 
 import scala.Ordering.Implicits.*
 import scala.math.Ordered.orderingToOrdered
@@ -144,9 +147,10 @@ object PathRollbackContext {
   val empty: PathRollbackContext = PathRollbackContext(Vector.empty, firstChild)
 
   def fromProtoV30(
-      maybeRbContext: Option[v30.ViewParticipantData.RollbackContext]
+      pvv: ProtocolVersionValidation,
+      maybeRbContext: Option[v30.ViewParticipantData.RollbackContext],
   ): ParsingResult[PathRollbackContext] =
-    maybeRbContext.fold(Either.right[ProtoDeserializationError, PathRollbackContext](empty)) {
+    maybeRbContext.fold(Either.Right[ProtoDeserializationError](empty)) {
       case v30.ViewParticipantData.RollbackContext(rbScope, nextChildP) =>
         for {
           nextChild <- PositiveInt
@@ -158,7 +162,13 @@ object PathRollbackContext {
               )
             )
 
-          rbScopeVector <- rbScope.toVector.zipWithIndex
+          rbScopeSeq <- ProtoValidation.validateLength(
+            rbScope,
+            Some("rollback_scope"),
+            pvv,
+            ProtoValidation.MaxCollectionSize,
+          )
+          rbScopeVector <- rbScopeSeq.toVector.zipWithIndex
             .traverse { case (value, idx) =>
               PositiveInt.create(value).leftMap { _ =>
                 s"positive value expected; found $value at position $idx"

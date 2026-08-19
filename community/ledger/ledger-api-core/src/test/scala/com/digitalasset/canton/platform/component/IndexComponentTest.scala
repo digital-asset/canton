@@ -27,6 +27,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.ledger.participant.state.{
+  IndexingWatermark,
   Reassignment,
   ReassignmentInfo,
   TestAcsChangeFactory,
@@ -522,6 +523,7 @@ trait IndexComponentTest
 
   protected val synchronizer1: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer1")
   protected val synchronizer2: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer2")
+  protected val synchronizer3: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer3")
   protected val packageName: Ref.PackageName = Ref.PackageName.assertFromString("-package-name-")
   protected val dsoParty: ValueParty =
     ValueParty(Ref.Party.assertFromString("dsoParty")) // sees all
@@ -653,7 +655,12 @@ trait IndexComponentTest
       )
       .toVector
 
-  protected def ingestPartyOnboarding(parties: Set[String], recordTime: CantonTimestamp): Offset = {
+  protected def ingestTopologyEvents(
+      parties: Set[String] = Set.empty,
+      synchronizerParametersPayloads: Seq[String] = Seq.empty,
+      synchronizerId: SynchronizerId = synchronizer1,
+      recordTime: CantonTimestamp,
+  ): Offset = {
     val topologyTransaction = TopologyTransactionEffective(
       updateId = randomUpdateId,
       events = parties.map(party =>
@@ -663,8 +670,12 @@ trait IndexComponentTest
           authorizationEvent = Onboarding(AuthorizationLevel.Observation),
         )
       ),
-      genericTopologyEvents = Nil, // TODO(i33326)
-      synchronizerId = synchronizer1,
+      genericTopologyEvents = synchronizerParametersPayloads.map(payload =>
+        Update.TopologyTransactionEffective.GenericTopologyEvent.SynchronizerParametersState(
+          ByteString.copyFromUtf8(payload)
+        )
+      ),
+      synchronizerId = synchronizerId,
       effectiveTime = recordTime,
     )
     val ledgerEndBeforeTopology = index
@@ -690,6 +701,7 @@ trait IndexComponentTest
       recordTime: () => CantonTimestamp,
       argumentLength: Int,
       resultLength: Int,
+      synchronizerId: SynchronizerId = synchronizer1,
   )(
       creates: Seq[Node.Create]
   ): Update.SequencedTransactionAccepted = {
@@ -700,7 +712,7 @@ trait IndexComponentTest
     archives.foreach(txBuilder.add)
     val tx = txBuilder.buildCommitted()
     transaction(
-      synchronizerId = synchronizer1,
+      synchronizerId = synchronizerId,
       recordTime = recordTime(),
     )(tx, Nil)
   }
@@ -841,7 +853,7 @@ trait IndexComponentTest
             )
           )*
         ),
-        repairCounter = RepairCounter.Genesis,
+        watermark = IndexingWatermark.fromTimestamp(CantonTimestamp(recordTime)),
         recordTime = CantonTimestamp(recordTime),
         synchronizerId = synchronizer2,
         acsChangeFactory = TestAcsChangeFactory(),

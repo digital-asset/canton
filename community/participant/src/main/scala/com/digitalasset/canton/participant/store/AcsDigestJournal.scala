@@ -5,9 +5,13 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.store.Purgeable
 import com.digitalasset.canton.tracing.TraceContext
 
-private[store] trait AcsDigestJournal[K] extends AcsDigestStore.DigestJournal[K] {
+private[store] trait AcsDigestJournal[K]
+    extends AcsDigestStore.DigestJournal[K]
+    with AutoCloseable
+    with Purgeable {
 
   /** Deletes all digest entries whose offset is higher than `fromExclusive`.
     */

@@ -199,6 +199,9 @@ class MempoolModule[E <: Env[E]](
       dequeueN(
         mempoolState.receivedOrderRequests,
         currentOrderingTopology.sequencingParameters.maxRequestsInBatch,
+        maxCombinedWeight = currentOrderingTopology.maxRequestPayloadBytes,
+      )(
+        _._1.tx.value.payload.size()
       )
     val batchCreationInstant = Instant.now
     locally {

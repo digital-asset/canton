@@ -402,8 +402,6 @@ sealed trait GeneralSynchronizerRouterIntegrationTest
   }
 }
 
-//class GeneralSynchronizerRouterIntegrationTestDefault extends GeneralSynchronizerRouterIntegrationTest {
-
 class GeneralSynchronizerRouterIntegrationTestPostgres
     extends GeneralSynchronizerRouterIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

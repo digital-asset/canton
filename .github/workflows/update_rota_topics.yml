@@ -1,0 +1,57 @@
+name: Update rota Slack topics
+
+# Refresh the rota channel topics with the people on duty this week. The scheduled Monday
+# run writes topics for real (passes --apply). A manual dispatch still defaults to a dry run
+# so you can preview the topics, tick the "apply" box to write from a manual run too.
+on:
+  schedule:
+    # 04:00 UTC is 06:00 CEST (summer). Cron has no DST awareness, so this lands at 05:00 CET
+    # in winter, which is fine for a weekly topic refresh once the week's rota is current.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Actually set the Slack topics (unchecked = dry run, logs only)'
+        type: boolean
+        default: false
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  update-rota-slack-topics:
+    name: Update the rota channel topics for the current week
+    needs: pick_runner
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: reads the private rota sheet, posts to DA Slack. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
+    # Hard cap so a hung nix build or script cannot pin the self-hosted runner.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+      SLACK_CHANNEL_ID_TEAM_CANTON: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_CI: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_CI }}
+      SLACK_CHANNEL_ID_TEAM_CANTON_FLAKY_TESTS: ${{ vars.SLACK_CHANNEL_ID_TEAM_CANTON_FLAKY_TESTS }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Update rota Slack topics
+        uses: ./.github/actions/nix/nix_run
+        with:
+          # Scheduled runs always apply. A manual dispatch honors the "apply" checkbox, so it
+          # defaults to a dry run and only writes topics when the box is ticked.
+          command: python3 scripts/ci/update_rota_topics.py ${{ (github.event_name == 'schedule' || inputs.apply == true) && '--apply' || '' }}

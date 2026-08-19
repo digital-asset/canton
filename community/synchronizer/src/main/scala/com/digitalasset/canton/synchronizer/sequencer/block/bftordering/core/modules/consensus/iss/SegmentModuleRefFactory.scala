@@ -45,6 +45,7 @@ final class SegmentModuleRefFactoryImpl[E <: Env[E]](
     epochStore: EpochStore[E],
     dependencies: ConsensusModuleDependencies[E],
     emptyBlockCreationTimeout: FiniteDuration,
+    viewChangeTimeoutOverride: Option[FiniteDuration],
     loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
     metrics: BftOrderingMetrics,
@@ -64,6 +65,7 @@ final class SegmentModuleRefFactoryImpl[E <: Env[E]](
       segmentState: SegmentState,
       metricsAccumulator: EpochMetricsAccumulator,
   ): E#ModuleRefT[ConsensusSegment.Message] = {
+    implicit val tc: TraceContext = traceContext
     val module =
       new IssSegmentModule[E](
         epoch,
@@ -78,6 +80,7 @@ final class SegmentModuleRefFactoryImpl[E <: Env[E]](
         dependencies.availability,
         dependencies.p2pNetworkOut,
         emptyBlockCreationTimeout,
+        viewChangeTimeoutOverride,
         metrics,
         timeouts,
         loggerFactory,

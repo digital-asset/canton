@@ -10,10 +10,12 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.RollbackContextFactory
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.WellFormedTransaction.Stage
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{Checked, LfTransactionUtil}
+import com.digitalasset.canton.util.{Checked, ErrorUtil, LfTransactionUtil}
+import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.SerializationVersion
 import com.digitalasset.daml.lf.value.{Value, ValueCoder}
 import com.google.common.annotations.VisibleForTesting
@@ -470,4 +472,147 @@ object WellFormedTransaction {
       metadata: TransactionMetadata,
   ): WellFormedTransaction[S] = WellFormedTransaction(tx, metadata)
 
+  /** In case of concurrent party replication, project out portions of the LF transaction involving
+    * exclusively onboarding parties according to the following rules:
+    *
+    *   1. Action nodes that have at least one non-onboarding hosted informee are kept and so are
+    *      all their descendants (in the case of an exercise node).
+    *
+    *   1. Action nodes that have at least one onboarding, hosted informee and no non-onboarding,
+    *      hosted informee are projected out, but the descendants of an exercise node are evaluated
+    *      independently.
+    *
+    *   1. Rollback nodes are kept around.
+    *
+    *   1. Children of exercise nodes that are projected out are lifted to the root or if a
+    *      descendant of a rollback node, children of the innermost rollback node.
+    *
+    *   1. Rollback nodes that end up at the root or children of other rollback nodes are not
+    *      collapsed, i.e. no rollback node normalization occurs, and root-level rollback nodes are
+    *      not collapsed with or turned into a root-level rollback scope.
+    *
+    * @param transactionsWithRollbackScopes
+    *   wrapped transaction that may need to have selected nodes be projected out depending on
+    *   locally hosted, onboarding informees
+    * @param hostedOnboardingParties
+    *   the set of hosted parties at the request-id time of the transaction with onboarding parties
+    *   broken out separately
+    */
+  def projectOutOnboardingTransactionNodes(
+      transactionsWithRollbackScope: WithRollbackScope[WellFormedTransaction[WithAbsoluteSuffixes]],
+      hostedOnboardingParties: HostedOnboardingParties,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): WithRollbackScope[WellFormedTransaction[WithAbsoluteSuffixes]] =
+    transactionsWithRollbackScope match {
+      case WithRollbackScope(rbScope, WellFormedTransaction(tx, metadata)) =>
+        // State accumulating projects transaction fields and context fields needed
+        // to evaluate not yet visited.
+        final case class State(
+            // Track nodes and roots that will be part of the projected transaction,
+            nodes: Map[LfNodeId, LfNode],
+            rootsReversed: Seq[LfNodeId],
+            // Stack of rollback children in reverse order to reparent if their parent has been projected out.
+            reversedRollbackChildrenStack: Seq[Seq[LfNodeId]],
+            // Ancestor node whose presence mandates keeping descendant nodes in the projection.
+            keepNodesAtAndUnderO: Option[LfNodeId],
+        ) {
+          // Add a non-root node to the projection.
+          def addNode(id: LfNodeId, node: LfNode): State =
+            copy(nodes + (id -> node))
+
+          // Add a root node or a node to be placed under the context stack of rollback nodes.
+          def addReparentedNode(id: LfNodeId, node: LfNode): State =
+            reversedRollbackChildrenStack match {
+              case innermostReversedRollbackChildren +: rest =>
+                copy(
+                  nodes = nodes + (id -> node),
+                  reversedRollbackChildrenStack = (id +: innermostReversedRollbackChildren) +: rest,
+                )
+              case emptyRollbackStack =>
+                require(emptyRollbackStack.isEmpty)
+                copy(
+                  nodes = nodes + (id -> node),
+                  rootsReversed = id +: rootsReversed,
+                )
+            }
+
+          // Add action node selectively if an ancestor is included or if the node itself is fully hosted.
+          def addActionNodeSelectively(
+              id: LfNodeId,
+              action: LfActionNode,
+              onFullyHosted: State => State,
+          ): State =
+            if (keepNodesAtAndUnderO.nonEmpty) addNode(id, action)
+            else if (hostedOnboardingParties.isAnyPartyFullyHosted(action.informeesOfNode))
+              onFullyHosted(addReparentedNode(id, action))
+            else this
+        }
+
+        // Walk the transaction remembering all nodes whose locally hosted informees are exclusively onboarding.
+        val state = tx.foldInExecutionOrder(
+          State(Map.empty, Seq.empty, Seq.empty, None)
+        )( // foreachInExecutionOrder(
+          leaf = { case (state, nodeId, action) =>
+            state.addActionNodeSelectively(nodeId, action, identity)
+          },
+          exerciseBegin = { case (state, nodeId, exercise) =>
+            (
+              state.addActionNodeSelectively(
+                nodeId,
+                exercise,
+                _.copy(keepNodesAtAndUnderO = Some(nodeId)),
+              ),
+              LfTransaction.ChildrenRecursion.DoRecurse,
+            )
+          },
+          exerciseEnd = { case (state, nodeId, _) =>
+            // Exit keep-all-nodes scope when we see the nodeId again
+            if (state.keepNodesAtAndUnderO.contains(nodeId))
+              state.copy(keepNodesAtAndUnderO = None)
+            else state
+          },
+          rollbackBegin = { case (state, nodeId, rollback) =>
+            (
+              state.keepNodesAtAndUnderO.fold {
+                // Defer adding rollback nodes until rollbackEnd. At rollbackBegin end,
+                // only create an empty list so that projected descendants can be added.
+                state.copy(reversedRollbackChildrenStack =
+                  Seq.empty +: state.reversedRollbackChildrenStack
+                )
+              }(_ => state.addNode(nodeId, rollback)),
+              LfTransaction.ChildrenRecursion.DoRecurse,
+            )
+          },
+          rollbackEnd = { case (state, nodeId, _) =>
+            state.keepNodesAtAndUnderO.fold(state.reversedRollbackChildrenStack match {
+              case innermostReversedRollbackChildren +: rest =>
+                // Rollback nodes are added upon end once their projected children are known
+                // and have been added to innermostReversedRollbackChildren.
+                val rollbackNode =
+                  LfNodeRollback(ImmArray.from(innermostReversedRollbackChildren.reverse))
+                state
+                  .copy(reversedRollbackChildrenStack = rest)
+                  .addReparentedNode(nodeId, rollbackNode)
+              case _ =>
+                ErrorUtil.invalidState(
+                  s"Reversed rollback children missing from stack upon end in state $state"
+                )
+            })(_ => state)
+          },
+        )
+        val State(nodesReversed, rootsReversed, _, _) = state
+        val nodes = nodesReversed.toMap
+        val roots = rootsReversed.reverse
+        val trimmedTx = LfVersionedTransaction(tx.version, nodes, ImmArray.from(roots))
+        // Trim the metadata seeds to prevent mapping seeds of removed node-ids during node-id normalization.
+        val trimmedMetadata = metadata
+          .focus(_.seeds)
+          .modify(_.filter { case (id, _) => nodes.keySet.contains(id) })
+        val (normalizedTx, normalizedMetadata) = normalizeNodeIds(trimmedTx, trimmedMetadata)
+        WithRollbackScope(
+          rbScope,
+          WellFormedTransaction[WithAbsoluteSuffixes](normalizedTx, normalizedMetadata),
+        )
+    }
 }

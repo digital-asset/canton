@@ -82,7 +82,6 @@ message ViewParticipantData {
   repeated string created_in_subview_archived_in_core = 4; // ids of contracts created in a subview and archived in the core
   repeated v31.ViewParticipantData.KeyResolutionWithMaintainers resolved_keys = 5;
   v31.ActionDescription action_description = 6;
-  reserved 7; // was rollback_context
-  repeated ViewExternalCallResult external_call_results = 8;
-  bool rolled_back = 9;
+  repeated ViewExternalCallResult external_call_results = 7;
+  bool rolled_back = 8;
 }

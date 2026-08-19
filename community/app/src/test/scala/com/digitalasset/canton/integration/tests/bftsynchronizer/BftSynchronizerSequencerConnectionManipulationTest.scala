@@ -18,9 +18,12 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
+import com.digitalasset.canton.time.PositiveFiniteDuration
 import monocle.macros.syntax.lens.*
 
-import scala.collection.immutable.Seq
+import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 sealed trait BftSynchronizerSequencerConnectionManipulationTest
     extends CommunityIntegrationTest
@@ -144,37 +147,57 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
     participant1.synchronizers.disconnect(daName)
     participant2.synchronizers.disconnect(daName)
 
-    sequencer1.stop()
-    sequencer2.start()
+    loggerFactory.assertLogsUnorderedOptional(
+      {
+        sequencer1.stop()
+        sequencer2.start()
 
-    clue("reconnecting nodes after switching from p1 to p2") {
-      mediator1.start()
-      participant1.synchronizers.reconnect(daName)
-      participant2.synchronizers.reconnect(daName)
-    }
+        clue("reconnecting nodes after switching from sequencer1 to sequencer2") {
+          mediator1.start()
+          participant1.synchronizers.reconnect(daName)
+          participant2.synchronizers.reconnect(daName)
+        }
 
-    clue("pinging works again") {
-      loggerFactory.assertLogsUnorderedOptional(
-        participant1.health.ping(participant2.id, timeout = pingTimeout),
-        (
-          LogEntryOptionality.OptionalMany,
-          _.warningMessage should include(
-            "Mempool received client request but this node is currently blacklisted, rejecting"
-          ),
+        clue("pinging works again") {
+          participant1.health.ping(participant2.id, timeout = pingTimeout)
+        }
+
+        sequencer1.start()
+      },
+      (
+        LogEntryOptionality.OptionalMany,
+        _.warningMessage should include("Connection has failed validation"),
+      ),
+      (
+        LogEntryOptionality.OptionalMany,
+        _.warningMessage should include(
+          "Mempool received client request but this node is currently blacklisted, rejecting"
         ),
-        (
-          LogEntryOptionality.OptionalMany,
-          _.warningMessage should include("Network error: TransportError"),
-        ),
-      )
-    }
-
-    sequencer1.start()
+      ),
+      (
+        LogEntryOptionality.OptionalMany,
+        _.warningMessage should include("Network error: TransportError"),
+      ),
+    )
   }
 }
 
 final class BftSynchronizerSequencerConnectionManipulationTestPostgres
     extends BftSynchronizerSequencerConnectionManipulationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencingParameters = Some(
+        SequencingParameters
+          .Default(testedProtocolVersion)
+          .update(
+            // Since this test is starting and stopping sequencers a lot there will be view-changes in CantonBFT.
+            // The default timeout is 10s which can make some blocks be delayed by much, triggering DelayLogger to warn
+            // that wall-clock and bft-time diverges too much. So we lower the view-change timeout to 1s.
+            pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava)
+          )
+      ),
+    )
+  )
 }

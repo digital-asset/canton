@@ -1340,6 +1340,8 @@ class IssSegmentModuleTest
           new ArrayBuffer[Consensus.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
         val p2pBuffer = new ArrayBuffer[P2PNetworkOut.Message](defaultBufferSize)
         val remoteNode = otherIds(0)
+        val otherNodes = otherIds.toSet
+        val membership = Membership.forTesting(myId, otherNodes)
         val store = new InMemoryUnitTestEpochStore[ProgrammableUnitTestEnv]()
 
         implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
@@ -1349,7 +1351,7 @@ class IssSegmentModuleTest
           availabilityModuleRef = fakeRecordingModule(availabilityBuffer),
           parentModuleRef = fakeRecordingModule(parentBuffer),
           p2pNetworkOutModuleRef = fakeRecordingModule(p2pBuffer),
-          otherNodes = otherIds.toSet,
+          otherNodes = otherNodes,
           leader = remoteNode,
           storeMessages = true,
           epochStore = store,
@@ -1379,12 +1381,13 @@ class IssSegmentModuleTest
           remotePrePrepare.message.blockMetadata.blockNumber,
           testEpochLength,
         )
+        val epochStateEpoch = Epoch(epochInfo, membership, membership)
 
         // Mock a PrePrepare received from another node; should call pipeToSelf to store PrePrepare
         consensus.receive(PbftSignedNetworkMessage(remotePrePrepare))
         context.runPipedMessagesAndReceiveOnModule(consensus)
         p2pBuffer shouldBe empty
-        context.blockingAwait(store.loadEpochProgress(epochInfo)) shouldBe EpochInProgress(
+        context.blockingAwait(store.loadEpochProgress(epochStateEpoch)) shouldBe EpochInProgress(
           Seq.empty,
           Seq.empty,
         )
@@ -1396,7 +1399,7 @@ class IssSegmentModuleTest
             FutureId(1),
           )
         context.runPipedMessages() should contain only prePrepareStored
-        context.blockingAwait(store.loadEpochProgress(epochInfo)) shouldBe EpochInProgress(
+        context.blockingAwait(store.loadEpochProgress(epochStateEpoch)) shouldBe EpochInProgress(
           Seq.empty,
           pbftMessagesForIncompleteBlocks = Seq[SignedMessage[PbftNetworkMessage]](
             remotePrePrepare
@@ -1427,7 +1430,8 @@ class IssSegmentModuleTest
             FutureId(3),
           )
         }
-        val progress = context.blockingAwait(store.loadEpochProgress(epochInfo))
+        val progress =
+          context.blockingAwait(store.loadEpochProgress(epochStateEpoch))
         progress shouldBe EpochInProgress(
           Seq.empty,
           pbftMessagesForIncompleteBlocks = Seq[SignedMessage[PbftNetworkMessage]](
@@ -1459,7 +1463,7 @@ class IssSegmentModuleTest
           baseCommit(from = otherIds(1)),
           baseCommit(from = myId),
         )
-        context.blockingAwait(store.loadEpochProgress(epochInfo)) should matchPattern {
+        context.blockingAwait(store.loadEpochProgress(epochStateEpoch)) should matchPattern {
           case EpochInProgress(completedBlocks, _)
               if completedBlocks == Seq[EpochStore.Block](
                 EpochStore.Block(
@@ -2083,7 +2087,8 @@ class IssSegmentModuleTest
 
         val blockMetadata = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(otherIds(0)))
         consensus.receive(
-          ConsensusSegment.ConsensusMessage.BlockOrdered(blockMetadata, isEmpty = false)
+          ConsensusSegment.ConsensusMessage
+            .BlockOrdered(blockMetadata, isEmpty = false)
         )
         // we are blocking progress but we don't start ordering an empty block until we've heard back from availability
         context.runPipedMessages() shouldBe empty
@@ -2162,11 +2167,13 @@ class IssSegmentModuleTest
           new ProgrammableUnitTestContext
         val consensusBuffer =
           new ArrayBuffer[Consensus.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val epochMetricsAccumulator = mock[EpochMetricsAccumulator]
         val segmentModule = createIssSegmentModule[ProgrammableUnitTestEnv](
           otherNodes = otherIds.toSet,
           leader = otherIds(0),
           parentModuleRef = fakeRecordingModule(consensusBuffer),
           cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          epochMetricsAccumulator = epochMetricsAccumulator,
         )()
 
         val blockMetadata =
@@ -2212,7 +2219,95 @@ class IssSegmentModuleTest
         )
 
         // but we still don't have any timeout scheduled
+        verifyZeroInteractions(epochMetricsAccumulator)
         context.delayedMessages shouldBe empty
+      }
+
+      "not cancel nested timer" in {
+        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+          new ProgrammableUnitTestContext
+        val consensusBuffer =
+          new ArrayBuffer[Consensus.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val epochMetricsAccumulator = mock[EpochMetricsAccumulator]
+        val segmentModule = createIssSegmentModule[ProgrammableUnitTestEnv](
+          otherNodes = otherIds.toSet,
+          leader = otherIds(0),
+          parentModuleRef = fakeRecordingModule(consensusBuffer),
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          epochMetricsAccumulator = epochMetricsAccumulator,
+        )()
+
+        val blockMetadata =
+          BlockMetadata(EpochNumber.First, segmentModule.getSegmentState.segment.firstBlockNumber)
+        segmentModule.receive(Start)
+        context.runPipedMessagesUntilNoMorePiped(segmentModule)
+        val normalTimeout = PbftNormalTimeout(blockMetadata, ViewNumber.First)
+        context.lastDelayedMessage shouldBe Some(
+          1 -> normalTimeout
+        )
+
+        context.runOneDelayedMessage(segmentModule)
+        context.runPipedMessagesUntilNoMorePiped(segmentModule)
+
+        segmentModule.getSegmentState.isViewChangeInProgress shouldBe true // we are in view-change
+        context.delayedMessages shouldBe empty // and don't have any time-out scheduled
+
+        // simulate strong quorum
+        otherIds.foreach { otherNode =>
+          segmentModule.receive(
+            PbftSignedNetworkMessage(
+              ViewChange
+                .create(blockMetadata, ViewNumber(1), Seq.empty, otherNode, Some(otherNode))
+                .fakeSign
+            )
+          )
+        }
+
+        context.runPipedMessages() shouldBe Seq.empty
+
+        // we should still be in view 1, but have a timer to go to ViewNumber(2)
+
+        val nestedTimeout = PbftNestedViewChangeTimeout(blockMetadata, ViewNumber(1))
+        segmentModule.getSegmentState.currentView shouldBe ViewNumber(1)
+        segmentModule.getSegmentState.isViewChangeInProgress shouldBe true
+        context.lastDelayedMessage shouldBe Some(
+          1 -> nestedTimeout
+        )
+        context.lastCancelledEvent shouldBe Some(1 -> normalTimeout)
+        context.resetLastCancelledEvent()
+
+        val prePrepare = PrePrepare.create(
+          blockMetadata,
+          ViewNumber.First,
+          oneRequestOrderingBlock3Ack,
+          CanonicalCommitSet(Set.empty),
+          myId,
+        )
+        val commitCertificate = CommitCertificate(
+          prePrepare.fakeSign,
+          Seq(
+            commitFromPrePrepare(prePrepare)(from = myId),
+            commitFromPrePrepare(prePrepare)(from = otherIds(0)),
+            commitFromPrePrepare(prePrepare)(from = otherIds(1)),
+          ),
+        )
+
+        segmentModule.receive(RetransmittedCommitCertificate(otherIds(0), commitCertificate))
+        context.runPipedMessagesUntilNoMorePiped(segmentModule)
+
+        // the block got ordered
+        consensusBuffer should contain(
+          Consensus.ConsensusMessage.BlockOrdered(
+            orderedBlockFromPrePrepare(prePrepare),
+            commitCertificate,
+            hasCompletedLedSegment = false,
+          )
+        )
+
+        // we haven't canceled anything more since we started the double nested view change timer
+        context.lastCancelledEvent shouldBe None
+        verifyZeroInteractions(epochMetricsAccumulator)
+        context.delayedMessages shouldBe Seq(nestedTimeout)
       }
     }
   }
@@ -2231,6 +2326,7 @@ class IssSegmentModuleTest
       storeMessages: Boolean = false,
       epochStore: EpochStore[E] = new InMemoryUnitTestEpochStore[E](),
       epochInProgress: EpochStore.EpochInProgress = EpochStore.EpochInProgress(),
+      epochMetricsAccumulator: EpochMetricsAccumulator = new EpochMetricsAccumulator(),
   )(
       epochInfo: EpochInfo = bootstrapEpoch(TestBootstrapTopologyActivationTime).info.next(
         epochLength,
@@ -2264,7 +2360,7 @@ class IssSegmentModuleTest
     new IssSegmentModule[E](
       epoch,
       segmentState,
-      new EpochMetricsAccumulator(),
+      epochMetricsAccumulator,
       storePbftMessages = storeMessages,
       epochStore,
       cryptoProvider,
@@ -2274,6 +2370,7 @@ class IssSegmentModuleTest
       availabilityModuleRef,
       p2pNetworkOutModuleRef,
       config.consensusEmptyBlockCreationTimeout,
+      config.viewChangeTimeoutOverride,
       metrics,
       timeouts,
       loggerFactory,

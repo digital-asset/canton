@@ -618,7 +618,7 @@ abstract class Environment[Config <: SharedCantonConfig[Config]](
         closeHeadlessHealthAdministration :+ executionSequencerFactory :+ closeActorSystem :+ closeExecutionContext :+
         closeScheduler
     logger.info("Closing environment...")
-    LifeCycle.close((instances.toSeq)*)(logger)
+    LifeCycle.close(instances)(logger)
   })
 }
 

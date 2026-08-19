@@ -32,6 +32,9 @@ import com.digitalasset.canton.console.{
   Help,
   Helpful,
   InstanceReference,
+  MediatorReference,
+  ParticipantReference,
+  SequencerReference,
 }
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -98,6 +101,59 @@ class TopologyAdministrationGroup(
   private[console] def runAdminCommand[T](grpcCommand: => GrpcAdminCommand[?, ?, T]): T =
     consoleEnvironment.run(adminCommand(grpcCommand))
 
+  private def resolveTargetProtocolVersion(synchronizerId: SynchronizerId): ProtocolVersion =
+    instance match {
+      case sequencer: SequencerReference => resolveSequencerProtocolVersion(sequencer)
+      case mediator: MediatorReference => resolveMediatorProtocolVersion(mediator)
+      case participant: ParticipantReference =>
+        resolveParticipantProtocolVersion(participant, synchronizerId)
+      case other =>
+        consoleEnvironment.raiseError(
+          s"Cannot determine protocol version for unsupported node type `${other.getClass.getSimpleName}`."
+        )
+    }
+
+  private def resolveSequencerProtocolVersion(sequencer: SequencerReference): ProtocolVersion =
+    sequencer.physical_synchronizer_id.protocolVersion
+
+  private def resolveMediatorProtocolVersion(mediator: MediatorReference): ProtocolVersion =
+    mediator.health.status.successOption
+      .map(_.protocolVersion)
+      .getOrElse(
+        consoleEnvironment.raiseError(
+          s"Cannot determine protocol version from mediator `${mediator.name}` health status."
+        )
+      )
+
+  /** Resolves the protocol version for a participant by taking the physical synchronizer id of the
+    * active connection for the given logical synchronizer id.
+    *
+    * Fails if the participant has no active connection for the logical synchronizer id, or if
+    * multiple active connections match.
+    */
+  private def resolveParticipantProtocolVersion(
+      participant: ParticipantReference,
+      synchronizerId: SynchronizerId,
+  ): ProtocolVersion = {
+    val matchingPhysicalSynchronizerIds = participant.synchronizers
+      .list_registered()
+      .flatMap { case (_, knownPsid, _) => knownPsid.toOption }
+      .filter(_.logical == synchronizerId)
+
+    matchingPhysicalSynchronizerIds match {
+      case Seq(physicalSynchronizerId) => physicalSynchronizerId.protocolVersion
+      case Seq() =>
+        consoleEnvironment.raiseError(
+          s"Synchronizer `$synchronizerId` is not registered on participant `${participant.name}`, cannot determine protocol version."
+        )
+      case many =>
+        consoleEnvironment.raiseError(
+          s"Found multiple registered physical synchronizers for `$synchronizerId` on participant `${participant.name}`: ${many
+              .mkString(", ")}."
+        )
+    }
+  }
+
   @Help.Summary("Initialize the node with a unique identifier")
   @Help.Description(
     """Every node in Canton is identified using a unique identifier, which is composed of a
@@ -135,8 +191,7 @@ class TopologyAdministrationGroup(
         .flatMap(bytes =>
           SignedTopologyTransaction
             .fromByteString(
-              ProtocolVersionValidation.NoValidation,
-              ProtocolVersionValidation.NoValidation,
+              ProtocolVersionValidation.AlwaysValidation,
               bytes,
             )
             .leftMap(_.message)
@@ -396,7 +451,7 @@ class TopologyAdministrationGroup(
         ),
     ): Unit = {
       val transaction = SignedTopologyTransaction
-        .readFromTrustedFilePVV(file)
+        .readFromTrustedFile(file)
         .valueOr { err =>
           consoleEnvironment.run(
             CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -425,7 +480,7 @@ class TopologyAdministrationGroup(
     ): Unit = {
       val transactions = files.map { file =>
         SignedTopologyTransaction
-          .readFromTrustedFilePVV(file)
+          .readFromTrustedFile(file)
           .valueOr { err =>
             consoleEnvironment.run(
               CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -452,7 +507,7 @@ class TopologyAdministrationGroup(
         ),
     ): Unit = {
       val transactions = SignedTopologyTransactions
-        .readFromTrustedFile(ProtocolVersionValidation.NoValidation, file)
+        .readFromTrustedFile(file)
         .valueOr { err =>
           consoleEnvironment.run(
             CommandErrors.GenericCommandError(s"Unable to read from `$file`: $err")
@@ -980,6 +1035,7 @@ class TopologyAdministrationGroup(
                 .initialValues(
                   synchronizerId.protocolVersion
                 ),
+              protocolVersion = Some(synchronizerId.protocolVersion),
               signedBy = None,
               store = Some(store),
               synchronize = None,
@@ -3388,6 +3444,9 @@ class TopologyAdministrationGroup(
         |  If None, the serial will be automatically selected by the node.
         |- synchronize: Synchronize timeout can be used to ensure that the state has been
         |  propagated into the node.
+         |- protocolVersion: Optional protocol version override for parameter conversion.
+         |  Leave as None for regular proposals. Set it during synchronizer bootstrap when
+         |  protocol version resolution from node state is not yet available.
         |- force: Must be set to true when performing a dangerous operation, such as increasing
         |  the preparationTimeRecordTimeTolerance.
         """
@@ -3403,14 +3462,20 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.bounded
         ),
         force: ForceFlags = ForceFlags.none,
+        protocolVersion: Option[ProtocolVersion] = None,
     ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerParametersState] = { // TODO(#15815): Don't expose internal TopologyMapping and TopologyChangeOp classes
 
       val nodeStatus = instance.health.status
 
+      val targetProtocolVersion =
+        protocolVersion.getOrElse(resolveTargetProtocolVersion(synchronizerId))
+
       val parametersInternal =
-        parameters.toInternal.valueOr(err =>
-          consoleEnvironment.raiseError(s"Cannot convert parameters to internal format: $err")
-        )
+        parameters
+          .toInternal(targetProtocolVersion)
+          .valueOr(err =>
+            consoleEnvironment.raiseError(s"Cannot convert parameters to internal format: $err")
+          )
 
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
@@ -3446,6 +3511,9 @@ class TopologyAdministrationGroup(
         |- signedBy: The fingerprint of the key to be used to sign this proposal.
         |- synchronize: Synchronize timeout can be used to ensure that the state has been
         |  propagated into the node.
+         |- protocolVersion: Optional protocol version override for parameter conversion.
+         |  Leave as None for regular proposals. Set it during synchronizer bootstrap when
+         |  protocol version resolution from node state is not yet available.
         |- force: Must be set to true when performing a dangerous operation, such as increasing
         |  the preparationTimeRecordTimeTolerance.
         """
@@ -3799,13 +3867,17 @@ class TopologyAdministrationGroup(
           consoleEnvironment.commandTimeouts.bounded
         ),
         force: ForceFlags = ForceFlags.none,
+        protocolVersion: Option[ProtocolVersion] = None,
     ): SignedTopologyTransaction[TopologyChangeOp, SequencingParametersState] = { // TODO(#15815): Don't expose internal TopologyMapping and TopologyChangeOp classes
+
       val nodeStatus = instance.health.status
+
+      val targetProtocolVersion =
+        protocolVersion.getOrElse(resolveTargetProtocolVersion(synchronizerId))
+
       val parametersInternal =
-        parameters.toInternal
-          .valueOr(err =>
-            consoleEnvironment.raiseError(s"Cannot convert parameters to internal format: $err")
-          )
+        parameters
+          .toInternal(targetProtocolVersion)
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
           baseRequest = BaseWriteRequest(

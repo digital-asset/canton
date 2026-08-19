@@ -1,0 +1,57 @@
+name: Resolve Previous Artifact Run
+description: Resolve the workflow run id of the latest non-expired artifact with the given name, excluding the current run
+
+inputs:
+  artifact-name:
+    description: Artifact name to search for
+    required: false
+    default: test-timings-latest
+
+outputs:
+  run-id:
+    description: Workflow run id of the resolved artifact
+    value: ${{ steps.resolve.outputs.run-id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve previous artifact run
+      id: resolve
+      uses: actions/github-script@v9
+      env:
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+      with:
+        script: |
+          const { owner, repo } = context.repo;
+          const artifactName = process.env.ARTIFACT_NAME;
+          const currentRunId = Number(context.runId);
+
+          const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+            owner,
+            repo,
+            per_page: 100,
+            name: artifactName,
+          });
+
+          // API ordering is not guaranteed, so enforce newest-first explicitly.
+          const artifactsNewestFirst = [...artifacts].sort((a, b) => {
+            const aCreatedAt = Date.parse(a.created_at || "");
+            const bCreatedAt = Date.parse(b.created_at || "");
+            return (Number.isFinite(bCreatedAt) ? bCreatedAt : 0) -
+              (Number.isFinite(aCreatedAt) ? aCreatedAt : 0);
+          });
+
+          const candidate = artifactsNewestFirst.find((artifact) => {
+            const run = artifact.workflow_run;
+            if (!run || artifact.expired) return false;
+            if (Number(run.id) === currentRunId) return false;
+            return true;
+          });
+
+          if (candidate) {
+            core.info(`Found artifact '${artifactName}' from run ${candidate.workflow_run.id}.`);
+            core.setOutput('run-id', String(candidate.workflow_run.id));
+          } else {
+            core.info(`No previous artifact '${artifactName}' found.`);
+            core.setOutput('run-id', '');
+          }

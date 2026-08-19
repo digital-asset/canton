@@ -77,13 +77,13 @@ object HttpServiceTestFixture {
 
     val payloadString: String = standardJwtPayload.asJson.noSpaces
 
-    JwtSigner.HMAC256
+    JwtSigner
+      .HMAC256("secret")
       .sign(
         DecodedJwt(
           """{"alg": "HS256", "typ": "JWT"}""",
           payloadString,
-        ),
-        "secret",
+        )
       )
       .fold(
         e => throw new IllegalArgumentException(s"cannot sign a JWT: ${e.toString}"),

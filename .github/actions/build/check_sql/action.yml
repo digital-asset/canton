@@ -1,0 +1,10 @@
+name: Check SQL definitions
+description: Static analysis of SQL migrations
+
+runs:
+  using: composite
+  steps:
+    - name: Validate SQL definitions
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: ./scripts/ci/check_sql_definitions.sh

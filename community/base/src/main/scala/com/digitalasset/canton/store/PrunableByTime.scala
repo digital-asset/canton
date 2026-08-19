@@ -110,7 +110,8 @@ trait PrunableByTime {
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-  ): FutureUnlessShutdown[Unit] =
+  ): FutureUnlessShutdown[Unit] = {
+    logger.debug(s"Pruning $kind up to $limit")
     for {
       lastTs <- getLastPruningTs
       _ <- advancePruningTimestamp(PruningPhase.Started, limit)
@@ -127,6 +128,7 @@ trait PrunableByTime {
         logger.debug(s"Pruned $num $kind using ${res.length} intervals")
       lastTs.foreach(ts => updateBucketSize(res, limit - ts))
     }
+  }
 
   private val stepSizeMillis = new AtomicReference[Long](
     batchingParameters

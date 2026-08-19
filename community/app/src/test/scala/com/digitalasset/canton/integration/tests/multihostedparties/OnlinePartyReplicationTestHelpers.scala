@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import com.daml.ledger.javaapi.data.DisclosedContract
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -12,6 +13,7 @@ import com.digitalasset.canton.console.{
   LocalParticipantReference,
   ParticipantReference,
 }
+import com.digitalasset.canton.damltests.java.nonstakeholderactors.OpenChoice
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.multihostedparties.OnlinePartyReplicationTestHelpers.{
@@ -20,18 +22,20 @@ import com.digitalasset.canton.integration.tests.multihostedparties.OnlinePartyR
 }
 import com.digitalasset.canton.integration.util.PartyToParticipantDeclarative
 import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
+import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.transaction.{
   ParticipantPermission,
   PartyToParticipant,
   SignedTopologyTransaction,
   TopologyChangeOp,
 }
-import com.digitalasset.canton.topology.{ExternalParty, Party, PartyId}
+import com.digitalasset.canton.topology.{ExternalParty, Party, PartyId, SynchronizerId}
 import com.digitalasset.canton.{BaseTest, config, integration}
 import org.scalatest.Assertion
 
 import scala.annotation.nowarn
 import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 /** Utilities for testing online party replication.
@@ -449,6 +453,85 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
       .toList
 
     mismatchErrors shouldBe List.empty
+  }
+
+  protected def createOpenChoiceDisclosableContract(
+      participant: ParticipantReference,
+      synchronizerId: Option[SynchronizerId] = None,
+  )(
+      signatory: Party,
+      optTimeout: Option[config.NonNegativeDuration] = Some(
+        participant.consoleEnvironment.commandTimeouts.ledgerCommand
+      ),
+  ): (OpenChoice.Contract, DisclosedContract) = {
+    val contract = new OpenChoice(signatory.toProtoPrimitive)
+    val cmds = contract.create().commands().asScala.toSeq
+    val tx = participant.ledger_api.javaapi.commands.submit(
+      Seq(signatory),
+      cmds,
+      synchronizerId,
+      optTimeout = optTimeout,
+      includeCreatedEventBlob = true, // blob needed to build the disclosed contract
+    )
+
+    (
+      JavaDecodeUtil.decodeAllCreated(OpenChoice.COMPANION)(tx).loneElement,
+      JavaDecodeUtil.decodeDisclosedContracts(tx).loneElement,
+    )
+  }
+
+  protected def publicUseOpenChoiceContract(
+      participant: ParticipantReference,
+      synchronizerId: Option[SynchronizerId] = None,
+  )(
+      contract: OpenChoice.Contract,
+      toDisclose: DisclosedContract,
+      actor: Party,
+      optTimeout: Option[config.NonNegativeDuration] = Some(
+        participant.consoleEnvironment.commandTimeouts.ledgerCommand
+      ),
+  ): Unit = {
+    val cmds = contract.id
+      .exercisePublicUse(actor.toProtoPrimitive)
+      .commands
+      .asScala
+      .toSeq
+    participant.ledger_api.javaapi.commands
+      .submit(
+        Seq(actor),
+        cmds,
+        synchronizerId,
+        optTimeout = optTimeout,
+        disclosedContracts = Seq(toDisclose),
+      )
+      .discard
+  }
+
+  protected def publicArchiveOpenChoiceContract(
+      participant: ParticipantReference,
+      synchronizerId: Option[SynchronizerId] = None,
+  )(
+      contract: OpenChoice.Contract,
+      toDisclose: DisclosedContract,
+      actor: Party,
+      optTimeout: Option[config.NonNegativeDuration] = Some(
+        participant.consoleEnvironment.commandTimeouts.ledgerCommand
+      ),
+  ): Unit = {
+    val cmds = contract.id
+      .exercisePublicArchive(actor.toProtoPrimitive)
+      .commands
+      .asScala
+      .toSeq
+    participant.ledger_api.javaapi.commands
+      .submit(
+        Seq(actor),
+        cmds,
+        synchronizerId,
+        optTimeout = optTimeout,
+        disclosedContracts = Seq(toDisclose),
+      )
+      .discard
   }
 }
 

@@ -1159,6 +1159,7 @@ class InMemoryFanoutBufferSpec
       effectiveTime = Time.Timestamp.Epoch,
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       events = Vector.empty,
+      synchronizerParametersState = None,
     )
 
   private def verifyLookupPresent(

@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ReplayCommand
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -107,7 +108,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
         contractIdVersion,
         InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
       )
-      .consume(pcs = defaultContracts, pkgs = allPackages)
+      .consume(lookupHandler(pcs = defaultContracts, pkgs = allPackages))
     res match {
       case Right((tx, _)) => Right(tx)
       case Left(e) => Left(e)
@@ -229,7 +230,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
           contractIdVersion,
           InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
         )
-        .consume(pkgs = trackPackageQueries)
+        .consume(lookupHandler(pkgs = trackPackageQueries))
       pkgIds.toSet shouldBe queriedPackageIds
     }
   }

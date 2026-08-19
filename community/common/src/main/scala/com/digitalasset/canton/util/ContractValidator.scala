@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Versioned}
@@ -108,7 +109,13 @@ object ContractValidator {
       for {
         metadata <- ContractMetadata.create(contract.signatories, contract.stakeholders, gk)
         authenticationData <- ContractAuthenticationData
-          .fromLfBytes(contractIdVersion, contract.authenticationData)
+          .fromLfBytes(
+            // TODO(#23971) V1 authentication data has no bounded field, and the caller is built
+            //  participant-wide, so there is no negotiated pvv to gate on; thread one with V2 support.
+            ProtocolVersionValidation.NoValidation,
+            contractIdVersion,
+            contract.authenticationData,
+          )
           .leftMap(_.toString)
         cantonContractSuffix <- contract.contractId match {
           case cid: LfContractId.V1 => Right(cid.suffix)

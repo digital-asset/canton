@@ -106,14 +106,19 @@ object DigestProcessorTestBase extends TestDigestUtils {
           traceContext: TraceContext
       ): Source[InternalIndexService.ActiveContract, NotUsed] = {
         val result =
-          partyToContracts.values.collect {
-            case (offset, contract)
-                if offset <= activeAt &&
-                  (stakeholders1.isEmpty || contract.stakeholders.exists(
-                    stakeholders1
-                  )) && (stakeholders2.isEmpty || contract.stakeholders.exists(stakeholders2)) =>
-              contract
-          }.toSet
+          partyToContracts.values
+            .filter { case (offset, contract) =>
+              offset <= activeAt &&
+              (stakeholders1.isEmpty || contract.stakeholders.exists(
+                stakeholders1
+              )) && (stakeholders2.isEmpty || contract.stakeholders.exists(stakeholders2))
+            }
+            .toSeq
+            // sort by offset to make the testing deterministic.
+            // in reality, the order of the returned contracts doesn't matter
+            .sortBy { case (offset, _) => offset }
+            .map { case (_, contract) => contract }
+            .distinct
 
         Source(result)
       }

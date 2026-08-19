@@ -50,7 +50,7 @@ import com.digitalasset.canton.util.LfTransactionUtil.{
   metadataFromFetch,
 }
 import com.digitalasset.canton.util.{LfTransactionBuilder, LfTransactionUtil, TestContractHasher}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref.PackageName
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray}
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -531,6 +531,7 @@ class ExampleTransactionFactory(
     extends EitherValues {
 
   private val protocolVersion = versionOverride.getOrElse(BaseTest.testedProtocolVersion)
+  private val pvv = ProtocolVersionValidation(protocolVersion)
   private val rollbackContextFactory = RollbackContextFactory(protocolVersion)
   private val random = new Random(0)
 
@@ -649,7 +650,11 @@ class ExampleTransactionFactory(
         case _: CantonContractIdV2Version =>
           ContractIdAbsolutizationDataV2(updateId, ledgerTime)
       }
-    new ContractIdAbsolutizer(cryptoOps, absolutizationData)
+    new ContractIdAbsolutizer(
+      pvv,
+      cryptoOps,
+      absolutizationData,
+    )
   }
 
   def localContractId(discriminator: LfHash): LfContractId = cantonContractIdVersion match {
@@ -742,7 +747,11 @@ class ExampleTransactionFactory(
         throw new IllegalArgumentException(s"Cannot absolutize contract instance: $err")
       )
     val authenticationData = ContractAuthenticationData
-      .fromLfBytes(cantonContractIdVersion, absoluteFci.authenticationData)
+      .fromLfBytes(
+        pvv,
+        cantonContractIdVersion,
+        absoluteFci.authenticationData,
+      )
       .valueOr(err => throw new IllegalArgumentException(s"Cannot parse authentication data: $err"))
     authenticationData -> absoluteFci.contractId
   }
@@ -1601,7 +1610,9 @@ class ExampleTransactionFactory(
       createInfo: CreateInfo,
   ): ContractAuthenticationData = {
     val absoluteFci = absolutizer(updateId).absolutizeFci(createInfo.relativeFci).value
-    ContractInstance.contractAuthenticationData(absoluteFci).value
+    ContractInstance
+      .contractAuthenticationData(pvv, absoluteFci)
+      .value
   }
 
   /** Transaction structure:

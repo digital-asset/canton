@@ -6,21 +6,27 @@ package com.digitalasset.canton.platform.indexer
 import cats.data.EitherT
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.health.HealthStatus
+import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, Update}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.indexer.IndexerState.RepairInProgress
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, RecoveringFutureQueue}
+import com.digitalasset.canton.util.StateChangedCallback
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.apache.pekko.Done
+import org.mockito.MockitoSugar
 import org.scalatest.Assertion
 import org.scalatest.flatspec.AnyFlatSpec
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Future, Promise}
 
-class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContext {
+class IndexerStateSpec
+    extends AnyFlatSpec
+    with BaseTest
+    with HasExecutionContext
+    with MockitoSugar {
 
   behavior of "IndexerState"
 
@@ -1507,6 +1513,80 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     ensureSynchronizer1.failed.futureValue shouldBe IndexerState.ShutdownInProgress
   }
 
+  it should "propagate health state from recovering indexer queue" in {
+    val initialIndexer = new TestRecoveringIndexer
+    val afterRepairIndexer = new TestRecoveringIndexer
+
+    val repairIndexerFactoryCalled = Promise[Unit]()
+    val repairIndexerCreated = Promise[FutureQueue[Update]]()
+    val repairIndexerFactoryCalled2 = Promise[Unit]()
+    val repairIndexerCreated2 = Promise[FutureQueue[Update]]()
+
+    val healthStates = new AtomicReference[List[ComponentHealthState]](List.empty)
+    def appendHealthState(state: ComponentHealthState): Unit =
+      healthStates.updateAndGet(old => old :+ state)
+
+    val indexerState = new IndexerState(
+      recoveringIndexerFactory = seqFactory(initialIndexer, afterRepairIndexer),
+      repairIndexerFactory = asyncSeqFactory(
+        repairIndexerFactoryCalled -> repairIndexerCreated.future,
+        repairIndexerFactoryCalled2 -> repairIndexerCreated2.future,
+      ),
+      loggerFactory = loggerFactory,
+    )
+
+    def updateHandler(): Unit =
+      appendHealthState(indexerState.componentHealthState)
+
+    indexerState.replaceHealthStateChangedCallback(updateHandler _)
+
+    eventually() {
+      indexerState.componentHealthState shouldEqual (ComponentHealthState.Ok())
+    }
+    healthStates.set(List.empty)
+
+    val repairOperationStartedPromise = Promise[Unit]()
+    val repairOperationFinishedPromise = Promise[Unit]()
+    val repairOperationF = indexerState.withRepairIndexer { repairQueue =>
+      repairQueue.offer(repairUpdate).futureValue shouldBe Done
+      repairOperationStartedPromise.trySuccess(())
+      EitherT.right[String](repairOperationFinishedPromise.future)
+    }.value
+
+    initialIndexer.donePromise.trySuccess(Done)
+
+    eventually() {
+      healthStates.get() should equal(
+        List(ComponentHealthState.failed("Initializing repair indexer"))
+      )
+    }
+
+    val repairIndexer = new TestRepairIndexer
+    repairIndexerCreated.trySuccess(repairIndexer)
+
+    eventually() {
+      indexerState.componentHealthState shouldEqual (ComponentHealthState.degraded(
+        "Repair indexer is running"
+      ))
+      healthStates.get().size should equal(2)
+      healthStates.get().drop(1) should equal(
+        List(ComponentHealthState.degraded("Repair indexer is running"))
+      )
+    }
+
+    repairOperationFinishedPromise.trySuccess(())
+    repairIndexer.repairPersistedPromise.trySuccess(())
+    repairIndexer.donePromise.trySuccess(Done)
+
+    eventually() {
+      healthStates.get().size should equal(3)
+      healthStates.get().drop(2) should equal(List(ComponentHealthState.Ok()))
+    }
+    afterRepairIndexer.firstSuccessfulConsumerInitializationPromise.trySuccess(())
+    repairOperationF.futureValue
+
+  }
+
   behavior of "IndexerQueueProxy"
 
   it should "allow offer for normal indexing" in {
@@ -1561,7 +1641,7 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
     override def shutdown(): Unit = shutdownPromise.trySuccess(())
 
     override def done: Future[Done] = donePromise.future
-    override def healthStatus: HealthStatus = HealthStatus.healthy
+    override def componentHealthState: ComponentHealthState = ComponentHealthState.Ok()
   }
 
   class TestRepairIndexer extends FutureQueue[Update] {
@@ -1582,18 +1662,18 @@ class IndexerStateSpec extends AnyFlatSpec with BaseTest with HasExecutionContex
 
     override def shutdown(): Unit = shutdownPromise.trySuccess(())
 
-    override def done: Future[Done] = donePromise.future
+    override val done: Future[Done] = donePromise.future
   }
 
-  def seqFactory[T](ts: T*): () => T = {
+  def seqFactory[T](ts: T*): StateChangedCallback => T = {
     val atomicTQueue: AtomicReference[List[T]] = new AtomicReference[List[T]](ts.toList)
-    () => atomicTQueue.getAndUpdate(_.tail).head
+    _ => atomicTQueue.getAndUpdate(_.tail).head
   }
 
   def asyncSeqFactory[T](promises: (Promise[Unit], Future[T])*): () => Future[T] = {
-    val factory = seqFactory(promises*)
+    def factory = seqFactory(promises*)(() => ())
     () => {
-      val (calledPromise, resultFuture) = factory()
+      val (calledPromise, resultFuture) = factory
       calledPromise.trySuccess(())
       resultFuture
     }

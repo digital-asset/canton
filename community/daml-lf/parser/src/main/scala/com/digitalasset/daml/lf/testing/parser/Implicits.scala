@@ -6,7 +6,6 @@ package parser
 
 import com.digitalasset.daml.lf.data.{Numeric, Ref}
 import com.digitalasset.daml.lf.language.Ast.{Expr, Kind, Module, Package, Type}
-//import com.digitalasset.daml.lf.language.LanguageMajorVersion
 
 object Implicits {
 
@@ -43,14 +42,20 @@ object Implicits {
       )
   }
 
-  private def toString(x: BigDecimal) =
-    Numeric.toUnscaledString(Numeric.assertFromUnscaledBigDecimal(x))
+  implicit class BigDecimalOp(val x: BigDecimal) extends AnyVal {
+    def fmt: String = Numeric.toUnscaledString(Numeric.assertFromUnscaledBigDecimal(x))
+  }
+
+  implicit class FullReferenceOp(val x: Ref.FullReference[?]) extends AnyVal {
+    def fmt: String = s"'${x.pkg}':${x.qualifiedName}"
+  }
 
   private def prettyPrint(x: Any): String =
     x match {
-      case d: BigDecimal => toString(d)
-      case d: Float => toString(d.toDouble)
-      case d: Double => toString(d)
+      case d: BigDecimal => d.fmt
+      case d: Float => BigDecimal.valueOf(d.toDouble).fmt
+      case d: Double => BigDecimal.valueOf(d).fmt
+      case x: Ref.FullReference[?] => x.fmt
       case other: Any => other.toString
     }
 }

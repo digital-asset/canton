@@ -27,6 +27,22 @@ import scala.math.Ordered.orderingToOrdered
 
 import TransactionRoutingError.{TopologyErrors, UnableToQueryTopologySnapshot}
 
+private final case class SynchronizerSuitability(
+    unknownSubmitters: Set[LfPartyId],
+    submittersWithoutSubmissionPermission: Seq[LfPartyId],
+    decentralizedPartiesWithSubmittingParticipant: Seq[LfPartyId],
+) {
+  def isSuitable: Boolean =
+    unknownSubmitters.isEmpty &&
+      submittersWithoutSubmissionPermission.isEmpty &&
+      decentralizedPartiesWithSubmittingParticipant.isEmpty
+
+  def isUnsuitableOnlyDueToDecentralizedParties: Boolean =
+    unknownSubmitters.isEmpty &&
+      submittersWithoutSubmissionPermission.isEmpty &&
+      decentralizedPartiesWithSubmittingParticipant.nonEmpty
+}
+
 class AdmissibleSynchronizersComputation(
     localParticipantId: ParticipantId,
     protected val loggerFactory: NamedLoggerFactory,
@@ -172,50 +188,78 @@ class AdmissibleSynchronizersComputation(
         s"Checking whether one synchronizer in ${synchronizersWithAllSubmitters.keys} is suitable for submission"
       )
 
-      // Return true if all submitters are locally hosted with correct permissions
-      def canUseSynchronizer(
+      // Return all reasons why a synchronizer cannot be used, empty reasons means suitable.
+      def unsuitableSynchronizerReason(
           synchronizerId: PhysicalSynchronizerId,
           parties: Map[LfPartyId, PartyInfo],
-      ): Boolean = {
+      ): SynchronizerSuitability = {
         // We keep only the relevant topology (submitter on the local participant)
-        val locallyHostedSubmitters: Map[LfPartyId, (ParticipantAttributes, PositiveInt)] =
+        val locallyHostedSubmitters: Map[LfPartyId, (ParticipantAttributes, PartyInfo)] =
           parties.toSeq.mapFilter { case (party, partyInfo) =>
             for {
               permissions <- partyInfo.participants.get(localParticipantId)
               _ <- Option.when(submitters.contains(party))(())
-            } yield (party, (permissions, partyInfo.threshold))
+            } yield (party, (permissions, partyInfo))
           }.toMap
 
         val unknownSubmitters: Set[LfPartyId] = submitters.diff(locallyHostedSubmitters.keySet)
 
-        val incorrectPermissionSubmitters = locallyHostedSubmitters.toSeq.flatMap {
-          case (party, (permissions, threshold)) =>
-            if (permissions.permission < Submission)
-              List(s"submitter $party has permissions=${permissions.permission}")
-            else if (threshold > PositiveInt.one)
-              List(s"submitter $party has threshold=$threshold")
-            else Nil
-        }
+        /* A party that is hosted with Submission permission on some participant has no signing key of
+         * its own: its submission authorization is created by the submitting participant. Such a party
+         * therefore cannot have a confirmation threshold greater than 1, because a single participant
+         * cannot produce authorization on behalf of several independent participants.
+         * If no hosting participant has Submission permission, the party can only act through external
+         * signing, so this diagnosis does not apply and the generic error is reported instead.
+         */
+        def hasSubmittingParticipant(partyInfo: PartyInfo): Boolean =
+          partyInfo.participants.values.exists(_.permission >= Submission)
 
-        val canUseSynchronizer = unknownSubmitters.isEmpty && incorrectPermissionSubmitters.isEmpty
+        val (decentralizedPartiesWithSubmittingParticipant, submittersWithoutSubmissionPermission) =
+          locallyHostedSubmitters.toSeq.foldLeft(
+            (Seq.empty[LfPartyId], Seq.empty[LfPartyId])
+          ) { case ((decentralizedParties, withoutPermission), (party, (permissions, partyInfo))) =>
+            if (partyInfo.threshold > PositiveInt.one && hasSubmittingParticipant(partyInfo))
+              (decentralizedParties :+ party, withoutPermission)
+            else if (permissions.permission < Submission)
+              (decentralizedParties, withoutPermission :+ party)
+            else (decentralizedParties, withoutPermission)
+          }
 
-        if (!canUseSynchronizer) {
-          val context = Map(
+        val reason = SynchronizerSuitability(
+          unknownSubmitters = unknownSubmitters,
+          submittersWithoutSubmissionPermission = submittersWithoutSubmissionPermission,
+          decentralizedPartiesWithSubmittingParticipant =
+            decentralizedPartiesWithSubmittingParticipant,
+        )
+
+        if (!reason.isSuitable) {
+          val context: Map[String, Any] = Map(
             "unknown submitters" -> unknownSubmitters,
-            "incorrect permissions" -> incorrectPermissionSubmitters,
+            "without submission permission" -> submittersWithoutSubmissionPermission,
+            "submission permission and confirmation threshold > 1" ->
+              decentralizedPartiesWithSubmittingParticipant,
           )
           logger.debug(s"Cannot use synchronizer $synchronizerId: $context")
         }
 
-        canUseSynchronizer
+        reason
       }
 
-      val suitableSynchronizers = for {
-        (synchronizerId, topology) <- synchronizersWithAllSubmitters
-        if canUseSynchronizer(synchronizerId, topology)
-      } yield synchronizerId
+      val (unsuitableReasons, suitableSynchronizerIds) =
+        synchronizersWithAllSubmitters.toSeq.partitionMap { case (synchronizerId, topology) =>
+          val reason = unsuitableSynchronizerReason(synchronizerId, topology)
+          Either.cond(reason.isSuitable, synchronizerId, reason)
+        }
 
-      ensureNonEmpty(suitableSynchronizers.toSet, noSynchronizerWhereAllSubmittersCanSubmit)
+      // Only evaluated if no synchronizer is suitable
+      def noSuitableSynchronizerError: TransactionRoutingError =
+        if (unsuitableReasons.forall(_.isUnsuitableOnlyDueToDecentralizedParties))
+          TopologyErrors.DecentralizedPartyCannotSubmit.Error(
+            unsuitableReasons.flatMap(_.decentralizedPartiesWithSubmittingParticipant).distinct
+          )
+        else noSynchronizerWhereAllSubmittersCanSubmit
+
+      ensureNonEmpty(suitableSynchronizerIds.toSet, noSuitableSynchronizerError)
     }
 
     def commonSynchronizerIds(

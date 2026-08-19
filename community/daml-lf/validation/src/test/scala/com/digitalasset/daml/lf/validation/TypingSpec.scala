@@ -12,7 +12,7 @@ import com.digitalasset.daml.lf.language.{
   PackageInterface,
   Reference,
 }
-import com.digitalasset.daml.lf.stablepackages.StablePackages
+import com.digitalasset.daml.lf.stablepackages.StablePackages.stablePackages.Tuple2
 import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import org.scalatest.matchers.should.Matchers
@@ -30,13 +30,6 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
     PackageVersion.assertFromString("0.0.0"),
     None,
   )
-
-  private[this] val stablePackages = StablePackages.stablePackages
-
-  private[this] val tuple2TyCon: String = {
-    import stablePackages.Tuple2
-    s"'${Tuple2.pkg}':${Tuple2.qualifiedName}"
-  }
 
   import SpecUtil.*
 
@@ -396,9 +389,9 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
         E"λ (e: ContractId Mod:I) → (( fetch_interface @Mod:I e ))" ->
           T"ContractId Mod:I → (( Update Mod:I ))",
         E"λ (e: Party) → (( fetch_by_key @Mod:T e ))" ->
-          T"Party → (( Update ($tuple2TyCon (ContractId Mod:T) Mod:T) ))",
+          T"Party → (( Update (${Tuple2.fmt} (ContractId Mod:T) Mod:T) ))",
         E"λ (n : Int64) (e: Party) → (( query_n_by_key @Mod:T n e ))" ->
-          T"Int64 → Party → (( Update (Option (List ($tuple2TyCon (ContractId Mod:T) Mod:T))) ))",
+          T"Int64 → Party → (( Update (Option (List (${Tuple2.fmt} (ContractId Mod:T) Mod:T))) ))",
         E"(( uget_time ))" ->
           T"(( Update Timestamp ))",
         E"Λ (τ : ⋆). λ (e: Update τ) →(( uembed_expr @τ e ))" ->

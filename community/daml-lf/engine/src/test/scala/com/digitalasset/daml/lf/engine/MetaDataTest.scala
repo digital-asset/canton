@@ -110,21 +110,21 @@ class MetaDataTest
     )
 
     "works as expected on root actions node by template" in {
-      val expected = ResultDone(Set("pkgT", "pkgTLib"))
+      val expected = Result.done(Set("pkgT", "pkgTLib"))
       forEvery(nodeWithoutInterface) { mkNode =>
         engine.deps(toVersionedTransaction(mkNode(langNodeBuilder))) shouldBe expected
       }
     }
 
     "works as expected on root action nodes by interface" in {
-      val expected = ResultDone(Set("pkgInt", "pkgIntLib", "pkgImpl", "pkgImplLib"))
+      val expected = Result.done(Set("pkgInt", "pkgIntLib", "pkgImpl", "pkgImplLib"))
       forEvery(nodeWithInterface) { mkNode =>
         engine.deps(toVersionedTransaction(mkNode(langNodeBuilder))) shouldBe expected
       }
     }
 
     "works as expected on non-root action nodes" in {
-      val expected = ResultDone(
+      val expected = Result.done(
         Set(
           "pkgBase",
           "pkgBaseLib",
@@ -206,7 +206,10 @@ class MetaDataTestHelper(loggerFactory: NamedLoggerFactory) {
     "pkgImplLib" -> emptyPkg("pkgImplLibName"),
     "pkgImpl" -> emptyPkg("pkgImplName").copy(directDeps = Set("pkgImplLib", "pkgInt")),
   ).foreach { case (pkgId, pkg) =>
-    require(engine.preloadPackage(pkgId, pkg).isInstanceOf[ResultDone[?]])
+    require(engine.preloadPackage(pkgId, pkg).start match {
+      case Result.Step.Pure(_) => true
+      case _ => false
+    })
   }
 
   val parties = Set[Ref.Party]("alice")

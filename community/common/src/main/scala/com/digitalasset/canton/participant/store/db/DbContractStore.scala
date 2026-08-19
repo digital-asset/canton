@@ -316,7 +316,6 @@ class DbContractStore(
                 .queryAndUpdate(query, functionFullName)(
                   traceContext,
                   callerCloseContext,
-                  _.nonEmpty, // There's an entry for every row inserted
                 )
                 .map(_.toMap)
               insertedData = items.view
@@ -379,7 +378,6 @@ class DbContractStore(
               .queryAndUpdate(action, s"$queryBaseName update")(
                 traceContext,
                 self.closeContext,
-                { case (_, insertedData) => insertedData.nonEmpty },
               )
               .map { case (foundData, insertedData) =>
                 processBatchResults(

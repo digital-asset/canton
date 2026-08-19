@@ -18,6 +18,7 @@ import com.digitalasset.daml.lf.data.Ref.{
 }
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Error.Interpretation as IErr
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
@@ -79,7 +80,10 @@ class ContractKeySpec
     val packages = DarDecoder.readArchive(resource, new ZipInputStream(stream)).toOption.get
     val (mainPkgId, mainPkg) = packages.main
     assert(
-      compiledPackages.addPackage(mainPkgId, mainPkg).consume(pkgs = packages.all.toMap).isRight
+      compiledPackages
+        .addPackage(mainPkgId, mainPkg)
+        .consume(lookupHandler(pkgs = packages.all.toMap))
+        .isRight
     )
     (mainPkgId, mainPkg, packages.all.toMap)
   }
@@ -199,7 +203,7 @@ class ContractKeySpec
               .CreateAndExercise(templateId.toRef, createArg, "DontExecuteCreate", exerciseArg)
           ),
         )
-        .consume(pkgs = allPackages, keys = lookupKey)
+        .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
 
       val result = suffixLenientEngine
         .interpretCommands(
@@ -213,7 +217,7 @@ class ContractKeySpec
           contractIdVersion = contractIdVersion,
           interpretationConfig = InterpretationConfig.Default,
         )
-        .consume(pkgs = allPackages, keys = lookupKey)
+        .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       result shouldBe a[Right[?, ?]]
     }
 
@@ -231,7 +235,7 @@ class ContractKeySpec
 
       val Right(cmds) = preprocessor
         .preprocessApiCommands(Map.empty, ImmArray(ApiCommand.Create(templateId.toRef, createArg)))
-        .consume(pkgs = allPackages, keys = lookupKey)
+        .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       val result = suffixLenientEngine
         .interpretCommands(
           validating = false,
@@ -244,7 +248,7 @@ class ContractKeySpec
           contractIdVersion = contractIdVersion,
           interpretationConfig = InterpretationConfig.Default,
         )
-        .consume(pkgs = allPackages, keys = lookupKey)
+        .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       result shouldBe a[Left[?, ?]]
       val Left(err) = result
       err.message should not include ("Boom")
@@ -265,7 +269,7 @@ class ContractKeySpec
 
       val Right(cmds) = preprocessor
         .preprocessApiCommands(Map.empty, ImmArray(ApiCommand.Create(templateId.toRef, createArg)))
-        .consume(pkgs = allPackages, keys = lookupKey)
+        .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
       val result = suffixLenientEngine
         .interpretCommands(
           validating = false,
@@ -278,7 +282,7 @@ class ContractKeySpec
           contractIdVersion = contractIdVersion,
           interpretationConfig = InterpretationConfig.Default,
         )
-        .consume(pkgs = allPackages, keys = lookupKey)
+        .consume(lookupHandler(pkgs = allPackages, keys = lookupKey))
 
       inside(result) { case Left(err) =>
         err.message should include(
@@ -361,7 +365,7 @@ class ContractKeySpec
         )
         val Right(cmds) = preprocessor
           .preprocessApiCommands(Map.empty, ImmArray(cmd))
-          .consume(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey)
+          .consume(lookupHandler(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey))
         engine
           .interpretCommands(
             validating = false,
@@ -375,7 +379,7 @@ class ContractKeySpec
             interpretationConfig =
               InterpretationConfig.Default.copy(contractStateMode = contractStateMode),
           )
-          .consume(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey)
+          .consume(lookupHandler(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey))
       }
 
       val emptyRecord = ValueRecord(None, ImmArray.Empty)

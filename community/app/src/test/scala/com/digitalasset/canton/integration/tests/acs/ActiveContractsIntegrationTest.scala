@@ -187,7 +187,11 @@ abstract class ActiveContractsIntegrationTestBase(enableAllLedgerApiReassignment
     val contractIdSuffixer = new ContractIdSuffixer(pureCrypto, cantonContractIdVersion)
     val ledgerCreateTime = CreationTime.CreatedAt(env.environment.clock.now.toLf)
     val contractIdAbsolutizer =
-      new ContractIdAbsolutizer(pureCrypto, ContractIdAbsolutizationDataV1)
+      new ContractIdAbsolutizer(
+        testedProtocolVersionValidation,
+        pureCrypto,
+        ContractIdAbsolutizationDataV1,
+      )
 
     val createIou = new Iou(
       signatory.toProtoPrimitive,

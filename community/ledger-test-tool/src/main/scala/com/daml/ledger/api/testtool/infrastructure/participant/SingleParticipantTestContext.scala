@@ -160,11 +160,11 @@ final class SingleParticipantTestContext private[participant] (
 
   override def currentEnd(): Future[Long] =
     services.state
-      .getLedgerEnd(new GetLedgerEndRequest())
+      .getLedgerEnd(new GetLedgerEndRequest(Seq()))
       .map(_.offset)
 
-  override def getLedgerEnd(): Future[GetLedgerEndResponse] =
-    services.state.getLedgerEnd(new GetLedgerEndRequest())
+  override def getLedgerEnd(synchronizerIds: Seq[String]): Future[GetLedgerEndResponse] =
+    services.state.getLedgerEnd(new GetLedgerEndRequest(synchronizerIds))
 
   override def latestPrunedOffsets(): Future[(Long, Long)] =
     services.state

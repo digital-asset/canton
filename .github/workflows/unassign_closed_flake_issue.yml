@@ -1,0 +1,77 @@
+name: Unassign closed flake issue
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  unassign-closed-flake-issue:
+    name: Unassigns a closed flake issue
+    needs: pick_runner
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: acts on the private flaky-test issues. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
+    permissions:
+      issues: write
+    steps:
+      - name: Unassign assignees from closed flaky-test issue
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const milestoneTitle = context.payload.issue.milestone?.title;
+            if (milestoneTitle !== 'Flaky Tests') {
+              core.info(
+                `Skipping issue #${context.payload.issue.number}: milestone is ${milestoneTitle ?? 'unset'}.`
+              );
+              return;
+            }
+
+            const labels = (context.payload.issue.labels ?? []).map(({ name }) => name);
+            if (labels.includes('unstable')) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.issue.number,
+                  name: 'unstable',
+                });
+                core.info(
+                  `Removed 'unstable' label from closed flaky-test issue #${context.payload.issue.number}.`
+                );
+              } catch (err) {
+                core.warning(
+                  `Failed to remove 'unstable' label from #${context.payload.issue.number}: ${err.message}`
+                );
+              }
+            }
+
+            const assignees = (context.payload.issue.assignees ?? []).map(({ login }) => login);
+            if (assignees.length === 0) {
+              core.info(`Issue #${context.payload.issue.number} has no assignees to remove.`);
+              return;
+            }
+
+            await github.rest.issues.removeAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              assignees,
+            });
+
+            core.info(
+              `Removed assignees from closed flaky-test issue #${context.payload.issue.number}: ${assignees.join(', ')}`
+            );

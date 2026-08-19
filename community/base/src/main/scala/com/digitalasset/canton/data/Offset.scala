@@ -68,5 +68,4 @@ object Offset {
   implicit val setParameterOffset: SetParameter[Offset] = (off, pp) => pp >> off.unwrap
   implicit val setParameterOffsetO: SetParameter[Option[Offset]] = (off, pp) =>
     pp >> off.map(_.unwrap)
-
 }

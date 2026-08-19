@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultOutputFetchHowManyRecipients
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule.FetchBatchesSingleWorkflowId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore.BatchIdAndEpochNumber
@@ -43,7 +44,6 @@ import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 
 class AvailabilityModuleOutputFetchTest
@@ -111,14 +111,16 @@ class AvailabilityModuleOutputFetchTest
               case Some(
                     P2PNetworkOut.SendToRandomAuthenticated(
                       P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(signedMessage),
-                      Seq(`Node1`, `Node2`),
+                      Seq(`Node1`, `Node2`), // firstChoiceRecipientsPool
+                      None, // secondChoiceRecipientsPool
                       Some(`FetchBatchesSingleWorkflowId`),
-                      None, // nodeThatFailed
+                      Seq(), // nodeThatFailed
                       Some(_), // onRecipientDecision
+                      howManyRecipients,
                     )
                   )
-                  if signedMessage ==
-                    RemoteOutputFetch.FetchRemoteBatchData
+                  if howManyRecipients == DefaultOutputFetchHowManyRecipients &&
+                    signedMessage == RemoteOutputFetch.FetchRemoteBatchData
                       .create(ABatchId, anEpochNumber, Node0)
                       .fakeSign =>
             }
@@ -127,13 +129,13 @@ class AvailabilityModuleOutputFetchTest
               .get()
               .getOrElse(fail("failed to get P2PNetworkOut message"))
               .asInstanceOf[P2PNetworkOut.SendToRandomAuthenticated]
-              .onRecipientDecision
-              .foreach(_(Some(Node1)))
+              .onRecipientsDecision
+              .foreach(_(Seq(Node1, Node2)))
 
             context.delayedMessages should matchPattern {
               case Seq(
                     LocalOutputFetch.FetchRemoteBatchDataTimeout(
-                      Some(`Node1`),
+                      Seq(`Node1`, `Node2`),
                       `ABatchId`,
                       `anEpochNumber`,
                       _,
@@ -417,7 +419,7 @@ class AvailabilityModuleOutputFetchTest
           )
           availability.receive(
             LocalOutputFetch.FetchRemoteBatchDataTimeout(
-              Some(Node1),
+              Seq(Node1),
               ABatchId,
               anEpochNumber,
               1.second,
@@ -440,20 +442,20 @@ class AvailabilityModuleOutputFetchTest
             val p2pNetworkOutCell = new AtomicReference[Option[P2PNetworkOut.Message]](None)
 
             outputFetchProtocolState.localOutputMissingBatches.addOne(
-              ABatchId -> AMissingBatchStatusNode1And2Acks
+              ABatchId -> AMissingBatchStatusNode1Ack
             )
             implicit val context
                 : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
               new ProgrammableUnitTestContext
             val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
-              otherNodes = Set(Node1),
+              otherNodes = Set(Node1, Node3),
               outputFetchProtocolState = outputFetchProtocolState,
               cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
               p2pNetworkOut = fakeCellModule(p2pNetworkOutCell),
             )
             availability.receive(
               LocalOutputFetch.FetchRemoteBatchDataTimeout(
-                Some(Node1),
+                Seq(Node1),
                 ABatchId,
                 anEpochNumber,
                 1.second,
@@ -461,7 +463,7 @@ class AvailabilityModuleOutputFetchTest
             )
 
             outputFetchProtocolState.localOutputMissingBatches should
-              contain only ABatchId -> AMissingBatchStatusNode1And2Acks.copy(numberOfAttempts = 2)
+              contain only ABatchId -> AMissingBatchStatusNode1Ack.copy(numberOfAttempts = 2)
             outputFetchProtocolState.incomingBatchRequests should be(empty)
             p2pNetworkOutCell.get() shouldBe None
             context.runPipedMessagesAndReceiveOnModule(availability)
@@ -470,30 +472,33 @@ class AvailabilityModuleOutputFetchTest
               case Some(
                     P2PNetworkOut.SendToRandomAuthenticated(
                       signedMessage,
-                      Seq(`Node1`, `Node2`),
+                      Seq(`Node1`), // firstChoiceRecipientsPool
+                      Some(Seq(`Node3`)), // secondChoiceRecipientsPool
                       Some(`FetchBatchesSingleWorkflowId`),
-                      Some(`Node1`), // nodeThatFailed
+                      Seq(`Node1`), // nodeThatFailed
                       Some(_), // onRecipientDecision
+                      howManyRecipients,
                     )
                   )
-                  if signedMessage == P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
-                    RemoteOutputFetch.FetchRemoteBatchData
-                      .create(ABatchId, anEpochNumber, Node0)
-                      .fakeSign
-                  ) =>
+                  if howManyRecipients == DefaultOutputFetchHowManyRecipients &&
+                    signedMessage == P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
+                      RemoteOutputFetch.FetchRemoteBatchData
+                        .create(ABatchId, anEpochNumber, Node0)
+                        .fakeSign
+                    ) =>
             }
 
             p2pNetworkOutCell
               .get()
               .getOrElse(fail("failed to get P2PNetworkOut message"))
               .asInstanceOf[P2PNetworkOut.SendToRandomAuthenticated]
-              .onRecipientDecision
-              .foreach(_(Some(Node2)))
+              .onRecipientsDecision
+              .foreach(_(Seq(Node3)))
 
             context.delayedMessages should matchPattern {
               case Seq(
                     LocalOutputFetch.FetchRemoteBatchDataTimeout(
-                      Some(`Node2`),
+                      Seq(`Node3`),
                       `ABatchId`,
                       `anEpochNumber`,
                       _,
@@ -621,9 +626,8 @@ class AvailabilityModuleOutputFetchTest
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>
-              val singleBatchMissingRequest = new BatchesRequest(
+              val singleBatchMissingRequest = new OrderedBlockBatchesRequest(
                 AnOrderedBlockForOutput,
-                missingBatches = mutable.SortedSet(ABatchId),
                 traceContext,
               )
 
@@ -674,9 +678,8 @@ class AvailabilityModuleOutputFetchTest
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>
-              val multipleBatchMissingRequest = new BatchesRequest(
+              val multipleBatchMissingRequest = new OrderedBlockBatchesRequest(
                 AnotherOrderedBlockForOutput,
-                missingBatches = mutable.SortedSet(ABatchId, AnotherBatchId),
                 traceContext,
               )
 
@@ -736,7 +739,7 @@ class AvailabilityModuleOutputFetchTest
           output = fakeCellModule(expectedOutputCell),
         )
         val request =
-          new BatchesRequest(AnOrderedBlockForOutput, mutable.SortedSet(ABatchId), traceContext)
+          new OrderedBlockBatchesRequest(AnOrderedBlockForOutput, traceContext)
 
         availability.receive(
           Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
@@ -755,13 +758,13 @@ class AvailabilityModuleOutputFetchTest
 
       "record the missing batches and ask other nodes for missing data" in {
         forAll(
-          Table[OrderingMode, Seq[BftNodeId]](
-            ("orderingMode mode", "possible recipients"),
-            (OrderingMode.Consensus, Seq(Node1, Node2)),
+          Table[OrderingMode, Seq[BftNodeId], Option[Seq[BftNodeId]]](
+            ("orderingMode mode", "first choice recipients pool", "second choice recipients pool"),
+            (OrderingMode.Consensus, Seq(Node1, Node2), Some(Seq(Node3))),
             // Ignore nodes from the PoA, use the current topology
-            (OrderingMode.StateTransfer, Seq(Node3)),
+            (OrderingMode.StateTransfer, Seq(Node3), None),
           )
-        ) { (orderingMode, possibleRecipients) =>
+        ) { (orderingMode, firstChoiceRecipientsPool, secondChoiceRecipientsPool) =>
           val outputFetchProtocolState = new MainOutputFetchProtocolState()
           val expectedMessageCell = new AtomicReference[Option[P2PNetworkOut.Message]](None)
           val cellNetwork = fakeCellModule(expectedMessageCell)
@@ -777,7 +780,7 @@ class AvailabilityModuleOutputFetchTest
             p2pNetworkOut = cellNetwork,
           )
 
-          val request = new BatchesRequest(
+          val request = new OrderedBlockBatchesRequest(
             OrderedBlockForOutput(
               OrderedBlock(
                 ABlockMetadata,
@@ -789,7 +792,6 @@ class AvailabilityModuleOutputFetchTest
               originalLeader = Node0,
               orderingMode = orderingMode,
             ),
-            mutable.SortedSet(ABatchId),
             traceContext,
           )
           outputFetchProtocolState.pendingBatchesRequests.addOne(request)
@@ -817,17 +819,20 @@ class AvailabilityModuleOutputFetchTest
             case Some(
                   P2PNetworkOut.SendToRandomAuthenticated(
                     signedMessage,
-                    `possibleRecipients`,
+                    `firstChoiceRecipientsPool`,
+                    `secondChoiceRecipientsPool`,
                     Some(`FetchBatchesSingleWorkflowId`),
-                    None, // nodeThatFailed
+                    Seq(), // nodeThatFailed
                     Some(_), // onRecipientDecision
+                    howManyRecipients,
                   )
                 )
-                if signedMessage == P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
-                  Availability.RemoteOutputFetch.FetchRemoteBatchData
-                    .create(ABatchId, anEpochNumber, from = Node0)
-                    .fakeSign
-                ) =>
+                if howManyRecipients == DefaultOutputFetchHowManyRecipients &&
+                  signedMessage == P2PNetworkOut.BftOrderingNetworkMessage.AvailabilityMessage(
+                    Availability.RemoteOutputFetch.FetchRemoteBatchData
+                      .create(ABatchId, anEpochNumber, from = Node0)
+                      .fakeSign
+                  ) =>
           }
         }
       }
@@ -846,9 +851,8 @@ class AvailabilityModuleOutputFetchTest
           p2pNetworkOut = cellNetwork,
         )
         outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(ABatchId)
-        val singleBatchMissingRequest = new BatchesRequest(
+        val singleBatchMissingRequest = new OrderedBlockBatchesRequest(
           AnOrderedBlockForOutput,
-          missingBatches = mutable.SortedSet(ABatchId),
           traceContext,
         )
         assertLogs(
@@ -861,7 +865,7 @@ class AvailabilityModuleOutputFetchTest
           log => {
             log.level shouldBe Level.DEBUG
             log.message should include(
-              s"Missing batch $ABatchId is actually in the process of being stored"
+              s"Missing batches ${List(ABatchId)} are actually in the process of being stored"
             )
           },
         )

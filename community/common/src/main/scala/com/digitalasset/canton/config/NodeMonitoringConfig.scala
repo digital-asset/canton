@@ -4,7 +4,7 @@
 package com.digitalasset.canton.config
 
 import com.daml.jwt.JwtTimestampLeeway
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
@@ -29,6 +29,9 @@ final case class GrpcHealthServerConfig(
   override val sslContext: Option[SslContext] = None
   override val serverCertChainFile: Option[PemFileOrString] = None
   override def maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize
+  override val flowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow
+  override val initialFlowControlWindow: Option[PositiveInt] =
+    ServerConfig.defaultInitialFlowControlWindow
   override def maxConcurrentCallsPerConnection: NonNegativeInt =
     ServerConfig.defaultMaxConcurrentCallsPerConnection
   override val maxTokenLifetime: NonNegativeDuration = NonNegativeDuration(Duration.Inf)

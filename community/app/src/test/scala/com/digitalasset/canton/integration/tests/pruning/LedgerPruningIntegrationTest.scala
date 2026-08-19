@@ -9,6 +9,7 @@ import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.metrics.DatabaseMetrics
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -105,7 +106,15 @@ abstract class LedgerPruningIntegrationTest
           _.focus(_.parameters.batching.maxAcsImportBatchSize)
             .replace(PositiveInt.one)
         ),
+        ConfigTransforms.updateAllParticipantConfigs_(
+          // Emit checkpoints quickly so that the digest processor increases its checkpoint watermark
+          // so that the matcher processes the incoming commitments and pruning can proceed quickly.
+          _.focus(_.ledgerApi.indexService.idleStreamOffsetCheckpointTimeout)
+            .replace(config.NonNegativeFiniteDuration.ofSeconds(1))
+        ),
+        ConfigTransforms.disableOldAcsCommitmentProcessor,
       )
+      .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
       .withSetup { env =>
         import env.*
         sequencer1.topology.synchronizer_parameters.propose_update(
@@ -125,7 +134,7 @@ abstract class LedgerPruningIntegrationTest
   ): Unit = {
     val desiredPruningOffsetHex = participant.ledger_api.state.end()
 
-    eventually() {
+    eventually(logElapsed = Some(s"$functionFullName($desiredPruningOffsetHex at ${clock.now})")) {
       clock.advance(pruningTimeout)
       pingCommand
       participant.health.ping(participant.id)
@@ -334,7 +343,7 @@ abstract class LedgerPruningIntegrationTest
     ): Unit = {
       logger.debug(s"Pruning ${participant.name}")
       participant.pruning.prune(pruneAt)
-      eventually() {
+      eventually(logElapsed = Some(s"$functionFullName(${participant.name} at $pruneAt)")) {
         val ledgerEndAfterPruning =
           participant.ledger_api.state.end()
         ledgerEndBeforeReset should be <= ledgerEndAfterPruning
@@ -361,7 +370,7 @@ abstract class LedgerPruningIntegrationTest
     val p2Id = participant2.id.adminParty
 
     // wait until all unrelated active contracts are archived
-    eventually() {
+    eventually(logElapsed = Some("Await all contracts archived")) {
       acsCount(participant1) shouldBe 0
       acsCount(participant2) shouldBe 0
     }
@@ -394,7 +403,7 @@ abstract class LedgerPruningIntegrationTest
       "created before pruning, remains active after pruning",
     )
 
-    eventually() {
+    eventually(logElapsed = Some("Await active contracts after cycle contract creation")) {
       acsCount(participant1) shouldBe 1
       acsCount(participant2) shouldBe 1
     }
@@ -438,7 +447,7 @@ abstract class LedgerPruningIntegrationTest
     createCycleContract(participant1, p1Id, "created after pruning, remains active after pruning")
     createCycleContract(participant2, p2Id, "created after pruning, remains active after pruning")
 
-    eventually() {
+    eventually(logElapsed = Some("Find safe pruning offsets after cycle contract creation")) {
       assert(
         participant1.pruning
           .find_safe_offset(clock.now.toInstant)
@@ -460,7 +469,8 @@ abstract class LedgerPruningIntegrationTest
       timeout = 30.seconds,
     )
     eventually(
-      timeUntilSuccess = 60.seconds
+      timeUntilSuccess = 60.seconds,
+      logElapsed = Some("Await active contracts after post-prune bong"),
     ) {
       pcsCount(participant1) shouldBe 30 + p1UnrelatedPingContracts
       pcsCount(participant2) shouldBe 30 + p2UnrelatedPingContracts
@@ -602,7 +612,7 @@ abstract class LedgerPruningIntegrationTest
       .flatMap(e => e.event.created)
       .loneElement
       .contractId
-    eventually() {
+    eventually(logElapsed = Some("await transient contracts for pruning")) {
       val GetEventsByContractIdResponse(created, archived) =
         participant1.ledger_api.event_query.by_contract_id(contractId, Seq(party))
       created should not be empty
@@ -808,10 +818,13 @@ abstract class LedgerPruningIntegrationTest
         // as repair failed, the offset dispatcher is reinitializing, which can cause ResilientLedgerSubscription warnings
         logEntries => {
           logEntries.foreach { logEntry =>
-            clue(logEntry.toString) {
-              logEntry.loggerName should include("ResilientLedgerSubscription")
-              logEntry.message should include(
-                "Ledger subscription PingService failed with an error"
+            withClue(logEntry.toString) {
+              logEntry.loggerName should (include("ResilientLedgerSubscription") or include(
+                "AcsCommitmentProcessorManager"
+              ))
+              logEntry.message should (
+                include("Ledger subscription PingService failed with an error") or
+                  include("failed to start running digest processor")
               )
               ()
             }

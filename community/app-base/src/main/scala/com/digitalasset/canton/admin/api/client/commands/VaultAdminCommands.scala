@@ -15,7 +15,9 @@ import com.digitalasset.canton.crypto.admin.v30.ListPublicKeysRequest
 import com.digitalasset.canton.crypto.admin.v30.VaultServiceGrpc.VaultServiceStub
 import com.digitalasset.canton.crypto.{PublicKeyWithName, v30 as cryptoprotoV30, *}
 import com.digitalasset.canton.util.OptionUtil
-import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.ManagedChannel
@@ -141,7 +143,15 @@ object VaultAdminCommands {
     override protected def handleResponse(
         response: v30.ImportPublicKeyResponse
     ): Either[String, Fingerprint] =
-      Fingerprint.fromProtoPrimitive(response.fingerprint).leftMap(_.toString)
+      ProtoValidation
+        .validateThen(
+          response.fingerprint,
+          "fingerprint",
+          ProtocolVersionValidation.AlwaysValidation,
+        )(
+          Fingerprint.fromProtoPrimitive
+        )
+        .leftMap(_.toString)
   }
 
   // upload a public key into the key registry
@@ -149,7 +159,12 @@ object VaultAdminCommands {
       extends BaseImportPublicKey {
 
     override protected def createRequest(): Either[String, v30.ImportPublicKeyRequest] =
-      Right(v30.ImportPublicKeyRequest(publicKey = publicKey, name = name.getOrElse("")))
+      Right(
+        v30.ImportPublicKeyRequest(
+          publicKey = publicKey,
+          name = name.getOrElse("").toProtoUnvalidated,
+        )
+      )
   }
 
   final case class GenerateSigningKey(
@@ -361,7 +376,13 @@ object VaultAdminCommands {
     override protected def handleResponse(
         response: v30.GetWrapperKeyIdResponse
     ): Either[String, String] =
-      Right(response.wrapperKeyId)
+      ProtoValidation
+        .validate(
+          response.wrapperKeyId,
+          Some("wrapper_key_id"),
+          ProtocolVersionValidation.AlwaysValidation,
+        )
+        .leftMap(_.message)
 
   }
 

@@ -6,7 +6,6 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.{
   ContractDeserializationError,
   InvariantViolation,
@@ -15,8 +14,9 @@ import com.digitalasset.canton.ReassignmentCounter
 import com.digitalasset.canton.protocol.{ContractInstance, ReassignmentId, Stakeholders, v30}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 
@@ -52,12 +52,13 @@ final case class UnassignmentData(
   def toProtoV30: v30.UnassignmentData = v30.UnassignmentData(
     submitterMetadata = submitterMetadata.toProtoV30.some,
     contracts = contractsBatch.contracts.map { reassign =>
-      com.digitalasset.canton.protocol.v30.ActiveContract(
+      v30.ActiveContract(
         reassign.contract.encoded,
         reassign.counter.toProtoPrimitive,
       )
     },
-    reassigningParticipantUids = reassigningParticipants.map(p => p.uid.toProtoPrimitive).toSeq,
+    reassigningParticipantUids =
+      reassigningParticipants.map(_.uid.toProtoPrimitive.toProtoUnvalidated).toSeq,
     sourcePhysicalSynchronizerId = sourcePsid.unwrap.toProtoPrimitive,
     targetPhysicalSynchronizerId = targetPsid.unwrap.toProtoPrimitive,
     targetTimestamp = targetTimestamp.unwrap.toProtoTimestamp.some,
@@ -101,20 +102,24 @@ object UnassignmentData
       proto.submitterMetadata,
     )
 
-    contracts <- proto.contracts
-      .traverse {
-        case com.digitalasset.canton.protocol.v30.ActiveContract(contractP, reassignmentCounterP) =>
-          ContractInstance
-            .decodeWithCreatedAt(contractP)
-            .leftMap(err => ContractDeserializationError(err))
-            .map(c =>
-              (
-                c,
-                Source(c.templateId.packageId),
-                Target(c.templateId.packageId),
-                ReassignmentCounter(reassignmentCounterP),
-              )
+    contracts <- ProtoValidation
+      .validateLengthThen(
+        proto.contracts,
+        "contracts",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      ) { case (v30.ActiveContract(contractP, reassignmentCounterP), _) =>
+        ContractInstance
+          .decodeWithCreatedAt(contractP)
+          .leftMap(err => ContractDeserializationError(err))
+          .map(c =>
+            (
+              c,
+              Source(c.templateId.packageId),
+              Target(c.templateId.packageId),
+              ReassignmentCounter(reassignmentCounterP),
             )
+          )
       }
       .flatMap(
         ContractsReassignmentBatch
@@ -122,13 +127,14 @@ object UnassignmentData
           .leftMap(err => InvariantViolation(Some("contracts"), err.toString))
       )
 
-    reassigningParticipants <- proto.reassigningParticipantUids
-      .traverse(uid =>
-        ProtoValidation
-          .validateThen(uid, "reassigning_participants", pvv)(
-            UniqueIdentifier.fromProtoPrimitive
-          )
-          .map(ParticipantId(_))
+    reassigningParticipants <- ProtoValidation
+      .validateThen(
+        proto.reassigningParticipantUids,
+        "reassigning_participant_uids",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )(
+        ParticipantId.fromProtoPrimitiveUid
       )
 
     sourceSynchronizer <- ProtoValidation

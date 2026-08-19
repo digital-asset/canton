@@ -47,21 +47,7 @@ import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{CommandId, SubmissionId, UserId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
-import com.digitalasset.daml.lf.engine.{
-  Engine,
-  EngineConfig,
-  Error,
-  Result,
-  ResultDone,
-  ResultError,
-  ResultInterruption,
-  ResultNeedContract,
-  ResultNeedExternalCall,
-  ResultNeedKey,
-  ResultNeedPackage,
-  ResultPrefetch,
-}
+import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error, Result}
 import com.digitalasset.daml.lf.interpretation.InterpretationConfig
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.*
@@ -253,7 +239,7 @@ class TestSubmissionService(
           transactionUsedForExternalSigning = false,
           routingSynchronizerState = routingSynchronizerState,
         )
-        .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
+        .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.toGrpcError))
         .merge
         .failOnShutdownToAbortException("test submit transaction")
       submissionResult <- syncService
@@ -339,109 +325,121 @@ class TestSubmissionService(
       traceContext: TraceContext
   ): Future[Either[Error, (SubmittedTransaction, Transaction.Metadata)]] = {
     @tailrec
-    def iterateOverInterrupts[A](continue: () => Result[A]): Result[A] =
-      continue() match {
-        case ResultInterruption(continue, _) => iterateOverInterrupts(continue)
-        case otherResult => otherResult
+    def iterateOverInterrupts[A](
+        step: Result.Step[A]
+    ): Result.Step[A] =
+      step match {
+        case im: Result.Step.Impure[x, A] =>
+          im.fx match {
+            case Result.Need.Interruption(_) => iterateOverInterrupts(im.resume(()))
+            case _ => step
+          }
+        case _ => step
       }
 
-    result match {
-      case ResultDone(result) => Future.successful(Right(result))
+    def drive(
+        step: Result.Step[(SubmittedTransaction, Transaction.Metadata)]
+    ): Future[Either[Error, (SubmittedTransaction, Transaction.Metadata)]] =
+      step match {
+        case Result.Step.Pure(value) => Future.successful(Right(value))
 
-      case ResultError(err) => Future.successful(Left(err))
+        case Result.Step.Error(err) => Future.successful(Left(err))
 
-      case ResultNeedContract(acoid, resume) =>
-        for {
-          contractOpt <- disclosedContracts.get(acoid) match {
-            case Some(contract) => Future.successful(Some(contract))
-            case None => contractResolver(acoid)(traceContext)
-          }
-          response: Response =
-            contractOpt match {
-              case Some(contract) =>
-                val hashingMethod = CantonContractIdVersion
-                  .extractCantonContractIdVersion(acoid)
-                  .valueOr(err =>
-                    throw new IllegalArgumentException(s"Invalid contract id version: $err")
+        case im: Result.Step.Impure[x, (SubmittedTransaction, Transaction.Metadata)] =>
+          im.fx match {
+            case Result.Need.Contract(acoid) =>
+              for {
+                contractOpt <- disclosedContracts.get(acoid) match {
+                  case Some(contract) => Future.successful(Some(contract))
+                  case None => contractResolver(acoid)(traceContext)
+                }
+                response: Result.Need.Contract.Response =
+                  contractOpt match {
+                    case Some(contract) =>
+                      val hashingMethod = CantonContractIdVersion
+                        .extractCantonContractIdVersion(acoid)
+                        .valueOr(err =>
+                          throw new IllegalArgumentException(s"Invalid contract id version: $err")
+                        )
+                        .contractHashingMethod
+                      Result.Need.Contract.Found(contract, hashingMethod, _ => true)
+                    case None =>
+                      Result.Need.Contract.NotFound
+                  }
+                r <- drive(im.resume(response))
+              } yield r
+
+            case Result.Need.Package(packageId) =>
+              for {
+                pckgO <- packageResolver
+                  .resolve(packageId, PackageResolver.ignoreMissingPackage)
+                  .failOnShutdownToAbortException(
+                    "TestSubmissionService"
                   )
-                  .contractHashingMethod
-                Response.ContractFound(contract, hashingMethod, _ => true)
-              case None =>
-                Response.ContractNotFound
-            }
-          r <- resolve(disclosedContracts, disclosedKeyContracts, resume(response))
-        } yield r
+                r <- drive(im.resume(pckgO))
+              } yield r
 
-      case ResultNeedPackage(packageId, resume) =>
-        for {
-          pckgO <- packageResolver
-            .resolve(packageId, PackageResolver.ignoreMissingPackage)
-            .failOnShutdownToAbortException(
-              "TestSubmissionService"
-            )
-          r <- resolve(disclosedContracts, disclosedKeyContracts, resume(pckgO))
-        } yield r
-
-      case ResultNeedKey(key, n, mbToken, resume) =>
-        for {
-          keyContracts <- mbToken match {
-            case NeedKeyProgression.Unstarted =>
-              disclosedKeyContracts.get(key) match {
-                case Some(contract) => Future.successful(contract)
-                case None =>
-                  keyResolver
-                    .lookupKey(key)
-                    .failOnShutdownToAbortException("test submit transaction")
-              }
-            case NeedKeyProgression.InProgress(ContinuationToken(rest)) => Future.successful(rest)
-            case _ => throw new IllegalStateException("unexpected continuation token")
-          }
-          (result, rest) = keyContracts.splitAt(n)
-          hasStarted: NeedKeyProgression.HasStarted =
-            if (rest.nonEmpty) NeedKeyProgression.InProgress(ContinuationToken(rest))
-            else NeedKeyProgression.Finished
-          r <- resolve(
-            disclosedContracts,
-            disclosedKeyContracts,
-            resume(
-              ResultNeedKey.Response(
-                result
-                  .map(fci =>
-                    ResultNeedKey.Response.AuthenticableFatContractInstance(
-                      fci,
-                      Hash.HashingMethod.TypedNormalForm,
-                      _ => true,
+            case Result.Need.Key(key, n, mbToken) =>
+              for {
+                keyContracts <- mbToken match {
+                  case NeedKeyProgression.Unstarted =>
+                    disclosedKeyContracts.get(key) match {
+                      case Some(contract) => Future.successful(contract)
+                      case None =>
+                        keyResolver
+                          .lookupKey(key)
+                          .failOnShutdownToAbortException("test submit transaction")
+                    }
+                  case NeedKeyProgression.InProgress(ContinuationToken(rest)) =>
+                    Future.successful(rest)
+                  case _ => throw new IllegalStateException("unexpected continuation token")
+                }
+                (result, rest) = keyContracts.splitAt(n)
+                hasStarted: NeedKeyProgression.HasStarted =
+                  if (rest.nonEmpty) NeedKeyProgression.InProgress(ContinuationToken(rest))
+                  else NeedKeyProgression.Finished
+                r <- drive(
+                  im.resume(
+                    Result.Need.Key.Response(
+                      result
+                        .map(fci =>
+                          Result.Need.Key.Response.AuthenticableFatContractInstance(
+                            fci,
+                            Hash.HashingMethod.TypedNormalForm,
+                            _ => true,
+                          )
+                        ),
+                      hasStarted,
                     )
-                  ),
-                hasStarted,
+                  )
+                )
+              } yield r
+
+            case Result.Need.Interruption(_) =>
+              drive(iterateOverInterrupts(im.resume(())))
+
+            case Result.Need.Prefetch(_, _) =>
+              drive(im.resume(()))
+
+            // TODO(https://github.com/digital-asset/canton/issues/564): skip external calls in
+            // tests, or mock the response instead?
+            case Result.Need.ExternalCall(extensionId, functionId, _, _) =>
+              Future.successful(
+                Left(
+                  Error.Interpretation(
+                    Error.Interpretation.Internal(
+                      "test",
+                      s"External calls are not supported in TestSubmissionService: extension=$extensionId, function=$functionId",
+                      None,
+                    ),
+                    None,
+                  )
+                )
               )
-            ),
-          )
-        } yield r
+          }
+      }
 
-      case ResultInterruption(continue, _) =>
-        resolve(disclosedContracts, disclosedKeyContracts, iterateOverInterrupts(continue))
-
-      case ResultPrefetch(_, _, resume) =>
-        resolve(disclosedContracts, disclosedKeyContracts, resume())
-
-      // TODO(https://github.com/digital-asset/canton/issues/564): Double-check whether
-      // tests using this helper can safely skip external calls, or whether this should
-      // mock the external-call response instead.
-      case ResultNeedExternalCall(extensionId, functionId, _, _, _) =>
-        Future.successful(
-          Left(
-            Error.Interpretation(
-              Error.Interpretation.Internal(
-                "test",
-                s"External calls are not supported in TestSubmissionService: extension=$extensionId, function=$functionId",
-                None,
-              ),
-              None,
-            )
-          )
-        )
-    }
+    drive(result.start)
   }
 }
 

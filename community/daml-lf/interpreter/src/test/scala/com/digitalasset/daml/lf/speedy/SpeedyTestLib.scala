@@ -139,9 +139,10 @@ private[speedy] object SpeedyTestLib {
   }
 
   @throws[ValidationError]
-  def typeAndCompile(
+  def typeAndCompile_(
       majorLanguageVersion: LanguageVersion.Major,
       pkgs: Map[PackageId, Ast.Package],
+      cmdMode: Boolean = false,
   ): PureCompiledPackages = {
     require(
       pkgs.values.forall(pkg => pkg.languageVersion.major == majorLanguageVersion), {
@@ -159,16 +160,20 @@ private[speedy] object SpeedyTestLib {
     PureCompiledPackages.assertBuild(
       pkgs,
       Compiler.Config.Dev
-        .copy(stacktracing = Compiler.FullStackTrace),
+        .copy(
+          stacktracing = Compiler.FullStackTrace,
+          cmdMode = cmdMode,
+        ),
     )
   }
 
   @throws[ValidationError]
-  def typeAndCompile[X](pkg: Ast.Package)(implicit
+  def typeAndCompile[X](pkg: Ast.Package, cmdMode: Boolean = false)(implicit
       parserParameter: ParserParameters[X]
   ): PureCompiledPackages =
-    typeAndCompile(
+    typeAndCompile_(
       pkg.languageVersion.major,
       StablePackages.stablePackages.packagesMap + (parserParameter.defaultPackageId -> pkg),
+      cmdMode = cmdMode,
     )
 }

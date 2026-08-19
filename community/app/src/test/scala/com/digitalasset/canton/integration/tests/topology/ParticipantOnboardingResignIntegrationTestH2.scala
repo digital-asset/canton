@@ -57,7 +57,7 @@ final class ParticipantOnboardingResignIntegrationTestH2
       }
 
   "A participant onboarding to a synchronizer with a different topology protocol version" should {
-    // TODO(i33335): enable this test.
+    // TODO(i32231): enable this test.
     "re-sign its onboarding transactions and become active" ignore { implicit env =>
       import env.*
 

@@ -87,7 +87,7 @@ trait CantonBaseError extends BaseError {
 
   def log()(implicit loggingContext: ErrorLoggingContext): Unit = logWithContext()(loggingContext)
 
-  def asGrpcError(implicit loggingContext: ErrorLoggingContext): StatusRuntimeException =
+  def toGrpcError(implicit loggingContext: ErrorLoggingContext): StatusRuntimeException =
     ErrorCode.asGrpcError(this)(loggingContext)
 
   def asGoogleGrpcStatus(implicit loggingContext: ErrorLoggingContext): com.google.rpc.Status =
@@ -96,7 +96,7 @@ trait CantonBaseError extends BaseError {
   def toCantonRpcError(implicit loggingContext: ErrorLoggingContext): RpcError = {
     val base = this
     GenericCantonRpcError(
-      asGrpcError = base.asGrpcError(loggingContext),
+      asGrpcError = base.toGrpcError(loggingContext),
       cause = base.cause,
       asGrpcStatus = base.asGoogleGrpcStatus,
       code = base.code,

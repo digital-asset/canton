@@ -27,7 +27,7 @@ import com.digitalasset.canton.error.MediatorError.{
   MalformedMessage,
   ParticipantEquivocation,
 }
-import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.NoSynchronizerOnWhichAllSubmittersCanSubmit
+import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.DecentralizedPartyCannotSubmit
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
@@ -1648,8 +1648,10 @@ trait LedgerAuthorizationIntegrationTest
       val createCommand = simpleCreateCmd(List(decentralizedParty))
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         participant1.ledger_api.commands.submit(Seq(decentralizedParty), createCommand),
-        _.errorMessage should (include(NoSynchronizerOnWhichAllSubmittersCanSubmit.id) and include(
-          "This participant cannot submit as the given submitter on any connected synchronizer"
+        _.errorMessage should (include(
+          DecentralizedPartyCannotSubmit.id
+        ) and include(
+          "Submission is not supported for parties that are hosted with Submission permission and have a confirmation threshold greater than 1"
         )),
       )
 

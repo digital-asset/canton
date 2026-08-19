@@ -95,7 +95,7 @@ class DbTrafficPurchasedStore(
               pp >> balance.value.serial
             },
             functionFullName,
-          )(traceContext, callerCloseContext, implicitly)
+          )(traceContext, callerCloseContext)
           .map(_ => Seq.fill(items.size)(()))
       }
 

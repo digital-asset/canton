@@ -49,7 +49,6 @@ import org.slf4j.event.Level
 
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
-import scala.collection.mutable
 
 class AvailabilityModuleDisseminationTest
     extends AnyWordSpec
@@ -527,12 +526,12 @@ class AvailabilityModuleDisseminationTest
           initialEpochNumber = initialEpochNumber,
         )
 
-      loggerFactory.assertLogs(
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
         availability.receive(
           RemoteDissemination.RemoteBatch.create(ABatchId, ABatch, from = Node1)
         ),
         log => {
-          log.level shouldBe Level.WARN
+          log.level shouldBe Level.INFO
           log.message should include regex
             """Batch BatchId\([^)]+\) from 'node1' contains an expired batch at epoch number 0 which is 500 epochs or more older than last known epoch 501, skipping"""
         },
@@ -543,13 +542,13 @@ class AvailabilityModuleDisseminationTest
         EpochNumber(initialEpochNumber + OrderingRequestBatch.BatchValidityDurationEpochs * 2),
       )
 
-      loggerFactory.assertLogs(
+      loggerFactory.assertLogs(rule = SuppressionRule.LevelAndAbove(Level.INFO))(
         availability.receive(
           RemoteDissemination.RemoteBatch
             .create(BatchId.from(tooFarInTheFutureBatch), tooFarInTheFutureBatch, from = Node1)
         ),
         log => {
-          log.level shouldBe Level.WARN
+          log.level shouldBe Level.INFO
           log.message should include regex
             """Batch BatchId\([^)]+\) from 'node1' contains a batch whose epoch number 1501 is too far in the future compared to last known epoch 501, skipping"""
         },
@@ -627,7 +626,7 @@ class AvailabilityModuleDisseminationTest
       canAcceptBatch(secondBatchId) shouldBe false
 
       // once the batch data is retrieved (and ready to send to output module), the spot becomes available
-      val request = new BatchesRequest(block, mutable.SortedSet(ABatchId), traceContext)
+      val request = new OrderedBlockBatchesRequest(block, traceContext)
       availability.receive(
         Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
           request,

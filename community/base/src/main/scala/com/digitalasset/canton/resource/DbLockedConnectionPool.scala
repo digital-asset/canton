@@ -184,11 +184,11 @@ class DbLockedConnectionPool private (
 
     logger.trace(s"Closing pool connections")
     LifeCycle.close(
-      (transitionOrFail(
+      transitionOrFail(
         classOf[State.Active].getSimpleName,
         getActiveState(_),
         State.Passive,
-      ).pool)*
+      ).pool
     )(logger)
   }
 
@@ -324,7 +324,7 @@ class DbLockedConnectionPool private (
   override def onClosed(): Unit =
     stateRef.get() match {
       case State.Active(pool) =>
-        LifeCycle.close(execQueue +: pool :+ mainConnection :+ mainExecutor :+ ds: _*)(logger)
+        LifeCycle.close(execQueue +: pool :+ mainConnection :+ mainExecutor :+ ds)(logger)
       case State.Passive =>
         LifeCycle.close(execQueue, mainConnection, mainExecutor, ds)(logger)
     }

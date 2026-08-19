@@ -4,22 +4,40 @@
 package com.digitalasset.daml.lf
 package interpretation
 
-case class Limits(
+final case class Limits(
     contractSignatories: Int,
-    contractObservers: Int,
-    choiceControllers: Int,
+    contractStakeholders: Int,
+    keyMaintainers: Int,
+    valueSize: Int,
+    actingParties: Int,
     choiceObservers: Int,
     choiceAuthorizers: Int,
+    externalCallResults: Int,
+    externalCallResultSize: Int,
+    nodeChildren: Int,
+    queryResult: Int,
     transactionInputContracts: Int,
+    transactionRoots: Int,
+    transactionNodes: Int,
+    totalInformees: Long,
 )
 
 object Limits {
   val Lenient = Limits(
     contractSignatories = Int.MaxValue,
-    contractObservers = Int.MaxValue,
-    choiceControllers = Int.MaxValue,
+    contractStakeholders = Int.MaxValue,
+    keyMaintainers = Int.MaxValue,
+    valueSize = Int.MaxValue,
+    actingParties = Int.MaxValue,
     choiceObservers = Int.MaxValue,
     choiceAuthorizers = Int.MaxValue,
+    externalCallResults = Int.MaxValue,
+    externalCallResultSize = Int.MaxValue,
+    nodeChildren = Int.MaxValue,
+    queryResult = Int.MaxValue,
     transactionInputContracts = Int.MaxValue,
+    transactionRoots = Int.MaxValue,
+    transactionNodes = Int.MaxValue,
+    totalInformees = Long.MaxValue,
   )
 }

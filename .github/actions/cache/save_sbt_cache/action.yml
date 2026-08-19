@@ -1,0 +1,83 @@
+name: Save SBT cache
+description: Save Ivy and SBT caches
+
+inputs:
+  ivy-cache-hit:
+    description: Whether ivy cache had an exact hit on restore
+    required: false
+    default: "false"
+  ivy-cache-matched-key:
+    description: Matched ivy cache key from restore
+    required: false
+    default: ""
+  sbt-cache-hit:
+    description: Whether sbt cache had an exact hit on restore
+    required: false
+    default: "false"
+  sbt-cache-matched-key:
+    description: Matched sbt cache key from restore
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Compute build hash
+      id: compute_hash
+      uses: ./.github/actions/cache/compute_build_hash
+
+    - name: Check if ivy cache is up to date
+      id: ivy_up_to_date
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: |
+          ./scripts/ci/check_cache_update_needed.sh \
+            "${{ steps.compute_hash.outputs.hash }}" \
+            "${{ inputs.ivy-cache-hit }}" \
+            "${{ inputs.ivy-cache-matched-key }}"
+        output-name: cache-up-to-date
+
+    - name: Save Ivy cache
+      id: save_ivy
+      if: steps.ivy_up_to_date.outputs.result != 'true'
+      # Best-effort: parallel jobs can race on identical cache keys.
+      continue-on-error: true
+      uses: ./.github/actions/cache/save_cache
+      with:
+        path: ~/.ivy2/cache/
+        key: >-
+          sbt-ivy-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+
+    - name: Warn on Ivy cache save failure
+      if: steps.save_ivy.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::Failed to save Ivy cache (best-effort). Check cache key, size limits, and permissions."
+
+    - name: Check if sbt cache is up to date
+      id: sbt_up_to_date
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: |
+          ./scripts/ci/check_cache_update_needed.sh \
+            "${{ steps.compute_hash.outputs.hash }}" \
+            "${{ inputs.sbt-cache-hit }}" \
+            "${{ inputs.sbt-cache-matched-key }}"
+        output-name: cache-up-to-date
+
+    - name: Save SBT cache
+      id: save_sbt
+      if: steps.sbt_up_to_date.outputs.result != 'true'
+      # Best-effort: parallel jobs can race on identical cache keys.
+      continue-on-error: true
+      uses: ./.github/actions/cache/save_cache
+      with:
+        path: ~/.sbt/
+        key: >-
+          sbt-home-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+
+    - name: Warn on SBT cache save failure
+      if: steps.save_sbt.outcome == 'failure'
+      shell: bash
+      run: |
+        echo "::warning::Failed to save SBT cache (best-effort). Check cache key, size limits, and permissions."

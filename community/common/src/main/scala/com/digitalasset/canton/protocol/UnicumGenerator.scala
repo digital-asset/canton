@@ -6,6 +6,7 @@ package com.digitalasset.canton.protocol
 import cats.syntax.either.*
 import com.digitalasset.canton.crypto.{Hash, HashOps, HashPurpose, HmacOps, Salt}
 import com.digitalasset.canton.serialization.DeterministicEncoding
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Versioned}
 import com.google.common.annotations.VisibleForTesting
@@ -216,7 +217,13 @@ class UnicumGenerator(cryptoOps: HashOps & HmacOps) {
           contractInstance.contractKeyWithMaintainers.map(Versioned(contractInstance.version, _)),
       )
       authenticationData <- ContractAuthenticationData
-        .fromLfBytes(cantonContractIdVersion, contractInstance.authenticationData)
+        .fromLfBytes(
+          // TODO(#23971) V1 authentication data has no bounded field, and the caller is built
+          //  participant-wide, so there is no negotiated pvv to gate on; thread one with V2 support.
+          ProtocolVersionValidation.NoValidation,
+          cantonContractIdVersion,
+          contractInstance.authenticationData,
+        )
         .leftMap(err => s"Failed to decode canton metadata: $err")
       createdAt <- contractInstance.createdAt match {
         case createdAt: CreationTime.CreatedAt =>

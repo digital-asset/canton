@@ -28,7 +28,7 @@ sealed trait CommandInterpretationIntegrationTest
       .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(
           // Increase granularity of interruptions so that the (short) Ping command gets
-          // some `ResultInterruption`s during interpretation before completing.
+          // some `Result.Need.Interruption`s during interpretation before completing.
           // We have had to previously lower this setting to 50 after the engine had
           // become more efficient and needed fewer cycles for a ping.
           _.focus(_.parameters.engine.iterationsBetweenInterruptions).replace(50)

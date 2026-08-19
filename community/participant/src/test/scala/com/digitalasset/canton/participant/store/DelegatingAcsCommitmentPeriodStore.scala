@@ -60,20 +60,15 @@ class DelegatingAcsCommitmentPeriodStore(delegate: AcsCommitmentPeriodStore & Na
   ): FutureUnlessShutdown[immutable.Iterable[MatchedCommitmentMatchPeriod]] =
     delegate.lookupMatched(periods)
 
-  override def watermarks()(implicit
+  override def watermark()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[AcsCommitmentPeriodStore.MatchingWatermark] =
-    delegate.watermarks()
+    delegate.watermark()
 
-  override def increaseInsertionWatermark(watermark: CantonTimestamp, affirmationOnly: Boolean)(
-      implicit traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    delegate.increaseInsertionWatermark(watermark, affirmationOnly)
-
-  override def increaseMatcherWatermark(offset: Offset)(implicit
+  override def increaseWatermark(offset: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    delegate.increaseMatcherWatermark(offset)
+    delegate.increaseWatermark(offset)
 
   override def markOutstanding(digests: immutable.Iterable[OutstandingCommitmentMatchPeriod])(
       implicit traceContext: TraceContext
@@ -95,8 +90,10 @@ class DelegatingAcsCommitmentPeriodStore(delegate: AcsCommitmentPeriodStore & Na
       insertMatched,
     )
 
-  override def checkInvariant()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    delegate.checkInvariant()
+  override def checkInvariant(affirmationWatermark: Option[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    delegate.checkInvariant(affirmationWatermark)
 
   override def deleteOutstandingAfter(fromExclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -107,6 +104,9 @@ class DelegatingAcsCommitmentPeriodStore(delegate: AcsCommitmentPeriodStore & Na
       implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Int] =
     delegate.doPruneInternal(limit, lastPruning)
+
+  override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    delegate.purge()
 
   override protected implicit val ec: ExecutionContext = delegate.ecInternal
 
@@ -119,4 +119,6 @@ class DelegatingAcsCommitmentPeriodStore(delegate: AcsCommitmentPeriodStore & Na
       implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
     delegate.advancePruningTimestampInternal(phase, timestamp)
+
+  override def close(): Unit = delegate.close()
 }

@@ -467,13 +467,10 @@ private[reassignment] class UnassignmentProcessingSteps(
     val fullTree: FullUnassignmentTree = parsedRequest.fullViewTree
     val requestCounter = parsedRequest.rc
 
-    val isReassigningParticipant = fullTree.isReassigningParticipant(participantId)
-    if (isReassigningParticipant) {
-      reassignmentCoordination.addPendingUnassignment(
-        parsedRequest.reassignmentId,
-        fullTree.sourceSynchronizer.map(_.logical),
-      )
-    }
+    reassignmentCoordination.addPendingUnassignment(
+      parsedRequest.reassignmentId,
+      fullTree.sourceSynchronizer.map(_.logical),
+    )
 
     val unassignmentValidation = new UnassignmentValidation(
       participantId,
@@ -567,7 +564,7 @@ private[reassignment] class UnassignmentProcessingSteps(
       trafficCost,
     ) = pendingRequestData
 
-    val isReassigningParticipant = unassignmentValidationResult.assignmentExclusivity.isDefined
+    val isReassigningParticipant = unassignmentValidationResult.isReassigningParticipant
     val pendingSubmissionData = pendingSubmissionMap.get(unassignmentValidationResult.rootHash)
     def rejected(
         errorDetails: ErrorDetails
@@ -640,15 +637,12 @@ private[reassignment] class UnassignmentProcessingSteps(
           val unassignmentData = unassignmentValidationResult.unassignmentData
           for {
             _ <- ifThenET(isReassigningParticipant) {
-              reassignmentCoordination
-                .addUnassignmentRequest(unassignmentData)
-                .map { _ =>
-                  reassignmentCoordination.completeUnassignment(
-                    unassignmentValidationResult.reassignmentId,
-                    unassignmentValidationResult.sourceSynchronizer,
-                  )
-                }
+              reassignmentCoordination.addUnassignmentRequest(unassignmentData)
             }
+            _ = reassignmentCoordination.completeUnassignment(
+              unassignmentValidationResult.reassignmentId,
+              unassignmentValidationResult.sourceSynchronizer,
+            )
 
             notInitiator = pendingSubmissionData.isEmpty
             _ <-

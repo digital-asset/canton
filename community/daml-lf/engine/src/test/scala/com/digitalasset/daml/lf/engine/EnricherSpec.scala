@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.daml.lf.engine.Result.lookupHandler
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.language.Ast.{TNat, TTyCon, Type}
 import com.digitalasset.daml.lf.language.Util.*
@@ -159,7 +160,7 @@ class EnricherSpec
   def preloadPackage(pkgId: Ref.PackageId, pkg: Ast.Package): Unit =
     engine
       .preloadPackage(pkgId, pkg)
-      .consume()
+      .consume(lookupHandler())
       .left
       .foreach(err => sys.error(err.message))
 
@@ -241,7 +242,7 @@ class EnricherSpec
     "enriches values as expected" in {
       val enricher = Enricher(engine)
       forEvery(testCases) { (typ, input, output) =>
-        enricher.enrichValue(typ, input) shouldBe ResultDone(output)
+        enricher.enrichValue(typ, input) shouldBe Result.done(output)
       }
     }
 
@@ -268,7 +269,7 @@ class EnricherSpec
         ),
       )
       forEvery(testCases) { (typ, input, output) =>
-        enricher.enrichValue(typ, input) shouldBe ResultDone(output)
+        enricher.enrichValue(typ, input) shouldBe Result.done(output)
       }
     }
 
@@ -290,7 +291,7 @@ class EnricherSpec
       )
 
       forEvery(testCases) { (typ, input) =>
-        inside(enricher.enrichValue(typ, input)) { case ResultError(err) =>
+        inside(enricher.enrichValue(typ, input).start) { case Result.Step.Error(err) =>
           err.message.toLowerCase() should include("null character")
         }
       }
@@ -305,15 +306,25 @@ class EnricherSpec
 
       val TNat = TTyCon("Mod:Nat")
 
-      enricher.enrichValue(
-        TList(TNat),
-        ValueList(List.range(0, 99).map(toNat).to(FrontStack)),
-      ) shouldBe a[ResultDone[?]]
-      enricher.enrichValue(TNat, toNat(100)) shouldBe a[ResultError]
-      enricher.enrichValue(
-        TList(TNat),
-        ValueList(List.range(0, 101).map(toNat).to(FrontStack)),
-      ) shouldBe a[ResultError]
+      inside(
+        enricher
+          .enrichValue(
+            TList(TNat),
+            ValueList(List.range(0, 99).map(toNat).to(FrontStack)),
+          )
+          .start
+      ) { case data.Freer.Step.Pure(_) => succeed }
+      inside(enricher.enrichValue(TNat, toNat(100)).start) { case data.Freer.Step.Error(_) =>
+        succeed
+      }
+      inside(
+        enricher
+          .enrichValue(
+            TList(TNat),
+            ValueList(List.range(0, 101).map(toNat).to(FrontStack)),
+          )
+          .start
+      ) { case data.Freer.Step.Error(_) => succeed }
     }
   }
 
@@ -424,8 +435,8 @@ class EnricherSpec
       )
 
       enricher.enrichVersionedTransaction(inputTransaction) shouldNot
-        be(ResultDone(inputTransaction))
-      enricher.enrichVersionedTransaction(inputTransaction) shouldBe ResultDone(outputTransaction)
+        be(Result.done(inputTransaction))
+      enricher.enrichVersionedTransaction(inputTransaction) shouldBe Result.done(outputTransaction)
 
     }
 
@@ -446,9 +457,9 @@ class EnricherSpec
       val tEnum = TTyCon("Mod:Enum")
       val normalizedEnum = ValueEnum(None, "value1")
 
-      enrichValue(tRecord, normalizedRecord) shouldBe ResultDone(enrichedRecord)
-      enrichValue(tVariant, normalizedVariant) shouldBe ResultDone(normalizedVariant)
-      enrichValue(tEnum, normalizedEnum) shouldBe ResultDone(normalizedEnum)
+      enrichValue(tRecord, normalizedRecord) shouldBe Result.done(enrichedRecord)
+      enrichValue(tVariant, normalizedVariant) shouldBe Result.done(normalizedVariant)
+      enrichValue(tEnum, normalizedEnum) shouldBe Result.done(normalizedEnum)
     }
 
     // enrichContractWithPackages test cases
@@ -474,8 +485,8 @@ class EnricherSpec
       "enriches a fat contract instance with packages that agree on the enrichment" in {
         // pkgId1 and pkgId2 agree on the enrichment
         val expectedPkgId = Order[PackageId].min(pkgId1, pkgId2)
-        inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId2))) {
-          case ResultDone(Right(enriched)) =>
+        inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId2)).start) {
+          case Result.Step.Pure(Right(enriched)) =>
             enriched.createArg shouldBe ValueRecord[Nothing](
               Some(Ref.TypeConId(expectedPkgId, "M:T")),
               ImmArray("p" -> ValueParty(alice)),
@@ -485,8 +496,8 @@ class EnricherSpec
 
       "fails to enrich a fat contract instance with packages that disagree on the enrichment" in {
         // pkgId1 and pkgId3 disagree on the enrichment
-        inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId3))) {
-          case ResultDone(result) =>
+        inside(enrich.enrichContractWithPackages(fcoinst, NonEmptySet.of(pkgId1, pkgId3)).start) {
+          case Result.Step.Pure(result) =>
             result shouldBe a[Left[?, ?]]
         }
       }
@@ -552,12 +563,8 @@ class EnricherSpec
         }
         val enricher = Enricher(Engine.DevEngine(loggerFactory))
 
-        val result = for {
-          _ <- ResultDone.Unit
-          _ <- enricher.enrichVersionedTransaction(largeTx)
-          _ <- ResultDone.Unit
-        } yield ()
-        result.consume(pkgs = Map(defaultPackageId -> pkg))
+        val result = enricher.enrichVersionedTransaction(largeTx).void
+        result.consume(lookupHandler(pkgs = Map(defaultPackageId -> pkg)))
         succeed
       }
     }

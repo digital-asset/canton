@@ -25,8 +25,23 @@ class SignatureSpec extends AnyWordSpec with Matchers {
         val jwtPayload = """{"dummy":"dummy"}"""
         val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
 
-        val signedJwt = JwtSigner.HMAC256
-          .sign(jwt, secret)
+        val signedJwt = JwtSigner
+          .HMAC256(secret)
+          .sign(jwt)
+          .assertRight
+        val verifier = HMAC256Verifier(secret).assertRight
+        verifier
+          .verify(signedJwt)
+          .assertRight
+      }
+
+      "work with just a payload" in {
+        val secret = "secret key"
+        val jwtPayload = """{"dummy":"dummy"}"""
+
+        val signedJwt = JwtSigner
+          .HMAC256(secret)
+          .signPayload(jwtPayload)
           .assertRight
         val verifier = HMAC256Verifier(secret).assertRight
         verifier
@@ -36,13 +51,12 @@ class SignatureSpec extends AnyWordSpec with Matchers {
 
       "fail with an invalid secret" in {
         val secret = "secret key"
-        val jwtHeader = """{"alg": "HS256", "typ": "JWT"}"""
         val jwtPayload = """{"dummy":"dummy"}"""
-        val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
 
         val success = {
-          val signedJwt = JwtSigner.HMAC256
-            .sign(jwt, secret)
+          val signedJwt = JwtSigner
+            .HMAC256(secret)
+            .signPayload(jwtPayload)
             .assertRight
           val verifier = HMAC256Verifier("invalid " + secret).assertRight
           verifier
@@ -65,12 +79,11 @@ class SignatureSpec extends AnyWordSpec with Matchers {
         val privateKey = keyPair.getPrivate.asInstanceOf[RSAPrivateKey]
         val publicKey = keyPair.getPublic.asInstanceOf[RSAPublicKey]
 
-        val jwtHeader = """{"alg": "RS256", "typ": "JWT"}"""
         val jwtPayload = """{"dummy":"dummy"}"""
-        val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
 
-        val signedJwt = JwtSigner.RSA256
-          .sign(jwt, privateKey)
+        val signedJwt = JwtSigner
+          .RSA256(privateKey)
+          .signPayload(jwtPayload)
           .assertRight
         val verifier = RSA256Verifier(publicKey).assertRight
         verifier
@@ -87,12 +100,11 @@ class SignatureSpec extends AnyWordSpec with Matchers {
         val keyPair2 = kpg.generateKeyPair()
         val publicKey = keyPair2.getPublic.asInstanceOf[RSAPublicKey]
 
-        val jwtHeader = """{"alg": "RS256", "typ": "JWT"}"""
         val jwtPayload = """{"dummy":"dummy"}"""
-        val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
 
-        val signedJwt = JwtSigner.RSA256
-          .sign(jwt, privateKey)
+        val signedJwt = JwtSigner
+          .RSA256(privateKey)
+          .signPayload(jwtPayload)
           .assertRight
         val verifier = RSA256Verifier(publicKey).assertRight
         verifier
@@ -113,12 +125,11 @@ class SignatureSpec extends AnyWordSpec with Matchers {
         val privateKey = keyPair.getPrivate.asInstanceOf[ECPrivateKey]
         val publicKey = keyPair.getPublic.asInstanceOf[ECPublicKey]
 
-        val jwtHeader = """{"alg": "ES256", "typ": "JWT"}"""
         val jwtPayload = """{"dummy":"dummy"}"""
-        val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
 
-        val signedJwt = JwtSigner.ECDSA
-          .sign(jwt, privateKey, Algorithm.ECDSA256(null, _))
+        val signedJwt = JwtSigner
+          .ES256(privateKey)
+          .signPayload(jwtPayload)
           .assertRight
         val verifier = ECDSAVerifier(Algorithm.ECDSA256(publicKey, null)).assertRight
         verifier
@@ -136,12 +147,11 @@ class SignatureSpec extends AnyWordSpec with Matchers {
         val keyPair2: KeyPair = kpg.generateKeyPair()
         val publicKey2 = keyPair2.getPublic.asInstanceOf[ECPublicKey]
 
-        val jwtHeader = """{"alg": "ES256", "typ": "JWT"}"""
         val jwtPayload = """{"dummy":"dummy"}"""
-        val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
         val success = {
-          val signedJwt = JwtSigner.ECDSA
-            .sign(jwt, privateKey1, Algorithm.ECDSA256(null, _))
+          val signedJwt = JwtSigner
+            .ES256(privateKey1)
+            .signPayload(jwtPayload)
             .assertRight
           val verifier = ECDSAVerifier(Algorithm.ECDSA256(publicKey2, null)).assertRight
           verifier
@@ -164,11 +174,10 @@ class SignatureSpec extends AnyWordSpec with Matchers {
         val privateKey = keyPair.getPrivate.asInstanceOf[ECPrivateKey]
         val publicKey = keyPair.getPublic.asInstanceOf[ECPublicKey]
 
-        val jwtHeader = """{"alg": "ES512", "typ": "JWT"}"""
         val jwtPayload = """{"dummy":"dummy"}"""
-        val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
-        val signedJwt = JwtSigner.ECDSA
-          .sign(jwt, privateKey, Algorithm.ECDSA512(null, _))
+        val signedJwt = JwtSigner
+          .ES512(privateKey)
+          .signPayload(jwtPayload)
           .assertRight
 
         val verifier = ECDSAVerifier(Algorithm.ECDSA512(publicKey, null)).assertRight
@@ -187,12 +196,11 @@ class SignatureSpec extends AnyWordSpec with Matchers {
         val keyPair2: KeyPair = kpg.generateKeyPair()
         val publicKey2 = keyPair2.getPublic.asInstanceOf[ECPublicKey]
 
-        val jwtHeader = """{"alg": "ES512", "typ": "JWT"}"""
         val jwtPayload = """{"dummy":"dummy"}"""
-        val jwt = DecodedJwt[String](jwtHeader, jwtPayload)
         val success = {
-          val signedJwt = JwtSigner.ECDSA
-            .sign(jwt, privateKey1, Algorithm.ECDSA512(null, _))
+          val signedJwt = JwtSigner
+            .ES512(privateKey1)
+            .signPayload(jwtPayload)
             .assertRight
           val verifier = ECDSAVerifier(Algorithm.ECDSA512(publicKey2, null)).assertRight
           verifier

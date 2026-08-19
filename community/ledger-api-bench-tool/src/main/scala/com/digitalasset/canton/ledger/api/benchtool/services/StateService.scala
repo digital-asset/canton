@@ -52,6 +52,6 @@ final class StateService(
     }
 
   def getLedgerEnd()(implicit ec: ExecutionContext): Future[Long] = for {
-    response <- service.getLedgerEnd(new GetLedgerEndRequest())
+    response <- service.getLedgerEnd(new GetLedgerEndRequest(Seq()))
   } yield response.offset
 }

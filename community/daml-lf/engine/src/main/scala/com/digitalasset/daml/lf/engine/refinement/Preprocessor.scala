@@ -10,7 +10,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.command.{ApiContractKey, ReplayCommand}
 import com.digitalasset.daml.lf.data.{CostModel, ImmArray, Ref}
-import com.digitalasset.daml.lf.language.{Ast, LookupError}
+import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
@@ -32,8 +32,8 @@ import com.digitalasset.daml.lf.value.Value
   *
   * @param compiledPackages
   *   a [[MutableCompiledPackages]] contains the Daml-LF package definitions against the command
-  *   should resolved/typechecked. It is updated dynamically each time the [[ResultNeedPackage]]
-  *   continuation is called.
+  *   should resolved/typechecked. It is updated dynamically each time a [[Result.Need.Package]]
+  *   question is answered.
   * @param forbidLocalContractIds
   *   when `true` the preprocessor will reject any value/command/transaction that contains a local
   *   Contract ID.
@@ -65,9 +65,9 @@ private[engine] final class Preprocessor(
 
   def getInputCost(implicit traceContext: TraceContext): Result[CostModel.Cost] =
     if (inputCost <= maxInputCost) {
-      ResultDone(inputCost)
+      Result.done(inputCost)
     } else {
-      ResultError(
+      Result.error(
         Error.Preprocessing.Internal(
           NameOf.qualifiedNameOfCurrentFunc,
           "Preprocessing input cost budget exceeded",
@@ -107,9 +107,8 @@ private[engine] final class Preprocessor(
       commandPreprocessor.unsafePreprocessApiCommand(pkgResolution, cmd)
     }
 
-  private[lf] val EmptyPackageResolution: Result[Map[Ref.PackageName, Ref.PackageId]] = ResultDone(
-    Map.empty
-  )
+  private[lf] val EmptyPackageResolution: Result[Map[Ref.PackageName, Ref.PackageId]] =
+    Result.done(Map.empty)
 
   def buildPackageResolution(
       packageMap: Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)] = Map.empty,
@@ -121,15 +120,15 @@ private[engine] final class Preprocessor(
     packagePreference.foldLeft(EmptyPackageResolution)((acc, pkgId) =>
       for {
         pkgName <- packageMap.get(pkgId) match {
-          case Some((pkgName, _)) => ResultDone(pkgName)
+          case Some((pkgName, _)) => Result.done(pkgName)
           case None =>
-            ResultError(Error.Preprocessing.Lookup(language.LookupError.MissingPackage(pkgId)))
+            Result.error(Error.Preprocessing.Lookup(language.LookupError.MissingPackage(pkgId)))
         }
         m <- acc
         _ <- m.get(pkgName) match {
-          case None => Result.Unit
+          case None => Result.unit
           case Some(pkgId0) =>
-            ResultError(
+            Result.error(
               Error.Preprocessing.Internal(
                 NameOf.qualifiedNameOfCurrentFunc,
                 s"package $pkgId0 and $pkgId have the same name $pkgName",
@@ -231,7 +230,7 @@ private[engine] final class Preprocessor(
     updateInputCost(prefetchKeys.map(_._1))
 
     safelyRun(
-      ResultError(
+      Result.error(
         Error.Preprocessing.Internal(
           NameOf.qualifiedNameOfCurrentFunc,
           "unsafePrefetchKeys should not need packages",
@@ -244,8 +243,9 @@ private[engine] final class Preprocessor(
       (keysToPrefetch, contractIdsToPrefetch)
     }.flatMap { case (keysToPrefetch, contractIdsToPrefetch) =>
       if (keysToPrefetch.nonEmpty || contractIdsToPrefetch.nonEmpty)
-        ResultPrefetch(contractIdsToPrefetch.toSeq, keysToPrefetch, () => Result.Unit)
-      else Result.Unit
+        Result.needPrefetch(contractIdsToPrefetch.toSeq, keysToPrefetch)
+      else
+        Result.unit
     }
   }
 
@@ -298,18 +298,15 @@ private[lf] object Preprocessor {
     new Preprocessor(
       pkgs,
       (pkgId, _) =>
-        ResultNeedPackage(
-          pkgId,
-          {
-            case Some(pkg) => pkgs.addPackage(pkgId, pkg)
+        for {
+          pkgO <- Result.needPackage(pkgId)
+          pkg <- pkgO match {
+            case Some(pkg) => Result.done(pkg)
             case None =>
-              ResultError(
-                Error.Preprocessing(
-                  Error.Preprocessing.Lookup(LookupError.MissingPackage(pkgId))
-                )
-              )
-          },
-        ),
+              Result.error(Error.Preprocessing.Lookup(language.LookupError.MissingPackage(pkgId)))
+          }
+          result <- pkgs.addPackage(pkgId, pkg)
+        } yield result,
       loggerFactory = loggerFactory,
     )
 

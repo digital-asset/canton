@@ -14,9 +14,12 @@ import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
 import com.digitalasset.canton.participant.store.{
+  AcsCommitmentPeriodStore,
+  AcsCommitmentSenderWatermarkStore,
   AcsCounterParticipantConfigStore,
   AcsDigestStore,
   AcsInspection,
+  BatchingAcsDigestStore,
   ContractStore,
   LogicalSyncPersistentState,
   PhysicalSyncPersistentState,
@@ -82,13 +85,38 @@ class DbLogicalSyncPersistentState(
     parameters.batchingConfig,
   )
 
-  override def acsDigestStore: AcsDigestStore = new DbAcsDigestStore(
+  override val acsDigestStore: AcsDigestStore = {
+    val underlying = new DbAcsDigestStore(
+      synchronizerIdx,
+      ledgerApiStore.map(_.stringInterningView),
+      storage,
+      loggerFactory,
+      timeouts,
+    )
+    new BatchingAcsDigestStore(
+      underlying,
+      parameters.acsCommitments.loadBatching,
+      timeouts,
+      loggerFactory,
+    )
+  }
+
+  override val acsCommitmentPeriodStore: AcsCommitmentPeriodStore = new DbAcsCommitmentPeriodStore(
+    storage,
     synchronizerIdx,
     ledgerApiStore.map(_.stringInterningView),
-    storage,
-    loggerFactory,
     timeouts,
+    loggerFactory,
+    enableAdditionalConsistencyChecks,
   )
+
+  override val acsCommitmentSenderWatermarkStore: AcsCommitmentSenderWatermarkStore =
+    new DbAcsCommitmentSenderWatermarkStore(
+      storage,
+      timeouts,
+      loggerFactory,
+      synchronizerIdx,
+    )
 
   override val acsInspection: AcsInspection =
     new AcsInspection(
@@ -129,13 +157,17 @@ class DbLogicalSyncPersistentState(
       )
     )
 
-  override def close(): Unit =
-    LifeCycle.close(
+  override def close(): Unit = {
+    val toClose = Seq(
       activeContractStore,
       acsCommitmentStore,
+      acsDigestStore,
+      acsCommitmentPeriodStore,
       reassignmentStore,
       pendingOnboardingClearanceStore,
-    )(logger)
+    ) ++ partyReplicationIndexingStoreIfOnPREnabled.toList
+    LifeCycle.close(toClose)(logger)
+  }
 }
 
 class DbPhysicalSyncPersistentState(
@@ -158,13 +190,13 @@ class DbPhysicalSyncPersistentState(
   private val timeouts = parameters.processingTimeouts
   private val batching = parameters.batchingConfig
 
-  val sequencedEventStore = new DbSequencedEventStore(
+  override val sequencedEventStore = new DbSequencedEventStore(
     storage,
     physicalSynchronizerIdx,
     timeouts,
     loggerFactory,
   )
-  val requestJournalStore: DbRequestJournalStore = new DbRequestJournalStore(
+  override val requestJournalStore: DbRequestJournalStore = new DbRequestJournalStore(
     physicalSynchronizerIdx,
     storage,
     insertBatchAggregatorConfig = batching.aggregator,
@@ -173,7 +205,7 @@ class DbPhysicalSyncPersistentState(
     loggerFactory,
   )
 
-  val connectivityStatusStore: DbSynchronizerConnectivityStatusStore =
+  override val connectivityStatusStore: DbSynchronizerConnectivityStatusStore =
     new DbSynchronizerConnectivityStatusStore(
       psid,
       storage,
@@ -181,9 +213,9 @@ class DbPhysicalSyncPersistentState(
       loggerFactory,
     )
 
-  val sendTrackerStore: SendTrackerStore = SendTrackerStore()
+  override val sendTrackerStore: SendTrackerStore = SendTrackerStore()
 
-  val submissionTrackerStore =
+  override val submissionTrackerStore =
     new DbSubmissionTrackerStore(
       storage,
       physicalSynchronizerIdx,

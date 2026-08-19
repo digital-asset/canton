@@ -8,6 +8,7 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.LfContractIdSyntax
 import com.digitalasset.canton.protocol.{GlobalKeySerialization, LfContractId, LfGlobalKey, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{LfPartyId, LfVersioned}
@@ -30,8 +31,8 @@ object KeyResolutionWithMaintainers {
   ): v31.ViewParticipantData.KeyResolutionWithMaintainers =
     v31.ViewParticipantData.KeyResolutionWithMaintainers(
       key = Some(GlobalKeySerialization.assertToProtoV31(resolution.map(_ => key))),
-      maintainers = resolution.unversioned.maintainers.toSeq,
-      contractIds = resolution.unversioned.contracts.map(_.toProtoPrimitive),
+      maintainers = resolution.unversioned.maintainers.toSeq.map(_.toProtoUnvalidated),
+      contractIds = resolution.unversioned.contracts.map(_.toProtoPrimitive.toProtoUnvalidated),
     )
 
   def fromProtoV31(
@@ -45,13 +46,14 @@ object KeyResolutionWithMaintainers {
         .required("KeyResolutionWithMaintainers.key", keyP)
         .flatMap(GlobalKeySerialization.fromProtoV31(pvv, _))
       contractIds <- ProtoValidation
-        .validateThen(contractIdsP, "contract_ids", pvv)(
+        .validateThen(contractIdsP, "contract_ids", pvv, ProtoValidation.MaxCollectionSize)(
           ProtoConverter.parseLfContractId
         )
       maintainers <- ProtoValidation.validateThen(
         maintainersP,
         "maintainers",
         pvv,
+        ProtoValidation.MaxCollectionSize,
       )(ProtoConverter.parseLfPartyId)
     } yield (
       key.unversioned,

@@ -1,0 +1,45 @@
+name: Close stale flake issues
+
+on:
+  schedule:
+    - cron: '0 5 * * 1-5' # Every workday at 05:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print what would be closed without actually closing'
+        type: boolean
+        default: true
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  close-stale-flake-issues:
+    name: Close flake issues with no activity for sufficiently long
+    needs: pick_runner
+    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: closes the private flaky-test issues. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Close stale flake issues
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 scripts/ci/close_stale_flake_issues.py ${{ inputs.dry_run == true && '--dry-run' || '' }}

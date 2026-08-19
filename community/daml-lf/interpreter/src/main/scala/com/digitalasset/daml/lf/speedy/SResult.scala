@@ -82,6 +82,41 @@ object Question {
       final case class Error(message: String)
     }
   }
+
+  sealed abstract class Cmd extends Product with Serializable
+  object Cmd {
+    final case class Create(tmplId: TypeConId, createArg: SValue.SRecord) extends Cmd
+    final case class FetchTemplate(tmplId: TypeConId, coid: ContractId) extends Cmd
+    final case class ExerciseTemplate(
+        ifaceId: TypeConId,
+        choice: ChoiceName,
+        coid: ContractId,
+        arg: SValue,
+    ) extends Cmd
+    final case class FetchInterface(ifaceId: TypeConId, coid: ContractId) extends Cmd
+    final case class ExerciseInterface(
+        ifaceId: Identifier,
+        choice: ChoiceName,
+        coid: ContractId,
+        arg: SValue,
+    ) extends Cmd
+    final case class QueryContractKey(tmplId: Identifier, key: SValue, n: Int) extends Cmd
+    final case class FetchByKey(tmplId: TypeConId, key: SValue) extends Cmd
+    final case class ExerciseByKey(
+        tmplId: Identifier,
+        choice: ChoiceName,
+        key: SValue,
+        arg: SValue,
+    ) extends Cmd
+    final case class ExternalCall(
+        extensionId: String,
+        functionId: String,
+        configHash: String,
+        input: String,
+    ) extends Cmd
+    final case object GetTime extends Cmd
+    final case class CheckLedgerTimeLT(time: Time.Timestamp) extends Cmd
+  }
 }
 
 /** The result from small-step evaluation. If the result is not Done or Continue, then the machine

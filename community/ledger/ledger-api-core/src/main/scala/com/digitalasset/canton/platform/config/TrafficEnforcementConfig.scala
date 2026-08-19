@@ -22,7 +22,19 @@ import com.typesafe.config.{Config, ConfigFactory}
   *   Whether to enforce traffic cost on submissions. If enabled, the participant will validate that
   *   the account associated with the submission is correctly permissioned and has sufficient
   *   balance to cover the expected traffic cost. If the account has insufficient balance, the
-  *   submission will be rejected. Disabled by default.
+  *   submission will be rejected. When disabled, the participant does not contact the traffic
+  *   service on the submission path at all. Disabled by default.
+  * @param rejectMultiPartySubmissions
+  *   Whether to reject submissions whose actAs has more than one party. TEA accounts are bound to a
+  *   single party, so by default such submissions bypass traffic enforcement entirely (validation
+  *   is skipped and an informational message is logged). When enabled, such submissions are
+  *   rejected instead. Disabled by default.
+  * @param allowSubmissionsOnDegradation
+  *   Whether to allow a submission to proceed without a balance check when the balance cannot be
+  *   determined, for example due to a database outage. The submission is still charged, so an
+  *   account that didn't have enough traffic balance might end up with a negative balance until it
+  *   is topped up. Doesn't apply when the traffic service refuses the request. A bypassed check is
+  *   logged at WARN. Disabled by default, so a failed lookup fails the submission.
   * @param trafficEnforcementServer
   *   The configuration for the connection to the traffic server. Currently, only the internal,
   *   in-process server variant is supported.
@@ -30,6 +42,8 @@ import com.typesafe.config.{Config, ConfigFactory}
 final case class TrafficEnforcementConfig(
     enabled: Boolean = false,
     enforceCostOnSubmissions: Boolean = false,
+    rejectMultiPartySubmissions: Boolean = false,
+    allowSubmissionsOnDegradation: Boolean = false,
     trafficEnforcementServer: TrafficEnforcementServerConfig =
       TrafficEnforcementServerConfig.Internal(),
 )
@@ -43,11 +57,31 @@ object TrafficEnforcementServerConfig {
     * @param inProcessTeaServerName
     *   The name of the in-process gRPC serving the traffic service API of the traffic enforcement
     *   server
+    * @param databaseQueryTimeout
+    *   Per-attempt deadline for the single database read backing `GetAccount`. Enforced on
+    *   PostgreSQL via `SET LOCAL statement_timeout`, which is expressed in whole milliseconds, so
+    *   this must be at least one millisecond. Has no effect on H2 (no millisecond-level query
+    *   timeout setting).
+    * @param accountLookupTimeout
+    *   Total per-call budget for the `GetAccount` RPC, covering the client's retries around
+    *   `databaseQueryTimeout`. Must be strictly greater than `databaseQueryTimeout`, so a timed-out
+    *   query still leaves room for a retry.
     */
   final case class Internal(
       inProcessTeaServerName: String = "TeaGrpcInProcServer",
       projection: ProjectionConfig = ProjectionConfig(),
+      databaseQueryTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(1),
+      accountLookupTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(20),
   ) extends TrafficEnforcementServerConfig {
+    require(
+      databaseQueryTimeout.underlying.toMillis > 0,
+      s"databaseQueryTimeout ($databaseQueryTimeout) must be at least one millisecond",
+    )
+    require(
+      databaseQueryTimeout.duration < accountLookupTimeout.duration,
+      s"databaseQueryTimeout ($databaseQueryTimeout) must be strictly less than accountLookupTimeout" +
+        s" ($accountLookupTimeout)",
+    )
 
     def processServerNameForInstance(instance: InstanceName, ledgerApiPort: Port): String =
       s"$inProcessTeaServerName-${instance.unwrap}-${ledgerApiPort.unwrap}"

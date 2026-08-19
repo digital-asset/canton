@@ -12,4 +12,4 @@ cd $SCRIPT_DIR
 ./prepare-dashboards.sh
 
 ssh $SSH_USERNAME@$ENV.da-int.net -f "sudo mkdir -m 777 -p $STACK_FOLDER"
-rsync -avz $SCRIPT_DIR $SSH_USERNAME@$ENV.da-int.net:$STACK_FOLDER
+rsync -vzr --delete $SCRIPT_DIR/ $SSH_USERNAME@$ENV.da-int.net:$STACK_FOLDER/

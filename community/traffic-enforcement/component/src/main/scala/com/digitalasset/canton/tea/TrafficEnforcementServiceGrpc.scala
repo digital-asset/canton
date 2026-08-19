@@ -8,11 +8,6 @@ import cats.syntax.either.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
-import com.digitalasset.canton.tea.TrafficEnforcementService.{
-  InvalidArgument,
-  NotEnoughTraffic,
-  TrafficEnforcementServiceError,
-}
 import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
@@ -22,7 +17,7 @@ import com.digitalasset.canton.tea.v1.{
   UpdateAccountResponse,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
-import io.grpc.{ServerServiceDefinition, Status, StatusRuntimeException}
+import io.grpc.ServerServiceDefinition
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -43,7 +38,7 @@ class TrafficEnforcementServiceGrpc(
     EitherT(
       service
         .getAccount(request)
-        .map(_.leftMap(handleError))
+        .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }
 
@@ -54,31 +49,9 @@ class TrafficEnforcementServiceGrpc(
     EitherT(
       service
         .updateAccount(request)
-        .map(_.leftMap(handleError))
+        .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }
-
-  /** Maps a [[TrafficEnforcementServiceError]] onto the gRPC status returned to the caller. */
-  private def handleError(
-      error: TrafficEnforcementServiceError
-  )(implicit traceContext: TraceContext): StatusRuntimeException =
-    error match {
-      case NotEnoughTraffic(account, balance, cost) =>
-        logger.info(
-          s"Rejecting traffic reservation for account $account: balance $balance is below cost $cost"
-        )
-        Status.RESOURCE_EXHAUSTED
-          .withDescription(
-            s"Not enough traffic for account $account: balance $balance is below cost $cost"
-          )
-          .asRuntimeException()
-      case InvalidArgument(provided, error) =>
-        val message = s"Invalid argument '$provided': $error"
-        logger.debug(message)
-        Status.INVALID_ARGUMENT
-          .withDescription(message)
-          .asRuntimeException()
-    }
 
   override def bindService(): ServerServiceDefinition =
     TrafficServiceGrpc.bindService(this, executionContext)

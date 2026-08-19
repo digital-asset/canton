@@ -12,13 +12,9 @@ import com.digitalasset.canton.crypto.{
   Signature,
   SynchronizerSnapshotSyncCryptoApi,
 }
+import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{
-  ByCiphertextId,
-  ByViewHash,
-  LightTransactionViewTree,
-  SubviewReferenceAndKey,
-}
+import com.digitalasset.canton.data.{ByCiphertextId, ByViewHash, LightTransactionViewTree}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
@@ -42,7 +38,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
-import scala.util.Success
+import scala.util.{Failure, Success}
 
 /** This class is responsible for decrypting the views contained in `EncryptedViewMessages`. It does
   * so in two steps:
@@ -237,13 +233,25 @@ private[decrypter] class ViewMessageDecrypterImplV1(
   )(implicit traceContext: TraceContext): Unit = {
     val isNew = promise.outcome(randomness)
     if (!isNew) {
-      val previousValue = promise.unwrap.future.value
-      if (!previousValue.contains(Success(Outcome(randomness)))) {
-        ErrorUtil.internalError(
-          new IllegalArgumentException(
-            s"View $viewHash has different encryption keys associated with it. (Previous: $previousValue, new: $randomness)"
+      promise.unwrap.future.value match {
+        case Some(Success(Outcome(existingRandomness))) if existingRandomness != randomness =>
+          ErrorUtil.internalError(
+            new IllegalArgumentException(
+              s"View $viewHash has different encryption keys associated with it. " +
+                s"(previous: $existingRandomness, new: $randomness)"
+            )
           )
-        )
+        case Some(Failure(cause)) =>
+          ErrorUtil.internalError(
+            new IllegalStateException(s"Promise with secure randomness failed with:", cause)
+          )
+        case None =>
+          ErrorUtil.internalError(
+            new IllegalStateException(
+              s"Promise with secure randomness was expected to be completed but was not"
+            )
+          )
+        case _ => () // Success with matching randomness
       }
     }
   }

@@ -45,6 +45,7 @@ class NaiveRequestTrackerTest
     val conflictDetector =
       new ConflictDetector(
         acs,
+        None,
         reassignmentCache,
         loggerFactory,
         checkedInvariant = true,

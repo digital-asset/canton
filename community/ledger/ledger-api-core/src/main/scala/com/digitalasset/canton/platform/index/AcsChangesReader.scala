@@ -85,7 +85,7 @@ class AcsChangesReader(
         // Only transactions and reassignments on the requested synchronizer contribute ACS changes.
         .filter { case (_, updateResponse) =>
           updateResponse match {
-            case UpdateResponse.ProtoUpdate(protoUpdate) =>
+            case UpdateResponse.ProtoUpdate(Some(protoUpdate), _) =>
               protoUpdate.update match {
                 case GetUpdateResponse.Update.Transaction(transaction) =>
                   transaction.synchronizerId == synchronizerIdString
@@ -176,7 +176,7 @@ object AcsChangesReader {
 
   private def archivedTransactionOffset(updateResponse: UpdateResponse): Option[Offset] =
     updateResponse match {
-      case UpdateResponse.ProtoUpdate(protoUpdate) =>
+      case UpdateResponse.ProtoUpdate(Some(protoUpdate), _) =>
         protoUpdate.update match {
           case GetUpdateResponse.Update.Transaction(transaction)
               if transaction.events.exists(_.event.isArchived) =>
@@ -213,7 +213,7 @@ object AcsChangesReader {
       deactivatedInfos: Vector[DeactivatedContractInfo],
   ): Option[(Offset, UpdateResponse)] =
     updateResponse match {
-      case UpdateResponse.ProtoUpdate(protoUpdate) =>
+      case UpdateResponse.ProtoUpdate(Some(protoUpdate), _) =>
         protoUpdate.update match {
           case GetUpdateResponse.Update.Transaction(transaction) =>
             Some(

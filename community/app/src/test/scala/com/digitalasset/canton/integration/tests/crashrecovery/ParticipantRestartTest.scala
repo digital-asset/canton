@@ -539,6 +539,8 @@ abstract class ParticipantRestartTest
     when(aliasResolution.logicalSynchronizerIds).thenReturn(Set(daId.logical))
     when(synchronizerConnectionConfigStore.aliasResolution).thenReturn(aliasResolution)
 
+    val acsDigestProcessorEnabled = false
+
     new PruningProcessor(
       Eval.now(participantNodePersistentState),
       stateManager,
@@ -546,6 +548,8 @@ abstract class ParticipantRestartTest
       ParticipantTestMetrics.pruning,
       exitOnFatalFailures = true,
       synchronizerConnectionConfigStore,
+      legacyAcsCommitmentProcessorDisabled = false,
+      acsDigestProcessorEnabled,
       timeouts,
       futureSupervisor,
       loggerFactory,

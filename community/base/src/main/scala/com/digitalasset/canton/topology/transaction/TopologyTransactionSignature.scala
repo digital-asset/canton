@@ -10,6 +10,8 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.nonempty.NonEmpty
 
 object TopologyTransactionSignature {
@@ -97,21 +99,35 @@ object MultiTransactionSignature {
   }
 
   def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       multiTransactionSignaturesP: v30.MultiTransactionSignatures,
       transactionHash: TxHash,
   ): ParsingResult[NonEmpty[Seq[MultiTransactionSignature]]] = {
     val v30.MultiTransactionSignatures(transactionHashesP, signaturesP) =
       multiTransactionSignaturesP
     for {
+      // Bound the collection; parseRequiredNonEmpty still validates each element.
+      transactionHashesSeqP <- ProtoValidation.validateLength(
+        transactionHashesP,
+        Some("transaction_hashes"),
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )
       transactionHashes <- ProtoConverter.parseRequiredNonEmpty(
         Hash.fromProtoPrimitive,
         "transaction_hashes",
-        transactionHashesP,
+        transactionHashesSeqP,
+      )
+      signaturesSeqP <- ProtoValidation.validateLength(
+        signaturesP,
+        Some("signatures"),
+        pvv,
+        ProtoValidation.MaxCollectionSize,
       )
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "signatures",
-        signaturesP,
+        signaturesSeqP,
       )
       _ <- Either
         .cond(

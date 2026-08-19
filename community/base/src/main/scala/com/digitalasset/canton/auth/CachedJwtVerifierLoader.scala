@@ -4,16 +4,7 @@
 package com.digitalasset.canton.auth
 
 import com.auth0.jwk.{JwkException, UrlJwkProvider}
-import com.auth0.jwt.algorithms.Algorithm
-import com.daml.jwt.{
-  ECDSAVerifier,
-  Error as JwtError,
-  JwksUrl,
-  JwtException,
-  JwtTimestampLeeway,
-  JwtVerifier,
-  RSA256Verifier,
-}
+import com.daml.jwt.{Error as JwtError, JwksUrl, JwtException, JwtTimestampLeeway, JwtVerifier}
 import com.daml.metrics.CacheMetrics
 import com.digitalasset.canton.auth.CachedJwtVerifierLoader.CacheKey
 import com.digitalasset.canton.caching.ScaffeineCache
@@ -21,7 +12,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import com.github.blemale.scaffeine.Scaffeine
 
-import java.security.interfaces.{ECPublicKey, RSAPublicKey}
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
@@ -121,22 +111,12 @@ class CachedJwtVerifierLoader(
     result
   }
 
-  @SuppressWarnings(
-    Array("org.wartremover.warts.Null")
-  )
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private[this] def getVerifierImpl(cacheKey: CacheKey): Either[JwtError, JwtVerifier] =
     try {
       val jwk = jwkProvider(cacheKey.jwksUrl).get(cacheKey.keyId.orNull)
       val publicKey = jwk.getPublicKey
-      publicKey match {
-        case rsa: RSAPublicKey => RSA256Verifier(rsa, jwtTimestampLeeway, maxTokenLife)
-        case ecKey: ECPublicKey if ecKey.getParams.getCurve.getField.getFieldSize == 256 =>
-          ECDSAVerifier(Algorithm.ECDSA256(ecKey, null), jwtTimestampLeeway, maxTokenLife)
-        case ecKey: ECPublicKey if ecKey.getParams.getCurve.getField.getFieldSize == 521 =>
-          ECDSAVerifier(Algorithm.ECDSA512(ecKey, null), jwtTimestampLeeway, maxTokenLife)
-        case key =>
-          Left(JwtError(Symbol("getVerifier"), s"Unsupported public key format ${key.getFormat}"))
-      }
+      JwtVerifier.fromPublicKey(publicKey, jwtTimestampLeeway, maxTokenLife)
     } catch {
       case e: JwkException => Left(JwtError(Symbol("getVerifier"), e.toString))
       case _: Throwable =>

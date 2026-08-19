@@ -8,8 +8,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Compile the Daml models
-(cd "$SCRIPT_DIR/model" && dpm build)
+dpm build --package-root model
 
 # Start canton sandbox in multi-sync mode (3 participants, 2 synchronizers)
 cd "$SCRIPT_DIR"
-../../bin/canton sandbox --multi-sync
+../../bin/canton sandbox-interactive --multi-sync

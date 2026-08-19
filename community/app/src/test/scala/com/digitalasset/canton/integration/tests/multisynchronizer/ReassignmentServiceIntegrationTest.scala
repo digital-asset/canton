@@ -38,7 +38,6 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
-  EnvironmentSetupPlugin,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
@@ -63,18 +62,13 @@ import org.scalatest.Tag
 import scala.concurrent.duration.DurationInt
 import scala.language.implicitConversions
 
-abstract class ReassignmentServiceIntegrationTest
+class ReassignmentServiceIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with SecurityTestSuite
     with AcsInspection
     with HasReassignmentCommandsHelpers
     with HasCommandRunnersHelpers {
-
-  protected def plugin: EnvironmentSetupPlugin
-
-  registerPlugin(plugin)
-  registerPlugin(new UsePostgres(loggerFactory))
 
   // Workaround to avoid false errors reported by IDEA.
   implicit def tagToContainer(tag: EvidenceTag): Tag = new TagContainer(tag)
@@ -86,6 +80,20 @@ abstract class ReassignmentServiceIntegrationTest
   private var party1a: PartyId = _
   private var party1b: PartyId = _
   private var party2: PartyId = _
+
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      sequencerGroups = MultiSynchronizer(
+        Seq(
+          Set(InstanceName.tryCreate("sequencer1")),
+          Set(InstanceName.tryCreate("sequencer2")),
+          Set(InstanceName.tryCreate("sequencer3")),
+        )
+      ),
+    )
+  )
+  registerPlugin(new UsePostgres(loggerFactory))
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1_S1M1
@@ -154,6 +162,28 @@ abstract class ReassignmentServiceIntegrationTest
         disableCommitments = true,
       )
 
+  /** Temporarily overrides the ledger command timeout for the specified participants, executes the
+    * test block, and safely restores the original timeouts.
+    */
+  private def withLedgerCommandTimeout[T](
+      timeout: config.NonNegativeDuration,
+      participants: LocalParticipantReference*
+  )(testCode: => T): T = {
+    val originalTimeouts = participants.map { p =>
+      p -> p.consoleEnvironment.commandTimeouts.ledgerCommand
+    }
+
+    try {
+      participants.foreach(_.consoleEnvironment.setLedgerCommandTimeout(timeout))
+
+      testCode
+    } finally {
+      originalTimeouts.foreach { case (p, originalTimeout) =>
+        p.consoleEnvironment.setLedgerCommandTimeout(originalTimeout)
+      }
+    }
+  }
+
   "ReassignmentService" should {
     /*
        Create a contract on da and reassign to acme
@@ -196,7 +226,7 @@ abstract class ReassignmentServiceIntegrationTest
       } {
         participant.topology.party_to_participant_mappings.propose_delta(
           party = signatory,
-          adds = List((participant2.id -> ParticipantPermission.Submission)),
+          adds = List(participant2.id -> ParticipantPermission.Submission),
           store = synchronizerId,
         )
       }
@@ -213,55 +243,54 @@ abstract class ReassignmentServiceIntegrationTest
 
       val updateFormat = getUpdateFormat(Set(signatory), includeReassignments = true)
 
-      val updatesP1 = participant1.ledger_api.updates.updates(
-        updateFormat = updateFormat,
-        completeAfter = Int.MaxValue,
-        beginOffsetExclusive = initialLedgerEnd1,
-        endOffsetInclusive = Some(finalLedgerEnd1),
-      )
+      // Reduce the ledger command timeout from 1 minute which is the default value
+      // to avoid waiting 1 minute per call and to avoid failing with GrpcClientGaveUp: DEADLINE_EXCEEDED
+      withLedgerCommandTimeout(3.seconds, participant1, participant2) {
 
-      val updatesP2 = participant2.ledger_api.updates.updates(
-        updateFormat = updateFormat,
-        completeAfter = Int.MaxValue,
-        beginOffsetExclusive = initialLedgerEnd2,
-        endOffsetInclusive = Some(finalLedgerEnd2),
-      )
+        val updatesP1 = participant1.ledger_api.updates.updates(
+          updateFormat = updateFormat,
+          completeAfter = Int.MaxValue,
+          beginOffsetExclusive = initialLedgerEnd1,
+          endOffsetInclusive = Some(finalLedgerEnd1),
+        )
 
-      // reduce the ledger command timeout from 1 minute which is the default value
-      // to avoid waiting 1 minute per call
-      // and to avoid failing with GrpcClientGaveUp: DEADLINE_EXCEEDED
-      participant2.consoleEnvironment.setLedgerCommandTimeout(3.seconds)
-      participant1.consoleEnvironment.setLedgerCommandTimeout(3.seconds)
+        val updatesP2 = participant2.ledger_api.updates.updates(
+          updateFormat = updateFormat,
+          completeAfter = Int.MaxValue,
+          beginOffsetExclusive = initialLedgerEnd2,
+          endOffsetInclusive = Some(finalLedgerEnd2),
+        )
 
-      // a submitting party on a non-submitting participant can't see the completion
-      getCompletions(
-        participant2,
-        signatoryOnParticipant2.toLf,
-        ledgerEndP2,
-        filterBy = _.synchronizerTime.value.synchronizerId == daId.logical.toProtoPrimitive,
-      ) should be(empty)
+        // a submitting party on a non-submitting participant can't see the completion
+        getCompletions(
+          participant2,
+          signatoryOnParticipant2.toLf,
+          ledgerEndP2,
+          filterBy = _.synchronizerTime.value.synchronizerId == daId.logical.toProtoPrimitive,
+        ) should be(empty)
 
-      // but can see the updates
-      updatesP2 should have size 4 // create, unassignment, assign, archive
+        // but can see the updates
+        updatesP2 should have size 4 // create, unassignment, assign, archive
 
-      // a non submitting party (stakeholder) on the submitting participant can't see the completion
-      getCompletions(
-        participant1,
-        observer,
-        ledgerEndP1,
-        filterBy = _.synchronizerTime.value.synchronizerId == daId.logical.toProtoPrimitive,
-      ) should be(empty)
+        // a non submitting party (stakeholder) on the submitting participant can't see the completion
+        getCompletions(
+          participant1,
+          observer,
+          ledgerEndP1,
+          filterBy = _.synchronizerTime.value.synchronizerId == daId.logical.toProtoPrimitive,
+        ) should be(empty)
 
-      // a submitting party on a submitting participant should see the completion
-      getCompletions(
-        participant1,
-        signatory,
-        ledgerEndP1,
-        filterBy = _.synchronizerTime.value.synchronizerId == daId.logical.toProtoPrimitive,
-      ) should not be empty
+        // a submitting party on a submitting participant should see the completion
+        getCompletions(
+          participant1,
+          signatory,
+          ledgerEndP1,
+          filterBy = _.synchronizerTime.value.synchronizerId == daId.logical.toProtoPrimitive,
+        ) should not be empty
 
-      // but and the updates
-      updatesP1 should have size 4 // create, unassign, assign, archive
+        // and the updates
+        updatesP1 should have size 4 // create, unassign, assign, archive
+      }
     }
 
     "updates are only visible to stakeholders and only them" in { implicit env =>
@@ -386,7 +415,7 @@ abstract class ReassignmentServiceIntegrationTest
       )
 
       inside(res) { case error: GenericCommandError =>
-        error.cause should include(unassignedEvent.reassignmentId.toString)
+        error.cause should include(unassignedEvent.reassignmentId)
         error.cause should include("unknown reassignment id")
       }
 
@@ -645,7 +674,7 @@ abstract class ReassignmentServiceIntegrationTest
     val createdEvent = createUpdateEvent.events.headOption.value.getCreated
 
     /*
-      During the unassignment below, we wait for the update to be published and expect a unassigned event.
+      During the unassignment below, we wait for the update to be published and expect an unassigned event.
       If the unassignment is submitted before the created event (from the create above) is published, then we will
       see the created event instead of the unassigned and the assertion will fail.
       The solution here is to wait for the created event to be published before proceeding further.
@@ -815,18 +844,4 @@ abstract class ReassignmentServiceIntegrationTest
     // Cleaning
     IouSyntax.archive(participant1, Some(acmeId))(contract, signatory)
   }
-}
-
-class ReferenceReassignmentServiceIntegrationTest extends ReassignmentServiceIntegrationTest {
-  override protected lazy val plugin =
-    new UseBftSequencer(
-      loggerFactory,
-      sequencerGroups = MultiSynchronizer(
-        Seq(
-          Set(InstanceName.tryCreate("sequencer1")),
-          Set(InstanceName.tryCreate("sequencer2")),
-          Set(InstanceName.tryCreate("sequencer3")),
-        )
-      ),
-    )
 }

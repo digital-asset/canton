@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.pruning
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.metrics.ExecutorServiceMetrics
@@ -14,33 +15,82 @@ import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.BaseTest.*
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
-import com.digitalasset.canton.config.{BatchingConfig, CommitmentSendDelay, DefaultProcessingTimeouts, NonNegativeDuration, PositiveDurationSeconds, TestingConfigInternal}
+import com.digitalasset.canton.config.{
+  BatchingConfig,
+  CommitmentSendDelay,
+  DefaultProcessingTimeouts,
+  NonNegativeDuration,
+  PositiveDurationSeconds,
+  TestingConfigInternal,
+}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.crypto.{LtHash16, SyncCryptoClient, SynchronizerSnapshotSyncCryptoApi}
+import com.digitalasset.canton.crypto.{
+  LtHash16,
+  SyncCryptoClient,
+  SynchronizerSnapshotSyncCryptoApi,
+}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.ledger.participant.state.{AcsChange, ContractStakeholdersAndReassignmentCounter}
+import com.digitalasset.canton.ledger.participant.state.{
+  AcsChange,
+  ContractStakeholdersAndReassignmentCounter,
+}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.participant.event.RecordTime
-import com.digitalasset.canton.participant.metrics.{ConnectedSynchronizerMetrics, ParticipantHistograms, ParticipantMetrics}
+import com.digitalasset.canton.participant.metrics.{
+  ConnectedSynchronizerMetrics,
+  ParticipantHistograms,
+  ParticipantMetrics,
+}
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.commitmentsFromStkhdCmts
-import com.digitalasset.canton.participant.store.memory.{InMemoryAcsCommitmentConfigStore, InMemoryAcsCommitmentStore, InMemoryActiveContractStore, InMemoryContractStore}
-import com.digitalasset.canton.participant.store.{AcsCommitmentStore, AcsCounterParticipantConfigStore}
+import com.digitalasset.canton.participant.store.memory.{
+  InMemoryAcsCommitmentConfigStore,
+  InMemoryAcsCommitmentStore,
+  InMemoryActiveContractStore,
+  InMemoryContractStore,
+}
+import com.digitalasset.canton.participant.store.{
+  AcsCommitmentStore,
+  AcsCounterParticipantConfigStore,
+}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.messages.{LegacyAcsCommitment, LegacyCommitmentPeriod, DefaultOpenEnvelope, SignedProtocolMessage}
-import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod, DefaultOpenEnvelope, SignedProtocolMessage}
+import com.digitalasset.canton.protocol.messages.{
+  DefaultOpenEnvelope,
+  Digest,
+  LegacyAcsCommitment,
+  LegacyCommitmentPeriod,
+  SignedProtocolMessage,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClient.TrafficCostValidator
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
 import com.digitalasset.canton.sequencing.client.{SendCallback, SequencerClientSend}
-import com.digitalasset.canton.sequencing.protocol.{AggregationRule, Batch, MessageId, OpenEnvelope, Recipients}
+import com.digitalasset.canton.sequencing.protocol.{
+  AggregationRule,
+  Batch,
+  MessageId,
+  OpenEnvelope,
+  Recipients,
+}
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
 import com.digitalasset.canton.time.{PositiveSeconds, SimClock}
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId, TestingTopology, UniqueIdentifier}
+import com.digitalasset.canton.topology.{
+  ParticipantId,
+  SynchronizerId,
+  TestingTopology,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{HasExecutorServiceGeneric, LfPartyId, ReassignmentCounter, RepairCounter, SynchronizerAlias, TestEssentials}
+import com.digitalasset.canton.{
+  HasExecutorServiceGeneric,
+  LfPartyId,
+  ReassignmentCounter,
+  RepairCounter,
+  SynchronizerAlias,
+  TestEssentials,
+}
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
 import org.openjdk.jmh.annotations.*
@@ -360,13 +410,15 @@ class AcsCommitmentBenchmark
 
   private def testSetup(topology: Map[ParticipantId, Set[LfPartyId]]): Unit = {
 
-    val acsCommitmentsCatchUpConfig =
-      Some(
-        AcsCommitmentsCatchUpParameters(
-          PositiveInt.tryCreate(configCatchUpIntervalSkip),
-          PositiveInt.tryCreate(configNrIntervalsToTriggerCatchUp),
-        )
-      )
+    val acsCommitmentsCatchUpConfig = {
+      val paramsE = for {
+        skip <- PositiveInt.create(configCatchUpIntervalSkip).leftMap(_.message)
+        catchUp <- PositiveInt.create(configNrIntervalsToTriggerCatchUp).leftMap(_.message)
+        params <- AcsCommitmentsCatchUpParameters.create(skip, catchUp)
+      } yield params
+
+      Some(paramsE.valueOr(err => sys.error(s"Couldn't create params: $err")))
+    }
 
     val synchronizerCrypto = cryptoSetup(
       localId,
@@ -613,7 +665,8 @@ class AcsCommitmentBenchmark
             .trySignAndCreate(
               payload,
               snapshot,
-              signingTimestampOverrides = None, // not needed for benchmark tests; session signing keys disabled
+              signingTimestampOverrides =
+                None, // not needed for benchmark tests; session signing keys disabled
             )
         }
       }
@@ -621,7 +674,7 @@ class AcsCommitmentBenchmark
   }
   private def stakeholderCommitment(
       contracts: Map[LfContractId, ReassignmentCounter]
-  ): LegacyAcsCommitment.CommitmentType = {
+  ): Digest.DigestType = {
     val h = LtHash16()
     contracts.keySet.foreach { cid =>
       h.add(

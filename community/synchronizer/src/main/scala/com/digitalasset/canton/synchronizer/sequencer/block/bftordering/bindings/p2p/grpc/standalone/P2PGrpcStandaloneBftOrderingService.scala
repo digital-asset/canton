@@ -35,7 +35,7 @@ class P2PGrpcStandaloneBftOrderingService(
   private val readersRef =
     new AtomicReference[Seq[(Long, StreamObserver[ReadOrderedResponse])]](Seq.empty)
 
-  def push(block: BlockFormat.Block): Unit = {
+  def push(block: BlockFormat.Block)(implicit traceContext: TraceContext): Unit = {
     val failed = mutable.ListBuffer[StreamObserver[ReadOrderedResponse]]()
     readersRef.get().foreach { case (minHeight, peerSender) =>
       if (block.blockHeight >= minHeight) {
@@ -52,8 +52,8 @@ class P2PGrpcStandaloneBftOrderingService(
               s"Failed to push block ${block.blockHeight} to reader $peerSender " +
                 s"with minHeight $minHeight: ${e.getMessage}",
               e,
-            )(TraceContext.empty)
-            failGrpcStreamObserver(peerSender, e, logger)(TraceContext.empty)
+            )
+            failGrpcStreamObserver(peerSender, e, logger)
             failed.addOne(peerSender).discard
         }
       }
@@ -76,8 +76,11 @@ class P2PGrpcStandaloneBftOrderingService(
       (request.startHeight -> peerSender) +: readers
     }.discard
 
-  override def close(): Unit =
+  override def close(): Unit = {
+    implicit val traceContext: TraceContext =
+      TraceContext.createNew("P2PGrpcStandaloneBftOrderingService.close")
     readersRef.getAndUpdate(_ => Seq.empty).foreach { case (_, peerSender) =>
-      completeGrpcStreamObserver(peerSender, logger)(TraceContext.empty)
+      completeGrpcStreamObserver(peerSender, logger)
     }
+  }
 }

@@ -26,6 +26,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   HasRepresentativeProtocolVersion,
@@ -34,7 +35,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
-  VersioningCompanionContext,
+  VersioningCompanion,
 }
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -200,16 +201,14 @@ case class SignedProtocolMessage[+M <: SignedProtocolMessageContent](
 }
 
 object SignedProtocolMessage
-    extends VersioningCompanionContext[SignedProtocolMessage[
-      SignedProtocolMessageContent
-    ], ProtocolVersionValidation] {
+    extends VersioningCompanion[SignedProtocolMessage[SignedProtocolMessageContent]] {
   override val name: String = "SignedProtocolMessage"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(
       ProtocolVersion.v34
     )(v30.SignedProtocolMessage)(
-      supportedProtoVersion(_)(fromProtoV30),
+      supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
   )
@@ -287,11 +286,13 @@ object SignedProtocolMessage
 
     for {
       typedMessage <- TypedSignedProtocolMessageContent
-        .fromByteStringPVV(pvv, typedMessageBytes)
+        .fromByteString(pvv, typedMessageBytes)
+      signaturesSeqP <- ProtoValidation
+        .validateLength(signaturesP, Some("signatures"), pvv, ProtoValidation.MaxCollectionSize)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "signatures",
-        signaturesP,
+        signaturesSeqP,
       )
       signedMessage = SignedProtocolMessage(typedMessage, signatures)
     } yield signedMessage

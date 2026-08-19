@@ -42,7 +42,7 @@ import com.digitalasset.canton.util.retry.{
   Pause,
   RetryWithDelay,
 }
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Status, StatusRuntimeException}
@@ -123,7 +123,13 @@ class AuthenticationTokenProvider(
             .fromProtoPrimitive(challenge.nonce)
             .leftMap(err => Status.INVALID_ARGUMENT.withDescription(s"Invalid nonce: $err"))
             .toEitherT[FutureUnlessShutdown]
-          token <- authenticate(endpoint, authenticationClient, nonce, challenge.fingerprints)
+          token <- authenticate(
+            endpoint,
+            authenticationClient,
+            nonce,
+            challenge.fingerprints,
+            synchronizerId.protocolVersion,
+          )
         } yield token).value
       }.map {
         case Left(status) if unavailableDueToChannelShutdown(status) =>
@@ -205,15 +211,19 @@ class AuthenticationTokenProvider(
       endpoint: Endpoint,
       authenticationClient: GrpcClient[SequencerAuthenticationServiceStub],
       nonce: Nonce,
-      fingerprintsP: Seq[String],
+      fingerprintsP: Seq[ProtoUnvalidatedString],
+      protocolVersion: ProtocolVersion,
   )(implicit
       tc: TraceContext
   ): EitherT[FutureUnlessShutdown, Status, AuthenticationTokenWithExpiry] =
     for {
       fingerprintsValid <- ProtoValidation
-        .validateThen(fingerprintsP, "fingerprints", ProtocolVersionValidation.AlwaysValidation)(
-          Fingerprint.fromProtoPrimitive
-        )
+        .validateThen(
+          fingerprintsP,
+          "fingerprints",
+          ProtocolVersionValidation.PV(protocolVersion),
+          ProtoValidation.MaxCollectionSize,
+        )(Fingerprint.fromProtoPrimitive)
         .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
         .toEitherT[FutureUnlessShutdown]
       fingerprintsNel <- NonEmpty

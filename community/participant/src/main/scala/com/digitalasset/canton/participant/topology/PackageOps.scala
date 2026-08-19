@@ -36,7 +36,6 @@ import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Packa
 import com.digitalasset.canton.participant.admin.PackageService.DarDescription
 import com.digitalasset.canton.participant.admin.PackageVettingSynchronization
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.IdentityManagerParentError
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -80,7 +79,7 @@ trait PackageOps extends NamedLogging {
       psid: PhysicalSynchronizerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit]
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit]
 
   def revokeVettingForPackages(
       packages: List[LfPackageId],
@@ -104,7 +103,7 @@ trait PackageOps extends NamedLogging {
       tc: TraceContext
   ): EitherT[
     FutureUnlessShutdown,
-    ParticipantTopologyManagerError,
+    TopologyManagerError,
     (Option[ParticipantVettedPackages], Option[ParticipantVettedPackages]),
   ]
 
@@ -112,7 +111,7 @@ trait PackageOps extends NamedLogging {
       opts: ListVettedPackagesOpts
   )(implicit
       tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Seq[ParticipantVettedPackages]]
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Seq[ParticipantVettedPackages]]
 }
 
 class PackageOpsImpl(
@@ -210,7 +209,7 @@ class PackageOpsImpl(
       psid: PhysicalSynchronizerId,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     modifyVettedPackages(
       psid,
       synchronizeVetting,
@@ -259,13 +258,13 @@ class PackageOpsImpl(
       tc: TraceContext
   ): EitherT[
     FutureUnlessShutdown,
-    ParticipantTopologyManagerError,
+    TopologyManagerError,
     (Option[ParticipantVettedPackages], Option[ParticipantVettedPackages]),
   ] = {
     val targetStatesMap: Map[PackageId, SinglePackageTargetVetting[PackageId]] =
       targetStates.map((x: SinglePackageTargetVetting[PackageId]) => x.ref -> x).toMap
 
-    def toNextState(previousState: VettedPackage) =
+    def toNextState(previousState: VettedPackage): Option[VettedPackage] =
       targetStatesMap.get(previousState.packageId) match {
         case None => Some(previousState)
         case Some(target) => target.toVettedPackage
@@ -291,7 +290,7 @@ class PackageOpsImpl(
 
   override def getVettedPackages(
       opts: ListVettedPackagesOpts
-  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Seq[
+  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, TopologyManagerError, Seq[
     ParticipantVettedPackages
   ]] = {
     val synchronizers =
@@ -306,7 +305,7 @@ class PackageOpsImpl(
               (synchronizerId, participantStartExclusive, participantsFilter),
             ) =>
           if (remainingPageSize <= 0)
-            EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](state)
+            EitherT.pure[FutureUnlessShutdown, TopologyManagerError](state)
           else
             getVettedPackagesForSynchronizer(
               synchronizer = synchronizerId,
@@ -332,17 +331,13 @@ class PackageOpsImpl(
       useApproximateTopologySnapshot: Boolean,
   )(implicit
       tc: TraceContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    ParticipantTopologyManagerError,
-    Seq[ParticipantVettedPackages],
-  ] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Seq[ParticipantVettedPackages]] =
     for {
       asOf <-
         if (useApproximateTopologySnapshot)
           topologyLookup.maybeOfflineApproximateTimestamp(synchronizer)
         else
-          EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](
+          EitherT.pure[FutureUnlessShutdown, TopologyManagerError](
             CantonTimestamp.MaxValue
           )
 
@@ -385,20 +380,18 @@ class PackageOpsImpl(
   private def checkCurrentSerial(
       currentSerial: Option[PositiveInt],
       expectedSerial: Option[PriorTopologySerial],
-  )(implicit tc: TraceContext): Either[ParticipantTopologyManagerError, Unit] =
+  )(implicit tc: TraceContext): Either[TopologyManagerError, Unit] =
     expectedSerial match {
       case None =>
-        Right(()) // no check required
+        Either.unit // no check required
       case Some(PriorTopologySerialNone) =>
         // check there is no prior serial
         Either.cond(
           currentSerial.isEmpty,
           (),
-          IdentityManagerParentError(
-            TopologyManagerError.SerialMismatch.Failure(
-              actual = currentSerial,
-              expected = None,
-            )
+          TopologyManagerError.SerialMismatch.Failure(
+            actual = currentSerial,
+            expected = None,
           ),
         )
       case Some(PriorTopologySerialExists(expectedSerial)) =>
@@ -406,11 +399,9 @@ class PackageOpsImpl(
         Either.cond(
           currentSerial.contains(expectedSerial),
           (),
-          IdentityManagerParentError(
-            TopologyManagerError.SerialMismatch.Failure(
-              actual = currentSerial,
-              expected = Some(expectedSerial),
-            )
+          TopologyManagerError.SerialMismatch.Failure(
+            actual = currentSerial,
+            expected = Some(expectedSerial),
           ),
         )
     }
@@ -433,7 +424,7 @@ class PackageOpsImpl(
       tc: TraceContext
   ): EitherT[
     FutureUnlessShutdown,
-    ParticipantTopologyManagerError,
+    TopologyManagerError,
     (Option[ParticipantVettedPackages], Option[ParticipantVettedPackages]),
   ] =
     vettingExecutionQueue.executeEUS(
@@ -466,7 +457,6 @@ class PackageOpsImpl(
               .traverse(_.nextSerial(errorLoggingContext))
               .map(_.getOrElse(PositiveInt.one))
           )
-          .leftMap(IdentityManagerParentError(_))
         nextParticipantState = ParticipantVettedPackages(
           packages = newVettedPackages,
           participantId = participantId,
@@ -492,13 +482,12 @@ class PackageOpsImpl(
                 dryRunSnapshot = dryRunSnapshot,
                 forceFlags = forceFlags,
               )
-              .leftMap[ParticipantTopologyManagerError](IdentityManagerParentError(_))
               .map { _ =>
                 if (currentVettedPackagesSet.contains(newVettedPackagesSet)) currentState
                 else Some(nextParticipantState)
               }
           else
-            EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](currentState)
+            EitherT.pure[FutureUnlessShutdown, TopologyManagerError](currentState)
       } yield currentState -> newState,
     )
 
@@ -511,17 +500,13 @@ class PackageOpsImpl(
       waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
   )(implicit
       tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, PositiveInt] =
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, PositiveInt] =
     for {
       mapping <-
         VettedPackages
           .create(participantId, newVettedPackagesState)
           .toEitherT[FutureUnlessShutdown]
-          .leftMap(err =>
-            ParticipantTopologyManagerError.IdentityManagerParentError(
-              TopologyManagerError.InvalidTopologyMapping.Reject(err)
-            )
-          )
+          .leftMap(err => TopologyManagerError.InvalidTopologyMapping.Reject(err))
       signedTx <- synchronizeWithClosing(functionFullName)(
         topologyManager
           .proposeAndAuthorize(
@@ -535,7 +520,6 @@ class PackageOpsImpl(
             forceChanges = forceFlags,
             waitToBecomeEffective = waitToBecomeEffective,
           )
-          .leftMap[ParticipantTopologyManagerError](IdentityManagerParentError(_))
       )
       _ <- synchronizeVetting
         .sync(newVettedPackagesState.toSet, topologyManager.psid)

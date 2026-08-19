@@ -1,0 +1,73 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.authentication
+
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
+  endpointFromProto,
+  endpointToProto,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.tracing.TraceContextGrpc.TraceContextOptionsKey
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import io.grpc.Metadata.BinaryMarshaller
+import io.grpc.{
+  CallOptions,
+  Channel,
+  ClientCall,
+  ClientInterceptor,
+  ForwardingClientCall,
+  Metadata,
+  MethodDescriptor,
+}
+
+private[p2p] class P2PAddEndpointHeaderGrpcClientInterceptor(
+    peerEndpoint: P2PEndpoint,
+    override val loggerFactory: NamedLoggerFactory,
+) extends ClientInterceptor
+    with NamedLogging {
+
+  import P2PAddEndpointHeaderGrpcClientInterceptor.ENDPOINT_METADATA_KEY
+
+  override def interceptCall[ReqT, RespT](
+      method: MethodDescriptor[ReqT, RespT],
+      callOptions: CallOptions,
+      next: Channel,
+  ): ClientCall[ReqT, RespT] = {
+    val tcOpts = Option(callOptions.getOption(TraceContextOptionsKey))
+    implicit val traceContext: TraceContext = tcOpts.getOrElse(TraceContextGrpc.fromGrpcContext)
+
+    new ForwardingClientCall.SimpleForwardingClientCall[ReqT, RespT](
+      next.newCall(method, callOptions)
+    ) {
+      override def start(responseListener: ClientCall.Listener[RespT], headers: Metadata): Unit = {
+        logger.debug(
+          "Adding endpoint header to outgoing call: " +
+            s"$ENDPOINT_METADATA_KEY with value $peerEndpoint"
+        )
+        headers.put(ENDPOINT_METADATA_KEY, peerEndpoint)
+        super.start(responseListener, headers)
+      }
+    }
+  }
+}
+
+private[bftordering] object P2PAddEndpointHeaderGrpcClientInterceptor {
+
+  private val ENDPOINT_METADATA_MARSHALLER =
+    new BinaryMarshaller[P2PEndpoint] {
+      override def toBytes(value: P2PEndpoint): Array[Byte] =
+        endpointToProto(value).toByteArray
+      override def parseBytes(serialized: Array[Byte]): P2PEndpoint =
+        endpointFromProto(PeerEndpoint.parseFrom(serialized))
+          .fold(parseError => throw new IllegalArgumentException(parseError), identity)
+    }
+
+  val ENDPOINT_METADATA_KEY: Metadata.Key[P2PEndpoint] =
+    Metadata.Key.of(
+      s"cantonbft-p2p-endpoint${Metadata.BINARY_HEADER_SUFFIX}",
+      ENDPOINT_METADATA_MARSHALLER,
+    )
+}

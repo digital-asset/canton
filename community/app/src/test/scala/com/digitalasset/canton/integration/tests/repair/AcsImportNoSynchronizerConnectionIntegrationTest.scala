@@ -46,16 +46,17 @@ final class AcsImportNoSynchronizerConnectionIntegrationTest
   private var alice: PartyId = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1.withSetup { implicit env =>
-      import env.*
-      acsFilename.deleteOnExit()
+    EnvironmentDefinition.P3_S1M1
+      .withSetup { implicit env =>
+        import env.*
+        acsFilename.deleteOnExit()
 
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
-      participant1.dars.upload(CantonExamplesPath)
+        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+        participant1.dars.upload(CantonExamplesPath)
 
-      // Allocate parties
-      alice = participant1.parties.enable(aliceName)
-    }
+        // Allocate parties
+        alice = participant1.parties.enable(aliceName)
+      }
 
   private lazy val acsFilename: File =
     File.temporaryFile("AcsImportNoSynchronizerConnectionIntegrationTest").get()

@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Resets compiled classes when requested or when the
-# branch is marked for full recompilation, otherwise
-# decides whether a network restore is needed. Assigns
-# var needs_network_restore either true or false.
+# Cleans compiled class outputs before each job so cache restoration is
+# deterministic on reused runners. A cold rebuild (skip the network restore and
+# recompile from scratch) happens only when the job asks for it AND the branch is
+# on the force-recompile list, so the compile job rebuilds cold on those branches
+# while every other job restores the freshly repopulated shared cache. Any other
+# combination restores precompiled outputs from the shared cache.
 
-RESET_REQUESTED="${RESET_REQUESTED:-false}"
+RESET_IF_REQUESTED="${RESET_IF_REQUESTED:-false}"
 BRANCH_NAME="${BRANCH_NAME:-main}"
 
 BRANCH_FORCE_RESET="false"
-FORCE_RECOMPILE_FILE=".circleci/branches_to_be_fully_recompiled_in_ci.txt"
+FORCE_RECOMPILE_FILE=".ci/branches_to_be_fully_recompiled_in_ci.txt"
 
 if [ -f "$FORCE_RECOMPILE_FILE" ]; then
   if echo "$BRANCH_NAME" | grep -qEf <(grep -Ev '^\s*($|#)' "$FORCE_RECOMPILE_FILE" | grep .); then
@@ -18,16 +20,13 @@ if [ -f "$FORCE_RECOMPILE_FILE" ]; then
   fi
 fi
 
-if [[ "$RESET_REQUESTED" == "true" || "$BRANCH_FORCE_RESET" == "true" ]]; then
-  echo "Resetting classes... wiping target folders."
-  find . -type d -name target -exec rm -rf {} \;
+echo "Cleaning local target directories before restore/build."
+find . -type d -name target -prune -exec rm -rf {} +
+
+if [[ "$RESET_IF_REQUESTED" == "true" && "$BRANCH_FORCE_RESET" == "true" ]]; then
+  echo "Cold rebuild requested for a force-recompile branch, skipping network restore."
   echo "needs_network_restore=false" >> "$GITHUB_OUTPUT"
 else
-  if [ -d "community/app/target" ] || [ -d "target" ] || [ -d "community/common/target" ]; then
-    echo "Local target folders found on ARC runner. Using incremental build."
-    echo "needs_network_restore=false" >> "$GITHUB_OUTPUT"
-  else
-    echo "No local target folders found. Network restore will be needed."
-    echo "needs_network_restore=true" >> "$GITHUB_OUTPUT"
-  fi
+  echo "Target directories cleaned, network restore will be used."
+  echo "needs_network_restore=true" >> "$GITHUB_OUTPUT"
 fi

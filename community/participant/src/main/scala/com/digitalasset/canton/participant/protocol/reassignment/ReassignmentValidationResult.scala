@@ -19,16 +19,16 @@ import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
 
-/** Represents the result of validating an unassignment or assignment request on a participant.
-  * hostedConfirmingReassigningParties: This is an empty set if the participant is not a reassigning
-  * participant. Otherwise, it represents the set of confirming parties currently hosted on this
-  * participant that have at least confirmation rights.
-  */
+/** Represents the result of validating an unassignment or assignment request on a participant. */
 private[reassignment] trait ReassignmentValidationResult {
   def reassignmentId: ReassignmentId
   def rootHash: RootHash
   def contracts: ContractsReassignmentBatch
-  def hostedConfirmingReassigningParties: Set[LfPartyId]
+
+  /** The set of confirming parties currently hosted on this participant that have at least
+    * confirmation rights.
+    */
+  def hostedConfirmingParties: Set[LfPartyId]
   def isReassigningParticipant: Boolean
   def commonValidationResult: CommonValidationResult
   def reassigningParticipantValidationResult: ReassigningParticipantValidationResult

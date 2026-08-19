@@ -5,7 +5,8 @@ package com.digitalasset.canton.platform.apiserver.services.traffic
 
 import cats.Eval
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient
 import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
@@ -34,12 +35,30 @@ class ApiTrafficService(
 
   override def getAccount(request: GetAccountRequest): Future[GetAccountResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    client.value.getAccount(request).asGrpcFuture
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(logger)
+    client.value
+      .getAccount(request)
+      .valueOrF(grpcError =>
+        FutureUnlessShutdown.failed(
+          RichTrafficServiceClient.normalizeTeaError(grpcError)
+        )
+      )
+      .asGrpcFuture
   }
 
   override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    client.value.updateAccount(request).asGrpcFuture
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(logger)
+    client.value
+      .updateAccount(request)
+      .valueOrF(grpcError =>
+        FutureUnlessShutdown.failed(
+          RichTrafficServiceClient.normalizeTeaError(grpcError)
+        )
+      )
+      .asGrpcFuture
   }
 
   override def bindService(): ServerServiceDefinition =

@@ -19,10 +19,12 @@ import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, F
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
+import com.digitalasset.canton.participant.protocol.ProtocolProcessor.IncompleteLightViewTree
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.{
   mkActivenessResult,
   mkActivenessSet,
@@ -213,6 +215,7 @@ final class AssignmentProcessingStepsTest
         mock[RecordOrderPublisher],
         mock[SynchronizerTimeTracker],
         mock[InFlightSubmissionSynchronizerTracker],
+        mock[AcsCommitmentSender],
         mock[OnboardingClearanceScheduler],
         persistentState,
         ledgerApiIndexer,
@@ -532,7 +535,10 @@ final class AssignmentProcessingStepsTest
               .value
         } yield {
           decrypted.decryptionErrors shouldBe Seq.empty
-          activenessSet shouldBe mkActivenessSet(assign = Set(contract.contractId))
+          activenessSet shouldBe mkActivenessSet(
+            assign = Set(contract.contractId),
+            reassignmentIds = Set(assignmentTree.reassignmentId),
+          )
         }
       }
     }
@@ -664,6 +670,66 @@ final class AssignmentProcessingStepsTest
         result.pendingData.assignmentValidationResult.reassigningParticipantValidationResult.errors should contain(
           UnassignmentDataNotFound(fullAssignmentTree.reassignmentId)
         )
+      }
+    }
+
+    "abstain when the participant is not reassigning" in {
+      for {
+        deps <- statefulDependencies
+        (_, ephemeralState) = deps
+
+        result <- valueOrFail(
+          assignmentProcessingSteps
+            .constructPendingDataAndResponse(
+              mkParsedRequest(makeFullAssignmentTree(reassigningParticipants = Set.empty)),
+              ephemeralState.reassignmentCache,
+              FutureUnlessShutdown.pure(mkActivenessResult()),
+              engineController =
+                EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
+              DummyTickRequest,
+              PublishUpdateViaRecordOrderPublisher.noop,
+            )
+        )("construction of pending data and response failed").failOnShutdown
+        confirmationResponse <- result.confirmationResponsesF.failOnShutdown
+      } yield confirmationResponse.valueOrFail("no response")._1.responses should matchPattern {
+        case Seq(ConfirmationResponse(_, LocalAbstain(_), _)) =>
+      }
+    }
+
+    "reject a malformed payload" in {
+      val parsedRequest = mkParsedRequest(makeFullAssignmentTree())
+        .copy(malformedPayloads = Seq(IncompleteLightViewTree(ViewPosition.root)))
+
+      for {
+        deps <- statefulDependencies
+        (_, ephemeralState) = deps
+
+        result <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          valueOrFail(
+            assignmentProcessingSteps
+              .constructPendingDataAndResponse(
+                parsedRequest,
+                ephemeralState.reassignmentCache,
+                FutureUnlessShutdown.pure(mkActivenessResult()),
+                engineController =
+                  EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
+                DummyTickRequest,
+                PublishUpdateViaRecordOrderPublisher.noop,
+              )
+          )("construction of pending data and response failed").failOnShutdown,
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.shouldBeCantonErrorCode(LocalRejectError.MalformedRejects.Payloads),
+                "malformed payload",
+              )
+            )
+          ),
+        )
+        confirmationResponse <- result.confirmationResponsesF.failOnShutdown
+      } yield confirmationResponse.valueOrFail("no response")._1.responses should matchPattern {
+        case Seq(ConfirmationResponse(None, reject: LocalReject, parties))
+            if reject.isMalformed && parties.isEmpty =>
       }
     }
 
@@ -844,7 +910,7 @@ final class AssignmentProcessingStepsTest
         reassignmentId,
         sourcePsid,
         isReassigningParticipant = false,
-        hostedConfirmingReassigningParties = contract.metadata.stakeholders,
+        hostedConfirmingParties = contract.metadata.stakeholders,
         commonValidationResult = AssignmentValidationResult.CommonValidationResult(
           activenessResult = mkActivenessResult(),
           participantSignatureVerificationResult = None,
@@ -950,6 +1016,82 @@ final class AssignmentProcessingStepsTest
       } yield {
         result.commitSet.nonEmpty shouldBe false
       }
+    }
+
+    // TODO(#34870): report a failed activeness check with a warning, or crash.
+    "commit when the activeness check failed" in {
+      val failingActivenessValidation = pendingRequestData
+        .focus(_.assignmentValidationResult.commonValidationResult.activenessResult)
+        .replace(mkActivenessResult(locked = Set(contract.contractId)))
+
+      for {
+        deps <- statefulDependencies
+        (_persistentState, state) = deps
+        result <-
+          valueOrFail(
+            assignmentProcessingSteps
+              .getCommitSetAndContractsToBeStoredAndEventFactory(
+                NoOpeningErrors(
+                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                ),
+                Verdict.Approve(testedProtocolVersion),
+                failingActivenessValidation,
+                state.pendingAssignmentSubmissions,
+                crypto.pureCrypto,
+              )
+              .failOnShutdown
+          )("get commit set and contracts to be stored and event failed")
+      } yield {
+        result.commitSet.nonEmpty shouldBe true
+      }
+    }
+
+    "complete the reassignment in the store on a reassigning participant" in {
+      val reassigningParticipantData = pendingRequestData
+        .focus(_.assignmentValidationResult.isReassigningParticipant)
+        .replace(true)
+
+      for {
+        deps <- statefulDependencies
+        (_persistentState, state) = deps
+        result <-
+          valueOrFail(
+            assignmentProcessingSteps
+              .getCommitSetAndContractsToBeStoredAndEventFactory(
+                NoOpeningErrors(
+                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                ),
+                Verdict.Approve(testedProtocolVersion),
+                reassigningParticipantData,
+                state.pendingAssignmentSubmissions,
+                crypto.pureCrypto,
+              )
+              .failOnShutdown
+          )("get commit set and contracts to be stored and event failed")
+        commitSet <- result.commitSet.value.failOnShutdown
+      } yield commitSet.reassignments shouldBe Seq(reassignmentId)
+    }
+
+    "not complete the reassignment in the store on a non-reassigning participant" in {
+      for {
+        deps <- statefulDependencies
+        (_persistentState, state) = deps
+        result <-
+          valueOrFail(
+            assignmentProcessingSteps
+              .getCommitSetAndContractsToBeStoredAndEventFactory(
+                NoOpeningErrors(
+                  SignedContent(mockDeliver, Signature.noSignature, None, testedProtocolVersion)
+                ),
+                Verdict.Approve(testedProtocolVersion),
+                pendingRequestData,
+                state.pendingAssignmentSubmissions,
+                crypto.pureCrypto,
+              )
+              .failOnShutdown
+          )("get commit set and contracts to be stored and event failed")
+        commitSet <- result.commitSet.value.failOnShutdown
+      } yield commitSet.reassignments shouldBe empty
     }
   }
 

@@ -54,7 +54,7 @@ class SerializationVersionTest(majorLanguageVersion: LanguageVersion.Major)
       val oldPkg1 = templatePkg.copy(languageVersion = oldLfVersion)
       val oldPkg2 = interfacesPkg.copy(languageVersion = oldLfVersion)
       val newPkg1 = implementsPkg.copy(languageVersion = newLfVersion)
-      val pkgs = SpeedyTestLib.typeAndCompile(
+      val pkgs = SpeedyTestLib.typeAndCompile_(
         majorLanguageVersion,
         Map(
           templatePkgId -> oldPkg1,
@@ -82,7 +82,7 @@ class SerializationVersionTest(majorLanguageVersion: LanguageVersion.Major)
 
     // TODO[34352]: reenable after overhauling test
     "template version == interface version" ignore {
-      val pkgs = SpeedyTestLib.typeAndCompile(
+      val pkgs = SpeedyTestLib.typeAndCompile_(
         majorLanguageVersion,
         Map(
           templatePkgId -> templatePkg,

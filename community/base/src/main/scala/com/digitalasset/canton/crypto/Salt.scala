@@ -61,7 +61,7 @@ object SaltAlgorithm {
     saltAlgorithmP match {
       case v30.Salt.Algorithm.Empty => Left(ProtoDeserializationError.FieldNotSet(field))
       case v30.Salt.Algorithm.Hmac(hmacAlgorithmP) =>
-        HmacAlgorithm.fromProtoEnum("hmac", hmacAlgorithmP).map(Hmac.apply)
+        HmacAlgorithm.fromProtoEnum(hmacAlgorithmP, "hmac").map(Hmac.apply)
     }
 }
 

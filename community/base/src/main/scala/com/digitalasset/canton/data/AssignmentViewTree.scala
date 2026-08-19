@@ -5,7 +5,6 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.{
   ContractDeserializationError,
   InvariantViolation,
@@ -22,8 +21,9 @@ import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
@@ -180,7 +180,8 @@ final case class AssignmentCommonData private (
       stakeholders = Some(stakeholders.toProtoV30),
       uuid = ProtoConverter.UuidConverter.toProtoPrimitive(uuid),
       submitterMetadata = Some(submitterMetadata.toProtoV30),
-      reassigningParticipantUids = reassigningParticipants.map(p => p.uid.toProtoPrimitive).toSeq,
+      reassigningParticipantUids =
+        reassigningParticipants.map(_.uid.toProtoPrimitive.toProtoUnvalidated).toSeq,
       unassignmentTs = Some(unassignmentTs.toProtoTimestamp),
     )
 
@@ -284,13 +285,15 @@ object AssignmentCommonData
         .required("submitter_metadata", submitterMetadataPO)
         .flatMap(ReassignmentSubmitterMetadata.fromProtoV30(pvv, _))
 
-      reassigningParticipants <- reassigningParticipantsP.traverse(uid =>
-        ProtoValidation
-          .validateThen(uid, "reassigning_participant_uids", pvv)(
-            UniqueIdentifier.fromProtoPrimitive
-          )
-          .map(ParticipantId(_))
-      )
+      reassigningParticipants <- ProtoValidation
+        .validateThen(
+          reassigningParticipantsP,
+          "reassigning_participant_uids",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )(
+          ParticipantId.fromProtoPrimitiveUid
+        )
       unassignmentTs <- ProtoConverter.parseRequired(
         CantonTimestamp.fromProtoTimestamp,
         "unassignment_ts",
@@ -406,19 +409,20 @@ object AssignmentView extends VersioningCompanionContextMemoization[AssignmentVi
           "reassignment_id",
           reassignmentIdP,
         )
-      contracts <- contractsP
-        .traverse { case v30.ActiveContract(contractP, reassignmentCounterP) =>
-          ContractInstance
-            .decodeWithCreatedAt(contractP)
-            .leftMap(err => ContractDeserializationError(err))
-            .map(c =>
-              (
-                c,
-                Source(c.templateId.packageId),
-                Target(c.templateId.packageId),
-                ReassignmentCounter(reassignmentCounterP),
+      contracts <- ProtoValidation
+        .validateLengthThen(contractsP, "contracts", pvv, ProtoValidation.MaxCollectionSize) {
+          case (v30.ActiveContract(contractP, reassignmentCounterP), _) =>
+            ContractInstance
+              .decodeWithCreatedAt(contractP)
+              .leftMap(err => ContractDeserializationError(err))
+              .map(c =>
+                (
+                  c,
+                  Source(c.templateId.packageId),
+                  Target(c.templateId.packageId),
+                  ReassignmentCounter(reassignmentCounterP),
+                )
               )
-            )
         }
         .flatMap(
           ContractsReassignmentBatch

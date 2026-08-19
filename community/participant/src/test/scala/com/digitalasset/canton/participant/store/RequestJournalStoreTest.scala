@@ -206,7 +206,7 @@ trait RequestJournalStoreTest extends FailOnShutdown {
       val store = mk()
       for {
         _ <- setupRequests(store)
-        _ <- store.pruneInternal(tsWithSecs(4))
+        _ <- store.prune(tsWithSecs(4))
         totalCount <- store.size()
       } yield {
         totalCount shouldBe 1
@@ -217,7 +217,7 @@ trait RequestJournalStoreTest extends FailOnShutdown {
       val store = mk()
       for {
         _ <- setupRequests(store)
-        _ <- store.pruneInternal(tsWithSecs(3))
+        _ <- store.prune(tsWithSecs(3))
         totalCount <- store.size()
       } yield {
         totalCount shouldBe 1

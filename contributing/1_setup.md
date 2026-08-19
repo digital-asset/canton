@@ -98,7 +98,8 @@ For example, prefer 2025.1.3 over 2025.2.
 To inherit a `direnv` environment for IntelliJ do the following:
 * Change directory into the repository root. Make sure that `direnv` loads the environment.
 * Start IntelliJ from that directory.
-  For Mac, call `open -a /Applications/IntelliJ\ IDEA.app/`.
+    * For Mac, call `open -a /Applications/IntelliJ\ IDEA.app/`.
+    * For Linux, call `idea.sh` script located in the IntelliJ IDEA installation directory.
 
 ## Open the Canton source code in IntelliJ IDEA
 
@@ -106,6 +107,7 @@ To inherit a `direnv` environment for IntelliJ do the following:
   * Choose File | Open...
   * Click on the Open button.
 * Choose the repository root directory.
+* in SBT settings, select "Use sbt shell for project reload and builds".
 
 ## IntelliJ IDEA Configuration
 

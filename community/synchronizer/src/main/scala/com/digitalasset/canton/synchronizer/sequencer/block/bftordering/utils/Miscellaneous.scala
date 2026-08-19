@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils
 
 import cats.data.OptionT
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -38,7 +39,6 @@ private[bftordering] object Miscellaneous {
   )(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-      rowsAltered: DbStorage.RowsAltered[A],
   ): FutureUnlessShutdown[A] =
     storage.runWrite(action, operationName, maxRetries)
 
@@ -53,14 +53,18 @@ private[bftordering] object Miscellaneous {
   def dequeueN[ElementT, NumberT](
       queue: mutable.Queue[ElementT],
       n: NumberT,
-  )(implicit num: Numeric[NumberT]): Seq[ElementT] = {
+      maxCombinedWeight: NonNegativeInt,
+  )(weighter: ElementT => Int)(implicit num: Numeric[NumberT]): Seq[ElementT] = {
     @SuppressWarnings(Array("org.wartremover.warts.Var"))
     var remaining = n
-    queue.dequeueWhile { _ =>
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    var remainingWeight = maxCombinedWeight.value
+    queue.dequeueWhile { element =>
       import num.*
       val left = remaining
       remaining = remaining - num.one
-      left > num.zero
+      remainingWeight = remainingWeight - weighter(element)
+      left > num.zero && remainingWeight >= 0
     }.toSeq
   }
 

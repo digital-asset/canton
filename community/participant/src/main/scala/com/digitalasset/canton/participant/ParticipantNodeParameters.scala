@@ -26,6 +26,7 @@ final case class ParticipantNodeParameters(
     ledgerApiServerParameters: LedgerApiServerParametersConfig,
     engine: CantonEngineConfig,
     journalGarbageCollectionDelay: time.NonNegativeFiniteDuration,
+    journalGarbageCollectionMinimumGap: time.PositiveFiniteDuration,
     disableUpgradeValidation: Boolean,
     enableStrictDarValidation: Boolean,
     commandProgressTracking: CommandProgressTrackerConfig,
@@ -56,6 +57,9 @@ final case class ParticipantNodeParameters(
   // Indexing of party onboarding events is deferred if OnPR indexer pausing is off.
   def deferPartyOnboardingIndexing: Boolean =
     alphaOnlinePartyReplicationSupport.exists(!_.pauseSynchronizerIndexingDuringPartyReplication)
+
+  def isOldCommitmentProcessorEnabled(protocolVersion: ProtocolVersion): Boolean =
+    protocolVersion < ProtocolVersion.acsCommitmentRedesign || !acsCommitments.disableOldAcsCommitmentProcessor
 }
 
 object ParticipantNodeParameters {
@@ -100,6 +104,7 @@ object ParticipantNodeParameters {
     ledgerApiServerParameters = LedgerApiServerParametersConfig(),
     engine = CantonEngineConfig(),
     journalGarbageCollectionDelay = time.NonNegativeFiniteDuration.Zero,
+    journalGarbageCollectionMinimumGap = time.PositiveFiniteDuration.tryOfSeconds(1),
     disableUpgradeValidation = false,
     enableStrictDarValidation = true,
     commandProgressTracking = CommandProgressTrackerConfig(),
