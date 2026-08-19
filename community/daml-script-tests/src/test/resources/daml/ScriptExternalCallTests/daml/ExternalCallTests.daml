@@ -1,0 +1,59 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module ExternalCallTests where
+
+import Daml.Script
+import DA.Assert
+import DA.ExternalCall (externalCall)
+import DA.Text
+
+-- Keep in sync with the copy in community/app/src/test/daml/ExternalCallTest: the projects
+-- are built by different build systems (sbt DamlPlugin vs dpm at test runtime) and cannot
+-- share sources, but both suites must exercise the same template behavior.
+template ExternalCallTester
+  with
+    owner : Party
+  where
+    signatory owner
+
+    nonconsuming choice CallExtension : Text
+      with
+        extensionId : Text
+        functionId : Text
+        configHex : Text
+        inputHex : Text
+      controller owner
+      do externalCall extensionId functionId configHex inputHex
+
+-- The service output recorded at submission flows back as the choice result.
+externalCallReturnsServiceOutput : Script Text
+externalCallReturnsServiceOutput = script do
+  owner <- allocateParty "Owner-ExternalCallTests:externalCallReturnsServiceOutput"
+  cid <- owner `submit` createCmd ExternalCallTester with owner
+  result <- owner `submit` exerciseCmd cid CallExtension with
+    extensionId = "test-extension"
+    functionId = "test-function"
+    configHex = "00ff"
+    inputHex = "deadbeef"
+  result === "c0ffee"
+  pure result
+
+-- A call to an unconfigured extension fails at interpretation time and
+-- surfaces to the script as the typed external-call submit error.
+unknownExtensionFailsWithExternalCallError : Script ()
+unknownExtensionFailsWithExternalCallError = script do
+  owner <- allocateParty "Owner-ExternalCallTests:unknownExtensionFailsWithExternalCallError"
+  cid <- owner `submit` createCmd ExternalCallTester with owner
+  res <- owner `trySubmit` exerciseCmd cid CallExtension with
+    extensionId = "missing-extension"
+    functionId = "test-function"
+    configHex = "00ff"
+    inputHex = "deadbeef"
+  case res of
+    Left (ExternalCallError ExecutionFailed extensionId functionId errMsg) -> do
+      extensionId === "missing-extension"
+      functionId === "test-function"
+      assert $ "Extension 'missing-extension' not configured" `isInfixOf` errMsg
+    Left e -> error $ "unknownExtensionFailsWithExternalCallError incorrect error: " <> show e
+    Right _ -> error "unknownExtensionFailsWithExternalCallError incorrectly succeeded"

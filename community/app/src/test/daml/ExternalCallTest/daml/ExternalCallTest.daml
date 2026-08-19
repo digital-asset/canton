@@ -9,6 +9,11 @@ import DA.ExternalCall (externalCall)
 -- external call to a configured extension service in the transaction. The
 -- config and input arguments are hex-encoded byte strings; the result is the
 -- service response as a hex-encoded byte string.
+--
+-- Keep in sync with the copy in
+-- community/daml-script-tests/src/test/resources/daml/ScriptExternalCallTests: the projects
+-- are built by different build systems (sbt DamlPlugin vs dpm at test runtime) and cannot
+-- share sources, but both suites must exercise the same template behavior.
 template ExternalCallTester
   with
     owner : Party
