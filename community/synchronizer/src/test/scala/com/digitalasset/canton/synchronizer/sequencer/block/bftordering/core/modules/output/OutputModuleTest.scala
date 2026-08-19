@@ -65,6 +65,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.{
   BatchId,
+  OrderingBlock,
   ProofOfAvailability,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime.CanonicalCommitSet
@@ -136,7 +137,7 @@ class OutputModuleTest
   implicit val pv: ProtocolVersion = testedProtocolVersion
 
   "OutputModule" should {
-    val initialBlock = anOrderedBlockForOutput()
+    val initialBlock = anOrderedBlockForOutput(batchIds = Seq(BatchId.createForTesting("batchId")))
 
     "fetch block from availability" when {
       "a block hasn't been provided yet and is not being fetched" in {
@@ -157,6 +158,30 @@ class OutputModuleTest
         verify(availabilityRef, times(1)).asyncSend(
           eqTo(Availability.LocalOutputFetch.FetchBlockData(initialBlock))
         )(any[TraceContext], any[MetricsContext])
+        succeed
+      }
+    }
+
+    "complete block without fetching" when {
+      "block has no batches (empty block)" in {
+        implicit val context: IgnoringUnitTestContext[Output.Message[IgnoringUnitTestEnv]] =
+          IgnoringUnitTestContext()
+        val store = createOutputMetadataStore[IgnoringUnitTestEnv]
+        val availabilityRef = mock[ModuleRef[Availability.Message[IgnoringUnitTestEnv]]]
+        val output = createOutputModule[IgnoringUnitTestEnv](
+          store = store,
+          availabilityRef = availabilityRef,
+        )()
+
+        output.receive(Output.Start)
+
+        val emptyBlock = anOrderedBlockForOutput(batchIds = Seq.empty)
+        output.receive(Output.BlockOrdered(emptyBlock))
+
+        verify(availabilityRef, never).asyncSend(
+          eqTo(Availability.LocalOutputFetch.FetchBlockData(emptyBlock))
+        )(any[TraceContext], any[MetricsContext])
+
         succeed
       }
     }
@@ -1724,6 +1749,170 @@ class OutputModuleTest
       )(any[TraceContext], any[MetricsContext])
       succeed
     }
+
+    "early block fetching" should {
+      implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext(resolveAwaits = true)
+      val batch =
+        OrderingRequestBatch.create(
+          Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
+          EpochNumber.First,
+        )
+      val batchId = BatchId.from(batch)
+      val orderedBlockForOutput = anOrderedBlockForOutput(batchIds = Seq(batchId))
+      val orderingBlock = OrderingBlock(orderedBlockForOutput.orderedBlock.batchRefs)
+      val blockNumber = orderedBlockForOutput.orderedBlock.metadata.blockNumber
+      val originalLeader = BftNodeId("original-leader")
+
+      val blockConsensusStarted = Output.BlockConsensusStarted(
+        blockNumber,
+        originalLeader,
+        orderingBlock,
+      )
+
+      "complete block that is ordered after an early fetch" in {
+        val store = createOutputMetadataStore[ProgrammableUnitTestEnv]
+        val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](
+            store = store,
+            availabilityRef = availabilityRef,
+          )()
+        output.receive(Output.Start)
+        output.receive(blockConsensusStarted)
+        verify(availabilityRef, times(1)).asyncSend(
+          eqTo(
+            Availability.LocalOutputFetch
+              .EarlyFetchBlockData(blockNumber, originalLeader, orderingBlock)
+          )
+        )(any[TraceContext], any[MetricsContext])
+        output.receive(Output.EarlyBlockDataFetched(blockNumber, Seq(batchId -> batch)))
+        output.receive(Output.BlockOrdered(orderedBlockForOutput))
+        // regular fetch is never called because the block was already fetched early
+        verify(availabilityRef, never).asyncSend(
+          eqTo(Availability.LocalOutputFetch.FetchBlockData(orderedBlockForOutput))
+        )(any[TraceContext], any[MetricsContext])
+
+        context.runPipedMessagesAndReceiveOnModule(output)
+        val blocks =
+          store.getBlockFromInclusive(initialBlockNumber = BlockNumber.First)(traceContext)()
+        blocks.size shouldBe 1
+        assertBlock(
+          blocks.head,
+          expectedBlockNumber = blockNumber,
+          expectedTimestamp = aTimestamp,
+        )
+        succeed
+      }
+
+      "complete block whose early fetch completes after it is ordered" in {
+        val store = createOutputMetadataStore[ProgrammableUnitTestEnv]
+        val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](
+            store = store,
+            availabilityRef = availabilityRef,
+          )()
+        output.receive(Output.Start)
+        output.receive(blockConsensusStarted)
+        verify(availabilityRef, times(1)).asyncSend(
+          eqTo(
+            Availability.LocalOutputFetch
+              .EarlyFetchBlockData(blockNumber, originalLeader, orderingBlock)
+          )
+        )(any[TraceContext], any[MetricsContext])
+
+        output.receive(Output.BlockOrdered(orderedBlockForOutput))
+        // regular fetch is never called because early fetch is in progress and will complete the block
+        verify(availabilityRef, never).asyncSend(
+          eqTo(Availability.LocalOutputFetch.FetchBlockData(orderedBlockForOutput))
+        )(any[TraceContext], any[MetricsContext])
+        // when early fetch completes, the block is completed and stored
+        output.receive(Output.EarlyBlockDataFetched(blockNumber, Seq(batchId -> batch)))
+
+        context.runPipedMessagesAndReceiveOnModule(output)
+        val blocks =
+          store.getBlockFromInclusive(initialBlockNumber = BlockNumber.First)(traceContext)()
+        blocks.size shouldBe 1
+        assertBlock(
+          blocks.head,
+          expectedBlockNumber = blockNumber,
+          expectedTimestamp = aTimestamp,
+        )
+        succeed
+      }
+
+      "an empty block completes immediately and ignores early fetched batches" in {
+        val store = createOutputMetadataStore[ProgrammableUnitTestEnv]
+        val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](
+            store = store,
+            availabilityRef = availabilityRef,
+          )()
+        output.receive(Output.Start)
+        output.receive(blockConsensusStarted)
+        verify(availabilityRef, times(1)).asyncSend(
+          eqTo(
+            Availability.LocalOutputFetch
+              .EarlyFetchBlockData(blockNumber, originalLeader, orderingBlock)
+          )
+        )(any[TraceContext], any[MetricsContext])
+
+        // an empty ordered block just completes the block because a view change occurred and the original early fetched batches didn't get used
+        val orderedEmptyBlockForOutput = anOrderedBlockForOutput(batchIds = Seq.empty)
+        output.receive(Output.BlockOrdered(orderedEmptyBlockForOutput))
+
+        // regular fetch is never called because the empty block simply completes now
+        verify(availabilityRef, never).asyncSend(
+          eqTo(Availability.LocalOutputFetch.FetchBlockData(orderedEmptyBlockForOutput))
+        )(any[TraceContext], any[MetricsContext])
+
+        context.runPipedMessagesAndReceiveOnModule(output)
+        val blocks =
+          store.getBlockFromInclusive(initialBlockNumber = BlockNumber.First)(traceContext)()
+        blocks.size shouldBe 1
+        assertBlock(
+          blocks.head,
+          expectedBlockNumber = blockNumber,
+          expectedTimestamp = aTimestamp,
+        )
+
+        // when early fetch completes, it is just ignored
+        output.receive(Output.EarlyBlockDataFetched(blockNumber, Seq(batchId -> batch)))
+
+        succeed
+      }
+
+      "multiple BlockConsensusStarted messages for the same block only trigger one early fetch" in {
+        val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](availabilityRef = availabilityRef)()
+        output.receive(Output.Start)
+        output.receive(blockConsensusStarted)
+
+        verify(availabilityRef, times(1)).asyncSend(
+          eqTo(
+            Availability.LocalOutputFetch
+              .EarlyFetchBlockData(blockNumber, originalLeader, orderingBlock)
+          )
+        )(any[TraceContext], any[MetricsContext])
+
+        output.receive(blockConsensusStarted)
+
+        // no extra calls
+        verify(availabilityRef, times(1)).asyncSend(
+          eqTo(
+            Availability.LocalOutputFetch
+              .EarlyFetchBlockData(blockNumber, originalLeader, orderingBlock)
+          )
+        )(any[TraceContext], any[MetricsContext])
+
+        succeed
+      }
+
+    }
+
   }
 
   "adjust time for a state-transferred block based on the previous BFT time" in {
@@ -1750,6 +1939,7 @@ class OutputModuleTest
     val block = anOrderedBlockForOutput(
       blockNumber = blockNumber,
       commitTimestamp = newBlockCommitTime,
+      batchIds = Seq(BatchId.createForTesting("batchId")),
     )
     output.receive(Output.Start)
     output.receive(Output.BlockOrdered(block))

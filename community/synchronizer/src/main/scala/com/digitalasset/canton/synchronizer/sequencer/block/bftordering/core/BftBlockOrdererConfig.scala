@@ -22,6 +22,7 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.networking.grpc.{CantonServerBuilder, ClientChannelParams}
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandaloneNetworkConfig,
   DefaultAvailabilityDisseminationPatience,
@@ -47,6 +48,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultNetworkSendRetryMinimumDelay,
   DefaultOutputEnqueueMaxRetries,
   DefaultOutputEnqueueMaxRetryDelay,
+  DefaultOutputFetchHowManyRecipients,
   DefaultOutputFetchMinimumDelay,
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
@@ -58,11 +60,17 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  FiniteDurationDistribution,
+  Probability,
+}
 import com.digitalasset.canton.util.retry
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import java.io.File
+import java.util.concurrent.ThreadLocalRandom
 import scala.concurrent.duration.*
+import scala.util.Random
 
 /** Configuration class for the BFT Block Orderer.
   *
@@ -72,6 +80,11 @@ import scala.concurrent.duration.*
   * @param leaderSelectionPolicyConfigForPv34
   *   The leader selection policy to enforce in the presence of View Changes of segments (only taken
   *   into account in Protocol Version 34).
+  * @param viewChangeTimeoutOverride
+  *   Optionally, the base duration to use for view change timeouts for ISS segments. If specified,
+  *   this value will be used instead of the pbftViewChangeTimeout set in the network-wide
+  *   SequencingParameters topology transaction. Note that this value is not persisted (in-memory
+  *   only), and must be set back to None to return using the SequencingParameters value.
   * @param maxMempoolQueueSize
   *   The maximum number of pending requests that will be held in the in-memory mempool. Once this
   *   queue size is reached, subsequent requests are rejected with a mempool overloaded error.
@@ -159,8 +172,15 @@ import scala.concurrent.duration.*
   * @param standalone
   *   Optionally, a startup mode in which the BFT ordering node runs as a "standalone" service,
   *   allowing the BFT layer to bypass the sequencer to directly receive requests from and serve
-  *   reads to clients. This mode is useful for isolated performance and scale testing. If set to
-  *   [[scala.None]], the BFT layer behaves as normal with the co-located Sequencer component.
+  *   reads to clients. This mode is useful for performance and scale testing of the CantonBFT
+  *   ordering component in isolation. If set to [[scala.None]] (default), the BFT layer behaves as
+  *   normal with the co-located Sequencer component. It can only be enabled with
+  *   "canton.parameters.non-standard-config = yes".
+  * @param sendDelay
+  *   Optionally, a delay to apply to outgoing P2P messages from the BFT ordering node. This is
+  *   useful for performance and scale testing. If set to [[scala.None]] (default), no artificial
+  *   send delay is introduced. It can only be enabled with "canton.parameters.non-standard-config =
+  *   yes".
   * @param storage
   *   Optionally, a dedicated storage solution for the BFT ordering layer, separate from the
   *   co-located sequencer. If set to [[scala.None]], the BFT layer shares the same storage as the
@@ -199,6 +219,7 @@ import scala.concurrent.duration.*
 final case class BftBlockOrdererConfig(
     segmentLengthForPv34: Option[Long] = None,
     leaderSelectionPolicyConfigForPv34: Option[BlacklistLeaderSelectionPolicyConfig] = None,
+    viewChangeTimeoutOverride: Option[FiniteDuration] = None,
     maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
     minRequestsInBatch: Short = DefaultMinRequestsInBatch,
     maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
@@ -215,11 +236,13 @@ final case class BftBlockOrdererConfig(
     consensusEmptyBlockCreationTimeout: FiniteDuration = DefaultConsensusEmptyBlockCreationTimeout,
     consensusNewEpochTopologyWarnTimeout: FiniteDuration =
       DefaultConsensusNewEpochTopologyWarnTimeout,
+    consensusEnableLogEndOfEpochProgress: Boolean = false,
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
     epochStateTransferRetryTimeout: FiniteDuration = DefaultEpochStateTransferTimeout,
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
     outputFetchMinimumDelay: FiniteDuration = DefaultOutputFetchMinimumDelay,
     outputFetchTimeoutCap: FiniteDuration = DefaultOutputFetchTimeoutCap,
+    outputFetchHowManyRecipients: PositiveInt = DefaultOutputFetchHowManyRecipients,
     outputEnqueueMaxRetries: Int = DefaultOutputEnqueueMaxRetries,
     outputEnqueueMaxRetryDelay: FiniteDuration = DefaultOutputEnqueueMaxRetryDelay,
     outputSizeOfChunkOfEpochsToLoadAtStart: Int = DefaultOutputSizeOfChunkOfEpochsToLoadAtStart,
@@ -268,6 +291,7 @@ object BftBlockOrdererConfig {
   val DefaultOutputFetchTimeout: FiniteDuration = 1_000.millis
   val DefaultOutputFetchMinimumDelay: FiniteDuration = 1_000.millis
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5_000.millis
+  val DefaultOutputFetchHowManyRecipients: PositiveInt = PositiveInt.tryCreate(1)
   val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
   val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
   val DefaultOutputSizeOfChunkOfEpochsToLoadAtStart: Int = 10
@@ -401,16 +425,23 @@ object BftBlockOrdererConfig {
       tls: Option[TlsServerConfig] = None,
       override val maxInboundMessageSize: NonNegativeInt =
         ServerConfig.defaultMaxInboundMessageSize,
+      // Keep Canton defaults for P2P server-side flow control, i.e. automatic flow control
+      //  with implementation defaults for the initial window size
+      override val flowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow,
+      override val initialFlowControlWindow: Option[PositiveInt] =
+        ServerConfig.defaultInitialFlowControlWindow,
       override val maxConcurrentCallsPerConnection: NonNegativeInt =
         ServerConfig.defaultMaxConcurrentCallsPerConnection,
       override val limits: Option[ActiveRequestLimitsConfig] = None,
+      override val keepAliveServer: Option[BasicKeepAliveServerConfig] = Some(
+        BasicKeepAliveServerConfig()
+      ),
   ) extends ServerConfig {
     override val name: String = "peer-to-peer"
     override val maxTokenLifetime: config.NonNegativeDuration =
       config.NonNegativeDuration(Duration.Inf)
     override val jwksCacheConfig: JwksCacheConfig = JwksCacheConfig()
     override val jwtTimestampLeeway: Option[JwtTimestampLeeway] = None
-    override val keepAliveServer: Option[BasicKeepAliveServerConfig] = None
     override val authServices: Seq[AuthServiceConfig] = Seq.empty
     override val adminTokenConfig: AdminTokenConfig = AdminTokenConfig()
 
@@ -434,7 +465,9 @@ object BftBlockOrdererConfig {
       override val tlsConfig: Option[TlsClientConfig] = Some(
         TlsClientConfig(trustCollectionFile = None, clientCert = None, enabled = true)
       ),
-      channel: ClientChannelParams = ClientChannelParams.Default,
+      // Don't disable automatic flow control for P2P client connections and use implementation defaults for its
+      //  initial window size
+      channel: ClientChannelParams = ClientChannelParams.Default.copy(flowControlWindow = None),
   ) extends ClientConfig
 
   final case class EndpointId(
@@ -448,9 +481,43 @@ object BftBlockOrdererConfig {
       signingPrivateKeyProtoFile: File,
       signingPublicKeyProtoFile: File,
       segmentLength: Long,
+      pbftViewChangeTimeout: FiniteDuration,
+      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
+      maxRequestsInBatch: Short,
+      maxBatchesPerBlockProposal: Short,
       peers: Seq[BftBlockOrderingStandalonePeerConfig],
       postOrderingDelay: Option[FiniteDuration] = None,
+      sendDelay: Option[BftBlockOrderingP2PSendDelayConfig] = None,
+      topologyBroadcastProbability: Option[Probability] = None,
+      pendingTopologyChangesProbability: Option[Probability] = None,
+      getOrderingTopologyDelay: Option[FiniteDurationDistribution] = None,
   )
+
+  final case class BftBlockOrderingP2PSendDelayConfig(
+      defaultDelayDistribution: Option[FiniteDurationDistribution] = None,
+      delaysByRecipients: Seq[DelayByRecipients] = Seq.empty,
+  ) {
+
+    private val delayByRecipientInstanceName: Map[String, FiniteDurationDistribution] =
+      delaysByRecipients.flatMap { case DelayByRecipients(instanceNames, delayDistribution) =>
+        instanceNames.map(_ -> delayDistribution)
+      }.toMap
+
+    def nextSendDelay(
+        recipientInstanceName: String
+    ): Option[FiniteDuration] =
+      delayByRecipientInstanceName
+        .get(recipientInstanceName)
+        .orElse(defaultDelayDistribution)
+        // Not used in simulation, so it's fine to use an actual random generator here
+        .map(_.generateRandomDuration(new Random(ThreadLocalRandom.current())))
+  }
+  object BftBlockOrderingP2PSendDelayConfig {
+    final case class DelayByRecipients(
+        instanceNames: Seq[String],
+        delayDistribution: FiniteDurationDistribution,
+    )
+  }
 
   final case class BftBlockOrderingStandalonePeerConfig(
       sequencerId: String,

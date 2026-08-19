@@ -18,7 +18,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.ClientChannelBuilder.createChannelBuilder
+import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   AuthenticationInitialState,
   P2PEndpoint,
   completeGrpcStreamObserver,
+  createNettyClientChannelBuilder,
   failGrpcStreamObserver,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.authentication.{
@@ -105,6 +106,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
   private val longRunningExecutionContext = ExecutionContext.fromExecutor(longRunningExecutor)
 
   private val stateRef = new AtomicReference[State](State())
+
+  private val clientChannelBuilder = ClientChannelBuilder(loggerFactory)
 
   // Called by the connection-managing actor when establishing a connection to an endpoint
   def getPeerSenderOrStartConnection(
@@ -572,7 +575,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
     logger.info(s"Creating a gRPC channel to $p2pEndpointId")
 
     val channel =
-      createChannelBuilder(p2pEndpoint.endpointConfig, maxInboundMessageSize = None).build()
+      createNettyClientChannelBuilder(clientChannelBuilder, p2pEndpoint.endpointConfig).build()
     val channelId = channel.toString
 
     val authenticationContextO =

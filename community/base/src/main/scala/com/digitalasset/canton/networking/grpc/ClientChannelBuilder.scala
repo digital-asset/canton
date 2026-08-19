@@ -22,10 +22,19 @@ import io.grpc.netty.shaded.io.netty.handler.ssl.{SslContext, SslContextBuilder}
 import java.util.concurrent.{Executor, TimeUnit}
 import scala.jdk.CollectionConverters.*
 
+/** @param flowControlWindow
+  *   Switches to manual gRPC flow control and sets its window; if `None`, then it is not configured
+  *   and the implementation default is used.
+  * @param initialFlowControlWindow
+  *   Switches to automatic gRPC flow control and sets its initial window; if `None`, then it is not
+  *   configured and the implementation default is used. If present, it is set after the
+  *   `flowControlWindow` parameters, so it overrides it.
+  */
 final case class ClientChannelParams(
     maxInboundMessageSize: NonNegativeInt,
     keepAliveClient: Option[KeepAliveClientConfig],
-    flowControlWindow: PositiveInt,
+    flowControlWindow: Option[PositiveInt],
+    initialFlowControlWindow: Option[PositiveInt],
     traceContextPropagation: Propagation,
 )
 
@@ -35,6 +44,7 @@ object ClientChannelParams {
       maxInboundMessageSize = DefaultMaxInboundMessageSize,
       keepAliveClient = None,
       flowControlWindow = ClientChannelParams.DefaultFlowControlWindow,
+      initialFlowControlWindow = ClientChannelParams.DefaultInitialFlowControlWindow,
       TracingConfig.Propagation.Enabled,
     )
   lazy val Default =
@@ -42,9 +52,11 @@ object ClientChannelParams {
       maxInboundMessageSize = DefaultMaxInboundMessageSize,
       keepAliveClient = Some(KeepAliveClientConfig()),
       flowControlWindow = ClientChannelParams.DefaultFlowControlWindow,
+      initialFlowControlWindow = ClientChannelParams.DefaultInitialFlowControlWindow,
       TracingConfig.Propagation.Enabled,
     )
-  val DefaultFlowControlWindow: PositiveInt = PositiveInt.tryCreate(1024 * 1024)
+  val DefaultFlowControlWindow: Option[PositiveInt] = Some(PositiveInt.tryCreate(1024 * 1024))
+  val DefaultInitialFlowControlWindow: Option[PositiveInt] = None
   val DefaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(128 * 1024 * 1024)
 }
 
@@ -90,7 +102,15 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
     builder.executor(executor)
     builder.maxInboundMessageSize(params.maxInboundMessageSize.value)
     ClientChannelBuilder.configureKeepAlive(params.keepAliveClient, builder).discard
-    builder.flowControlWindow(params.flowControlWindow.value)
+
+    params.flowControlWindow.foreach { flowControlWindow =>
+      builder.flowControlWindow(flowControlWindow.value).discard
+    }
+
+    params.initialFlowControlWindow.foreach { initialFlowControlWindow =>
+      builder.initialFlowControlWindow(initialFlowControlWindow.value).discard
+    }
+
     if (params.traceContextPropagation == Propagation.Enabled)
       builder.intercept(TraceContextGrpc.clientInterceptor()).discard
 
@@ -172,24 +192,31 @@ object ClientChannelBuilder {
   )(implicit executor: Executor): ManagedChannelBuilderProxy =
     createChannelBuilder(clientConfig, maxInboundMessageSize = Some(Int.MaxValue))
 
-  def createChannelBuilder(
+  private def createChannelBuilder(
       clientConfig: ClientConfig,
       maxInboundMessageSize: Option[Int],
   )(implicit executor: Executor): ManagedChannelBuilderProxy = {
     val clientChannelParams = clientConfig.channel
-    val nettyChannelBuilder =
+    val nettyChannelBuilder = // Mutable builder
       NettyChannelBuilder
         .forAddress(clientConfig.address, clientConfig.port.unwrap)
         .executor(executor)
         .maxInboundMessageSize(
           maxInboundMessageSize.getOrElse(clientChannelParams.maxInboundMessageSize.value)
         )
-        .flowControlWindow(clientChannelParams.flowControlWindow.value)
+
+    clientChannelParams.flowControlWindow.foreach { flowControlWindow =>
+      nettyChannelBuilder.flowControlWindow(flowControlWindow.value).discard
+    }
+
+    clientChannelParams.initialFlowControlWindow.foreach { initialFlowControlWindow =>
+      nettyChannelBuilder.initialFlowControlWindow(initialFlowControlWindow.value).discard
+    }
 
     if (clientChannelParams.traceContextPropagation == Propagation.Enabled)
       nettyChannelBuilder
         .intercept(TraceContextGrpc.clientInterceptor())
-        .discard // Imperative-style builder
+        .discard
 
     // Apply TLS settings
     clientConfig.tlsConfig

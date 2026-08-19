@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.tea.projection
 
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -125,13 +125,14 @@ object TeaProjectionFactory {
       config: ProjectionConfig,
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
+      databaseQueryTimeout: PositiveFiniteDuration,
       onEventCommitted: () => Unit = () => (),
   )(implicit system: ActorSystem[?]): (TeaProjectionFactory, TeaTrafficStore) = {
     import system.executionContext
 
     storage match {
       case db: DbStorage =>
-        val store = new TeaDbTrafficStore(db, loggerFactory, timeouts)
+        val store = new TeaDbTrafficStore(db, loggerFactory, timeouts, databaseQueryTimeout)
         val projection: TeaProjectionFactory =
           new TeaDbProjectionFactory(
             db,
@@ -143,7 +144,7 @@ object TeaProjectionFactory {
           )
         (projection, store)
       case _: MemoryStorage =>
-        val store = new TeaMemoryTrafficStore()
+        val store = new TeaMemoryTrafficStore(loggerFactory)
         val projection: TeaProjectionFactory =
           new TeaMemoryProjectionFactory(loggerFactory, store, onEventCommitted)
         (projection, store)

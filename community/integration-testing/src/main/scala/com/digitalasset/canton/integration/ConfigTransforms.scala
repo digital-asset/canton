@@ -114,6 +114,8 @@ object ConfigTransforms {
           .replace(true)
           .focus(_.topology.useNewClient)
           .replace(true)
+          .focus(_.parameters.enableAsyncSequencerLogging)
+          .replace(true)
       ),
       ConfigTransforms.updateAllParticipantConfigs_(
         _.focus(_.topology.useNewProcessor)

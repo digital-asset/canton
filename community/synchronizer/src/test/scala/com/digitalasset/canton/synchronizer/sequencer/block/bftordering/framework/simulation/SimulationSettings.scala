@@ -5,40 +5,13 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  PowerDistribution,
+  Probability,
+}
 
-import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.Random
-
-// following: https://github.com/DACH-NY/simulation-testing-demo/tree/main
-
-final case class PowerDistribution(low: FiniteDuration, mean: FiniteDuration) {
-
-  def generateRandomDuration(rng: Random): FiniteDuration = {
-    // the nextDouble function has a range of [0, 1)
-    val domain = rng.nextDouble() + Double.MinPositiveValue
-    // the log function has a range of (-inf, 0] in the synchronizer of (0, 1]
-    // so we negate to get the range of [0, inf)
-    // 0 is excluded from the synchronizer to eliminate potential inf calculation blowing up FiniteDuration construction
-    val sample = -Math.log(domain)
-    // we adjust the mean, since we will add `low` afterwards
-    // to guarantee we are at least `low`
-    val adjustedMean = mean.minus(low).max(0.microseconds).toMicros
-
-    FiniteDuration((adjustedMean * sample).toLong, TimeUnit.MICROSECONDS).plus(low)
-  }
-
-  def copyWithMaxLow(otherLow: FiniteDuration): PowerDistribution =
-    this.copy(low = low.max(otherLow))
-
-}
-
-final case class Probability(prob: Double) {
-  require(0 <= prob, "Probability must be at least 0")
-  require(prob <= 1, "Probability must be at most 1")
-  def flipCoin(rng: Random): Boolean =
-    rng.nextDouble() <= prob
-}
 
 final case class BrokenLink(from: BftNodeId, to: BftNodeId)
 

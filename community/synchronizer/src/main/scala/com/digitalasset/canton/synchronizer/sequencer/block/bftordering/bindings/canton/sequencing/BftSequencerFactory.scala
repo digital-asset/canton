@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -123,8 +122,6 @@ class BftSequencerFactory(
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
       lsuSequencingBounds: Option[LsuSequencingBounds],
-      parallelism: PositiveInt,
-      enablePrevalidation: Boolean,
       synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
@@ -151,8 +148,7 @@ class BftSequencerFactory(
       BlockProcessingParameters(
         orderingTimeFixMode,
         lsuSequencingBounds,
-        parallelism = parallelism,
-        enablePrevalidation = enablePrevalidation,
+        nodeParameters,
       ),
       nodeParameters,
       metrics,

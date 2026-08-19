@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
@@ -95,7 +96,8 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
           ConsensusStatus.EpochStatus.create(
             anotherId,
             epoch0,
-            Seq(
+            NonEmpty.mk(
+              Seq,
               inProgressSegmentStatus(Seq(true, false, false)),
               completeSegmentStatus,
               inViewChangeSegmentStatus(Seq(false, false, true)),
@@ -117,7 +119,8 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
           ConsensusStatus.EpochStatus.create(
             anotherId,
             epoch0,
-            Seq(
+            NonEmpty.mk(
+              Seq,
               inProgressSegmentStatus(Seq(false, true, false, false)), // blocks 0, 3, 6, 9
               completeSegmentStatus, // blocks 1, 4, 7
               SegmentStatus
@@ -155,7 +158,8 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
           ConsensusStatus.EpochStatus.create(
             anotherId,
             epoch0,
-            Seq(
+            NonEmpty.mk(
+              Seq,
               inProgressSegmentStatus(Seq(false, true, false, false, true)),
               inProgressSegmentStatus(Seq(false, true, false, false, false)),
             ),
@@ -175,7 +179,8 @@ class PreviousEpochsRetransmissionsTrackerTest extends AnyWordSpec with BftSeque
         ConsensusStatus.EpochStatus.create(
           anotherId,
           epoch0,
-          Seq(
+          NonEmpty.mk(
+            Seq,
             inProgressSegmentStatus(Seq(false, true, false, false, true)),
             inProgressSegmentStatus(Seq(false, true, false, false, false)),
           ),

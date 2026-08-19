@@ -9,7 +9,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.DbStorage
-import com.digitalasset.canton.store.db.{DbTest, H2Test, MigrationMode, PostgresTest}
+import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tea.projection.{
   EventSource,
   TeaProjectionFactory,
@@ -49,7 +49,12 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
   // The store is a stateless query wrapper; data isolation between tests is provided by cleanDb.
   // The execution context comes from HasExecutionContext (mixed in via DbTest).
   private lazy val dbStore: TeaDbTrafficStore =
-    new TeaDbTrafficStore(storage, loggerFactory, timeouts)
+    new TeaDbTrafficStore(
+      storage,
+      loggerFactory,
+      timeouts,
+      TrafficEnforcementServerConfig.Internal().databaseQueryTimeout,
+    )
 
   override protected def createBackend()(implicit system: ActorSystem[?]): Backend =
     new Backend {
@@ -60,7 +65,7 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
           storage.underlying,
           loggerFactory,
           dbStore,
-          EventSource.LedgerAPI,
+          EventSource.LedgerAPICompletions,
           ProjectionConfig(),
         )
     }
@@ -70,12 +75,6 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
   }
 }
 
-class DbTeaProjectionFactoryPostgresTest extends DbTeaProjectionFactoryTest with PostgresTest {
-  // TODO(i33278): remove when migrations are stable
-  override def migrationMode: MigrationMode = MigrationMode.DevVersion
-}
+class DbTeaProjectionFactoryPostgresTest extends DbTeaProjectionFactoryTest with PostgresTest
 
-class DbTeaProjectionFactoryH2Test extends DbTeaProjectionFactoryTest with H2Test {
-  // TODO(i33278): remove when migrations are stable
-  override def migrationMode: MigrationMode = MigrationMode.DevVersion
-}
+class DbTeaProjectionFactoryH2Test extends DbTeaProjectionFactoryTest with H2Test

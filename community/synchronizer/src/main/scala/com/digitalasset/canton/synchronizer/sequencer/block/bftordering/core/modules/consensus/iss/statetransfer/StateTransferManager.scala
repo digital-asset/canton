@@ -114,7 +114,7 @@ class StateTransferManager[E <: Env[E]](
         membership,
         cryptoProvider,
         abort,
-        nodeThatTimedOut = None,
+        nodesThatTimedOut = Seq.empty,
       )
     }
 
@@ -122,7 +122,7 @@ class StateTransferManager[E <: Env[E]](
       newEpochNumber: EpochNumber,
       membership: Membership,
       cryptoProvider: CryptoProvider[E],
-      nodeThatTimedOut: Option[BftNodeId],
+      nodesThatTimedOut: Seq[BftNodeId],
   )(
       abort: String => Nothing
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
@@ -137,7 +137,7 @@ class StateTransferManager[E <: Env[E]](
       membership,
       cryptoProvider,
       abort,
-      nodeThatTimedOut,
+      nodesThatTimedOut,
     )
   }
 
@@ -146,14 +146,14 @@ class StateTransferManager[E <: Env[E]](
       membership: Membership,
       cryptoProvider: CryptoProvider[E],
       abort: String => Nothing,
-      nodeThatTimedOut: Option[BftNodeId],
+      nodesThatTimedOut: Seq[BftNodeId],
   )(implicit context: E#ActorContextT[Consensus.Message[E]]): Unit = context.withNewTraceContext {
     implicit traceContext =>
       waitingForEpochTransfer = Some(Instant.now)
       val blockTransferRequest =
         StateTransferMessage.BlockTransferRequest.create(newEpochNumber, membership.myId)
       messageSender.signMessage(cryptoProvider, blockTransferRequest) { signedMessage =>
-        sendBlockTransferRequest(signedMessage, membership, nodeThatTimedOut)(abort)
+        sendBlockTransferRequest(signedMessage, membership, nodesThatTimedOut)(abort)
       }
   }
 
@@ -201,7 +201,7 @@ class StateTransferManager[E <: Env[E]](
 
       case StateTransferMessage.RetryBlockTransferRequest(request, nodeThatTimedOutO) =>
         logger.info(s"Retrying block transfer request for epoch ${request.message.epoch}")
-        sendBlockTransferRequest(request, topologyInfo.currentMembership, nodeThatTimedOutO)(
+        sendBlockTransferRequest(request, topologyInfo.currentMembership, nodeThatTimedOutO.toList)(
           abort
         )
         StateTransferMessageResult.Continue
@@ -304,7 +304,7 @@ class StateTransferManager[E <: Env[E]](
   private def sendBlockTransferRequest(
       request: SignedMessage[StateTransferMessage.BlockTransferRequest],
       membership: Membership,
-      nodeThatTimedOut: Option[BftNodeId],
+      nodesThatTimedOut: Seq[BftNodeId],
   )(abort: String => Nothing)(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
@@ -322,11 +322,11 @@ class StateTransferManager[E <: Env[E]](
       messageSender.sendBlockTransferRequest(
         request,
         possibleRecipients,
-        nodeThatTimedOut,
-        Some(chosenRecipientO =>
+        nodesThatTimedOut, // There should always be just one
+        Some(chosenRecipients => // There should always be just one
           timeoutManager
             .scheduleTimeout(
-              StateTransferMessage.RetryBlockTransferRequest(request, chosenRecipientO)
+              StateTransferMessage.RetryBlockTransferRequest(request, chosenRecipients.headOption)
             )
         ),
       )

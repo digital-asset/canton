@@ -109,7 +109,7 @@ class PbftViewChangeState(
       setSignedPrePrepares(abort)(viewNumber, signedMessages)
   }
 
-  private def reachedWeakQuorum: Boolean =
+  def reachedWeakQuorum: Boolean =
     membership.orderingTopology.hasWeakQuorum(viewChangeMap.size)
 
   def shouldAdvanceViewChange: Boolean = {

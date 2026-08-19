@@ -166,7 +166,8 @@ class ParticipantTopologyDispatcher(
 
     def alreadyTrustedInStore(
         store: TopologyStore[?]
-    ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Boolean] =
+    ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Boolean] = {
+      logger.debug(s"Checking trust in synchronizer $synchronizerId inside store ${store.name}")
       EitherT.right(
         synchronizeWithClosing(functionFullName)(
           store
@@ -178,12 +179,19 @@ class ParticipantTopologyDispatcher(
               filterUid = Some(NonEmpty(Seq, participantId.uid)),
               filterNamespace = None,
             )
-            .map(_.toTopologyState.exists {
-              case SynchronizerTrustCertificate(`participantId`, `logicalSynchronizerId`, _) => true
-              case _ => false
-            })
+            .map { txns =>
+              if (logger.underlying.isDebugEnabled) {
+                logger.debug(s"SynchronizerTrustCertificates in store ${store.storeId}: $txns")
+              }
+              txns.toTopologyState.exists {
+                case SynchronizerTrustCertificate(`participantId`, `logicalSynchronizerId`, _) =>
+                  true
+                case _ => false
+              }
+            }
         )
       )
+    }
 
     def trustSynchronizer(
         state: SyncPersistentState

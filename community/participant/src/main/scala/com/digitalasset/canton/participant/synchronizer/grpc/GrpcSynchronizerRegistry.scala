@@ -356,13 +356,9 @@ class GrpcSynchronizerRegistry(
         )
         .toEitherT[FutureUnlessShutdown]
 
-      _ = logger.debug(s"Crypto handshake validated against crypto config")
-
       _ <- aliasManager
         .processHandshake(config.synchronizerAlias, info.psid)
         .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
-
-      _ = logger.debug(s"${config.synchronizerAlias} maps to ${info.psid} after handshake")
 
       // create persistent state for the synchronizer if it does not exist yet
       _ <- syncPersistentStateManager

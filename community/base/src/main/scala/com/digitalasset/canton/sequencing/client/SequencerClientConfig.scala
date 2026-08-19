@@ -72,7 +72,13 @@ import com.digitalasset.canton.tracing.TracingConfig.Propagation
   * @param channelMaxInboundMessageSize
   *   max inbound request size for the grpc channel to the sequencer.
   * @param channelFlowControlWindow
-  *   flow control window for the grpc channel to the sequencer.
+  *   switches to manual gRPC flow control and sets its window; if `None`, then it is not configured
+  *   and the implementation default is used. Switches to automatic gRPC flow control and sets its
+  *   initial window; if `None`, then it is not
+  * @param channelInitialFlowControlWindow
+  *   Switches to automatic gRPC flow control and sets its initial window; if `None`, then it is not
+  *   configured and the implementation default is used. If present, it is set after the
+  *   `flowControlWindow` parameters, so it overrides it.
   */
 final case class SequencerClientConfig(
     eventInboxSize: PositiveInt = PositiveInt.tryCreate(100),
@@ -103,14 +109,16 @@ final case class SequencerClientConfig(
     enableAmplificationImprovements: Boolean = true,
     amplifyOnMaxSequencingTimeTooFar: Boolean = true,
     channelMaxInboundMessageSize: NonNegativeInt = ClientChannelParams.DefaultMaxInboundMessageSize,
-    channelFlowControlWindow: PositiveInt = ClientChannelParams.DefaultFlowControlWindow,
+    channelFlowControlWindow: Option[PositiveInt] = ClientChannelParams.DefaultFlowControlWindow,
+    channelInitialFlowControlWindow: Option[PositiveInt] =
+      ClientChannelParams.DefaultInitialFlowControlWindow,
 ) {
 
   def clientChannelParams(tracePropagation: Propagation): ClientChannelParams = ClientChannelParams(
     maxInboundMessageSize = channelMaxInboundMessageSize,
     keepAliveClient = keepAliveClient,
     flowControlWindow = channelFlowControlWindow,
+    initialFlowControlWindow = channelInitialFlowControlWindow,
     traceContextPropagation = tracePropagation,
   )
-
 }

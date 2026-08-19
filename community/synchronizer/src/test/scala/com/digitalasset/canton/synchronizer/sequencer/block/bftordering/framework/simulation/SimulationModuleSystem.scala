@@ -69,7 +69,10 @@ object SimulationModuleSystem {
   ) extends P2PNetworkRef[P2PMessageT]
       with NamedLogging {
 
-    override def asyncP2PSend(createMessage: Option[Instant] => P2PMessageT)(implicit
+    override def asyncP2PSend(
+        recipientBftNodeId: BftNodeId,
+        createMessage: Option[Instant] => P2PMessageT,
+    )(implicit
         traceContext: TraceContext,
         metricsContext: MetricsContext,
     ): Unit =

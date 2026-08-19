@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.pruning
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.metrics.ExecutorServiceMetrics
@@ -359,10 +360,10 @@ class AcsCommitmentBenchmark
 
     val acsCommitmentsCatchUpConfig =
       Some(
-        AcsCommitmentsCatchUpParameters(
+        AcsCommitmentsCatchUpParameters.create(
           PositiveInt.tryCreate(configCatchUpIntervalSkip),
           PositiveInt.tryCreate(configNrIntervalsToTriggerCatchUp),
-        )
+        ).valueOr(err => throw new IllegalArgumentException(s"Invalid AcsCommitmentsCatchUpParameters: $err"))
       )
 
     val synchronizerCrypto = cryptoSetup(

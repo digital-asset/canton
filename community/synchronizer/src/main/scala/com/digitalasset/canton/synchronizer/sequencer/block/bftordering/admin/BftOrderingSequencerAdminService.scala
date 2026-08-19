@@ -105,7 +105,7 @@ final class BftOrderingSequencerAdminService(
       request: GetPeerNetworkStatusRequest
   ): Future[GetPeerNetworkStatusResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    logger.info(
+    logger.debug(
       "BFT sequencer admin service: getting network status for endpoints " +
         s"${if (request.endpointIds.isEmpty) "<all known>" else request.endpointIds.toString()} " +
         "to the network."

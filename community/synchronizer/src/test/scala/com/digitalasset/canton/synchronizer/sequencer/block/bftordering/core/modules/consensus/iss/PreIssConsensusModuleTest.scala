@@ -68,6 +68,18 @@ class PreIssConsensusModuleTest
   import PreIssConsensusModuleTest.*
 
   private val clock = new SimClock(loggerFactory = loggerFactory)
+  private val orderingTopology = OrderingTopology.forTesting(Set(myId))
+  private def orderingTopologyInfo = OrderingTopologyInfo[ProgrammableUnitTestEnv](
+    myId,
+    currentTopology = orderingTopology,
+    currentCryptoProvider = failingCryptoProvider,
+    currentLeaders = Seq(myId),
+    currentBlacklistedNodes = Seq.empty,
+    previousTopology = orderingTopology, // not relevant
+    previousCryptoProvider = failingCryptoProvider,
+    previousLeaders = Seq(myId),
+    previousBlacklistedNodes = Seq.empty,
+  )
 
   "PreIssConsensusModule" should {
     "set up the epoch store and state correctly" in {
@@ -113,7 +125,12 @@ class PreIssConsensusModuleTest
         val latestEpoch = latestEpochO.getOrElse(defaultBootstrapEpoch)
         val latestCompletedEpoch = latestCompletedEpochO.getOrElse(defaultBootstrapEpoch)
         val epochInProgress = EpochStore.EpochInProgress(Seq.empty, Seq.empty)
-        when(epochStore.loadEpochProgress(latestEpoch.info)).thenReturn(() => epochInProgress)
+        val epochStateEpoch = EpochState.Epoch(
+          latestEpoch.info,
+          orderingTopologyInfo.currentMembership,
+          orderingTopologyInfo.previousMembership,
+        )
+        when(epochStore.loadEpochProgress(epochStateEpoch)).thenReturn(() => epochInProgress)
         when(
           epochStore.loadCompleteBlocks(
             EpochNumber(
@@ -138,7 +155,7 @@ class PreIssConsensusModuleTest
 
         selfMessages.foreach(preIssConsensusModule.receive)
 
-        verify(epochStore).loadEpochProgress(latestEpoch.info)
+        verify(epochStore).loadEpochProgress(epochStateEpoch)
         verify(epochStore).loadCompleteBlocks(
           EpochNumber(
             latestCompletedEpoch.info.number - RetransmissionsManager.HowManyEpochsToKeep + 1
@@ -187,19 +204,8 @@ class PreIssConsensusModuleTest
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
     implicit val config: BftBlockOrdererConfig = BftBlockOrdererConfig()
 
-    val orderingTopology = OrderingTopology.forTesting(Set(myId))
     new PreIssConsensusModule[ProgrammableUnitTestEnv](
-      OrderingTopologyInfo(
-        myId,
-        currentTopology = orderingTopology,
-        currentCryptoProvider = failingCryptoProvider,
-        currentLeaders = Seq(myId),
-        currentBlacklistedNodes = Seq.empty,
-        previousTopology = orderingTopology, // not relevant
-        previousCryptoProvider = failingCryptoProvider,
-        previousLeaders = Seq(myId),
-        previousBlacklistedNodes = Seq.empty,
-      ),
+      orderingTopologyInfo,
       epochStore,
       None,
       clock,

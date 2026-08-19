@@ -15,6 +15,9 @@ import com.digitalasset.canton.util.ReleaseUtils
   * respect to the Ledger API. The tests are executed against the latest patch (stable or
   * snapshot/RC, whichever is most recent) of the most recent supported `(major, minor)` release
   * line.
+  *
+  * NOTE: if the test fails, you might have introduced a feature flag that has not been there in a
+  * previous version.
   */
 trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConformanceTest {
   override lazy val testedReleases: List[ReleaseUtils.TestedRelease] = {

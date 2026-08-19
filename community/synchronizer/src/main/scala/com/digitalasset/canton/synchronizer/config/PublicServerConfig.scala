@@ -53,6 +53,9 @@ final case class PublicServerConfig(
       PublicServerConfig.defaultNonceExpirationInterval,
     maxTokenExpirationInterval: NonNegativeFiniteDuration =
       PublicServerConfig.defaultMaxTokenExpirationInterval,
+    override val flowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow,
+    override val initialFlowControlWindow: Option[PositiveInt] =
+      ServerConfig.defaultInitialFlowControlWindow,
     override val maxConcurrentCallsPerConnection: NonNegativeInt =
       ServerConfig.defaultMaxConcurrentCallsPerConnection,
     maxAuthTokensPerMember: PositiveInt = PublicServerConfig.defaultMaxAuthTokensPerMember,

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions
 
 import cats.syntax.traverse.*
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   EpochNumber,
@@ -36,10 +37,11 @@ class EpochStatusBuilder(
     else ()
 
   def epochStatus: Option[ConsensusStatus.EpochStatus] =
-    segmentArray.toList.sequence.map { segments =>
-      ConsensusStatus.EpochStatus.create(from, epochNumber, segments)(
-        synchronizerProtocolVersion
-      )
-    }
+    for {
+      segments <- segmentArray.toList.sequence
+      nonEmptySegments <- NonEmpty.from(segments)
+    } yield ConsensusStatus.EpochStatus.create(from, epochNumber, nonEmptySegments)(
+      synchronizerProtocolVersion
+    )
 
 }

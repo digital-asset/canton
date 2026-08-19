@@ -11,13 +11,20 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BlockNumber,
   EpochNumber,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.CompleteBlockData
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.{
+  BatchId,
+  OrderingBlock,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   OrderingTopology,
   SequencingParameters,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
+  CompleteBlockData,
+  OrderingRequestBatch,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   Env,
@@ -52,12 +59,28 @@ object Output {
     */
   final case object ProcessNewEpochTopologyMessagesIfPossible extends Message[Nothing]
 
+  /** From local consensus to let output module know that consensus has started on that block and
+    * that the output module can start fetching the data for it before waiting for the block to be
+    * ordered. This is an optimization to reduce the time between consensus ordering a block and the
+    * output module being able to move to the next epoch.
+    */
+  final case class BlockConsensusStarted(
+      blockNumber: BlockNumber,
+      originalLeader: BftNodeId,
+      block: OrderingBlock,
+  ) extends Message[Nothing]
+
   // From local consensus
   final case class BlockOrdered(orderedBlockForOutput: OrderedBlockForOutput)
       extends Message[Nothing]
 
   // From local availability storage
   final case class BlockDataFetched(data: CompleteBlockData) extends Message[Nothing]
+  // From local availability storage
+  final case class EarlyBlockDataFetched(
+      blockNumber: BlockNumber,
+      batches: Seq[(BatchId, OrderingRequestBatch)],
+  ) extends Message[Nothing]
 
   final case class BlockDataStored(
       orderedBlockData: CompleteBlockData,

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
@@ -43,18 +44,20 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
   "RetransmissionMessageValidator.validateRetransmissionRequest" should {
     "error when the number of segments is not correct" in {
       val validator = new RetransmissionMessageValidator(epoch)
-      val request = retransmissionRequest(segments = Seq.empty)
+      val request = retransmissionRequest(segments =
+        NonEmpty.mk(Seq, SegmentStatus.Complete, SegmentStatus.Complete)
+      )
 
       val result =
         validator.validateRetransmissionRequest(request)
       result shouldBe Left(
-        "Got a retransmission request from node0 with 0 segments when there should be 1, ignoring"
+        "Got a retransmission request from node0 with 2 segments when there should be 1, ignoring"
       )
     }
 
     "error when all segments are complete" in {
       val validator = new RetransmissionMessageValidator(epoch)
-      val request = retransmissionRequest(segments = Seq(SegmentStatus.Complete))
+      val request = retransmissionRequest(segments = NonEmpty.mk(Seq, SegmentStatus.Complete))
 
       val result =
         validator.validateRetransmissionRequest(request)
@@ -67,7 +70,8 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
       val validator = new RetransmissionMessageValidator(epoch)
       val request =
         retransmissionRequest(
-          segments = Seq(SegmentStatus.InViewChange(ViewNumber.First, Seq.empty, Seq.empty))
+          segments =
+            NonEmpty.mk(Seq, SegmentStatus.InViewChange(ViewNumber.First, Seq.empty, Seq.empty))
         )
 
       val result =
@@ -81,7 +85,8 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
       val validator = new RetransmissionMessageValidator(epoch)
       val request =
         retransmissionRequest(
-          segments = Seq(SegmentStatus.InViewChange(ViewNumber.First, Seq(false), Seq.empty))
+          segments =
+            NonEmpty.mk(Seq, SegmentStatus.InViewChange(ViewNumber.First, Seq(false), Seq.empty))
         )
 
       val result =
@@ -94,12 +99,13 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
     "validate correctly status with view change" in {
       val validator = new RetransmissionMessageValidator(epoch)
       val request = retransmissionRequest(
-        segments = Seq(
+        segments = NonEmpty.mk(
+          Seq,
           SegmentStatus.InViewChange(
             ViewNumber.First,
             Seq(false),
             Seq.fill(epochLength.toInt)(false),
-          )
+          ),
         )
       )
       val result = validator.validateRetransmissionRequest(request)
@@ -109,11 +115,12 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
     "error when blockStatuses has wrong size in one of the segment statuses" in {
       val validator = new RetransmissionMessageValidator(epoch)
       val request = retransmissionRequest(
-        segments = Seq(
+        segments = NonEmpty.mk(
+          Seq,
           SegmentStatus.InProgress(
             ViewNumber.First,
             Seq.empty,
-          )
+          ),
         )
       )
       val result = validator.validateRetransmissionRequest(request)
@@ -125,11 +132,12 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
     "error when pbft messages list has wrong size in one of the segment statuses" in {
       val validator = new RetransmissionMessageValidator(epoch)
       val request = retransmissionRequest(
-        segments = Seq(
+        segments = NonEmpty.mk(
+          Seq,
           SegmentStatus.InProgress(
             ViewNumber.First,
             Seq.fill(epochLength.toInt)(BlockStatus.InProgress(false, Seq.empty, Seq.empty)),
-          )
+          ),
         )
       )
       val result = validator.validateRetransmissionRequest(request)
@@ -141,11 +149,12 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
     "validate correctly status with well formed in-progress block" in {
       val validator = new RetransmissionMessageValidator(epoch)
       val request = retransmissionRequest(
-        segments = Seq(
+        segments = NonEmpty.mk(
+          Seq,
           SegmentStatus.InProgress(
             ViewNumber.First,
             Seq.fill(epochLength.toInt)(BlockStatus.InProgress(false, Seq(false), Seq(false))),
-          )
+          ),
         )
       )
       val result = validator.validateRetransmissionRequest(request)
@@ -269,7 +278,7 @@ object RetransmissionMessageValidatorTest {
   def membership(implicit pv: ProtocolVersion): Membership = Membership.forTesting(myId)
   def epoch(implicit pv: ProtocolVersion): Epoch = Epoch(epochInfo, membership, membership)
 
-  def retransmissionRequest(segments: Seq[SegmentStatus])(implicit
+  def retransmissionRequest(segments: NonEmpty[Seq[SegmentStatus]])(implicit
       synchronizerProtocolVersion: ProtocolVersion
   ): EpochStatus =
     EpochStatus.create(otherId, EpochNumber.First, segments)(synchronizerProtocolVersion)

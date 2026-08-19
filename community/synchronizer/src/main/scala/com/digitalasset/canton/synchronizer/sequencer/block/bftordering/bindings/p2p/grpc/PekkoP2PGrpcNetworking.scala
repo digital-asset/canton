@@ -17,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoActorContext
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   P2PAddress,
   P2PNetworkManager,
@@ -72,12 +73,14 @@ private final case class Initialize(
 
 private final case class SendMessage(
     override val config: BftBlockOrdererConfig,
+    recipientBftNodeId: BftNodeId,
     createMessage: Option[Instant] => BftOrderingMessage,
     metricsContext: MetricsContext,
     attemptNumber: Int,
     override val traceContext: TraceContext,
-    sendInstant: Instant = Instant.now,
-    maybeDelay: Option[FiniteDuration] = None,
+    sendInstantForQueueLatencyMetrics: Instant = Instant.now,
+    retryDelayO: Option[FiniteDuration] = None,
+    supposedSendInstantForLatencyTestingO: Option[Instant] = None,
 ) extends ResendablePekkoP2PGrpcConnectionManagerActorMessage
 
 /** Closes the connection-managing actor. Sent as part of disconnecting an endpoint.
@@ -102,12 +105,14 @@ final class PekkoP2PNetworkRef(
   override def toString: String = this.getClass.getSimpleName + s"($actorName)"
 
   override def asyncP2PSend(
-      createMessage: Option[Instant] => BftOrderingMessage
+      recipientBftNodeId: BftNodeId,
+      createMessage: Option[Instant] => BftOrderingMessage,
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit = {
     outstandingMessages.incrementAndGet().discard
     synchronizeWithClosingSync("send-message") {
       connectionManagingActorRef ! SendMessage(
         config,
+        recipientBftNodeId,
         createMessage,
         metricsContext,
         attemptNumber = 1,
@@ -156,7 +161,7 @@ object PekkoP2PGrpcNetworking {
       //
       //  - A is configured with an endpoint to B but B is not configured with an endpoint to A
       //  - A connects and authenticates successfully to B
-      //  - B wants to send to A and thus it creates a network ref to A
+      //  - B wants to send to A, and thus it creates a network ref to A
       //  - The connection crashes and B cleans up the network ref
       //  - A reconnects and authenticates successfully to B
       val actorName =
@@ -219,17 +224,33 @@ object PekkoP2PGrpcNetworking {
           // Emit actor queue latency for the message
           message match {
 
-            case SendMessage(_, _, metricsContext, _, _, sendInstant, maybeDelay) =>
+            case SendMessage(
+                  _,
+                  _,
+                  _,
+                  metricsContext,
+                  _,
+                  _,
+                  sendInstantForQueueLatencyMetrics,
+                  retryDelayO,
+                  supposedSendInstantForLatencyTestingO,
+                ) =>
               // Emit actor queue metrics
               metrics.performance.orderingStageLatency.emitModuleQueueLatency(
                 "PekkoP2PGrpcConnectionManagingActor",
-                sendInstant,
-                maybeDelay,
+                sendInstantForQueueLatencyMetrics,
+                retryDelayO,
               )(metricsContext)
-              metrics.performance.orderingStageLatency.emitModuleQueueSize(
-                "PekkoP2PGrpcConnectionManagingActor",
-                outstandingMessages.decrementAndGet(),
-              )(metricsContext)
+              // Do not count sends delayed for latency testing in the actor queue size metrics
+              if (
+                supposedSendInstantForLatencyTestingO.isEmpty || config.standalone
+                  .flatMap(_.sendDelay)
+                  .isEmpty
+              )
+                metrics.performance.orderingStageLatency.emitModuleQueueSize(
+                  "PekkoP2PGrpcConnectionManagingActor",
+                  outstandingMessages.decrementAndGet(),
+                )(metricsContext)
 
             case Initialize(_, _, traceContext) =>
               outstandingMessages.decrementAndGet()
@@ -255,13 +276,13 @@ object PekkoP2PGrpcNetworking {
           case _ =>
             val maxAttempts = config.networkSendAttempts.value
             message match {
-              case sm @ SendMessage(_, grpcMessage, metricsContext, attemptNumber, _, _, _) =>
+              case sm @ SendMessage(_, _, _, metricsContext, attemptNumber, _, _, _, _) =>
                 val newAttemptNumber = attemptNumber + 1
-                val delay = sm.jitterStream.next(newAttemptNumber)
+                val retryDelay = sm.jitterStream.next(newAttemptNumber)
                 if (newAttemptNumber <= maxAttempts) {
                   logger.debug(
                     s"Connection-managing actor $actorName " +
-                      s"couldn't yet obtain connection for `Send`, retrying it in $delay, " +
+                      s"couldn't yet obtain connection for `Send`, retrying it in $retryDelay, " +
                       s"attempt $newAttemptNumber out of $maxAttempts"
                   )
                   // Retrying after a delay due to not being connected:
@@ -269,12 +290,12 @@ object PekkoP2PGrpcNetworking {
                   val delayedMessage =
                     sm.copy(
                       attemptNumber = newAttemptNumber,
-                      sendInstant = Instant.now,
-                      maybeDelay = Some(delay),
+                      sendInstantForQueueLatencyMetrics = Instant.now,
+                      retryDelayO = Some(retryDelay),
                     )
                   outstandingMessages.incrementAndGet().discard
                   context
-                    .scheduleOnce(delay, target = context.self, delayedMessage)
+                    .scheduleOnce(retryDelay, target = context.self, delayedMessage)
                     .discard
                   metrics.p2p.send.sendsRetried.inc()(metricsContext)
                 } else
@@ -334,23 +355,25 @@ object PekkoP2PGrpcNetworking {
 
             case i: Initialize =>
               logger.info(s"Connection-managing actor $actorName initializing")
-              scheduleMessageIfNotConnectedBehavior(i)((_) => ())
+              scheduleMessageIfNotConnectedBehavior(i)(_ => ())
               Behaviors.same
 
             case sendMsg: SendMessage =>
               implicit val traceContext: TraceContext = sendMsg.traceContext
-              scheduleMessageIfNotConnectedBehavior(sendMsg) { peerSender =>
-                val now = Instant.now
-                val msg = sendMsg.createMessage(Some(now))
+
+              def grpcSend(peerSender: PeerSender, messageSendInstant: Instant = Instant.now)
+                  : Unit = {
+                val msg = sendMsg.createMessage(Some(messageSendInstant))
+                logger.debug(
+                  s"Connection-managing actor $actorName sending message to sender $peerSender"
+                )
+                val writeStart = Instant.now
                 try {
-                  logger.debug(
-                    s"Connection-managing actor $actorName sending message to sender $peerSender"
-                  )
                   peerSender.onNext(msg)
                   // Network send succeeded (but it may still be lost)
                   updateTimer(
                     metrics.p2p.send.networkWriteLatency,
-                    Duration.between(sendMsg.sendInstant, now),
+                    Duration.between(writeStart, Instant.now),
                   )(sendMsg.metricsContext)
                 } catch {
                   case exception: Exception =>
@@ -380,24 +403,71 @@ object PekkoP2PGrpcNetworking {
                         exception,
                       )
                       outstandingMessages.incrementAndGet().discard
+                      // Retrying after a delay due to send exception:
+                      //  record the send instant and delay to emit the actor queue latency when processing the message
+                      val delayedMessage =
+                        sendMsg.copy(
+                          attemptNumber = newAttemptNumber,
+                          sendInstantForQueueLatencyMetrics = Instant.now,
+                          retryDelayO = Some(delay),
+                        )
                       pekkoActorContext
                         .scheduleOnce(
                           delay,
                           target = pekkoActorContext.self,
-                          sendMsg.copy(
-                            attemptNumber = newAttemptNumber,
-                            sendInstant = Instant.now,
-                            maybeDelay = Some(delay),
-                          ),
+                          delayedMessage,
                         )
                         .discard
                       metrics.p2p.send.sendsRetried.inc()(sendMsg.metricsContext)
-                    } else
+                    } else {
                       logger.info(
                         s"Connection-managing actor $actorName couldn't send $msg, " +
                           s"invalidating the connection. No more retries left.",
                         exception,
                       )
+                    }
+                }
+              }
+
+              scheduleMessageIfNotConnectedBehavior(sendMsg) { peerSender =>
+                (
+                  sendMsg.supposedSendInstantForLatencyTestingO,
+                  config.standalone.flatMap(_.sendDelay),
+                ) match {
+                  case (None, Some(delayConf)) =>
+                    val recipientBftNodeId = sendMsg.recipientBftNodeId
+                    val recipientInstanceNameO = instanceName(recipientBftNodeId)
+                    val delayO = recipientInstanceNameO.flatMap(delayConf.nextSendDelay)
+                    logger.debug(
+                      s"Connection-managing actor $actorName delaying send of message to $recipientBftNodeId, " +
+                        s"instance name $recipientInstanceNameO, sender $peerSender by $delayO"
+                    )
+                    delayO.fold(grpcSend(peerSender)) { delay =>
+                      // Not setting retry relay and not incrementing the queue size as we want this send to appear
+                      //  as already performed in metrics, rather than queued.
+                      val now = Instant.now
+                      pekkoActorContext
+                        .scheduleOnce(
+                          delay,
+                          target = pekkoActorContext.self,
+                          sendMsg.copy(
+                            // Do not count the artificial send delay in the actor queue latency metrics
+                            sendInstantForQueueLatencyMetrics = now.plusNanos(delay.toNanos),
+                            // Use the current instant as the supposed send instant for latency testing, so that we see
+                            //  the artificial latency in the gRPC latency metrics
+                            supposedSendInstantForLatencyTestingO = Some(now),
+                          ),
+                        )
+                        .discard
+                    }
+
+                  case (Some(supposedSendInstantForLatencyTesting), _) =>
+                    // Fake the network send instant to be the supposed send instant,
+                    //  before waiting the artificial delay for latency testing, so that we see
+                    //  the artificial latency in the gRPC latency metrics
+                    grpcSend(peerSender, supposedSendInstantForLatencyTesting)
+
+                  case (None, None) => grpcSend(peerSender)
                 }
               }
               Behaviors.same
@@ -415,5 +485,8 @@ object PekkoP2PGrpcNetworking {
           }
       }
     }
+
+    private def instanceName(recipientBftNodeId: BftNodeId): Option[String] =
+      recipientBftNodeId.split("::").view.zipWithIndex.map(_.swap).toMap.get(1)
   }
 }

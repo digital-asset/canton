@@ -38,10 +38,12 @@ import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.*
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.{
+  SequencerBackpressure,
   SequencerRequest,
   SubmissionDuringShutdown,
   SubmissionInternalError,
   SynchronizerWithoutMediatorError,
+  TimeoutError,
 }
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessResult,
@@ -55,6 +57,7 @@ import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissio
   TimeoutTooLow,
 }
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory.*
+import com.digitalasset.canton.participant.protocol.submission.TransactionSubmissionTrackingData.CauseWithTemplate
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
   ContractInstanceOfId,
   ContractLookupError,
@@ -106,6 +109,7 @@ import com.digitalasset.canton.{
   checked,
 }
 import com.digitalasset.daml.lf.transaction.CreationTime
+import com.google.rpc.status.Status as RpcStatus
 import monocle.PLens
 
 import scala.collection.immutable.SortedMap
@@ -565,17 +569,19 @@ class TransactionProcessingSteps(
     override def submissionErrorTrackingData(
         error: SubmissionSendError
     )(implicit traceContext: TraceContext): TransactionSubmissionTrackingData = {
-      val errorCode: TransactionError = error.sendError match {
-        case refused @ SendAsyncClientError.RequestRefused(error) =>
-          if (error.isOverload)
-            TransactionProcessor.SubmissionErrors.SequencerBackpressure.Rejection(error.toString)
-          else if (error.hasMaxSequencingTimeElapsed)
-            TransactionProcessor.SubmissionErrors.TimeoutError.Error()
-          else TransactionProcessor.SubmissionErrors.SequencerRequest.Error(refused)
+      val rejectionCause = error.sendError match {
+        case refused @ SendAsyncClientError.RequestRefused(refusal) =>
+          CauseWithTemplate(
+            if (refusal.isOverload) SequencerBackpressure.Rejection(refusal.toString)
+            else if (refusal.hasMaxSequencingTimeElapsed) TimeoutError.Error()
+            else SequencerRequest.Error(refused): TransactionError
+          )
+        case SendAsyncClientError.TrafficEnforcementRejected(reason) =>
+          // Traffic enforcement already decided what the client should see, this only renders it.
+          CauseWithTemplate(RpcStatus.fromJavaProto(reason.asGrpcStatus))
         case otherSendError =>
-          TransactionProcessor.SubmissionErrors.SequencerRequest.Error(otherSendError)
+          CauseWithTemplate(SequencerRequest.Error(otherSendError): TransactionError)
       }
-      val rejectionCause = TransactionSubmissionTrackingData.CauseWithTemplate(errorCode)
       TransactionSubmissionTrackingData(
         completionInfo,
         rejectionCause,
