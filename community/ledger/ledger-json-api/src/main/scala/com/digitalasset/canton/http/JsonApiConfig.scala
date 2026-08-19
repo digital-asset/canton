@@ -24,6 +24,7 @@ final case class JsonApiConfig(
     portFile: Option[Path] = None,
     pathPrefix: Option[String] = None,
     requestTimeout: FiniteDuration = JsonApiConfig.defaultRequestTimeout,
+    clientRequestTimeout: ClientRequestTimeoutConfig = ClientRequestTimeoutConfig(),
     maxInboundMessageSize: Option[NonNegativeInt] = None,
 ) {
   def port: Port =
@@ -63,6 +64,27 @@ final case class JsonClientConfig(
 object JsonApiConfig {
   private val defaultAddress: String = java.net.InetAddress.getLoopbackAddress.getHostAddress
   private val defaultRequestTimeout: FiniteDuration = 20.seconds
+
+  val defaultRequestTimeoutLowerBound: FiniteDuration = 1.second
+  val defaultRequestTimeoutUpperBound: FiniteDuration = 60.seconds
+}
+
+/** Bounds for the client-supplied per-request timeout carried in the `Request-Timeout` header.
+  *
+  * See [[RequestTimeoutDirective]] for how these bounds are enforced.
+  */
+final case class ClientRequestTimeoutConfig(
+    lowerBound: FiniteDuration = JsonApiConfig.defaultRequestTimeoutLowerBound,
+    upperBound: FiniteDuration = JsonApiConfig.defaultRequestTimeoutUpperBound,
+) {
+  require(
+    lowerBound >= 1.millis,
+    s"The client request timeout lower bound must be at least 1 millisecond, but was $lowerBound",
+  )
+  require(
+    lowerBound <= upperBound,
+    s"The client request timeout lower bound ($lowerBound) must not exceed the upper bound ($upperBound)",
+  )
 }
 
 final case class WebsocketConfig(

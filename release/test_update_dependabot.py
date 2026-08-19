@@ -13,6 +13,15 @@ import pytest
 
 import update_dependabot as ud
 
+# The open-source mirror deliberately ships no .github/dependabot.yml (dependabot
+# runs only on the private repo). Skip rather than error when the file is absent,
+# so the mirror's python gate and the code-drop PRs stay green.
+if not ud.DEFAULT_FILE.exists():
+    pytest.skip(
+        "no .github/dependabot.yml (expected on the open-source mirror, where dependabot is disabled)",
+        allow_module_level=True,
+    )
+
 REAL = ud.DEFAULT_FILE.read_text()
 
 # Classify on the `target-branch:` key (independent of the module) so the test

@@ -43,7 +43,12 @@ import com.digitalasset.canton.crypto.kms.KmsKeyId
 import com.digitalasset.canton.crypto.kms.driver.v1.DriverKms
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.http.{JsonApiConfig, JsonClientConfig, WebsocketConfig}
+import com.digitalasset.canton.http.{
+  ClientRequestTimeoutConfig,
+  JsonApiConfig,
+  JsonClientConfig,
+  WebsocketConfig,
+}
 import com.digitalasset.canton.ledger.runner.common.PureConfigReaderWriter.Secure.{
   commandConfigurationConvert,
   dbConfigPostgresDataSourceConfigConvert,
@@ -1087,6 +1092,8 @@ object CantonConfig {
         })
       implicit val wsConfigReader: ConfigReader[WebsocketConfig] =
         deriveReader[WebsocketConfig]
+      implicit val clientRequestTimeoutConfigReader: ConfigReader[ClientRequestTimeoutConfig] =
+        deriveReader[ClientRequestTimeoutConfig]
       deriveReader[JsonApiConfig]
     }
 
@@ -1913,6 +1920,8 @@ object CantonConfig {
         }
       implicit val wsConfigWriter: ConfigWriter[WebsocketConfig] =
         deriveWriter[WebsocketConfig]
+      implicit val clientRequestTimeoutConfigWriter: ConfigWriter[ClientRequestTimeoutConfig] =
+        deriveWriter[ClientRequestTimeoutConfig]
       deriveWriter[JsonApiConfig]
     }
 
