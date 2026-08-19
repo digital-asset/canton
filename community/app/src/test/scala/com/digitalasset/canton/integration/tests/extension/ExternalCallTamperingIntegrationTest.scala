@@ -207,8 +207,9 @@ class ExternalCallTamperingIntegrationTest
           LogEntryOptionality.Required -> modelConformanceReplayMissing("participant2"),
         )
 
-        // Validation fails during re-interpretation, before the extension service would be
-        // re-contacted, so the service observes no call at all.
+        // Re-interpretation replays recorded results instead of contacting the service, and the
+        // stripped views leave the external-call check nothing to re-validate, so the service is
+        // never contacted.
         extensionService.observedCalls shouldBe empty
 
         assertPingSucceeds(participant1, participant2)
@@ -252,8 +253,9 @@ class ExternalCallTamperingIntegrationTest
             |  occurrences = Seq(ExternalCallOccurrence(viewPosition = ViewPosition(L), exerciseIndex = 0, callIndex = 0), ExternalCallOccurrence(viewPosition = ViewPosition(R), exerciseIndex = 0, callIndex = 0))
             |)""".stripMargin
 
-        // The consistency check alarms (WARN) once per confirming participant and, on the strength
-        // of the same disagreement, rejects both root views recording the key (each an INFO-level
+        // The consistency check alarms (WARN) once per request on every participant receiving the
+        // views (both confirm here) and, on the strength of the same disagreement, rejects both
+        // root views recording the key (each an INFO-level
         // LOCAL_VERDICT_EXTERNAL_CALL_RESULT_DISAGREEMENT verdict, below this WARN suppressor). The
         // alarm carries the full description, including both occurrences, so both confirmers
         // rejecting proves the request cannot be committed.
