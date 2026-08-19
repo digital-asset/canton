@@ -73,7 +73,7 @@ class TestSubmissionService(
     syncService: SyncService,
     mkPackageMap: TraceContext => Future[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
     externalCallHandler: ExternalCallHandler,
-    interpretationConfig: InterpretationConfig = InterpretationConfig.Default,
+    interpretationConfig: InterpretationConfig,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
