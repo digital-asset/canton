@@ -983,8 +983,18 @@ trait SynchronizerChangeRealClockIntegrationTest
         assertPingSucceeds(P5, P4, synchronizerId = Some(iouSynchronizerId))
 
         // Reconnect P2 and P3 to preserve state
-        P2.synchronizers.reconnect(iouSynchronizerAlias, synchronize = Some(timeouts.default))
-        P3.synchronizers.reconnect(iouSynchronizerAlias, synchronize = Some(timeouts.default))
+        loggerFactory.assertLogsUnorderedOptional(
+          {
+            P2.synchronizers.reconnect(iouSynchronizerAlias, synchronize = Some(timeouts.default))
+            P3.synchronizers.reconnect(iouSynchronizerAlias, synchronize = Some(timeouts.default))
+          },
+          // After reconnecting, P2 and P3 send their confirmation responses, which may exceed
+          // the confirmation response timeout.
+          (
+            LogEntryOptionality.OptionalMany,
+            _.warningMessage should include regex "Response message for request \\[.*\\] timed out at",
+          ),
+        )
       }
 
     }

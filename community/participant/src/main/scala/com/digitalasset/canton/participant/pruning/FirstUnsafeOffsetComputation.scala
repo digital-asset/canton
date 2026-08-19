@@ -31,7 +31,6 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   UnknownId,
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
 import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -202,15 +201,8 @@ class FirstUnsafeOffsetComputation(
       }
 
       // Other checks
-      // TODO(#33650) - Replace with unboundedTraverseFilter; safe because bound to synchronizers (1 to 10)
-      unsafeIncompleteReassignmentOffsets <- logicalPersistentStates.values.toSeq.parTraverseFilter(
-        firstUnsafeReassignmentEventFor(
-          _,
-          participantNodePersistentState.value.ledgerApiStore,
-        )
-      )
       unsafeDedupOffset <- EitherT.right(firstUnsafeOffsetPublicationTime())
-    } yield (unsafeLogicalSynchronizerOffsets.toList ++ unsafeDedupOffset ++ unsafePhysicalSynchronizerOffsets ++ unsafeIncompleteReassignmentOffsets)
+    } yield (unsafeLogicalSynchronizerOffsets.toList ++ unsafeDedupOffset ++ unsafePhysicalSynchronizerOffsets)
       .minByOption(_.offset)
   }
 
@@ -312,61 +304,6 @@ class FirstUnsafeOffsetComputation(
         )
         result
       }
-  }
-
-  private def firstUnsafeReassignmentEventFor(
-      persistent: LogicalSyncPersistentState,
-      ledgerApiStore: LedgerApiStore,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] = {
-    val synchronizerId = persistent.lsid
-
-    for {
-      earliestIncompleteReassignmentO <- EitherT
-        .right(
-          persistent.reassignmentStore.findEarliestIncomplete()
-        )
-
-      unsafeOffsetO <- earliestIncompleteReassignmentO.flatTraverse {
-        case (
-              earliestIncompleteReassignmentGlobalOffset,
-              earliestIncompleteReassignmentId,
-              targetSynchronizerId,
-            ) =>
-          for {
-            unsafeOffsetForReassignments <- EitherT[
-              FutureUnlessShutdown,
-              LedgerPruningError,
-              SynchronizerOffset,
-            ](
-              ledgerApiStore
-                .synchronizerOffset(earliestIncompleteReassignmentGlobalOffset)
-                .map(
-                  _.toRight(
-                    Pruning.LedgerPruningInternalError(
-                      s"incomplete reassignment from $earliestIncompleteReassignmentGlobalOffset not found on $synchronizerId"
-                    )
-                  )
-                )
-            )
-            unsafeOffsetEarliestIncompleteReassignmentO = Option(
-              UnsafeOffset(
-                unsafeOffsetForReassignments.offset,
-                unsafeOffsetForReassignments.synchronizerId,
-                Some(CantonTimestamp(unsafeOffsetForReassignments.recordTime)),
-                s"incomplete reassignment from $synchronizerId to $targetSynchronizerId (reassignmentId $earliestIncompleteReassignmentId)",
-              )
-            )
-
-          } yield unsafeOffsetEarliestIncompleteReassignmentO
-      }
-    } yield {
-      logger.debug(
-        s"First unsafe pruning offset from reassignment store for logical synchronizer $synchronizerId at $unsafeOffsetO"
-      )
-      unsafeOffsetO
-    }
   }
 
   /** Determines the first offset that is unsafe to prune on the basis of logical synchronizer

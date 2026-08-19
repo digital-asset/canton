@@ -23,6 +23,7 @@ import com.digitalasset.canton.topology.transaction.{
   DecentralizedNamespaceDefinition,
   SignedTopologyTransaction,
 }
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
 import com.digitalasset.nonempty.NonEmpty
@@ -153,8 +154,16 @@ abstract class InitialTopologySnapshotValidatorTest
           .value
         // specifically adding the duplicate signature first in the list of signatures.
         // this causes the new transaction to have a different signature for key1 as the original `dnd`
+        val signatures = ProtoValidation
+          .validateLength(
+            dndProto.signatures,
+            field = None,
+            testedProtocolVersionValidation,
+            ProtoValidation.MaxCollectionSize,
+          )
+          .value
         val protoWithDuplicateSig =
-          dndProto.copy(signatures = newSig.toProtoV30 +: dndProto.signatures)
+          dndProto.copy(signatures = newSig.toProtoV30 +: signatures)
 
         SignedTopologyTransaction
           .fromProtoV30(

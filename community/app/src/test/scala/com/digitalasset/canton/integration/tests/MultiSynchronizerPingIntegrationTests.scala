@@ -11,7 +11,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 
 sealed trait MultiSynchronizerPingIntegrationTests
     extends CommunityIntegrationTest
-    with IsolatedEnvironments
+    with SharedEnvironment
     with HasCycleUtils {
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
@@ -56,7 +56,7 @@ sealed trait MultiSynchronizerPingIntegrationTests
 
 //class MultiSynchronizerPingIntegrationTestsDefault extends MultiSynchronizerPingIntegrationTests
 
-class MultiSynchronizerPingBftOrderingIntegrationTestsPostgres
+final class MultiSynchronizerPingBftOrderingIntegrationTestsPostgres
     extends MultiSynchronizerPingIntegrationTests {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

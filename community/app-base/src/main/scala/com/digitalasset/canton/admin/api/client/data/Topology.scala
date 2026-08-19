@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.admin.api.client.data
 
-import cats.syntax.traverse.*
 import com.digitalasset.canton.admin.api.client.data.ListPartiesResult.ParticipantSynchronizers
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -54,7 +53,13 @@ object ListPartiesResult {
         ProtocolVersionValidation.AlwaysValidation,
       )(ParticipantId.fromProtoPrimitiveUid)
 
-      synchronizers <- value.synchronizers.traverse(fromProtoV30)
+      synchronizers <- ProtoValidation
+        .validateLengthThen(
+          value.synchronizers,
+          "synchronizers",
+          ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((entry, _) => fromProtoV30(entry))
     } yield ParticipantSynchronizers(participantId, synchronizers)
 
   def fromProtoV30(
@@ -66,7 +71,13 @@ object ListPartiesResult {
         "party",
         ProtocolVersionValidation.AlwaysValidation,
       )(UniqueIdentifier.fromProtoPrimitive)
-      participants <- value.participants.traverse(fromProtoV30)
+      participants <- ProtoValidation
+        .validateLengthThen(
+          value.participants,
+          "participants",
+          ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((entry, _) => fromProtoV30(entry))
     } yield ListPartiesResult(PartyId(partyUid), participants)
 }
 
@@ -97,8 +108,20 @@ object ListKeyOwnersResult {
         "keyOwner",
         ProtocolVersionValidation.AlwaysValidation,
       )(Member.fromProtoPrimitive)
-      signingKeys <- value.signingKeysV30.traverse(SigningPublicKey.fromProtoV30)
-      encryptionKeys <- value.encryptionKeys.traverse(EncryptionPublicKey.fromProtoV30)
+      signingKeys <- ProtoValidation
+        .validateLengthThen(
+          value.signingKeysV30,
+          "signing_keys",
+          ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((entry, _) => SigningPublicKey.fromProtoV30(entry))
+      encryptionKeys <- ProtoValidation
+        .validateLengthThen(
+          value.encryptionKeys,
+          "encryption_keys",
+          ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((entry, _) => EncryptionPublicKey.fromProtoV30(entry))
     } yield ListKeyOwnersResult(synchronizerId, owner, signingKeys, encryptionKeys)
 }
 

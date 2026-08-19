@@ -36,7 +36,8 @@ import com.digitalasset.canton.time.{
   SimClock,
 }
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{ProtoDeserializationError, config, crypto as SynchronizerCrypto}
 import com.digitalasset.nonempty.NonEmpty
 import com.digitalasset.nonempty.NonEmptyUtil.instances.*
@@ -170,7 +171,15 @@ object StaticSynchronizerParameters {
       content: Seq[P],
       parse: (P, String) => ParsingResult[A],
   ): ParsingResult[NonEmpty[Set[A]]] =
-    ProtoConverter.parseRequiredNonEmpty(parse(_, field), field, content).map(_.toSet)
+    ProtoValidation
+      .validateLength(
+        content,
+        Some(field),
+        ProtocolVersionValidation.AlwaysValidation,
+        ProtoValidation.MaxCollectionSize,
+      )
+      .flatMap(ProtoConverter.parseRequiredNonEmpty(parse(_, field), field, _))
+      .map(_.toSet)
 
   def fromProtoV30(
       synchronizerParametersP: v30.StaticSynchronizerParameters

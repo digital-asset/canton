@@ -143,6 +143,7 @@ class GrpcTopologyAggregationService(
             synchronizerIdsP,
             "synchronizer_ids",
             ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
           )(SynchronizerId.fromProtoPrimitive)
         )
         .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
@@ -260,6 +261,7 @@ class GrpcTopologyAggregationService(
             request.synchronizerIds,
             "synchronizer_ids",
             ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
           )(SynchronizerId.fromProtoPrimitive)
         )
         .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)

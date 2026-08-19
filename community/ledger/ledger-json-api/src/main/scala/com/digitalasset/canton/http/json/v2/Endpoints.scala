@@ -29,8 +29,8 @@ import io.circe.{Decoder, Encoder}
 import io.grpc.stub.StreamObserver
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.{Flow, Sink, Source}
+import org.apache.pekko.stream.{AbruptStageTerminationException, Materializer}
 import sttp.capabilities.WebSockets
 import sttp.capabilities.pekko.PekkoStreams
 import sttp.model.{Header, StatusCode}
@@ -339,18 +339,11 @@ trait Endpoints extends NamedLogging {
                 s"Request failed with legacy error ${sre.getStatus} / ${sre.getMessage}",
                 sre.getCause,
               )
-              JsCantonError(
+              JsCantonError.fromUnstructuredError(
                 code = Option(sre.getStatus.getDescription)
                   .getOrElse("Status description not available"),
                 cause = sre.getMessage,
-                correlationId = None,
-                traceId = None,
-                context = Map(),
-                resources = Seq(),
-                errorCategory = -1,
                 grpcCodeValue = Some(sre.getStatus.getCode.value()),
-                retryInfo = None,
-                definiteAnswer = None,
               )
             },
         )
@@ -396,6 +389,17 @@ trait Endpoints extends NamedLogging {
           StatusCode.BadRequest,
           JsCantonError.fromErrorCode(
             InvalidArgument.Reject(illegalArgument.getMessage)
+          ),
+        )
+      )
+    // Special case for timed out requests
+    case _: AbruptStageTerminationException =>
+      Left(
+        (
+          StatusCode.RequestTimeout,
+          JsCantonError.fromUnstructuredError(
+            code = "REQUEST_TIMEOUT",
+            cause = "The request timed out before it completed.",
           ),
         )
       )

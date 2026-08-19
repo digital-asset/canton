@@ -168,9 +168,13 @@ class TransactionViewTest
           TransactionView.Optics.viewParticipantDataUnsafe
             .modify { vpd =>
               val actionDescription = vpd.tryUnwrap.actionDescription.toProtoV30
-              actionDescription.getExercise.withPackagePreference(Seq(unexpectedPackage))
+              actionDescription.getExercise.withPackagePreference(
+                Seq(unexpectedPackage.toProtoUnvalidated)
+              )
               val exercise = actionDescription.withExercise(
-                actionDescription.getExercise.withPackagePreference(Seq(unexpectedPackage))
+                actionDescription.getExercise.withPackagePreference(
+                  Seq(unexpectedPackage.toProtoUnvalidated)
+                )
               )
               vpd.tryUnwrap.copy(actionDescription =
                 ActionDescription.fromProtoV30(testedProtocolVersionValidation, exercise).value

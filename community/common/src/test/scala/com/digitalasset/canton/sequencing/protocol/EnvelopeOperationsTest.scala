@@ -8,6 +8,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.protocol.v31
 import com.digitalasset.canton.util.MaxBytesToDecompress
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{CommonGenerators, ProtocolVersion}
 import com.digitalasset.canton.{BaseTestWordSpec, ProtoDeserializationError}
 import com.google.protobuf.ByteString
@@ -68,9 +69,15 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
         .pureApply(Gen.Parameters.default, Seed.random())
 
       val protoBatch = batch.toProtoV31
-      val invalidProtoBatch = protoBatch.copy(
-        compressedEnvelopes = protoBatch.compressedEnvelopes ++ protoBatch.compressedEnvelopes
-      )
+      val envelopes = ProtoValidation
+        .validateLength(
+          protoBatch.compressedEnvelopes,
+          field = None,
+          testedProtocolVersionValidation,
+          ProtoValidation.MaxCollectionSize,
+        )
+        .value
+      val invalidProtoBatch = protoBatch.copy(compressedEnvelopes = envelopes ++ envelopes)
 
       Batch.fromProtoV31(
         testedProtocolVersionValidation,
@@ -226,7 +233,12 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
         testedProtocolVersion,
       )
     val perEnvelopeSize =
-      v31.EnvelopeWithoutRecipients(content = payload, signatures = Seq.empty).serializedSize
+      v31
+        .EnvelopeWithoutRecipients(
+          content = payload,
+          signatures = Seq.empty[com.digitalasset.canton.crypto.v30.Signature],
+        )
+        .serializedSize
     (Batch.fromClosed(testedProtocolVersion, envelope, envelope), perEnvelopeSize)
   }
 }
