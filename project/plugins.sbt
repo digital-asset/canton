@@ -24,7 +24,7 @@ libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.14"
 addSbtPlugin("com.thoughtworks.sbt-api-mappings" % "sbt-api-mappings" % "3.0.0")
 
 // unifies scaladoc from all modules into a single artifact
-addSbtPlugin("com.github.sbt" % "sbt-unidoc" % "0.5.0")
+addSbtPlugin("com.github.sbt" % "sbt-unidoc" % "0.6.1")
 addSbtPlugin("com.eed3si9n" %% "sbt-buildinfo" % "0.13.1")
 
 // Our DamlPlugin needs to read and write values from daml.yaml files
