@@ -10,7 +10,7 @@ override-components:
     version: $DAML_VERSION
 build-options:
 - --target=2.dev
-name: CantonExternalCall
+name: ExternalCallTest
 source: daml
 version: 1.0.0
 dependencies:

@@ -40,13 +40,13 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
       implicit env =>
         import env.*
 
-        participant1.dars.upload(BaseTest.CantonExternalCallPath)
+        participant1.dars.upload(BaseTest.ExternalCallTestPath)
         val owner = participant1.parties.enable("external-call-owner")
 
         val transaction = participant1.ledger_api.javaapi.commands.submit(
           Seq(owner),
           Seq(
-            new M.cantonexternalcall.ExternalCallTester(owner.toProtoPrimitive).createAnd
+            new M.externalcalltest.ExternalCallTester(owner.toProtoPrimitive).createAnd
               .exerciseCallExtension(
                 extensionService.extensionId,
                 "test-function",

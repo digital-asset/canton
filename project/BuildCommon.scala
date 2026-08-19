@@ -910,8 +910,8 @@ object BuildCommon {
             "com.digitalasset.canton.lfdev",
           ),
           (
-            (Test / sourceDirectory).value / "daml" / "CantonExternalCall",
-            (Test / damlDarOutput).value / "CantonExternalCall-1.0.0.dar",
+            (Test / sourceDirectory).value / "daml" / "ExternalCallTest",
+            (Test / damlDarOutput).value / "ExternalCallTest-1.0.0.dar",
             "com.digitalasset.canton.extcall",
           ),
           (
