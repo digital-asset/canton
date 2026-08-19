@@ -1,8 +1,17 @@
 package com.digitalasset.canton.build
 
-import sbt._
-import sbt.Keys._
+import sbt.*
+import sbt.Keys.*
 import org.scalafmt.sbt.ScalafmtPlugin
+import sbt.io.FileFilter
+import sbt.nio.file.FileTreeView
+
+import java.io.{File, IOException}
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.{FileVisitOption, FileVisitResult, FileVisitor, Files, Path as NioPath}
+import java.util.concurrent.TimeUnit
+import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
 object CantonScalafmtPlugin extends AutoPlugin {
@@ -18,16 +27,54 @@ object CantonScalafmtPlugin extends AutoPlugin {
 
   import autoImport._
 
+  private def findCantonScriptFiles(root: File) = {
+    // copy of sbt.io.DescendantOrSelfPathFinder.native, with the difference that it allows to avoid entire
+    // subtrees (e.g. the `target` folders)
+    def native(
+        file: File,
+        filter: FileFilter,
+        dirFilter: FileFilter,
+        fileSet: mutable.Set[File],
+        depth: Int,
+    ): Unit =
+      try {
+        if (filter.accept(file)) fileSet += file
+        if (depth > 0)
+          FileTreeView.default.list(file.toPath).foreach { case (path, attributes) =>
+            val file = path.toFile
+            val ff = new File(path.toString) {
+              override def isDirectory: Boolean = attributes.isDirectory
+              override def isFile: Boolean = attributes.isRegularFile
+            }
+            if (attributes.isRegularFile && filter.accept(ff)) {
+              fileSet += file
+            } else if (
+              attributes.isDirectory && dirFilter.accept(ff) && !attributes.isSymbolicLink
+            ) {
+              native(file, filter, dirFilter, fileSet, depth - 1)
+            }
+          }
+        ()
+      } catch {
+        case _: IOException =>
+      }
+
+    val nativeWalk = mutable.Set[File]()
+    val targetFilter: FileFilter = "target"
+    native(root, "*.canton", -targetFilter, nativeWalk, Int.MaxValue)
+    nativeWalk.toSeq
+  }
+
   // Moving these settings to globalSettings ensures they run EXACTLY ONCE per sbt invocation,
   // targeting the root folder instead of evaluating on every sub-project module.
   override lazy val globalSettings: Seq[Setting[_]] = Seq(
     scalafmtCanton := {
       val log = streams.value.log
       // In global scope, we explicitly target the workspace root directory
-      val repoRoot = new java.io.File(".")
-      val cantonFiles = (repoRoot ** "*.canton").get.filterNot(
-        _.getAbsolutePath.contains(s"${java.io.File.separator}target${java.io.File.separator}")
-      )
+      val repoRoot = (ThisBuild / baseDirectory).value
+
+      val cantonFiles = findCantonScriptFiles(repoRoot)
+
       val taskState = Keys.state.value
 
       if (cantonFiles.nonEmpty) {
@@ -58,9 +105,7 @@ object CantonScalafmtPlugin extends AutoPlugin {
       val repoRoot = new java.io.File(".")
       val taskState = Keys.state.value
 
-      val cantonFiles = (repoRoot ** "*.canton").get.filterNot(
-        _.getAbsolutePath.contains(s"${java.io.File.separator}target${java.io.File.separator}")
-      )
+      val cantonFiles = findCantonScriptFiles(repoRoot)
 
       if (cantonFiles.nonEmpty) {
         log.info(

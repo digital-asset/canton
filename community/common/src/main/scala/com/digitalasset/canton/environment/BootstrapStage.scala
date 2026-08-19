@@ -179,7 +179,7 @@ abstract class BootstrapStage[T <: CantonNode, StageResult <: BootstrapStageOrLe
     val stageResultCloseables = stageResult.getAndSet(None).toList
     val thisStageCloseables = closeables.getAndSet(Seq.empty).reverse
     val allCloseables = stageResultCloseables ++ thisStageCloseables
-    LifeCycle.close(allCloseables*)(logger)
+    LifeCycle.close(allCloseables)(logger)
   }
 
 }

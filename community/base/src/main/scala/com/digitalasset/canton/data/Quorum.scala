@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.data
 
-import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v30
@@ -12,6 +11,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.{
   parseNonNegativeInt,
   parsePositiveInt,
 }
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
 
 /** A set of confirming parties and their weights plus a threshold constitutes a quorum.
@@ -58,14 +59,19 @@ object Quorum {
   lazy val empty: Quorum = Quorum(Map.empty, NonNegativeInt.zero)
 
   def fromProtoV30(
+      pvv: ProtocolVersionValidation,
       quorumP: v30.Quorum,
       informees: Seq[LfPartyId],
   ): ParsingResult[Quorum] = {
     val v30.Quorum(partyIndexAndWeightsP, thresholdP) = quorumP
     for {
-      confirmers <- partyIndexAndWeightsP
-        .traverse { partyIndexAndWeight =>
-          val v30.PartyIndexAndWeight(indexP, weightP) = partyIndexAndWeight
+      confirmers <- ProtoValidation
+        .validateLengthThen(
+          partyIndexAndWeightsP,
+          "party_index_and_weights",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        ) { case (v30.PartyIndexAndWeight(indexP, weightP), _) =>
           for {
             weight <- parsePositiveInt("weight", weightP)
             confirmingParty <-

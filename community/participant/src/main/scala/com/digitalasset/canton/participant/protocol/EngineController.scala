@@ -15,8 +15,8 @@ import java.util.concurrent.atomic.AtomicReference
   * computation and the engine itself. An instance of this class is created by the protocol
   * processor for each request and passed along during processing. When a condition determines that
   * the computation should be aborted, the component calls [[abort]]. The instance is also passed to
-  * the engine when performing a computation. During the execution of a `ResultInterruption`, the
-  * engine will call [[abortStatus]] to determine whether it should abort or continue.
+  * the engine when performing a computation. During a `Result.Need.Interruption`, the engine will
+  * call [[abortStatus]] to determine whether it should abort or continue.
   *
   * @param participantId
   *   the participant processing the associated request

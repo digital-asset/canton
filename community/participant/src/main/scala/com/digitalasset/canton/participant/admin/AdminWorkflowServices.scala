@@ -35,7 +35,6 @@ import com.digitalasset.canton.participant.config.{
 }
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.TopologyManagerError.{
@@ -408,9 +407,7 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
     EitherTUtil
       .leftSubflatMap(res) {
         case CantonPackageServiceError.IdentityManagerParentError(
-              ParticipantTopologyManagerError.IdentityManagerParentError(
-                NoAppropriateSigningKeyInStore.Failure(_, _) | SecretKeyNotInStore.Failure(_)
-              )
+              NoAppropriateSigningKeyInStore.Failure(_, _) | SecretKeyNotInStore.Failure(_)
             ) =>
           // Log error by creating error object, but continue processing.
           AdminWorkflowServices.CanNotAutomaticallyVetAdminWorkflowPackage
@@ -418,9 +415,7 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
             .discard
           Either.unit
         case CantonPackageServiceError.IdentityManagerParentError(
-              ParticipantTopologyManagerError.IdentityManagerParentError(
-                MappingAlreadyExists.Failure(_, _)
-              )
+              MappingAlreadyExists.Failure(_, _)
             ) =>
           // Ignore this error, which comes from racily vetting admin packages, since the desired target state has already been achieved.
           Either.unit

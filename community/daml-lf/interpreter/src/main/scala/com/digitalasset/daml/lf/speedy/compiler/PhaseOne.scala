@@ -32,6 +32,7 @@ private[compiler] object PhaseOne {
   final case class Config(
       profiling: ProfilingMode,
       stacktracing: StackTraceMode,
+      cmdMode: Boolean = false,
   )
 
   private val SUGetTime = SEBuiltin(SBUGetTime)
@@ -436,7 +437,7 @@ private[lf] final class PhaseOne(
           case BSECP256K1ValidateKey => SBSECP256K1ValidateKey
 
           // External call
-          case BExternalCall => SBExternalCall
+          case BExternalCall => if (config.cmdMode) SBCNeedExternalCall else SBExternalCall
 
           // TextMap
 
@@ -668,62 +669,88 @@ private[lf] final class PhaseOne(
         compileBlock(env, bindings, body)
       case UpdateFetchTemplate(tmplId, coid) =>
         compileExp(env, coid) { coid =>
-          Return(t.FetchTemplateDefRef(tmplId)(coid))
+          if (config.cmdMode)
+            Return(t.CmdFetchTemplateDefRef(tmplId)(coid))
+          else
+            Return(t.FetchTemplateDefRef(tmplId)(coid))
         }
       case UpdateFetchInterface(ifaceId, coid) =>
         compileExp(env, coid) { coid =>
-          Return(t.FetchInterfaceDefRef(ifaceId)(coid))
+          if (config.cmdMode)
+            Return(t.CmdFetchInterfaceDefRef(ifaceId)(coid))
+          else
+            Return(t.FetchInterfaceDefRef(ifaceId)(coid))
         }
       case UpdateEmbedExpr(_, exp) =>
         compileEmbedExpr(env, exp)
       case UpdateCreate(tmplId, arg) =>
         compileExp(env, arg) { arg =>
-          Return(t.CreateDefRef(tmplId)(arg))
+          if (config.cmdMode)
+            Return(t.CmdCreateDefRef(tmplId)(arg))
+          else
+            Return(t.CreateDefRef(tmplId)(arg))
         }
       case UpdateCreateInterface(_, arg) =>
         unaryFunction(env) { (tokPos, env) =>
           compileExp(env, arg) { arg =>
             let(env, arg) { (payloadPos, env) =>
-              Return(SBResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
+              if (config.cmdMode)
+                Return(SBCResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
+              else
+                Return(SBResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
             }
           }
         }
       case UpdateExercise(tmplId, chId, cid, arg) =>
         compileExp(env, cid) { cid =>
           compileExp(env, arg) { arg =>
-            Return(t.TemplateChoiceDefRef(tmplId, chId)(cid, arg))
+            if (config.cmdMode)
+              Return(t.CmdExerciseTemplateDefRef(tmplId, chId)(cid, arg))
+            else
+              Return(t.TemplateChoiceDefRef(tmplId, chId)(cid, arg))
           }
         }
-      case UpdateExerciseInterface(ifaceId, chId, cid, arg, maybeGuard) =>
+      case UpdateExerciseInterface(ifaceId, chId, cid, arg, _) =>
         compileExp(env, cid) { cid =>
           compileExp(env, arg) { arg =>
-            def choiceDefRef(guard: SExpr) =
-              Return(t.InterfaceChoiceDefRef(ifaceId, chId)(guard, cid, arg))
-            maybeGuard match {
-              case Some(guard) =>
-                compileExp(env, guard)(choiceDefRef(_))
-              case None =>
-                choiceDefRef(SEAbs(1, SEValue.True))
-            }
+            if (config.cmdMode)
+              Return(t.CmdExerciseInterfaceDefRef(ifaceId, chId)(cid, arg))
+            else
+              Return(t.InterfaceChoiceDefRef(ifaceId, chId)(cid, arg))
           }
         }
       case UpdateExerciseByKey(tmplId, chId, key, arg) =>
         compileExp(env, key) { key =>
           compileExp(env, arg) { arg =>
-            Return(t.ChoiceByKeyDefRef(tmplId, chId)(key, arg))
+            if (config.cmdMode)
+              Return(t.CmdExerciseByKeyDefRef(tmplId, chId)(key, arg))
+            else
+              Return(t.ChoiceByKeyDefRef(tmplId, chId)(key, arg))
           }
         }
       case UpdateGetTime =>
         Return(SUGetTime)
       case UpdateLedgerTimeLT(time) =>
         compileExp(env, time) { time =>
-          Return(SBULedgerTimeLT(time))
+          if (config.cmdMode)
+            Return(SBCCheckLedgerTimeLT(time))
+          else
+            Return(SBULedgerTimeLT(time))
         }
       case UpdateQueryNByKey(templateId) =>
-        Return(t.QueryNByKeyDefRef(templateId)())
+        if (config.cmdMode)
+          Return(t.CmdQueryNByKeyDefRef(templateId)())
+        else
+          Return(t.QueryNByKeyDefRef(templateId)())
       case UpdateFetchByKey(templateId) =>
-        Return(t.FetchByKeyDefRef(templateId)())
+        if (config.cmdMode)
+          Return(t.CmdFetchByKeyDefRef(templateId)())
+        else
+          Return(t.FetchByKeyDefRef(templateId)())
       case UpdateTryCatchV1(_, body, binder, handler) =>
+        // Exception handling is not supported in the command path: in cmd mode the resulting
+        // SETryCatchV1 crashes at runtime (CmdMachine.asUpdateMachine), so we do not special-case
+        // it here.
         unaryFunction(env) { (tokenPos, env) =>
           compileExp(env, body) { body =>
             val env1 = env.pushExprVar(binder)

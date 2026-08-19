@@ -11,6 +11,13 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
+import com.digitalasset.canton.participant.metrics.{
+  CommitmentMetrics,
+  ParticipantTestMetrics,
+  TestCommitmentMetrics,
+}
+import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
+import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.{
   CommitmentMatchPeriod,
   MatchedCommitmentMatchPeriod,
@@ -31,7 +38,7 @@ import com.digitalasset.canton.protocol.messages.{
   CommitmentPeriod,
   Digest,
 }
-import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
@@ -64,7 +71,7 @@ class ReceivedAcsCommitmentMatcherTest
     super.afterAll()
   }
 
-  private def synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId
+  private def psid: PhysicalSynchronizerId = DefaultTestIdentities.synchronizerId.toPhysical
 
   private val p1: LedgerParticipantId = DefaultTestIdentities.participant1.toLf
   private val p2: LedgerParticipantId = DefaultTestIdentities.participant2.toLf
@@ -80,10 +87,12 @@ class ReceivedAcsCommitmentMatcherTest
       loggerFactory,
       enableConsistencyChecks = true,
     )
+    val metrics: CommitmentMetrics = TestCommitmentMetrics()
     val matcher: ReceivedAcsCommitmentMatcher =
       new ReceivedAcsCommitmentMatcher(
         store,
-        Eval.now(stringInterning),
+        stringInterning,
+        metrics,
         loggerFactory,
         PositiveInt.tryCreate(1000),
       )
@@ -121,11 +130,11 @@ class ReceivedAcsCommitmentMatcherTest
         recordTime: CantonTimestamp,
     )(implicit traceContext: TraceContext): InternalIndexService.AcsUpdateContainer = {
       val commitment = AcsCommitment.create(
-        synchronizerId.toPhysical,
+        psid,
         sender,
         participant,
         CommitmentPeriod.tryCreate(fromExclusive, toInclusive),
-        Digest.hashDigest(ByteString.copyFromUtf8(digest)).getCryptographicEvidence,
+        digest,
         testedProtocolVersion,
       )
       val message = AcsCommitmentProtocolMessage(commitment, Signature.noSignature)
@@ -149,7 +158,7 @@ class ReceivedAcsCommitmentMatcherTest
     CommitmentPeriod.tryCreate(from, to)
 
   "ReceivedAcsCommitmentMatcher" should {
-    "process a received ACS commitment" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "process a received ACS commitment and handle mismatch/mismatches" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -159,11 +168,28 @@ class ReceivedAcsCommitmentMatcherTest
         CommitmentMatchPeriod.outstanding(intern(p2), ts(20), ts(30), "P2:20-30"),
       )
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(30), affirmationOnly = false).futureValueUS
 
       val updateContainer = mkAcsUpdateContainer(p2, ts(2), ts(25), "P2:12-20", off(17), ts(42))
-
-      Source(Seq(updateContainer)).via(matcher.flow).runWith(Sink.ignore).futureValue
+      loggerFactory.assertLogs(
+        Source(Seq(updateContainer)).via(matcher.pipeline).runWith(Sink.ignore).futureValue,
+        _.shouldBeCantonError(
+          AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.code,
+          _ should include("The local commitment does not match the remote commitment"),
+          context => {
+            context("remote") should include(
+              CommitmentsMismatch
+                .RemoteAcsCommitmentData(p2, p1, cp(ts(2), ts(25)), "P2:12-20")
+                .toString
+            )
+            context("local") should include(
+              Seq(
+                CommitmentsMismatch.LocalDigest(cp(ts(2), ts(10)), "P2:1-10"),
+                CommitmentsMismatch.LocalDigest(cp(ts(20), ts(25)), "P2:20-30"),
+              ).mkString(", ")
+            )
+          },
+        ),
+      )
 
       store
         .lookupOutstanding(Seq(intern(p2) -> cp(ts(1), ts(30))))
@@ -183,7 +209,9 @@ class ReceivedAcsCommitmentMatcherTest
         .lookupMatched(Seq(intern(p2) -> cp(ts(1), ts(30))))
         .futureValueUS should contain theSameElementsAs
         Seq(CommitmentMatchPeriod.matched(intern(p2), ts(12), ts(20), off(17)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(17))
+      store.watermark().futureValueUS.matching shouldBe Some(off(17))
+
+      metrics.matchingWatermark.getValue shouldBe ts(42).toMicros
     }
 
     "process matching after mismatching commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -192,11 +220,28 @@ class ReceivedAcsCommitmentMatcherTest
 
       val outstanding = Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(1), ts(10), "P2:1-10"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(10), affirmationOnly = false).futureValueUS
 
       val mismatch = mkAcsUpdateContainer(p2, ts(1), ts(8), "P2:1-8", off(13), ts(11))
       val `match` = mkAcsUpdateContainer(p2, ts(2), ts(8), "P2:1-10", off(14), ts(12))
-      Source(Seq(mismatch, `match`)).via(matcher.flow).runWith(Sink.ignore).futureValue
+      loggerFactory.assertLogs(
+        Source(Seq(mismatch, `match`)).via(matcher.pipeline).runWith(Sink.ignore).futureValue,
+        _.shouldBeCantonError(
+          AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.code,
+          _ should include("The local commitment does not match the remote commitment"),
+          context => {
+            context("remote") should include(
+              CommitmentsMismatch
+                .RemoteAcsCommitmentData(p2, p1, cp(ts(1), ts(8)), "P2:1-8")
+                .toString
+            )
+            context("local") should include(
+              Seq(
+                CommitmentsMismatch.LocalDigest(cp(ts(1), ts(8)), "P2:1-10")
+              ).mkString(", ")
+            )
+          },
+        ),
+      )
       store
         .lookupMismatchedOrUnexpected(Seq(intern(p2) -> cp(ts(1), ts(10))))
         .futureValueUS should contain theSameElementsAs
@@ -205,7 +250,9 @@ class ReceivedAcsCommitmentMatcherTest
         .lookupMatched(Seq(intern(p2) -> cp(ts(1), ts(10))))
         .futureValueUS should contain theSameElementsAs
         Seq(CommitmentMatchPeriod.matched(intern(p2), ts(2), ts(8), off(14)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(14))
+      store.watermark().futureValueUS.matching shouldBe Some(off(14))
+
+      metrics.matchingWatermark.getValue shouldBe ts(12).toMicros
     }
 
     "ignore parse errors" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -214,7 +261,6 @@ class ReceivedAcsCommitmentMatcherTest
 
       val outstanding = Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(2), ts(3), "P2:2-3"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(30), affirmationOnly = false).futureValueUS
 
       val badPayload = ByteString.copyFromUtf8("this is garbage")
       val badUpdateContainer = InternalIndexService.AcsUpdateContainer(
@@ -226,7 +272,7 @@ class ReceivedAcsCommitmentMatcherTest
       val goodUpdateContainer = mkAcsUpdateContainer(p2, ts(2), ts(3), "P2:2-3", off(13), ts(11))
       loggerFactory.assertLogs(
         Source(Seq(badUpdateContainer, goodUpdateContainer))
-          .via(matcher.flow)
+          .via(matcher.pipeline)
           .runWith(Sink.ignore)
           .futureValue,
         _.warningMessage should include(
@@ -237,7 +283,9 @@ class ReceivedAcsCommitmentMatcherTest
         .lookupMatched(Seq(intern(p2) -> cp(ts(2), ts(3))))
         .futureValueUS should contain theSameElementsAs
         Seq(CommitmentMatchPeriod.matched(intern(p2), ts(2), ts(3), off(13)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(13))
+      store.watermark().futureValueUS.matching shouldBe Some(off(13))
+
+      metrics.matchingWatermark.getValue shouldBe ts(11).toMicros
     }
 
     // TODO(#34324) Change this so that they are not ignored
@@ -245,11 +293,11 @@ class ReceivedAcsCommitmentMatcherTest
       val fixture = new Fixture(p1)
       import fixture.*
 
-      store.increaseInsertionWatermark(ts(10), affirmationOnly = false).futureValueUS
-
       val unexpected = mkAcsUpdateContainer(p2, ts(2), ts(3), "P2:2-3", off(1), ts(4))
-      Source(Seq(unexpected)).via(matcher.flow).runWith(Sink.ignore).futureValue
-      store.watermarks().futureValueUS.matching shouldBe Some(off(1))
+      Source(Seq(unexpected)).via(matcher.pipeline).runWith(Sink.ignore).futureValue
+      store.watermark().futureValueUS.matching shouldBe Some(off(1))
+
+      metrics.matchingWatermark.getValue shouldBe ts(4).toMicros
     }
 
     "handle multiple envelopes in the same container" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -261,36 +309,22 @@ class ReceivedAcsCommitmentMatcherTest
         CommitmentMatchPeriod.outstanding(intern(p3), ts(10), ts(20), "P3:10-20"),
       )
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(20), affirmationOnly = false).futureValueUS
 
-      val mismatchP2 = AcsCommitment.create(
-        synchronizerId.toPhysical,
-        p2,
-        p1,
-        cp(ts(4), ts(8)),
-        Digest.hashDigest(ByteString.copyFromUtf8("mismatch")).getCryptographicEvidence,
-        testedProtocolVersion,
-      )
+      val mismatchP2 =
+        AcsCommitment.create(psid, p2, p1, cp(ts(4), ts(8)), "mismatch", testedProtocolVersion)
       val commitmentsP2 =
         mismatchP2 +-: NonEmpty(Seq, cp(ts(1), ts(5)), cp(ts(5), ts(10))).map(cp =>
           AcsCommitment.create(
-            synchronizerId.toPhysical,
+            psid,
             p2,
             p1,
             cp,
-            Digest.hashDigest(ByteString.copyFromUtf8("P2:1-10")).getCryptographicEvidence,
+            "P2:1-10",
             testedProtocolVersion,
           )
         )
       val commitmentsP3 = NonEmpty(Seq, cp(ts(10), ts(15)), cp(ts(15), ts(20))).map(cp =>
-        AcsCommitment.create(
-          synchronizerId.toPhysical,
-          p3,
-          p1,
-          cp,
-          Digest.hashDigest(ByteString.copyFromUtf8("P3:10-20")).getCryptographicEvidence,
-          testedProtocolVersion,
-        )
+        AcsCommitment.create(psid, p3, p1, cp, "P3:10-20", testedProtocolVersion)
       )
       val messages = (commitmentsP2 ++ commitmentsP3).map(cmt =>
         AcsCommitmentProtocolMessage(cmt, Signature.noSignature)
@@ -303,9 +337,27 @@ class ReceivedAcsCommitmentMatcherTest
         off(23),
         traceContext,
       )
-      Source(Seq(container)).via(matcher.flow).runWith(Sink.ignore).futureValue
+      loggerFactory.assertLogs(
+        Source(Seq(container)).via(matcher.pipeline).runWith(Sink.ignore).futureValue,
+        _.shouldBeCantonError(
+          AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.code,
+          _ should include("The local commitment does not match the remote commitment"),
+          context => {
+            context("remote") should include(
+              CommitmentsMismatch
+                .RemoteAcsCommitmentData(p2, p1, cp(ts(4), ts(8)), "mismatch")
+                .toString
+            )
+            context("local") should include(
+              Seq(
+                CommitmentsMismatch.LocalDigest(cp(ts(4), ts(8)), "P2:1-10")
+              ).mkString(", ")
+            )
+          },
+        ),
+      )
 
-      store.watermarks().futureValueUS.matching shouldBe Some(off(23))
+      store.watermark().futureValueUS.matching shouldBe Some(off(23))
       store
         .lookupMatched(Seq(intern(p2) -> cp(ts(1), ts(10)), intern(p3) -> cp(ts(10), ts(20))))
         .futureValueUS should contain theSameElementsAs
@@ -317,6 +369,7 @@ class ReceivedAcsCommitmentMatcherTest
           CommitmentMatchPeriod.matched(intern(p3), ts(10), ts(15), off(23)),
           CommitmentMatchPeriod.matched(intern(p3), ts(15), ts(20), off(23)),
         )
+      metrics.matchingWatermark.getValue shouldBe ts(20).toMicros
     }
 
     "tolerate overlapping and duplicate commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -325,7 +378,6 @@ class ReceivedAcsCommitmentMatcherTest
 
       val outstanding = Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(1), ts(20), "P2:1-20"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(20), affirmationOnly = false).futureValueUS
 
       val updates = Seq(
         mkAcsUpdateContainer(p2, ts(1), ts(10), "P2:1-20", off(10), ts(11)),
@@ -333,7 +385,7 @@ class ReceivedAcsCommitmentMatcherTest
         mkAcsUpdateContainer(p2, ts(1), ts(20), "P2:1-20", off(12), ts(13)),
         mkAcsUpdateContainer(p2, ts(1), ts(20), "P2:1-20", off(13), ts(14)),
       )
-      Source(updates).via(matcher.flow).runWith(Sink.ignore).futureValue
+      Source(updates).via(matcher.pipeline).runWith(Sink.ignore).futureValue
 
       store.lookupOutstanding(Seq(intern(p2) -> cp(ts(1), ts(20)))).futureValueUS shouldBe empty
       store
@@ -343,7 +395,9 @@ class ReceivedAcsCommitmentMatcherTest
           CommitmentMatchPeriod.matched(intern(p2), ts(1), ts(10), off(10)),
           CommitmentMatchPeriod.matched(intern(p2), ts(10), ts(20), off(12)),
         )
-      store.watermarks().futureValueUS.matching shouldBe Some(off(13))
+      store.watermark().futureValueUS.matching shouldBe Some(off(13))
+
+      metrics.matchingWatermark.getValue shouldBe ts(14).toMicros
     }
 
     "correctly process many queued commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -355,16 +409,16 @@ class ReceivedAcsCommitmentMatcherTest
       val outstanding =
         Seq(CommitmentMatchPeriod.outstanding(intern(p2), ts(0), ts(count), "P2:all"))
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(count), affirmationOnly = false).futureValueUS
 
       val updates =
         (1L to count).map(i => mkAcsUpdateContainer(p2, ts(0), ts(i), "P2:all", off(i), ts(i + 1)))
-      Source(updates).via(matcher.flow).runWith(Sink.ignore).futureValue
+      Source(updates).via(matcher.pipeline).runWith(Sink.ignore).futureValue
       store
         .lookupMatched(Seq(intern(p2) -> cp(ts(0), ts(count))))
         .futureValueUS should contain theSameElementsAs
         (1L to count).map(i => CommitmentMatchPeriod.matched(intern(p2), ts(i - 1), ts(i), off(i)))
-      store.watermarks().futureValueUS.matching shouldBe Some(off(count))
+      store.watermark().futureValueUS.matching shouldBe Some(off(count))
+      metrics.matchingWatermark.getValue shouldBe ts(count + 1).toMicros
     }
 
     "process commitments from different participants concurrently and sequentially per participant" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -385,7 +439,6 @@ class ReceivedAcsCommitmentMatcherTest
         )
       }
       store.markOutstanding(outstanding).futureValueUS
-      store.increaseInsertionWatermark(ts(10), affirmationOnly = false).futureValueUS
 
       val updates = participants.flatMap { case (sender, i) =>
         val first = Fixture.mkAcsUpdateContainer(
@@ -438,12 +491,13 @@ class ReceivedAcsCommitmentMatcherTest
       val matcher =
         new ReceivedAcsCommitmentMatcher(
           slowStore,
-          Eval.now(stringInterning),
+          stringInterning,
+          ParticipantTestMetrics.synchronizer.commitments,
           loggerFactory,
           PositiveInt.tryCreate(10),
         )
 
-      val fut = Source(updates).via(matcher.flow).runWith(Sink.ignore)
+      val fut = Source(updates).via(matcher.pipeline).runWith(Sink.ignore)
       always() {
         fut.isCompleted shouldBe false
         calls.get should be <= participants.size
@@ -473,7 +527,25 @@ class ReceivedAcsCommitmentMatcherTest
         Seq(first, second)
       }
       store.lookupMatched(periods).futureValueUS should contain theSameElementsAs expected
-      store.watermarks().futureValueUS.matching shouldBe Some(off(updates.size.toLong))
+      store.watermark().futureValueUS.matching shouldBe Some(off(updates.size.toLong))
+      ParticipantTestMetrics.synchronizer.commitments.matchingWatermark.getValue shouldBe
+        // 3 participants indexed from 0, then 20 seconds added for the second update.
+        ts(22).toMicros
+    }
+
+    "increase the watermark upon offset checkpoints" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+      val fixture = new Fixture(p1)
+      import fixture.*
+
+      val updateContainer = InternalIndexService.AcsUpdateContainer(
+        InternalIndexService.AcsUpdate.OffsetCheckpoint,
+        ts(10),
+        off(15),
+        traceContext,
+      )
+      Source(Seq(updateContainer)).via(matcher.pipeline).runWith(Sink.ignore).futureValue
+      store.watermark().futureValueUS.matching shouldBe Some(off(15))
+      metrics.matchingWatermark.getValue shouldBe ts(10).toMicros
     }
   }
 

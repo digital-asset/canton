@@ -4,19 +4,27 @@
 package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.auth0.jwk.UrlJwkProvider
+import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
+import com.digitalasset.canton.config.{AuthServiceConfig, CantonConfig}
 import com.digitalasset.canton.crypto.{SignatureFormat, SigningAlgorithmSpec}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
+  EnvironmentSetupPlugin,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.google.protobuf.ByteString
+import monocle.macros.syntax.lens.*
 
 import java.net.URI
 import java.security.KeyPairGenerator
 import scala.jdk.CollectionConverters.*
 
 class JwksAuth0Test extends CommunityIntegrationTest with SharedEnvironment {
+  registerPlugin(ExpectedScopeOverrideConfig(loggerFactory))
+
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
       .withSetup { implicit env =>
@@ -81,4 +89,26 @@ class JwksAuth0Test extends CommunityIntegrationTest with SharedEnvironment {
     }
   }
 
+  // Plugin to override the configuration and use authorization.
+  // JWKS URLs should be reachable without token, even when authorization is on.
+  case class ExpectedScopeOverrideConfig(
+      protected val loggerFactory: NamedLoggerFactory
+  ) extends EnvironmentSetupPlugin {
+    override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig =
+      ConfigTransforms.updateParticipantConfig("participant1") {
+        _.focus(_.ledgerApi.authServices)
+          .replace(
+            Seq(
+              AuthServiceConfig
+                .UnsafeJwtHmac256(
+                  secret = NonEmptyString.tryCreate("very-secret"),
+                  targetAudience = Some("target-audience"),
+                  targetScope = None,
+                )
+            )
+          )
+          .focus(_.ledgerApi.adminTokenConfig.adminClaim)
+          .replace(true)
+      }(config)
+  }
 }

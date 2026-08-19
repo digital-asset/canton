@@ -84,7 +84,7 @@ class RollBackNodesInPartialTransactionSpec extends AnyWordSpec with Matchers wi
           contractIdVersion = contractIdVersion,
         ) match {
         case Left(e) => throw new RuntimeException(s"$e")
-        case Right(r) => r
+        case Right(r) => (r._1.coid, r._2)
       }
 
     def insertCreate_ : PartialTransaction =

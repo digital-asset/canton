@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.multisynchronizer
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalSequencerReference, ParticipantReference}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
@@ -32,6 +33,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencer,
@@ -40,7 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicyWithoutTraceContext,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{Member, ParticipantId, PartyId}
 import com.digitalasset.canton.{BaseTest, SynchronizerAlias, config}
 import org.scalatest.Assertion
 
@@ -234,20 +236,20 @@ final class ReassignmentsConfirmationThresholdIntegrationTest
     )
 
   "Confirmation thresholds for reassignments" should {
-    // Count the number of confirmation responses sent by each participant
-    def countConfirmationResponsesPolicy(
-        confirmations: TrieMap[ParticipantId, Int]
-    ): SendPolicyWithoutTraceContext = submissionRequest =>
-      submissionRequest.sender match {
-        case pid: ParticipantId
-            if ProgrammableSequencerPolicies.isConfirmationResponse(submissionRequest) =>
-          val newValue = confirmations.getOrElse(pid, 0) + 1
-          confirmations.put(pid, newValue)
+    // Record the confirmation responses sent by each participant
+    def recordConfirmationResponsesPolicy(
+        confirmations: TrieMap[Member, Seq[SubmissionRequest]]
+    ): SendPolicyWithoutTraceContext = submissionRequest => {
+      if (ProgrammableSequencerPolicies.isConfirmationResponse(submissionRequest))
+        confirmations
+          .updateWith(submissionRequest.sender) {
+            case None => Some(Seq(submissionRequest))
+            case Some(requests) => Some(requests :+ submissionRequest)
+          }
+          .discard
 
-          SendDecision.Process
-
-        case _ => SendDecision.Process
-      }
+      SendDecision.Process
+    }
 
     /** Drop confirmation responses of participants
       *
@@ -290,35 +292,43 @@ final class ReassignmentsConfirmationThresholdIntegrationTest
         case _ => SendDecision.Process
       }
 
-    "only reassigning participants should send confirmation responses" in { implicit env =>
-      import env.*
+    "only reassigning participants should approve, the other ones should abstain" in {
+      implicit env =>
+        import env.*
 
-      val daConfirmations = new TrieMap[ParticipantId, Int]()
-      val acmeConfirmations = new TrieMap[ParticipantId, Int]()
+        val daConfirmations = new TrieMap[Member, Seq[SubmissionRequest]]()
+        val acmeConfirmations = new TrieMap[Member, Seq[SubmissionRequest]]()
 
-      programmableSequencers(daName).setPolicy_("confirmations count")(
-        countConfirmationResponsesPolicy(daConfirmations)
-      )
+        programmableSequencers(daName).setPolicy_("confirmations record")(
+          recordConfirmationResponsesPolicy(daConfirmations)
+        )
 
-      programmableSequencers(acmeName).setPolicy_("confirmations count")(
-        countConfirmationResponsesPolicy(acmeConfirmations)
-      )
+        programmableSequencers(acmeName).setPolicy_("confirmations record")(
+          recordConfirmationResponsesPolicy(acmeConfirmations)
+        )
 
-      val bobIou = participant1.ledger_api.javaapi.state.acs.await(Iou.COMPANION)(bob)
+        val bobIou = participant1.ledger_api.javaapi.state.acs.await(Iou.COMPANION)(bob)
 
-      val reassignmentId =
-        participant1.ledger_api.commands
-          .submit_unassign(bob, Seq(bobIou.id.toLf), daId, acmeId)
-          .reassignmentId
+        val reassignmentId =
+          participant1.ledger_api.commands
+            .submit_unassign(bob, Seq(bobIou.id.toLf), daId, acmeId)
+            .reassignmentId
 
-      participant1.ledger_api.commands.submit_assign(bob, reassignmentId, daId, acmeId)
+        participant1.ledger_api.commands.submit_assign(bob, reassignmentId, daId, acmeId)
 
-      // Only P1 is a reassigning participant
-      daConfirmations shouldBe Map(participant1.id -> 1)
-      acmeConfirmations shouldBe Map(participant1.id -> 1)
+        // Only P1 is a reassigning participant for the Iou whose sole stakeholder is Bob. Both P2 and P3
+        // host Bob on only one of (da, acme)
+        ProgrammableSequencer.confirmationResponsesKind(daConfirmations.toMap) shouldBe Map(
+          participant1.id -> Seq("LocalApprove"),
+          participant2.id -> Seq("LocalAbstain"),
+        )
+        ProgrammableSequencer.confirmationResponsesKind(acmeConfirmations.toMap) shouldBe Map(
+          participant1.id -> Seq("LocalApprove"),
+          participant3.id -> Seq("LocalAbstain"),
+        )
 
-      programmableSequencers(daName).resetPolicy()
-      programmableSequencers(acmeName).resetPolicy()
+        programmableSequencers(daName).resetPolicy()
+        programmableSequencers(acmeName).resetPolicy()
     }
 
     "not require confirmation on both synchronizers" in { implicit env =>

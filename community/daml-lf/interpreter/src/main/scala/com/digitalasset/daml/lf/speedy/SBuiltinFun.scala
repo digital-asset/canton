@@ -5,7 +5,6 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.daml.nameof.NameOf
-import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash.{HashingMethod, hashContractInstance}
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.*
@@ -124,6 +123,28 @@ private[speedy] sealed abstract class UpdateBuiltin(arity: Int)
       machine: Machine[Q],
   ): Control[Q] =
     machine.asUpdateMachine(productPrefix)(executeUpdate(args, _))
+}
+
+private[speedy] sealed abstract class CmdBuiltin(arity: Int)
+    extends SBuiltinFun(arity + 1)
+    with Product {
+
+  /** Command builtins used by the transaction conductor.
+    *
+    * @param args
+    *   arguments for executing the builtin
+    * @return
+    *   the builtin execution's resulting control value
+    */
+  protected def executeCmd(
+      args: ArraySeq[SValue]
+  ): Question.Cmd
+
+  override private[speedy] final def execute[Q](
+      args: ArraySeq[SValue],
+      machine: Machine[Q],
+  ): Control[Q] =
+    machine.asCmdMachine(productPrefix)(_ => Control.Question(executeCmd(args)))
 }
 
 private[lf] object SBuiltinFun {
@@ -517,7 +538,7 @@ private[lf] object SBuiltinFun {
       machine match {
         case _: PureMachine =>
           SOptional(Some(SText(coid)))
-        case _: UpdateMachine =>
+        case _: UpdateMachine | _: CmdMachine =>
           SValue.SValue.None
       }
     }
@@ -859,7 +880,7 @@ private[lf] object SBuiltinFun {
     @throws(classOf[IllegalArgumentException])
     @throws(classOf[NoSuchAlgorithmException])
     @throws(classOf[InvalidKeySpecException])
-    private[speedy] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
+    private[this] def extractPublicKey(hexEncodedPublicKey: Ref.HexString): PublicKey = {
       val byteEncodedPublicKey = Ref.HexString.decode(hexEncodedPublicKey).toByteArray
 
       KeyFactory.getInstance("EC").generatePublic(new X509EncodedKeySpec(byteEncodedPublicKey))
@@ -1478,8 +1499,8 @@ private[lf] object SBuiltinFun {
             optLocation = machine.getLastLocation,
             contractIdVersion = machine.contractIdVersion,
           ) match {
-          case Right((coid, newPtx)) =>
-            machine.enforceLimitSignatoriesAndObservers(coid, contract)
+          case Right((createNode, newPtx)) =>
+            val coid = createNode.coid
             machine.storeLocalContract(coid, templateId, templateArg)
             machine.ptx = newPtx
             machine.insertContractInfoCache(coid, contract)
@@ -1528,25 +1549,10 @@ private[lf] object SBuiltinFun {
         val exerciseVersion = machine.assignSerializationVersion(hasKey = contract.keyOpt.isDefined)
         val chosenValue = args(0).toNormalizedValue
         val controllers = extractParties(NameOf.qualifiedNameOfCurrentFunc, args(2))
-        machine.enforceChoiceControllersLimit(
-          controllers,
-          coid,
-          templateId,
-          choiceId,
-          chosenValue,
-        )
         val obsrs = extractParties(NameOf.qualifiedNameOfCurrentFunc, args(3))
-        machine.enforceChoiceObserversLimit(obsrs, coid, templateId, choiceId, chosenValue)
         val choiceAuthorizers =
           if (explicitChoiceAuthority) {
             val authorizers = extractParties(NameOf.qualifiedNameOfCurrentFunc, args(4))
-            machine.enforceChoiceAuthorizersLimit(
-              authorizers,
-              coid,
-              templateId,
-              choiceId,
-              chosenValue,
-            )
             Some(authorizers)
           } else {
             require(args(4) == SValue.SValue.EmptyList)
@@ -1760,31 +1766,6 @@ private[lf] object SBuiltinFun {
     }
   }
 
-  final case class SBApplyChoiceGuard(
-      choiceName: ChoiceName,
-      byInterface: Option[TypeConId],
-  ) extends UpdateBuiltin(3) {
-    override protected def executeUpdate(
-        args: ArraySeq[SValue],
-        machine: UpdateMachine,
-    ): Control.Expression = {
-      val guard = args(0)
-      val (templateId, record) = getSAnyContract(args, 1)
-      val coid = getSContractId(args, 2)
-
-      val e = SEAppAtomic(SEValue(guard), ArraySeq(SEValue(SAnyContract(templateId, record))))
-      machine.pushKont(KCheckChoiceGuard(coid, templateId, choiceName, byInterface))
-      Control.Expression(e)
-    }
-  }
-
-  final case object SBGuardConstTrue extends SBuiltinPure(1) {
-    override private[speedy] def executePure(args: ArraySeq[SValue], machine: Machine[?]): SBool = {
-      discard(getSAnyContract(args, 0))
-      SValue.SValue.True
-    }
-  }
-
   final case class SBResolveSBUBeginExercise(
       interfaceId: TypeConId,
       choiceName: ChoiceName,
@@ -1841,6 +1822,11 @@ private[lf] object SBuiltinFun {
   }
 
   final case object SBResolveCreate extends SBResolveVirtual(CreateDefRef.apply)
+
+  // Cmd-mode counterpart of SBResolveCreate: resolves the concrete template from the interface
+  // payload and routes the create through CmdCreateDefRef (which emits the Question.Cmd.Create
+  // builtin) so that a CmdMachine can interpret it.
+  final case object SBCResolveCreate extends SBResolveVirtual(CmdCreateDefRef.apply)
 
   final case class SBSignatoryInterface(ifaceId: TypeConId)
       extends SBResolveVirtual(SignatoriesDefRef.apply)
@@ -2110,32 +2096,6 @@ private[lf] object SBuiltinFun {
           key: GlobalKeyWithMaintainers,
       ): Right[Nothing, Unit] =
         Right(())
-    }
-
-    final class Lookup(override val templateId: TypeConId)
-        extends KeyOperation("LookupByKey", needN = false) {
-      import transaction.BackwardsCompatibilityImplicits.*
-
-      override final def handleKnownInputKey(
-          machine: UpdateMachine,
-          key: GlobalKeyWithMaintainers,
-          result: KeyMapping,
-          payloads: List[SValue],
-      ): Control[Nothing] = {
-        machine.ptx = machine.ptx.insertQueryByKey(
-          optLocation = machine.getLastLocation,
-          key = key,
-          result = result,
-          keyVersion = machine.assignSerializationVersion(hasKey = true),
-        )
-        Control.Value(SOptional(result.queue.asCidOption.map(SContractId(_))))
-      }
-
-      override def authorizeLookup(
-          machine: UpdateMachine,
-          key: GlobalKeyWithMaintainers,
-      ): Either[IE, Unit] =
-        machine.ptx.authorizeQueryByKey(machine.getLastLocation, key)
     }
 
     final class QueryNByKey(override val templateId: TypeConId)
@@ -2568,17 +2528,115 @@ private[lf] object SBuiltinFun {
     }
   }
 
-  final case object SQueryNByKey extends SBuiltinFun(2) {
-    override private[speedy] def execute[Q](
-        args: ArraySeq[SValue],
-        machine: Machine[Q],
-    ): Control[Nothing] = {
-      val nrOfResults = getSInt64(args, 0)
+  case class SBCCreate(tmplId: TypeConId) extends CmdBuiltin(1) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val record = getSRecord(args, 0)
+      Question.Cmd.Create(tmplId, record)
+    }
+  }
+
+  case class SBCFetchTemplate(tmplId: TypeConId) extends CmdBuiltin(1) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val coid = getSContractId(args, 0)
+      Question.Cmd.FetchTemplate(tmplId, coid)
+    }
+  }
+
+  case class SBCFetchByKey(tmplId: TypeConId) extends CmdBuiltin(1) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val key = args(0)
+      Question.Cmd.FetchByKey(tmplId, key)
+    }
+  }
+
+  case class SBCExerciseTemplate(ifaceId: TypeConId, choiceName: ChoiceName) extends CmdBuiltin(2) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val coid = getSContractId(args, 0)
+      val arg = args(1)
+      Question.Cmd.ExerciseTemplate(ifaceId, choiceName, coid, arg)
+    }
+  }
+
+  case class SBCFetchInterface(ifaceId: TypeConId) extends CmdBuiltin(1) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val coid = getSContractId(args, 0)
+      Question.Cmd.FetchInterface(ifaceId, coid)
+    }
+  }
+
+  case class SBCExerciseInterface(ifaceId: TypeConId, choiceName: ChoiceName)
+      extends CmdBuiltin(2) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val coid = getSContractId(args, 0)
+      val arg = args(1)
+      Question.Cmd.ExerciseInterface(
+        ifaceId,
+        choiceName,
+        coid,
+        arg,
+      )
+    }
+  }
+
+  case class SBCQueryContractKey(tmplId: TypeConId) extends CmdBuiltin(2) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val n = (getSInt64(args, 0) min MaxContractKeyFetches.toLong).toInt
       val key = args(1)
+      Question.Cmd.QueryContractKey(tmplId, key, n)
+    }
+  }
 
-      // the filling in is up to Remy
+  case class SBCExerciseByKey(
+      tmplId: TypeConId,
+      choiceName: ChoiceName,
+  ) extends CmdBuiltin(2) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val key = args(0)
+      val arg = args(1)
+      Question.Cmd.ExerciseByKey(tmplId, choiceName, key, arg)
+    }
+  }
 
-      crash(s"SQueryNByKey not implemented $nrOfResults $key")
+  case object SBCNeedExternalCall extends CmdBuiltin(4) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val extensionId = getSText(args, 0)
+      val functionId = getSText(args, 1)
+      val configHex = getSText(args, 2)
+      val inputHex = getSText(args, 3)
+      Question.Cmd.ExternalCall(extensionId, functionId, configHex, inputHex)
+    }
+  }
+
+  case object SBCGetTime extends CmdBuiltin(0) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = Question.Cmd.GetTime
+  }
+
+  case object SBCCheckLedgerTimeLT extends CmdBuiltin(1) {
+    override protected def executeCmd(
+        args: ArraySeq[SValue]
+    ): Question.Cmd = {
+      val time = getSTimestamp(args, 0)
+      Question.Cmd.CheckLedgerTimeLT(time)
     }
   }
 
@@ -2674,7 +2732,7 @@ private[lf] object SBuiltinFun {
   private[speedy] val SBuildContractInfoStruct =
     SBuiltinFun.SBStructCon(contractInfoPositionStruct)
 
-  private def extractContractInfo(
+  private[this] def extractContractInfo(
       assignSerializationVersion: Boolean => SerializationVersion,
       tmplId2PackageName: TypeConId => PackageName,
       contractInfoStruct: SValue,
@@ -2738,7 +2796,7 @@ private[lf] object SBuiltinFun {
     *     TypedNormalForm hashing method
     *   - returns the converted argument
     */
-  private def fetchTemplate(
+  private[this] def fetchTemplate(
       machine: UpdateMachine,
       dstTmplId: TypeConId,
       coid: V.ContractId,
@@ -2855,7 +2913,7 @@ private[lf] object SBuiltinFun {
     *
     * Assumes that the package of [dstTmplId] is already loaded.
     */
-  private def fetchValidateDstContract(
+  private[this] def fetchValidateDstContract(
       machine: UpdateMachine,
       coid: V.ContractId,
       srcTmplId: TypeConId,
@@ -2868,8 +2926,6 @@ private[lf] object SBuiltinFun {
     for {
       dstContract <- getContractInfo(machine, coid, dstTmplId, dstTmplArg)
       _ <- ensureContractActive(machine, coid, dstContract.templateId)
-      _ = machine.enforceLimitAddInputContract()
-      _ = machine.enforceLimitSignatoriesAndObservers(coid, dstContract)
       _ <- checkContractUpgradable(
         coid,
         srcTmplId,
@@ -2907,7 +2963,7 @@ private[lf] object SBuiltinFun {
     * of [[HashingMethod.Legacy]] or [[HashingMethod.UpgradeFriendlyUnsafe]]. Does nothing if the
     * hashing method is [[HashingMethod.TypedNormalForm]].
     */
-  private def authenticateIfLegacyContract(
+  private[this] def authenticateIfLegacyContract(
       coid: V.ContractId,
       coinst: FatContractInstance,
       hashingMethod: Hash.HashingMethod,
@@ -2986,10 +3042,10 @@ private[lf] object SBuiltinFun {
               srcPackageName = srcPkgName,
               dstPackageName = dstPkgName,
               originalSignatories = original.signatories,
-              originalSignatoryStakeholders = original.nonSignatoryStakeholders,
+              originalNonSignatoryStakeholders = original.nonSignatoryStakeholders,
               originalKeyOpt = original.keyOpt,
               recomputedSignatories = recomputed.signatories,
-              recomputedSignatoryStakeholders = recomputed.nonSignatoryStakeholders,
+              recomputedNonSignatoryStakeholders = recomputed.nonSignatoryStakeholders,
               recomputedKeyOpt = recomputed.keyOpt,
               msg = errors.mkString("['", "', '", "']"),
             )
@@ -3001,7 +3057,7 @@ private[lf] object SBuiltinFun {
   /** Type-checks [createArg] against [dstTmplId] and converts it to an SValue. The [coid] and
     * [srcTmplId] parameters are used for error reporting only.
     */
-  private def importCreateArg[Q](
+  private[this] def importCreateArg[Q](
       machine: Machine[Q],
       coidOpt: Option[V.ContractId],
       srcTmplId: TypeConId,
@@ -3029,7 +3085,7 @@ private[lf] object SBuiltinFun {
   }
 
   // Get the contract info for a contract, computing if not in our cache
-  private def getContractInfo(
+  private[this] def getContractInfo(
       machine: UpdateMachine,
       coid: V.ContractId,
       templateId: Identifier,
@@ -3052,7 +3108,7 @@ private[lf] object SBuiltinFun {
         }
     }
 
-  private def computeContractInfo(
+  private[this] def computeContractInfo(
       machine: UpdateMachine,
       templateId: Identifier,
       templateArg: SValue,
@@ -3073,7 +3129,7 @@ private[lf] object SBuiltinFun {
     }
   }
 
-  private def ensureContractActive(
+  private[this] def ensureContractActive(
       machine: UpdateMachine,
       coid: V.ContractId,
       templateId: Identifier,

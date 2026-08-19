@@ -6,6 +6,7 @@ package com.digitalasset.canton.auth
 import com.daml.jwt.{
   AuthServiceJWTCodec,
   AuthServiceJWTPayload,
+  PartyJWTPayload,
   StandardJWTPayload,
   StandardJWTTokenFormat,
 }
@@ -78,6 +79,8 @@ class AuthServiceJWTCodecSpec
       .map(payload =>
         payload.copy(scope = payload.scope.map(_ => AuthServiceJWTCodec.scopeLedgerApiFull))
       )
+      // filter out accidental self-signed JWTs
+      .filterNot(payload => payload.issuer.contains(payload.userId))
 
   "Audience-Based AuthServiceJWTPayload codec" when {
     import AuthServiceJWTCodec.AudienceBasedTokenJsonImplicits.*
@@ -550,8 +553,9 @@ class AuthServiceJWTCodecSpec
             |  "exp": 100
             |}
           """.stripMargin
-        parse(serialized).failure.exception.getMessage
-          .contains("must include participantId value prefixed by") shouldBe true
+        parse(serialized).failure.exception.getMessage should include(
+          "must include participantId value prefixed by"
+        )
       }
 
       "reject token with invalid scope" in {
@@ -580,6 +584,77 @@ class AuthServiceJWTCodecSpec
             |}
           """.stripMargin
         parse(serialized) shouldBe Success(expected.copy(userId = userId))
+      }
+    }
+
+    "Party JWTs" should {
+      import AuthServiceJWTCodec.JsonImplicits.*
+
+      val parseSuccess = (serialized: String, expected: PartyJWTPayload) => {
+        parse(serialized) shouldBe Success(expected)
+        serializeAndParse(expected) shouldBe Success(expected)
+      }
+
+      "support expected JWT claims" in {
+        val expected = PartyJWTPayload(
+          partyId = "somePartyId",
+          participantId = "someParticipantId",
+          userId = "someUserId",
+          exp = Some(Instant.ofEpochSecond(100)),
+          scope = Some(AuthServiceJWTCodec.scopeLedgerApiFull),
+          synchronizerId = "someSynchronizerId",
+        )
+
+        val serialized =
+          s"""{
+              |  "iss": "somePartyId",
+              |  "aud": "someParticipantId",
+              |  "sub": "somePartyId",
+              |  "exp": 100,
+              |  "scope": "${AuthServiceJWTCodec.scopeLedgerApiFull}",
+              |  "daml.com": {
+              |    "usr": "someUserId",
+              |    "syn": "someSynchronizerId"
+              |  }
+              |}
+            """.stripMargin
+        parseSuccess(serialized, expected)
+      }
+
+      "reject token without synchronizer" in {
+        val serialized =
+          s"""{
+              |  "iss": "somePartyId",
+              |  "aud": "someParticipantId",
+              |  "sub": "somePartyId",
+              |  "exp": 100,
+              |  "scope": "${AuthServiceJWTCodec.scopeLedgerApiFull}",
+              |  "daml.com": {
+              |    "usr": "someUserId"
+              |  }
+              |}
+            """.stripMargin
+        parse(serialized).failure.exception.getMessage should include(
+          "Expecting synchronizer ID"
+        )
+      }
+
+      "reject token without user" in {
+        val serialized =
+          s"""{
+              |  "iss": "somePartyId",
+              |  "aud": "someParticipantId",
+              |  "sub": "somePartyId",
+              |  "exp": 100,
+              |  "scope": "${AuthServiceJWTCodec.scopeLedgerApiFull}",
+              |  "daml.com": {
+              |    "syn": "someSynchronizerId"
+              |  }
+              |}
+            """.stripMargin
+        parse(serialized).failure.exception.getMessage should include(
+          "Expecting user ID"
+        )
       }
     }
   }

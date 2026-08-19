@@ -185,12 +185,12 @@ class SyncCryptoSignerWithSessionKeys(
 
   override def onClosed(): Unit = {
     LifeCycle.close(
-      {
-        // Invalidate all cache entries and run pending maintenance tasks
+      // Invalidate all cache entries and run pending maintenance tasks
+      () => {
         sessionSigningKeysCache.invalidateAll()
         sessionSigningKeysCache.cleanUp()
-        ExecutorServiceExtensions(scheduledExecutorService)(logger, timeouts)
-      }
+      },
+      ExecutorServiceExtensions(scheduledExecutorService)(logger, timeouts),
     )(logger)
     super.onClosed()
   }

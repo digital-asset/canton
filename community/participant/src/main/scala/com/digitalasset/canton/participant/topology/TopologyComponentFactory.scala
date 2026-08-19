@@ -27,8 +27,11 @@ import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation.PendingOnboardingClearanceStore
-import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
+import com.digitalasset.canton.participant.store.{
+  SyncPersistentState,
+  SynchronizerConnectionConfigStore,
+}
 import com.digitalasset.canton.participant.synchronizer.PendingLsuOperation
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.store.SequencedEventStore
@@ -99,6 +102,7 @@ class TopologyComponentFactory(
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
       pendingLsuOperationsStore: PendingLsuOperation.Store,
+      synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
       pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
       sequencedEventStore: SequencedEventStore,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
@@ -122,6 +126,7 @@ class TopologyComponentFactory(
         ),
         synchronizerPredecessor = synchronizerPredecessor,
         pendingLsuOperationsStore = pendingLsuOperationsStore,
+        synchronizerConnectionConfigStore = synchronizerConnectionConfigStore,
         pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
         onboardingClearanceScheduler = onboardingClearanceScheduler,
         metrics = metrics,
@@ -224,7 +229,7 @@ class TopologyComponentFactory(
         checkCannotDisablePartyWithActiveContracts(
           partyId,
           forceFlags,
-          acsInspections = () => Map(syncPersistentState.lsid -> syncPersistentState.acsInspection),
+          acsInspections = Map(syncPersistentState.lsid -> syncPersistentState.acsInspection),
         )
 
       override def checkInsufficientSignatoryAssigningParticipantsForParty(
@@ -242,7 +247,7 @@ class TopologyComponentFactory(
           nextThreshold,
           nextConfirmingParticipants,
           forceFlags,
-          () => Map(syncPersistentState.lsid -> syncPersistentState.reassignmentStore),
+          Map(syncPersistentState.lsid -> syncPersistentState.reassignmentStore),
           () => ledgerApiStore.value.ledgerEnd,
         )
 
@@ -255,7 +260,7 @@ class TopologyComponentFactory(
         checkInsufficientParticipantPermissionForSignatoryParty(
           partyId,
           forceFlags,
-          acsInspections = () => Map(syncPersistentState.lsid -> syncPersistentState.acsInspection),
+          acsInspections = Map(syncPersistentState.lsid -> syncPersistentState.acsInspection),
         )
     }
     topologyManager

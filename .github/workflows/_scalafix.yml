@@ -1,0 +1,34 @@
+name: Scalafix
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  scalafix:
+    name: Scalafix
+    runs-on: ${{ inputs.runner }}
+    env:
+      EXECUTOR_JVM_HEAP_SIZE: 9000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Restore compile and sbt caches
+        id: cache_restore
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Run scalafixCheck
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: scalafixCheck
+          report_to_datadog: "false"
+          execution_context_size: "4"

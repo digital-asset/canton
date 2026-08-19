@@ -6,6 +6,7 @@ package com.digitalasset.canton.protocol
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError}
@@ -31,8 +32,8 @@ final case class Stakeholders private (all: Set[LfPartyId], signatories: Set[LfP
   )
 
   def toProtoV30: v30.Stakeholders = v30.Stakeholders(
-    all = all.toSeq,
-    signatories = signatories.toSeq,
+    all = all.toSeq.map(_.toProtoUnvalidated),
+    signatories = signatories.toSeq.map(_.toProtoUnvalidated),
   )
 }
 
@@ -60,10 +61,19 @@ object Stakeholders {
   ): ParsingResult[Stakeholders] =
     for {
       stakeholders <- ProtoValidation
-        .validateThen(stakeholdersP.all, "stakeholders", pvv)(ProtoConverter.parseLfPartyId)
+        .validateThen(stakeholdersP.all, "stakeholders", pvv, ProtoValidation.MaxCollectionSize)(
+          ProtoConverter.parseLfPartyId
+        )
         .map(_.toSet)
       signatories <- ProtoValidation
-        .validateThen(stakeholdersP.signatories, "signatories", pvv)(ProtoConverter.parseLfPartyId)
+        .validateThen(
+          stakeholdersP.signatories,
+          "signatories",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )(
+          ProtoConverter.parseLfPartyId
+        )
         .map(_.toSet)
 
       nonStakeholderSignatories = signatories -- stakeholders

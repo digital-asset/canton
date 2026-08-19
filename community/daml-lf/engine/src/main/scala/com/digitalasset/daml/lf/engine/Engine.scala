@@ -27,6 +27,7 @@ import com.digitalasset.daml.lf.speedy.Speedy.{Machine, PureMachine, UpdateMachi
 import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot
+import com.digitalasset.daml.lf.transaction.validator.TransactionValidator
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
@@ -49,10 +50,10 @@ import scala.jdk.CollectionConverters.*
   * [[com.digitalasset.daml.lf.transaction.Transaction]]s. <p>
   *
   * This class does not dereference contract ids or package ids on its own. Instead, when an
-  * instance of this class needs to dereference a contract id or package id, it returns a
-  * [[ResultNeedContract]] or [[ResultNeedPackage]] to the caller. The caller can then resume the
-  * computation by calling `result.resume`. The engine may or may not cache and reuse the provided
-  * contract instance or package. <p>
+  * instance of this class needs to dereference a contract id or package id, it returns a [[Result]]
+  * that suspends on a [[Result.Need.Contract]] or [[Result.Need.Package]] question. The caller
+  * drives the resulting [[Result.Step]] and resumes it with the requested data. The engine may or
+  * may not cache and reuse the provided contract instance or package. <p>
   *
   * The caller must dereference contract and package ids consistently, i.e., if the '''same
   * engine''' returns `result1` and `result2`, `result1` and `result2` request to dereference the
@@ -98,10 +99,10 @@ class Engine(
     *
     * The resulting transaction (if any) meets the following properties: <ul> <li>The transaction is
     * well-typed and conforms to the DAML model described by the packages supplied via
-    * `ResultNeedPackage`. In particular, each contract created by the transaction meets the ensures
-    * clauses of the underlying template.</li> <li>The transaction paired with `submitters` is
-    * well-authorized according to the ledger model.</li> <li>The transaction is annotated with the
-    * packages used during interpretation.</li> </ul>
+    * `Result.Need.Package`. In particular, each contract created by the transaction meets the
+    * ensures clauses of the underlying template.</li> <li>The transaction paired with `submitters`
+    * is well-authorized according to the ledger model.</li> <li>The transaction is annotated with
+    * the packages used during interpretation.</li> </ul>
     *
     * @param packageMap
     *   all the package known by the ledger with their name and version
@@ -281,7 +282,7 @@ class Engine(
   /** Check if the given transaction is a valid result of some single-submitter command.
     *
     * Formally, for all tx, pcs, pkgs, keys: evaluate(validate(tx, ledgerEffectiveTime)) ==
-    * Result.Unit <==> exists cmds. evaluate(submit(cmds)) = tx where: evaluate(result) =
+    * Result.unit <==> exists cmds. evaluate(submit(cmds)) = tx where: evaluate(result) =
     * result.consume(pcs, pkgs, keys)
     *
     * A transaction may contain relative contract IDs and still pass validation, but not in the root
@@ -347,8 +348,8 @@ class Engine(
         transaction.Validation
           .isReplayedBy(tx, rtx)
           .fold(
-            e => ResultError(Error.Validation.ReplayMismatch(e)),
-            _ => ResultDone(metrics),
+            e => Result.error(Error.Validation.ReplayMismatch(e)),
+            _ => Result.done(metrics),
           )
     } yield validationResult
 
@@ -366,27 +367,26 @@ class Engine(
     )
 
   private[engine] def loadPackage(pkgId: PackageId, context: language.Reference): Result[Unit] =
-    ResultNeedPackage(
-      pkgId,
-      {
-        case Some(pkg) =>
-          compiledPackages.addPackage(pkgId, pkg)
-        case None =>
-          ResultError(Error.Package.MissingPackage(pkgId, context))
-      },
-    )
+    for {
+      pkgO <- Result.needPackage(pkgId)
+      pkg <- pkgO match {
+        case Some(p) => Result.done(p)
+        case None => Result.error(Error.Package.MissingPackage(pkgId, context))
+      }
+      _ <- compiledPackages.addPackage(pkgId, pkg)
+    } yield ()
 
   @inline
   private[this] def runCompilerSafely[X](funcName: => String, run: => X)(implicit
       traceContext: TraceContext
   ): Result[X] =
     try {
-      ResultDone(run)
+      Result.done(run)
     } catch {
       // The two following error should be prevented by the type checking does by translateCommand
       // so it’s an internal error.
       case speedy.Compiler.PackageNotFound(pkgId, context) =>
-        ResultError(
+        Result.error(
           Error.Preprocessing.Internal(
             funcName,
             s"CompilationError: " + LookupError.MissingPackage.pretty(pkgId, context),
@@ -394,7 +394,7 @@ class Engine(
           )
         )
       case err @ speedy.Compiler.CompilationError(msg) =>
-        ResultError(Error.Preprocessing.Internal(funcName, s"CompilationError: $msg", Some(err)))
+        Result.error(Error.Preprocessing.Internal(funcName, s"CompilationError: $msg", Some(err)))
     }
 
   // command-list compilation, followed by interpretation
@@ -473,7 +473,7 @@ class Engine(
       interpretationConfig = interpretationConfig,
       contractIdVersion = contractIdVersion,
       packageResolution = packageResolution,
-      limits = config.limits,
+      limits = config.transactionLimits,
       iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
       initialGasBudget = config.gasBudget,
       metricPlugins = metricPlugins,
@@ -491,7 +491,7 @@ class Engine(
       acc | compiledPackages
         .getPackageDependencies(pkgId)
         .getOrElse(
-          return ResultError(
+          return Result.error(
             Error.Interpretation.Internal(
               NameOf.qualifiedNameOfCurrentFunc,
               s"INTERNAL ERROR: Missing dependencies of package $pkgId",
@@ -500,15 +500,15 @@ class Engine(
           )
         )
     )
-    ResultDone(deps)
+    Result.done(deps)
   }
 
-  private def handleError(err: SError.SError, detailMsg: Option[String]): ResultError =
+  private def handleError(err: SError.SError, detailMsg: Option[String]): Result[Nothing] =
     err match {
       case SError.SErrorDamlException(error) =>
-        ResultError(Error.Interpretation.DamlException(error), detailMsg)
+        Result.error(Error.Interpretation.DamlException(error), detailMsg)
       case err @ SError.SErrorCrash(where, reason) =>
-        ResultError(Error.Interpretation.Internal(where, reason, Some(err)))
+        Result.error(Error.Interpretation.Internal(where, reason, Some(err)))
     }
 
   private lazy val enricher = refinement.Enricher(
@@ -546,18 +546,38 @@ class Engine(
 
       disallowedPackages.headOption match {
         case Some((pkgId, pkg)) =>
-          ResultError(
+          Result.error(
             Error.Package.AllowedLanguageVersion(pkgId, pkg, allowedLangVersions)
           )
         case None =>
-          Result.Unit
+          Result.unit
       }
+    }
+
+    def checkTransactionLimits(
+        tx: SubmittedTransaction,
+        metadata: Tx.Metadata,
+        inputContracts: Map[ContractId, FatContractInstance],
+    ): Result[Unit] = {
+      val errors =
+        TransactionValidator.validate(tx, metadata, inputContracts, config.transactionLimits)
+
+      Result.assert(errors.isEmpty)(
+        Error.Validation(Error.Validation.TransactionLimitExceeded(errors))
+      )
     }
 
     def finish: Result[(SubmittedTransaction, Tx.Metadata, Speedy.Metrics)] =
       machine.finish match {
         case Right(
-              UpdateMachine.Result(tx, _, nodeSeeds, globalKeyMapping, contractOrder)
+              UpdateMachine.Result(
+                tx,
+                inputContracts,
+                _,
+                nodeSeeds,
+                globalKeyMapping,
+                contractOrder,
+              )
             ) =>
           deps(tx).flatMap { deps =>
             if (config.paranoid) {
@@ -586,7 +606,7 @@ class Engine(
                 // check that impoverishment remove the data added by enrichement
                 rich <- enricher
                   .enrichVersionedTransaction(tx)
-                  .consume()
+                  .consume(Result.lookupHandler())
                   .left
                   .map("transaction enrichment fails: " + _)
                 poor = refinement.Enricher.impoverish(rich)
@@ -681,10 +701,15 @@ class Engine(
 
             snapshotResult match {
               case Some((loc, ValueCoder.EncodeError(errMsg))) =>
-                ResultError(Error.Interpretation.Internal(loc, errMsg, None))
+                Result.error(Error.Interpretation.Internal(loc, errMsg, None))
 
               case None =>
-                checkAllowedDeps(deps).map(_ => (tx, meta, machine.metrics))
+                for {
+                  _ <- checkAllowedDeps(deps)
+                  _ <-
+                    if (machine.validating) Result.unit
+                    else checkTransactionLimits(tx, meta, inputContracts)
+                } yield (tx, meta, machine.metrics)
             }
           }
         case Left(err) =>
@@ -703,24 +728,24 @@ class Engine(
               loop
 
             case Question.Update.NeedPackage(pkgId, context, callback) =>
-              Result.needPackage(
-                pkgId,
-                context,
-                (pkg: Package) =>
-                  compiledPackages.addPackage(pkgId, pkg).flatMap { _ =>
-                    callback(compiledPackages)
-                    interpretLoop(machine, time, submissionInfo)
-                  },
-              )
+              for {
+                pkgO <- Result.needPackage(pkgId)
+                pkg <- pkgO match {
+                  case Some(p) => Result.done(p)
+                  case None => Result.error(Error.Package.MissingPackage(pkgId, context))
+                }
+                _ <- compiledPackages.addPackage(pkgId, pkg)
+                _ = callback(compiledPackages)
+                result <- interpretLoop(machine, time, submissionInfo)
+              } yield result
 
             case Question.Update.NeedContract(coid, _, callback) =>
-              Result.needContract(
-                coid,
-                { (coinst, hashMethod, authenticator) =>
-                  callback(coinst, hashMethod, authenticator)
-                  interpretLoop(machine, time, submissionInfo)
-                },
-              )
+              for {
+                contract <- Result.needContract(coid)
+                (coinst, hashMethod, authenticator) = contract
+                _ = callback(coinst, hashMethod, authenticator)
+                result <- interpretLoop(machine, time, submissionInfo)
+              } yield result
 
             case Question.Update.NeedKey(
                   gk,
@@ -738,7 +763,7 @@ class Engine(
               // token's buffer before going back to the caller.
 
               def wrapHasStarted(
-                  overflow: Vector[ResultNeedKey.Response.ContractEntry],
+                  overflow: Vector[Result.Need.Key.Response.ContractEntry],
                   callerProgression: NeedKeyProgression.HasStarted,
               ): NeedKeyProgression.HasStarted =
                 if (overflow.nonEmpty)
@@ -756,7 +781,7 @@ class Engine(
                   }
 
               def resumeWithNeededEntries(
-                  entries: Vector[ResultNeedKey.Response.ContractEntry],
+                  entries: Vector[Result.Need.Key.Response.ContractEntry],
                   callerHasStarted: NeedKeyProgression.HasStarted,
               ) = {
                 import cats.instances.either.*
@@ -764,16 +789,16 @@ class Engine(
                 import cats.syntax.traverse.*
                 val (enginePage, engineRest) = entries.splitAt(n)
                 enginePage.traverse {
-                  case ResultNeedKey.Response.AuthenticableFatContractInstance(
+                  case Result.Need.Key.Response.AuthenticableFatContractInstance(
                         contractInstance,
                         expectedHashingMethod,
                         idValidator,
                       ) =>
                     Right((contractInstance, expectedHashingMethod, idValidator))
-                  case ResultNeedKey.Response.UnsupportedContractIdVersion(coid) =>
+                  case Result.Need.Key.Response.UnsupportedContractIdVersion(coid) =>
                     Left(interpretation.Error.UnsupportedContractId(coid))
                 } match {
-                  case Left(err) => ResultError(Error.Interpretation.DamlException(err))
+                  case Left(err) => Result.error(Error.Interpretation.DamlException(err))
                   case Right(sanitizedPage) =>
                     callback(sanitizedPage, wrapHasStarted(engineRest, callerHasStarted))
                     interpretLoop(machine, time, submissionInfo)
@@ -781,14 +806,10 @@ class Engine(
               }
 
               def askCaller(callerToken: NeedKeyProgression.CanContinue) =
-                ResultNeedKey(
-                  gk,
-                  n,
-                  callerToken,
-                  { case ResultNeedKey.Response(callerContracts, callerHasStarted) =>
-                    resumeWithNeededEntries(callerContracts, callerHasStarted)
-                  },
-                )
+                for {
+                  response <- Result.needKey(gk, n, callerToken)
+                  result <- resumeWithNeededEntries(response.contracts, response.hasStarted)
+                } yield result
 
               canContinue match {
                 case NeedKeyProgression.InProgress(
@@ -812,7 +833,7 @@ class Engine(
                   // No buffer — ask the caller directly.
                   askCaller(NeedKeyProgression.Unstarted)
                 case NeedKeyProgression.InProgress(_) =>
-                  ResultError(
+                  Result.error(
                     Error.Interpretation.Internal(
                       NameOf.qualifiedNameOfCurrentFunc,
                       "Invalid NeedKeyProgression token",
@@ -828,22 +849,21 @@ class Engine(
                   input,
                   callback,
                 ) =>
-              ResultNeedExternalCall(
-                extensionId,
-                functionId,
-                configHash,
-                input,
-                { (result: Either[ResultNeedExternalCall.Error, String]) =>
-                  val speedyResult =
-                    result.left.map(e => Question.Update.NeedExternalCall.Error(e.message))
-                  callback(speedyResult)
-                  interpretLoop(machine, time, submissionInfo)
-                },
-              )
+              for {
+                result <- Result.needExternalCall(extensionId, functionId, configHash, input)
+                speedyResult = result.left.map(e =>
+                  Question.Update.NeedExternalCall.Error(e.message)
+                )
+                _ = callback(speedyResult)
+                next <- interpretLoop(machine, time, submissionInfo)
+              } yield next
           }
 
         case SResultInterruption =>
-          ResultInterruption(() => interpretLoop(machine, time, submissionInfo), abort)
+          for {
+            _ <- Result.needInterruption(abort)
+            result <- interpretLoop(machine, time, submissionInfo)
+          } yield result
 
         case _: SResultFinal =>
           finish
@@ -859,7 +879,7 @@ class Engine(
   def clearPackages(): Unit = compiledPackages.clear()
 
   /** This function can be used to give a package to the engine pre-emptively, rather than having
-    * the engine to ask about it through [[ResultNeedPackage]].
+    * the engine to ask about it through [[Result.Need.Package]].
     *
     * Returns a [[Result]] because the package might need another package to be loaded.
     */
@@ -932,10 +952,13 @@ class Engine(
     @scala.annotation.nowarn("msg=dead code following this construct")
     def interpret(machine: PureMachine, abort: () => Option[String]): Result[SValue] =
       machine.run() match {
-        case SResultFinal(v) => ResultDone(v)
+        case SResultFinal(v) => Result.done(v)
         case SResultError(err) => handleError(err, None)
         case SResult.SResultInterruption =>
-          ResultInterruption(() => interpret(machine, abort), abort)
+          for {
+            _ <- Result.needInterruption(abort)
+            result <- interpret(machine, abort)
+          } yield result
         case SResultQuestion(nothing) => nothing: Nothing
       }
     for {
@@ -973,8 +996,8 @@ class Engine(
     *   the hashing method to use
     * @return
     *   a Result containing the computed hash. When [hashingMethod] is
-    *   [[com.digitalasset.daml.lf.crypto.Hash.HashingMethod.TypedNormalForm]], returns a
-    *   [[ResultError]] if [create] is ill-typed or if its package is unavailable.
+    *   [[com.digitalasset.daml.lf.crypto.Hash.HashingMethod.TypedNormalForm]], returns a failed
+    *   [[Result]] if [create] is ill-typed or if its package is unavailable.
     */
   def hashCreateNode(
       create: Node.Create,
@@ -1012,7 +1035,7 @@ class Engine(
           _ <-
             if (!compiledPackages.contains(pkgId))
               loadPackage(pkgId, language.Reference.Template(templateId.toRef))
-            else Result.Unit
+            else Result.unit
           sValue <- new ValueTranslator(
             compiledPackages.pkgInterface,
             forbidLocalContractIds = true,
@@ -1064,7 +1087,7 @@ class Engine(
     *   a function that checks whether a given hash is valid
     * @return
     *   a Result containing a [Right(())] on success and a [Left(_)] when validation fails. On other
-    *   errors like missing packages or internal errors, a ResultError is returned.
+    *   errors like missing packages or internal errors, a failed `Result` is returned.
     */
   def validateContractInstance(
       instance: FatContractInstance,
@@ -1076,7 +1099,7 @@ class Engine(
     val substitutedInstance = instance.mapCid(contractIdSubstitution)
 
     def internalError(msg: String): Result[Either[IError, Unit]] =
-      ResultError(Error.Interpretation.Internal(NameOf.qualifiedNameOfCurrentFunc, msg, None))
+      Result.error(Error.Interpretation.Internal(NameOf.qualifiedNameOfCurrentFunc, msg, None))
 
     def interpret(
         machine: UpdateMachine,
@@ -1095,28 +1118,32 @@ class Engine(
                 interpret(machine, abort)
               }
             case Update.NeedPackage(pkgId, context, callback) =>
-              Result.needPackage(
-                pkgId,
-                context,
-                (pkg: Package) =>
-                  compiledPackages.addPackage(pkgId, pkg).flatMap { _ =>
-                    callback(compiledPackages)
-                    interpret(machine, abort)
-                  },
-              )
+              for {
+                pkgO <- Result.needPackage(pkgId)
+                pkg <- pkgO match {
+                  case Some(p) => Result.done(p)
+                  case None => Result.error(Error.Package.MissingPackage(pkgId, context))
+                }
+                _ <- compiledPackages.addPackage(pkgId, pkg)
+                _ = callback(compiledPackages)
+                result <- interpret(machine, abort)
+              } yield result
             case _ => internalError(s"unexpected question from speedy: $question")
           }
         case SResult.SResultFinal(_) =>
-          ResultDone(Right(()))
+          Result.done(Right(()))
         case SResult.SResultError(err) =>
           err match {
             case SError.SErrorDamlException(error) =>
-              ResultDone(Left(error))
+              Result.done(Left(error))
             case err @ SError.SErrorCrash(where, reason) =>
-              ResultError(Error.Interpretation.Internal(where, reason, Some(err)))
+              Result.error(Error.Interpretation.Internal(where, reason, Some(err)))
           }
         case SResult.SResultInterruption =>
-          ResultInterruption(() => interpret(machine, abort), abort)
+          for {
+            _ <- Result.needInterruption(abort)
+            result <- interpret(machine, abort)
+          } yield result
       }
 
     val machine =
@@ -1181,13 +1208,13 @@ object Engine {
     Error.Interpretation(Error.Interpretation.DamlException(error), None)
 
   private final case class BufferedKeyContracts(
-      overflow: Vector[ResultNeedKey.Response.ContractEntry],
+      overflow: Vector[Result.Need.Key.Response.ContractEntry],
       callerProgression: NeedKeyProgression.HasStarted,
   ) extends NeedKeyProgression.Token
 
   private object Syntax {
     implicit class EitherOps[A](val e: Either[Error, A]) extends AnyVal {
-      def toResult: Result[A] = e.fold(ResultError(_), ResultDone(_))
+      def toResult: Result[A] = e.fold(Result.error(_), Result.done(_))
     }
   }
 }

@@ -9,18 +9,25 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.{InternalIndexService, SynchronizerIndex}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
-  AcsUpdate,
   CheckpointFence,
+  ContractChange,
+  ContractChangeBatch,
   NotCheckpointFence,
   ProcessingContext,
 }
 import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
+import com.digitalasset.canton.participant.metrics.{
+  CommitmentMetrics,
+  ParticipantTestMetrics,
+  TestCommitmentMetrics,
+}
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigestUpdate,
   Checkpoint,
   CheckpointType,
   RawDigest,
+  allCheckpointsFilter,
 }
 import com.digitalasset.canton.participant.store.{
   AcsDigestStore,
@@ -38,7 +45,9 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext}
 import org.apache.pekko.stream.scaladsl.Sink
+import org.apache.pekko.stream.testkit.scaladsl.TestSink
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.util.ChainingSyntax
 
 @AcsCommitmentTest
@@ -57,6 +66,8 @@ class ReinitializingDigestProcessorTest
       indexService: InternalIndexService = mkIndexService(),
       acsDigestStore: AcsDigestStore = mkInMemoryDigestStore(),
       counterpartyBatchSize: Int = 10,
+      // default is 1, so that testing is deterministic
+      contractChangeClassificationBatchSize: Int = 1,
       writeJournalTombstonesBatchSize: PositiveInt = PositiveInt.tryCreate(5),
       testingTopologyFactory: TestingIdentityFactory = TestingTopology(
         topology = Map.empty,
@@ -70,7 +81,8 @@ class ReinitializingDigestProcessorTest
         ),
       ).build(),
       hasLedgerEnd: Boolean = true,
-  ): ReinitializingDigestProcessor = {
+      metrics: CommitmentMetrics = ParticipantTestMetrics.synchronizer.commitments,
+  ): ReinitializingDigestProcessorImpl = {
     val testSynchronizerId = DefaultTestIdentities.synchronizerId
     val mockLedgerApiStore: LedgerApiStore = {
       val ledgerEndO = Option.when(hasLedgerEnd)(
@@ -96,14 +108,14 @@ class ReinitializingDigestProcessorTest
     }
 
     val digestAccumulator = new SequentialDigestAccumulator(
-      participant.toLf,
       acsDigestStore,
       mockStringInterning,
       AcsDigestTracingMode.Disabled,
+      metrics,
       loggerFactory,
     )
 
-    new ReinitializingDigestProcessor(
+    new ReinitializingDigestProcessorImpl(
       thisParticipantId = participant,
       synchronizerId = testSynchronizerId,
       indexService = indexService,
@@ -114,11 +126,15 @@ class ReinitializingDigestProcessorTest
         counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
         reinitializingJournalTombstonesBatchSize = writeJournalTombstonesBatchSize,
         tracing = AcsDigestTracingMode.Disabled,
+        contractChangeClassificationBatchSize =
+          PositiveInt.tryCreate(contractChangeClassificationBatchSize),
       ),
       getTopologySnapshot = ts =>
         FutureUnlessShutdown.pure(
           testingTopologyFactory.topologySnapshot(timestampOfSnapshot = ts.value)
         ),
+      enableAdditionalConsistencyChecks = true,
+      metrics = metrics,
       loggerFactory = loggerFactory,
       timeouts = timeouts,
     )
@@ -163,14 +179,14 @@ class ReinitializingDigestProcessorTest
     val p4DigestUpdateTombstone_AtOff99 = AcsDigestUpdate(p4DigestTombstoneOff99, None)
 
     // Party Digest Updates for testing
-    val partyAliceDigestOff98 = acsDigest(98, localOrderParty(alice), Some(genRawDigest(0x5a)))
-    val partyAliceDigestOff99 = acsDigest(99, localOrderParty(alice), Some(genRawDigest(0x6a)))
+    val partyAliceDigestOff98 = acsDigest(98, internedPartyId(alice), Some(genRawDigest(0x5a)))
+    val partyAliceDigestOff99 = acsDigest(99, internedPartyId(alice), Some(genRawDigest(0x6a)))
 
     val partyAliceUpdate1_AtOff98 = AcsDigestUpdate(partyAliceDigestOff98, None)
     val partyAliceUpdate2_AtOff99 = AcsDigestUpdate(partyAliceDigestOff99, Some(off(98)))
 
-    val partyBobDigestOff98 = acsDigest(98, remoteOrderParty(bob), Some(genRawDigest(0x7a)))
-    val partyBobDigestOff99 = acsDigest(99, remoteOrderParty(bob), Some(genRawDigest(0x6a)))
+    val partyBobDigestOff98 = acsDigest(98, internedPartyId(bob), Some(genRawDigest(0x7a)))
+    val partyBobDigestOff99 = acsDigest(99, internedPartyId(bob), Some(genRawDigest(0x6a)))
 
     val partyBobUpdate1_AtOff98 = AcsDigestUpdate(partyBobDigestOff98, None)
     val partyBobUpdate2_AtOff99 = AcsDigestUpdate(partyBobDigestOff99, Some(off(98)))
@@ -263,7 +279,7 @@ class ReinitializingDigestProcessorTest
         // party bulk results
         val partyBulkMap = testDigestStore.party
           .bulkLookup(
-            keys = Seq(localOrderParty(alice), remoteOrderParty(bob)),
+            keys = Seq(alice, bob).map(internedPartyId),
             toInclusive = targetTimepoint_At99.offset,
           )
           .futureValueUS
@@ -279,9 +295,9 @@ class ReinitializingDigestProcessorTest
         // Verify parties are tombstones at offset 99
         partyBulkMap should not be empty
         partyBulkMap.keys should contain theSameElementsAs Seq(
-          localOrderParty(alice),
-          remoteOrderParty(bob),
-        )
+          alice,
+          bob,
+        ).map(internedPartyId)
         partyBulkMap.values.foreach(_.digestUpdate.digestO shouldBe None)
 
         // Verify participants are tombstones at offset 99
@@ -318,7 +334,7 @@ class ReinitializingDigestProcessorTest
 
         val partyBulkMap = testDigestStore.party
           .bulkLookup(
-            keys = Seq(localOrderParty(alice), remoteOrderParty(bob)),
+            keys = Seq(alice, bob).map(internedPartyId),
             toInclusive = tp100.offset,
           )
           .futureValueUS
@@ -330,10 +346,7 @@ class ReinitializingDigestProcessorTest
           .futureValueUS
 
         partyBulkMap should not be empty
-        partyBulkMap.keys should contain theSameElementsAs Seq(
-          localOrderParty(alice),
-          remoteOrderParty(bob),
-        )
+        partyBulkMap.keys should contain theSameElementsAs Seq(alice, bob).map(internedPartyId)
         partyBulkMap.values.foreach(_.digestUpdate.digestO shouldBe None)
 
         participantsBulkMap should not be empty
@@ -394,7 +407,7 @@ class ReinitializingDigestProcessorTest
 
         val partyBulk = testDigestStore.party
           .bulkLookup(
-            keys = Seq(localOrderParty(alice), remoteOrderParty(bob)),
+            keys = Seq(alice, bob).map(internedPartyId),
             toInclusive = tp100.offset,
           )
           .futureValueUS
@@ -409,10 +422,7 @@ class ReinitializingDigestProcessorTest
         partyBulk should not be empty
 
         // Verify parties have tombstones created at offset 100
-        partyBulk.keys should contain theSameElementsAs Seq(
-          localOrderParty(alice),
-          remoteOrderParty(bob),
-        )
+        partyBulk.keys should contain theSameElementsAs Seq(alice, bob).map(internedPartyId)
         partyBulk.values.foreach { update =>
           update.digestUpdate.offset shouldBe tp100.offset
           update.digestUpdate.digestO shouldBe None
@@ -457,7 +467,7 @@ class ReinitializingDigestProcessorTest
       }
     }
 
-    "reinitAcsUpdates" should {
+    "reinitializeContractChanges" should {
       val topologySnapshotFactory = TestingTopology(topology =
         Map(
           partyHosting(alice)(p1, p2),
@@ -466,8 +476,9 @@ class ReinitializingDigestProcessorTest
         )
       ).build()
 
-      "handle a simple case of a few ACS updates" in {
+      "handle a simple case of a few contract changes" in {
         val reinitAtTp = tp(3)
+        val metrics = TestCommitmentMetrics()
         val rdp = mkReinitializingDigestProcessor(
           reinitTimepoint = reinitAtTp,
           indexService = mkIndexService(
@@ -475,29 +486,33 @@ class ReinitializingDigestProcessorTest
             (off(2), cid(2), Seq(party(alice), party(bob), party(charlie))),
           ),
           testingTopologyFactory = topologySnapshotFactory,
+          metrics = metrics,
         )
         val topologySnapshot =
           topologySnapshotFactory.topologySnapshot(timestampOfSnapshot = reinitAtTp.recordTime)
 
-        val acsUpdates = rdp
-          .reinitAcsUpdates(reinitAtTp, topologySnapshot)
+        val contractChanges = rdp
+          .reinitializeContractChanges(reinitAtTp, topologySnapshot)
           .runWith(Sink.seq)
           .futureValue
 
-        acsUpdates shouldBe Seq(
+        contractChanges shouldBe Seq(
           ProcessingContext(
             reinitAtTp,
             NotCheckpointFence(
               topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
+              ContractChangeBatch.tryCreate(
+                Map(
                   alice -> Set(p1.toLf, p2.toLf),
                   bob -> Set(p2.toLf, p3.toLf),
                 ),
-                locallyHostedStakeholders = Seq(alice),
-                cid = cid(1),
-                rc = rc,
-                isActivation = true,
+                ContractChange(
+                  stakeholders = Set(alice, bob),
+                  locallyHostedStakeholders = Seq(alice),
+                  cid = cid(1),
+                  rc = rc,
+                  isActivation = true,
+                ),
               ),
             ),
           ),
@@ -505,16 +520,19 @@ class ReinitializingDigestProcessorTest
             reinitAtTp,
             NotCheckpointFence(
               topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
+              ContractChangeBatch.tryCreate(
+                Map(
                   alice -> Set(p1.toLf, p2.toLf),
                   bob -> Set(p2.toLf, p3.toLf),
                   charlie -> Set(p1.toLf, p3.toLf, p4.toLf),
                 ),
-                locallyHostedStakeholders = Seq(alice, charlie),
-                cid = cid(2),
-                rc = rc,
-                isActivation = true,
+                ContractChange(
+                  stakeholders = Set(alice, bob, charlie),
+                  locallyHostedStakeholders = Seq(alice, charlie),
+                  cid = cid(2),
+                  rc = rc,
+                  isActivation = true,
+                ),
               ),
             ),
           ),
@@ -523,6 +541,8 @@ class ReinitializingDigestProcessorTest
             CheckpointFence(CheckpointType.Reinitialization),
           ),
         )
+        metrics.reinitializeParties.getValue shouldBe 3
+        metrics.reinitializeContractChanges.getValue shouldBe 2
       }
 
       "handle grouping and filtering by record time" in {
@@ -530,6 +550,7 @@ class ReinitializingDigestProcessorTest
         val requestedTimepoint = tp(2)
         val after = off(3)
 
+        val metrics = TestCommitmentMetrics()
         val rdp = mkReinitializingDigestProcessor(
           reinitTimepoint = requestedTimepoint,
           indexService = mkIndexService(
@@ -539,34 +560,38 @@ class ReinitializingDigestProcessorTest
             (after, cid(4), Seq(party(alice), party(charlie))), // Should be filtered out
           ),
           counterpartyBatchSize = 2,
+          metrics = metrics,
         )
         val topologySnapshot = topologySnapshotFactory.topologySnapshot(timestampOfSnapshot =
           requestedTimepoint.recordTime
         )
 
-        val acsUpdates = rdp
-          .reinitAcsUpdates(
+        val contractChanges = rdp
+          .reinitializeContractChanges(
             requestedTimepoint,
             topologySnapshot,
           )
           .runWith(Sink.seq)
           .futureValue
 
-        acsUpdates shouldBe Seq(
+        contractChanges shouldBe Seq(
           ProcessingContext(
             requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
+              ContractChangeBatch.tryCreate(
+                Map(
                   alice -> Set(p1.toLf, p2.toLf),
                   bob -> Set(p2.toLf, p3.toLf),
                   // charlie is "missing" here because the counterparty batch size is 2
                 ),
-                locallyHostedStakeholders = Seq(alice),
-                cid = cid(1),
-                rc = rc,
-                isActivation = true,
+                ContractChange(
+                  stakeholders = Set(alice, bob),
+                  locallyHostedStakeholders = Seq(alice),
+                  cid = cid(1),
+                  rc = rc,
+                  isActivation = true,
+                ),
               ),
             ),
           ),
@@ -574,15 +599,18 @@ class ReinitializingDigestProcessorTest
             requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
+              ContractChangeBatch.tryCreate(
+                Map(
                   alice -> Set(p1.toLf, p2.toLf),
                   bob -> Set(p2.toLf, p3.toLf),
                 ),
-                locallyHostedStakeholders = Seq(alice, charlie),
-                cid = cid(2),
-                rc = rc,
-                isActivation = true,
+                ContractChange(
+                  stakeholders = Set(alice, bob),
+                  locallyHostedStakeholders = Seq(alice, charlie),
+                  cid = cid(2),
+                  rc = rc,
+                  isActivation = true,
+                ),
               ),
             ),
           ),
@@ -590,15 +618,18 @@ class ReinitializingDigestProcessorTest
             requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
+              ContractChangeBatch.tryCreate(
+                Map(
                   alice -> Set(p1.toLf, p2.toLf),
                   bob -> Set(p2.toLf, p3.toLf),
                 ),
-                locallyHostedStakeholders = Seq(alice),
-                cid = cid(3),
-                rc = rc,
-                isActivation = true,
+                ContractChange(
+                  stakeholders = Set(alice, bob),
+                  locallyHostedStakeholders = Seq(alice),
+                  cid = cid(3),
+                  rc = rc,
+                  isActivation = true,
+                ),
               ),
             ),
           ),
@@ -606,14 +637,17 @@ class ReinitializingDigestProcessorTest
             requestedTimepoint,
             NotCheckpointFence(
               topologySnapshot,
-              AcsUpdate(
-                stakeholders = Map(
+              ContractChangeBatch.tryCreate(
+                Map(
                   charlie -> Set(p1.toLf, p3.toLf, p4.toLf)
                 ),
-                locallyHostedStakeholders = Seq(alice, charlie),
-                cid = cid(2),
-                rc = rc,
-                isActivation = true,
+                ContractChange(
+                  stakeholders = Set(charlie),
+                  locallyHostedStakeholders = Seq(alice, charlie),
+                  cid = cid(2),
+                  rc = rc,
+                  isActivation = true,
+                ),
               ),
             ),
           ),
@@ -622,7 +656,47 @@ class ReinitializingDigestProcessorTest
             CheckpointFence(CheckpointType.Reinitialization),
           ),
         )
+        metrics.reinitializeParties.getValue shouldBe 3
+        metrics.reinitializeContractChanges.getValue shouldBe 4
       }
+
+      "batch contract changes in case of backpressure" in {
+        val numContracts = 100
+        val contracts = (1 to numContracts).map(i => (off(i), cid(i), Seq(alice)))
+
+        val requestedTimepoint = tp(numContracts + 1)
+
+        val rdp = mkReinitializingDigestProcessor(
+          reinitTimepoint = requestedTimepoint,
+          indexService = mkIndexService(contracts*),
+          contractChangeClassificationBatchSize = 3,
+        )
+        val topologySnapshot = topologySnapshotFactory.topologySnapshot(timestampOfSnapshot =
+          requestedTimepoint.recordTime
+        )
+
+        val sink = rdp
+          .reinitializeContractChanges(requestedTimepoint, topologySnapshot)
+          .map(_.value.tryValue)
+          .runWith(TestSink.probe)
+
+        val count = new AtomicInteger(0)
+        val receivedBatches = Seq.unfold(()) { _ =>
+          if (count.get() >= numContracts) None
+          else {
+            sink.requestNext() match {
+              case ContractChangeBatch(_, changes) =>
+                sink.expectNoMessage()
+                count.addAndGet(changes.size)
+                Some(changes.size -> ())
+              case otherwise => fail(s"unexpected classification: $otherwise")
+            }
+          }
+        }
+        count.get() shouldBe numContracts
+        receivedBatches.exists(_ > 1) shouldBe true
+      }
+
     }
 
     "start" should {
@@ -636,10 +710,12 @@ class ReinitializingDigestProcessorTest
 
       "do nothing on an empty digest store" in {
         val testDigestStore = mkInMemoryDigestStore()
+        val metrics = TestCommitmentMetrics()
         val rdp = mkReinitializingDigestProcessor(
           reinitTimepoint = tp100,
           acsDigestStore = testDigestStore,
           testingTopologyFactory = topologySnapshotFactory,
+          metrics = metrics,
         )
 
         rdp.start().futureValueUS
@@ -655,10 +731,13 @@ class ReinitializingDigestProcessorTest
 
         participantDigests.isEmpty shouldBe true
         partyDigests.isEmpty shouldBe true
+        // Write a checkpoint and update the metric even if all digests are empty
+        metrics.checkpointWatermark.getValue shouldBe tp100.recordTime.toMicros
       }
 
       "prepare tombstones and set new values with checkpoint" in {
         val testDigestStore = mkInMemoryDigestStore()
+        val metrics = TestCommitmentMetrics()
         val rdp = mkReinitializingDigestProcessor(
           reinitTimepoint = tp100,
           acsDigestStore = testDigestStore,
@@ -669,6 +748,7 @@ class ReinitializingDigestProcessorTest
             (off(100), cid(2), Seq(party(alice), party(bob), party(charlie))),
           ),
           testingTopologyFactory = topologySnapshotFactory,
+          metrics = metrics,
         )
 
         testDigestStore.participant
@@ -689,10 +769,13 @@ class ReinitializingDigestProcessorTest
         rdp.start().futureValueUS
         rdp.completionFuture.futureValueUS
 
-        val lastCheckpoint = testDigestStore.latestCheckpointUpTo(Offset.MaxValue).futureValueUS
+        val lastCheckpoint =
+          testDigestStore.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter).futureValueUS
 
         lastCheckpoint.isDefined shouldBe true
         lastCheckpoint.value shouldBe Checkpoint(tp(100), CheckpointType.Reinitialization)
+
+        metrics.checkpointWatermark.getValue shouldBe ts(100).toMicros
 
         // Do we still have a valid chain of digest journals?
         testDigestStore.checkReplacesInvariant().futureValueUS
@@ -706,13 +789,10 @@ class ReinitializingDigestProcessorTest
           testDigestStore.party
             .bulkLookup(
               keys = Seq(
-                localOrderParty(alice),
-                remoteOrderParty(alice),
-                localOrderParty(bob),
-                remoteOrderParty(bob),
-                localOrderParty(charlie),
-                remoteOrderParty(charlie),
-              ),
+                alice,
+                bob,
+                charlie,
+              ).map(internedPartyId),
               toInclusive = off(98),
             )
             .futureValueUS
@@ -731,13 +811,10 @@ class ReinitializingDigestProcessorTest
           testDigestStore.party
             .bulkLookup(
               keys = Seq(
-                localOrderParty(alice),
-                remoteOrderParty(alice),
-                localOrderParty(bob),
-                remoteOrderParty(bob),
-                localOrderParty(charlie),
-                remoteOrderParty(charlie),
-              ),
+                alice,
+                bob,
+                charlie,
+              ).map(internedPartyId),
               toInclusive = off(99),
             )
             .futureValueUS
@@ -756,13 +833,10 @@ class ReinitializingDigestProcessorTest
           testDigestStore.party
             .bulkLookup(
               keys = Seq(
-                localOrderParty(alice),
-                remoteOrderParty(alice),
-                localOrderParty(bob),
-                remoteOrderParty(bob),
-                localOrderParty(charlie),
-                remoteOrderParty(charlie),
-              ),
+                alice,
+                bob,
+                charlie,
+              ).map(internedPartyId),
               toInclusive = off(100),
             )
             .futureValueUS
@@ -780,13 +854,10 @@ class ReinitializingDigestProcessorTest
         partyDigestUpdates_At100 should not be empty
         partyDigestUpdates_At100.values.foreach(_.digestUpdate.offset shouldBe off(100))
         partyDigestUpdates_At100.keys should contain theSameElementsAs Seq(
-          localOrderParty(alice),
-          localOrderParty(bob),
-          localOrderParty(charlie),
-          remoteOrderParty(alice),
-          remoteOrderParty(bob),
-          remoteOrderParty(charlie),
-        )
+          alice,
+          bob,
+          charlie,
+        ).map(internedPartyId)
       }
 
       "truncate journals properly when the reinitialization offset is not at the end of the journal" in {

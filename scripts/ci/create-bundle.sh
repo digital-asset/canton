@@ -29,6 +29,15 @@ function adjust_startup_scripts() {
   done
 }
 
+function remove_override_components {
+  if [[ -d "$RELEASE_DIR/examples" ]]; then
+    while IFS= read -r -d '' daml_yaml; do
+      awk '/^override-components:/{skip=1; next} skip && /^ /{next} {skip=0; print}' "$daml_yaml" > "$daml_yaml.tmp" && mv "$daml_yaml.tmp" "$daml_yaml"
+      echo "Stripped override-components from $daml_yaml"
+    done < <(find "$RELEASE_DIR/examples" -path "*/model/daml.yaml" -print0)
+  fi
+}
+
 function get_release_name() {
   if [ -z "${RELEASE_SUFFIX}" ]; then
     RELEASE=$(echo $JAR | sed -e 's/\.jar$//')
@@ -146,6 +155,10 @@ do
 done
 
 adjust_startup_scripts
+
+# Remove the override-components section from all example daml.yaml files.
+# The Daml snapshot version defined in the project fails to compile Daml code when running the examples manually
+remove_override_components
 
 cd $TARGET
 

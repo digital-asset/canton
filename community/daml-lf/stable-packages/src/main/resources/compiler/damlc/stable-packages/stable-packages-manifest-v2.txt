@@ -1,6 +1,7 @@
 compiler/damlc/stable-packages/lf-v2/daml-prim/GHC-Types.dalf
 compiler/damlc/stable-packages/lf-v2/daml-prim/GHC-Prim.dalf
 compiler/damlc/stable-packages/lf-v2/daml-prim/GHC-Tuple.dalf
+compiler/damlc/stable-packages/lf-v2/daml-prim/GHC-Stack-Types.dalf
 compiler/damlc/stable-packages/lf-v2/daml-prim/DA-Internal-Erased.dalf
 compiler/damlc/stable-packages/lf-v2/daml-prim/DA-Internal-NatSyn.dalf
 compiler/damlc/stable-packages/lf-v2/daml-prim/DA-Internal-PromotedText.dalf

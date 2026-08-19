@@ -382,24 +382,23 @@ class DbReassignmentStore(
       """
 
     val doneE = EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit](
-      storage.update(updateSameOrUnset, functionFullName).map { changed =>
+      storage.update(updateSameOrUnset, functionFullName).flatMap { changed =>
         if (changed > 0) {
           if (changed != 1)
             logger.error(
               s"Reassignment completion query changed $changed lines. It should only change 1."
             )
-          Either.unit
+          FutureUnlessShutdown.pure(Either.unit)
         } else {
-          if (changed != 0)
-            logger.error(
-              s"Reassignment completion query changed $changed lines -- this should not be negative."
-            )
-          Left(
-            ReassignmentAlreadyCompleted(
-              reassignmentId,
-              ts,
-            ): ReassignmentStoreError
-          )
+          // No row was updated: either this participant has no entry for the reassignment, or it
+          // is already completed at a different timestamp. Query the entry to report an accurate
+          // error.
+          storage.query(entryExists(reassignmentId), functionFullName).map {
+            case Some(_) =>
+              Left[ReassignmentStoreError, Unit](ReassignmentAlreadyCompleted(reassignmentId, ts))
+            case None =>
+              Left[ReassignmentStoreError, Unit](UnknownReassignmentId(reassignmentId))
+          }
         }
       }
     )
@@ -494,7 +493,7 @@ class DbReassignmentStore(
   private def findIncomplete(
       sourceSynchronizer: Option[Source[SynchronizerId]],
       validAt: Offset,
-      start: Long,
+      lastReassignmentIdO: Option[ReassignmentId],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[InternalIncompleteReassignmentData]] =
@@ -519,15 +518,20 @@ class DbReassignmentStore(
                 sql" and source_synchronizer_idx=$indexedSourceSynchronizer"
               )
 
-            val limitSql =
-              storage.limitSql(numberOfItems = DbReassignmentStore.dbQueryLimit, skipItems = start)
+            // Cursor for the pagination loop in `queryWithFiltering`
+            val cursorFilter =
+              lastReassignmentIdO.fold(sql"")(lastId => sql" and reassignment_id > $lastId")
+
+            val order = sql" order by reassignment_id "
+
+            val limitSql = storage.limitSql(batchingConfig.maxItemsInBatch.unwrap)
 
             val base: SQLActionBuilder =
               sql"""select reassignment_id, unassignment_data, stakeholders, unassignment_global_offset, assignment_global_offset
               from par_reassignments
               where target_synchronizer_idx=$indexedTargetSynchronizer"""
 
-            (base ++ incomplete ++ sourceSynchronizerFilter ++ limitSql)
+            (base ++ incomplete ++ sourceSynchronizerFilter ++ cursorFilter ++ order ++ limitSql)
               .as[
                 (
                     ReassignmentId,
@@ -564,9 +568,8 @@ class DbReassignmentStore(
   private def queryWithFiltering(
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
-      dbQueryLimit: Int,
       queryFrom: (
-          Long,
+          Option[ReassignmentId],
           TraceContext,
       ) => FutureUnlessShutdown[Seq[InternalIncompleteReassignmentData]],
   )(implicit
@@ -579,21 +582,27 @@ class DbReassignmentStore(
     }
 
     Monad[FutureUnlessShutdown].tailRecM(
-      (Vector.empty[InternalIncompleteReassignmentData], 0, 0L)
-    ) { case (acc, accSize, start) =>
+      (Vector.empty[InternalIncompleteReassignmentData], 0, Option.empty[ReassignmentId])
+    ) { case (acc, accSize, lastReassignmentIdO) =>
       val missing = limit.unwrap - accSize
 
       if (missing <= 0)
         FutureUnlessShutdown.pure(Right(acc))
       else {
-        queryFrom(start, traceContext).map { result =>
+        queryFrom(lastReassignmentIdO, traceContext).map { result =>
           val filteredResult = result.filter(stakeholderFilter).take(missing)
-          val filteredResultSize = filteredResult.size
+          val newAcc = acc ++ filteredResult
 
-          if (result.isEmpty)
-            Right(acc)
+          if (result.sizeIs < batchingConfig.maxItemsInBatch.unwrap)
+            Right(newAcc)
           else
-            Left((acc ++ filteredResult, accSize + filteredResultSize, start + dbQueryLimit))
+            Left(
+              (
+                newAcc,
+                accSize + filteredResult.size,
+                result.lastOption.map(_.reassignmentId),
+              )
+            )
         }
       }
     }
@@ -605,18 +614,17 @@ class DbReassignmentStore(
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] = {
-    val queryFrom = (start: Long, traceContext: TraceContext) =>
+    val queryFrom = (lastReassignmentIdO: Option[ReassignmentId], traceContext: TraceContext) =>
       findIncomplete(
         sourceSynchronizer = sourceSynchronizer,
         validAt = validAt,
-        start = start,
+        lastReassignmentIdO = lastReassignmentIdO,
       )(traceContext)
 
     queryWithFiltering(
       stakeholders = stakeholders,
       limit = limit,
       queryFrom = queryFrom,
-      dbQueryLimit = DbReassignmentStore.dbQueryLimit,
     ).map(
       _.map(
         _.toIncompleteReassignmentData(validAt)
@@ -766,8 +774,5 @@ object DbReassignmentStore {
         assignmentTs,
       )
   }
-
-  // We tend to use 1000 to limit queries
-  private val dbQueryLimit = 1000
 
 }

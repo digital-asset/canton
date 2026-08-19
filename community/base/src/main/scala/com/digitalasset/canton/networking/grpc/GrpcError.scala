@@ -53,6 +53,12 @@ sealed trait GrpcError {
     }
 
   def retry: Boolean = decodedCantonError.exists(_.isRetryable)
+
+  /** Rebuilds a [[io.grpc.StatusRuntimeException]] with this error's original status and trailers,
+    * preserving the original error id for callers that re-raise instead of retrying.
+    */
+  def asRuntimeException: StatusRuntimeException =
+    new StatusRuntimeException(status, optTrailers.getOrElse(new Metadata()))
 }
 
 object GrpcError {

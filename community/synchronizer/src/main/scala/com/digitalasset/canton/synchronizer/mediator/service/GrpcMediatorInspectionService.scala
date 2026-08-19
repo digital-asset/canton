@@ -102,7 +102,7 @@ class GrpcMediatorInspectionService(
             cause = "Error during MediatorInspectionService.verdicts",
             throwableO = Some(throwable),
           )
-          .asGrpcError,
+          .toGrpcError,
     )
 
     lsuSuccessorAfterUpgradeTime

@@ -1,0 +1,84 @@
+name: Start Toxiproxy Container
+description: Start the CI Toxiproxy container and wait until control API is ready
+
+inputs:
+  shard-index:
+    description: Test shard index used to make the container name unique
+    required: true
+  image:
+    description: Toxiproxy Docker image
+    required: false
+    default: ghcr.io/shopify/toxiproxy:2.1.5
+  control-port:
+    description: |
+      Host port mapped to Toxiproxy control API (bridge mode only).
+      Ignored when network-mode is host: Toxiproxy always binds its control API to 8474
+      on the host network directly, and the readiness probe and Scala CI client both
+      connect to the hardcoded 127.0.0.1:8474.
+    required: false
+    default: "8474"
+  network-mode:
+    description: |
+      Docker network mode. Use host in CI (default) so Toxiproxy binds directly to the
+      runner network namespace and tests connect via 127.0.0.1:8474 without port translation.
+      Use bridge for local development, which requires explicit port mappings via
+      control-port and proxy-ports-range.
+    required: false
+    default: "host"
+  proxy-ports-range:
+    description: |
+      Host and container port range mapped for created proxy listeners (bridge mode only).
+      Ignored when network-mode is host. The range must be at least 1000 ports wide.
+    required: false
+    default: "30000-30999"
+
+outputs:
+  container-name:
+    description: Started Toxiproxy container name
+    value: ${{ steps.start.outputs.container-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Start Toxiproxy container
+      id: start
+      shell: bash
+      env:
+        SHARD_INDEX: ${{ inputs.shard-index }}
+        RUN_ID: ${{ github.run_id }}
+        IMAGE: ${{ inputs.image }}
+        CONTROL_PORT: ${{ inputs.control-port }}
+        NETWORK_MODE: ${{ inputs.network-mode }}
+        PROXY_PORTS_RANGE: ${{ inputs.proxy-ports-range }}
+      run: |
+        CONTAINER_NAME="canton-toxiproxy-${RUN_ID}-${SHARD_INDEX}"
+        echo "container-name=$CONTAINER_NAME" >> "$GITHUB_OUTPUT"
+
+        if [[ "$NETWORK_MODE" == "host" ]]; then
+          docker run -d \
+            --name "$CONTAINER_NAME" \
+            --network host \
+            "$IMAGE"
+        else
+          docker run -d \
+            --name "$CONTAINER_NAME" \
+            -p "$CONTROL_PORT:8474" \
+            -p "$PROXY_PORTS_RANGE:$PROXY_PORTS_RANGE" \
+            "$IMAGE"
+        fi
+
+    - name: Wait for Toxiproxy readiness
+      shell: bash
+      env:
+        CONTAINER_NAME: ${{ steps.start.outputs.container-name }}
+        CONTROL_PORT: ${{ inputs.control-port }}
+      run: |
+        for _ in $(seq 1 60); do
+          if curl --silent --fail "http://127.0.0.1:${CONTROL_PORT}/version" >/dev/null; then
+            exit 0
+          fi
+          sleep 2
+        done
+        docker logs "$CONTAINER_NAME"
+        echo "Toxiproxy did not become ready in time"
+        exit 1

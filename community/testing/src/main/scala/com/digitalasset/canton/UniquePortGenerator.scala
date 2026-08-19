@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.StandardOpenOption
 import java.time.Duration
 import scala.annotation.tailrec
+import scala.concurrent.blocking
 import scala.util.*
 
 /** Generates host-wide unique ports for canton tests that we guarantee won't be used in our tests.
@@ -154,34 +155,36 @@ class UniqueBoundedCounter(
     *   - data file mutation is properly serialized (required as per [[java.nio.channels.FileLock]]
     *     JavaDoc).
     */
-  private def perform(operation: Int => Int): Try[Int] = lock.exclusive {
-    Using(lockFile.newFileChannel(Seq(StandardOpenOption.WRITE, StandardOpenOption.CREATE))) {
-      lockChannel =>
-        var fileLock: FileLock = null
-        try {
-          // Acquire file lock using blocking lock()
-          // This may block and throw OverlappingFileLockException if another OS process holds the lock.
-          // This may also throw numerous other exceptions!
-          logger.trace("Attempting to acquire file lock via blocking lock()...")
-          fileLock = lockChannel.lock()
-          logger.trace("Acquired file lock.")
+  private def perform(operation: Int => Int): Try[Int] = blocking {
+    lock.exclusive {
+      Using(lockFile.newFileChannel(Seq(StandardOpenOption.WRITE, StandardOpenOption.CREATE))) {
+        lockChannel =>
+          var fileLock: FileLock = null
+          try {
+            // Acquire file lock using blocking lock()
+            // This may block and throw OverlappingFileLockException if another OS process holds the lock.
+            // This may also throw numerous other exceptions!
+            logger.trace("Attempting to acquire file lock via blocking lock()...")
+            fileLock = lockChannel.lock()
+            logger.trace("Acquired file lock.")
 
-          logger.trace("Mutating counter...")
-          val dataAccessResult = mutateCounter(operation)
-          logger.trace("Counter changed.")
+            logger.trace("Mutating counter...")
+            val dataAccessResult = mutateCounter(operation)
+            logger.trace("Counter changed.")
 
-          dataAccessResult.fold(throw _, identity)
-        } finally {
-          if (fileLock != null) {
-            logger.trace("Releasing file lock.")
-            Try(fileLock.release())
-          } else {
-            logger.trace(
-              "Nothing to release. File lock was null because the attempt to acquire the file lock failed " +
-                "with an exception, most likely an OverlappingFileLockException has been thrown."
-            )
+            dataAccessResult.fold(throw _, identity)
+          } finally {
+            if (fileLock != null) {
+              logger.trace("Releasing file lock.")
+              Try(fileLock.release())
+            } else {
+              logger.trace(
+                "Nothing to release. File lock was null because the attempt to acquire the file lock failed " +
+                  "with an exception, most likely an OverlappingFileLockException has been thrown."
+              )
+            }
           }
-        }
+      }
     }
   }
 

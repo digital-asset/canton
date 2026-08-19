@@ -2,10 +2,11 @@
 set -euo pipefail
 
 TARGET="community/app/target/release"
+rm -rf "$TARGET"
 mkdir -p "$TARGET"
 
 shopt -s nullglob
-archives=($TMP_WORKSPACE/community-release/*.tar.gz)
+archives=("$TMP_WORKSPACE"/community-release/*.tar.gz)
 if [[ ${#archives[@]} -eq 0 ]]; then
   echo "No packaged community release archives found in $TMP_WORKSPACE/community-release"
   exit 1

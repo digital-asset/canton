@@ -12,7 +12,7 @@ import "com/digitalasset/canton/topology/admin/v30/common.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
-/**
+/*
  * Perform participant repair operations, including exporting and importing ACS, purging
  * contracts, and migrating synchronizers. These operations directly act on the internal state of the participant
  * and should be used with caution.
@@ -56,15 +56,14 @@ service ParticipantRepairService {
 
   rpc RepairCommitmentsUsingAcs(RepairCommitmentsUsingAcsRequest) returns (RepairCommitmentsUsingAcsResponse);
 
-  /**
-     Perform a late logical synchronizer upgrade
-     This endpoint should ONLY be used when the following two conditions are met:
-     - The participant node missed the upgrade on the old synchronizer, and
-     - The old synchronizer has been decommissioned in the meantime.
+  //   Perform a late logical synchronizer upgrade
+  //   This endpoint should ONLY be used when the following two conditions are met:
+  //   - The participant node missed the upgrade on the old synchronizer, and
+  //   - The old synchronizer has been decommissioned in the meantime.
+  //
+  //   After the upgrade has been done, other repair operations might need to be done.
+  //   This includes manually repairing the ACS to account for missed activity on both the old and new synchronizer.
 
-     After the upgrade has been done, other repair operations might need to be done.
-     This includes manually repairing the ACS to account for missed activity on both the old and new synchronizer.
-  */
   rpc PerformLateLsu(PerformLateLsuRequest) returns (PerformLateLsuResponse);
 
   // Deletes the synchronizer configuration specified by the physical synchronizer id.
@@ -81,6 +80,16 @@ service ParticipantRepairService {
   //
   // Returns empty response if the pending operation was successfully deleted or no matching pending operation was found.
   rpc DeletePendingOperation(DeletePendingOperationRequest) returns (DeletePendingOperationResponse);
+
+  // Reinitialize the party and participant digests at the current ledger end. Ongoing digest processing is stopped.
+  //
+  // Fetches the topology snapshot for the participant at the current ledger end timestamp
+  // then recalculates and persists the party and participant digests.
+  //
+  rpc ReinitializeDigestCommitments(ReinitializeDigestCommitmentsRequest) returns (ReinitializeDigestCommitmentsResponse);
+
+  // Queries the latest completed ACS digest reinitialization timestamp for the given synchronizer ID.
+  rpc ReinitializeDigestCommitmentsStatus(ReinitializeDigestCommitmentsStatusRequest) returns (ReinitializeDigestCommitmentsStatusResponse);
 }
 
 message PurgeContractsRequest {
@@ -379,3 +388,28 @@ message DeletePendingOperationRequest {
 }
 
 message DeletePendingOperationResponse {}
+
+message ReinitializeDigestCommitmentsRequest {
+  // The ID of the synchronizer for which ACS digest reinitialization is requested.
+  string synchronizer_id = 1;
+
+  // Whether the running ACS digest processor should start or resume
+  // after reinitialization completes.
+  bool running_digest_processor_should_start_after = 2;
+}
+
+message ReinitializeDigestCommitmentsResponse {
+  // The target record timestamp for the reinitialization
+  // (this is the ACS snapshot timestamp, not the completion time).
+  google.protobuf.Timestamp reinitialization_timestamp = 1;
+}
+
+message ReinitializeDigestCommitmentsStatusRequest {
+  // The ID of the synchronizer for which to query the last ACS digest reinitialization timestamp.
+  string synchronizer_id = 1;
+}
+
+message ReinitializeDigestCommitmentsStatusResponse {
+  // The record timestamp of the last completed ACS digest reinitialization.
+  google.protobuf.Timestamp last_completed_reinitialization_time = 1;
+}

@@ -352,10 +352,30 @@ private[lf] object SExpr {
   final case class SignatoriesDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class ObserversDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class ContractKeyWithMaintainersDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class ContractKeyDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class KeyMaintainersDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class ToContractInfoDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class ChoiceControllerDefRef(ref: DefinitionRef, choiceName: ChoiceName)
       extends SDefinitionRef
   final case class ChoiceObserverDefRef(ref: DefinitionRef, choiceName: ChoiceName)
+      extends SDefinitionRef
+  final case class ChoiceAuthorizersDefRef(ref: DefinitionRef, choiceName: ChoiceName)
+      extends SDefinitionRef
+
+  final case class CmdCreateDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class CmdFetchTemplateDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class CmdFetchInterfaceDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class CmdFetchByKeyDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class CmdQueryNByKeyDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class CmdExerciseTemplateDefRef(ref: DefinitionRef, choiceName: ChoiceName)
+      extends SDefinitionRef
+  final case class CmdExerciseInterfaceDefRef(ref: DefinitionRef, choiceName: ChoiceName)
+      extends SDefinitionRef
+  final case class CmdExerciseByKeyDefRef(ref: DefinitionRef, choiceName: ChoiceName)
+      extends SDefinitionRef
+  final case class CmdChoiceBodyDefRef(ref: DefinitionRef, choiceName: ChoiceName)
+      extends SDefinitionRef
+  final case class CmdInterfaceChoiceBodyDefRef(ref: DefinitionRef, choiceName: ChoiceName)
       extends SDefinitionRef
 
   /** InterfaceInstanceDefRef(parent, interfaceId, templateId) points to the Unit value if 'parent'

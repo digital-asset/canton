@@ -12,7 +12,8 @@ import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.*
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
@@ -64,36 +65,36 @@ final case class SubmitterMetadata private (
   @transient override protected lazy val companionObj: SubmitterMetadata.type = SubmitterMetadata
 
   protected def toProtoV30: v30.SubmitterMetadata = v30.SubmitterMetadata(
-    actAs = actAs.toSeq,
+    actAs = actAs.toSeq.map(_.toProtoUnvalidated),
     userId = userId.toProtoPrimitive,
     commandId = commandId.toProtoPrimitive,
     submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
     salt = Some(salt.toProtoV30),
-    submissionId = submissionId.getOrElse(""),
+    submissionId = submissionId.getOrElse("").toProtoUnvalidated,
     dedupPeriod = Some(SerializableDeduplicationPeriod(dedupPeriod).toProtoV30),
     maxSequencingTime = maxSequencingTime.toProtoPrimitive,
     externalAuthorization = externalAuthorization.map(_.toProtoV30),
   )
 
   protected def toProtoV31: v31.SubmitterMetadata = v31.SubmitterMetadata(
-    actAs = actAs.toSeq,
+    actAs = actAs.toSeq.map(_.toProtoUnvalidated),
     userId = userId.toProtoPrimitive,
     commandId = commandId.toProtoPrimitive,
     submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
     salt = Some(salt.toProtoV30),
-    submissionId = submissionId.getOrElse(""),
+    submissionId = submissionId.getOrElse("").toProtoUnvalidated,
     dedupPeriod = Some(SerializableDeduplicationPeriod(dedupPeriod).toProtoV30),
     maxSequencingTime = maxSequencingTime.toProtoPrimitive,
     externalAuthorization = externalAuthorization.map(_.toProtoV31),
   )
 
   protected def toProtoV32: v32.SubmitterMetadata = v32.SubmitterMetadata(
-    actAs = actAs.toSeq,
+    actAs = actAs.toSeq.map(_.toProtoUnvalidated),
     userId = userId.toProtoPrimitive,
     commandId = commandId.toProtoPrimitive,
     submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
     salt = Some(salt.toProtoV30),
-    submissionId = submissionId.getOrElse(""),
+    submissionId = submissionId.getOrElse("").toProtoUnvalidated,
     dedupPeriod = Some(SerializableDeduplicationPeriod(dedupPeriod).toProtoV30),
     maxSequencingTime = maxSequencingTime.toProtoPrimitive,
     externalAuthorization = externalAuthorization.map(_.toProtoV32),
@@ -301,11 +302,11 @@ object SubmitterMetadata
       bytes: DataByteString,
   )(
       saltOP: Option[com.digitalasset.canton.crypto.v30.Salt],
-      actAsP: Seq[String],
-      userIdP: String,
-      commandIdP: String,
-      submittingParticipantUidP: String,
-      submissionIdP: String,
+      actAsP: Seq[ProtoUnvalidatedString],
+      userIdP: ProtoUnvalidatedString,
+      commandIdP: ProtoUnvalidatedString,
+      submittingParticipantUidP: ProtoUnvalidatedString,
+      submissionIdP: ProtoUnvalidatedString,
       dedupPeriodOP: Option[v30.DeduplicationPeriod],
       maxSequencingTimeOP: Long,
       externalAuthorizationO: Option[ExternalAuthorization],
@@ -320,7 +321,9 @@ object SubmitterMetadata
         )(UniqueIdentifier.fromProtoPrimitive)
         .map(ParticipantId(_))
       actAs <- ProtoValidation
-        .validateThen(actAsP, "act_as", pvv)(ProtoConverter.parseLfPartyId)
+        .validateThen(actAsP, "act_as", pvv, ProtoValidation.MaxCollectionSize)(
+          ProtoConverter.parseLfPartyId
+        )
       userId <- ProtoValidation.validateThen(userIdP, "userId", pvv)((s, _) =>
         UserId
           .fromProtoPrimitive(s)

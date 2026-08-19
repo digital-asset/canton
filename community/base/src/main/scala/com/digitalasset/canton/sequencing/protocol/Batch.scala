@@ -14,6 +14,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{MediatorId, Member}
 import com.digitalasset.canton.util.ByteStringUtil
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -196,7 +197,9 @@ object Batch
       )
       uncompressedBatchProto <- ProtoConverter.protoParser(v30.Batch.parseFrom)(uncompressed)
       v30.Batch(envelopesProto) = uncompressedBatchProto
-      envelopes <- envelopesProto.toList.traverse(ClosedUncompressedEnvelope.fromProtoV30(pvv, _))
+      envelopes <- ProtoValidation
+        .validateLength(envelopesProto, Some("envelopes"), pvv, ProtoValidation.MaxCollectionSize)
+        .flatMap(_.toList.traverse(ClosedUncompressedEnvelope.fromProtoV30(pvv, _)))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield Batch[ClosedEnvelope](envelopes)(rpv)
   }
@@ -223,19 +226,30 @@ object Batch
         decompressedRecipientsBytes
       )
 
-      recipientsList <- decompressedRecipientsProto.recipients.toList.traverse(
-        Recipients.fromProtoV30(pvv, _)
-      )
+      recipientsList <- ProtoValidation
+        .validateLength(
+          decompressedRecipientsProto.recipients,
+          Some("recipients"),
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )
+        .flatMap(_.toList.traverse(Recipients.fromProtoV30(pvv, _)))
       algorithm <- CompressionAlgorithm.fromProtoV30(protoAlgorithm)
 
+      compressedEnvelopesSeq <- ProtoValidation.validateLength(
+        compressedEnvelopes,
+        Some("compressed_envelopes"),
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )
       envelopes <- Either.cond(
-        recipientsList.lengthIs == compressedEnvelopes.length,
-        recipientsList.zip(compressedEnvelopes).map { case (recipients, envelopes) =>
+        recipientsList.lengthIs == compressedEnvelopesSeq.length,
+        recipientsList.zip(compressedEnvelopesSeq).map { case (recipients, envelopes) =>
           ClosedCompressedEnvelope.create(
             envelopes,
             recipients,
             algorithm,
-          )(allocator.nextEnvelopeBudget())
+          )(allocator.nextEnvelopeBudget(), pvv)
         },
         InvariantViolation(
           None,

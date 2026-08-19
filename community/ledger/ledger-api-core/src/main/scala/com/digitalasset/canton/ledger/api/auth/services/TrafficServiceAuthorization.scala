@@ -18,8 +18,6 @@ import io.grpc.ServerServiceDefinition
 
 import scala.concurrent.{ExecutionContext, Future}
 
-// TODO(#33681): Implement authorization tests once the traffic enforcement server is implemented
-//               and the Ledger API endpoints can actually serve
 final class TrafficServiceAuthorization(
     protected val service: TrafficService & AutoCloseable,
     private val authorizer: Authorizer,

@@ -117,21 +117,16 @@ class SynchronizerMigration(
         .getAllFor(source.unwrap)
         .fold(
           err => SourceSynchronizerIdUnknown(err.alias).asLeft,
-          connections => {
-            if (connections.isEmpty)
-              InvalidArgument.UnknownSourceSynchronizer(source).asLeft
-            else {
-              connections.filter(_.status.canMigrateFrom) match {
-                case Nil => InvalidSynchronizerConfigStatuses(source, Nil).asLeft
-                case Seq(connection) => connection.asRight
-                case other =>
-                  InvalidSynchronizerConfigStatuses(
-                    source,
-                    other.map(c => (c.configuredPsid, c.status)),
-                  ).asLeft
-              }
-            }
-          },
+          connections =>
+            connections.filter(_.status.canMigrateFrom) match {
+              case Nil => InvalidSynchronizerConfigStatuses(source, Nil).asLeft
+              case Seq(connection) => connection.asRight
+              case other =>
+                InvalidSynchronizerConfigStatuses(
+                  source,
+                  other.map(c => (c.configuredPsid, c.status)),
+                ).asLeft
+            },
         )
 
       sourceConnection <- EitherT.fromEither[FutureUnlessShutdown](sourceConnectionE).map(Source(_))

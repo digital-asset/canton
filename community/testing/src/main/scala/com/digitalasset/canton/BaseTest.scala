@@ -31,6 +31,7 @@ import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.{PartyKind, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.canton.util.LoggerUtil.roundDurationForHumans
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{CheckedT, MaxBytesToDecompress}
 import com.digitalasset.canton.version.{
@@ -39,6 +40,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersionValidation,
   ReleaseProtocolVersion,
 }
+import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.metrics.SdkMeterProvider
@@ -59,7 +61,7 @@ import org.scalatestplus.scalacheck.CheckerAsserting
 import org.slf4j.bridge.SLF4JBridgeHandler
 import org.typelevel.discipline.Laws
 
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, tailrec}
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
@@ -310,7 +312,7 @@ trait FutureHelpers extends Assertions with ScalaFuturesWithPatience { self =>
     def futureValueUS(timeout: PatienceConfiguration.Timeout)(implicit pos: Position): A =
       fut.unwrap.futureValue(timeout).onShutdown(fail("Unexpected shutdown"))
     def succeedOnFutureCompleteOrShutdown(implicit pos: Position): Unit =
-      fut.succeedOnFutureCompleteOrShutdown(PatienceConfiguration.Timeout(defaultPatience.timeout))(
+      succeedOnFutureCompleteOrShutdown(PatienceConfiguration.Timeout(defaultPatience.timeout))(
         pos
       )
     def succeedOnFutureCompleteOrShutdown(timeout: PatienceConfiguration.Timeout)(implicit
@@ -448,11 +450,13 @@ trait BaseTest
       timeUntilSuccess: FiniteDuration = 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
       retryOnTestFailuresOnly: Boolean = true,
+      logElapsed: Option[String] = None,
   )(testCode: => T): T =
     BaseTest.eventually(
       timeUntilSuccess,
       maxPollInterval,
-      retryOnTestFailuresOnly = retryOnTestFailuresOnly,
+      retryOnTestFailuresOnly,
+      logElapsed.map(noTracingLogger -> _),
     )(testCode)
 
   /** Keeps evaluating `testCode` until it fails or a timeout occurs.
@@ -567,40 +571,56 @@ object BaseTest {
     * @throws java.lang.IllegalArgumentException
     *   if `timeUntilSuccess` is negative
     */
-  @SuppressWarnings(
-    Array(
-      "org.wartremover.warts.Var",
-      "org.wartremover.warts.While",
-      "org.wartremover.warts.Return",
-    )
-  )
+  @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
   def eventually[T](
       timeUntilSuccess: FiniteDuration = 20.seconds,
       maxPollInterval: FiniteDuration = 5.seconds,
       retryOnTestFailuresOnly: Boolean = true,
+      logElapsed: Option[(Logger, String)] = None,
   )(testCode: => T): T = {
     require(
       timeUntilSuccess >= Duration.Zero,
       s"The timeout must not be negative, but is $timeUntilSuccess",
     )
-    val deadline = timeUntilSuccess.fromNow
-    var sleepMs = 1L
-    def sleep(): Unit = {
-      val timeLeft = deadline.timeLeft.toMillis max 0
+
+    val start = System.nanoTime()
+    val deadline = start + timeUntilSuccess.toNanos
+    def deadlineTimeLeft: FiniteDuration =
+      Duration.fromNanos(deadline - System.nanoTime())
+    def hasTimeLeft: Boolean =
+      deadline - System.nanoTime() >= 0
+    def timeElapsed: String =
+      roundDurationForHumans(Duration.fromNanos(System.nanoTime() - start))
+
+    def sleep(sleepMs: Long): Long = {
+      val timeLeft = deadlineTimeLeft.toMillis max 0
       Threading.sleep(sleepMs min timeLeft)
-      sleepMs = (sleepMs * 2) min maxPollInterval.toMillis
+      (sleepMs * 2) min maxPollInterval.toMillis
     }
-    while (deadline.hasTimeLeft()) {
-      try {
-        return testCode
-      } catch {
-        case _: TestFailedException =>
-          sleep()
-        case _: Throwable if !retryOnTestFailuresOnly =>
-          sleep()
+
+    @tailrec def go(sleepMs: Long): T = {
+      val result = Try(testCode)
+      result match {
+        case Success(value) =>
+          logElapsed.foreach { case (theLogger, msg) =>
+            theLogger.debug(s"$msg succeeded after $timeElapsed")
+          }
+          value
+        case Failure(ex) =>
+          val retry = !retryOnTestFailuresOnly || ex.isInstanceOf[TestFailedException]
+          if (retry && hasTimeLeft) {
+            val nextSleepMs = sleep(sleepMs)
+            go(nextSleepMs)
+          } else {
+            logElapsed.foreach { case (theLogger, msg) =>
+              theLogger.debug(s"$msg failed after $timeElapsed")
+            }
+            throw ex
+          }
       }
     }
-    testCode // try one last time and throw exception, if assertion keeps failing
+
+    go(sleepMs = 1L)
   }
 
   // Uses SymbolicCrypto for the configured crypto schemes

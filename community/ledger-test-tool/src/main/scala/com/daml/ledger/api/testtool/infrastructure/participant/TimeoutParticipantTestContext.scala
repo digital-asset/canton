@@ -954,9 +954,9 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
       delegate.transactionsWithVariants(request, clue),
     )
 
-  override def getLedgerEnd(): Future[GetLedgerEndResponse] = withTimeout(
+  override def getLedgerEnd(sequencerIds: Seq[String]): Future[GetLedgerEndResponse] = withTimeout(
     "Get ledger end request",
-    delegate.getLedgerEnd(),
+    delegate.getLedgerEnd(sequencerIds),
   )
 
   override def getJwks(

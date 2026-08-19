@@ -121,7 +121,7 @@ sealed trait CompletionServiceITBase extends CantonFixture with CreatesParties w
       val offset5 = submitAndWaitForOffset(commandService, partyB, "Cmd5").futureValue
       val offset6 = submitAndWaitForOffset(commandService, partyB, "Cmd6").futureValue
 
-      val end = stateService.getLedgerEnd(GetLedgerEndRequest()).futureValue
+      val end = stateService.getLedgerEnd(GetLedgerEndRequest(Seq())).futureValue
       val allA = allCompletions(completionService, List(partyA)).futureValue
       val allB = allCompletions(completionService, List(partyB)).futureValue
       val halfA = completionsFrom(completionService, List(partyA), offset3).futureValue

@@ -41,7 +41,7 @@ abstract class SafePackageResolver private[refinement] (
             collectNewPackagesFromTypes(rest, acc)
           case Ast.TSynApp(_, _) | Ast.TForall(_, _) | Ast.TStruct(_) =>
             // We assume that collectPackages is always given serializable types
-            ResultError(
+            Result.error(
               Error.Preprocessing
                 .Internal(
                   NameOf.qualifiedNameOfCurrentFunc,
@@ -51,7 +51,7 @@ abstract class SafePackageResolver private[refinement] (
             )
         }
       case Nil =>
-        ResultDone(acc)
+        Result.done(acc)
     }
 
   final protected def collectNewPackagesFromTemplatesOrInterfaces(
@@ -99,7 +99,7 @@ abstract class SafePackageResolver private[refinement] (
         case (pkgId, context) :: rest =>
           loadPackage(pkgId, context).flatMap(_ => loop(rest))
         case Nil =>
-          Result.Unit
+          Result.unit
       }
 
     loop(pkgIds.toList)

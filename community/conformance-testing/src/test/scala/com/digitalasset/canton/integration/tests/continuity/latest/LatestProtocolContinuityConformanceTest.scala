@@ -19,6 +19,9 @@ import com.digitalasset.canton.util.ReleaseUtils
   * If you add new config parameters, these tests may start to fail to start up (check the log files
   * starting with "external-<node>". You need to remove these new config parameters via
   * [[ProtocolContinuityConformanceTest.removeConfigPaths]].
+  *
+  * NOTE: if the test fails, you might have introduced a feature flag that has not been there in a
+  * previous version.
   */
 trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConformanceTest {
   override lazy val testedReleases: List[ReleaseUtils.TestedRelease] = {

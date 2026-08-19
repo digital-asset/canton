@@ -10,10 +10,11 @@ Then, read through the following files, as they contain very important guideline
  * [4_testing.md](4_testing.md)
  * [5_ci-usage.md](5_ci-usage.md)
  * [6_github.md](6_github.md)
+ * [7_ci-github-actions-usage.md](7_ci-github-actions-usage.md)
 
 Finally, read the introductory sections of every other file in [the current folder](.),
 so you get an idea of the Canton development ecosystem.
 You do not have to read all the details yet,
 you can leave that to the moment when you actually need the information.
 
-If while making the contribution you have utilized AI tools, read our guidelines [AI_POLICY.md](AI_POLICY.md).
+If while making the contribution you have utilized AI tools, read our guidelines [AI_POLICY.md](/AI_POLICY.md).

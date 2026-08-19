@@ -96,7 +96,13 @@ object ExternalAuthorization
       partyId <- ProtoValidation.validateThen(partyP, "party", pvv)(
         PartyId.fromProtoPrimitive
       )
-      partySignatures <- signaturesP.traverse(Signature.fromProtoV30)
+      partySignatures <- ProtoValidation
+        .validateLengthThen(
+          signaturesP,
+          "signatures",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => Signature.fromProtoV30(element))
     } yield partyId -> partySignatures
   }
 
@@ -106,7 +112,13 @@ object ExternalAuthorization
   ): ParsingResult[ExternalAuthorization] = {
     val v30.ExternalAuthorization(signaturesP, _) = proto
     for {
-      signatures <- signaturesP.traverse(fromProtoV30(pvv, _))
+      signatures <- ProtoValidation
+        .validateLengthThen(
+          signaturesP,
+          "signatures",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => fromProtoV30(pvv, element))
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV30(proto.hashingSchemeVersion)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ExternalAuthorization(signatures.toMap, hashingSchemeVersion, None)(rpv)
@@ -118,7 +130,13 @@ object ExternalAuthorization
   ): ParsingResult[ExternalAuthorization] = {
     val v31.ExternalAuthorization(signaturesP, hashingSchemeVersionP, maxRecordTimeP) = proto
     for {
-      signatures <- signaturesP.traverse(fromProtoV30(pvv, _))
+      signatures <- ProtoValidation
+        .validateLengthThen(
+          signaturesP,
+          "signatures",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => fromProtoV30(pvv, element))
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV31(hashingSchemeVersionP)
       maxRecordTime <- maxRecordTimeP.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
@@ -131,7 +149,13 @@ object ExternalAuthorization
   ): ParsingResult[ExternalAuthorization] = {
     val v32.ExternalAuthorization(signaturesP, hashingSchemeVersionP, maxRecordTimeP) = proto
     for {
-      signatures <- signaturesP.traverse(fromProtoV30(pvv, _))
+      signatures <- ProtoValidation
+        .validateLengthThen(
+          signaturesP,
+          "signatures",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )((element, _) => fromProtoV30(pvv, element))
       hashingSchemeVersion <- HashingSchemeVersion.fromProtoV32(hashingSchemeVersionP)
       maxRecordTime <- maxRecordTimeP.traverse(CantonTimestamp.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))

@@ -9,10 +9,15 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.commitment.Timepoint
 import com.digitalasset.canton.participant.store.AcsDigestStore.*
-import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
+import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.{
+  PartyHostingChange,
+  ReconciliationIntervalBoundary,
+  Reinitialization,
+}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, InternedPartyId, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.wordspec.AsyncWordSpecLike
 
 import scala.collection.immutable
@@ -386,8 +391,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
   // Functional tests verifying the common operations on the store and sub-journals
   private def functionalCommonOperationsTests(
       mkStore: () => AcsDigestStore,
-      partyAndLocalOrderKey1: PartyAndOrder[InternedPartyId],
-      partyAndRemoteOrderKey1: PartyAndOrder[InternedPartyId],
+      party1: InternedPartyId,
+      party2: InternedPartyId,
       participantId1: InternedParticipantId,
   ): Unit = {
     val (offset0, t0) = offsetTime(PositiveLong.tryCreate(10))
@@ -399,24 +404,20 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     val rawDigest = genRawDigest(0x2c)
 
     def checkReplacesIntervalCommonUpserts(store: AcsDigestStore) = {
-      // key1 local order
-      val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party1UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
-      // key1 remote order
-      val partyUpdate2AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party2UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party2, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
-      // key1 local order reference to the T0 data
-      val partyUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset1, t1, None, None),
+      val party1EmptyUpdateAtT1 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party1, offset1, t1, None, None),
         replacesOffset = Some(offset0),
       )
-      // key1 remote order reference to the T0 data
-      val partyUpdate2AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset1, t1, None, None),
+      val party2EmptyUpdateAtT1 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party2, offset1, t1, None, None),
         replacesOffset = Some(offset0),
       )
 
@@ -428,10 +429,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       for {
         _ <- store.party.upsertDigestUpdates(
           List(
-            partyUpdate1AtT0,
-            partyUpdate2AtT0,
-            partyUpdate1AtT1,
-            partyUpdate2AtT1,
+            party1UpdateAtT0,
+            party2UpdateAtT0,
+            party1EmptyUpdateAtT1,
+            party2EmptyUpdateAtT1,
           )
         )
         _ <- store.participant.upsertDigestUpdates(
@@ -445,14 +446,12 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     s"properly retain data on 'deleteAfter' when there is data at the boundary" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
-      // key1 local order
-      val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party1UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
-      // key1 remote order
-      val partyUpdate2AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party2UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party2, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
 
@@ -462,7 +461,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       )
 
       for {
-        _ <- store.party.upsertDigestUpdates(List(partyUpdate1AtT0, partyUpdate2AtT0))
+        _ <- store.party.upsertDigestUpdates(List(party1UpdateAtT0, party2UpdateAtT0))
         _ <- store.participant.upsertDigestUpdates(List(participantUpdate1AtT1))
 
         // Verify the integrity of replaces time pointers across the updates
@@ -472,7 +471,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- store.deleteAfter(offset1)
 
         partyUpdates <- store.party.bulkLookup(
-          keys = List(partyAndLocalOrderKey1, partyAndRemoteOrderKey1),
+          keys = List(party1, party2),
           toInclusive = offset0,
         )
         participantUpdate <- store.participant.bulkLookup(
@@ -481,8 +480,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         )
       } yield {
         partyUpdates shouldBe (Map(
-          partyAndLocalOrderKey1 -> partyUpdate1AtT0,
-          partyAndRemoteOrderKey1 -> partyUpdate2AtT0,
+          party1 -> party1UpdateAtT0,
+          party2 -> party2UpdateAtT0,
         ))
         participantUpdate shouldBe (Map(
           participantId1 -> participantUpdate1AtT1
@@ -493,14 +492,12 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     s"properly retain data on 'deleteUpTo' when there is one update per key in the past" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
-      // key1 local order
-      val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party1UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
-      // key1 remote order
-      val partyUpdate2AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party2UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party2, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
 
@@ -510,7 +507,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       )
 
       for {
-        _ <- store.party.upsertDigestUpdates(List(partyUpdate1AtT0, partyUpdate2AtT0))
+        _ <- store.party.upsertDigestUpdates(List(party1UpdateAtT0, party2UpdateAtT0))
         _ <- store.participant.upsertDigestUpdates(List(participantUpdate1AtT1))
 
         // Verify the integrity of replaces time pointers across the updates
@@ -520,7 +517,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- store.deleteUpTo(offset1)
 
         partyUpdates <- store.party.bulkLookup(
-          keys = List(partyAndLocalOrderKey1, partyAndRemoteOrderKey1),
+          keys = List(party1, party2),
           toInclusive = offset0,
         )
         participantUpdate <- store.participant.bulkLookup(
@@ -529,8 +526,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         )
       } yield {
         partyUpdates shouldBe (Map(
-          partyAndLocalOrderKey1 -> partyUpdate1AtT0,
-          partyAndRemoteOrderKey1 -> partyUpdate2AtT0,
+          party1 -> party1UpdateAtT0,
+          party2 -> party2UpdateAtT0,
         ))
         participantUpdate shouldBe (Map(
           participantId1 -> participantUpdate1AtT1
@@ -541,21 +538,20 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     s"properly execute global node boundaries across sub-journals" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val pruningStore = mkStore()
 
-      // key1 local order
-      val partyUpdate1AtT0 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party1UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party1, offset0, t0, Some(rawDigest), None),
         replacesOffset = None,
       )
       for {
-        _ <- pruningStore.party.upsertDigestUpdates(List(partyUpdate1AtT0))
+        _ <- pruningStore.party.upsertDigestUpdates(List(party1UpdateAtT0))
         _ <- pruningStore.insertCheckpointTime(checkpoint1)
 
         // Test global prune boundaries across sub-journals
         _ <- pruningStore.deleteAfter(offset1)
         _ <- pruningStore.deleteUpTo(offset1)
 
-        remainingParty <- pruningStore.party.lookup(partyAndLocalOrderKey1, offset0)
-      } yield remainingParty shouldBe Some(partyUpdate1AtT0)
+        remainingParty <- pruningStore.party.lookup(party1, offset0)
+      } yield remainingParty shouldBe Some(party1UpdateAtT0)
     }
 
     s"'checkReplacesInvariant' check is successful when there is no broken reference in the journals" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
@@ -580,15 +576,13 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     s"'checkReplacesInvariant' check is successful when the first few updates has dangling reference (after pruning)" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
       val store = mkStore()
 
-      // key1 local order
-      val partyUpdate1AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndLocalOrderKey1, offset1, t1, Some(rawDigest), None),
+      val party1UpdateAtT1 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party1, offset1, t1, Some(rawDigest), None),
         // referring to a deleted digest update
         replacesOffset = Some(offset0),
       )
-      // key1 remote order
-      val partyUpdate2AtT1 = AcsDigestUpdate(
-        digestUpdate = AcsDigest(partyAndRemoteOrderKey1, offset0, t0, Some(rawDigest), None),
+      val party2UpdateAtT0 = AcsDigestUpdate(
+        digestUpdate = AcsDigest(party2, offset0, t0, Some(rawDigest), None),
         // referring to a deleted digest update
         replacesOffset = Some(offset0),
       )
@@ -602,8 +596,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       for {
         _ <- store.party.upsertDigestUpdates(
           List(
-            partyUpdate1AtT1,
-            partyUpdate2AtT1,
+            party1UpdateAtT1,
+            party2UpdateAtT0,
           )
         )
         _ <- store.participant.upsertDigestUpdates(
@@ -777,10 +771,26 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- upsertInsertCheckpointsInto(testStore, testJournal)
         // Evaluate batch retrieval across mixed chronological indices at the middle boundary
         bulkAtMiddle <- testJournal.bulkLookup(List(key1, key2), offset(6))
-      } yield bulkAtMiddle shouldBe Map(
-        key1 -> update6_K1T6V2, // tombstone
-        key2 -> update3_K2T5,
-      )
+        bulkWithRepeatedKeys <- testJournal.bulkLookup(
+          Seq(
+            key1 -> offset(2),
+            key1 -> offset(6),
+            key2 -> offset(4),
+            key2 -> offset(10),
+          )
+        )
+      } yield {
+        bulkAtMiddle shouldBe Map(
+          key1 -> update6_K1T6V2, // tombstone
+          key2 -> update3_K2T5,
+        )
+        bulkWithRepeatedKeys shouldBe Map(
+          (key1, offset(2)) -> update1_K1T2,
+          (key1, offset(6)) -> update6_K1T6V2,
+          (key2, offset(4)) -> update2_K2T4,
+          (key2, offset(10)) -> update8_K2T9,
+        )
+      }
     }
 
     "crash recovery (deleteAfter) rolling back to the middle checkpoint" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
@@ -793,7 +803,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         // Roll back the entire store to the middle checkpoint at T6
         _ <- testStore.deleteAfter(offset(6))
 
-        lastCheckpointAfterDelete <- testStore.latestCheckpointUpTo(offset(6))
+        lastCheckpointAfterDelete <- testStore.latestCheckpointUpTo(offset(6), allCheckpointsFilter)
 
         // Verify that entries beyond checkpoint at t6 (update4 through update10) are completely wiped out
         checkKey1AtT11 <- testJournal.lookup(key1, offset(11))
@@ -824,7 +834,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- testStore.deleteUpTo(offset(6))
 
         // 2. Check first checkpoint after the prune
-        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(offset(0))
+        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(
+          offset(0),
+          allCheckpointsFilter,
+        )
 
         // 3. Query historical windows to check if the operation safely preserved active frontier references
         preservedHistoryKey1AtT6 <- testJournal.lookup(key1, offset(6))
@@ -870,7 +883,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         _ <- testStore.deleteUpTo(offset(7))
 
         // 2. Check first checkpoint after T0
-        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(offset(0))
+        firstCheckpointAfterDelete <- testStore.firstCheckpointAfter(
+          offset(0),
+          allCheckpointsFilter,
+        )
 
         // 3. Because deleteUpTo is exclusive for T7 and lookup is inclusive
         // we can verify if the tombstone is gone at T6_V2
@@ -904,18 +920,19 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       offsetTime(PositiveLong.tryCreate(20))
     )
     val checkpoint2 @ Checkpoint(Timepoint(offset2), _) = checkpoint(
-      offsetTime(PositiveLong.tryCreate(30))
+      offsetTime(PositiveLong.tryCreate(30)),
+      CheckpointType.AffirmationIntervalBoundary,
     )
     val checkpoint3 @ Checkpoint(Timepoint(offset3), _) = checkpoint(
-      offsetTime(PositiveLong.tryCreate(40))
+      offsetTime(PositiveLong.tryCreate(40)),
+      CheckpointType.Reinitialization,
     )
 
-    val partyAndLocalOrderKey1 = localOrderParty(partyIndex = 1)
-    val partyAndRemoteOrderKey1 = remoteOrderParty(partyIndex = 1)
-    val partyAndLocalOrderKey2 = localOrderParty(partyIndex = 2)
+    val party1: InternedPartyId = 1
+    val party2: InternedPartyId = 2
 
-    def twoThousandsPartyKeys =
-      (1 to 1000).flatMap(i => List(localOrderParty(i), remoteOrderParty(i))).toList
+    def twoThousandsPartyKeys: List[InternedPartyId] =
+      (1 to 2000).toList
 
     val participantId1: InternedParticipantId = internedParticipantId(10_001)
     val participantId2: InternedParticipantId = internedParticipantId(10_002)
@@ -934,19 +951,37 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         val emptyStore = mkStore(executionContext)
 
         for {
-          firstAfterT0 <- emptyStore.firstCheckpointAfter(offset0)
-          latestUpToT2 <- emptyStore.latestCheckpointUpTo(offset2)
+          firstAfterT0 <- emptyStore.firstCheckpointAfter(offset0, allCheckpointsFilter)
+          firstAfterT0Reinit <- emptyStore.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, CheckpointType.Reinitialization)),
+          )
+          latestUpToT2 <- emptyStore.latestCheckpointUpTo(offset2, allCheckpointsFilter)
+          latestUpToT2Party <- emptyStore.latestCheckpointUpTo(
+            offset2,
+            Some(NonEmpty(Set, CheckpointType.PartyHostingChange)),
+          )
+
+          // Latest checkpoints with various types
+          latestReconciliationCp <- emptyStore.latestReconciliationCheckpoint()
+          latestReinitializationCp <- emptyStore.latestReinitializationCheckpoint()
+          latestTickCp <- emptyStore.latestTickCheckpoint()
         } yield {
           firstAfterT0 shouldEqual None
+          firstAfterT0Reinit shouldEqual None
           latestUpToT2 shouldEqual None
+          latestUpToT2Party shouldEqual None
+
+          latestReconciliationCp shouldEqual None
+          latestReinitializationCp shouldEqual None
+          latestTickCp shouldEqual None
         }
       }
 
       "with an empty party journal" should {
         behave like emptyDigestJournalTests(
           () => mkStore(executionContext).party,
-          sampleKeys =
-            List(partyAndLocalOrderKey1, partyAndRemoteOrderKey1, partyAndLocalOrderKey2),
+          sampleKeys = List(party1, party2),
           largeKeySet = twoThousandsPartyKeys,
           rangeStart = offset0,
           rangeEnd = offset3,
@@ -979,16 +1014,53 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
             )
 
           // Test exact matches
-          exactFloor <- store.latestCheckpointUpTo(offset3)
-          exactCeil <- store.firstCheckpointAfter(offset1)
+          exactFloor <- store.latestCheckpointUpTo(offset3, allCheckpointsFilter)
+          exactCeil <- store.firstCheckpointAfter(offset1, allCheckpointsFilter)
 
           // Test intermediate boundaries
-          midFloor <- store.latestCheckpointUpTo(offset2)
-          midCeil <- store.firstCheckpointAfter(offset2)
+          midFloor <- store.latestCheckpointUpTo(offset2, allCheckpointsFilter)
+          midCeil <- store.firstCheckpointAfter(offset2, allCheckpointsFilter)
 
           // Test empty lookups
-          emptyFloor <- store.latestCheckpointUpTo(offset0)
-          emptyCeil <- store.firstCheckpointAfter(offset3)
+          emptyFloor <- store.latestCheckpointUpTo(offset0, allCheckpointsFilter)
+          emptyCeil <- store.firstCheckpointAfter(offset3, allCheckpointsFilter)
+
+          // Test filtering
+          filterFloorExact <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, checkpoint3.checkpointType)),
+          )
+          filterCeilExact <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, checkpoint1.checkpointType)),
+          )
+
+          filterFloorSkip <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, checkpoint2.checkpointType)),
+          )
+          filterCeilSkip <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, checkpoint2.checkpointType)),
+          )
+
+          filterFloorEmpty <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, CheckpointType.MaxEventsWithoutCheckpoint)),
+          )
+          filterCeilEmpty <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, CheckpointType.MaxEventsWithoutCheckpoint)),
+          )
+
+          filterFloorMultiple <- store.latestCheckpointUpTo(
+            offset3,
+            Some(NonEmpty(Set, checkpoint1.checkpointType, checkpoint2.checkpointType)),
+          )
+          filterCeilMultiple <- store.firstCheckpointAfter(
+            offset0,
+            Some(NonEmpty(Set, checkpoint2.checkpointType, checkpoint3.checkpointType)),
+          )
         } yield {
           exactFloor shouldBe Some(checkpoint3)
           exactCeil shouldBe Some(checkpoint2)
@@ -998,6 +1070,39 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
 
           emptyFloor shouldBe None
           emptyCeil shouldBe None
+
+          filterFloorExact shouldBe Some(checkpoint3)
+          filterCeilExact shouldBe Some(checkpoint1)
+
+          filterFloorSkip shouldBe Some(checkpoint2)
+          filterCeilSkip shouldBe Some(checkpoint2)
+
+          filterFloorEmpty shouldBe None
+          filterCeilEmpty shouldBe None
+
+          filterFloorMultiple shouldBe Some(checkpoint2)
+          filterCeilMultiple shouldBe Some(checkpoint2)
+        }
+      }
+
+      "allow overwriting checkpoints" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
+        val store = mkStore(executionContext)
+
+        val partyHostingChange = Checkpoint(Timepoint(off(10))(ts(8)), PartyHostingChange)
+        val reconciliationCheckpoint =
+          Checkpoint(Timepoint(off(10))(ts(9)), ReconciliationIntervalBoundary)
+
+        for {
+          _ <- store.insertCheckpointTime(partyHostingChange)
+          originalCheckpoint <- store.latestCheckpointUpTo(Offset.MaxValue, checkpointTypes = None)
+          _ <- store.insertCheckpointTime(reconciliationCheckpoint)
+          replacementCheckpoint <- store.latestCheckpointUpTo(
+            Offset.MaxValue,
+            checkpointTypes = None,
+          )
+        } yield {
+          originalCheckpoint.value shouldBe partyHostingChange
+          replacementCheckpoint.value shouldBe reconciliationCheckpoint
         }
       }
     }
@@ -1007,8 +1112,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         behave like
           functionalDigestJournalTests(
             () => mkStore(executionContext).party,
-            key1 = partyAndLocalOrderKey1,
-            key2 = partyAndLocalOrderKey2,
+            key1 = party1,
+            key2 = party2,
             digest1 = rawDigest1,
             digest2 = rawDigest2,
             checkpoint0.timepoint,
@@ -1033,8 +1138,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       "be operational on common (store and both sub-journals) updates" should {
         behave like functionalCommonOperationsTests(
           () => mkStore(executionContext),
-          partyAndLocalOrderKey1,
-          partyAndLocalOrderKey2,
+          party1,
+          party2,
           participantId1,
         )
       }
@@ -1043,8 +1148,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         behave like complexDensityJournalTests(
           () => mkStore(executionContext),
           _.party,
-          key1 = partyAndLocalOrderKey1,
-          key2 = partyAndLocalOrderKey2,
+          key1 = party1,
+          key2 = party2,
           digest1 = genRawDigest(0x2a.toByte),
           digest2 = genRawDigest(0x2b.toByte),
         )
@@ -1074,11 +1179,13 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     val (offset2, t2) = checkpoint2.timepoint.tupled
     val checkpoint3 = checkpoint(offsetTime(PositiveLong.tryCreate(40)))
     val (offset3, t3) = checkpoint3.timepoint.tupled
+    val checkpoint4Reinitialization =
+      checkpoint(offsetTime(PositiveLong.tryCreate(50)), Reinitialization)
 
     val syncA = indexedSynchronizer(synchronizerIndex = 2, name = "synchronizer-A")
     val syncB = indexedSynchronizer(synchronizerIndex = 3, name = "synchronizer-B")
 
-    val partyKey = localOrderParty(partyIndex = 1)
+    val partyKey = 1
     val participantKey = internedParticipantId(10_001)
     val rawDigestA = genRawDigest(0x1a.toByte)
     val rawDigestB = genRawDigest(0x2b.toByte)
@@ -1142,7 +1249,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
 
     def upsertInsertInto(
         store: AcsDigestStore,
-        acsDigestPartyUpdates: immutable.Iterable[AcsDigestUpdate[PartyAndOrder[InternedPartyId]]],
+        acsDigestPartyUpdates: immutable.Iterable[AcsDigestUpdate[InternedPartyId]],
         acsParticipantUpdates: immutable.Iterable[AcsDigestUpdate[InternedParticipantId]],
     ) =
       for {
@@ -1182,17 +1289,28 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
 
           // Insert T3 into Store B
           _ <- storeB.insertCheckpointTime(checkpoint3)
+          _ <- storeB.insertCheckpointTime(checkpoint4Reinitialization)
 
           // Latest checkpoint at T3 (inclusive)
-          latestCheckpointA_T3 <- storeA.latestCheckpointUpTo(offset3)
-          latestCheckpointB_T3 <- storeB.latestCheckpointUpTo(offset3)
+          latestCheckpointA_T3 <- storeA.latestCheckpointUpTo(offset3, allCheckpointsFilter)
+          latestCheckpointB_T3 <- storeB.latestCheckpointUpTo(offset3, allCheckpointsFilter)
 
           // First checkpoint after T0 (exclusive)
-          firstCheckpointA_T0 <- storeA.firstCheckpointAfter(offset0)
-          firstCheckpointB_T0 <- storeB.firstCheckpointAfter(offset0)
+          firstCheckpointA_T0 <- storeA.firstCheckpointAfter(offset0, allCheckpointsFilter)
+          firstCheckpointB_T0 <- storeB.firstCheckpointAfter(offset0, allCheckpointsFilter)
 
-          firstCheckpointA_T3 <- storeA.firstCheckpointAfter(offset3)
-          firstCheckpointB_T3 <- storeB.firstCheckpointAfter(offset3)
+          firstCheckpointA_T3 <- storeA.firstCheckpointAfter(offset3, allCheckpointsFilter)
+          firstCheckpointB_T3 <- storeB.firstCheckpointAfter(offset3, allCheckpointsFilter)
+
+          // Reconciliation is a tick checkpoint while Reinitialization is not
+          latestReconciliationCpA <- storeA.latestReconciliationCheckpoint()
+          latestReconciliationCpB <- storeB.latestReconciliationCheckpoint()
+
+          latestReinitializationCpA <- storeA.latestReinitializationCheckpoint()
+          latestReinitializationCpB <- storeB.latestReinitializationCheckpoint()
+
+          latestTickCpA <- storeA.latestTickCheckpoint()
+          latestTickCpB <- storeB.latestTickCheckpoint()
         } yield {
           latestCheckpointA_T3 shouldBe Some(checkpoint1)
           latestCheckpointB_T3 shouldBe Some(checkpoint3)
@@ -1201,7 +1319,16 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           firstCheckpointB_T0 shouldBe Some(checkpoint3)
 
           firstCheckpointA_T3 shouldBe None
-          firstCheckpointB_T3 shouldBe None
+          firstCheckpointB_T3 shouldBe Some(checkpoint4Reinitialization)
+
+          latestReconciliationCpA shouldBe Some(checkpoint1)
+          latestReconciliationCpB shouldBe Some(checkpoint3)
+
+          latestReinitializationCpA shouldBe None
+          latestReinitializationCpB shouldBe Some(checkpoint4Reinitialization)
+
+          latestTickCpA shouldEqual Some(checkpoint1)
+          latestTickCpB shouldEqual Some(checkpoint3)
         }
       }
 
@@ -1244,8 +1371,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
           // We wipe out T2 on Store A. Store B must remain unaffected.
           _ <- storeA.deleteAfter(offset1)
 
-          checkpointA_afterRollback <- storeA.latestCheckpointUpTo(offset2)
-          checkpointB_afterRollback <- storeB.latestCheckpointUpTo(offset2)
+          checkpointA_afterRollback <- storeA.latestCheckpointUpTo(offset2, allCheckpointsFilter)
+          checkpointB_afterRollback <- storeB.latestCheckpointUpTo(offset2, allCheckpointsFilter)
 
           rolledBackPartyAT2 <- storeA.party.lookup(partyKey, offset2)
           rolledBackParticipantAT2 <- storeA.participant.lookup(participantKey, offset2)

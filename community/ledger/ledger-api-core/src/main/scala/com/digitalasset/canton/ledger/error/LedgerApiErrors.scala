@@ -16,7 +16,6 @@ import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiError
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.Error as LfError
-import com.digitalasset.daml.lf.engine.Error.Validation.ReplayMismatch
 import org.slf4j.event.Level
 
 import scala.concurrent.duration.FiniteDuration
@@ -298,11 +297,14 @@ object LedgerApiErrors extends LedgerApiErrorGroup {
         loggingContext: ErrorLoggingContext
     ) extends DamlErrorWithDefiniteAnswer(cause = err.message)
 
-    final case class Validation(reason: ReplayMismatch)(implicit
+    final case class Validation(err: LfError.Validation.Error)(implicit
         loggingContext: ErrorLoggingContext
-    ) extends DamlErrorWithDefiniteAnswer(
-          cause = s"Observed un-expected replay mismatch: $reason"
-        )
+    ) extends DamlErrorWithDefiniteAnswer(cause = err match {
+          case reason: LfError.Validation.ReplayMismatch =>
+            s"Observed un-expected replay mismatch: $reason"
+          case _ =>
+            err.message
+        })
 
     final case class Interpretation(
         where: String,

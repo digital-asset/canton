@@ -358,7 +358,7 @@ private[speedy] case class PartialTransaction(
       contractIdVersion: ContractIdVersion,
   ): Either[
     (PartialTransaction, IErr),
-    (Value.ContractId, PartialTransaction),
+    (Node.Create, PartialTransaction),
   ] = {
     val auth = Authorize(context.info.authorizers)
     val actionNodeSeed = context.nextActionChildSeed
@@ -400,7 +400,7 @@ private[speedy] case class PartialTransaction(
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(csmJournal = next)
-            Right((cid, nextPtx))
+            Right((createNode, nextPtx))
           case Left(err) =>
             Left(this -> convTxError(nodes, "Create", err))
         }

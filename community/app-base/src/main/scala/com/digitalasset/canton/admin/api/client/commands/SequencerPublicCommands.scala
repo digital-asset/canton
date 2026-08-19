@@ -9,6 +9,8 @@ import com.digitalasset.canton.sequencer.api.v30 as proto
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnect.GetSynchronizerParametersResponse.Parameters
 import com.digitalasset.canton.sequencer.api.v30.SequencerConnectServiceGrpc.SequencerConnectServiceStub
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import io.grpc.ManagedChannel
@@ -74,8 +76,12 @@ object SequencerPublicCommands {
     override protected def handleResponse(
         response: proto.SequencerConnect.GetSynchronizerIdResponse
     ): Either[String, PhysicalSynchronizerId] =
-      PhysicalSynchronizerId
-        .fromProtoPrimitive(response.physicalSynchronizerId, "synchronizer_id")
+      ProtoValidation
+        .validateThen(
+          response.physicalSynchronizerId,
+          "synchronizer_id",
+          ProtocolVersionValidation.AlwaysValidation,
+        )(PhysicalSynchronizerId.fromProtoPrimitive)
         .leftMap(_.message)
   }
 

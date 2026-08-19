@@ -33,7 +33,7 @@ import com.digitalasset.canton.util.ReassignmentTag.Target
 final case class UnassignmentValidationResult(
     unassignmentData: UnassignmentData,
     override val rootHash: RootHash,
-    hostedConfirmingReassigningParties: Set[LfPartyId],
+    hostedConfirmingParties: Set[LfPartyId],
     // Defined iff the participant is reassigning
     assignmentExclusivity: Option[Target[CantonTimestamp]],
     commonValidationResult: UnassignmentValidationResult.CommonValidationResult,
@@ -55,24 +55,8 @@ final case class UnassignmentValidationResult(
 
   def contracts: ContractsReassignmentBatch = unassignmentData.contractsBatch
 
-  def commitSet: CommitSet = CommitSet(
-    archivals = Map.empty,
-    creations = Map.empty,
-    assignments = Map.empty,
-    unassignments = (contracts.contractIdCounters
-      .map { case (contractId, reassignmentCounter) =>
-        (
-          contractId,
-          CommitSet.UnassignmentCommit(
-            targetSynchronizer.map(_.logical),
-            stakeholders,
-            reassignmentCounter,
-          ),
-        )
-      })
-      .toMap
-      .forgetNE,
-  )
+  def commitSet: CommitSet =
+    CommitSet.createForUnassignment(contracts, targetSynchronizer, stakeholders)
 
   def createReassignmentAccepted(
       participantId: ParticipantId,

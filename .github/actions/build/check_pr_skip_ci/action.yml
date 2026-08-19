@@ -1,0 +1,21 @@
+name: Check PR skip CI
+description: Check whether build should be aborted due to `skip ci` label on PR
+
+outputs:
+  should-skip:
+    description: true if should skip CI
+    value: ${{ steps.check.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+
+    - name: Check PR skip ci label
+      id: check
+      uses: ./.github/actions/nix/nix_run
+      with:
+        command: ./scripts/ci/abort-if-skip-ci.sh
+        output-name: skip
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        GITHUB_EVENT_NUMBER: ${{ github.event.pull_request.number }}

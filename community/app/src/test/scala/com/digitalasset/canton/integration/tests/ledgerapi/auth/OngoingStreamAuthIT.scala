@@ -292,9 +292,10 @@ final class OngoingStreamAuthIT
         identityProviderConfig.identityProviderId,
         Vector(aliceRight),
         primaryParty = "",
+        primaryPartyAuthentication = false,
       ).futureValue
       val ledgerEnd = stub(StateServiceGrpc.stub(channel), canBeAnAdmin.token)
-        .getLedgerEnd(GetLedgerEndRequest())
+        .getLedgerEnd(GetLedgerEndRequest(Seq()))
         .map(_.offset)
         .futureValue
       val (firstSeenF, secondSeenF) = observePartyUpdates(alice3Context, ledgerEnd, alice3PartyId)
@@ -320,7 +321,7 @@ final class OngoingStreamAuthIT
       inside(
         loggerFactory.assertLogs(
           stub(StateServiceGrpc.stub(channel), alice3Context.token)
-            .getLedgerEnd(GetLedgerEndRequest())
+            .getLedgerEnd(GetLedgerEndRequest(Seq()))
             .failed
             .futureValue,
           _.warningMessage should fullyMatch regex raw"Authorization failed: the provided token was not verified by any configured authentication service: " +

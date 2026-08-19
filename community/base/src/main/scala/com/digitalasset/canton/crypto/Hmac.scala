@@ -33,8 +33,8 @@ object HmacAlgorithm extends PrettyPrintingCompanion[HmacAlgorithm] {
   }
 
   def fromProtoEnum(
-      field: String,
       hmacAlgorithmP: v30.HmacAlgorithm,
+      field: String,
   ): ParsingResult[HmacAlgorithm] =
     hmacAlgorithmP match {
       case v30.HmacAlgorithm.HMAC_ALGORITHM_UNSPECIFIED =>

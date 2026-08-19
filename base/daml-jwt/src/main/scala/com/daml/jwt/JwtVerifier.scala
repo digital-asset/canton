@@ -7,6 +7,7 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.auth0.jwt.interfaces.RSAKeyProvider
 
 import java.io.File
+import java.security.PublicKey
 import java.security.interfaces.{ECPublicKey, RSAPublicKey}
 import java.time.{Duration, Instant}
 import scala.math.Ordered.orderingToOrdered
@@ -67,6 +68,26 @@ class JwtVerifier(
   private def base64Decode(jwt: DecodedJwt[String]): Either[Error, DecodedJwt[String]] =
     jwt.transform(Base64.decode).left.map(_.within(Symbol("JwtVerifier.base64Decode")))
 
+}
+
+object JwtVerifier {
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  def fromPublicKey(
+      publicKey: PublicKey,
+      jwtTimestampLeeway: Option[JwtTimestampLeeway] = None,
+      maxTokenLife: Option[Long] = None,
+  ): Either[Error, JwtVerifier] =
+    publicKey match {
+      case rsa: RSAPublicKey => RSA256Verifier(rsa, jwtTimestampLeeway, maxTokenLife)
+      case ec: ECPublicKey if ec.getParams.getCurve.getField.getFieldSize == 256 =>
+        ECDSAVerifier(Algorithm.ECDSA256(ec, null), jwtTimestampLeeway, maxTokenLife)
+      case ec: ECPublicKey if ec.getParams.getCurve.getField.getFieldSize == 384 =>
+        ECDSAVerifier(Algorithm.ECDSA384(ec, null), jwtTimestampLeeway, maxTokenLife)
+      case ec: ECPublicKey if ec.getParams.getCurve.getField.getFieldSize == 521 =>
+        ECDSAVerifier(Algorithm.ECDSA512(ec, null), jwtTimestampLeeway, maxTokenLife)
+      case key =>
+        Left(Error(Symbol("getVerifier"), s"Unsupported public key format ${key.getFormat}"))
+    }
 }
 
 // HMAC256 validator factory

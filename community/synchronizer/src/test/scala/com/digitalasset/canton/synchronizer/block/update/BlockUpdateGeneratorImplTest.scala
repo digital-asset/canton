@@ -93,6 +93,7 @@ class BlockUpdateGeneratorImplTest
     lsuSequencingBounds = None,
     parallelism = PositiveInt.two,
     enablePrevalidation = true,
+    enableAsyncLoggingWithOutcome = false,
   )
 
   "BlockUpdateGeneratorImpl.extractBlockEvents" should {
@@ -128,6 +129,7 @@ class BlockUpdateGeneratorImplTest
               ),
               parallelism = PositiveInt.two,
               enablePrevalidation = true,
+              enableAsyncLoggingWithOutcome = false,
             ),
             metrics,
             memberValidatorMock,

@@ -10,6 +10,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.{ChainUtil, Checked, ErrorUtil}
 
 import scala.annotation.tailrec
@@ -53,11 +54,11 @@ object MapsUtil {
     def step(): F[Either[Unit, Option[V]]] = map.get(key) match {
       case None =>
         monad.map(notFoundV) {
-          case None => Either.right[Unit, Option[V]](None)
+          case None => Either.Right[Unit](None)
           case Some(newValue) =>
             map
               .putIfAbsent(key, newValue)
-              .fold(Either.right[Unit, Option[V]](None))(_ => Either.left[Unit, Option[V]](()))
+              .fold(Either.Right[Unit](Option.empty[V]))(_ => Either.Left[Option[V]](()))
         }
       case Some(oldValue) =>
         monad.map(f(oldValue)) {

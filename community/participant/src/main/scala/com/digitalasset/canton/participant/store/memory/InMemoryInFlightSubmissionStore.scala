@@ -67,7 +67,7 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
   ): EitherT[FutureUnlessShutdown, InFlightSubmission[SubmissionSequencingInfo], Unit] =
     inFlights
       .putIfAbsent(submission.changeIdHash, submission)
-      .fold(Either.right[InFlightSubmission[SubmissionSequencingInfo], Unit](())) { old =>
+      .fold(Either.unit[InFlightSubmission[SubmissionSequencingInfo]]) { old =>
         Either.cond(old == submission, (), old)
       }
       .toEitherT[FutureUnlessShutdown]

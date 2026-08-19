@@ -69,17 +69,20 @@ class StateServiceClient(
     } yield active
 
   def getLedgerEnd(
-      token: Option[String] = None
+      synchronizerIds: Seq[String],
+      token: Option[String] = None,
   )(implicit traceContext: TraceContext): Future[GetLedgerEndResponse] =
     LedgerClient
       .stubWithTracing(service, token.orElse(getDefaultToken()))
-      .getLedgerEnd(GetLedgerEndRequest())
+      .getLedgerEnd(
+        GetLedgerEndRequest(synchronizerIds)
+      )
 
   /** Get the current participant offset */
   def getLedgerEndOffset(
       token: Option[String] = None
   )(implicit traceContext: TraceContext): Future[Long] =
-    getLedgerEnd(token).map(_.offset)
+    getLedgerEnd(Seq(), token).map(_.offset)
 
   def getConnectedSynchronizers(
       party: String,

@@ -12,12 +12,17 @@ import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule.reasonForNotAcceptingProposalsString
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule.{
+  RelativeSegmentLatencyMetric,
+  ViewChangeMetric,
+  reasonForNotAcceptingProposalsString,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.PbftBlockState.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
+  BftNodeId,
   BlockNumber,
   EpochNumber,
   FutureId,
@@ -69,6 +74,7 @@ class IssSegmentModule[E <: Env[E]](
     availability: ModuleRef[Availability.Message[E]],
     p2pNetworkOut: ModuleRef[P2PNetworkOut.Message],
     emptyBlockCreationTimeout: FiniteDuration,
+    viewChangeTimeoutOverride: Option[FiniteDuration] = None,
     metrics: BftOrderingMetrics,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
@@ -82,27 +88,18 @@ class IssSegmentModule[E <: Env[E]](
 
   private val thisNode = epoch.currentMembership.myId
 
-  private case class ViewChangeMetric() extends TimeoutManager.TimeoutMetric {
+  private val segmentLatencyMetric = RelativeSegmentLatencyMetric(segmentState.leader, metrics)
 
-    private val metricsContextForThisSegment: MetricsContext = metricsContext.withExtraLabels(
-      metrics.consensus.labels.Leader -> segmentState.leader
-    )
-
-    override def scheduleChangedAfter(
-        duration: Duration
-    ): Unit =
-      BftOrderingMetrics.updateTimer(
-        metrics.consensus.viewChangeProgressLatency,
-        duration,
-      )(metricsContextForThisSegment)
-  }
+  private val baseViewChangeTimeout: FiniteDuration = viewChangeTimeoutOverride.getOrElse(
+    segmentState.epoch.currentMembership.orderingTopology.sequencingParameters.pbftViewChangeTimeout.toScala
+  )
 
   private val viewChangeTimeoutManager =
     new TimeoutManager[E, ConsensusSegment.Message, BlockNumber](
       loggerFactory,
-      segmentState.epoch.currentMembership.orderingTopology.sequencingParameters.pbftViewChangeTimeout.toScala,
+      baseViewChangeTimeout,
       segmentState.segment.firstBlockNumber,
-      Some(ViewChangeMetric()),
+      Some(ViewChangeMetric(segmentState.leader, metrics)),
     )
 
   private val blockStartTimeoutManager =
@@ -322,12 +319,18 @@ class IssSegmentModule[E <: Env[E]](
             }
         }
 
+      case ConsensusSegment.ConsensusMessage
+            .CompletedLedSegment(epochNumber, timeWhenItCompleted) =>
+        if (epoch.info.number == epochNumber) {
+          segmentLatencyMetric.recordSegmentLedByThisNodeCompleted(timeWhenItCompleted)
+        }
+
       case ConsensusSegment.ConsensusMessage.BlockOrdered(metadata, isEmpty) =>
-        maybeOriginalLeaderSegmentState.fold {
+        maybeOriginalLeaderSegmentState.fold(
           logger.debug(
             s"$messageType: not the original leader for this segment, not ordering a new block."
           )
-        } { mySegmentState =>
+        ) { mySegmentState =>
           mySegmentState.confirmCompleteBlockStored(metadata.blockNumber, isEmpty)
           // If this leader is waiting to start ordering a new block and, after confirming completion of this block,
           // it considers itself to be blocking progress for other segments, then it will start ordering an empty block
@@ -428,12 +431,16 @@ class IssSegmentModule[E <: Env[E]](
         // Consider changing timeout manipulation: stop once CompleteBlock is emitted and then
         //   reschedule once OrderedBlockStored. This avoids counting delays in async DB writes
         //   against a correct leader, albeit with some additional complexity.
-        if (!segmentState.isSegmentComplete && !segmentState.isViewChangeInProgress)
-          viewChangeTimeoutManager.scheduleTimeout(
-            PbftNormalTimeout(segmentBlockMetadata, segmentState.currentView)
-          )
-        // Else, the segment is complete; cancel timeouts for this segment and accumulate metrics
-        else {
+        if (!segmentState.isSegmentComplete) {
+          // We might be doing a view change, in that case we should not push the segment-specific timeout. A block can
+          // be ordered even if we are in a view change because we might have been given a commit certificate via
+          // retransmission.
+          if (!segmentState.isViewChangeInProgress)
+            viewChangeTimeoutManager.scheduleTimeout(
+              PbftNormalTimeout(segmentBlockMetadata, segmentState.currentView)
+            )
+          // Else, the segment is complete; cancel timeouts for this segment and accumulate metrics
+        } else {
           metricsAccumulator.accumulate(
             segmentState.currentView + 1,
             segmentState.commitVotes,
@@ -490,6 +497,7 @@ class IssSegmentModule[E <: Env[E]](
               maybeOriginalLeaderSegmentState.exists(_ => segmentState.isSegmentComplete),
           )
         )
+        if (segmentState.isSegmentComplete) segmentLatencyMetric.recordThisSegmentCompleted()
 
       case ConsensusSegment.ConsensusMessage.CompletedEpoch(epochNumber) =>
         if (epoch.info.number == epochNumber) {
@@ -880,6 +888,58 @@ class IssSegmentModule[E <: Env[E]](
 }
 
 object IssSegmentModule {
+
+  private final case class ViewChangeMetric(leader: BftNodeId, metrics: BftOrderingMetrics)(implicit
+      metricsContext: MetricsContext
+  ) extends TimeoutManager.TimeoutMetric {
+    private val metricsContextForThisSegment: MetricsContext =
+      metricsContext.withExtraLabels(metrics.consensus.labels.Leader -> leader)
+
+    override def scheduleChangedAfter(
+        duration: Duration
+    ): Unit =
+      BftOrderingMetrics.updateTimer(
+        metrics.consensus.viewChangeProgressLatency,
+        duration,
+      )(metricsContextForThisSegment)
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private final case class RelativeSegmentLatencyMetric(
+      leader: BftNodeId,
+      metrics: BftOrderingMetrics,
+  )(implicit
+      metricsContext: MetricsContext
+  ) {
+    private val metricsContextForThisSegment: MetricsContext =
+      metricsContext.withExtraLabels(metrics.consensus.labels.Leader -> leader)
+
+    private var thisSegmentEndTime: Option[Instant] = None
+    private var segmentLeadByThisNodeEndTime: Option[Instant] = None
+
+    def recordThisSegmentCompleted(): Unit = if (thisSegmentEndTime.isEmpty) {
+      thisSegmentEndTime = Some(Instant.now())
+      recordIfReady()
+    }
+
+    def recordSegmentLedByThisNodeCompleted(timeWhenItCompleted: Instant): Unit = if (
+      segmentLeadByThisNodeEndTime.isEmpty
+    ) {
+      segmentLeadByThisNodeEndTime = Some(timeWhenItCompleted)
+      recordIfReady()
+    }
+
+    private def recordIfReady(): Unit =
+      (thisSegmentEndTime, segmentLeadByThisNodeEndTime) match {
+        case (Some(thisSegmentEnd), Some(segmentLeadByThisNodeEnd)) =>
+          val duration = Duration.between(segmentLeadByThisNodeEnd, thisSegmentEnd)
+          BftOrderingMetrics.updateTimer(
+            metrics.consensus.relativeSegmentLatency,
+            if (duration.isNegative) Duration.ZERO else duration,
+          )(metricsContextForThisSegment)
+        case _ => ()
+      }
+  }
 
   private def reasonForNotAcceptingProposalsString(
       mySegmentState: OriginalLeaderSegmentState

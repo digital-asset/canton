@@ -86,7 +86,7 @@ final class ApiUpdateService(
                 req.descendingOrder,
                 skipPruningChecks = false,
               )
-              .collect { case IndexUpdateService.UpdatesResponse.ProtoUpdates(update) =>
+              .collect { case IndexUpdateService.UpdatesResponse.ProtoUpdates(Some(update), _) =>
                 update
               }
               .via(logger.enrichedDebugStream("Responding with updates.", updatesLoggable))

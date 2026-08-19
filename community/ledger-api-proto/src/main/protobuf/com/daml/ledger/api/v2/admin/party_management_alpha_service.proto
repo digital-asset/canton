@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package com.daml.ledger.api.v2.admin;
 
+import "com/daml/ledger/api/v2/crypto.proto";
 import "com/daml/ledger/api/v2/state_service.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
@@ -16,6 +17,40 @@ option java_package = "com.daml.ledger.api.v2.admin";
 // This service exposes an EXPERIMENTAL "alpha"-stage party management functionality subject to change in future releases.
 //
 service PartyManagementAlphaService {
+  // Generates a PartyToParticipant mapping topology transaction to onboard an already hosted
+  // party to a target participant which does not yet host the party.
+  //
+  // For external parties, the returned transaction hash can be signed externally.
+  // The transaction and any signatures are then submitted using the AuthorizePartyUpdate RPC.
+  // For local (internal) parties, the transaction can be passed directly to AuthorizePartyUpdate
+  // without external signatures.
+  //
+  // Note that for external parties, setting a permission other than Confirmation or
+  // Observation does not make sense.
+  //
+  // Returns the serialized PartyToParticipant mapping topology transaction along with the
+  // hash to sign.
+  // Returns INVALID_ARGUMENT if the parameters are invalid or inconsistent with the current
+  // topology state.
+  rpc GeneratePartyTopologyUpdate(GeneratePartyTopologyUpdateRequest) returns (GeneratePartyTopologyUpdateResponse);
+
+  // Submits a PartyToParticipant mapping topology transaction to onboard an already hosted
+  // party to a new target participant.
+  //
+  // This endpoint can be called on the target participant, as well as on any source
+  // participant(s) already hosting the party, to collect the necessary signatures
+  // to reach the required authorization thresholds.
+  //
+  // The transaction bytes are expected to be generated via GeneratePartyTopologyUpdate RPC.
+  //
+  // Additionally, local user rights and identity provider mapping will be provisioned if
+  // provided. Note: IAM user provisioning only occurs if this endpoint is invoked on the
+  // target participant.
+  //
+  // Returns INVALID_ARGUMENT if the parameters are invalid or inconsistent with the current
+  // topology state.
+  rpc AuthorizePartyUpdate(AuthorizePartyUpdateRequest) returns (AuthorizePartyUpdateResponse);
+
   // Exports the specified party's Active Contract Set (ACS) in the specified synchronizer so that the party
   // along with the ACS can be added to the specified target participant using the 'AddPartyWithAcs' endpoint.
   // This request requires that the party has been authorized for onboarding to the target participant.
@@ -59,10 +94,82 @@ service PartyManagementAlphaService {
   // "party already hosted" error.
   rpc AddPartyWithAcs(stream AddPartyWithAcsRequest) returns (AddPartyWithAcsResponse);
 
+  // TODO(#31414): There's no add_party_request_id; querying the status must be trivial like:
+  //  By querying the status using semantic data—"What is the status of Party X moving to Target Participant Y on Synchronizer Z?"
+  //
   // Status endpoint that given an 'add_party_request_id' returns status information about progress,
   // completion, or errors of a previous call to 'AddPartyWithAcs' on the target participant.
   rpc GetAddPartyStatus(GetAddPartyStatusRequest) returns (GetAddPartyStatusResponse);
 }
+
+message GeneratePartyTopologyUpdateRequest {
+  // The party to replicate.
+  //
+  // Required
+  string party_id = 1;
+
+  // The synchronizer in which to replicate the party.
+  //
+  // Required
+  string synchronizer_id = 2;
+
+  // The unique identifier of the target participant where the party will be replicated.
+  //
+  // Required
+  string target_participant_uid = 3;
+
+  // The permission level of the party on the target participant.
+  //
+  // Required
+  ParticipantPermission participant_permission = 4;
+}
+
+message GeneratePartyTopologyUpdateResponse {
+  // The serialized topology transaction which needs to be signed.
+  //
+  // Required: must be non-empty
+  bytes transaction = 1;
+
+  // The hash that needs be signed (to sign the topology transaction).
+  //
+  // Required: must be non-empty
+  bytes hash = 2;
+}
+
+message AuthorizePartyUpdateRequest {
+  // The synchronizer where the party is being replicated.
+  //
+  // Required
+  string synchronizer_id = 1;
+
+  // The serialized PartyToParticipant topology transaction.
+  //
+  // Required: must be non-empty
+  bytes transaction = 2;
+
+  // External signatures authorizing the topology transaction.
+  //
+  // Must be provided for external parties where the namespace keys are held externally.
+  // If empty, the local participant will simply append its own node signature to authorize
+  // or propose the transaction.
+  //
+  // Optional: can be empty
+  repeated Signature signatures = 3;
+
+  // If provided, the local user is provisioned and the quota is checked.
+  // If omitted, no IAM user provisioning occurs.
+  //
+  // Optional
+  string user_id = 4;
+
+  // The id of the Identity Provider on the target participant.
+  // If not set, assumes the default IDP or uses the token's 'iss' field.
+  //
+  // Optional
+  string identity_provider_id = 5;
+}
+
+message AuthorizePartyUpdateResponse {}
 
 message ExportPartyAcsRequest {
   // The identifier of the party being replicated.

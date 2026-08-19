@@ -1225,18 +1225,24 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     val isProposalFilter = sql" AND is_proposal = $isProposal"
     val changeOpFilter = filterOp.fold(sql"")(op => sql" AND operation = $op")
     val mappingTypeFilter = typeFilter(types)
-    val uidNamespaceFilter =
+    val uidNamespaceTableJoinFilter =
       if (hasUidFilter) {
-        val namespaceFilter = filterNamespace.toList.flatMap(_.map(ns => sql"namespace = $ns"))
-        val uidFilter =
-          filterUid.toList.flatten.map(uid =>
-            sql"(identifier = ${uid.identifier} AND namespace = ${uid.namespace})"
+        val namespaces: Array[String] =
+          (filterNamespace.toList.flatMap(_.map(_.unwrap)) ++
+            filterUid.toList.flatMap(_.map(_.namespace.unwrap))).toArray
+        val idents: Array[String185] =
+          (filterNamespace.toList.flatMap(_.map((_: Namespace) => String185.empty)) ++
+            filterUid.toList.flatMap(_.map(_.identifier))).toArray
+        Some(
+          (
+            sql" unnest($namespaces, $idents) as uids(ns, ident) ",
+            sql" uids.ns = namespace AND (uids.ident = identifier OR uids.ident = '') ",
           )
-        sql" AND (" ++ (namespaceFilter ++ uidFilter).intercalate(sql" OR ") ++ sql")"
-      } else SQLActionBuilderChain(sql"")
+        )
+      } else None
 
     val nonPaginationFilters =
-      timeRangeFilter ++ isProposalFilter ++ changeOpFilter ++ mappingTypeFilter ++ uidNamespaceFilter
+      timeRangeFilter ++ isProposalFilter ++ changeOpFilter ++ mappingTypeFilter
     val query = pagination match {
       case Some((participantStartExclusive, pageLimit)) =>
         val paginationFilter = participantStartExclusive match {
@@ -1250,10 +1256,12 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
           nonPaginationFilters ++ paginationFilter,
           limit = s" LIMIT $pageLimit ",
           orderBy = " ORDER BY identifier, namespace ",
+          tableJoinFilter = uidNamespaceTableJoinFilter,
         )
       case _ =>
         buildQueryForTransactions(
-          nonPaginationFilters
+          nonPaginationFilters,
+          tableJoinFilter = uidNamespaceTableJoinFilter,
         )
     }
 
@@ -1314,9 +1322,15 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       limit: String = "",
       orderBy: String = " ORDER BY id ",
       includeRejected: Boolean = false,
+      tableJoinFilter: Option[(SQLActionBuilder, SQLActionBuilder)] = None,
   ): QueryAction = {
+    val targetTable: SQLActionBuilder = tableJoinFilter match {
+      case None => sql" common_topology_transactions "
+      case Some((leftTable, onFilter)) =>
+        leftTable ++ sql" JOIN common_topology_transactions ON " ++ onFilter
+    }
     val query =
-      sql"SELECT instance, sequenced, valid_from, valid_until, rejection_reason FROM common_topology_transactions WHERE store_id = $storeIndex" ++
+      sql"SELECT instance, sequenced, valid_from, valid_until, rejection_reason FROM " ++ targetTable ++ sql" WHERE store_id = $storeIndex" ++
         subQuery ++ (if (!includeRejected) sql" AND rejection_reason IS NULL"
                      else sql"") ++ sql" #$orderBy #$limit"
     query.as[QueryResult]

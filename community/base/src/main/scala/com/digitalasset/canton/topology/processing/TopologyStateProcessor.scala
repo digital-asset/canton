@@ -306,7 +306,7 @@ class TopologyStateProcessorImpl private[processing] (
   ): Either[TopologyTransactionRejection, Unit] = inStore match {
     case Some(value) =>
       for {
-        expected <- value.nextSerial
+        expected <- value.nextSerialOrRejection
         _ <- Either.cond(
           expected == toValidate.serial,
           (),

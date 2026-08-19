@@ -1267,10 +1267,7 @@ abstract class EventStorageBackendTemplate(
           ORDER BY $synchronizerIdOrdering event_offset DESC
           ${QueryStrategy.limitClause(Some(1))}
           """)(connection),
-    ).flatten
-      .sortBy(_.offset)
-      .reverse
-      .headOption
+    ).flatten.maxByOption(_.offset)
   }
 
   // Note: Added for offline party replication as CN is using it.
@@ -1453,10 +1450,7 @@ abstract class EventStorageBackendTemplate(
           ORDER BY publication_time DESC, event_offset DESC
           ${QueryStrategy.limitClause(Some(1))}
           """)(connection),
-    ).flatten
-      .sortBy(_.offset)
-      .reverse
-      .headOption
+    ).flatten.maxByOption(_.offset)
   }
 
   override def fetchTopologyPartyEventIds(
@@ -1483,17 +1477,14 @@ abstract class EventStorageBackendTemplate(
         .withFetchSize(Some(fetchSize(eventSequentialIds)))
     RowDefs.partyToParticipantEventParser(stringInterning).queryMultipleRows(query)(connection)
   }
-  override def fetchDynamicSynchronizerParametersEventIds(
-      eventSequentialIds: SequentialIdBatch
-  )(connection: Connection): Vector[Long] =
-    SQL"""
-        SELECT e.event_sequential_id
-        FROM lapi_events_generic_topology_events e
-        WHERE ${queryStrategy.inBatch("e.event_sequential_id", eventSequentialIds)}
-        ORDER BY e.event_sequential_id
-        """
-      .withFetchSize(Some(fetchSize(eventSequentialIds)))
-      .asVectorOf(long("event_sequential_id"))(connection)
+  override def fetchDynamicSynchronizerParametersEventIds: IdPageQuery =
+    UpdateStreamingQueries.fetchEventIds(
+      tableName = "lapi_events_generic_topology_events",
+      witnessO = None,
+      templateIdO = None,
+      stringInterning = stringInterning,
+      hasFirstPerSequentialId = false,
+    )
 
   override def dynamicSynchronizerParametersBatch(
       eventSequentialIds: SequentialIdBatch

@@ -1,0 +1,9 @@
+name: Nix Warmup
+description: Nix warmup
+
+runs:
+  using: composite
+  steps:
+    - name: Nix warmup
+      run: time nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run 'echo "Nix env ready"'
+      shell: bash

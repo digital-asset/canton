@@ -7,20 +7,27 @@ import cats.Eval
 import cats.syntax.foldable.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestampSecond
-import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
+import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.ledger.participant.state.{AcsChangeFactory, SynchronizerIndex}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.event.{AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Promise}
 
 /** Canton synchronisation journals garbage collectors
   *
@@ -39,6 +46,7 @@ private[participant] class JournalGarbageCollector(
     inFlightSubmissionStore: Eval[InFlightSubmissionStore],
     psid: PhysicalSynchronizerId,
     journalGarbageCollectionDelay: NonNegativeFiniteDuration,
+    disableLegacyAcsCommitmentProcessor: Boolean,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext)
@@ -46,7 +54,7 @@ private[participant] class JournalGarbageCollector(
 
   def observer(
       traceContext: TraceContext
-  ): Unit = flush(traceContext)
+  ): Unit = flush()(traceContext)
 
   override protected def run()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     synchronizeWithClosing(functionFullName) {
@@ -59,21 +67,21 @@ private[participant] class JournalGarbageCollector(
             acsCommitmentStore,
             inFlightSubmissionStore.value,
             psid.logical,
-            checkForOutstandingCommitments = false,
+            disableLegacyAcsCommitmentProcessor,
           )
-        _ <- safeToPruneTsO.fold(FutureUnlessShutdown.unit) { ts =>
+        _ <- safeToPruneTsO.traverse_ { ts =>
           val maxDelay = (ts - CantonTimestampSecond.MinValue).toSeconds
           val cappedJournalGarbageCollectionDelay =
             journalGarbageCollectionDelay.duration.toSeconds.min(maxDelay)
 
-          FutureUnlessShutdown.outcomeF(prune(ts.minusSeconds(cappedJournalGarbageCollectionDelay)))
+          prune(ts.minusSeconds(cappedJournalGarbageCollectionDelay))
         }
       } yield ()
     }
 
   private def prune(pruneTs: CantonTimestampSecond)(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
+  ): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Starting periodic background pruning of journals up to $pruneTs")
     val acsDescription = s"Periodic ACS prune at $pruneTs"
     // Clean unused entries from the ACS
@@ -84,11 +92,11 @@ private[participant] class JournalGarbageCollector(
     val submissionTrackerStoreF = synchronizeWithClosing(submissionTrackerStoreDescription)(
       submissionTrackerStore.prune(pruneTs.forgetRefinement)
     )
-    Seq(acsF, submissionTrackerStoreF).sequence_.onShutdown(())
+    Seq(acsF, submissionTrackerStoreF).sequence_
   }
 }
 
-private[pruning] object JournalGarbageCollector {
+private[participant] object JournalGarbageCollector {
   private[pruning] abstract class Scheduler
       extends NamedLogging
       with FlagCloseable
@@ -112,9 +120,7 @@ private[pruning] object JournalGarbageCollector {
     protected def run()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
     protected implicit def executionContext: ExecutionContext
 
-    private[pruning] def flush(
-        traceContext: TraceContext
-    ): Unit =
+    private[pruning] def flush()(implicit traceContext: TraceContext): Unit =
       // set request flag and kick off pruning if flag was not already set
       if (!state.getAndUpdate(_.copy(requested = true)).requested)
         doFlush()(traceContext)
@@ -147,5 +153,52 @@ private[pruning] object JournalGarbageCollector {
         }
       }
 
+  }
+
+  class RateLimitedCollector @VisibleForTesting private[canton] (
+      minimumGap: PositiveFiniteDuration,
+      flush: TraceContext => Unit,
+  ) extends AcsChangeListener {
+
+    private val minimumGapMicros: Long = minimumGap.toScala.toMicros
+
+    private val lastTrigger: AtomicReference[CantonTimestamp] = new AtomicReference(
+      CantonTimestamp.MinValue
+    )
+
+    override def publish(toc: RecordTime, acsChangeFactoryO: Option[AcsChangeFactory])(implicit
+        traceContext: TraceContext,
+        closeContext: CloseContext,
+    ): Unit = maybeTrigger(toc.timestamp)
+
+    override def publishForUpgradeTime(
+        upgradeTime: CantonTimestamp
+    )(implicit traceContext: TraceContext, closeContext: CloseContext): Unit =
+      maybeTrigger(upgradeTime)
+
+    private def maybeTrigger(
+        timestamp: CantonTimestamp
+    )(implicit traceContext: TraceContext): Unit = {
+      val previous = lastTrigger.getAndUpdate { last =>
+        require(
+          last <= timestamp,
+          s"Timestamps must be non-decreasing: last = $last, next = $timestamp",
+        )
+        if (timestamp.toMicros - last.toMicros >= minimumGapMicros) {
+          timestamp
+        } else last
+      }
+      if (timestamp.toMicros - previous.toMicros >= minimumGapMicros) {
+        flush(traceContext)
+      }
+    }
+  }
+
+  object RateLimitedCollector {
+    def create(
+        minimumGap: PositiveFiniteDuration,
+        collector: JournalGarbageCollector,
+    ): RateLimitedCollector =
+      new RateLimitedCollector(minimumGap, implicit traceContext => collector.flush())
   }
 }

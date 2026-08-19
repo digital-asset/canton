@@ -255,7 +255,7 @@ private[execution] class TopologyAwareCommandExecutor(
                         interpretationResult.processedDisclosedContracts.map(_.contractId).toList,
                       routingSynchronizerState = routingSynchronizerState,
                     )
-                    .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.asGrpcError))
+                    .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.toGrpcError))
                     .merge
                     .map(highestRankedSync =>
                       (

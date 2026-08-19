@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol.messages
 
 import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.data.{CantonTimestamp, ViewPosition}
@@ -13,6 +14,7 @@ import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.Si
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmptyUtil.instances.*
@@ -69,7 +71,7 @@ case class ConfirmationResponse private
     v30.ConfirmationResponse(
       viewPosition = viewPositionO.map(_.toProtoV30),
       localVerdict = Some(localVerdict.toProtoV30),
-      confirmingParties = confirmingParties.toList,
+      confirmingParties = confirmingParties.toList.map(_.toProtoUnvalidated),
     )
 
   override protected def pretty: Pretty[this.type] =
@@ -145,8 +147,9 @@ object ConfirmationResponse {
         confirmingPartiesP,
         "confirming_parties",
         pvv,
+        ProtoValidation.MaxCollectionSize,
       )(ProtoConverter.parseLfPartyId)
-      viewPositionO = viewPositionPO.map(ViewPosition.fromProtoV30)
+      viewPositionO <- viewPositionPO.traverse(ViewPosition.fromProtoV30(pvv, _))
       response <-
         ConfirmationResponse
           .create(
@@ -321,10 +324,12 @@ object ConfirmationResponses extends VersioningCompanionMemoization[Confirmation
       sender <- ProtoValidation.validateThen(senderP, "sender", pvv)(
         ParticipantId.fromProtoPrimitive
       )
+      responsesSeqP <- ProtoValidation
+        .validateLength(responsesP, Some("responses"), pvv, ProtoValidation.MaxCollectionSize)
       responses <- ProtoConverter.parseRequiredNonEmpty(
         ConfirmationResponse.fromProtoV30(pvv, _),
         "responses",
-        responsesP,
+        responsesSeqP,
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ConfirmationResponses(requestId, rootHash, synchronizerId, sender, responses)(

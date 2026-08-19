@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.base.error.utils.DecodedCantonError
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -96,7 +95,7 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
   // High request size
   private val overrideMaxRequestSize = NonNegativeInt.tryCreate(30_000)
   // Too low to allow create command to succeed. High enough for parameters to be updatable.
-  // Also, high enough not to impact the BFT Orderer's own mempool module's acceptance of messages, which is not the target of this test.
+  // But not too low to not allow time-advancing messages
   private val lowMaxRequestSize = NonNegativeInt.tryCreate(800)
 
   "Canton" should {
@@ -205,13 +204,22 @@ sealed abstract class MaxRequestSizeCrashIntegrationTest
       restart
 
       // Use the old env (without the override), submission should work
-      val (_, submissionF) = submitCommand(participant1)
-      submissionF.futureValue.discard
+      eventually(retryOnTestFailuresOnly = false) {
+        // CantonBFT might still be in the epoch before the new topology is active, so we might have to retry until it goes to next epoch
+        loggerFactory.assertLogsUnorderedOptional(
+          {
+            val (_, submissionF) = submitCommand(participant1)
+            submissionF.futureValue.discard
+          },
+          LogEntryOptionality.OptionalMany -> (_.warningMessage should include(
+            s"but it exceeds the maximum (${lowMaxRequestSize.value}), rejecting"
+          )),
+        )
+      }
     }
   }
 }
 
-@UnstableTest // TODO(#34490), TODO(#28465) CantonBFT need to support config override
 class MaxRequestSizeCrashBftOrderingIntegrationIntegrationTestPostgres
     extends MaxRequestSizeCrashIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

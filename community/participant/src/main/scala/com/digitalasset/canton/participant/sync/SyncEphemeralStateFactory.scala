@@ -13,7 +13,9 @@ import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
@@ -22,9 +24,11 @@ import com.digitalasset.canton.participant.store.{
   ContractStore,
   ParticipantNodeEphemeralState,
   RequestJournalStore,
+  StoredSynchronizerConnectionConfig,
   SyncPersistentState,
 }
 import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.PerformLsuHandler
+import com.digitalasset.canton.participant.synchronizer.SynchronizerHandle
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.store.SequencedEventStore.ByTimestamp
@@ -34,21 +38,22 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{RepairCounter, RequestCounter, SequencerCounter}
+import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.ExecutionContext
 
 trait SyncEphemeralStateFactory {
   def createFromPersistent(
       persistentState: SyncPersistentState,
+      synchronizerHandle: SynchronizerHandle,
       synchronizerCrypto: SynchronizerCryptoClient,
       ledgerApiIndexer: Eval[LedgerApiIndexer],
       contractStore: Eval[ContractStore],
       participantNodeEphemeralState: ParticipantNodeEphemeralState,
-      synchronizerPredecessor: Option[SynchronizerPredecessor],
-      createTimeTracker: () => SynchronizerTimeTracker,
       promiseUSFactory: PromiseUnlessShutdownFactory,
       metrics: ConnectedSynchronizerMetrics,
       sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
+      synchronizerConnectionConfig: StoredSynchronizerConnectionConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
       synchronizerLoggerFactory: NamedLoggerFactory,
@@ -59,26 +64,27 @@ trait SyncEphemeralStateFactory {
 }
 
 class SyncEphemeralStateFactoryImpl(
+    parameters: ParticipantNodeParameters,
     exitOnFatalFailures: Boolean,
     timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     clock: Clock,
-)(implicit ec: ExecutionContext)
+)(implicit ec: ExecutionContext, mat: Materializer)
     extends SyncEphemeralStateFactory
     with NamedLogging {
 
   override def createFromPersistent(
       persistentState: SyncPersistentState,
+      synchronizerHandle: SynchronizerHandle,
       synchronizerCrypto: SynchronizerCryptoClient,
       ledgerApiIndexer: Eval[LedgerApiIndexer],
       contractStore: Eval[ContractStore],
       participantNodeEphemeralState: ParticipantNodeEphemeralState,
-      synchronizerPredecessor: Option[SynchronizerPredecessor],
-      createTimeTracker: () => SynchronizerTimeTracker,
       promiseUSFactory: PromiseUnlessShutdownFactory,
       metrics: ConnectedSynchronizerMetrics,
       sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
+      synchronizerConnectionConfig: StoredSynchronizerConnectionConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
       synchronizerLoggerFactory: NamedLoggerFactory,
@@ -90,6 +96,7 @@ class SyncEphemeralStateFactoryImpl(
       _ <- ledgerApiIndexer.value.ensureNoProcessingForSynchronizer(
         persistentState.synchronizerIdx.synchronizerId
       )
+      synchronizerPredecessor = synchronizerConnectionConfig.predecessor
       synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
         .cleanSynchronizerIndex(persistentState.synchronizerIdx.synchronizerId)
       _ = logger.info(
@@ -100,6 +107,21 @@ class SyncEphemeralStateFactoryImpl(
         persistentState.sequencedEventStore,
         synchronizerIndex,
         synchronizerPredecessor,
+      )
+
+      acsCommitmentSender = new AcsCommitmentSender(
+        persistentState.acsDigestStore,
+        synchronizerCrypto,
+        synchronizerHandle.sequencerClient,
+        persistentState.acsCommitmentSenderWatermarkStore,
+        clock,
+        ledgerApiIndexer.flatMap(_.ledgerApiStore.map(_.stringInterningView)),
+        metrics.commitments.sender,
+        persistentState.psid,
+        participantId,
+        parameters.acsCommitments.sender,
+        timeouts,
+        synchronizerLoggerFactory,
       )
 
       _ <- SyncEphemeralStateFactory.cleanupPersistentState(persistentState, synchronizerIndex)
@@ -133,7 +155,14 @@ class SyncEphemeralStateFactoryImpl(
 
       // the time tracker, note, must be shutdown in synchronizer as it is using the sequencer client to
       // request time proofs.
-      timeTracker = createTimeTracker()
+      timeTracker = SynchronizerTimeTracker(
+        synchronizerConnectionConfig.config.timeTracker,
+        clock,
+        synchronizerHandle.sequencerClient,
+        timeouts,
+        synchronizerLoggerFactory,
+      )
+      _ = synchronizerHandle.topologyClient.setSynchronizerTimeTracker(timeTracker)
 
       inFlightSubmissionSynchronizerTracker <-
         participantNodeEphemeralState.inFlightSubmissionTracker
@@ -150,6 +179,7 @@ class SyncEphemeralStateFactoryImpl(
         recordOrderPublisher,
         timeTracker,
         inFlightSubmissionSynchronizerTracker,
+        acsCommitmentSender,
         onboardingClearanceScheduler,
         persistentState,
         ledgerApiIndexer.value,

@@ -6,7 +6,6 @@ package com.digitalasset.canton.crypto
 import cats.Order
 import cats.data.EitherT
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -30,6 +29,7 @@ import com.digitalasset.canton.serialization.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -276,10 +276,15 @@ object AsymmetricEncrypted extends HasVersionedMessageCompanion[AsymmetricEncryp
       encryptedP: v30.AsymmetricEncrypted
   ): ParsingResult[AsymmetricEncrypted[T]] =
     for {
-      fingerprint <- Fingerprint.fromProtoPrimitive(encryptedP.fingerprint)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      fingerprint <- ProtoValidation.validateThen(
+        encryptedP.fingerprint,
+        "fingerprint",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
       encryptionAlgorithmSpec <- EncryptionAlgorithmSpec.fromProtoEnum(
-        "encryption_algorithm_spec",
         encryptedP.encryptionAlgorithmSpec,
+        "encryption_algorithm_spec",
       )
       ciphertext = encryptedP.ciphertext
     } yield AsymmetricEncrypted(ciphertext, encryptionAlgorithmSpec, fingerprint)
@@ -324,8 +329,8 @@ object EncryptionKeySpec extends PrettyPrintingCompanion[EncryptionKeySpec] {
   }
 
   def fromProtoEnum(
-      field: String,
       schemeP: v30.EncryptionKeySpec,
+      field: String,
   ): ParsingResult[EncryptionKeySpec] =
     schemeP match {
       case v30.EncryptionKeySpec.ENCRYPTION_KEY_SPEC_UNSPECIFIED =>
@@ -344,10 +349,10 @@ object EncryptionKeySpec extends PrettyPrintingCompanion[EncryptionKeySpec] {
       keySchemeP: v30.EncryptionKeyScheme,
   ): ParsingResult[EncryptionKeySpec] =
     EncryptionKeySpec
-      .fromProtoEnum("key_spec", keySpecP)
+      .fromProtoEnum(keySpecP, "key_spec")
       .leftFlatMap {
         case ProtoDeserializationError.FieldNotSet(_) =>
-          EncryptionKeySpec.fromProtoEnumEncryptionKeyScheme("scheme", keySchemeP)
+          EncryptionKeySpec.fromProtoEnumEncryptionKeyScheme(keySchemeP, "scheme")
         case err => Left(err)
       }
 
@@ -355,8 +360,8 @@ object EncryptionKeySpec extends PrettyPrintingCompanion[EncryptionKeySpec] {
     * compatibility with existing data.
     */
   private def fromProtoEnumEncryptionKeyScheme(
-      field: String,
       schemeP: v30.EncryptionKeyScheme,
+      field: String,
   ): ParsingResult[EncryptionKeySpec] =
     schemeP match {
       case v30.EncryptionKeyScheme.ENCRYPTION_KEY_SCHEME_UNSPECIFIED =>
@@ -424,8 +429,8 @@ object EncryptionAlgorithmSpec extends PrettyPrintingCompanion[EncryptionAlgorit
   }
 
   def fromProtoEnum(
-      field: String,
       schemeP: v30.EncryptionAlgorithmSpec,
+      field: String,
   ): ParsingResult[EncryptionAlgorithmSpec] =
     schemeP match {
       case v30.EncryptionAlgorithmSpec.ENCRYPTION_ALGORITHM_SPEC_UNSPECIFIED =>
@@ -466,22 +471,30 @@ final case class RequiredEncryptionSpecs(
 
 object RequiredEncryptionSpecs extends PrettyPrintingCompanion[RequiredEncryptionSpecs] {
   def fromProtoV30(
-      requiredEncryptionSpecsP: v30.RequiredEncryptionSpecs
+      pvv: ProtocolVersionValidation,
+      requiredEncryptionSpecsP: v30.RequiredEncryptionSpecs,
   ): ParsingResult[RequiredEncryptionSpecs] =
     for {
-      keySpecs <- requiredEncryptionSpecsP.keys.traverse(keySpec =>
-        EncryptionKeySpec.fromProtoEnum("keys", keySpec)
-      )
-      algorithmSpecs <- requiredEncryptionSpecsP.algorithms
-        .traverse(algorithmSpec =>
-          EncryptionAlgorithmSpec.fromProtoEnum("algorithms", algorithmSpec)
-        )
+      keySpecs <- ProtoValidation
+        .validateLengthThen(
+          requiredEncryptionSpecsP.keys,
+          "keys",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )(EncryptionKeySpec.fromProtoEnum)
+      algorithmSpecs <- ProtoValidation
+        .validateLengthThen(
+          requiredEncryptionSpecsP.algorithms,
+          "algorithms",
+          pvv,
+          ProtoValidation.MaxCollectionSize,
+        )(EncryptionAlgorithmSpec.fromProtoEnum)
       keySpecsNE <- NonEmpty
         .from(keySpecs.toSet)
         .toRight(
           ProtoDeserializationError.InvariantViolation(
             "keys",
-            "no required encryption algorithm specification",
+            "no required encryption key specification",
           )
         )
       algorithmSpecsNE <- NonEmpty
@@ -489,7 +502,7 @@ object RequiredEncryptionSpecs extends PrettyPrintingCompanion[RequiredEncryptio
         .toRight(
           ProtoDeserializationError.InvariantViolation(
             "algorithms",
-            "no required encryption key specification",
+            "no required encryption algorithm specification",
           )
         )
     } yield RequiredEncryptionSpecs(algorithmSpecsNE, keySpecsNE)
@@ -528,8 +541,8 @@ object SymmetricKeyScheme extends PrettyPrintingCompanion[SymmetricKeyScheme] {
   }
 
   def fromProtoEnum(
-      field: String,
       schemeP: v30.SymmetricKeyScheme,
+      field: String,
   ): ParsingResult[SymmetricKeyScheme] =
     schemeP match {
       case v30.SymmetricKeyScheme.SYMMETRIC_KEY_SCHEME_UNSPECIFIED =>
@@ -583,8 +596,8 @@ object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
 
   def fromProtoV30(keyP: v30.SymmetricKey): ParsingResult[SymmetricKey] =
     for {
-      format <- CryptoKeyFormat.fromProtoEnum("format", keyP.format)
-      scheme <- SymmetricKeyScheme.fromProtoEnum("scheme", keyP.scheme)
+      format <- CryptoKeyFormat.fromProtoEnum(keyP.format, "format")
+      scheme <- SymmetricKeyScheme.fromProtoEnum(keyP.scheme, "scheme")
       key <- SymmetricKey
         .create(format, keyP.key, scheme)
         .leftMap(err =>
@@ -783,7 +796,7 @@ object EncryptionPublicKey
       publicKeyP: v30.EncryptionPublicKey
   ): ParsingResult[EncryptionPublicKey] =
     for {
-      format <- CryptoKeyFormat.fromProtoEnum("format", publicKeyP.format)
+      format <- CryptoKeyFormat.fromProtoEnum(publicKeyP.format, "format")
       keySpec <- EncryptionKeySpec.fromProtoEnumWithDefaultScheme(
         publicKeyP.keySpec,
         publicKeyP.scheme,
@@ -924,8 +937,13 @@ object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPriva
       privateKeyP: v30.EncryptionPrivateKey
   ): ParsingResult[EncryptionPrivateKey] =
     for {
-      id <- Fingerprint.fromProtoPrimitive(privateKeyP.id)
-      format <- CryptoKeyFormat.fromProtoEnum("format", privateKeyP.format)
+      // TODO(#34479): validate the crypto key fingerprint once the negotiated pvv is threaded here.
+      id <- ProtoValidation.validateThen(
+        privateKeyP.id,
+        "id",
+        ProtocolVersionValidation.NoValidation,
+      )(Fingerprint.fromProtoPrimitive)
+      format <- CryptoKeyFormat.fromProtoEnum(privateKeyP.format, "format")
       keySpec <- EncryptionKeySpec.fromProtoEnumWithDefaultScheme(
         privateKeyP.keySpec,
         privateKeyP.scheme,

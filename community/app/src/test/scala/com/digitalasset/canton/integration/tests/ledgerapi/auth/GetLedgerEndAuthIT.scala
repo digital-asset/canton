@@ -16,7 +16,7 @@ final class GetLedgerEndAuthIT extends PublicServiceCallAuthTests {
 
   override def serviceCallName: String = "StateService#GetLedgerEnd"
 
-  private lazy val request = GetLedgerEndRequest()
+  private lazy val request = GetLedgerEndRequest(Seq())
 
   override def serviceCall(context: ServiceCallContext)(implicit
       env: TestConsoleEnvironment

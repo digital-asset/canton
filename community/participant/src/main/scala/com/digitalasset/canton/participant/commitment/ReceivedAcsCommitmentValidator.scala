@@ -100,7 +100,7 @@ class ReceivedAcsCommitmentValidatorImpl(
         .map { messages =>
           NonEmpty.from(messages) match {
             case Some(validatedMessages) =>
-              updateMetrics(validatedMessages)
+              updateMetrics(ts, validatedMessages)
               publish(Some(toReceivedAcsCommitment(ts, validatedMessages)))
             case None => publish(None)
           }
@@ -154,7 +154,10 @@ class ReceivedAcsCommitmentValidatorImpl(
       result <- AcsCommitmentProtocolMessage.verifySignature(cryptoSnapshot, message)
     } yield result
 
-  private def updateMetrics(messages: NonEmpty[Seq[AcsCommitmentProtocolMessage]]): Unit = {
+  private def updateMetrics(
+      ts: CantonTimestamp,
+      messages: NonEmpty[Seq[AcsCommitmentProtocolMessage]],
+  ): Unit = {
     val latestPeriodEnd =
       messages.maxBy1(_.acsCommitment.period.toInclusive).acsCommitment.period.toInclusive
     // TODO(#34085) Decide whether we want to label this metric by the sender
@@ -163,6 +166,11 @@ class ReceivedAcsCommitmentValidatorImpl(
     metrics.lastIncomingReceived.updateValue(
       // ACS commitments may come in any order. We therefore take the maximum of the period ends.
       _ max latestPeriodEnd.toMicros
+    )
+    metrics.receivedWatermark.updateValue(
+      // ACS commitment messages are processed asynchronously and thus unordered.
+      // We therefore take the maximum of the sequencing times.
+      _ max ts.toMicros
     )
     // TODO(#34085) Rework participant latency metrics
   }
@@ -224,7 +232,7 @@ object ReceivedAcsCommitments
   ): ParsingResult[ReceivedAcsCommitments] =
     for {
       messages <- ProtoConverter.parseRequiredNonEmpty(
-        AcsCommitmentProtocolMessage.fromTrustedByteStringPVV,
+        AcsCommitmentProtocolMessage.fromTrustedByteString,
         "commitment",
         proto.commitment,
       )

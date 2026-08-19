@@ -11,8 +11,9 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
-import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointToBeWritten
 import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Initial,
   Started,
@@ -20,18 +21,21 @@ import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Stopped,
   Stopping,
 }
-import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
+import com.digitalasset.canton.participant.store.AcsDigestStore
+import com.digitalasset.canton.participant.store.AcsDigestStore.{Checkpoint, CheckpointType}
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
-import com.digitalasset.canton.util.TryUtil
+import com.digitalasset.canton.util.{ErrorUtil, TryUtil}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ReassignmentCounter}
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.KillSwitch
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -43,11 +47,20 @@ trait BaseDigestProcessor extends NamedLogging {
 
   def synchronizerId: SynchronizerId
 
-  def isReinitializingProcessor: Boolean
-
   protected def startPipelineInternal()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[(KillSwitch, Future[Unit])]
+
+  @VisibleForTesting
+  private[canton] def metrics: CommitmentMetrics
+  protected def acsDigestStore: AcsDigestStore
+
+  def writeCheckpoint(checkpointToBeWritten: CheckpointToBeWritten)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    acsDigestStore.insertCheckpointTime(checkpointToBeWritten.toCheckpoint).map { _ =>
+      metrics.checkpointWatermark.updateValue(checkpointToBeWritten.recordTimeInclusive.toMicros)
+    }
 
   private val state: AtomicReference[DigestProcessorState] = new AtomicReference(
     Initial
@@ -237,7 +250,6 @@ object DigestProcessorState {
   final case class Stopped(reason: Try[Unit]) extends DigestProcessorState
 }
 
-// TODO(#33422) - clean up and move here only the definitions an types that is used by all children
 object BaseDigestProcessor {
 
   type Checkpointing_Input = ProcessingContext[InternalIndexService.AcsUpdate]
@@ -321,19 +333,62 @@ object BaseDigestProcessor {
   /** Defines which digests (party and participant) need to be updated with the hash of the
     * contract.
     * @param stakeholders
-    *   the parties and affected participants for which the digest needs to be updated with the hash
-    *   of the contract and the locally hosted stakeholders.
+    *   the parties for which the digest needs to be updated with the hash of the contract and the
+    *   locally hosted stakeholders.
     * @param locallyHostedStakeholders
     *   the stakeholders of the contract that are hosted by the processing participant. This
     *   collection does not contain duplicates.
     */
-  final case class AcsUpdate(
-      stakeholders: Map[LfPartyId, Set[LedgerParticipantId]],
+  final case class ContractChange(
+      stakeholders: Set[LfPartyId],
       locallyHostedStakeholders: Seq[LfPartyId],
       cid: LfContractId,
       rc: ReassignmentCounter,
       isActivation: Boolean,
+  )
+
+  /** Data type for holding multiple
+    * [[com.digitalasset.canton.participant.commitment.BaseDigestProcessor.ContractChange]]s.
+    * @param partyHostings
+    *   The participants hosting parties. All parties that are stakeholders of [[changes]], and only
+    *   those parties, must have an entry in the map, even if the party is not hosted on any
+    *   participant.
+    * @param changes
+    *   The contract changes for stakeholders mentioned in [[partyHostings]].
+    */
+  final case class ContractChangeBatch private (
+      partyHostings: Map[LfPartyId, Set[LedgerParticipantId]],
+      changes: immutable.Iterable[ContractChange],
   ) extends Classification
+
+  object ContractChangeBatch {
+    def create(
+        partyHostings: Map[LfPartyId, Set[LedgerParticipantId]],
+        changes: immutable.Iterable[ContractChange],
+        enableConsistencyChecks: Boolean,
+    )(implicit elc: ErrorLoggingContext): ContractChangeBatch = {
+      if (enableConsistencyChecks) {
+        val allStakeholders = changes.iterator.flatMap(_.stakeholders).toSet
+        val hostedParties = partyHostings.keySet
+
+        ErrorUtil.requireArgument(
+          allStakeholders == hostedParties,
+          s"""Not all stakeholders are hosted or not all hosted parties are stakeholders:
+           |all stakeholders = $allStakeholders
+           |hosted parties = $hostedParties
+           |contract changes = $changes""".stripMargin,
+        )
+      }
+      ContractChangeBatch(partyHostings, changes)
+    }
+
+    @VisibleForTesting
+    def tryCreate(
+        partyHostings: Map[LfPartyId, Set[LedgerParticipantId]],
+        changes: ContractChange*
+    )(implicit elc: ErrorLoggingContext): ContractChangeBatch =
+      create(partyHostings, changes, enableConsistencyChecks = true)
+  }
 
   /** When a party is being onboarded to a participant.
     */
@@ -361,14 +416,47 @@ object BaseDigestProcessor {
       override val participant: LedgerParticipantId,
   ) extends PartyHostingChange
 
-  /** When a checkpoint has been written, meaning that all digests up to record time and offset
-    * (both inclusive) have been persisted.
+  /** When a checkpoint has been written, meaning that all digests up the offset (inclusive) have
+    * been persisted.
     */
   final case class CheckpointWritten(
       recordTimeInclusive: CantonTimestamp,
       offsetInclusive: Offset,
       checkpointType: CheckpointType,
   )
+
+  /** Used to signal that a checkpoint should be written, because all digests up to and including
+    * `offsetInclusive` have been persisted.
+    */
+  final case class CheckpointToBeWritten(
+      recordTimeInclusive: CantonTimestamp,
+      offsetInclusive: Offset,
+      checkpointType: CheckpointType,
+  ) {
+    def toCheckpointWritten: CheckpointWritten =
+      CheckpointWritten(
+        recordTimeInclusive,
+        offsetInclusive,
+        checkpointType,
+      )
+
+    def toCheckpoint: Checkpoint = Checkpoint(
+      offset = offsetInclusive,
+      recordTime = recordTimeInclusive,
+      checkpointType = checkpointType,
+    )
+  }
+
+  object CheckpointToBeWritten {
+    def apply(
+        timepoint: Timepoint,
+        checkpointType: CheckpointType,
+    ): CheckpointToBeWritten = CheckpointToBeWritten(
+      timepoint.recordTime,
+      timepoint.offset,
+      checkpointType,
+    )
+  }
 
   object CheckpointWritten {
     def apply(timepoint: Timepoint, tpe: CheckpointType): CheckpointWritten =

@@ -14,7 +14,6 @@ import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.participant.util.TimeOfRequest
 import com.digitalasset.canton.tracing.TraceContext
-import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
 
@@ -88,20 +87,11 @@ trait RequestJournalStore { this: NamedLogging =>
     */
   def prune(
       beforeInclusive: CantonTimestamp
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    pruneInternal(beforeInclusive)
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 
   /** Purges all data from the request journal.
     */
   def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
-
-  /** Deletes all request counters at or before the given timestamp. Calls to this method are
-    * idempotent, independent of the order.
-    */
-  @VisibleForTesting
-  private[store] def pruneInternal(beforeInclusive: CantonTimestamp)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit]
 
   /** Counts requests whose timestamps lie between the given timestamps (inclusive).
     *

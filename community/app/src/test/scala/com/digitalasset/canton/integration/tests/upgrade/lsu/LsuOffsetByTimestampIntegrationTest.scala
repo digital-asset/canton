@@ -54,6 +54,10 @@ class LsuOffsetByTimestampIntegrationTest extends LsuBase {
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S2M2_Config
       .withNetworkBootstrap(implicit env => new NetworkBootstrapper(EnvironmentDefinition.S1M1))
+      .addConfigTransforms(
+        // TODO(#34818) Enable the new pipeline
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline
+      )
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
         defaultEnvironmentSetup()

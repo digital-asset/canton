@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.pruning
 import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
@@ -70,7 +69,6 @@ import com.digitalasset.canton.pruning.{
   ConfigForSlowCounterParticipants,
   ConfigForSynchronizerThresholds,
 }
-import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
@@ -80,6 +78,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.HasTestCloseContext
+import com.digitalasset.canton.{protocol, *}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdString
 import com.digitalasset.nonempty.NonEmpty
@@ -320,7 +319,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   ) = {
 
     val acsCommitmentsCatchUp = Option.when(acsCommitmentsCatchUpModeEnabled)(
-      AcsCommitmentsCatchUpParameters(PositiveInt.two, PositiveInt.one)
+      AcsCommitmentsCatchUpParameters.create(PositiveInt.two, PositiveInt.one).value
     )
 
     val synchronizerCrypto = cryptoSetup(
@@ -540,6 +539,8 @@ sealed trait AcsCommitmentProcessorBaseTest
       archivals = Map.empty[LfContractId, ArchivalCommit],
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs2 = AcsChangeSupport.fromCommitSet(cs2).acsChange(Map.empty)
 
@@ -556,6 +557,8 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs4 = AcsChangeSupport
       .fromCommitSet(cs4)
@@ -580,6 +583,8 @@ sealed trait AcsCommitmentProcessorBaseTest
           reassignmentCounter2,
         )
       ),
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs7 = AcsChangeSupport.fromCommitSet(cs7).acsChange(Map.empty)
 
@@ -598,6 +603,8 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs8 =
       AcsChangeSupport
@@ -620,6 +627,8 @@ sealed trait AcsCommitmentProcessorBaseTest
       ),
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs9 = AcsChangeSupport
       .fromCommitSet(cs9)
@@ -639,6 +648,8 @@ sealed trait AcsCommitmentProcessorBaseTest
           reassignmentCounter2,
         )
       ),
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs10 = AcsChangeSupport.fromCommitSet(cs10).acsChange(Map.empty)
 
@@ -653,6 +664,8 @@ sealed trait AcsCommitmentProcessorBaseTest
         )
       ),
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs12 = AcsChangeSupport.fromCommitSet(cs12).acsChange(Map.empty)
 
@@ -793,6 +806,8 @@ sealed trait AcsCommitmentProcessorBaseTest
       archivals = Map.empty[LfContractId, ArchivalCommit],
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs2 = AcsChangeSupport.fromCommitSet(cs2).acsChange(Map.empty)
 
@@ -808,6 +823,8 @@ sealed trait AcsCommitmentProcessorBaseTest
       ),
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map.empty[LfContractId, AssignmentCommit],
+      reassignments = Nil,
+      hostedOnboardingPartiesO = None,
     )
     val acs4 = AcsChangeSupport
       .fromCommitSet(cs4)
@@ -1079,7 +1096,7 @@ class AcsCommitmentProcessorTest
           .safeToPrune_(
             cleanReplayF = FutureUnlessShutdown.pure(CantonTimestamp.MinValue),
             commitmentsPruningBound =
-              CommitmentsPruningBound.Outstanding(_ => FutureUnlessShutdown.pure(None)),
+              CommitmentsPruningBound.LastComputedAndSent(FutureUnlessShutdown.pure(None)),
             earliestInFlightSubmissionFUS = FutureUnlessShutdown.pure(None),
             sortedReconciliationIntervalsProvider =
               constantSortedReconciliationIntervalsProvider(longInterval),
@@ -1095,7 +1112,7 @@ class AcsCommitmentProcessorTest
         res <- PruningProcessor
           .safeToPrune_(
             cleanReplayF = FutureUnlessShutdown.pure(CantonTimestamp.MinValue),
-            commitmentsPruningBound = CommitmentsPruningBound.Outstanding(_ =>
+            commitmentsPruningBound = CommitmentsPruningBound.LastComputedAndSent(
               FutureUnlessShutdown.pure(Some(CantonTimestamp.MinValue))
             ),
             earliestInFlightSubmissionFUS = FutureUnlessShutdown.pure(None),
@@ -1109,26 +1126,25 @@ class AcsCommitmentProcessorTest
 
     "take checkForOutstandingCommitments flag into account" in {
       val longInterval = PositiveSeconds.tryOfDays(100)
-      val now = CantonTimestamp.now()
+      val now = CantonTimestamp.Epoch.plus(java.time.Duration.ofDays(365))
 
       val sortedReconciliationIntervalsProvider =
         constantSortedReconciliationIntervalsProvider(longInterval)
 
       def safeToPrune(
-          checkForOutstandingCommitments: Boolean
+          disabled: Boolean
       ): Future[Option[CantonTimestampSecond]] = {
-        val noOutstandingCommitmentsF
-            : CantonTimestamp => FutureUnlessShutdown[Some[CantonTimestamp]] =
-          _ => FutureUnlessShutdown.pure(Some(CantonTimestamp.MinValue))
-        val lastComputedAndSentF = FutureUnlessShutdown.pure(Some(now))
+        val commitmentsPruningBound =
+          if (disabled) CommitmentsPruningBound.DisabledLegacyAcsCommitmentProcessor
+          else
+            CommitmentsPruningBound.LastComputedAndSent(
+              FutureUnlessShutdown.pure(Some(CantonTimestamp.Epoch))
+            )
 
         PruningProcessor
           .safeToPrune_(
             cleanReplayF = FutureUnlessShutdown.pure(now),
-            commitmentsPruningBound =
-              if (checkForOutstandingCommitments)
-                CommitmentsPruningBound.Outstanding(noOutstandingCommitmentsF)
-              else CommitmentsPruningBound.LastComputedAndSent(lastComputedAndSentF),
+            commitmentsPruningBound,
             earliestInFlightSubmissionFUS = FutureUnlessShutdown.pure(None),
             sortedReconciliationIntervalsProvider =
               constantSortedReconciliationIntervalsProvider(longInterval),
@@ -1138,15 +1154,15 @@ class AcsCommitmentProcessorTest
       }
 
       for {
-        res1 <- safeToPrune(true)
-        res2 <- safeToPrune(false)
+        disabledBound <- safeToPrune(disabled = true)
+        enabledBound <- safeToPrune(disabled = false)
         sortedReconciliationIntervals <- sortedReconciliationIntervalsProvider
           .reconciliationIntervals(now)
           .failOnShutdown
-        tick = sortedReconciliationIntervals.tickBeforeOrAt(now).value
       } yield {
-        res1 shouldBe Some(CantonTimestampSecond.MinValue)
-        res2 shouldBe Some(tick)
+        disabledBound shouldBe Some(sortedReconciliationIntervals.tickBeforeOrAt(now).value)
+        enabledBound shouldBe
+          Some(sortedReconciliationIntervals.tickBeforeOrAt(CantonTimestamp.Epoch).value)
       }
     }
   }
@@ -1529,55 +1545,11 @@ class AcsCommitmentProcessorTest
       }).failOnShutdown
     }
 
-    "prevent pruning when there is no timestamp such that no commitments are outstanding" in {
-      val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
-      val acsCommitmentStore = mock[AcsCommitmentStore]
-      when(
-        acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp],
-          any[Option[SafeToPruneCommitmentState]],
-        )(
-          any[TraceContext]
-        )
-      )
-        .thenReturn(FutureUnlessShutdown.pure(None))
-      val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
-
-      for {
-        _ <- requestJournalStore.insert(
-          RequestData.clean(RequestCounter(0), CantonTimestamp.Epoch, CantonTimestamp.Epoch)
-        )
-        res <- PruningProcessor
-          .latestSafeToPruneTick(
-            requestJournalStore,
-            Some(
-              SynchronizerIndex.forSequencedUpdate(CantonTimestamp.Epoch)
-            ),
-            constantSortedReconciliationIntervalsProvider(defaultReconciliationInterval),
-            acsCommitmentStore,
-            inFlightSubmissionStore,
-            synchronizerId,
-            checkForOutstandingCommitments = true,
-          )
-      } yield {
-        res shouldEqual None
-      }
-    }
-
     "prevent pruning when there is no clean head in the request journal" in {
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
       val acsCommitmentStore = mock[AcsCommitmentStore]
-      when(
-        acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp],
-          any[Option[SafeToPruneCommitmentState]],
-        )(
-          any[TraceContext]
-        )
-      )
-        .thenAnswer { (ts: CantonTimestamp) =>
-          FutureUnlessShutdown.pure(Some(ts.min(CantonTimestamp.Epoch)))
-        }
+      when(acsCommitmentStore.lastComputedAndSent(any[TraceContext]))
+        .thenReturn(FutureUnlessShutdown.pure(Some(CantonTimestampSecond.Epoch)))
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
 
       for {
@@ -1589,7 +1561,7 @@ class AcsCommitmentProcessorTest
             acsCommitmentStore,
             inFlightSubmissionStore,
             synchronizerId,
-            checkForOutstandingCommitments = true,
+            disableLegacyAcsCommitmentProcessor = false,
           )
           .failOnShutdown
       } yield {
@@ -1613,19 +1585,12 @@ class AcsCommitmentProcessorTest
       val requestTsDelta = 20.seconds
 
       val acsCommitmentStore = mock[AcsCommitmentStore]
-      when(
-        acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp],
-          any[Option[SafeToPruneCommitmentState]],
-        )(
-          any[TraceContext]
-        )
-      )
-        .thenAnswer { (ts: CantonTimestamp) =>
+      when(acsCommitmentStore.lastComputedAndSent(any[TraceContext]))
+        .thenReturn(
           FutureUnlessShutdown.pure(
-            Some(ts.min(CantonTimestamp.Epoch.plusSeconds(JDuration.ofDays(200).getSeconds)))
+            Some(CantonTimestampSecond.ofEpochSecond(JDuration.ofDays(200).getSeconds))
           )
-        }
+        )
 
       val sortedReconciliationIntervalsProvider =
         constantSortedReconciliationIntervalsProvider(reconciliationInterval)
@@ -1665,7 +1630,7 @@ class AcsCommitmentProcessorTest
             acsCommitmentStore,
             inFlightSubmissionStore,
             synchronizerId,
-            checkForOutstandingCommitments = true,
+            disableLegacyAcsCommitmentProcessor = false,
           )
         _ <- requestJournalStore
           .insert(
@@ -1690,7 +1655,7 @@ class AcsCommitmentProcessorTest
             acsCommitmentStore,
             inFlightSubmissionStore,
             synchronizerId,
-            checkForOutstandingCommitments = true,
+            disableLegacyAcsCommitmentProcessor = false,
           )
       } yield {
         withClue("request 1:") {
@@ -1710,19 +1675,12 @@ class AcsCommitmentProcessorTest
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
       val acsCommitmentStore = mock[AcsCommitmentStore]
 
-      when(
-        acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp],
-          any[Option[SafeToPruneCommitmentState]],
-        )(
-          any[TraceContext]
-        )
-      )
-        .thenAnswer { (ts: CantonTimestamp) =>
+      when(acsCommitmentStore.lastComputedAndSent(any[TraceContext]))
+        .thenReturn(
           FutureUnlessShutdown.pure(
-            Some(ts.min(CantonTimestamp.Epoch.plusSeconds(JDuration.ofDays(200).getSeconds)))
+            Some(CantonTimestampSecond.ofEpochSecond(JDuration.ofDays(200).getSeconds))
           )
-        }
+        )
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
 
       val sortedReconciliationIntervalsProvider =
@@ -1756,7 +1714,7 @@ class AcsCommitmentProcessorTest
             acsCommitmentStore,
             inFlightSubmissionStore,
             synchronizerId,
-            checkForOutstandingCommitments = true,
+            disableLegacyAcsCommitmentProcessor = false,
           )
       } yield assertInIntervalBefore(tsCleanRequest, reconciliationInterval)(res)
     }
@@ -1772,19 +1730,12 @@ class AcsCommitmentProcessorTest
 
       val requestJournalStore = new InMemoryRequestJournalStore(loggerFactory)
       val acsCommitmentStore = mock[AcsCommitmentStore]
-      when(
-        acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp],
-          any[Option[SafeToPruneCommitmentState]],
-        )(
-          any[TraceContext]
-        )
-      )
-        .thenAnswer { (ts: CantonTimestamp) =>
+      when(acsCommitmentStore.lastComputedAndSent(any[TraceContext]))
+        .thenReturn(
           FutureUnlessShutdown.pure(
-            Some(ts.min(CantonTimestamp.Epoch.plusSeconds(JDuration.ofDays(200).getSeconds)))
+            Some(CantonTimestampSecond.ofEpochSecond(JDuration.ofDays(200).getSeconds))
           )
-        }
+        )
       val inFlightSubmissionStore = new InMemoryInFlightSubmissionStore(loggerFactory)
 
       val sortedReconciliationIntervalsProvider =
@@ -1853,7 +1804,7 @@ class AcsCommitmentProcessorTest
               acsCommitmentStore,
               inFlightSubmissionStore,
               synchronizerId,
-              checkForOutstandingCommitments = true,
+              disableLegacyAcsCommitmentProcessor = false,
             )
         res1 <- testeeSafeToPrune()
         // Now remove the timed-out submission 1 and compute the pruning point again
@@ -2307,6 +2258,8 @@ class AcsCommitmentProcessorTest
             reassignmentCounter1,
           )
         ),
+        reassignments = Nil,
+        hostedOnboardingPartiesO = None,
       )
 
       val reassignmentCounterOfArchival =
@@ -2444,6 +2397,60 @@ class AcsCommitmentProcessorTest
             case None => ()
           }
         }
+
+      "reject invalid catch-up configs during deserialization instead of throwing" in {
+        // Regression test: a malicious/malformed topology transaction carrying an out-of-range
+        // catch-up config must surface as a parse error, never as an exception escaping the
+        // deserialization path (which would wedge the sequenced event handler of every member).
+        val invalidConfigs = Seq(
+          // ambiguous: catching up with a single interval
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 1,
+            nrIntervalsToTriggerCatchup = 1,
+          ),
+          // overflow when computing the catch-up interval
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = Int.MaxValue,
+            nrIntervalsToTriggerCatchup = 2,
+          ),
+          // 65536 * 65536 = 2^32, which is exactly one past Int.MaxValue, and overflows
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 65536,
+            nrIntervalsToTriggerCatchup = 65536,
+          ),
+          // non-positive values
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 0,
+            nrIntervalsToTriggerCatchup = 5,
+          ),
+          protocol.v30.AcsCommitmentsCatchUpConfig(
+            catchupIntervalSkip = 5,
+            nrIntervalsToTriggerCatchup = -1,
+          ),
+        )
+
+        forAll(invalidConfigs) { proto =>
+          Try(AcsCommitmentsCatchUpParameters.fromProtoV30(proto)) match {
+            case scala.util.Success(Left(_)) =>
+              succeed
+            case scala.util.Success(Right(value)) =>
+              fail(s"Invalid catch-up config $proto was accepted as $value")
+            case scala.util.Failure(t) =>
+              fail(s"Deserialization of $proto threw instead of returning an error", t)
+          }
+        }
+
+        // valid configs still round-trip
+        val valid = AcsCommitmentsCatchUpParameters
+          .create(
+            PositiveInt.tryCreate(2),
+            PositiveInt.tryCreate(3),
+          )
+          .value
+        FutureUnlessShutdown.pure(
+          AcsCommitmentsCatchUpParameters.fromProtoV30(valid.toProtoV30) shouldBe Right(valid)
+        )
+      }
 
       "enter catch up mode when processing falls behind" in {
         val timeProofs = List(3L, 8, 20, 35, 59).map(CantonTimestamp.ofEpochSecond)
@@ -2660,24 +2667,6 @@ class AcsCommitmentProcessorTest
         })
       }
 
-      "catch up parameters overflow causes exception" in {
-        assertThrows[IllegalArgumentException]({
-          new AcsCommitmentsCatchUpParameters(
-            PositiveInt.tryCreate(Int.MaxValue / 2),
-            PositiveInt.tryCreate(Int.MaxValue / 2),
-          )
-        })
-      }
-
-      "catch up parameters (1,1) throws exception" in {
-        assertThrows[IllegalArgumentException]({
-          new AcsCommitmentsCatchUpParameters(
-            PositiveInt.tryCreate(1),
-            PositiveInt.tryCreate(1),
-          )
-        })
-      }
-
       "catch up with maximum reconciliation interval and catch-up parameters logs error" in {
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
@@ -2711,10 +2700,12 @@ class AcsCommitmentProcessorTest
 
             // maximum catch-up config parameters so that their multiplication is allowed
             val startConfig =
-              new AcsCommitmentsCatchUpParameters(
-                PositiveInt.tryCreate(Int.MaxValue / 8),
-                PositiveInt.tryCreate(8),
-              )
+              AcsCommitmentsCatchUpParameters
+                .create(
+                  PositiveInt.tryCreate(Int.MaxValue / 8),
+                  PositiveInt.tryCreate(8),
+                )
+                .value
             val startConfigWithValidity = SynchronizerParameters.WithValidity(
               validFrom = CantonTimestamp.MinValue,
               validUntil = Some(CantonTimestamp.MaxValue),
@@ -2804,7 +2795,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(2), PositiveInt.tryCreate(3))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(2), PositiveInt.tryCreate(3))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(CantonTimestamp.MaxValue),
@@ -2884,7 +2877,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(10), PositiveInt.tryCreate(2))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(10), PositiveInt.tryCreate(2))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(CantonTimestamp.MaxValue),
@@ -3219,7 +3214,9 @@ class AcsCommitmentProcessorTest
         )
 
         val midConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(1), PositiveInt.tryCreate(2))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(1), PositiveInt.tryCreate(2))
+            .value
         val disabledConfig = AcsCommitmentsCatchUpParameters.disabledCatchUp()
         val changedConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.last.head,
@@ -3327,7 +3324,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(changeConfigTimestamp),
@@ -3415,7 +3414,9 @@ class AcsCommitmentProcessorTest
         )
 
         val startConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(3), PositiveInt.tryCreate(1))
+            .value
         val startConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = testSequences.head.addMicros(-1),
           validUntil = Some(changeConfigTimestamp),
@@ -3423,7 +3424,9 @@ class AcsCommitmentProcessorTest
         )
 
         val changeConfig =
-          new AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(2), PositiveInt.tryCreate(1))
+          AcsCommitmentsCatchUpParameters
+            .create(PositiveInt.tryCreate(2), PositiveInt.tryCreate(1))
+            .value
         val changeConfigWithValidity = SynchronizerParameters.WithValidity(
           validFrom = changeConfigTimestamp,
           validUntil = None,

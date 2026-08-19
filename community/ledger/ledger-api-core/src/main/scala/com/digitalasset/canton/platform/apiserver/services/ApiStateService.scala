@@ -3,6 +3,9 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
+import cats.instances.either.*
+import cats.instances.seq.*
+import cats.syntax.alternative.catsSyntaxAlternativeSeparate
 import cats.syntax.traverse.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.offset_checkpoint.SynchronizerTime
@@ -22,11 +25,12 @@ import com.digitalasset.canton.ledger.api.validation.{
   FormatValidator,
   ParticipantOffsetValidator,
 }
-import com.digitalasset.canton.ledger.participant.state.SyncService
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.{
   IndexActiveContractsService as ACSBackend,
   IndexUpdateService,
 }
+import com.digitalasset.canton.ledger.participant.state.{SyncService, SynchronizerIndex}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
@@ -38,6 +42,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.shutdownAsGrpcError
 import com.digitalasset.canton.platform.config.StateServiceConfig
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission as TopologyParticipantPermission
 import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -255,23 +260,60 @@ final class ApiStateService(
   }
 
   override def getLedgerEnd(request: GetLedgerEndRequest): Future[GetLedgerEndResponse] = {
-    val ledgerEnd = updateService.currentLedgerEnd()
-    Future.successful(
-      GetLedgerEndResponse(
-        ledgerEnd.fold(0L)(_.lastOffset.unwrap),
-        ledgerEnd
-          .map(
-            _.synchronizerIndices
-              .map { case (id, index) =>
-                SynchronizerTime(id.toProtoPrimitive, Some(index.recordTime.toProtoTimestamp))
+    implicit val loggingContext: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+    val result = request.synchronizerId
+      .traverse(FieldValidator.requireSynchronizerId(_, "synchronizer_id"))
+      .fold(
+        t => Future.failed(ValidationLogger.logFailureWithTrace(logger, request, t)),
+        synchronizerIds => {
+          val ledgerEnd = updateService.currentLedgerEnd()
+          ledgerEnd match {
+            case Some(end) =>
+              val (unmatched, matched) = synchronizerIds
+                .map(sIdx =>
+                  end.synchronizerIndices
+                    .get(sIdx)
+                    .fold[Either[SynchronizerId, (SynchronizerId, SynchronizerIndex)]](Left(sIdx))(
+                      i => Right(sIdx -> i)
+                    )
+                )
+                .separate
+              if (unmatched.nonEmpty) {
+                Future.failed(
+                  RequestValidationErrors.NoRecordTimeFoundForSynchronizerId
+                    .Error(unmatched)
+                    .asGrpcError
+                )
+              } else {
+                Future.successful(
+                  GetLedgerEndResponse(
+                    ledgerEnd.fold(0L)(_.lastOffset.unwrap),
+                    matched.map { case (id, index) =>
+                      SynchronizerTime(id.toProtoPrimitive, Some(index.recordTime.toProtoTimestamp))
+                    },
+                  )
+                )
               }
-              .toSeq
-          )
-          .getOrElse(
-            Seq()
-          ),
+            case None =>
+              if (synchronizerIds.isEmpty) { // If no synchronizerIds are provided, we can return the ledger end without any synchronizer times
+                Future.successful(
+                  GetLedgerEndResponse(
+                    offset = 0L,
+                    synchronizerTimes = Seq.empty,
+                  )
+                )
+              } else {
+                Future.failed(
+                  RequestValidationErrors.NoRecordTimeFoundForSynchronizerId
+                    .Error(synchronizerIds)
+                    .asGrpcError
+                )
+              }
+          }
+        },
       )
-    )
+    result.thereafter(logger.logErrorsOnCall[GetLedgerEndResponse])
   }
 
   override def getLatestPrunedOffsets(

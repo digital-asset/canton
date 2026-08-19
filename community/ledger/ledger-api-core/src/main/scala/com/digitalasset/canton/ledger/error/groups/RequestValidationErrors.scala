@@ -19,6 +19,7 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors.{
 }
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiErrorGroup.RequestValidationErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.language.{LookupError, Reference}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -631,4 +632,22 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
           cause = s"end_inclusive is not provided when descending_order is true"
         )
   }
+
+  @Explanation("""Some of requested synchronizer ids do not have any update recorded.""")
+  @Resolution(
+    "Ensure that the requested synchronizers are or were connected to this participant and there were sequenced updates on every of the requested synchronizers. If the synchronizer was recently connected, you may need to wait for updates to be sequenced and retry."
+  )
+  object NoRecordTimeFoundForSynchronizerId
+      extends ErrorCode(
+        id = "NO_RECORD_TIME_FOUND_FOR_SYNCHRONIZER_ID",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+      ) {
+    final case class Error(synchronizerIds: Seq[SynchronizerId])(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends ContextualizedDamlError(
+          cause =
+            s"No record time found for synchronizer ids: ${synchronizerIds.view.map(_.toProtoPrimitive).mkString(", ")}"
+        )
+  }
+
 }

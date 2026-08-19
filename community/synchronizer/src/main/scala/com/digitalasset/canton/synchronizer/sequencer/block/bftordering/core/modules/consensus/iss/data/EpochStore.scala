@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoEnv
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.db.DbEpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory.InMemoryEpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
@@ -101,7 +102,7 @@ trait EpochStore[E <: Env[E]] extends AutoCloseable {
   def addOrderedBlockActionName(epochNumber: EpochNumber, blockNumber: BlockNumber): String =
     s"Add OrderedBlock $blockNumber epoch: $epochNumber"
 
-  def loadEpochProgress(activeEpochInfo: EpochInfo)(implicit
+  def loadEpochProgress(activeEpoch: EpochState.Epoch)(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[EpochInProgress]
   protected def loadEpochProgressActionName(activeEpochInfo: EpochInfo): String =

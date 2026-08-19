@@ -139,6 +139,12 @@ object DamlLfFeature {
     versionRange = VersionRange.From(v2_3),
   )
 
+  val featureStableCallStack = DamlLfFeature(
+    name = "Stable packages for CallStack types",
+    cppFlag = "DAML_STABLE_CALLSTACK",
+    versionRange = VersionRange.From(v2_3),
+  )
+
   val featurePV34 = DamlLfFeature(
     name = "LF versions supported by PV34",
     cppFlag = "DAML_PV34",
@@ -167,6 +173,7 @@ object DamlLfFeature {
     "featureExternalCall" -> featureExternalCall,
     "featureUnsafeFromInterface" -> featureUnsafeFromInterface,
     "featureExtendedCryptoPrimitives" -> featureExtendedCryptoPrimitives,
+    "featureStableCallStack" -> featureStableCallStack,
     "featurePV34" -> featurePV34,
     "featurePV35" -> featurePV35,
   )

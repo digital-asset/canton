@@ -39,8 +39,11 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil, OptionUtil}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
+  ProtocolVersionValidation,
   ReleaseVersion,
   RepresentativeProtocolVersion,
 }
@@ -102,16 +105,22 @@ object BaseQuery {
     for {
       baseQuery <- ProtoConverter.required("base_query", value)
       proposals = baseQuery.proposals
-      filterSignedKey = baseQuery.filterSignedKey
+      filterSignedKey <- ProtoValidation.validate(
+        baseQuery.filterSignedKey,
+        Some("filter_signed_key"),
+        ProtocolVersionValidation.AlwaysValidation,
+      )
       timeQuery <- TimeQuery.fromProto(baseQuery.timeQuery, "time_query")
       operationOp <- TopologyChangeOp.fromProtoV30(baseQuery.operation)
       protocolVersion <- baseQuery.protocolVersion.traverse(ProtocolVersion.fromProtoPrimitive(_))
       store <- baseQuery.store.traverse(
         grpc.TopologyStoreId.fromProtoV30(_, "store")
       )
-      clientVersion <- baseQuery.clientVersion.traverse(
-        ReleaseVersion.fromProtoPrimitive(_, "client_version")
-      )
+      clientVersion <- ProtoValidation.validateThen(
+        baseQuery.clientVersion,
+        "client_version",
+        ProtocolVersionValidation.AlwaysValidation,
+      )(ReleaseVersion.fromProtoPrimitive)
     } yield BaseQuery(
       store,
       proposals,
@@ -203,7 +212,7 @@ class GrpcTopologyManagerReadService(
       operation = context.operation.toProto,
       transactionHash = context.transactionHash,
       serial = context.serial.unwrap,
-      signedByFingerprints = context.signedBy.map(_.unwrap).toSeq,
+      signedByFingerprints = context.signedBy.map(_.unwrap.toProtoUnvalidated).toSeq,
     )
 
   // to avoid race conditions, we want to use the approximateTimestamp of the topology client.
@@ -218,7 +227,28 @@ class GrpcTopologyManagerReadService(
       None
   }
 
+  private def readFilter(field: String, value: ProtoUnvalidatedString)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, String] =
+    wrapErrUS(
+      ProtoValidation.validate(value, Some(field), ProtocolVersionValidation.AlwaysValidation)
+    )
+
   private def collectFromStoresByFilterString(
+      baseQueryProto: Option[adminProto.BaseQuery],
+      typ: TopologyMapping.Code,
+      filterStringP: ProtoUnvalidatedString,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, Seq[
+    (TransactionSearchResult, TopologyMapping)
+  ]] =
+    for {
+      filterString <- readFilter("filter_string", filterStringP)
+      res <- collectFromStoresByValidatedFilterString(baseQueryProto, typ, filterString)
+    } yield res
+
+  private def collectFromStoresByValidatedFilterString(
       baseQueryProto: Option[adminProto.BaseQuery],
       typ: TopologyMapping.Code,
       filterString: String,
@@ -310,17 +340,22 @@ class GrpcTopologyManagerReadService(
   ): Future[adminProto.ListNamespaceDelegationResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
+      filterNamespace <- readFilter("filter_namespace", request.filterNamespace)
+      filterTargetKeyFingerprint <- readFilter(
+        "filter_target_key_fingerprint",
+        request.filterTargetKeyFingerprint,
+      )
       transactions <- collectFromStores(
         request.baseQuery,
         NamespaceDelegation.code,
         idFilter = None,
-        namespaceFilter = Some(request.filterNamespace),
+        namespaceFilter = Some(filterNamespace),
       )
 
       resultsE = transactions
         .collect {
           case (result, x: NamespaceDelegation)
-              if request.filterTargetKeyFingerprint.isEmpty || x.target.fingerprint.unwrap == request.filterTargetKeyFingerprint =>
+              if filterTargetKeyFingerprint.isEmpty || x.target.fingerprint.unwrap == filterTargetKeyFingerprint =>
             (result, x)
         }
         .traverse { case (context, elem) =>
@@ -360,11 +395,12 @@ class GrpcTopologyManagerReadService(
   ): Future[adminProto.ListDecentralizedNamespaceDefinitionResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
+      filterNamespace <- readFilter("filter_namespace", request.filterNamespace)
       res <- collectFromStores(
         request.baseQuery,
         DecentralizedNamespaceDefinition.code,
         idFilter = None,
-        namespaceFilter = Some(request.filterNamespace),
+        namespaceFilter = Some(filterNamespace),
       )
     } yield {
       val results = res
@@ -386,17 +422,19 @@ class GrpcTopologyManagerReadService(
   ): Future[adminProto.ListOwnerToKeyMappingResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      transactions <- collectFromStoresByFilterString(
+      filterKeyOwnerUid <- readFilter("filter_key_owner_uid", request.filterKeyOwnerUid)
+      filterKeyOwnerType <- readFilter("filter_key_owner_type", request.filterKeyOwnerType)
+      transactions <- collectFromStoresByValidatedFilterString(
         request.baseQuery,
         OwnerToKeyMapping.code,
-        request.filterKeyOwnerUid,
+        filterKeyOwnerUid,
       )
       resultsE = transactions
         .collect {
           // topology store indexes by uid, so need to filter out the members of the wrong type
           case (result, x: OwnerToKeyMapping)
-              if x.member.filterString.startsWith(request.filterKeyOwnerUid) &&
-                (request.filterKeyOwnerType.isEmpty || request.filterKeyOwnerType == x.member.code.threeLetterId.unwrap) =>
+              if x.member.filterString.startsWith(filterKeyOwnerUid) &&
+                (filterKeyOwnerType.isEmpty || filterKeyOwnerType == x.member.code.threeLetterId.unwrap) =>
             (result, x)
         }
         .traverse { case (context, elem) =>
@@ -574,19 +612,19 @@ class GrpcTopologyManagerReadService(
       request: adminProto.ListPartyToParticipantRequest
   ): Future[adminProto.ListPartyToParticipantResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    def partyPredicate(x: PartyToParticipant) =
-      x.partyId.toProtoPrimitive.startsWith(request.filterParty)
-
-    def participantPredicate(x: PartyToParticipant) =
-      request.filterParticipant.isEmpty || x.participantIds.exists(
-        _.toProtoPrimitive.contains(request.filterParticipant)
-      )
 
     val ret = for {
-      transactions <- collectFromStoresByFilterString(
+      filterParty <- readFilter("filter_party", request.filterParty)
+      filterParticipant <- readFilter("filter_participant", request.filterParticipant)
+      partyPredicate = (x: PartyToParticipant) => x.partyId.toProtoPrimitive.startsWith(filterParty)
+      participantPredicate = (x: PartyToParticipant) =>
+        filterParticipant.isEmpty || x.participantIds.exists(
+          _.toProtoPrimitive.contains(filterParticipant)
+        )
+      transactions <- collectFromStoresByValidatedFilterString(
         request.baseQuery,
         PartyToParticipant.code,
-        request.filterParty,
+        filterParty,
       )
       resultsE = transactions
         .collect {
@@ -737,7 +775,11 @@ class GrpcTopologyManagerReadService(
     val res = for {
       baseQuery <- wrapErrUS(BaseQuery.fromProto(request.baseQuery))
       excludeTopologyMappings <- wrapErrUS(
-        request.excludeMappings.traverse(TopologyMapping.Code.fromString)
+        ProtoValidation.validateThen(
+          request.excludeMappings,
+          "exclude_mappings",
+          ProtocolVersionValidation.AlwaysValidation,
+        )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types = TopologyMapping.Code.all.diff(excludeTopologyMappings)
       storedTopologyTransactions <- listAllStoredTopologyTransactions(
@@ -758,7 +800,11 @@ class GrpcTopologyManagerReadService(
     val res = for {
       baseQuery <- wrapErrUS(BaseQuery.fromProto(request.baseQuery))
       includeTopologyMappings <- wrapErrUS(
-        request.includeMappings.traverse(TopologyMapping.Code.fromString)
+        ProtoValidation.validateThen(
+          request.includeMappings,
+          "include_mappings",
+          ProtocolVersionValidation.AlwaysValidation,
+        )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types =
         if (includeTopologyMappings.isEmpty) TopologyMapping.Code.all
@@ -795,7 +841,11 @@ class GrpcTopologyManagerReadService(
     val res = for {
       baseQuery <- wrapErrUS(BaseQuery.fromProto(request.baseQuery))
       excludeTopologyMappings <- wrapErrUS(
-        request.excludeMappings.traverse(TopologyMapping.Code.fromString)
+        ProtoValidation.validateThen(
+          request.excludeMappings,
+          "exclude_mappings",
+          ProtocolVersionValidation.AlwaysValidation,
+        )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types = TopologyMapping.Code.all.diff(excludeTopologyMappings)
       storedTopologyTransactions <- listAllStoredTopologyTransactions(
@@ -832,7 +882,11 @@ class GrpcTopologyManagerReadService(
     val res = for {
       baseQuery <- wrapErrUS(BaseQuery.fromProto(request.baseQuery))
       excludeTopologyMappings <- wrapErrUS(
-        request.excludeMappings.traverse(TopologyMapping.Code.fromString)
+        ProtoValidation.validateThen(
+          request.excludeMappings,
+          "exclude_mappings",
+          ProtocolVersionValidation.AlwaysValidation,
+        )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types = TopologyMapping.Code.all.diff(excludeTopologyMappings)
       storedTopologyTransactions <- listAllStoredTopologyTransactions(
@@ -861,11 +915,12 @@ class GrpcTopologyManagerReadService(
   private def listAllStoredTopologyTransactions(
       baseQuery: BaseQuery,
       topologyMappings: Seq[TopologyMapping.Code],
-      filterNamespace: String,
+      filterNamespaceP: ProtoUnvalidatedString,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, GenericStoredTopologyTransactions] =
     for {
+      filterNamespace <- readFilter("filter_namespace", filterNamespaceP)
       stores <- collectStores(baseQuery.store)
       results <- EitherT.right(
         stores.parTraverse { store =>
@@ -1207,6 +1262,10 @@ class GrpcTopologyManagerReadService(
   ): Future[ListLsuSequencerConnectionSuccessorResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
+      filterSuccessor <- readFilter(
+        "filter_successor_physical_synchronizer_id",
+        request.filterSuccessorPhysicalSynchronizerId,
+      )
       res <- collectFromStoresByFilterString(
         request.baseQuery,
         LsuSequencerConnectionSuccessor.code,
@@ -1214,7 +1273,7 @@ class GrpcTopologyManagerReadService(
       )
     } yield {
       val filterSuccessorPhysicalSynchronizerId =
-        OptionUtil.emptyStringAsNone(request.filterSuccessorPhysicalSynchronizerId)
+        OptionUtil.emptyStringAsNone(filterSuccessor)
       def successorPsidPredicate(mapping: LsuSequencerConnectionSuccessor) =
         filterSuccessorPhysicalSynchronizerId.fold(true)(
           _.startsWith(mapping.successorPsid.toProtoPrimitive)

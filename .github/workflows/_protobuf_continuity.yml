@@ -1,0 +1,33 @@
+name: Protobuf Continuity
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  protobuf_continuity:
+    name: Protobuf Continuity
+    runs-on: ${{ inputs.runner }}
+    env:
+      EXECUTOR_JVM_HEAP_SIZE: 2500M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      - name: Run protobuf continuity check
+        uses: ./.github/actions/sbt/execute_sbt_command
+        with:
+          cmd: protobufContinuityCheck
+          report_to_datadog: "false"
+          execution_context_size: "2"

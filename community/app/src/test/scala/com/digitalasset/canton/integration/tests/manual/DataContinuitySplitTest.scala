@@ -7,7 +7,7 @@ import cats.data.NonEmptyList
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.tests.manual.S3Synchronization.ContinuityDumpRef
 import com.digitalasset.canton.util.ReleaseUtils
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 
 import scala.annotation.nowarn
 
@@ -16,7 +16,7 @@ final class BasicDataContinuityTestPostgresShard1
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).first
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).first
 }
 
 final class BasicDataContinuityTestPostgresShard2
@@ -25,7 +25,7 @@ final class BasicDataContinuityTestPostgresShard2
   registerPlugin(plugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).second
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).second
 }
 
 final class BasicDataContinuityTestPostgresShard3
@@ -34,7 +34,7 @@ final class BasicDataContinuityTestPostgresShard3
   registerPlugin(plugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).third
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).third
 }
 
 final class BasicDataContinuityTestPostgresShard4
@@ -43,7 +43,7 @@ final class BasicDataContinuityTestPostgresShard4
   registerPlugin(plugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).fourth
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).fourth
 }
 
 final class SynchronizerChangeDataContinuityTestPostgresShard1
@@ -51,7 +51,7 @@ final class SynchronizerChangeDataContinuityTestPostgresShard1
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).first
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).first
 }
 
 final class SynchronizerChangeDataContinuityTestPostgresShard2
@@ -59,7 +59,7 @@ final class SynchronizerChangeDataContinuityTestPostgresShard2
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).second
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).second
 }
 
 final class SynchronizerChangeDataContinuityTestPostgresShard3
@@ -68,7 +68,7 @@ final class SynchronizerChangeDataContinuityTestPostgresShard3
   registerPlugin(plugin)
 
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).third
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).third
 }
 
 final class SynchronizerChangeDataContinuityTestPostgresShard4
@@ -76,7 +76,7 @@ final class SynchronizerChangeDataContinuityTestPostgresShard4
     with DataContinuityTestFixturePostgres {
   registerPlugin(plugin)
   override def dumpDirectories(): List[(ContinuityDumpRef, ProtocolVersion)] =
-    SplitReleaseVersion.split(S3Dump.getDumpDirectories()).fourth
+    SplitReleaseVersion.currentRun(S3Dump.getDumpDirectories(_)).fourth
 }
 
 /*
@@ -108,12 +108,39 @@ object SplitReleaseVersion {
 
   private val numberOfClasses = PositiveInt.tryCreate(4)
 
+  /** Set to "true" by the CI workflow on regular PR branches to restrict the run to the latest
+    * release of the current line. Full history is kept on `main` and `release-line` branches, where
+    * it is "false" or unset. See `.github/workflows/_test_data_continuity_dumps.yml`.
+    */
+  private val latestReleaseOnly: Boolean =
+    sys.env.get("DATA_CONTINUITY_LATEST_ONLY").exists(_.equalsIgnoreCase("true"))
+
   final case class Split(
       first: List[(ContinuityDumpRef, ProtocolVersion)],
       second: List[(ContinuityDumpRef, ProtocolVersion)],
       third: List[(ContinuityDumpRef, ProtocolVersion)],
       fourth: List[(ContinuityDumpRef, ProtocolVersion)],
   )
+
+  /** Splits the dumps for this CI run into the four shard classes: the full history by default, or
+    * just the latest release of the current line when the run is scoped down (regular PRs).
+    *
+    * `fetchDumps` is supplied by the caller because the dump source (`S3Dump`) is a member of the
+    * `S3Synchronization` test trait and is only in scope inside the test classes, not in this
+    * object. It is called with the `(major, minor)` line to scope to, or `None` for full history.
+    *
+    * A scoped run finds no dumps when the current line has not been released yet, in which case
+    * there is no prior release to check continuity against and the run legitimately no-ops. Full
+    * runs are left to fail loudly via `split` if the S3 listing ever comes back empty, since that
+    * would signal a misconfiguration rather than a not-yet-released line.
+    */
+  def currentRun(
+      fetchDumps: Option[(Int, Int)] => List[(ContinuityDumpRef, ProtocolVersion)]
+  ): Split = {
+    val dumps = fetchDumps(Option.when(latestReleaseOnly)(ReleaseVersion.current.majorMinor))
+    if (latestReleaseOnly && dumps.isEmpty) Split(Nil, Nil, Nil, Nil)
+    else split(dumps)
+  }
 
   @nowarn("msg=match may not be exhaustive")
   def split(allDumpDirectories: List[(ContinuityDumpRef, ProtocolVersion)]): Split = {

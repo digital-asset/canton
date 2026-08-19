@@ -3,46 +3,35 @@
 
 package com.digitalasset.canton.participant.event
 
+import com.digitalasset.canton.LfPartyId
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
   AcsChangeFactory,
   AcsChangeFactoryImpl,
   ContractStakeholdersAndReassignmentCounter,
 }
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.nonempty.NonEmpty
 
 /** Components that need to keep a running snapshot of ACS.
   */
 trait AcsChangeListener {
-
-  /** ACS change notification. Any response logic needs to happen in the background. The ACS change
-    * set may be empty, (e.g., in case of time proofs).
-    *
-    * @param toc
-    *   time of the change
-    * @param acsChange
-    *   active contract set change descriptor
-    */
-  def publish(toc: RecordTime, acsChange: AcsChange)(implicit
-      traceContext: TraceContext,
-      closeContext: CloseContext,
-  ): Unit
-
-  def publish(acsChanges: NonEmpty[Seq[(RecordTime, AcsChange)]])(implicit
-      traceContext: TraceContext,
-      closeContext: CloseContext,
-  ): FutureUnlessShutdown[Unit]
 
   def publish(toc: RecordTime, acsChangeFactoryO: Option[AcsChangeFactory])(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
   ): Unit
 
+  /** Publish to trigger for LSU upgrade time. Should be called only at logical synchronizer upgrade
+    * time.
+    */
+  def publishForUpgradeTime(
+      upgradeTime: CantonTimestamp
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): Unit
 }
 
 object AcsChangeSupport extends HasLoggerName {
@@ -71,37 +60,53 @@ object AcsChangeSupport extends HasLoggerName {
   def fromCommitSet(
       commitSet: CommitSet
   )(implicit loggingContext: NamedLoggingContext): AcsChangeFactory = {
-    /* Temporary maps built to easily remove the transient contracts from activate and deactivate the common contracts.
+    /* Temporary maps built to easily remove the transient contracts from activations, deactivations, and archival deactivations
+       and remove contracts of which all hosted stakeholders are onboarding parties.
        The keys are made of the contract id and reassignment counter.
        An unassignment with reassignment counter c cancels out an assignment / create with reassignment counter c-1.
        Thus, to be able to match active contracts that are being deactivated, we decrement the reassignment counters for unassignments.
        We *do not* need to decrement the reassignment counter for archives, because we already obtain each archival's
        reassignment counter from the last create / assign event on that contract.
      */
-    val tmpActivations = commitSet.creations.map { case (contractId, data) =>
-      contractId -> ContractStakeholdersAndReassignmentCounter(
-        data.contractMetadata.stakeholders,
-        data.reassignmentCounter,
+
+    // Exclude contracts if there are onboarding hosted parties and all hosted contract stakeholders are onboarding.
+    // This filter excludes activeness changes whose hosted stakeholders are all onboarding parties and in such cases
+    // helps ensure that "fully" hosted non-stakeholder informees witness the corresponding change as a ledger effect
+    // rather than an ACS delta. AcsChangeFactory.contractActivenessChanged(cid) returning false causes the indexer to
+    // treat corresponding exercises and creates as witnessed events.
+    def excludeForPartyOnboarding(stakeholders: Set[LfPartyId]): Boolean =
+      commitSet.hostedOnboardingPartiesO.fold(false)(
+        _.hostedPartiesIfAllOnboarding(stakeholders).nonEmpty
       )
-    } ++ commitSet.assignments.map { case (contractId, data) =>
-      contractId -> ContractStakeholdersAndReassignmentCounter(
-        data.contractMetadata.stakeholders,
-        data.reassignmentCounter,
-      )
+
+    val tmpActivations = commitSet.creations.collect {
+      case (contractId, data) if !excludeForPartyOnboarding(data.contractMetadata.stakeholders) =>
+        contractId -> ContractStakeholdersAndReassignmentCounter(
+          data.contractMetadata.stakeholders,
+          data.reassignmentCounter,
+        )
+    } ++ commitSet.assignments.collect {
+      case (contractId, data) if !excludeForPartyOnboarding(data.contractMetadata.stakeholders) =>
+        contractId -> ContractStakeholdersAndReassignmentCounter(
+          data.contractMetadata.stakeholders,
+          data.reassignmentCounter,
+        )
     }
 
     /*
     Subtracting the reassignment counter of unassignments to correctly match deactivated contracts as explained above
      */
-    val tmpUnassignments = commitSet.unassignments.map { case (contractId, data) =>
-      contractId -> ContractStakeholdersAndReassignmentCounter(
-        data.stakeholders,
-        data.reassignmentCounter - 1,
-      )
+    val tmpUnassignments = commitSet.unassignments.collect {
+      case (contractId, data) if !excludeForPartyOnboarding(data.stakeholders) =>
+        contractId -> ContractStakeholdersAndReassignmentCounter(
+          data.stakeholders,
+          data.reassignmentCounter - 1,
+        )
     }
 
-    val tmpArchivals = commitSet.archivals.collect { case (contractId, data) =>
-      contractId -> data.stakeholders
+    val tmpArchivals = commitSet.archivals.collect {
+      case (contractId, data) if !excludeForPartyOnboarding(data.stakeholders) =>
+        contractId -> data.stakeholders
     }
 
     val transient = tmpActivations.keySet.intersect((tmpArchivals ++ tmpUnassignments).keySet)

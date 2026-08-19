@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
@@ -13,6 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.Se
   PeerConnectionStatus,
   PeerEndpointHealth,
   PeerEndpointHealthStatus,
+  PeerNetworkStatus,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
@@ -48,7 +50,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkManager,
   P2PNetworkRef,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.BftNodeShuffler
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.{
   BftOrderingMessage,
   BftOrderingMessageBody,
@@ -85,8 +86,6 @@ final class P2PNetworkOutModule[
     with P2PConnectionEventListener {
 
   private val connectedP2PEndpointIds = mutable.Set.empty[P2PEndpoint.Id]
-
-  private val nodeShuffler = new BftNodeShuffler(random)
 
   val p2pNetworkManager: P2PNetworkManagerT =
     dependencies.createP2PNetworkManager(this, dependencies.p2pNetworkIn)
@@ -128,11 +127,15 @@ final class P2PNetworkOutModule[
         startModulesIfNeeded()
 
       case P2PNetworkOut.Internal.Connect(p2pEndpoint) =>
-        logger.info("Connecting to operator-added P2P endpoint " + p2pEndpoint.id)
+        logger.info(
+          s"Operator added P2P endpoint ${p2pEndpoint.id}, ensuring outgoing connectivity to it"
+        )
         ensureSendingEnabledTo(P2PAddress.Endpoint(p2pEndpoint))
 
       case P2PNetworkOut.Internal.Disconnect(p2pEndpointId) =>
-        logger.info("Disconnecting from operator-removed P2P endpoint " + p2pEndpointId)
+        logger.info(
+          s"Operator removed P2P endpoint $p2pEndpointId, disconnecting from it if outgoing"
+        )
         disconnect(p2pEndpointId)
 
       case P2PNetworkOut.Network.Connected(maybeP2pEndpointId) =>
@@ -141,13 +144,19 @@ final class P2PNetworkOutModule[
             s"P2P endpoint ${maybeP2pEndpointId.map(_.toString).getOrElse("<incoming connection>")} " +
               s"is now connected"
           )
-          emitConnectionStateMetricsAndLogEndpointsStatus(notifyMempool = false)
+          emitConnectionStateMetricsAndLogEndpointsStatus(
+            getPeerNetworkStatus(),
+            notifyMempool = false,
+          )
         }
 
       case P2PNetworkOut.Network.Disconnected(p2pEndpointId) =>
         if (connectedP2PEndpointIds.remove(p2pEndpointId)) {
           logger.info(s"P2P endpoint $p2pEndpointId is now disconnected")
-          emitConnectionStateMetricsAndLogEndpointsStatus(notifyMempool = true)
+          emitConnectionStateMetricsAndLogEndpointsStatus(
+            getPeerNetworkStatus(),
+            notifyMempool = true,
+          )
         }
 
       case P2PNetworkOut.Network.Authenticated(bftNodeId, maybeP2PEndpoint) =>
@@ -159,16 +168,19 @@ final class P2PNetworkOutModule[
         )
         maybeP2PEndpointId.foreach(connectedP2PEndpointIds.add(_).discard)
         ensureSendingEnabledTo(P2PAddress.NodeId(bftNodeId, maybeP2PEndpoint))
-        emitConnectionStateMetricsAndLogEndpointsStatus(notifyMempool = true)
+        val peerNetworkStatus = getPeerNetworkStatus()
+        emitConnectionStateMetricsAndLogEndpointsStatus(peerNetworkStatus, notifyMempool = true)
         maxNodesContemporarilyAuthenticated = Math.max(
           maxNodesContemporarilyAuthenticated,
-          getAuthenticatedCountIncludingSelf(),
+          getAuthenticatedCountIncludingSelf(peerNetworkStatus),
         )
         startModulesIfNeeded()
 
       case P2PNetworkOut.Network.TopologyUpdate(newMembership) =>
         membership = newMembership
-        sendConnectivityUpdateToMempool()
+        val peerNetworkStatus = getPeerNetworkStatus()
+        sendConnectivityUpdateToMempool(peerNetworkStatus)
+        logQuorumInfo(peerNetworkStatus)
 
       case P2PNetworkOut.Multicast(message, recipientBftNodeIds) =>
         recipientBftNodeIds.toSeq.sorted // For determinism
@@ -176,34 +188,39 @@ final class P2PNetworkOutModule[
 
       case P2PNetworkOut.SendToRandomAuthenticated(
             message,
-            possibleRecipients,
+            firstChoiceRecipientsPool,
+            secondChoiceRecipientsPool,
             workflowIdO,
-            nodeThatFailedO,
-            onRecipientDecision,
+            nodesThatFailed,
+            onRecipientsDecision,
+            howManyRecipients,
           ) =>
         val now = clock.now.toInstant
         updateBlacklists(
           workflowIdO,
-          nodeThatFailedO,
+          nodesThatFailed,
           now,
-          possibleRecipients,
+          firstChoiceRecipientsPool,
           message,
         )
         workflowIdO.foreach(expireWorkflowBlacklist(now, _))
-        val blackListed = getBlacklisted(workflowIdO, possibleRecipients, message)
-        val authenticatedNodeIds = getAuthenticatedNodeIds(getStatus())
-        val recipientNodeIdO =
-          selectRecipient(
+        val blackListed = getBlacklisted(workflowIdO, firstChoiceRecipientsPool, message)
+        val authenticatedNodeIds = getAuthenticatedNodeIds(getPeerNetworkStatus())
+        val recipientNodeIds =
+          selectRecipients(
             workflowIdO,
-            possibleRecipients,
+            firstChoiceRecipientsPool,
+            secondChoiceRecipientsPool,
             authenticatedNodeIds,
             blackListed,
             message,
+            howManyRecipients,
           )
-        try onRecipientDecision.foreach(_(recipientNodeIdO))
+        recipientNodeIds.foreach(sendIfKnown(_, message))
+        try onRecipientsDecision.foreach(_(recipientNodeIds))
         catch {
           case scala.util.control.NonFatal(e) =>
-            logger.warn("`onRecipientDecision` callback failed", e)
+            logger.warn("`onRecipientsDecision` callback failed", e)
         }
 
       case P2PNetworkOut.EndWorkflow(workflowId) =>
@@ -216,9 +233,38 @@ final class P2PNetworkOutModule[
         processAdminMessage(admin)
     }
 
+  private def logQuorumInfo(
+      peerNetworkStatus: PeerNetworkStatus
+  )(implicit traceContext: TraceContext): Unit = {
+    val weakQuorum = membership.orderingTopology.weakQuorum
+    val strongQuorum = membership.orderingTopology.strongQuorum
+    val authenticatedNodesCount = getAuthenticatedCountIncludingSelf(peerNetworkStatus)
+    if (authenticatedNodesCount < weakQuorum) {
+      logWhenQuorumOK = true
+      logger.info(
+        s"Authenticated P2P nodes count (including this node) $authenticatedNodesCount is currently below " +
+          s"weak quorum size $weakQuorum, dissemination and ordering may not be able to proceed " +
+          "until more nodes are authenticated"
+      )
+    } else if (authenticatedNodesCount < strongQuorum) {
+      logWhenQuorumOK = true
+      logger.info(
+        s"Authenticated P2P nodes count (including this node) $authenticatedNodesCount is currently below " +
+          s"strong quorum size $strongQuorum, ordering may not be able to proceed " +
+          "until more nodes are authenticated"
+      )
+    } else if (logWhenQuorumOK) {
+      logWhenQuorumOK = false
+      logger.info(
+        s"Authenticated P2P nodes count (including this node) $authenticatedNodesCount is now again above " +
+          s"strong quorum size $strongQuorum"
+      )
+    }
+  }
+
   private def updateBlacklists(
       workflowIdO: Option[WorkflowId],
-      nodeThatFailedO: Option[BftNodeId],
+      nodesThatFailed: Seq[BftNodeId],
       now: Instant,
       possibleRecipients: Seq[BftNodeId],
       message: BftOrderingNetworkMessage,
@@ -227,22 +273,23 @@ final class P2PNetworkOutModule[
       workflowBlacklists.updateWith(workflowId) { (blacklistO: Option[Map[BftNodeId, Instant]]) =>
         if (blacklistO.isEmpty)
           logger.info(s"New workflow $workflowId started")
-        nodeThatFailedO.fold[Option[Map[BftNodeId, Instant]]] {
+        if (nodesThatFailed.isEmpty) {
           logger.debug(
             s"Sending message `${message.getClass.getSimpleName}` to random authenticated " +
               s"node among $possibleRecipients with workflow ID $workflowId (not a retry), " +
               s"keeping blacklist $blacklistO"
           )
           blacklistO.fold(Some(Map.empty[BftNodeId, Instant]))(blacklist => Some(blacklist))
-        } { nodeThatFailed =>
+        } else {
           logger.info(
             s"Retrying to send message `${message.getClass.getSimpleName}` to random authenticated " +
               s"node among $possibleRecipients with workflow ID $workflowId, " +
-              s"adding last node used $nodeThatFailed to blacklist $blacklistO (or refreshing " +
+              s"adding last node used $nodesThatFailed to blacklist $blacklistO (or refreshing " +
               "its last failure time if already present)"
           )
-          blacklistO.fold(Some(Map(nodeThatFailed -> now)))(blacklist =>
-            Some(blacklist + (nodeThatFailed -> now))
+          val nodesThatFailedWithFailureInstant = nodesThatFailed.map(_ -> now)
+          blacklistO.fold(Some(Map.from(nodesThatFailedWithFailureInstant)))(blacklist =>
+            Some(blacklist ++ nodesThatFailedWithFailureInstant)
           )
         }
       }
@@ -294,48 +341,75 @@ final class P2PNetworkOutModule[
       blacklist
     }
 
-  private def selectRecipient(
+  @SuppressWarnings(Array("org.wartremover.warts.Return", "org.wartremover.warts.Var"))
+  private def selectRecipients(
       workflowIdO: Option[WorkflowId],
-      possibleRecipients: Seq[BftNodeId],
+      firstChoiceRecipientsPool: Seq[BftNodeId],
+      secondChoiceRecipientsPoolO: Option[Seq[BftNodeId]],
       authenticatedNodeIds: Seq[BftNodeId],
       blackListed: Set[BftNodeId],
       message: BftOrderingNetworkMessage,
-  )(implicit traceContext: TraceContext): Option[BftNodeId] = {
-    val candidatesBeforeBlacklist = authenticatedNodeIds.intersect(possibleRecipients)
-    nodeShuffler
-      .shuffle(candidatesBeforeBlacklist.diff(blackListed.toSeq))
-      .headOption
-      .fold[Option[BftNodeId]] {
-        // Falling back to a blacklisted node if all possible recipients are blacklisted
-        nodeShuffler
-          .shuffle(candidatesBeforeBlacklist)
-          .headOption
-          .fold[Option[BftNodeId]] {
-            logger.info(
-              s"No authenticated nodes available among $possibleRecipients " +
-                s"(even not excluding blacklisted $blackListed for workflow $workflowIdO) " +
-                s"to send random unicast message `${message.getClass.getSimpleName}` to (yet?)"
-            )
-            None
-          } { recipientNodeId =>
-            logger.debug(
-              s"Sending message `${message.getClass.getSimpleName}` to random authenticated node $recipientNodeId " +
-                s"among $possibleRecipients (all of which are blacklisted $blackListed for workflow $workflowIdO, " +
-                s"all authenticated nodes: $authenticatedNodeIds)"
-            )
-            sendIfKnown(recipientNodeId, message)
-            Some(recipientNodeId)
-          }
-      } { recipientNodeId =>
-        logger.debug(
-          s"Sending message `${message.getClass.getSimpleName}` " +
-            s"to random authenticated node $recipientNodeId among $possibleRecipients " +
-            s"(excluding $blackListed for workflow $workflowIdO, " +
-            s"all authenticated nodes: $authenticatedNodeIds)"
-        )
-        sendIfKnown(recipientNodeId, message)
-        Some(recipientNodeId)
-      }
+      howManyRecipients: PositiveInt,
+  )(implicit traceContext: TraceContext): Seq[BftNodeId] = {
+    val firstChoiceAuthenticatedOnlyCandidates =
+      authenticatedNodeIds
+        .intersect(firstChoiceRecipientsPool)
+    val blacklistedSeq = blackListed.toSeq
+    val firstChoiceAuthenticatedAndNotBlacklistedCandidates =
+      firstChoiceAuthenticatedOnlyCandidates.diff(blacklistedSeq)
+    val howManyRecipientsInt = howManyRecipients.value
+    val firstChoiceSelected =
+      random
+        .shuffle(firstChoiceAuthenticatedAndNotBlacklistedCandidates)
+        .take(howManyRecipientsInt)
+    if (firstChoiceSelected.sizeIs == howManyRecipientsInt)
+      return firstChoiceSelected.sorted
+
+    var remainingHowMany = howManyRecipientsInt - firstChoiceSelected.size
+    val secondChoiceRecipientsPool = secondChoiceRecipientsPoolO.getOrElse(Seq.empty)
+    val secondChoiceAuthenticatedOnlyCandidates =
+      authenticatedNodeIds
+        .intersect(secondChoiceRecipientsPool)
+    val secondChoiceAuthenticatedAndNotBlacklistedCandidates =
+      secondChoiceAuthenticatedOnlyCandidates.diff(blacklistedSeq)
+    val secondChoiceSelected =
+      random
+        .shuffle(secondChoiceAuthenticatedAndNotBlacklistedCandidates)
+        .take(remainingHowMany)
+    val firstOrSecondChoiceSelected = firstChoiceSelected ++ secondChoiceSelected
+    if (firstOrSecondChoiceSelected.sizeIs == howManyRecipientsInt)
+      return firstOrSecondChoiceSelected.sorted
+
+    remainingHowMany = howManyRecipientsInt - firstOrSecondChoiceSelected.size
+    val messageType = message.getClass.getSimpleName
+
+    def logPartialRecipientSelection(recipients: Seq[BftNodeId]): Unit =
+      logger.info(
+        "Not enough authenticated and whitelisted nodes available " +
+          s"($howManyRecipients requested, $remainingHowMany remaining) " +
+          s"among $firstChoiceRecipientsPool nor " +
+          s"$secondChoiceRecipientsPoolO to send message of type `$messageType` to, " +
+          s"(send blacklist for workflow $workflowIdO = $blackListed) " +
+          s"falling back to $recipients among authenticated candidate in either list, " +
+          s"(all authenticated nodes = $authenticatedNodeIds)"
+      )
+
+    val anyOtherAuthenticatedCandidates =
+      (firstChoiceAuthenticatedOnlyCandidates ++ secondChoiceAuthenticatedOnlyCandidates).diff(
+        firstOrSecondChoiceSelected
+      )
+    if (anyOtherAuthenticatedCandidates.nonEmpty) {
+      val recipients =
+        (firstOrSecondChoiceSelected ++ random
+          .shuffle(anyOtherAuthenticatedCandidates)
+          .take(remainingHowMany)).sorted
+      logPartialRecipientSelection(recipients)
+      return recipients
+    }
+
+    val recipients = firstOrSecondChoiceSelected.sorted
+    logPartialRecipientSelection(recipients)
+    firstOrSecondChoiceSelected
   }
 
   private def sendIfKnown(
@@ -383,7 +457,7 @@ final class P2PNetworkOutModule[
         locally {
           logger.trace(s"Sending network message to $recipientBftNodeId: $message")
           implicit val mc: MetricsContext = mc1
-          networkSend(ref, serializedMessage)
+          networkSend(recipientBftNodeId, ref, serializedMessage)
           emitSendStats(metrics, serializedMessage)
         }
       }
@@ -470,13 +544,10 @@ final class P2PNetworkOutModule[
         }
 
       case Admin.GetStatus(callback, p2pEndpointIds) =>
-        logger.info(
-          s"Operator requested status for P2P endpoints ${p2pEndpointIds.getOrElse("<all>")}"
-        )
-        callback(getStatus(p2pEndpointIds))
+        callback(getPeerNetworkStatus(p2pEndpointIds))
     }
 
-  private def getStatus(
+  private def getPeerNetworkStatus(
       p2pEndpointIds: Option[Iterable[P2PEndpoint.Id]] = None
   )(implicit
       context: E#ActorContextT[P2PNetworkOut.Message],
@@ -609,10 +680,14 @@ final class P2PNetworkOutModule[
   }
 
   private def networkSend(
+      recipientBftNodeId: BftNodeId,
       ref: P2PNetworkRef[BftOrderingMessage],
       message: BftOrderingMessageBody,
   )(implicit traceContext: TraceContext, mc: MetricsContext): Unit =
-    ref.asyncP2PSend(maybeNetworkSendInstant => messageToSend(message, maybeNetworkSendInstant))
+    ref.asyncP2PSend(
+      recipientBftNodeId,
+      maybeNetworkSendInstant => messageToSend(message, maybeNetworkSendInstant),
+    )
 
   private def messageToSend(
       message: BftOrderingMessageBody,
@@ -662,28 +737,34 @@ final class P2PNetworkOutModule[
       p2pEndpointId: P2PEndpoint.Id
   )(implicit context: E#ActorContextT[P2PNetworkOut.Message], traceContext: TraceContext): Unit = {
     logger.info(
-      s"Disconnecting P2P endpoint $p2pEndpointId ('${p2pConnectionState.getBftNodeId(p2pEndpointId).getOrElse("<unknown node ID>")}'"
+      s"Disconnecting P2P endpoint $p2pEndpointId " +
+        s"('${p2pConnectionState.getBftNodeId(p2pEndpointId).getOrElse("<unknown node ID>")}')"
     )
     p2pNetworkManager.shutdownOutgoingConnection(p2pEndpointId)
     connectedP2PEndpointIds.remove(p2pEndpointId).discard
-    emitConnectionStateMetricsAndLogEndpointsStatus(notifyMempool = true)
+    emitConnectionStateMetricsAndLogEndpointsStatus(getPeerNetworkStatus(), notifyMempool = true)
   }
 
-  private def emitConnectionStateMetricsAndLogEndpointsStatus(notifyMempool: Boolean)(implicit
-      context: E#ActorContextT[P2PNetworkOut.Message],
+  private def emitConnectionStateMetricsAndLogEndpointsStatus(
+      peerNetworkStatus: PeerNetworkStatus,
+      notifyMempool: Boolean,
+  )(implicit
       mc: MetricsContext,
       traceContext: TraceContext,
   ): Unit = {
-    val status = getStatus()
-    val authenticatedCount = getAuthenticatedNodeIds(status).size
-    val connectedCount = getConnectedPeersCount(status)
+    if (notifyMempool)
+      sendConnectivityUpdateToMempool(peerNetworkStatus)
+    val authenticatedCount = getAuthenticatedNodeIds(peerNetworkStatus).size
+    val connectedCount = getConnectedPeersCount(peerNetworkStatus)
     emitConnectedCount(metrics, connectedCount)
     emitAuthenticatedCount(metrics, authenticatedCount)
-    logEmitForwardP2PStatus(status, notifyMempool)
+    metrics.p2p.update(peerNetworkStatus)
+    logger.info(s"New P2P network status: $peerNetworkStatus")
+    logQuorumInfo(peerNetworkStatus)
   }
 
-  private def getConnectedPeersCount(status: SequencerBftAdminData.PeerNetworkStatus) =
-    status.endpointStatuses.count {
+  private def getConnectedPeersCount(peerNetworkStatus: PeerNetworkStatus) =
+    peerNetworkStatus.endpointStatuses.count {
       case PeerConnectionStatus.PeerEndpointStatus(
             _,
             _,
@@ -697,10 +778,8 @@ final class P2PNetworkOutModule[
       case _ => false
     }
 
-  private def getAuthenticatedNodeIds(
-      status: SequencerBftAdminData.PeerNetworkStatus
-  ): Seq[BftNodeId] =
-    status.endpointStatuses
+  private def getAuthenticatedNodeIds(peerNetworkStatus: PeerNetworkStatus): Seq[BftNodeId] =
+    peerNetworkStatus.endpointStatuses
       .collect {
         case PeerConnectionStatus.PeerEndpointStatus(
               _,
@@ -717,28 +796,17 @@ final class P2PNetworkOutModule[
       .distinct
       .sorted // For output determinism and easier testing
 
-  private def getAuthenticatedCountIncludingSelf()(implicit
-      context: E#ActorContextT[P2PNetworkOut.Message],
-      traceContext: TraceContext,
-  ): Int =
-    getAuthenticatedNodeIds(getStatus()).size + 1
+  private def getAuthenticatedCountIncludingSelf(peerNetworkStatus: PeerNetworkStatus): Int =
+    getAuthenticatedNodeIds(peerNetworkStatus).size + 1
 
-  private def logEmitForwardP2PStatus(
-      status: SequencerBftAdminData.PeerNetworkStatus,
-      notifyMempool: Boolean,
-  )(implicit context: E#ActorContextT[P2PNetworkOut.Message], traceContext: TraceContext): Unit = {
-    if (notifyMempool)
-      sendConnectivityUpdateToMempool()
-    metrics.p2p.update(status)
-    logger.info(s"P2P endpoints status: $status")
-  }
-
-  private def sendConnectivityUpdateToMempool()(implicit
-      context: E#ActorContextT[P2PNetworkOut.Message],
-      traceContext: TraceContext,
+  private def sendConnectivityUpdateToMempool(peerNetworkStatus: PeerNetworkStatus)(implicit
+      traceContext: TraceContext
   ): Unit =
     dependencies.mempool.asyncSend(
-      Mempool.P2PConnectivityUpdate(membership, getAuthenticatedCountIncludingSelf())
+      Mempool.P2PConnectivityUpdate(
+        membership,
+        getAuthenticatedCountIncludingSelf(peerNetworkStatus),
+      )
     )
 }
 
@@ -758,6 +826,7 @@ private[bftordering] object P2PNetworkOutModule {
     var consensusStarted = false
     var outputStarted = false
     var pruningStarted = false
+    var logWhenQuorumOK = false
 
     // We want to track the maximum number of contemporarily authenticated nodes,
     //  because the threshold actions will be used by protocol modules to know when

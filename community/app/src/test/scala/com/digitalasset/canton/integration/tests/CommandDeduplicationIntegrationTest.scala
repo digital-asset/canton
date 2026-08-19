@@ -827,6 +827,8 @@ abstract class CommandDeduplicationPruningIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
+        // TODO(#34818) Enable the new pipeline
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
       )
       .withSetup { implicit env =>
         import env.*

@@ -375,7 +375,7 @@ class LedgerApiOtelIT extends LedgerApiOtelITBase {
       testStreamingService[CompletionStreamResponse](
         submissionService,
         stateService
-          .getLedgerEnd(GetLedgerEndRequest())
+          .getLedgerEnd(GetLedgerEndRequest(Seq()))
           .map(_.offset)(_),
         (party, offset) =>
           completionService.completionStream(
@@ -449,7 +449,7 @@ class LedgerApiOtelIT extends LedgerApiOtelITBase {
       testStreamingService[GetUpdatesResponse](
         submissionService,
         stateService
-          .getLedgerEnd(GetLedgerEndRequest())
+          .getLedgerEnd(GetLedgerEndRequest(Seq()))
           .map(_.offset)(_),
         (party, offset) =>
           updateService.getUpdates(

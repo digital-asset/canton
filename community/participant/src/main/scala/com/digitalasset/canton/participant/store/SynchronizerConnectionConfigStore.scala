@@ -7,12 +7,14 @@ import cats.data.EitherT
 import cats.syntax.apply.*
 import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.SynchronizerPredecessor
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
   AtMostOnePhysicalActive,
+  AtMostOnePhysicalLsuTarget,
+  ConfigIdentifier,
   Error,
   InconsistentPredecessorLogicalSynchronizerIds,
   MissingConfigForSynchronizer,
@@ -32,6 +34,7 @@ import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{
   ConfiguredPhysicalSynchronizerId,
+  KnownPhysicalSynchronizerId,
   PhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
@@ -42,6 +45,7 @@ import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.digitalasset.nonempty.NonEmpty
 import slick.jdbc.{GetResult, SetParameter}
 
+import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
 
 /** @param config
@@ -171,6 +175,10 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
       psid: PhysicalSynchronizerId
   ): Either[UnknownPsid, StoredSynchronizerConnectionConfig]
 
+  def getByAlias(
+      alias: SynchronizerAlias
+  ): Map[ConfiguredPhysicalSynchronizerId, StoredSynchronizerConnectionConfig]
+
   /** Retrieves the active connection for `alias`. Return an
     * [[SynchronizerConnectionConfigStore.Error]] if the alias is unknown or if no connection is
     * active. If several active configs are found, returns an
@@ -179,14 +187,15 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
   def getActive(
       alias: SynchronizerAlias
   ): Either[SynchronizerConnectionConfigStore.Error, StoredSynchronizerConnectionConfig] =
-    getAllFor(alias).map(_.filter(_.status.isActive)).map(NonEmpty.from).flatMap {
-      case None => NoActiveSynchronizer(alias).asLeft
-      case Some(configs) =>
-        if (configs.sizeIs == 1)
-          configs.head1.asRight
-        else
-          AtMostOnePhysicalActive(alias, configs.map(_.configuredPsid).toSet).asLeft
-    }
+    for {
+      allActive <- getAllFor(alias).map(_.filter(_.status.isActive))
+      configs <- NonEmpty.from(allActive).toRight(NoActiveSynchronizer(alias))
+      _ <- Either.cond(
+        configs.sizeIs == 1,
+        (),
+        AtMostOnePhysicalActive(alias, configs.map(_.configuredPsid).toSet),
+      )
+    } yield configs.head1
 
   /** Retrieves the active connection for `id`. Return an
     * [[SynchronizerConnectionConfigStore.Error]] if the id is unknown or if no connection is
@@ -200,6 +209,84 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
       alias <- aliasResolution.aliasForSynchronizerId(id).toRight(UnknownId(id))
       config <- getActive(alias)
     } yield config
+
+  /** If the given logical synchronizer is currently active or targeted by an LSU migration, find
+    * the config of the physical synchronizer in the predecessor lineage whose config upgrade time
+    * (if any) is before the given `timestamp` and whose successor config upgrade time (if any) is
+    * at or after the given `timestamp`. If this config state is
+    * [[com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.LsuTarget]], an
+    * error is returned instead.
+    *
+    *   - Ignores configs with state
+    *     [[com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.Inactive]].
+    *   - Ignores configs whose configured physical synchronizer ID is
+    *     [[com.digitalasset.canton.topology.UnknownPhysicalSynchronizerId]]
+    */
+  def getActiveAt(
+      id: SynchronizerId,
+      timestamp: CantonTimestamp,
+  ): Either[SynchronizerConnectionConfigStore.Error, StoredSynchronizerConnectionConfig] = {
+    // Traverse the chain of predecessors of `current` until the upgrade time of its predecessor (if any)
+    // is before the given timestamp. The search aborts if a predecessor is missing from the `candidates` map.
+    @tailrec def find(
+        candidates: Map[PhysicalSynchronizerId, StoredSynchronizerConnectionConfig],
+        current: StoredSynchronizerConnectionConfig,
+    ): Either[SynchronizerConnectionConfigStore.Error, StoredSynchronizerConnectionConfig] =
+      current.predecessor match {
+        case None => Right(current)
+        case Some(predecessor) =>
+          if (predecessor.upgradeTime < timestamp) Right(current)
+          else {
+            val predecessorPsid = predecessor.psid
+            candidates.get(predecessorPsid) match {
+              case None =>
+                Left(MissingConfigForSynchronizer(ConfigIdentifier.WithPsid(predecessorPsid)))
+              case Some(predecessorConfig) =>
+                find(candidates, predecessorConfig)
+            }
+          }
+      }
+
+    for {
+      alias <- aliasResolution.aliasForSynchronizerId(id).toRight(UnknownId(id))
+      all = getByAlias(alias)
+      _ <- Either.cond(all.nonEmpty, (), UnknownAlias(alias))
+      // Completely ignore inactive synchronizer configs, as they are no longer relevant.
+      withoutInactive = all.collect {
+        case (KnownPhysicalSynchronizerId(psid), config)
+            if config.status != SynchronizerConnectionConfigStore.Inactive =>
+          psid -> config
+      }
+      actives = withoutInactive.values.filter { config =>
+        // The store invariants should ensure that there's at most one `Active` config.
+        // Moreover, the protocol for setting the status ensures that
+        // there can be at most one active or hard-migrating source config
+        // (modulo race conditions between the checks),
+        // as long as we don't perform a hard domain migration off an LsuSource.
+        config.status == SynchronizerConnectionConfigStore.Active ||
+        config.status == SynchronizerConnectionConfigStore.HardMigratingSource
+      }
+      _ <- Either.cond(
+        actives.sizeIs <= 1,
+        (),
+        AtMostOnePhysicalActive(alias, actives.map(_.configuredPsid).toSet),
+      )
+      targets =
+        withoutInactive.values.filter(_.status == SynchronizerConnectionConfigStore.LsuTarget)
+      _ <- Either.cond(
+        targets.sizeIs <= 1,
+        (),
+        AtMostOnePhysicalLsuTarget(alias, targets.map(_.configuredPsid).toSet),
+      )
+      head <- targets.headOption.orElse(actives.headOption).toRight(NoActiveSynchronizer(alias))
+      atTimestamp <- find(withoutInactive, head)
+      _ <- Either.cond(
+        atTimestamp.status != SynchronizerConnectionConfigStore.LsuTarget,
+        (),
+        NoActiveSynchronizer(alias),
+      )
+    } yield atTimestamp
+  }
 
   /** Retrieves all configured synchronizers connection configs
     */
@@ -397,6 +484,13 @@ object SynchronizerConnectionConfigStore {
   ) extends Error {
     override def message: String =
       s"At most one physical synchronizer should be active for `$alias`. Found: $ids"
+  }
+  final case class AtMostOnePhysicalLsuTarget(
+      alias: SynchronizerAlias,
+      ids: Set[ConfiguredPhysicalSynchronizerId],
+  ) extends Error {
+    override def message: String =
+      s"At most one physical synchronizer should be the LSU target for `$alias`. Found: $ids"
   }
   final case class ConfigAlreadyExists(
       alias: SynchronizerAlias,

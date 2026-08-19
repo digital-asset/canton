@@ -283,14 +283,13 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       }
 
       _ <- trafficEnforcementBackendO.traverse(trafficEnforcementBackend =>
-        EitherT.right[RpcError](
-          trafficEnforcementBackend.value
-            .validateTraffic(
-              actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs,
-              trafficCost =
-                costEstimation.map(_.confirmationRequestTrafficCostEstimation).getOrElse(0L),
-            )
-        )
+        trafficEnforcementBackend.value
+          .validateTraffic(
+            actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs,
+            trafficCost =
+              costEstimation.map(_.confirmationRequestTrafficCostEstimation).getOrElse(0L),
+          )
+          .leftWiden[RpcError]
       )
     } yield proto.PrepareSubmissionResponse(
       preparedTransaction = Some(prepareResult.transaction),

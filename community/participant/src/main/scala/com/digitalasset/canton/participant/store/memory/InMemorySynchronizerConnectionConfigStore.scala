@@ -107,7 +107,7 @@ class InMemorySynchronizerConnectionConfigStore(
             _ <- checkLogicalIdConsistent(psid, alias)
           } yield ()
 
-        case UnknownPhysicalSynchronizerId => ().asRight
+        case UnknownPhysicalSynchronizerId => Either.unit
       }
 
       _ <- checkStatusConsistent(configuredPsid, alias, status)
@@ -186,14 +186,14 @@ class InMemorySynchronizerConnectionConfigStore(
       alias: SynchronizerAlias,
       status: SynchronizerConnectionConfigStore.Status,
   ): Either[Error, Unit] =
-    if (!status.isActive) Either.right(())
+    if (!status.isActive) Either.unit
     else {
       val existingPsid = configuredSynchronizerMap.collectFirst {
         case ((`alias`, configuredPsid), config) if config.status == Active =>
           configuredPsid
       }
       existingPsid match {
-        case Some(`psid`) | None => Either.right(())
+        case Some(`psid`) | None => Either.unit
         case Some(otherConfiguredPsid) =>
           Either.left(
             AtMostOnePhysicalActive(alias, Set(otherConfiguredPsid, psid)): Error
@@ -282,6 +282,13 @@ class InMemorySynchronizerConnectionConfigStore(
   override def getAll(): Seq[StoredSynchronizerConnectionConfig] =
     configuredSynchronizerMap.values.toSeq
 
+  override def getByAlias(
+      alias: SynchronizerAlias
+  ): Map[ConfiguredPhysicalSynchronizerId, StoredSynchronizerConnectionConfig] =
+    configuredSynchronizerMap.collect { case ((`alias`, id), config) =>
+      id -> config
+    }.toMap
+
   /** We have no cache, so this is a noop. */
   override def refreshCache()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     FutureUnlessShutdown.unit
@@ -297,9 +304,7 @@ class InMemorySynchronizerConnectionConfigStore(
     val connections = configuredSynchronizerMap.collect { case ((`alias`, _), config) =>
       config
     }.toSeq
-
-    if (connections.nonEmpty) NonEmpty.from(connections).toRight(UnknownAlias(alias))
-    else UnknownAlias(alias).asLeft
+    NonEmpty.from(connections).toRight(UnknownAlias(alias))
   }
 
   override protected def getAllForAliasInternal(alias: SynchronizerAlias)(implicit

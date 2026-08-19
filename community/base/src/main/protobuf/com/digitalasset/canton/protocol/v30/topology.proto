@@ -482,8 +482,8 @@ message SignedTopologyTransaction {
 message SignedTopologyTransactions {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
-  // serialized signed topology transaction (protobuf bytestring)
-  repeated bytes signed_transaction = 1;
+  // serialized signed topology transactions (protobuf bytestring)
+  repeated bytes signed_transactions = 1;
 }
 
 /** Accepted topology transaction

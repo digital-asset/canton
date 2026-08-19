@@ -27,7 +27,11 @@ object GeneratorsTime {
     )
   )
 
+  /** Needs to be divided by billion, because
+    * [[com.digitalasset.canton.time.PositiveSeconds.toFiniteDuration]] transforms seconds to
+    * nanoseconds, which can cause a Long overflow
+    */
   implicit val positiveSecondsArb: Arbitrary[PositiveSeconds] = Arbitrary(
-    positiveLongArb.arbitrary.map(i => PositiveSeconds.tryOfSeconds(i.unwrap))
+    positiveLongArb.arbitrary.map(i => PositiveSeconds.tryOfSeconds(i.unwrap / 1_000_000_000))
   )
 }

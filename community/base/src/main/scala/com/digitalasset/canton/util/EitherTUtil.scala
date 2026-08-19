@@ -199,13 +199,4 @@ object EitherTUtil {
 
   def unitUS[A]: EitherT[FutureUnlessShutdown, A, Unit] =
     EitherT(FutureUnlessShutdown.pure(Either.unit))
-
-  object syntax {
-    implicit class FunctorToEitherT[F[_]: Functor, T](f: F[T]) {
-
-      /** Converts any F[T] into EitherT[F, A, T] */
-      def toEitherTRight[A]: EitherT[F, A, T] =
-        EitherT.right[A](f)
-    }
-  }
 }

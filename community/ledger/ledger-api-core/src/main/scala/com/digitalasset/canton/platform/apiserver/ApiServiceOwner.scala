@@ -10,7 +10,7 @@ import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.crypto.CryptoPureApi
+import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.auth.*
@@ -123,6 +123,7 @@ object ApiServiceOwner {
       trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
       externalCallHandler: ExternalCallHandler,
       lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
+      lookupSynchronizerCryptoClient: SynchronizerId => Option[SynchronizerCryptoClient],
       pureCryptoApi: CryptoPureApi,
   )(implicit
       actorSystem: ActorSystem,
@@ -162,7 +163,18 @@ object ApiServiceOwner {
         )
     }
     val userAuthInterceptor = new AuthInterceptor(
-      authServices = authServices :+ new IdentityProviderAwareAuthService(
+      authServices = authServices.map {
+        // @see [[com.digitalasset.canton.auth.UninitializedPartyJWTAuthService]] for why we need to do this
+        case uninitialized: UninitializedPartyJWTAuthService =>
+          new PartyJWTAuthService(
+            config = uninitialized,
+            participantId = participantId,
+            userManagementStore = userManagementStore,
+            loggerFactory = loggerFactory,
+            lookupSynchronizerCryptoClient = lookupSynchronizerCryptoClient,
+          )(commandExecutionContext)
+        case s => s
+      } :+ new IdentityProviderAwareAuthService(
         identityProviderConfigLoader = identityProviderConfigLoader,
         jwtVerifierLoader = jwtVerifierLoader,
         loggerFactory = loggerFactory,

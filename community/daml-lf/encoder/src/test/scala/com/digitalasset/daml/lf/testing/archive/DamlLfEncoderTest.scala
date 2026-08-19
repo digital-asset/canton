@@ -77,6 +77,7 @@ class DamlLfEncoderTest extends AnyWordSpec with Matchers with TableDrivenProper
         "GHC.Prim",
         "GHC.Tuple",
         "GHC.Types",
+        "GHC.Stack.Types",
         "DA.Action.State.Type",
         "DA.Date.Types",
         "DA.Internal.Any",

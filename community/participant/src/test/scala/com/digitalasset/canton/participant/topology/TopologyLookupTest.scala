@@ -8,7 +8,7 @@ import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.topology.DefaultTestIdentities.defaultDynamicSynchronizerParameters
-import com.digitalasset.canton.topology.admin.grpc.PsidLookup
+import com.digitalasset.canton.topology.admin.grpc.PsidLookupAt
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
@@ -17,7 +17,6 @@ import com.digitalasset.canton.topology.transaction.SynchronizerParametersState
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   PhysicalSynchronizerId,
-  SynchronizerId,
   TopologyManagerError,
 }
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -74,11 +73,7 @@ final class TopologyLookupTest
         cleanSynchronizerRecordTime = _ => None,
         topologyManagerO = _ => None, // Simulate offline
         topologyClientO = _ => None, // Simulate offline
-        psidLookup = new PsidLookup {
-          override def activePsidFor(
-              synchronizerId: SynchronizerId
-          ): Option[PhysicalSynchronizerId] = None
-        },
+        psidLookup = PsidLookupAt.empty,
         syncPersistentStateO =
           (id: PhysicalSynchronizerId) => if (id == psid) Some(persistentState) else None,
         loggerFactory = loggerFactory,
@@ -93,13 +88,8 @@ final class TopologyLookupTest
         .value
         .parameters shouldBe defaultDynamicSynchronizerParameters
 
-      topologyLookup
-        .maybeOfflineApproximateSnapshot(otherPsid)
-        .futureValueUS
-        .left
-        .value shouldBe ParticipantTopologyManagerError.IdentityManagerParentError(
+      topologyLookup.maybeOfflineApproximateSnapshot(otherPsid).futureValueUS.left.value shouldBe
         TopologyManagerError.TopologyStoreUnknown.Failure(SynchronizerStore(otherPsid))
-      )
     }
   }
 }

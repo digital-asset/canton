@@ -9,7 +9,6 @@ import com.digitalasset.canton.resource.{DbStorage, DbStorageMulti, DbStorageSin
 import com.digitalasset.canton.tea.projection.{
   EventId,
   EventSource,
-  EventType,
   ProjectionEvent,
   TeaProjectionFactory,
 }
@@ -25,6 +24,7 @@ import slick.dbio.DBIO
 import slick.jdbc.JdbcProfile
 
 import scala.concurrent.ExecutionContext
+import scala.util.{Failure, Success}
 
 /** Pekko projection backed by a JDBC DB.
   * @param dbStorage
@@ -36,6 +36,7 @@ private[projection] class TeaDbProjectionFactory(
     store: TeaDbTrafficStore,
     eventSource: EventSource,
     config: ProjectionConfig,
+    override val onEventCommitted: () => Unit = () => (),
 )(implicit system: ActorSystem[?])
     extends TeaProjectionFactory
     with NamedLogging {
@@ -97,19 +98,35 @@ private[projection] class TeaDbProjectionFactory(
     override def process(envelope: Traced[ProjectionEvent]): DBIO[Done] = {
       val account = envelope.value.account
       val event = envelope.value.event
-      for {
-        // We don't add 'transactionally' on purpose here, as this DBIO is picked up by the pekko projection
-        // which will add the offset persistence to it and wrap the whole thing into a transaction
-        // to provide exactlyOnce semantics
-        _ <- store.persistDeltaDBIO(
+      implicit val traceContext = envelope.traceContext
+
+      logger.debug(s"Persisting event ${envelope.value}")
+
+      // Classifies the exception so it can be reported under TRAFFIC_UPDATE_OUT_OF_BOUND.
+      val reject = TeaDbTrafficStore.rejection(account, event.deltaEvent.delta)
+
+      // We don't add 'transactionally' on purpose here, as this DBIO is picked up by the pekko projection
+      // which will add the offset persistence to it and wrap the whole thing into a transaction
+      // to provide exactlyOnce semantics
+      store
+        .persistDeltaDBIO(
           accountId = account,
           eventId = EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),
-          delta = event.deltaEvent.delta,
+          trafficDelta = event.deltaEvent.delta,
           timestamp = event.deltaEvent.timestamp,
-          eventType = EventType.Usage,
           eventSource = eventSource,
         )
-      } yield Done
+        .asTry
+        .flatMap {
+          case Success(_) => DBIO.successful(Done)
+          // Both branches fail the action, the difference is only that a rejected delta is reported
+          // under its own error code rather than as a raw JDBC failure.
+          // TODO(#34424): decide the failure policy for a rejected delta. Failing stalls the
+          //  projection, skipping the event drops the delta and needs a different transaction shape,
+          //  since the event row inserted above has to roll back while the offset bump commits.
+          case Failure(ex) if reject.isDefinedAt(ex) => DBIO.failed(reject(ex).asGrpcError)
+          case Failure(ex) => DBIO.failed(ex)
+        }
     }
   }
 }

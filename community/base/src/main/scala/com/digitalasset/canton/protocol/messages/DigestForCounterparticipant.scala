@@ -3,9 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
-import cats.syntax.either.*
 import com.digitalasset.canton.LedgerParticipantId
-import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v32
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseLfParticipantId}
@@ -13,7 +11,7 @@ import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersionValidation
 
 final case class DigestForCounterparticipant(
-    digest: Digest.HashedDigestType,
+    digest: Digest.DigestType,
     counterparticipant: LedgerParticipantId,
 ) extends PrettyPrinting {
   override protected def pretty: Pretty[DigestForCounterparticipant.this.type] = prettyOfClass(
@@ -22,7 +20,7 @@ final case class DigestForCounterparticipant(
   )
 
   def toProtoV32: v32.DigestForCounterparticipant = v32.DigestForCounterparticipant(
-    digest = Digest.hashedDigestTypeToProto(digest),
+    digest = digest,
     counterparticipant = counterparticipant,
   )
 }
@@ -33,16 +31,12 @@ object DigestForCounterparticipant {
       pvv: ProtocolVersionValidation,
       protoMsg: v32.DigestForCounterparticipant,
   ): ParsingResult[DigestForCounterparticipant] = for {
-    digest <- Digest
-      .hashedDigestTypeFromByteString(protoMsg.digest)
-      .leftMap(
-        CryptoDeserializationError.apply
-      )
+
     counterparticipant <- ProtoValidation.validateThen(
       protoMsg.counterparticipant,
       "counterparticipant",
       pvv,
     )(parseLfParticipantId)
-  } yield DigestForCounterparticipant(digest, counterparticipant)
+  } yield DigestForCounterparticipant(protoMsg.digest, counterparticipant)
 
 }

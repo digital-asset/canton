@@ -8,8 +8,9 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TopologyConfig}
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.protocol.SizeLimits
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -312,6 +313,33 @@ trait StoreBasedTopologySnapshotTest
       }
     }
 
+    "get correct size limits" in {
+      val fixture = new Fixture()
+
+      val expectedSizeLimits =
+        //        if (testedProtocolVersion >= ProtocolVersion.v36) SizeLimits.default else SizeLimits.max
+        // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
+        SizeLimits.max
+
+      for {
+        _ <- fixture.add(
+          sequencedTimestamp = ts,
+          effectiveTimestamp = Some(ts),
+          transactions = Seq(dpc1),
+        )
+        _ = fixture.client.observed(
+          ts.immediateSuccessor,
+          ts.immediateSuccessor,
+          SequencerCounter(0),
+          Seq(),
+        )
+        latestTs = fixture.client.latestTopologyChangeTimestamp
+        sizeLimits <- fixture.client.getSizeLimits(latestTs)
+      } yield {
+        sizeLimits shouldBe expectedSizeLimits
+      }
+    }
+
     "waiting for snapshots" should {
 
       val ts1 = CantonTimestamp.Epoch
@@ -335,6 +363,16 @@ trait StoreBasedTopologySnapshotTest
         awaitTimestampF.isCompleted shouldBe false
         observed(ts2.immediatePredecessor)
         awaitTimestampF.isCompleted shouldBe true
+      }
+
+      "abort a pending await when the client is closed" in {
+        val fixture = new Fixture()
+        import fixture.*
+        val awaitTimestampF = client.awaitTimestamp(ts2).getOrElse(fail("expected future"))
+        observed(ts1)
+        awaitTimestampF.isCompleted shouldBe false
+        client.close()
+        awaitTimestampF.unwrap.futureValue shouldBe UnlessShutdown.AbortedDueToShutdown
       }
 
       "just return None if snapshot already exists" in {

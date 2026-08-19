@@ -27,7 +27,7 @@ CODEOWNERS @DACH-NY/canton-change-owners
 /shared_dependencies.json @DACH-NY/canton-change-owners
 
 # Triggering a recompile on a branch does not require change owners approval
-/.circleci/branches_to_be_fully_recompiled_in_ci.txt
+/.ci/branches_to_be_fully_recompiled_in_ci.txt
 
 # changes to the sequencer driver API should be reviewed by the change owners
 # because the canton-drivers repository depends on it

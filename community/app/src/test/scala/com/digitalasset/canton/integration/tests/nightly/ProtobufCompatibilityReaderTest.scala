@@ -128,6 +128,8 @@ final class ProtobufCompatibilityReaderTest
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
+      // CantonBFT blacklisting
+      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
     ),
     (3, 5) -> Seq(
       // Changed for 3.5.1-rc4
@@ -174,9 +176,41 @@ final class ProtobufCompatibilityReaderTest
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "GetPreferredPackageVersionResponse" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present message "PackagePreference" was deleted from file.""",
       """com/daml/ledger/api/v2/interactive/interactive_submission_service.proto:Previously present RPC "GetPreferredPackageVersion" on service "InteractiveSubmissionService" was deleted.""",
-      // CantonBFT blacklisting
-      """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
     ),
+  )
+
+  val breakingChangesInGoogleProtobuf = Seq(
+    """google/protobuf/descriptor.proto:Previously present field "42" with name "php_generic_services" on message "FileOptions" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "1" on enum "Utf8Validation" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "2" with name "features" on message "FeatureSetEditionDefault" was deleted.""",
+    """google/protobuf/api.proto:Previously present field "8" with name "edition" on message "Api" was deleted.""",
+    """google/protobuf/api.proto:Previously present field "8" with name "edition" on message "Method" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "1001" on enum "Edition" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "1002" on enum "Edition" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "2147483647" on enum "Edition" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "900" on enum "Edition" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "9999" on enum "Edition" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "15" with name "option_dependency" on message "FileDescriptorProto" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "11" with name "visibility" on message "DescriptorProto" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "6" with name "visibility" on message "EnumDescriptorProto" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present reserved name "stream" on message "ServiceDescriptorProto" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present reserved range "[4]" on message "ServiceDescriptorProto" is missing values: [4] were removed.""",
+    """google/protobuf/descriptor.proto:Previously present reserved name "php_generic_services" on message "FileOptions" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present reserved range "[42]" on message "FileOptions" is missing values: [42] were removed.""",
+    """google/protobuf/descriptor.proto:Previously present field "22" with name "feature_support" on message "FieldOptions" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "4" with name "feature_support" on message "EnumValueOptions" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "7" with name "enforce_naming_style" on message "FeatureSet" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "8" with name "default_symbol_visibility" on message "FeatureSet" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "3" on enum "Utf8Validation" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present reserved range "[1]" on enum "Utf8Validation" is missing values: [1] were removed.""",
+    """google/protobuf/descriptor.proto:Previously present field "4" with name "overridable_features" on message "FeatureSetEditionDefault" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "5" with name "fixed_features" on message "FeatureSetEditionDefault" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present reserved name "features" on message "FeatureSetEditionDefault" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present reserved range "[1]" on message "FeatureSetEditionDefault" is missing values: [1] were removed.""",
+    """google/protobuf/descriptor.proto:Previously present reserved range "[2]" on message "FeatureSetEditionDefault" is missing values: [2] were removed.""",
+    """google/protobuf/descriptor.proto:Previously present field "42" with name "php_generic_services" on message "FileOptions" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present enum value "1" on enum "Utf8Validation" was deleted.""",
+    """google/protobuf/descriptor.proto:Previously present field "2" with name "features" on message "FeatureSetEditionDefault" was deleted.""",
   )
 
   "protobuf" should {
@@ -214,7 +248,8 @@ final class ProtobufCompatibilityReaderTest
             val errorOutput =
               processLogger.outputLines().map(_.replaceAll(raw".proto:\d+:\d+:", ".proto:"))
 
-            val acceptedBreakingChanges = acceptedBreakingChangesByVersion(majorMinor)
+            val acceptedBreakingChanges =
+              acceptedBreakingChangesByVersion(majorMinor) ++ breakingChangesInGoogleProtobuf
 
             val unacceptableBreakages = errorOutput.filter(!acceptedBreakingChanges.contains(_))
             if (unacceptableBreakages.nonEmpty) {
