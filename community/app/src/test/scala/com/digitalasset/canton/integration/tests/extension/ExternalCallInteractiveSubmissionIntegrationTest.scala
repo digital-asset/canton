@@ -67,7 +67,6 @@ class ExternalCallInteractiveSubmissionIntegrationTest
                     aliceE.toProtoPrimitive
                   ).create.commands.loneElement
                 ),
-                includeCreatedEventBlob = true,
               )
               .getEvents
               .loneElement
