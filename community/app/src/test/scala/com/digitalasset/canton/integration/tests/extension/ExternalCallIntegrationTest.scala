@@ -50,15 +50,15 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
     participant1.parties.enable(name)
   }
 
-  private def callExtension(owner: PartyId, extensionId: String)(implicit
-      env: TestConsoleEnvironment
+  private def callExtension(owner: PartyId, extensionId: String, configHex: String = "00ff")(
+      implicit env: TestConsoleEnvironment
   ): Transaction = {
     import env.*
     participant1.ledger_api.javaapi.commands.submit(
       Seq(owner),
       Seq(
         new M.externalcalltest.ExternalCallTester(owner.toProtoPrimitive).createAnd
-          .exerciseCallExtension(extensionId, "test-function", "00ff", "deadbeef")
+          .exerciseCallExtension(extensionId, "test-function", configHex, "deadbeef")
           .commands
           .loneElement
       ),
@@ -75,8 +75,8 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
         val transaction = callExtension(owner, extensionService.extensionId)
 
         // The choice returns the service output recorded in the transaction.
-        val exercised = transaction.getEvents.asScala.collect {
-          case event: ExercisedEvent => event
+        val exercised = transaction.getEvents.asScala.collect { case event: ExercisedEvent =>
+          event
         }.loneElement
         exercised.getExerciseResult.asText().toScala.value.getValue shouldBe
           UseExtensionService.defaultResponseHex
@@ -159,6 +159,25 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
           // The submission already fails, so nothing is recorded and nothing is re-validated.
           extensionService.observedCalls.map(_.mode) shouldBe Seq("submission")
         } finally extensionService.reset()
+    }
+
+    "fail the submission when the call arguments are not canonical hex" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      implicit env =>
+        extensionService.reset()
+        val owner = setUpOwner("external-call-preparation-owner")
+
+        // The stdlib wrapper lowercases the hex arguments, so only genuinely non-hex input
+        // reaches the interpreter's canonicality check.
+        assertThrowsAndLogsCommandFailures(
+          callExtension(owner, extensionService.extensionId, configHex = "zz").discard,
+          _.commandFailureMessage should include regex
+            "INTERPRETATION_EXTERNAL_CALL_ERROR_PREPARATION_FAILED\\(9,.*\\): " +
+            "Interpretation error: Error: External call preparation failed " +
+            s"\\(extensionId=${extensionService.extensionId}, functionId=test-function\\): " +
+            "Invalid external call config or input: expected canonical lowercase hex",
+        )
+        // Preparation fails before the handler is invoked: no request reaches the service.
+        extensionService.observedCalls shouldBe empty
     }
 
     "reject the request when the recorded output cannot be re-validated" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
