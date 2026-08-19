@@ -33,6 +33,9 @@ jobs:
     name: Update the rota channel topics for the current week
     needs: pick_runner
     runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: reads the private rota sheet, posts to DA Slack. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
     # Hard cap so a hung nix build or script cannot pin the self-hosted runner.
     timeout-minutes: 20
     permissions:

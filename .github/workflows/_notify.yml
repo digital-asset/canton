@@ -15,6 +15,9 @@ jobs:
   send_notification:
     name: Send Slack Notification
     runs-on: ${{ inputs.runner }}
+    # Posts to DA Slack via a blocked action and needs DA secrets. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
     steps:
       - name: Checkout (slack)
         # Full checkout (not sparse): select_rota.py reads the rota Google Sheet
