@@ -45,6 +45,9 @@ jobs:
     name: Audit release-notes check coverage
     needs: pick_runner
     runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: audits DA release-notes coverage. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
     steps:
       - name: Find PRs missing the release-notes check
         uses: actions/github-script@v9

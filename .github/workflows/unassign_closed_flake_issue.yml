@@ -22,6 +22,9 @@ jobs:
     name: Unassigns a closed flake issue
     needs: pick_runner
     runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: acts on the private flaky-test issues. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
     permissions:
       issues: write
     steps:

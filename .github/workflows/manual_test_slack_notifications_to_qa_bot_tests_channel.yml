@@ -52,6 +52,9 @@ jobs:
     name: Post to Slack
     needs: pick_runner
     runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Internal-only: posts to the DA Slack test channel and needs DA secrets. Skip on the OSS mirror.
+    # TODO(#34681): re-enable on the public repo after the OSS org switch.
+    if: github.repository == 'DACH-NY/canton'
     steps:
       - name: Post production-shaped sample to Slack
         uses: slackapi/slack-github-action@v1.26.0
