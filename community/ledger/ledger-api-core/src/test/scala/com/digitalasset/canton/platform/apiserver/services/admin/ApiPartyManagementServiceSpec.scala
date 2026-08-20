@@ -75,6 +75,8 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.{Spanning, TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.{IdentityProviderId, ObjectMeta}
+import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{BaseTest, HasExecutorService, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
@@ -363,8 +365,17 @@ class ApiPartyManagementServiceSpec
                     .mapping
                     .value
                     .update(
-                      _.partyToParticipant.partySigningKeys.keys.modify(
-                        _.map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL)))
+                      _.partyToParticipant.partySigningKeys.keys.modify(keys =>
+                        // the wrapper exposes no elements, so read them back through the bound
+                        ProtoValidation
+                          .validateLength(
+                            keys,
+                            field = None,
+                            ProtocolVersionValidation.AlwaysValidation,
+                            ProtoValidation.MaxCollectionSize,
+                          )
+                          .value
+                          .map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL)))
                       )
                     )
                 )
@@ -404,8 +415,17 @@ class ApiPartyManagementServiceSpec
                     .mapping
                     .value
                     .update(
-                      _.partyToParticipant.partySigningKeys.keys.modify(
-                        _.map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE)))
+                      _.partyToParticipant.partySigningKeys.keys.modify(keys =>
+                        // the wrapper exposes no elements, so read them back through the bound
+                        ProtoValidation
+                          .validateLength(
+                            keys,
+                            field = None,
+                            ProtocolVersionValidation.AlwaysValidation,
+                            ProtoValidation.MaxCollectionSize,
+                          )
+                          .value
+                          .map(_.copy(usage = Seq(v30.SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE)))
                       )
                     )
                 )

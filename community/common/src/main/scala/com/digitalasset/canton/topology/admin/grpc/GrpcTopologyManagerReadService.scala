@@ -779,6 +779,7 @@ class GrpcTopologyManagerReadService(
           request.excludeMappings,
           "exclude_mappings",
           ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
         )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types = TopologyMapping.Code.all.diff(excludeTopologyMappings)
@@ -804,6 +805,7 @@ class GrpcTopologyManagerReadService(
           request.includeMappings,
           "include_mappings",
           ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
         )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types =
@@ -845,6 +847,7 @@ class GrpcTopologyManagerReadService(
           request.excludeMappings,
           "exclude_mappings",
           ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
         )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types = TopologyMapping.Code.all.diff(excludeTopologyMappings)
@@ -886,6 +889,7 @@ class GrpcTopologyManagerReadService(
           request.excludeMappings,
           "exclude_mappings",
           ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
         )((code, _) => TopologyMapping.Code.fromString(code))
       )
       types = TopologyMapping.Code.all.diff(excludeTopologyMappings)

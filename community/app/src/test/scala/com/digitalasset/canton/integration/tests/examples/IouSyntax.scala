@@ -197,7 +197,7 @@ object IouSyntax {
       optTimeout: Option[config.NonNegativeDuration] = Some(
         participant.consoleEnvironment.commandTimeouts.ledgerCommand
       ),
-  ): Unit =
+  ): Transaction =
     participant.ledger_api.commands
       .submit(
         Seq(submittingParty),
@@ -210,7 +210,6 @@ object IouSyntax {
         synchronizerId,
         optTimeout = optTimeout,
       )
-      .discard
 
   def call(participant: ParticipantReference, synchronizerId: Option[SynchronizerId] = None)(
       contract: Iou.Contract,

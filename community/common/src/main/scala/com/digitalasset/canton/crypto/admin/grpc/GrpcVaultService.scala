@@ -130,13 +130,22 @@ class GrpcVaultService(
             Some("name"),
             ProtocolVersionValidation.AlwaysValidation,
           )
-          purposeO <- filters.purpose
-            .traverse(purpose => KeyPurpose.fromProtoEnum(purpose, "purpose"))
+          purposeO <- ProtoValidation
+            .validateLengthThen(
+              filters.purpose,
+              "purpose",
+              ProtocolVersionValidation.AlwaysValidation,
+              ProtoValidation.MaxCollectionSize,
+            )(KeyPurpose.fromProtoEnum)
             .map(keyPurposeList => NonEmpty.from(keyPurposeList))
-          usageO <-
-            filters.usageV30
-              .traverse(usage => SigningKeyUsage.fromProtoEnumV30(usage, "usageV30"))
-              .map(keyUsageList => NonEmpty.from(keyUsageList.flatten.toSet))
+          usageO <- ProtoValidation
+            .validateLengthThen(
+              filters.usageV30,
+              "usageV30",
+              ProtocolVersionValidation.AlwaysValidation,
+              ProtoValidation.MaxCollectionSize,
+            )(SigningKeyUsage.fromProtoEnumV30)
+            .map(keyUsageList => NonEmpty.from(keyUsageList.flatten.toSet))
           _ = if (purposeO.exists(_.contains(KeyPurpose.Encryption)) && usageO.exists(_.nonEmpty))
             throw ProtoDeserializationFailure
               .WrapNoLoggingStr("Cannot specify a usage when listing encryption keys")

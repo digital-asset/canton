@@ -444,3 +444,80 @@ final class OfflinePartyReplicationIdempotencyIntegrationTest
     )
   }
 }
+
+/** Setup:
+  *   - Alice is hosted on participant1 (source)
+  *   - Bob is hosted on participant2
+  *   - 2 active IOU contracts between Alice and Bob
+  *   - Participant3 (target) is empty, and the target participant for replicating Alice
+  *
+  * Test: Asserts that importing a later ACS snapshot picks up contracts that were created after an
+  * earlier snapshot was taken. It takes a first ACS export, creates an additional contract that
+  * augments the ACS, takes a second ACS export, imports the first snapshot (verifying the new
+  * contract is not yet present), then imports the second snapshot (verifying the new contract is
+  * now present).
+  */
+final class OfflinePartyReplicationIncrementalAcsImportIntegrationTest
+    extends OfflinePartyReplicationIntegrationTestBase {
+
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .withSetup { implicit env =>
+        import env.*
+        source = participant1
+        target = participant3
+
+        IouSyntax.createIou(source)(alice, bob, 1.95).discard
+        IouSyntax.createIou(source)(alice, bob, 2.95).discard
+      }
+
+  "ACS import of a later snapshot picks up contracts created after an earlier snapshot" in {
+    implicit env =>
+      import env.*
+
+      val clock = env.environment.simClock.value
+
+      // Take a first ACS export (2 active contracts).
+      val firstExportOffset = source.ledger_api.state.end()
+      source.repair.export_acs(
+        parties = Set(alice),
+        ledgerOffset = firstExportOffset,
+        exportFilePath = acsSnapshotPath,
+      )
+
+      // Execute a new transaction that augments the ACS (now 3 active contracts)
+      IouSyntax.createIou(source)(alice, bob, 3.95).discard
+      source.ledger_api.state.acs.active_contracts_of_party(alice) should have size 3
+
+      val secondAcsSnapshotPath =
+        tempDirectory.toTempFile("offpr_incremental_second_acs_snapshot.gz").toString
+
+      // Take a second ACS export capturing the newly created contract
+      val secondExportOffset = source.ledger_api.state.end()
+      source.repair.export_acs(
+        parties = Set(alice),
+        ledgerOffset = secondExportOffset,
+        exportFilePath = secondAcsSnapshotPath,
+      )
+
+      // Only now authorize hosting: this creates the onboarding PTP mapping required by the
+      // party ACS import and disconnects the target from all synchronizers.
+      targetAuthorizesHosting(alice, daId, disconnectTarget = true).discard
+
+      // Import the first ACS snapshot and verify the new contract isn't there yet
+      target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
+      eventually() {
+        target.ledger_api.state.acs.active_contracts_of_party(alice) should have size 2
+      }
+
+      // Import the second ACS snapshot and verify the new contract is now present
+      target.parties.import_party_acs(daId, Some(alice), secondAcsSnapshotPath)
+      eventually() {
+        target.ledger_api.state.acs.active_contracts_of_party(alice) should have size 3
+      }
+
+      reconnectAndEnsureOnboardingClearance(clock, alice, daName)
+
+      assertAcsAndContinuedOperation(target, expectedNumActiveContracts = 3)
+  }
+}

@@ -41,6 +41,30 @@ final case class CantonTimestamp(underlying: LfTimestamp)
   def add(d: Duration): CantonTimestamp = new CantonTimestamp(underlying.add(d))
   def add(d: FiniteDuration): CantonTimestamp = new CantonTimestamp(underlying.add(d.toJava))
 
+  /** Adds `d` to this timestamp.
+    *
+    * @return
+    *   Left if the result is not a valid [[CantonTimestamp]], either because it is out of bounds or
+    *   because the computation overflows.
+    */
+  def safeAdd(d: Duration): Either[String, CantonTimestamp] =
+    for {
+      durationMicros <- Either
+        .catchOnly[ArithmeticException](
+          Math.addExact(
+            Math.multiplyExact(d.getSeconds, 1000000L),
+            d.getNano / 1000L,
+          )
+        )
+        .leftMap(_ => s"Duration $d cannot be expressed in microseconds")
+      micros <- Either
+        .catchOnly[ArithmeticException](Math.addExact(underlying.micros, durationMicros))
+        .leftMap(_ => s"Adding $d to $this overflows")
+      timestamp <- LfTimestamp.fromLong(micros)
+    } yield CantonTimestamp(timestamp)
+
+  def safeAdd(d: RefinedDuration): Either[String, CantonTimestamp] = safeAdd(d.unwrap)
+
   def addMicros(micros: Long): CantonTimestamp = new CantonTimestamp(underlying.addMicros(micros))
 
   def plusSeconds(seconds: Long): CantonTimestamp =

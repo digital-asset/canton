@@ -5,10 +5,10 @@ package com.digitalasset.canton.integration.tests.pruning
 
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{DbConfig, PositiveDurationSeconds}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
+import com.digitalasset.canton.config.{CommitmentSendDelay, DbConfig, PositiveDurationSeconds}
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
-import com.digitalasset.canton.examples.java.iou.Iou
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
@@ -21,14 +21,25 @@ import com.digitalasset.canton.integration.util.{
   PartiesAllocator,
 }
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
-import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
-import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.{BaseTest, config}
+import monocle.macros.syntax.lens.*
 
 import java.time.Duration as JDuration
 import scala.concurrent.duration.DurationInt
+import scala.jdk.DurationConverters.*
+import scala.util.chaining.*
 
+/** In this test, we check how reassignments interact with pruning.
+  *
+  * Topology:
+  *   - Two participants connected to both da and acme
+  *   - Two parties (Alice, Bank) multi-hosted on P1 and P2 on both synchronizers. Confirmation
+  *     threshold is one.
+  */
 sealed trait ReassignmentPruningIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -64,8 +75,20 @@ sealed trait ReassignmentPruningIntegrationTest
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        // To ensure that pruning can happen quickly
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+      )
+      // Don't delay sending ACS commitments
+      .updateTestingConfig(
+        _.focus(_.commitmentSendDelay).replace(
+          Some(
+            CommitmentSendDelay(
+              Some(NonNegativeProportion.zero),
+              Some(NonNegativeProportion.zero),
+            )
+          )
+        )
       )
       .withSetup { implicit env =>
         import env.*
@@ -88,25 +111,28 @@ sealed trait ReassignmentPruningIntegrationTest
 
         participant1.health.ping(participant2.id)
 
-        PartiesAllocator(participants.all.toSet)(
-          Seq(
-            "alice" -> participant1,
-            "bank" -> participant2,
-          ),
-          Map(
-            "alice" -> Map(
-              daId -> (PositiveInt.one, Set(participant1.id -> Submission)),
-              acmeId -> (PositiveInt.one, Set(participant1.id -> Submission)),
-            ),
-            "bank" -> Map(
-              daId -> (PositiveInt.one, Set(participant2.id -> Submission)),
-              acmeId -> (PositiveInt.one, Set(participant2.id -> Submission)),
-            ),
-          ),
-        )
+        withClue("Prepare parties") {
+          val syncPermissions = Set[(ParticipantId, ParticipantPermission)](
+            (participant1.id, ParticipantPermission.Submission),
+            (participant2.id, ParticipantPermission.Submission),
+          )
 
-        alice = "alice".toPartyId(participant1)
-        bank = "bank".toPartyId(participant2)
+          val permissions = Map(
+            daId -> (PositiveInt.one, syncPermissions),
+            acmeId -> (PositiveInt.one, syncPermissions),
+          )
+
+          PartiesAllocator(Set(participant1, participant2))(
+            newParties = Seq("Alice" -> participant1, "Bank" -> participant1),
+            targetTopology = Map(
+              "Alice" -> permissions,
+              "Bank" -> permissions,
+            ),
+          )
+
+          alice = "Alice".toPartyId()
+          bank = "Bank".toPartyId()
+        }
 
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
@@ -126,73 +152,6 @@ sealed trait ReassignmentPruningIntegrationTest
       safeOffset should be >= safeOffset2
     }
     participant.pruning.prune(desiredPruningOffset)
-  }
-
-  private def ensureOffsetUnsafeToPrune(
-      undesiredPruningOffset: Long,
-      clock: SimClock,
-      participant: LocalParticipantReference,
-  ): Unit = {
-    eventually() {
-      val safeOffset = participant.pruning
-        .find_safe_offset(clock.now.toInstant)
-        .value
-      safeOffset should be < undesiredPruningOffset
-    }
-
-    loggerFactory.assertThrowsAndLogs[CommandFailure](
-      participant.pruning.prune(undesiredPruningOffset),
-      logEntry =>
-        logEntry.errorMessage should include(
-          "GrpcRequestRefusedByServer: FAILED_PRECONDITION/UNSAFE_TO_PRUNE"
-        ),
-    )
-  }
-
-  // Creates on synchronizer an Iou with Alice as owner and the Bank as the payer
-  private def createIou(
-      synchronizerId: SynchronizerId
-  )(implicit env: TestConsoleEnvironment): Iou.ContractId = {
-    import env.*
-    clue(s"create Iou contract on $daId") {
-      IouSyntax.createIou(env.participant2, Some(synchronizerId))(bank, alice).id
-    }
-  }
-
-  // unassigns the given iou from origin to target
-  // returns the reassignmentId, the unassignment offset on participant1 and the unassignment offset on participant2
-  private def unassignIou(
-      origin: SynchronizerId,
-      target: SynchronizerId,
-      contractId: Iou.ContractId,
-  )(implicit
-      env: TestConsoleEnvironment
-  ): (String, Long, Long) = {
-    import env.*
-
-    val ledgerEndP1BeforeUnassign =
-      participant1.ledger_api.state.end()
-    val unassignment =
-      participant2.ledger_api.commands.submit_unassign(
-        bank,
-        Seq(contractId.toLf),
-        origin,
-        target,
-      )
-    val unassignOffsetP2 = unassignment.reassignment.offset
-    val reassignmentId = unassignment.reassignmentId
-
-    val unassignOffsetP1 = participant1.ledger_api.updates
-      .reassignments(
-        partyIds = Set(alice),
-        completeAfter = 1,
-        beginOffsetExclusive = ledgerEndP1BeforeUnassign,
-      )
-      .collectFirst { case wrapper: UpdateService.ReassignmentWrapper =>
-        wrapper.reassignment.offset
-      }
-      .value
-    (reassignmentId, unassignOffsetP1, unassignOffsetP2)
   }
 
   // assigns the given iou from origin to target
@@ -221,19 +180,107 @@ sealed trait ReassignmentPruningIntegrationTest
     (assignOffsetP1, assignOffsetP2)
   }
 
-  "pruning on reassignments should" should {
+  /** Wait until P2 safe to prune timestamp reaches the provided timestamp.
+    *
+    * Returns the corresponding offset.
+    */
+  private def waitP2SafeTsReaches(
+      targetTs: CantonTimestamp,
+      targetOffset: Long,
+  )(implicit env: TestConsoleEnvironment): Long = {
+    import env.*
+
+    eventually() {
+      environment.simClock.value.advance(15.seconds.toJava)
+      participant1.health.ping(participant2, synchronizerId = Some(env.daId))
+      participant1.health.ping(participant2, synchronizerId = Some(env.acmeId))
+
+      val computedSafeOffset =
+        participant2.pruning.find_safe_offset(beforeOrAt = environment.clock.now.toInstant).value
+
+      val safeTimestamp =
+        participant2.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value
+          .lastSynchronizerOffsetBeforeOrAt(
+            env.daId,
+            Offset.tryFromLong(computedSafeOffset),
+          )
+          .futureValueUS
+          .value
+          .recordTime
+          .pipe(t => CantonTimestamp.assertFromInstant(t.toInstant))
+
+      safeTimestamp should be > targetTs
+      computedSafeOffset should be > targetOffset
+
+      logger.debug(
+        s"Got safeTimestamp=$safeTimestamp and offset=$computedSafeOffset when querying with targetTs=$targetTs"
+      )
+
+      computedSafeOffset
+    }
+  }
+
+  "Pruning" should {
+    /*
+      Despite an incomplete reassignment, pruning can be done
+      After pruning, the incomplete reassignment can still be queried
+     */
+    "not be blocked by incomplete reassignments" in { implicit env =>
+      import env.*
+
+      // Iou that will not get pruned
+      IouSyntax.createIou(participant1, Some(daId))(bank, alice, 1.0)
+
+      val transientIou1 = IouSyntax.createIou(participant1, Some(daId))(bank, alice, 2.0)
+      IouSyntax.archive(participant1, Some(daId))(transientIou1, bank)
+
+      val reassignmendId = withClue("Create an unassign an Iou") {
+        val iou = IouSyntax.createIou(participant1, Some(daId))(bank, alice, 3.0)
+        val iouCid = LfContractId.assertFromString(iou.id.contractId)
+
+        participant1.ledger_api.commands
+          .submit_unassign(alice, Seq(iouCid), daId, acmeId)
+          .reassignmentId
+      }
+
+      val transientIou2 = IouSyntax.createIou(participant1, Some(daId))(bank, alice, 4.0)
+      val transientIou2Archived = IouSyntax
+        .archive(participant1, Some(daId))(transientIou2, bank)
+
+      val offset =
+        waitP2SafeTsReaches(transientIou2Archived.recordTime.value, transientIou2Archived.offset)
+
+      // safe to prune offset progresses past the second transient contract (and thus past the unassignment)
+      offset should be >= transientIou2Archived.offset
+
+      participant2.pruning.prune(offset)
+
+      // Despite pruning, the incomplete unassigned can still be found in the store
+      val incompleteUnassigned = participant2.ledger_api.state.acs
+        .incomplete_unassigned_of_party(bank)
+        .loneElement
+
+      incompleteUnassigned.reassignmentId shouldBe reassignmendId
+    }
+
     "prune completed reassignments, not prune incomplete ones" in { implicit env =>
       import env.*
 
       val clock = environment.simClock.value
 
       // create iou on daId with Alice and the Bank as stakeholders
-      val contractId = createIou(daId)
+      val contractId = IouSyntax.createIou(env.participant2, Some(daId))(bank, alice).id
 
       // Prepare reassignment of the Iou from daId to acmeId
       // First unassign the Iou from daId to acmeId
-      val (reassignmentId, unassignOffsetP1, unassignOffsetP2) =
-        unassignIou(daId, acmeId, contractId)
+      val reassignmentId = participant2.ledger_api.commands
+        .submit_unassign(
+          bank,
+          Seq(contractId.toLf),
+          daId,
+          acmeId,
+        )
+        .reassignmentId
 
       // save the offsets to test acs snapshots
       offsetP1AfterUnassign = participant1.ledger_api.state.end()
@@ -255,8 +302,6 @@ sealed trait ReassignmentPruningIntegrationTest
 
       participant1.health.ping(participantId = participant2, synchronizerId = Some(daId))
       participant1.health.ping(participantId = participant2, synchronizerId = Some(acmeId))
-      participant2.health.ping(participantId = participant1, synchronizerId = Some(daId))
-      participant2.health.ping(participantId = participant1, synchronizerId = Some(acmeId))
 
       // Wait for the pruning timeout
       val baseTime1 = clock.now
@@ -264,10 +309,6 @@ sealed trait ReassignmentPruningIntegrationTest
       clock.advanceTo(newTime1)
 
       participants.all.foreach(_.testing.fetch_synchronizer_times())
-
-      // Prevent pruning of the incomplete reassignment. i.e., check that unassignOffset is not safe to prune
-      ensureOffsetUnsafeToPrune(unassignOffsetP1, clock, participant1)
-      ensureOffsetUnsafeToPrune(unassignOffsetP2, clock, participant2)
 
       // Complete the unassignment by submitting the assign from daId to acmeId
       val (assignOffsetP1, assignOffsetP2) = assignIou(daId, acmeId, reassignmentId)
@@ -289,8 +330,6 @@ sealed trait ReassignmentPruningIntegrationTest
 
       participant1.health.ping(participantId = participant2, synchronizerId = Some(daId))
       participant1.health.ping(participantId = participant2, synchronizerId = Some(acmeId))
-      participant2.health.ping(participantId = participant1, synchronizerId = Some(daId))
-      participant2.health.ping(participantId = participant1, synchronizerId = Some(acmeId))
 
       val baseTime3 = clock.now
       val newTime3 = baseTime3.add(pruningTimeout)
@@ -339,7 +378,7 @@ sealed trait ReassignmentPruningIntegrationTest
   }
 }
 
-class ReassignmentPruningIntegrationTestPostgres extends ReassignmentPruningIntegrationTest {
+final class ReassignmentPruningIntegrationTestPostgres extends ReassignmentPruningIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
     new UseReferenceBlockSequencer[DbConfig.Postgres](

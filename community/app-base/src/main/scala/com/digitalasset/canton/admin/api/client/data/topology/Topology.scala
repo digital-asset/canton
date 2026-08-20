@@ -85,6 +85,7 @@ object BaseResult {
         signedByFingerprints,
         "signed_by_fingerprints",
         ProtocolVersionValidation.AlwaysValidation,
+        ProtoValidation.MaxCollectionSize,
       )(Fingerprint.fromProtoPrimitive)
       signedBy <- NonEmpty
         .from(signedByFingerprints)

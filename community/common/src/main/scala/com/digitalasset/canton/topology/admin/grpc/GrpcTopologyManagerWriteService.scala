@@ -93,13 +93,20 @@ class GrpcTopologyManagerWriteService(
               signedBy,
               "signed_by",
               ProtocolVersionValidation.AlwaysValidation,
+              ProtoValidation.MaxCollectionSize,
             )(Fingerprint.fromProtoPrimitive)
           )
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       forceFlags <- EitherT
         .fromEither[FutureUnlessShutdown](
-          ForceFlags
-            .fromProtoV30(forceChanges)
+          ProtoValidation
+            .validateLength(
+              forceChanges,
+              Some("force_changes"),
+              ProtocolVersionValidation.AlwaysValidation,
+              ProtoValidation.MaxCollectionSize,
+            )
+            .flatMap(ForceFlags.fromProtoV30)
             .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
         )
       signedTopoTx <-
@@ -148,8 +155,16 @@ class GrpcTopologyManagerWriteService(
             signedBy,
             "signed_by",
             ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
           )(Fingerprint.fromProtoPrimitive)
-          forceFlags <- ForceFlags.fromProtoV30(forceChanges)
+          forceFlags <- ProtoValidation
+            .validateLength(
+              forceChanges,
+              Some("force_changes"),
+              ProtocolVersionValidation.AlwaysValidation,
+              ProtoValidation.MaxCollectionSize,
+            )
+            .flatMap(ForceFlags.fromProtoV30)
           validatedMapping <- mapping match {
             case v30.AuthorizeRequest.Proposal.Mapping.V30(value) =>
               TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
@@ -203,18 +218,29 @@ class GrpcTopologyManagerWriteService(
   ): Future[v30.SignTransactionsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val requestE = for {
-      signedTxs <-
-        requestP.transactions
-          .traverse(tx =>
-            SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
-          )
+      signedTxs <- ProtoValidation.validateLengthThen(
+        requestP.transactions,
+        "transactions",
+        ProtocolVersionValidation.AlwaysValidation,
+        ProtoValidation.MaxCollectionSize,
+      )((tx, _) =>
+        SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
+      )
       signingKeys <-
         ProtoValidation.validateThen(
           requestP.signedBy,
           "signed_by",
           ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
         )(Fingerprint.fromProtoPrimitive)
-      forceFlags <- ForceFlags.fromProtoV30(requestP.forceFlags)
+      forceFlags <- ProtoValidation
+        .validateLength(
+          requestP.forceFlags,
+          Some("force_flags"),
+          ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
+        )
+        .flatMap(ForceFlags.fromProtoV30)
     } yield (signedTxs, signingKeys, forceFlags)
 
     val res = for {
@@ -244,13 +270,26 @@ class GrpcTopologyManagerWriteService(
       manager <- targetManagerET(request.store)
       protocolVersionValidation = manager.managerVersion.validation
       forceChanges <- EitherT.fromEither[FutureUnlessShutdown](
-        ForceFlags
-          .fromProtoV30(request.forceChanges)
+        ProtoValidation
+          .validateLength(
+            request.forceChanges,
+            Some("force_changes"),
+            // Always validate the length and not dependent on the store's protocol version
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )
+          .flatMap(ForceFlags.fromProtoV30)
           .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
       )
       signedTxs <- EitherT.fromEither[FutureUnlessShutdown](
-        request.transactions
-          .traverse(tx => SignedTopologyTransaction.fromProtoV30(protocolVersionValidation, tx))
+        ProtoValidation
+          .validateLengthThen(
+            request.transactions,
+            "transactions",
+            // Always validate the length and not dependent on the store's protocol version
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((tx, _) => SignedTopologyTransaction.fromProtoV30(protocolVersionValidation, tx))
           .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
       )
       _ = if (signedTxs.exists(_.selectMapping[PartyToKeyMapping].isDefined)) {
@@ -428,40 +467,52 @@ class GrpcTopologyManagerWriteService(
       request: GenerateTransactionsRequest
   ): Future[GenerateTransactionsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val resultET = request.proposals.parTraverse { proposal =>
-      val v30.GenerateTransactionsRequest.Proposal(opP, serialP, mappingPO, store) = proposal
-      val validatedMappingE = for {
-        serial <- Option
-          .when(serialP != 0)(serialP)
-          .traverse(ProtoConverter.parsePositiveInt("serial", _))
-        op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
-        mapping <- mappingPO match {
-          case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
-            TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
-          case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>
-            ProtoConverter.required("mapping", None)
-        }
-      } yield (serial, op, mapping)
-
-      for {
-        serialOpMapping <- EitherT
-          .fromEither[FutureUnlessShutdown](validatedMappingE)
-          .leftMap(ProtoDeserializationFailure.Wrap(_))
-        (serial, op, mapping) = serialOpMapping
-        manager <- targetManagerET(store)
-        existingTransaction <- manager
-          .findExistingTransaction(mapping)
-        transaction <- manager
-          .build(
-            op,
-            mapping,
-            serial,
-            manager.managerVersion.serialization,
-            existingTransaction,
+    val resultET = for {
+      proposals <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          ProtoValidation.validateLength(
+            request.proposals,
+            Some("proposals"),
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
           )
-          .leftWiden[RpcError]
-      } yield transaction.toByteStringChecked -> transaction.hash.hash.getCryptographicEvidence
-    }
+        )
+        .leftMap(ProtoDeserializationFailure.Wrap(_): RpcError)
+      txAndHashes <- proposals.parTraverse { proposal =>
+        val v30.GenerateTransactionsRequest.Proposal(opP, serialP, mappingPO, store) = proposal
+        val validatedMappingE = for {
+          serial <- Option
+            .when(serialP != 0)(serialP)
+            .traverse(ProtoConverter.parsePositiveInt("serial", _))
+          op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
+          mapping <- mappingPO match {
+            case v30.GenerateTransactionsRequest.Proposal.Mapping.V30(value) =>
+              TopologyMapping.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, value)
+            case v30.GenerateTransactionsRequest.Proposal.Mapping.Empty =>
+              ProtoConverter.required("mapping", None)
+          }
+        } yield (serial, op, mapping)
+
+        for {
+          serialOpMapping <- EitherT
+            .fromEither[FutureUnlessShutdown](validatedMappingE)
+            .leftMap(ProtoDeserializationFailure.Wrap(_))
+          (serial, op, mapping) = serialOpMapping
+          manager <- targetManagerET(store)
+          existingTransaction <- manager
+            .findExistingTransaction(mapping)
+          transaction <- manager
+            .build(
+              op,
+              mapping,
+              serial,
+              manager.managerVersion.serialization,
+              existingTransaction,
+            )
+            .leftWiden[RpcError]
+        } yield transaction.toByteStringChecked -> transaction.hash.hash.getCryptographicEvidence
+      }
+    } yield txAndHashes
 
     CantonGrpcUtil.mapErrNewEUS(
       resultET.map { txAndHashes =>

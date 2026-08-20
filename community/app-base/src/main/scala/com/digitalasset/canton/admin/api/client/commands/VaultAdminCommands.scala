@@ -77,7 +77,14 @@ object VaultAdminCommands {
     override protected def handleResponse(
         response: v30.ListMyKeysResponse
     ): Either[String, Seq[PrivateKeyMetadata]] =
-      response.privateKeysMetadata.traverse(PrivateKeyMetadata.fromProtoV30).leftMap(_.toString)
+      ProtoValidation
+        .validateLengthThen(
+          response.privateKeysMetadata,
+          "private_keys_metadata",
+          ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((entry, _) => PrivateKeyMetadata.fromProtoV30(entry))
+        .leftMap(_.toString)
   }
 
   // list public keys in key registry
@@ -124,7 +131,14 @@ object VaultAdminCommands {
     override protected def handleResponse(
         response: v30.ListPublicKeysResponse
     ): Either[String, Seq[PublicKeyWithName]] =
-      response.publicKeysV30.traverse(PublicKeyWithName.fromProto30).leftMap(_.toString)
+      ProtoValidation
+        .validateLengthThen(
+          response.publicKeysV30,
+          "public_keys_v30",
+          ProtocolVersionValidation.AlwaysValidation,
+          ProtoValidation.MaxCollectionSize,
+        )((entry, _) => PublicKeyWithName.fromProto30(entry))
+        .leftMap(_.toString)
   }
 
   abstract class BaseImportPublicKey

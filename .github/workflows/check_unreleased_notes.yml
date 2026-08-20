@@ -45,8 +45,10 @@ jobs:
     runs-on: ${{ needs.pick_runner.outputs.runner }}
     permissions:
       contents: read
-      # write so the script can post/update the sticky PR comment.
+      # write so same-repo PRs can post the sticky comment (fork PRs are read-only
+      # regardless, see writeSticky).
       pull-requests: write
+      issues: write
     steps:
       - name: Require UNRELEASED.md update
         uses: actions/github-script@v9
@@ -112,6 +114,20 @@ jobs:
             });
             const sticky = comments.find(c => c.body && c.body.includes(MARKER));
 
+            // Fork PRs get a read-only token, so comment writes 403. Keep them
+            // best-effort so the non-blocking main reminder never fails on a fork.
+            async function writeSticky(commentBody, createIfMissing) {
+              try {
+                if (sticky) {
+                  await github.rest.issues.updateComment({ owner, repo, comment_id: sticky.id, body: commentBody });
+                } else if (createIfMissing) {
+                  await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body: commentBody });
+                }
+              } catch (e) {
+                core.warning(`Could not post the sticky release-notes comment (likely a fork PR with a read-only token): ${e.message}`);
+              }
+            }
+
             const missingBody = blocking
               ? `${MARKER}\n⚠️ **Release note required.** This PR targets \`${pr.base.ref}\` but does not ` +
                 `modify \`${RELEASE_NOTES_FILE}\`.\n\nPlease add a release note to \`${RELEASE_NOTES_FILE}\`, ` +
@@ -124,18 +140,12 @@ jobs:
 
             if (ok) {
               // Only update an existing comment; never add noise to a clean PR.
-              if (sticky) {
-                await github.rest.issues.updateComment({ owner, repo, comment_id: sticky.id, body });
-              }
+              await writeSticky(body, false);
               core.notice(touched ? `${RELEASE_NOTES_FILE} was updated.` : `'${SKIP_LABEL}' label present; skipping.`);
               return;
             }
 
-            if (sticky) {
-              await github.rest.issues.updateComment({ owner, repo, comment_id: sticky.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
-            }
+            await writeSticky(body, true);
             const detail =
               `This PR targets '${pr.base.ref}' but does not modify ${RELEASE_NOTES_FILE}. ` +
               `Add a release note, or apply the '${SKIP_LABEL}' label if this change needs none (e.g. forward-port, CI-only, docs).`;

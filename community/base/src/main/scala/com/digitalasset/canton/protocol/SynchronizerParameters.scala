@@ -1050,8 +1050,8 @@ final case class DynamicSynchronizerParametersWithValidity(
     )
 
   def assignmentExclusivityLimitFor(baseline: CantonTimestamp): Either[String, CantonTimestamp] =
-    checkValidity(baseline, "assignment exclusivity limit").map(_ =>
-      baseline.add(assignmentExclusivityTimeout.unwrap)
+    checkValidity(baseline, "assignment exclusivity limit").flatMap(_ =>
+      baseline.safeAdd(assignmentExclusivityTimeout)
     )
 
   /** Computes the participant response time for the given timestamp.
