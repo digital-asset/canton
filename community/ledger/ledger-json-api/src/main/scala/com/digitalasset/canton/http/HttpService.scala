@@ -157,6 +157,12 @@ class HttpService(
           }
           .getOrElse(allEndpoints)
 
+        timeoutAwareEndpoints = RequestTimeoutDirective(
+          prefixedEndpoints,
+          startSettings.clientRequestTimeout.lowerBound,
+          startSettings.clientRequestTimeout.upperBound,
+        )
+
         binding <- liftET[HttpService.Error] {
           val serverBuilder = Http()
             .newServerAt(startSettings.address, startSettings.port.unwrap)
@@ -167,7 +173,7 @@ class HttpService(
               logger.info(s"Enabling HTTPS with $config")
               serverBuilder.enableHttps(HttpService.httpsConnectionContext(config)(logger))
             }
-            .bind(prefixedEndpoints)
+            .bind(timeoutAwareEndpoints)
         }
 
         _ <- either(

@@ -4,9 +4,10 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.time.Instant
+import java.time.{Duration, Instant}
 
 class CantonTimestampTest extends AnyWordSpec with BaseTest {
 
@@ -60,6 +61,79 @@ class CantonTimestampTest extends AnyWordSpec with BaseTest {
       )
       val exception = intercept[IllegalArgumentException](CantonTimestamp.assertFromString(str))
       exception.getMessage should include(s"Unable to parse $str as CantonTimestamp")
+    }
+  }
+
+  "safeAdd" should {
+    "add the duration" in {
+      CantonTimestamp.Epoch.safeAdd(Duration.ofSeconds(1)).value shouldBe
+        CantonTimestamp.ofEpochSecond(1)
+    }
+
+    "keep sub-second precision" in {
+      CantonTimestamp.Epoch.safeAdd(Duration.ofNanos(1500)).value shouldBe
+        CantonTimestamp.Epoch.addMicros(1)
+    }
+
+    "subtract a negative duration" in {
+      CantonTimestamp.Epoch.safeAdd(Duration.ofSeconds(-1)).value shouldBe
+        CantonTimestamp.ofEpochSecond(-1)
+    }
+
+    "round a negative sub-microsecond duration towards the past" in {
+      CantonTimestamp.Epoch.safeAdd(Duration.ofNanos(-1500)).value shouldBe
+        CantonTimestamp.Epoch.addMicros(-2)
+    }
+
+    "reach the upper bound" in {
+      CantonTimestamp.Epoch
+        .safeAdd(Duration.between(Instant.EPOCH, CantonTimestamp.MaxValue.toInstant))
+        .value shouldBe CantonTimestamp.MaxValue
+    }
+
+    "reach the lower bound" in {
+      CantonTimestamp.Epoch
+        .safeAdd(Duration.between(Instant.EPOCH, CantonTimestamp.MinValue.toInstant))
+        .value shouldBe CantonTimestamp.MinValue
+    }
+
+    "fail when the result is out of bounds" in {
+      CantonTimestamp.MaxValue.safeAdd(Duration.ofNanos(1000)).left.value should
+        include("out of bound Timestamp")
+    }
+
+    "fail when the result is below the lower bound" in {
+      CantonTimestamp.MinValue.safeAdd(Duration.ofNanos(-1000)).left.value should
+        include("out of bound Timestamp")
+    }
+
+    "fail when the addition overflows" in {
+      CantonTimestamp.MaxValue
+        .safeAdd(Duration.ofSeconds(Long.MaxValue / 1_000_000L))
+        .left
+        .value should include("overflows")
+    }
+
+    "fail when the addition underflows" in {
+      CantonTimestamp.MinValue
+        .safeAdd(Duration.ofSeconds(-(Long.MaxValue / 1_000_000L)))
+        .left
+        .value should include("overflows")
+    }
+
+    "fail when the duration cannot be expressed in microseconds" in {
+      CantonTimestamp.Epoch.safeAdd(Duration.ofSeconds(Long.MaxValue)).left.value should
+        include("cannot be expressed in microseconds")
+    }
+
+    "fail when a negative duration cannot be expressed in microseconds" in {
+      CantonTimestamp.Epoch.safeAdd(Duration.ofSeconds(Long.MinValue)).left.value should
+        include("cannot be expressed in microseconds")
+    }
+
+    "accept a refined duration" in {
+      CantonTimestamp.Epoch.safeAdd(NonNegativeFiniteDuration.tryOfSeconds(1)).value shouldBe
+        CantonTimestamp.ofEpochSecond(1)
     }
   }
 

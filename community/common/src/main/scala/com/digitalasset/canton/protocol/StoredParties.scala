@@ -53,6 +53,7 @@ object StoredParties
         partiesP,
         "parties",
         ProtocolVersionValidation.NoValidation,
+        ProtoValidation.MaxCollectionSize,
       )(ProtoConverter.parseLfPartyId)
     } yield StoredParties.fromIterable(parties)
   }

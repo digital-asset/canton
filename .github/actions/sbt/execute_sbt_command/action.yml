@@ -141,6 +141,8 @@ runs:
         EXECUTION_CONTEXT_SIZE: ${{ inputs.execution_context_size }}
         EXTRA_PARAMETERS: ${{ inputs.extra_parameters }}
         FAIL_ON_ERROR_IN_OUTPUT: ${{ inputs.fail_on_error_in_output }}
+        # Lets the sbt-ci-wrapper crash path authenticate gh to append an SBT-kill failure to the flaky issue.
+        GH_TOKEN: ${{ github.token }}
         LOG_IMMEDIATE_FLUSH: ${{ inputs.log_immediate_flush }}
         MATRIX_SHARD: ${{ inputs.matrix_shard }}
         OVERRIDE_JAVA_VERSION_FOR_TESTS: ${{ inputs.override_java_version_for_tests }}

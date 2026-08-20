@@ -13,7 +13,18 @@ import pytest
 
 import update_dependabot as ud
 
-REAL = ud.DEFAULT_FILE.read_text()
+# The open-source mirror deliberately ships no .github/dependabot.yml (dependabot
+# runs only on the private repo). There the tests that assert against the real
+# file are skipped, while the pure-logic tests (manifest parsing and rewrite
+# invariants over inline docs) still run. That keeps the mirror's python gate
+# collecting tests and green, rather than erroring on a missing file or exiting
+# 5 with nothing collected.
+REAL = ud.DEFAULT_FILE.read_text() if ud.DEFAULT_FILE.exists() else None
+
+needs_real_dependabot = pytest.mark.skipif(
+    REAL is None,
+    reason="no .github/dependabot.yml (expected on the open-source mirror, where dependabot is disabled)",
+)
 
 # Classify on the `target-branch:` key (independent of the module) so the test
 # oracle does not share any substring blind spot.
@@ -60,6 +71,7 @@ def test_parse_manifest_rejects_malformed(bad):
 
 # --- rewrite (manifest-driven coverage) -------------------------------------
 
+@needs_real_dependabot
 def test_covers_each_supported_line_for_configured_ecosystems_only():
     out = ud.rewrite(REAL, ["3.5", "3.6"])
     for line in ("release-line-3.5", "release-line-3.6"):
@@ -67,29 +79,34 @@ def test_covers_each_supported_line_for_configured_ecosystems_only():
         assert ecos == sorted(ud.PER_LINE_ECOSYSTEMS)  # docker only for now
 
 
+@needs_real_dependabot
 def test_per_line_ecosystems_are_a_subset_of_base():
     # Coverage can only clone ecosystems that exist as base (main) entries.
     base_ecos = {_ecosystem(e) for e in _base(REAL)}
     assert set(ud.PER_LINE_ECOSYSTEMS) <= base_ecos
 
 
+@needs_real_dependabot
 def test_covers_exactly_the_supported_lines():
     out = ud.rewrite(REAL, ["3.6"])
     assert {_targets(e) for e in _per_line(out)} == {"release-line-3.6"}
 
 
+@needs_real_dependabot
 def test_ramps_down_lines_not_in_manifest():
     # REAL currently carries release-line-3.5 entries; syncing to [9.9] drops them.
     out = ud.rewrite(REAL, ["9.9"])
     assert "release-line-3.5" not in out
 
 
+@needs_real_dependabot
 def test_empty_manifest_leaves_only_base_entries():
     out = ud.rewrite(REAL, [])
     assert _per_line(out) == []
     assert _base(out) == _base(REAL)
 
 
+@needs_real_dependabot
 def test_per_line_entries_are_faithful_clones_of_covered_base():
     out = ud.rewrite(REAL, ["9.9"])
     stripped = [
@@ -99,6 +116,7 @@ def test_per_line_entries_are_faithful_clones_of_covered_base():
     assert sorted(stripped) == sorted(covered_base)
 
 
+@needs_real_dependabot
 def test_idempotent():
     once = ud.rewrite(REAL, ["3.5", "3.6"])
     assert ud.rewrite(once, ["3.5", "3.6"]) == once
@@ -124,6 +142,7 @@ def test_base_entry_mentioning_target_branch_in_comment_is_not_dropped():
 
 # --- CLI --------------------------------------------------------------------
 
+@needs_real_dependabot
 def test_cli_syncs_file_from_manifest(tmp_path):
     f = tmp_path / "dependabot.yml"
     f.write_text(REAL)
@@ -136,6 +155,7 @@ def test_cli_syncs_file_from_manifest(tmp_path):
     }
 
 
+@needs_real_dependabot
 def test_cli_rejects_malformed_manifest(tmp_path):
     f = tmp_path / "dependabot.yml"
     f.write_text(REAL)

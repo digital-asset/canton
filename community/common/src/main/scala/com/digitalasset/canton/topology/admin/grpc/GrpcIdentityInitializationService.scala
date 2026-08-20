@@ -61,17 +61,25 @@ class GrpcIdentityInitializationService(
       )
       // parse topology transactions
       certificates <- handleProtoFailure(
-        MonadUtil
-          .sequentialTraverse(certificatesP)(
-            SignedTopologyTransaction
-              .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _)
-              .flatMap { tx =>
-                tx.selectOp[TopologyChangeOp.Replace]
-                  .toRight(
-                    ProtoDeserializationError
-                      .OtherError("Topology transaction is not a replace but a remove")
-                  )
-              }
+        ProtoValidation
+          .validateLength(
+            certificatesP,
+            Some("certificates"),
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )
+          .flatMap(certs =>
+            MonadUtil.sequentialTraverse(certs)(
+              SignedTopologyTransaction
+                .fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _)
+                .flatMap { tx =>
+                  tx.selectOp[TopologyChangeOp.Replace]
+                    .toRight(
+                      ProtoDeserializationError
+                        .OtherError("Topology transaction is not a replace but a remove")
+                    )
+                }
+            )
           )
       )
       _ <- bootstrap

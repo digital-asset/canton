@@ -707,19 +707,22 @@ final class ParticipantTrafficEnforcementDegradationTest extends ParticipantTraf
 
         // Charlie's balance is zero, so a lookup that did complete would reject this submission.
         val degradedMessage = "allowing the submission to proceed without a balance check"
-        loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
-          participant1.ledger_api.javaapi.commands
-            .submit(Seq(charlie), Seq(createCycleCommandJava(charlie, "degraded")))
-            .getUpdateId should not be empty,
-          entries => {
-            forAtLeast(1, entries)(_.warningMessage should include(degradedMessage))
-            forEvery(entries)(entry =>
-              entry.warningMessage should (include(degradedMessage) or include(
-                "DEADLINE_EXCEEDED"
-              ))
-            )
-          },
-        )
+        // In rare cases the database query may complete in time, so we retry until we see the degraded message.
+        eventually() {
+          loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
+            participant1.ledger_api.javaapi.commands
+              .submit(Seq(charlie), Seq(createCycleCommandJava(charlie, "degraded")))
+              .getUpdateId should not be empty,
+            entries => {
+              forAtLeast(1, entries)(_.warningMessage should include(degradedMessage))
+              forEvery(entries)(entry =>
+                entry.warningMessage should (include(degradedMessage) or include(
+                  "DEADLINE_EXCEEDED"
+                ))
+              )
+            },
+          )
+        }
 
         // The submission was still charged even though the balance check was bypassed.
         eventually() {

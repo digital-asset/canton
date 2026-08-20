@@ -151,6 +151,17 @@ The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, 
 - The JSON Ledger API now rejects malformed identifiers (e.g. template-id) provided in requests (one that does not follow the
   `<package>:<moduleName>:<entityName>` format) with a descriptive `400 Bad Request` error that names the
   expected format, instead of surfacing it as an internal error.
+- The JSON Ledger API now honours an optional, client-supplied `Request-Timeout` header (value in milliseconds) that sets a
+  per-request timeout. The value is validated against a configurable `[lower-bound; upper-bound]` window (defaulting to `[1s; 60s]`):
+  values within the window are enforced as-is, values above, or below the lower bound, a non-positive value, or a non-numeric value is
+  rejected with a descriptive `400 Bad Request`. When the header is absent, the server default request timeout applies unchanged.
+  The window can be configured under `http-ledger-api.client-request-timeout`:
+  ```
+  canton.participants.<participant>.http-ledger-api.client-request-timeout {
+    lower-bound = 1s
+    upper-bound = 60s
+  }
+  ```
 - The default size of the Ledger API in-memory fan-out buffer (`<participant>.ledger-api.index-service.max-transactions-in-memory-fan-out-buffer-size`) has been increased from 1000 to 1100 to accommodate serving ACS commitments from the buffer.
 - Ledger API and Indexer metrics clean-up:
   - *BREAKING*: The indexer queue metrics `daml.participant.api.indexer.indexer_queue_blocked`, `daml.participant.api.indexer.indexer_queue_buffered` and `daml.participant.api.indexer.indexer_queue_uncommitted` are now exposed as gauges instead of meters.

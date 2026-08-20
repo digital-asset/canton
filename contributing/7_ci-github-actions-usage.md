@@ -59,6 +59,95 @@ Tip: if attempt 1 failed and attempt 2 passed, treat this as a possible flake.
 
 ---
 
+# How to find failed tests quickly
+
+Use the workflow run summary:
+
+1. Open the workflow run page.
+2. Scroll down to the GitHub summary section.
+3. Find the test summary blocks (table + failed-tests list) appended by test jobs.
+4. Use that list as the primary source of failed test names.
+
+![Github Actions workflow run summary with failed tests](7_gha_failed_tests_summary.png)
+
+Note: stack traces are being added to failed-test reporting, but this may depend on whether the related PR has already merged.
+
+---
+
+# How to find test logs
+
+To inspect detailed test logs:
+
+1. Open the workflow run.
+2. Open the specific failed test job (or the shard you want).
+3. Expand the test step, usually named one of:
+   - `Run Ordinary Tests`
+   - `Run Data Continuity Tests`
+   - or a similar test-run step name
+4. Inside that step, expand:
+   - `Run SBT Tests`
+   - or `Run SBT Tests (Failed-only Rerun)`
+5. Then expand:
+   - `Display and execute SBT command`
+
+If the run failed in that area, GitHub usually auto-expands the failing section.
+
+Raw log files are also available as artifacts. Open the same workflow run, go to `Artifacts`,
+download the shard bundle for the job/shard you need, and inspect files under `log/`.
+
+![GitHub Actions failed test logs](7_gha_failed_test_logs.png)
+
+---
+
+# How to find artifacts
+
+1. Open the workflow run page.
+2. Scroll to the `Artifacts` section.
+3. Download the artifact for the job/shard you need.
+4. Common examples:
+   - `test-full-class-names` (test list from compile)
+   - `<job>-shard-bundle-<run_id>-<shard>` (logs, summary, timings, test reports)
+   - `<job>-timings-latest` (merged timings for future shard balancing)
+
+Tip: for test debugging, start with the shard bundle and inspect `log/`, `summary/`, and `timings/`.
+
+---
+
+# How to inspect historic runs
+
+Use historic runs when you need to compare behavior over time.
+
+1. Open `Actions` and select the workflow (for example `Canton Build Required`).
+2. Browse older runs for the same branch or PR.
+3. Compare:
+   - failed jobs
+   - failed tests
+   - whether a rerun recovered the failure
+4. Use this to distinguish a stable failure from a flaky one.
+
+Tip: combine this with the attempt selector described above. Attempts show retries within one run, historic runs show behavior across different commits.
+
+---
+
+# How to rerun failed tests
+
+There are two rerun paths:
+
+1. **Automatic failed-jobs rerun workflow**
+   - We have `Rerun Failed Jobs in Workflow`.
+   - It observes selected workflows and requests one failed-jobs rerun when policy allows.
+
+2. **Manual rerun from GitHub UI**
+   - Open the workflow run.
+   - Use `Re-run jobs` and choose `Re-run failed jobs`.
+   - This reruns only failed jobs from that run attempt.
+
+![GitHub Actions rerun failed jobs](7_gha_rerun_failed_jobs.png)
+
+After rerun, use the attempt selector to compare attempt 1 and attempt 2.
+
+---
+
 # Related docs
 
 - Legacy CircleCI usage and background: [5_ci-usage.md](5_ci-usage.md)

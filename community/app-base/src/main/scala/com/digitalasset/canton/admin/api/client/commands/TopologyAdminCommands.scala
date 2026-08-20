@@ -6,6 +6,7 @@ package com.digitalasset.canton.admin.api.client.commands
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   ServerEnforcedTimeout,
@@ -94,7 +95,14 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListNamespaceDelegationResponse
       ): Either[String, Seq[ListNamespaceDelegationResult]] =
-        response.results.traverse(ListNamespaceDelegationResult.fromProtoV30).leftMap(_.toString)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListNamespaceDelegationResult.fromProtoV30(result))
+          .leftMap(_.toString)
     }
 
     final case class ListDecentralizedNamespaceDefinition(
@@ -124,8 +132,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListDecentralizedNamespaceDefinitionResponse
       ): Either[String, Seq[ListDecentralizedNamespaceDefinitionResult]] =
-        response.results
-          .traverse(ListDecentralizedNamespaceDefinitionResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListDecentralizedNamespaceDefinitionResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -156,7 +169,14 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListOwnerToKeyMappingResponse
       ): Either[String, Seq[ListOwnerToKeyMappingResult]] =
-        response.results.traverse(ListOwnerToKeyMappingResult.fromProtoV30).leftMap(_.toString)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListOwnerToKeyMappingResult.fromProtoV30(result))
+          .leftMap(_.toString)
     }
 
     final case class ListPartyToKeyMapping(
@@ -183,7 +203,14 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListPartyToKeyMappingResponse
       ): Either[String, Seq[ListPartyToKeyMappingResult]] =
-        response.results.traverse(ListPartyToKeyMappingResult.fromProtoV30).leftMap(_.toString)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListPartyToKeyMappingResult.fromProtoV30(result))
+          .leftMap(_.toString)
     }
 
     final case class ListSynchronizerTrustCertificate(
@@ -213,8 +240,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListSynchronizerTrustCertificateResponse
       ): Either[String, Seq[ListSynchronizerTrustCertificateResult]] =
-        response.results
-          .traverse(ListSynchronizerTrustCertificateResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListSynchronizerTrustCertificateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -245,8 +277,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListParticipantSynchronizerPermissionResponse
       ): Either[String, Seq[ListParticipantSynchronizerPermissionResult]] =
-        response.results
-          .traverse(ListParticipantSynchronizerPermissionResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListParticipantSynchronizerPermissionResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -276,8 +313,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListPartyHostingLimitsResponse
       ): Either[String, Seq[ListPartyHostingLimitsResult]] =
-        response.results
-          .traverse(ListPartyHostingLimitsResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListPartyHostingLimitsResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -307,8 +349,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListVettedPackagesResponse
       ): Either[String, Seq[ListVettedPackagesResult]] =
-        response.results
-          .traverse(ListVettedPackagesResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListVettedPackagesResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -340,8 +387,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListPartyToParticipantResponse
       ): Either[String, Seq[ListPartyToParticipantResult]] =
-        response.results
-          .traverse(ListPartyToParticipantResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListPartyToParticipantResult.fromProtoV30(result))
           .leftMap(_.toString)
 
     }
@@ -373,8 +425,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListSynchronizerParametersStateResponse
       ): Either[String, Seq[ListSynchronizerParametersStateResult]] =
-        response.results
-          .traverse(ListSynchronizerParametersStateResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListSynchronizerParametersStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -405,8 +462,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListSequencingParametersStateResponse
       ): Either[String, Seq[ListSequencingParametersStateResult]] =
-        response.results
-          .traverse(ListSequencingParametersStateResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListSequencingParametersStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -437,8 +499,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListMediatorSynchronizerStateResponse
       ): Either[String, Seq[ListMediatorSynchronizerStateResult]] =
-        response.results
-          .traverse(ListMediatorSynchronizerStateResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListMediatorSynchronizerStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -469,8 +536,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListSequencerSynchronizerStateResponse
       ): Either[String, Seq[ListSequencerSynchronizerStateResult]] =
-        response.results
-          .traverse(ListSequencerSynchronizerStateResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListSequencerSynchronizerStateResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -500,8 +572,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListLsuAnnouncementResponse
       ): Either[String, Seq[ListLsuAnnouncementResult]] =
-        response.results
-          .traverse(ListLsuAnnouncementResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListLsuAnnouncementResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -534,8 +611,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListLsuSequencerConnectionSuccessorResponse
       ): Either[String, Seq[ListLsuSequencerConnectionSuccessorResult]] =
-        response.results
-          .traverse(ListLsuSequencerConnectionSuccessorResult.fromProtoV30)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListLsuSequencerConnectionSuccessorResult.fromProtoV30(result))
           .leftMap(_.toString)
     }
 
@@ -556,7 +638,14 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListAvailableStoresResponse
       ): Either[String, Seq[TopologyStoreId]] =
-        response.storeIds.traverse(TopologyStoreId.fromProtoV30(_, "store_ids")).leftMap(_.message)
+        ProtoValidation
+          .validateLengthThen(
+            response.storeIds,
+            "store_ids",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((storeId, field) => TopologyStoreId.fromProtoV30(storeId, field))
+          .leftMap(_.message)
     }
 
     @deprecated("Use ListAllV2 instead", since = "3.5")
@@ -846,7 +935,14 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListPartiesResponse
       ): Either[String, Seq[ListPartiesResult]] =
-        response.results.traverse(ListPartiesResult.fromProtoV30).leftMap(_.toString)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListPartiesResult.fromProtoV30(result))
+          .leftMap(_.toString)
 
       //  command will potentially take a long time
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
@@ -886,7 +982,14 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: v30.ListKeyOwnersResponse
       ): Either[String, Seq[ListKeyOwnersResult]] =
-        response.results.traverse(ListKeyOwnersResult.fromProtoV30).leftMap(_.toString)
+        ProtoValidation
+          .validateLengthThen(
+            response.results,
+            "results",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((result, _) => ListKeyOwnersResult.fromProtoV30(result))
+          .leftMap(_.toString)
 
       //  command will potentially take a long time
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
@@ -1019,7 +1122,7 @@ object TopologyAdminCommands {
         Right(
           SignTransactionsRequest(
             transactions.map(_.toProtoV30),
-            signedBy.map(_.toProtoPrimitive),
+            signedBy.map(_.toProtoPrimitive.toProtoUnvalidated),
             Some(store.toProtoV30),
             forceFlags.toProtoV30,
           )
@@ -1033,8 +1136,13 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: SignTransactionsResponse
       ): Either[String, Seq[GenericSignedTopologyTransaction]] =
-        response.transactions
-          .traverse(tx =>
+        ProtoValidation
+          .validateLengthThen(
+            response.transactions,
+            "transactions",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          )((tx, _) =>
             SignedTopologyTransaction.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, tx)
           )
           .leftMap(_.message)
@@ -1063,26 +1171,37 @@ object TopologyAdminCommands {
       override protected def handleResponse(
           response: GenerateTransactionsResponse
       ): Either[String, Seq[TopologyTransaction[TopologyChangeOp, TopologyMapping]]] =
-        response.generatedTransactions
-          .traverse { generatedTransaction =>
+        ProtoValidation
+          .validateLengthThen(
+            response.generatedTransactions,
+            "generated_transactions",
+            ProtocolVersionValidation.AlwaysValidation,
+            ProtoValidation.MaxCollectionSize,
+          ) { case (generatedTransaction, _) =>
             val serializedTransaction = generatedTransaction.serializedTransaction
             val serializedHash = generatedTransaction.transactionHash
             for {
               parsedTopologyTransaction <-
                 TopologyTransaction
                   .fromByteString(ProtocolVersionValidation.AlwaysValidation, serializedTransaction)
-                  .leftMap(_.message)
               // We don't really need the hash from the response here because we can re-build it from the deserialized
               // topology transaction. But users of the API without access to this code wouldn't be able to do that,
               // which is why the hash is returned by the API. Let's still verify that they match here.
-              parsedHash <- Hash.fromByteString(serializedHash).leftMap(_.message)
+              parsedHash <- Hash
+                .fromByteString(serializedHash)
+                .leftMap(err =>
+                  ProtoDeserializationError
+                    .ValueDeserializationError(err.toString, "transaction_hash")
+                )
               _ = Either.cond(
                 parsedTopologyTransaction.hash.hash.compare(parsedHash) == 0,
                 (),
-                s"Response hash did not match transaction hash",
+                ProtoDeserializationError
+                  .InvariantViolation(None, "Response hash did not match transaction hash"),
               )
             } yield parsedTopologyTransaction
           }
+          .leftMap(_.message)
     }
     object GenerateTransactions {
       final case class Proposal(
@@ -1143,7 +1262,7 @@ object TopologyAdminCommands {
             ),
             mustFullyAuthorize = mustFullyAuthorize,
             forceChanges = forceChanges.toProtoV30,
-            signedBy = signedBy.map(_.toProtoPrimitive),
+            signedBy = signedBy.map(_.toProtoPrimitive.toProtoUnvalidated),
             store = Some(store.toProtoV30),
             waitToBecomeEffective =
               waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
@@ -1217,8 +1336,8 @@ object TopologyAdminCommands {
         AuthorizeRequest(
           TransactionHash(transactionHash),
           mustFullyAuthorize = mustFullyAuthorize,
-          forceChanges = Seq.empty,
-          signedBy = signedBy.map(_.toProtoPrimitive),
+          forceChanges = Seq.empty[v30.ForceFlag],
+          signedBy = signedBy.map(_.toProtoPrimitive.toProtoUnvalidated),
           store = Some(store.toProtoV30),
           waitToBecomeEffective.map(_.asNonNegativeFiniteApproximation.toProtoPrimitive),
         )

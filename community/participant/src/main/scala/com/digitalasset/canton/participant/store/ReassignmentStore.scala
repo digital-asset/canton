@@ -382,7 +382,7 @@ trait ReassignmentLookup {
     * or equal to `validAt`.
     *
     * @param sourceSynchronizer
-    *   if empty, select only reassignments whose source synchronizer matches the given one
+    *   if non-empty, select only reassignments whose source synchronizer matches the given one
     * @param validAt
     *   select only reassignments that are successfully unassigned
     * @param stakeholders
