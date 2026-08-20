@@ -46,7 +46,7 @@ object Dependencies {
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.13.0"
-  lazy val checkerFramework_version = "3.47.0"
+  lazy val checkerFramework_version = "4.2.2"
   lazy val chimney_version = "1.4.0"
   lazy val circe_version = "0.14.2"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
@@ -70,7 +70,7 @@ object Dependencies {
   lazy val magnolifyScalacheck_version = "0.6.2"
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
-  lazy val monocle_version = "3.2.0"
+  lazy val monocle_version = "3.3.0"
   lazy val munit_version = "1.3.4"
   lazy val grpc_version = resolveDependency("io.grpc", "grpc-api").revision
 
@@ -225,7 +225,7 @@ object Dependencies {
   lazy val scalatestTestNG =
     "org.scalatestplus" %% "testng-7-5" % "3.2.11.0"
 
-  lazy val scalatest_compatible = "org.scalatest" % "scalatest-compatible" % "3.2.11"
+  lazy val scalatest_compatible = "org.scalatest" % "scalatest-compatible" % "3.2.20"
   lazy val scalatest_wordspec = "org.scalatest" %% "scalatest-wordspec" % "3.2.11"
   lazy val scalatest_flatspec = "org.scalatest" %% "scalatest-flatspec" % "3.2.11"
   lazy val scalatest_shouldmatchers = "org.scalatest" %% "scalatest-shouldmatchers" % "3.2.11"
