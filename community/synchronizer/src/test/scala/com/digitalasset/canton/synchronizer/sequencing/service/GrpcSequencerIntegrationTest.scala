@@ -87,6 +87,7 @@ import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, Topo
 import com.digitalasset.canton.topology.store.TopologyStateForInitializationService
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, PekkoUtil}
+import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
 import com.digitalasset.canton.version.{
   IgnoreInSerializationTestExhaustivenessCheck,
   ProtocolVersion,
@@ -263,7 +264,7 @@ class Env(
           .onShutdown(throw new Exception("Aborted due to shutdown."))
       } yield v30.SequencerAuthentication.ChallengeResponse(
         Nonce.generate(cryptoApi.pureCrypto).toProtoPrimitive,
-        fingerprints.map(_.unwrap),
+        fingerprints.map(_.unwrap.toProtoUnvalidated),
       )
     override def authenticate(
         request: v30.SequencerAuthentication.AuthenticateRequest

@@ -231,6 +231,8 @@ class GrpcSequencerService(
       loggerFactory,
     )
 
+  private val pvv = ProtocolVersionValidation(protocolVersion)
+
   override protected val timeouts: ProcessingTimeout = parameters.processingTimeouts
 
   private val rates = new TrieMap[ParticipantId, RateLimiter]()
@@ -870,7 +872,7 @@ class GrpcSequencerService(
           ProtoValidation.validateThen(
             request.member,
             "member",
-            ProtocolVersionValidation.AlwaysValidation,
+            pvv,
           )(Member.fromProtoPrimitive)
         )
         .leftMap(_.asGrpcError)

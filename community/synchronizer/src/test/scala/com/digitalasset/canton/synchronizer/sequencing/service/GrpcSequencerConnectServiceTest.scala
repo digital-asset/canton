@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencing.service
 
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -15,7 +14,8 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
@@ -26,7 +26,10 @@ class GrpcSequencerConnectServiceTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext
+    with ProtocolVersionChecksAnyWordSpec
     with MockitoSugar {
+
+  lazy private val sequencerLimits = SequencerLimits()
 
   private class Env(initialTimeBound: Option[CantonTimestamp] = None) {
     val synchronizerId = DefaultTestIdentities.synchronizerId
@@ -62,7 +65,7 @@ class GrpcSequencerConnectServiceTest
       initialTimeBound.map(ts =>
         LsuSequencingBounds.unsafeCreate(upgradeTime = ts, lowerBoundSequencingTimeExclusive = ts)
       ),
-      SequencerLimits(),
+      sequencerLimits,
       sanitizePublicErrorMessages = false,
       disableReleaseVersionHandshakeCheck = false,
       SequencerTestMetrics(this.getClass.getSimpleName),
@@ -97,8 +100,6 @@ class GrpcSequencerConnectServiceTest
   }
 
   "GrpcSequencerConnectService" should {
-    val totalTxnLimit = PositiveInt.tryCreate(7)
-
     "reject requests without memberId in the context" in {
       val env = new Env()
 
@@ -118,7 +119,9 @@ class GrpcSequencerConnectServiceTest
         .findDynamicSynchronizerParameters()(anyTraceContext)
 
       // prepare the protobuf message to be sent to the service (empty)
-      val request = SequencerConnect.RegisterOnboardingTopologyTransactionsRequest(Seq.empty)
+      val request = SequencerConnect.RegisterOnboardingTopologyTransactionsRequest(
+        Seq.empty[com.digitalasset.canton.protocol.v30.SignedTopologyTransaction]
+      )
 
       // Send the message to the service, it should be refused because there is
       // no memberId in the grpc context
@@ -133,10 +136,22 @@ class GrpcSequencerConnectServiceTest
 
     "enforce the transaction batch limit" in {
       val env = new Env()
-      val tooManyTxs = (1 to (totalTxnLimit.value + 1)).map(_ => env.mockTx(env.createSTC()))
+
+      val tooMany = GrpcSequencerConnectService.maxOnboardingTransactions.value + 1
+      val tooManyTxs =
+        (1 to tooMany).map(_ => env.mockTx(env.createSTC()))
+
       val result = env.service
-        .validateOnboardingTransactions(env.participantId, tooManyTxs, totalTxnLimit)
-      result.left.value.getDescription should include("Too many topology transactions")
+        .parseAndValidateOnboardingTransactions(env.participantId, tooManyTxs.map(_.toProtoV30))
+
+      // The length check in < PV36 has a different error message than the check from the proto validation tooling
+      if (testedProtocolVersion <= ProtocolVersion.v35) {
+        result.left.value.getDescription should include("Too many topology transactions")
+      } else {
+        result.left.value.getDescription should include(
+          s"repeated field has $tooMany elements, exceeding the maximum of ${GrpcSequencerConnectService.maxOnboardingTransactions.value}"
+        )
+      }
     }
 
     "enforce exactly one SynchronizerTrustCertificate" in {
@@ -147,7 +162,6 @@ class GrpcSequencerConnectServiceTest
         .validateOnboardingTransactions(
           env.participantId,
           Seq(env.mockTx(env.createOTK())),
-          totalTxnLimit,
         )
         .left
         .value
@@ -157,7 +171,7 @@ class GrpcSequencerConnectServiceTest
       val multiStc =
         Seq(env.mockTx(env.createSTC()), env.mockTx(env.createSTC()), env.mockTx(env.createOTK()))
       env.service
-        .validateOnboardingTransactions(env.participantId, multiStc, totalTxnLimit)
+        .validateOnboardingTransactions(env.participantId, multiStc)
         .left
         .value
         .getDescription should include("Exactly one SynchronizerTrustCertificate is required")
@@ -167,7 +181,7 @@ class GrpcSequencerConnectServiceTest
       val env = new Env()
       val txs = Seq(env.mockTx(env.createSTC()), env.mockTx(env.createOTK()))
       val result = env.service
-        .validateOnboardingTransactions(env.participantId, txs, PositiveInt.tryCreate(10))
+        .validateOnboardingTransactions(env.participantId, txs)
       result.left.value.getDescription should include("Missing mappings")
     }
 
@@ -187,7 +201,6 @@ class GrpcSequencerConnectServiceTest
             env.mockTx(env.createOTK(otherPId)),
             env.factory.mkAdd(nsDelegation),
           ),
-          totalTxnLimit,
         )
         .left
         .value
@@ -202,7 +215,6 @@ class GrpcSequencerConnectServiceTest
         .validateOnboardingTransactions(
           env.participantId,
           Seq(env.mockTx(env.createSTC()), env.mockTx(env.createOTK()), env.factory.mkAdd(wrongNs)),
-          totalTxnLimit,
         )
         .left
         .value
@@ -213,7 +225,6 @@ class GrpcSequencerConnectServiceTest
         .validateOnboardingTransactions(
           env.participantId,
           Seq(proposal, env.mockTx(env.createOTK()), env.factory.mkAdd(nsDelegation)),
-          totalTxnLimit,
         )
         .left
         .value
@@ -224,7 +235,6 @@ class GrpcSequencerConnectServiceTest
         .validateOnboardingTransactions(
           env.participantId,
           Seq(removal, env.mockTx(env.createOTK()), env.factory.mkAdd(nsDelegation)),
-          totalTxnLimit,
         )
         .left
         .value
@@ -240,7 +250,6 @@ class GrpcSequencerConnectServiceTest
         .validateOnboardingTransactions(
           env.participantId,
           Seq(stc),
-          totalTxnLimit,
         )
 
       missingOtkResult.left.value.getDescription should include(
@@ -252,7 +261,6 @@ class GrpcSequencerConnectServiceTest
         .validateOnboardingTransactions(
           env.participantId,
           Seq(stc, env.mockTx(env.createOTK()), env.mockTx(env.createOTK())),
-          totalTxnLimit,
         )
 
       multipleOtkResult.left.value.getDescription should include(
@@ -278,16 +286,15 @@ class GrpcSequencerConnectServiceTest
         .validateOnboardingTransactions(
           env.participantId,
           txs,
-          PositiveInt.tryCreate(10),
         )
       result shouldBe Right(())
     }
 
     // --- handshake clientProtocolVersions size limit ---
 
-    "reject a handshake request that exceeds the clientProtocolVersions limit" in {
+    "reject a handshake request that exceeds the clientProtocolVersions limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val env = new Env()
-      val maxClientProtocolVersions = SequencerLimits().maxClientProtocolVersions.value
+      val maxClientProtocolVersions = sequencerLimits.maxClientProtocolVersions.value
       val exceedingClientProtocolVersions =
         maxClientProtocolVersions + 1 // One over the configured limit
       val request = SequencerConnect.HandshakeRequest(
@@ -297,10 +304,8 @@ class GrpcSequencerConnectServiceTest
       )
       inside(env.service.handshake(request).failed.futureValue) { case ex: StatusRuntimeException =>
         ex.getStatus.getCode shouldBe Code.INVALID_ARGUMENT
-        ex.getStatus.getDescription should include("Too many client protocol versions")
-        ex.getStatus.getDescription should include(s"Limit: $maxClientProtocolVersions")
         ex.getStatus.getDescription should include(
-          s"Found: $exceedingClientProtocolVersions"
+          s"exceeding the maximum of $maxClientProtocolVersions"
         )
       }
     }

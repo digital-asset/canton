@@ -12,7 +12,8 @@ import com.digitalasset.canton.synchronizer.sequencer.config.SequencerLimits
 import com.digitalasset.canton.synchronizer.sequencing.authentication.MemberAuthenticationService
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Status.Code
@@ -25,9 +26,8 @@ class GrpcSequencerAuthenticationServiceTest
     extends AnyWordSpec
     with BaseTest
     with HasExecutionContext
+    with ProtocolVersionChecksAnyWordSpec
     with MockitoSugar {
-
-  private val protocolVersion = BaseTest.defaultStaticSynchronizerParametersWith().protocolVersion
 
   private def mkAuthService(
       authenticationService: MemberAuthenticationService,
@@ -36,7 +36,7 @@ class GrpcSequencerAuthenticationServiceTest
   ): GrpcSequencerAuthenticationService =
     new GrpcSequencerAuthenticationService(
       authenticationService,
-      protocolVersion,
+      testedProtocolVersion,
       disableReleaseVersionHandshakeCheck,
       sequencerLimits,
       loggerFactory,
@@ -108,7 +108,7 @@ class GrpcSequencerAuthenticationServiceTest
       )
       val request = mkChallengeRequest(
         member.toProtoPrimitive,
-        Seq.fill(maxMemberProtocolVersions)(protocolVersion.toProtoPrimitive),
+        Seq.fill(maxMemberProtocolVersions)(testedProtocolVersion.toProtoPrimitive),
       )
 
       val response = service.challenge(request).futureValue
@@ -116,7 +116,7 @@ class GrpcSequencerAuthenticationServiceTest
       response.fingerprints shouldBe Seq(expectedFingerprint.unwrap.toProtoUnvalidated)
     }
 
-    "reject challenge requests with too many member protocol versions" in {
+    "reject challenge requests with too many member protocol versions" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val sequencerLimits = SequencerLimits()
       val maxMemberProtocolVersions = sequencerLimits.maxMemberProtocolVersions.value
       val request = mkChallengeRequest("", Seq.fill(maxMemberProtocolVersions + 1)(30))
@@ -130,8 +130,9 @@ class GrpcSequencerAuthenticationServiceTest
 
       inside(service.challenge(request).failed.futureValue) { case ex: StatusRuntimeException =>
         ex.getStatus.getCode shouldBe Code.INVALID_ARGUMENT
-        ex.getStatus.getDescription should include("Too many member protocol versions")
-        ex.getStatus.getDescription should include(s"Limit: $maxMemberProtocolVersions")
+        ex.getStatus.getDescription should include(
+          s"exceeding the maximum of $maxMemberProtocolVersions"
+        )
       }
 
       verifyNoInteractions(authenticationService)
