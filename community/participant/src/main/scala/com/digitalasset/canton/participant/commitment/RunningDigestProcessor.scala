@@ -457,7 +457,7 @@ class RunningDigestProcessorImpl(
       // load the ACS of the party to determine the counterparties that need to have their digest updated
       .counterParties(synchronizerId, offset, Some(partyAffectedByTopologyChange))
       .grouped(acsCommitmentConfig.counterpartyBatchSize.unwrap)
-      .flatMapConcat { counterparties =>
+      .mapAsync(acsCommitmentConfig.acsFetchParallelism.unwrap) { counterparties =>
         metrics.runningDigestProcessor.localPartyChangeCounterparties.updateValue(
           _ + counterparties.size
         )
@@ -465,70 +465,73 @@ class RunningDigestProcessorImpl(
 
         // for a group of counterparties, load the acs that is shared with the locally onboarded party
         // and emit the corresponding classification
-        indexService
-          .acs(
-            synchronizerId,
-            offset,
-            counterpartiesSet,
-            Set(partyAffectedByTopologyChange),
-          )
-          .batch(
-            max = acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap.toLong,
-            Vector(_),
-          )(_ :+ _)
-          .mapAsyncAndDrainUS(1) { activeContractsOfCounterparties =>
-            metrics.runningDigestProcessor.localPartyChangeContractChanges.updateValue(
-              _ + activeContractsOfCounterparties.size
+        Future(
+          indexService
+            .acs(
+              synchronizerId,
+              offset,
+              counterpartiesSet,
+              Set(partyAffectedByTopologyChange),
             )
-            val stakeholdersOfContracts =
-              activeContractsOfCounterparties.iterator.flatMap(_.stakeholders).toSet
+            .grouped(acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap)
+            .map(counterpartiesSet -> _)
+        )
+      }
+      .flatten
+      .mapAsyncAndDrainUS(
+        acsCommitmentConfig.contractChangeClassificationParallelism.unwrap
+      ) { case (counterpartiesSet, activeContractsOfCounterparties) =>
+        metrics.runningDigestProcessor.localPartyChangeContractChanges.updateValue(
+          _ + activeContractsOfCounterparties.size
+        )
+        val stakeholdersOfContracts =
+          activeContractsOfCounterparties.iterator.flatMap(_.stakeholders).toSet
 
-            for {
-              partyToParticipant <- getOnboardedParticipantsOfParties(
-                topologySnapshot,
-                stakeholdersOfContracts,
+        for {
+          partyToParticipant <- getOnboardedParticipantsOfParties(
+            topologySnapshot,
+            stakeholdersOfContracts,
+          )
+            // see scaladoc of this method as to why we don't apply the updated topology changes for added parties,
+            // but we do for removed parties.
+            .map(
+              if (isPartyBeingAdded) changeTracker.applyPendingTopologyChanges
+              else updatedTracker.applyPendingTopologyChanges
+            )
+        } yield {
+          val contractChanges =
+            activeContractsOfCounterparties.iterator.map { activeContractOfCounterparty =>
+              // emit the classification update for all stakeholders of the current stakeholder batch
+              // of the contract and their respective hosting participants.
+              val counterpartiesStakeholders =
+                activeContractOfCounterparty.stakeholders.iterator
+                  .filter(counterpartiesSet.contains)
+                  .toSet
+
+              ContractChange(
+                counterpartiesStakeholders,
+                // only emit the on-/offboarded party as local party. Other locally hosted stakeholders will have already
+                // been processed by other events (e.g. an AcsChange or their own party onboarding event).
+                Seq(partyAffectedByTopologyChange),
+                activeContractOfCounterparty.contractId,
+                activeContractOfCounterparty.reassignmentCounter,
+                isActivation = isPartyBeingAdded,
               )
-                // see scaladoc of this method as to why we don't apply the updated topology changes for added parties,
-                // but we do for removed parties.
-                .map(
-                  if (isPartyBeingAdded) changeTracker.applyPendingTopologyChanges
-                  else updatedTracker.applyPendingTopologyChanges
-                )
-            } yield {
-              val contractChanges = activeContractsOfCounterparties.map {
-                activeContractOfCounterparty =>
-                  // emit the classification update for all stakeholders of the current stakeholder batch
-                  // of the contract and their respective hosting participants.
-                  val counterpartiesStakeholders =
-                    activeContractOfCounterparty.stakeholders.iterator
-                      .filter(counterpartiesSet.contains)
-                      .toSet
+            }.toSeq
 
-                  ContractChange(
-                    counterpartiesStakeholders,
-                    // only emit the on-/offboarded party as local party. Other locally hosted stakeholders will have already
-                    // been processed by other events (e.g. an AcsChange or their own party onboarding event).
-                    Seq(partyAffectedByTopologyChange),
-                    activeContractOfCounterparty.contractId,
-                    activeContractOfCounterparty.reassignmentCounter,
-                    isActivation = isPartyBeingAdded,
-                  )
-              }
+          val counterpartiesToParticipant = activeContractsOfCounterparties.iterator
+            .flatMap(_.stakeholders)
+            .distinct
+            .filter(counterpartiesSet)
+            .map(party => party -> partyToParticipant.getOrElse(party, Set.empty))
+            .toMap
 
-              val counterpartiesToParticipant = activeContractsOfCounterparties.iterator
-                .flatMap(_.stakeholders)
-                .distinct
-                .filter(counterpartiesSet)
-                .map(party => party -> partyToParticipant.getOrElse(party, Set.empty))
-                .toMap
-
-              ContractChangeBatch.create(
-                counterpartiesToParticipant,
-                contractChanges,
-                enableAdditionalConsistencyChecks,
-              )
-            }
-          }
+          ContractChangeBatch.create(
+            counterpartiesToParticipant,
+            contractChanges,
+            enableAdditionalConsistencyChecks,
+          )
+        }
       }
 
     (

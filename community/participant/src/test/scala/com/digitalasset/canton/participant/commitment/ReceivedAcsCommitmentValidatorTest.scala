@@ -28,13 +28,13 @@ import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValid
 import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, TestCommitmentMetrics}
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.AcsCommitmentAlarm
 import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
-import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   AcsCommitmentProtocolMessage,
   CommitmentPeriod,
   Digest,
 }
+import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
@@ -62,24 +62,27 @@ class ReceivedAcsCommitmentValidatorTest
   import DefaultTestIdentities.{physicalSynchronizerId, participant1, participant2, participant3}
 
   private lazy val jceStaticSynchronizerParameters: StaticSynchronizerParameters =
-    StaticSynchronizerParameters(
-      requiredSigningSpecs = RequiredSigningSpecs(
-        CryptoProvider.Jce.signingAlgorithms.supported,
-        CryptoProvider.Jce.signingKeys.supported,
-      ),
-      requiredEncryptionSpecs = RequiredEncryptionSpecs(
-        CryptoProvider.Jce.encryptionAlgorithms.supported,
-        CryptoProvider.Jce.encryptionKeys.supported,
-      ),
-      requiredSymmetricKeySchemes = CryptoProvider.Jce.symmetric.supported,
-      requiredHashAlgorithms = CryptoProvider.Jce.hash.supported,
-      requiredCryptoKeyFormats = CryptoProvider.Jce.supportedCryptoKeyFormats,
-      requiredSignatureFormats = CryptoProvider.Jce.supportedSignatureFormats,
-      topologyChangeDelay = StaticSynchronizerParameters.defaultTopologyChangeDelay,
-      enableTransparencyChecks = false,
-      protocolVersion = testedProtocolVersion,
-      serial = NonNegativeInt.zero,
-    )
+    StaticSynchronizerParameters
+      .create(
+        requiredSigningSpecs = RequiredSigningSpecs(
+          CryptoProvider.Jce.signingAlgorithms.supported,
+          CryptoProvider.Jce.signingKeys.supported,
+        ),
+        requiredEncryptionSpecs = RequiredEncryptionSpecs(
+          CryptoProvider.Jce.encryptionAlgorithms.supported,
+          CryptoProvider.Jce.encryptionKeys.supported,
+        ),
+        requiredSymmetricKeySchemes = CryptoProvider.Jce.symmetric.supported,
+        requiredHashAlgorithms = CryptoProvider.Jce.hash.supported,
+        requiredCryptoKeyFormats = CryptoProvider.Jce.supportedCryptoKeyFormats,
+        requiredSignatureFormats = CryptoProvider.Jce.supportedSignatureFormats,
+        topologyChangeDelay = StaticSynchronizerParameters.defaultTopologyChangeDelay,
+        enableTransparencyChecks = false,
+        protocolVersion = testedProtocolVersion,
+        serial = NonNegativeInt.zero,
+        synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion),
+      )
+      .value
 
   private lazy val crypto: Crypto = Crypto
     .create(

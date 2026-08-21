@@ -338,6 +338,12 @@ class TransactionConfirmationRequestFactory(
           s"versions >= v${ProtocolVersion.transparency} (got $protocolVersion)",
       )
 
+      // Accumulator for ciphertext IDs + final envelopes
+      case class ViewEncryptionAccumulator(
+          byCiphertextIdMap: Map[ViewHash, ByCiphertextId],
+          envelopes: Chain[OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]],
+      )
+
       // Build light view trees for a recipient group, using the subview references generated for
       // the previous groups when it's necessary to refer to subviews.
       def createLightTransactionViewTreesWithSameRecipients(
@@ -664,14 +670,6 @@ object TransactionConfirmationRequestFactory {
       seedGenerator,
     )
   }
-
-  // Accumulator for ciphertext IDs + final envelopes.
-  // NOTE: @unused works around a 2.13.18 -Wunused false positive; used in nested defs below.
-  @unused
-  final private case class ViewEncryptionAccumulator(
-      byCiphertextIdMap: Map[ViewHash, ByCiphertextId],
-      envelopes: Chain[OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]],
-  )
 
   /** Superclass for all errors that may arise during the creation of a confirmation request.
     */

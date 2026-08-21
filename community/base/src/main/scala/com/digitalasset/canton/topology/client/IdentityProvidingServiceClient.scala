@@ -25,8 +25,8 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
   SequencingParametersWithValidity,
-  SizeLimits,
   StaticSynchronizerParameters,
+  SynchronizerLimits,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -271,25 +271,13 @@ trait SynchronizerTopologyClient extends TopologyClientApi[TopologySnapshot] wit
       implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
 
-  /** Return the size limits valid at the given timestamp, to be used for validating collection
-    * sizes on this synchronizer
+  /** Return the size limits to be used for validating collection sizes on this synchronizer
     *
-    * @param validAt
-    *   the timestamp at which the size limits are valid
+    * The current implementation uses the static synchronizer parameters. Even though it is
+    * therefore not related to the topology, we keep this interface here to facilitate a switch to
+    * dynamic synchronizer parameters if / when needed.
     */
-  def getSizeLimits(validAt: CantonTimestamp, warnOnUsingDefault: Boolean = true)(implicit
-      loggingContext: ErrorLoggingContext,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[SizeLimits] =
-    // This implementation currently takes the limits from the dynamic synchronizer parameters, but allows the
-    // flexibility to take them from static synchronizer parameters in the future, or a mix of both
-    for {
-      snapshot <- awaitSnapshotUSSupervised(s"Retrieving size limits valid at $validAt")(validAt)
-      dynamicSynchronizerParameters <- snapshot.findDynamicSynchronizerParametersOrDefault(
-        protocolVersion,
-        warnOnUsingDefault,
-      )(loggingContext.traceContext)
-    } yield dynamicSynchronizerParameters.sizeLimits
+  def getSynchronizerLimits: SynchronizerLimits
 }
 
 trait BaseTopologySnapshotClient {
@@ -759,6 +747,9 @@ trait SynchronizerTopologyClientWithInit
     with TopologyTransactionProcessingSubscriber
     with HasFutureSupervision
     with NamedLogging {
+
+  override def getSynchronizerLimits: SynchronizerLimits =
+    staticSynchronizerParameters.synchronizerLimits
 
   /** Updates the topology client with the topology store state and optionally with externally
     * provided timestamps during startup.

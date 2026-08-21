@@ -113,6 +113,7 @@ fi
 
 CODE=0
 WATCHDOG_TIMEOUT_TRIGGERED=false
+WATCHDOG_XML_GENERATED=false
 
 # Print variable and value
 print_var() {
@@ -192,7 +193,11 @@ on_exit() {
             err "REPORT_TO_DATADOG is enabled, but DATADOG_API_KEY is not set"
             exit 1
           else
-            python3 ./scripts/ci/report_failing_tests.py "SBT exited with code $CODE ($HINT_MSG)"
+            if [[ "$CODE" == 190 && "$WATCHDOG_XML_GENERATED" == "true" ]]; then
+              info "Skipping generic message-path report for exit code 190. Relying on synthesized XML as single source of truth."
+            else
+              python3 ./scripts/ci/report_failing_tests.py "SBT exited with code $CODE ($HINT_MSG)"
+            fi
           fi
         else
           info "REPORT_TO_DATADOG is disabled, skipping Datadog reporting"
@@ -501,6 +506,15 @@ run_sbt_with_optional_single_test_watchdog() {
         if (( elapsed_seconds >= watchdog_seconds )); then
           WATCHDOG_TIMEOUT_TRIGGERED=true
           err "Detected test case running for ${elapsed_seconds}s, exceeding MAX_SINGLE_TEST_MINUTES=${MAX_SINGLE_TEST_MINUTES}. Stopping this shard run."
+
+          # Hand off parsing, GHA formatting, and XML generation entirely to Python
+          if python3 scripts/ci/generate_watchdog_xml.py --log-line "$line" --time "$elapsed_seconds"; then
+            WATCHDOG_XML_GENERATED=true
+          else
+            err "Python script failed to process watchdog timeout. Bailing out of mock XML generation."
+            WATCHDOG_XML_GENERATED=false
+          fi
+
           # Kill the entire process group so timeout, the JVM and all descendants go down together.
           # job_pid is the setsid leader (timeout), so its PGID == job_pid.
           kill -TERM -- "-$job_pid" 2>/dev/null || true

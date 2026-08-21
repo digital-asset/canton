@@ -83,7 +83,7 @@ abstract class CryptoIntegrationTest(cryptoConfig: CryptoConfig)
           daName,
           InitializedSynchronizer(
             synchronizerId,
-            staticSynchronizerParameters.toInternal,
+            staticSynchronizerParameters.toInternal.value,
             synchronizerOwners = Set(sequencer1),
           ),
         )
@@ -304,7 +304,7 @@ sealed trait ReconnectSynchronizerAutoInitIntegrationTest {
         anotherSynchronizerAlias,
         InitializedSynchronizer(
           anotherSynchronizerId,
-          staticSynchronizerParameters.toInternal,
+          staticSynchronizerParameters.toInternal.value,
           synchronizerOwners = Set(sequencer2),
         ),
       )

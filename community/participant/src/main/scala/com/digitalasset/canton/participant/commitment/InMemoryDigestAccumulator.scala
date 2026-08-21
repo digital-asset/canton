@@ -56,6 +56,7 @@ import scala.Ordered.orderingToOrdered
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.util.chaining.*
 import scala.util.{Failure, Success, Try}
 
 /** @param maxNumLoadedDigests
@@ -91,7 +92,6 @@ class InMemoryDigestAccumulator(
       traceContext: TraceContext
   ): Flow[DigestAccumulator_Input, CheckpointToBeWritten, NotUsed] =
     flowInternal()
-
   @VisibleForTesting
   def flowInternal(
       computeDigestBlocker: Option[
@@ -111,9 +111,13 @@ class InMemoryDigestAccumulator(
       // Set buffer size to the digest load parallelisms so that at most `digestLoadParallelism` many
       // reads are spawned by `ensurePresent` when the buffer is filling up. This bound is conservative
       // in that it also counts `ensurePresent` that do not have to load anything at all.
-      .buffer(digestLoadParallelism, OverflowStrategy.backpressure)
-      // Separate buffered in addition to the buffer before so that we can use the same buffer size everywhere
-      .buffered(metrics.bufferDigestPipelineBeforeComputeDigestsChanges, bufferSize)
+      // If the participant is configured to run with pipeline buffers (e.g. for debugging), use this buffer size instead,
+      // so that the metric for this buffer is consistent with the other pipeline buffers.
+      .pipe(flow =>
+        if (bufferSize > 0)
+          flow.buffered(metrics.bufferDigestPipelineBeforeComputeDigestsChanges, bufferSize)
+        else flow.buffer(digestLoadParallelism, OverflowStrategy.backpressure)
+      )
       .mapAsync(digestComputeParallelism)(event => Future(computeDigestChanges(event)))
       .buffered(metrics.bufferDigestPipelineBeforeJoinLoading, bufferSize)
       .mapAsyncAndDrainUS(

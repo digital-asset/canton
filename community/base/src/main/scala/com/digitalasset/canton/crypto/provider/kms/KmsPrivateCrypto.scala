@@ -28,7 +28,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.{CryptoMetrics, DecryptionMetrics, SigningMetrics}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ByteString256, ByteString4096}
+import com.digitalasset.canton.util.{ByteString256, ByteString4096, EitherTUtil}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
@@ -140,7 +140,7 @@ class KmsPrivateCrypto(
       )
     } yield publicKey
 
-  override private[crypto] def signBytesInternal(
+  override def signBytes(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -185,9 +185,11 @@ class KmsPrivateCrypto(
                       ),
                   )
                   .toEitherT[FutureUnlessShutdown]
-                signatureRaw <- kms
-                  .sign(kmsKeyId, bytes, validAlgorithmSpec, pubKey.keySpec)
-                  .leftMap[SigningError](err => SigningError.FailedToSign(err.show))
+                signatureRaw <- EitherTUtil.timed(signingMetrics.signingLatency)(
+                  kms
+                    .sign(kmsKeyId, bytes, validAlgorithmSpec, pubKey.keySpec)
+                    .leftMap[SigningError](err => SigningError.FailedToSign(err.show))
+                )
               } yield Signature.create(
                 SignatureFormat.fromSigningAlgoSpec(validAlgorithmSpec),
                 signatureRaw,
@@ -271,7 +273,7 @@ class KmsPrivateCrypto(
       _ = privateStore.storeKeyMetadata(KmsMetadata(publicKey.id, keyId, KeyPurpose.Encryption))
     } yield publicKey
 
-  override private[crypto] def decryptInternal[M](encrypted: AsymmetricEncrypted[M])(
+  override def decrypt[M](encrypted: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
   )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, DecryptionError, M] =
     for {
@@ -297,9 +299,11 @@ class KmsPrivateCrypto(
                   s"data to decrypt does not adhere to bound: $err"
                 )
               )
-            plaintext <- kms
-              .decryptAsymmetric(kmsKeyId, ciphertext, encrypted.encryptionAlgorithmSpec)
-              .leftMap[DecryptionError](err => DecryptionError.FailedToDecrypt(err.show))
+            plaintext <- EitherTUtil.timed(decryptionMetrics.decryptLatency)(
+              kms
+                .decryptAsymmetric(kmsKeyId, ciphertext, encrypted.encryptionAlgorithmSpec)
+                .leftMap[DecryptionError](err => DecryptionError.FailedToDecrypt(err.show))
+            )
             message <- EitherT
               .fromEither[FutureUnlessShutdown](deserialize(plaintext.unwrap))
               .leftMap[DecryptionError](DecryptionError.FailedToDeserialize.apply)

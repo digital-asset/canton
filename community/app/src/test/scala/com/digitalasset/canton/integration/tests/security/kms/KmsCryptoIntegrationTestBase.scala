@@ -113,7 +113,7 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
           daName,
           InitializedSynchronizer(
             synchronizerId,
-            staticParameters.toInternal,
+            staticParameters.toInternal.value,
             synchronizerOwners = Set(sequencer1),
           ),
         )

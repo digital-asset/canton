@@ -65,6 +65,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.{EitherTUtil, Mutex, PekkoUtil, ResourceUtil}
 import com.digitalasset.canton.version.{
+  ProtoVersion,
   ProtocolVersion,
   ProtocolVersionCompatibility,
   ReleaseVersion,
@@ -378,13 +379,20 @@ protected object ConnectionPoolTestHelpers {
   )
 
   lazy val correctStaticParametersResponse
-      : Either[Exception, SequencerConnect.GetSynchronizerParametersResponse] = Right(
-    SequencerConnect.GetSynchronizerParametersResponse(
-      SequencerConnect.GetSynchronizerParametersResponse.Parameters.ParametersV1(
-        defaultStaticSynchronizerParameters.toProtoV30
-      )
-    )
-  )
+      : Either[Exception, SequencerConnect.GetSynchronizerParametersResponse] = {
+    val parameters = defaultStaticSynchronizerParameters.protoVersion match {
+      case ProtoVersion(30) =>
+        SequencerConnect.GetSynchronizerParametersResponse.Parameters.V30(
+          defaultStaticSynchronizerParameters.toProtoV30
+        )
+      case ProtoVersion(31) =>
+        SequencerConnect.GetSynchronizerParametersResponse.Parameters.V31(
+          defaultStaticSynchronizerParameters.toProtoV31
+        )
+      case other => throw new IllegalStateException(s"Unexpected proto version: $other")
+    }
+    Right(SequencerConnect.GetSynchronizerParametersResponse(parameters))
+  }
 
   lazy val positiveAcknowledgeResponse
       : Either[Exception, SequencerService.AcknowledgeSignedResponse] = Right(

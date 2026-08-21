@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.commitment
 
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
@@ -14,6 +15,7 @@ import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.{AcsCommitmentPeriodStore, AcsDigestStore}
 import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.interning.StringInterning
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
@@ -41,6 +43,10 @@ class DigestProcessorFactoryImpl(
     topologyLookup: TopologyLookup,
     acsDigestStoreLookup: SynchronizerId => Option[AcsDigestStore],
     acsCommitmentPeriodStoreLookup: SynchronizerId => Option[AcsCommitmentPeriodStore],
+    cachingTopologySnapshotLookup: (
+        SynchronizerId,
+        CantonTimestamp,
+    ) => Option[TopologySnapshot],
     internalIndexService: InternalIndexService,
     ledgerApiStore: LedgerApiStore,
     stringInterning: StringInterning,
@@ -150,14 +156,7 @@ class DigestProcessorFactoryImpl(
       acsDigestStore,
       indexService = internalIndexService,
       getTopologySnapshot = tracedTimestamp =>
-        EitherTUtil.toFutureUnlessShutdown(
-          topologyLookup
-            .maybeOfflineAwaitTopologySnapshot(synchronizerId, tracedTimestamp.value)(
-              tracedTimestamp.traceContext
-            )
-            // TODO(#33084): cleanup error types
-            .leftMap(_.asGrpcError)
-        ),
+        cachingTopologySnapshotLookup(synchronizerId, tracedTimestamp.value),
       ledgerApiStore,
       enableAdditionalConsistencyChecks = enableAdditionalConsistencyChecks,
       metrics,

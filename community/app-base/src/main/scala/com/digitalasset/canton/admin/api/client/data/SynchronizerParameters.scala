@@ -14,7 +14,14 @@ import com.digitalasset.canton.admin.api.client.data.crypto.{
 }
 import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.SignatureFormat
+import com.digitalasset.canton.crypto.{
+  CryptoKeyFormat as CryptoKeyFormatInternal,
+  HashAlgorithm as HashAlgorithmInternal,
+  RequiredEncryptionSpecs as RequiredEncryptionSpecsInternal,
+  RequiredSigningSpecs as RequiredSigningSpecsInternal,
+  SignatureFormat,
+  SymmetricKeyScheme as SymmetricKeySchemeInternal,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters.InvalidDynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
@@ -23,10 +30,12 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters as DynamicSynchronizerParametersInternal,
   OnboardingRestriction as OnboardingRestrictionInternal,
   StaticSynchronizerParameters as StaticSynchronizerParametersInternal,
+  SynchronizerLimits as InternalSynchronizerLimits,
   v30,
+  v31,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.time.{
   Clock,
@@ -35,7 +44,6 @@ import com.digitalasset.canton.time.{
   RemoteClock,
   SimClock,
 }
-import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.canton.{ProtoDeserializationError, config, crypto as SynchronizerCrypto}
@@ -57,14 +65,32 @@ final case class StaticSynchronizerParameters(
     enableTransparencyChecks: Boolean,
     protocolVersion: ProtocolVersion,
     serial: NonNegativeInt,
+    synchronizerLimits: SynchronizerLimits,
 ) extends PrettyPrinting {
-  def writeToFile(outputFile: String): Unit =
-    BinaryFileUtil.writeByteStringToFile(outputFile, toInternal.toByteString)
-
-  def toInternal: StaticSynchronizerParametersInternal =
-    this.transformInto[StaticSynchronizerParametersInternal]: @nowarn(
-      "msg=Der in object CryptoKeyFormat is deprecated"
-    )
+  def toInternal: Either[String, StaticSynchronizerParametersInternal] =
+    // Cannot use Chimney's `transformInto` because `StaticSynchronizerParametersInternal`'s constructor
+    // is private to enforce its invariants
+    StaticSynchronizerParametersInternal
+      .create(
+        requiredSigningSpecs = requiredSigningSpecs.transformInto[RequiredSigningSpecsInternal],
+        requiredEncryptionSpecs =
+          requiredEncryptionSpecs.transformInto[RequiredEncryptionSpecsInternal],
+        requiredSymmetricKeySchemes =
+          requiredSymmetricKeySchemes.transformInto[NonEmpty[Set[SymmetricKeySchemeInternal]]],
+        requiredHashAlgorithms =
+          requiredHashAlgorithms.transformInto[NonEmpty[Set[HashAlgorithmInternal]]],
+        requiredCryptoKeyFormats =
+          requiredCryptoKeyFormats.transformInto[NonEmpty[Set[CryptoKeyFormatInternal]]]: @nowarn(
+            "msg=Der in object CryptoKeyFormat is deprecated"
+          ),
+        requiredSignatureFormats = requiredSignatureFormats,
+        topologyChangeDelay = topologyChangeDelay.toInternal,
+        enableTransparencyChecks = enableTransparencyChecks,
+        protocolVersion = protocolVersion,
+        serial = serial,
+        synchronizerLimits = synchronizerLimits.toInternal,
+      )
+      .leftMap(_.toString)
 
   override protected def pretty: Pretty[StaticSynchronizerParameters] = prettyOfClass(
     param("required signing specs", _.requiredSigningSpecs),
@@ -76,6 +102,7 @@ final case class StaticSynchronizerParameters(
     paramIfTrue("enable transparency checks", _.enableTransparencyChecks),
     param("protocol version", _.protocolVersion),
     param("serial", _.serial),
+    param("synchronizer limits", _.synchronizerLimits),
   )
 }
 
@@ -256,22 +283,127 @@ object StaticSynchronizerParameters {
       // Data in the console is not really validated, so we allow for deleted
       protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP, allowDeleted = true)
       serial <- ProtoConverter.parseNonNegativeInt("serial", serialP)
-    } yield StaticSynchronizerParameters(
-      StaticSynchronizerParametersInternal(
-        SynchronizerCrypto
-          .RequiredSigningSpecs(requiredSigningAlgorithmSpecs, requiredSigningKeySpecs),
-        SynchronizerCrypto
-          .RequiredEncryptionSpecs(requiredEncryptionAlgorithmSpecs, requiredEncryptionKeySpecs),
-        requiredSymmetricKeySchemes,
-        requiredHashAlgorithms,
-        requiredCryptoKeyFormats,
-        requiredSignatureFormats,
-        topologyChangeDelay.toInternal,
-        enableTransparencyChecks,
-        protocolVersion,
-        serial,
+
+      staticSynchronizerParameters <- StaticSynchronizerParametersInternal
+        .create(
+          SynchronizerCrypto
+            .RequiredSigningSpecs(requiredSigningAlgorithmSpecs, requiredSigningKeySpecs),
+          SynchronizerCrypto
+            .RequiredEncryptionSpecs(requiredEncryptionAlgorithmSpecs, requiredEncryptionKeySpecs),
+          requiredSymmetricKeySchemes,
+          requiredHashAlgorithms,
+          requiredCryptoKeyFormats,
+          requiredSignatureFormats,
+          topologyChangeDelay.toInternal,
+          enableTransparencyChecks,
+          protocolVersion,
+          serial,
+          SynchronizerLimits.max.toInternal,
+        )
+        .leftMap(_.toProtoDeserializationError)
+    } yield StaticSynchronizerParameters(staticSynchronizerParameters)
+  }
+
+  def fromProtoV31(
+      synchronizerParametersP: v31.StaticSynchronizerParameters
+  ): ParsingResult[StaticSynchronizerParameters] = {
+    val v31.StaticSynchronizerParameters(
+      requiredSigningSpecsOP,
+      requiredEncryptionSpecsOP,
+      requiredSymmetricKeySchemesP,
+      requiredHashAlgorithmsP,
+      requiredCryptoKeyFormatsP,
+      requiredSignatureFormatsP,
+      protocolVersionP,
+      serialP,
+      enableTransparencyChecks,
+      topologyChangeDelayP,
+      synchronizerLimitsP,
+    ) = synchronizerParametersP
+
+    for {
+      requiredSigningSpecsP <- requiredSigningSpecsOP.toRight(
+        ProtoDeserializationError.FieldNotSet(
+          "required_signing_specs"
+        )
       )
-    )
+      requiredSigningAlgorithmSpecs <- parseRequiredSet(
+        "required_signing_algorithm_specs",
+        requiredSigningSpecsP.algorithms,
+        SynchronizerCrypto.SigningAlgorithmSpec.fromProtoEnum,
+      )
+      requiredSigningKeySpecs <- parseRequiredSet(
+        "required_signing_key_specs",
+        requiredSigningSpecsP.keys,
+        SynchronizerCrypto.SigningKeySpec.fromProtoEnum,
+      )
+      requiredEncryptionSpecsP <- requiredEncryptionSpecsOP.toRight(
+        ProtoDeserializationError.FieldNotSet(
+          "required_encryption_specs"
+        )
+      )
+      requiredEncryptionAlgorithmSpecs <- parseRequiredSet(
+        "required_encryption_algorithm_specs",
+        requiredEncryptionSpecsP.algorithms,
+        SynchronizerCrypto.EncryptionAlgorithmSpec.fromProtoEnum,
+      )
+      requiredEncryptionKeySpecs <- parseRequiredSet(
+        "required_encryption_key_specs",
+        requiredEncryptionSpecsP.keys,
+        SynchronizerCrypto.EncryptionKeySpec.fromProtoEnum,
+      )
+      requiredSymmetricKeySchemes <- parseRequiredSet(
+        "required_symmetric_key_schemes",
+        requiredSymmetricKeySchemesP,
+        SynchronizerCrypto.SymmetricKeyScheme.fromProtoEnum,
+      )
+      requiredHashAlgorithms <- parseRequiredSet(
+        "required_hash_algorithms",
+        requiredHashAlgorithmsP,
+        SynchronizerCrypto.HashAlgorithm.fromProtoEnum,
+      )
+      requiredCryptoKeyFormats <- parseRequiredSet(
+        "required_crypto_key_formats",
+        requiredCryptoKeyFormatsP,
+        SynchronizerCrypto.CryptoKeyFormat.fromProtoEnum,
+      )
+      requiredSignatureFormats <- parseRequiredSet(
+        "required_signature_formats",
+        requiredSignatureFormatsP,
+        SynchronizerCrypto.SignatureFormat.fromProtoEnum,
+      )
+      topologyChangeDelay <- ProtoConverter.parseRequired(
+        config.NonNegativeFiniteDuration.fromProtoPrimitive("topology_change_delay")(_),
+        "topology_change_delay",
+        topologyChangeDelayP,
+      )
+      // Data in the console is not really validated, so we allow for deleted
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP, allowDeleted = true)
+      serial <- ProtoConverter.parseNonNegativeInt("serial", serialP)
+      synchronizerLimits <- parseRequired(
+        InternalSynchronizerLimits.fromProtoV31,
+        "synchronizer_limits",
+        synchronizerLimitsP,
+      )
+
+      staticSynchronizerParameters <- StaticSynchronizerParametersInternal
+        .create(
+          SynchronizerCrypto
+            .RequiredSigningSpecs(requiredSigningAlgorithmSpecs, requiredSigningKeySpecs),
+          SynchronizerCrypto
+            .RequiredEncryptionSpecs(requiredEncryptionAlgorithmSpecs, requiredEncryptionKeySpecs),
+          requiredSymmetricKeySchemes,
+          requiredHashAlgorithms,
+          requiredCryptoKeyFormats,
+          requiredSignatureFormats,
+          topologyChangeDelay.toInternal,
+          enableTransparencyChecks,
+          protocolVersion,
+          serial,
+          synchronizerLimits,
+        )
+        .leftMap(_.toProtoDeserializationError)
+    } yield StaticSynchronizerParameters(staticSynchronizerParameters)
   }
 }
 
@@ -290,7 +422,6 @@ final case class DynamicSynchronizerParameters(
     acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
     preparationTimeRecordTimeTolerance: config.NonNegativeFiniteDuration,
-    sizeLimits: SizeLimits,
 ) extends PrettyPrinting {
 
   def decisionTimeout: config.NonNegativeFiniteDuration =
@@ -333,7 +464,6 @@ final case class DynamicSynchronizerParameters(
       param("participant synchronizer limits", _.participantSynchronizerLimits),
       param("preparation time record time tolerance", _.preparationTimeRecordTimeTolerance),
       param("onboarding restriction", _.onboardingRestriction),
-      param("size limits", _.sizeLimits),
     )
 
   def update(
@@ -378,29 +508,32 @@ final case class DynamicSynchronizerParameters(
     for {
       // cannot use chimney here: the internal constructor is private to enforce its invariants
       acsCommitmentsCatchUpInternal <- acsCommitmentsCatchUp.traverse(_.toInternal)
-    } yield DynamicSynchronizerParametersInternal.tryCreate(
-      confirmationResponseTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(confirmationResponseTimeout),
-      mediatorReactionTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
-      assignmentExclusivityTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(assignmentExclusivityTimeout),
-      ledgerTimeRecordTimeTolerance =
-        InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
-      mediatorDeduplicationTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
-      reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
-      maxRequestSize = MaxRequestSize(maxRequestSize),
-      sequencerAggregateSubmissionTimeout =
-        InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
-      trafficControl = trafficControl.map(_.toInternal),
-      onboardingRestriction = onboardingRestriction.transformInto[OnboardingRestrictionInternal],
-      acsCommitmentsCatchUpParameters = acsCommitmentsCatchUpInternal,
-      participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
-      preparationTimeRecordTimeTolerance =
-        InternalNonNegativeFiniteDuration.fromConfig(preparationTimeRecordTimeTolerance),
-      sizeLimits = sizeLimits.toInternal,
-    )(rpv)
+      internalDynamicSynchronizerParameters <- DynamicSynchronizerParametersInternal
+        .create(
+          confirmationResponseTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(confirmationResponseTimeout),
+          mediatorReactionTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(mediatorReactionTimeout),
+          assignmentExclusivityTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(assignmentExclusivityTimeout),
+          ledgerTimeRecordTimeTolerance =
+            InternalNonNegativeFiniteDuration.fromConfig(ledgerTimeRecordTimeTolerance),
+          mediatorDeduplicationTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(mediatorDeduplicationTimeout),
+          reconciliationInterval = PositiveSeconds.fromConfig(reconciliationInterval),
+          maxRequestSize = MaxRequestSize(maxRequestSize),
+          sequencerAggregateSubmissionTimeout =
+            InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
+          trafficControl = trafficControl.map(_.toInternal),
+          onboardingRestriction =
+            onboardingRestriction.transformInto[OnboardingRestrictionInternal],
+          acsCommitmentsCatchUpParameters = acsCommitmentsCatchUpInternal,
+          participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
+          preparationTimeRecordTimeTolerance =
+            InternalNonNegativeFiniteDuration.fromConfig(preparationTimeRecordTimeTolerance),
+        )(rpv)
+        .leftMap(_.toString)
+    } yield internalDynamicSynchronizerParameters
   }
 }
 

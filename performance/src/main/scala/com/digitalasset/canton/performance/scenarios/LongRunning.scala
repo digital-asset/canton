@@ -27,11 +27,12 @@ import com.digitalasset.canton.performance.util.{
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.nonempty.NonEmpty
+import org.scalatest.EitherValues
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
 
-object LongRunning {
+object LongRunning extends EitherValues {
 
   /** Start long runnign test
     *
@@ -217,7 +218,7 @@ object LongRunning {
           new ParticipantSimulator(
             localNode,
             sequencers,
-            sequencers.head1.synchronizer_parameters.static.get().toInternal,
+            sequencers.head1.synchronizer_parameters.static.get().toInternal.value,
             respondToAcsCommitments = true,
             loggerFactory,
             environmentTimeouts,

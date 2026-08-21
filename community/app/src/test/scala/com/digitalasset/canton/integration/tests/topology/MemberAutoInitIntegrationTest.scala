@@ -140,7 +140,7 @@ trait MemberAutoInitIntegrationTest
         synchronizerAlias,
         InitializedSynchronizer(
           synchronizerId,
-          staticSynchronizerParameters.toInternal,
+          staticSynchronizerParameters.toInternal.value,
           synchronizerOwners = Set(sequencer1),
         ),
       )
@@ -264,7 +264,7 @@ trait MemberAutoInitIntegrationTest
         synchronizerAlias,
         InitializedSynchronizer(
           synchronizerId,
-          staticSynchronizerParameters.toInternal,
+          staticSynchronizerParameters.toInternal.value,
           synchronizerOwners = Set(sequencer2),
         ),
       )

@@ -73,7 +73,7 @@ trait KmsMigrationIntegrationTest
       acmeName,
       InitializedSynchronizer(
         synchronizerId,
-        EnvironmentDefinition.defaultStaticSynchronizerParameters.toInternal,
+        EnvironmentDefinition.defaultStaticSynchronizerParameters.toInternal.value,
         synchronizerOwners = Set(sequencer2),
       ),
     )

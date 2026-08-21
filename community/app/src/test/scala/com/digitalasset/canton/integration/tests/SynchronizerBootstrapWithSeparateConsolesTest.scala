@@ -23,6 +23,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
   UniqueIdentifier,
 }
+import com.digitalasset.canton.util.BinaryFileUtil
 
 import scala.concurrent.duration.DurationInt
 
@@ -79,9 +80,9 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
         // All synchronizer founders need to agree on the static synchronizer parameters. They don't have to be passed around as file,
         // but for the sake of this test, we do it here.
         {
-          EnvironmentDefinition.defaultStaticSynchronizerParameters.writeToFile(
-            paramsFile
-          )
+          val ssp = EnvironmentDefinition.defaultStaticSynchronizerParameters
+          val sspAsByteString = ssp.toInternal.value.toByteString
+          BinaryFileUtil.writeByteStringToFile(paramsFile, sspAsByteString)
         }
 
         // load the static synchronizer parameters
@@ -140,7 +141,7 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
           )
 
           physicalSynchronizerId =
-            PhysicalSynchronizerId(synchronizerId, synchronizerParams.toInternal)
+            PhysicalSynchronizerId(synchronizerId, synchronizerParams.toInternal.value)
         }
 
         // Sequencer2 console:

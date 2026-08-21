@@ -8,33 +8,38 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.v31 as protoV31
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.ProtocolVersion
 
-final case class SizeLimits(transactionProtocolLimits: TransactionProtocolLimits)
+final case class SynchronizerLimits(transactionProtocolLimits: TransactionProtocolLimits)
     extends PrettyPrinting {
-  override protected def pretty: Pretty[SizeLimits] = prettyOfClass(
+  override protected def pretty: Pretty[SynchronizerLimits] = prettyOfClass(
     param("transaction protocol limits", _.transactionProtocolLimits)
   )
 
-  def toProtoV31: protoV31.SizeLimits = protoV31.SizeLimits(
+  def toProtoV31: protoV31.SynchronizerLimits = protoV31.SynchronizerLimits(
     transactionProtocolLimits = Some(transactionProtocolLimits.toProtoV31)
   )
 }
 
-object SizeLimits {
-  lazy val default: SizeLimits =
-    SizeLimits(transactionProtocolLimits = TransactionProtocolLimits.default)
-  lazy val max: SizeLimits = SizeLimits(transactionProtocolLimits = TransactionProtocolLimits.max)
+object SynchronizerLimits {
+  lazy val default: SynchronizerLimits =
+    SynchronizerLimits(transactionProtocolLimits = TransactionProtocolLimits.default)
+  lazy val max: SynchronizerLimits =
+    SynchronizerLimits(transactionProtocolLimits = TransactionProtocolLimits.max)
+
+  def defaultFor(protocolVersion: ProtocolVersion): SynchronizerLimits =
+    if (protocolVersion >= ProtocolVersion.v36) default else max
 
   def fromProtoV31(
-      sizeLimitsP: protoV31.SizeLimits
-  ): ParsingResult[SizeLimits] = {
-    val protoV31.SizeLimits(transactionProtocolLimitsP) = sizeLimitsP
+      synchronizerLimitsP: protoV31.SynchronizerLimits
+  ): ParsingResult[SynchronizerLimits] = {
+    val protoV31.SynchronizerLimits(transactionProtocolLimitsP) = synchronizerLimitsP
 
     for {
       transactionProtocolLimits <- ProtoConverter
         .required("transaction_protocol_limits", transactionProtocolLimitsP)
         .flatMap(TransactionProtocolLimits.fromProtoV31)
-    } yield SizeLimits(transactionProtocolLimits)
+    } yield SynchronizerLimits(transactionProtocolLimits)
   }
 }
 

@@ -290,7 +290,11 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
           case mediator: MediatorReference =>
             mediator.setup
               .assign(
-                PhysicalSynchronizerId(synchronizerId, staticSynchronizerParameters.toInternal),
+                PhysicalSynchronizerId(
+                  synchronizerId,
+                  staticSynchronizerParameters.serial,
+                  staticSynchronizerParameters.protocolVersion,
+                ),
                 sequencerConnections,
               )
 

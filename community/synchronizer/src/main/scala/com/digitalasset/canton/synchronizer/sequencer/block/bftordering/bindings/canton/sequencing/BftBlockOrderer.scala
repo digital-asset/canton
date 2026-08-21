@@ -666,6 +666,7 @@ final class BftBlockOrderer(
         signedSubmissionRequest.content.messageId.unwrap,
         signedSubmissionRequest.content.sender,
         signedSubmissionRequest.toByteString,
+        Some(signedSubmissionRequest.content.maxSequencingTime),
       )
     } { _ =>
       if (!warnedAboutStandaloneSend) {
@@ -687,6 +688,7 @@ final class BftBlockOrderer(
       "ACK-" + request.timestamp,
       signedAcknowledgeRequest.content.member,
       signedAcknowledgeRequest.toByteString,
+      maxSequencingTime = None,
     ).value.map(_ => ())
   }
 
@@ -852,19 +854,21 @@ final class BftBlockOrderer(
       messageId: String,
       sender: Member,
       payload: ByteString,
+      maxSequencingTime: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): EitherT[Future, SequencerDeliverError, Unit] =
-    sendToMempoolGeneric(tag, messageId, payload, Some(sender))
+    sendToMempoolGeneric(tag, messageId, payload, maxSequencingTime, Some(sender))
 
   private def orderSendRequest(
       request: SendRequest
   )(implicit traceContext: TraceContext): Future[SendResponse] =
-    sendToMempoolGeneric(request.tag, "standalone", request.payload)
+    sendToMempoolGeneric(request.tag, "standalone", request.payload, maxSequencingTime = None)
       .fold(e => SendResponse(Some(e.cause)), _ => SendResponse(None))
 
   private def sendToMempoolGeneric(
       tag: String,
       messageId: String,
       payload: ByteString,
+      maxSequencingTime: Option[CantonTimestamp],
       sender: Option[Member] = None,
   )(implicit traceContext: TraceContext): EitherT[Future, SequencerDeliverError, Unit] = {
     val orderingRequestTraceContext =
@@ -891,6 +895,7 @@ final class BftBlockOrderer(
         tracedOrderingRequest,
         Some(replyRef),
         sender,
+        maxSequencingTime,
       )
     )
     EitherT(replyPromise.future.map {

@@ -48,7 +48,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil}
 import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.{Status, StatusRuntimeException}
 
@@ -97,11 +97,17 @@ class GrpcSequencerConnectService(
       request: GetSynchronizerParametersRequest
   ): Future[GetSynchronizerParametersResponse] =
     mapErrorEither(
-      staticSynchronizerParameters.protoVersion.v match {
-        case 30 =>
+      staticSynchronizerParameters.protoVersion match {
+        case ProtoVersion(30) =>
           Right(
             GetSynchronizerParametersResponse(
-              Parameters.ParametersV1(staticSynchronizerParameters.toProtoV30)
+              Parameters.V30(staticSynchronizerParameters.toProtoV30)
+            )
+          )
+        case ProtoVersion(31) =>
+          Right(
+            GetSynchronizerParametersResponse(
+              Parameters.V31(staticSynchronizerParameters.toProtoV31)
             )
           )
         case unsupported =>

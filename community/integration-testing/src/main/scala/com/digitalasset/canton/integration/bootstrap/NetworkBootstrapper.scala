@@ -25,6 +25,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.{SynchronizerAlias, protocol}
 import monocle.syntax.all.*
+import org.scalatest.EitherValues
 
 /** Bootstraps synchronizers given topology descriptions and stores information in
   * [[com.digitalasset.canton.integration.EnvironmentTestHelpers.initializedSynchronizers]].
@@ -33,7 +34,7 @@ import monocle.syntax.all.*
   */
 class NetworkBootstrapper(networks: NetworkTopologyDescription*)(implicit
     env: TestConsoleEnvironment
-) {
+) extends EitherValues {
   def bootstrap(): Unit = {
     // Start all local nodes needed for bootstrap
     (networks.flatMap(_.synchronizerOwners) ++
@@ -76,7 +77,7 @@ class NetworkBootstrapper(networks: NetworkTopologyDescription*)(implicit
       synchronizerAlias,
       InitializedSynchronizer(
         synchronizerId,
-        desc.staticSynchronizerParameters.toInternal,
+        desc.staticSynchronizerParameters.toInternal.value,
         synchronizerOwners = desc.synchronizerOwners.toSet,
       ),
     )

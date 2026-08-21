@@ -89,6 +89,8 @@ private[lsu] trait LsuBase
   protected def defaultEnvironmentSetup(
       participantsOverride: Option[Seq[ParticipantReference]] = None,
       hasTrafficControl: Boolean = true,
+      reconciliationInterval: config.PositiveDurationSeconds =
+        config.PositiveDurationSeconds.ofSeconds(1),
       changeDynamicSynchronizerParameters: Boolean = true,
       connectParticipants: Boolean = true,
   )(implicit env: TestConsoleEnvironment): Unit = {
@@ -106,6 +108,7 @@ private[lsu] trait LsuBase
         daId,
         synchronizerOwners1,
         hasTrafficControl = hasTrafficControl,
+        reconciliationInterval = reconciliationInterval,
       )
 
     oldSynchronizerNodes =
@@ -419,7 +422,10 @@ object LsuBase {
 
     val newPsid: PhysicalSynchronizerId =
       overridePsid.getOrElse(
-        PhysicalSynchronizerId(currentPsid.logical, newStaticSynchronizerParameters.toInternal)
+        PhysicalSynchronizerId(
+          currentPsid.logical,
+          newStaticSynchronizerParameters.toInternal.value,
+        )
       )
 
     val synchronizerSuccessor: SynchronizerSuccessor = SynchronizerSuccessor(newPsid, upgradeTime)

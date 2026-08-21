@@ -84,7 +84,7 @@ class ReinitializingDigestProcessorImpl(
     digestAccumulator: DigestAccumulator,
     protected override val acsDigestStore: AcsDigestStore,
     indexService: InternalIndexService,
-    getTopologySnapshot: Traced[CantonTimestamp] => FutureUnlessShutdown[TopologySnapshot],
+    getTopologySnapshot: Traced[CantonTimestamp] => Option[TopologySnapshot],
     ledgerApiStore: LedgerApiStore,
     enableAdditionalConsistencyChecks: Boolean,
     private[canton] override val metrics: CommitmentMetrics,
@@ -118,7 +118,12 @@ class ReinitializingDigestProcessorImpl(
       _ <- writeTombstonesToJournals(
         tombstoneTimepoint = reinitializingTimepoint
       )
-      topologySnapshot <- getTopologySnapshot(Traced(reinitializingTimepoint.recordTime))
+      topologySnapshotO = getTopologySnapshot(Traced(reinitializingTimepoint.recordTime))
+      topologySnapshot = topologySnapshotO.getOrElse(
+        ErrorUtil.invalidState(
+          s"Unable to get a topology snapshot for $synchronizerId at $reinitializingTimepoint"
+        )
+      )
     } yield {
       val (ks, doneF) = PekkoUtil
         .runSupervised(
@@ -139,78 +144,85 @@ class ReinitializingDigestProcessorImpl(
   )(implicit
       traceContext: TraceContext
   ): Source[ProcessingContext[CheckpointFenceOr[ContractChangeBatch]], KillSwitch] = {
+    val bufferSize = acsCommitmentConfig.digestPipelineBufferSize.unwrap
+    metrics.bufferDigestPipelineSize.updateValue(bufferSize.toLong)
     metrics.reinitializeParties.updateValue(0)
     metrics.reinitializeContractChanges.updateValue(0)
     val acsUpdates = indexService
       .counterParties(synchronizerId, reinitializingTimepoint.offset, party = None)
       .viaMat(KillSwitches.single)(Keep.right)
       .grouped(counterpartyBatchSize)
-      .flatMap { counterparties =>
+      .mapAsync(acsCommitmentConfig.acsFetchParallelism.unwrap) { counterparties =>
         val counterpartiesSet = counterparties.toSet
         metrics.reinitializeParties.updateValue(_ + counterpartiesSet.size)
 
-        indexService
-          .acs(synchronizerId, reinitializingTimepoint.offset, counterpartiesSet, Set.empty)
-          .batch(
-            max = acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap.toLong,
-            Vector(_),
-          )(_ :+ _)
-          // we get all the active contracts by the offset
-          .mapAsyncAndDrainUS(1) { activeContractsOfCounterparties =>
-            metrics.reinitializeContractChanges.updateValue(_ + 1)
-            val stakeholdersOfContracts =
-              activeContractsOfCounterparties.iterator.flatMap(_.stakeholders).toSet
+        Future(
+          indexService
+            .acs(synchronizerId, reinitializingTimepoint.offset, counterpartiesSet, Set.empty)
+            .grouped(acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap)
+            .map(counterpartiesSet -> _)
+        )
+      }
+      .flatten
+      .buffered(metrics.bufferDigestPipelineBeforeClassification, bufferSize)
+      .mapAsyncAndDrainUS(
+        acsCommitmentConfig.contractChangeClassificationParallelism.unwrap
+      ) { case (counterpartiesSet, activeContractsOfCounterparties) =>
+        metrics.reinitializeContractChanges.updateValue(
+          _ + activeContractsOfCounterparties.size
+        )
+        val stakeholdersOfContracts =
+          activeContractsOfCounterparties.iterator.flatMap(_.stakeholders).toSet
 
-            for {
-              // get the map of (party -> Set of participants where it is onboarded)
-              partyToParticipant <- getOnboardedParticipantsOfParties(
-                topologySnapshot,
-                stakeholdersOfContracts,
+        for {
+          // get the map of (party -> Set of participants where it is onboarded)
+          partyToParticipant <- getOnboardedParticipantsOfParties(
+            topologySnapshot,
+            stakeholdersOfContracts,
+          )
+        } yield {
+          val contractChanges =
+            activeContractsOfCounterparties.iterator.map { activeContractOfCounterparty =>
+              // emit the classification update for all stakeholders of the current stakeholder batch
+              // of the contract and their respective hosting participants.
+              val counterpartyStakeholders =
+                activeContractOfCounterparty.stakeholders.iterator
+                  .filter(counterpartiesSet.contains)
+                  .toSet
+
+              val locallyHostedStakeholders =
+                activeContractOfCounterparty.stakeholders.iterator.filter { sh =>
+                  partyToParticipant.getOrElse(sh, Set.empty).contains(thisLfParticipantId)
+                }.toSeq
+
+              ContractChange(
+                counterpartyStakeholders,
+                locallyHostedStakeholders,
+                activeContractOfCounterparty.contractId,
+                activeContractOfCounterparty.reassignmentCounter,
+                isActivation = true,
               )
-            } yield {
-              val contractChanges = activeContractsOfCounterparties.map {
-                activeContractOfCounterparty =>
-                  // emit the classification update for all stakeholders of the current stakeholder batch
-                  // of the contract and their respective hosting participants.
-                  val counterpartyStakeholders =
-                    activeContractOfCounterparty.stakeholders.iterator
-                      .filter(counterpartiesSet.contains)
-                      .toSet
+            }.toSeq
 
-                  val locallyHostedStakeholders =
-                    activeContractOfCounterparty.stakeholders.iterator.filter { sh =>
-                      partyToParticipant.getOrElse(sh, Set.empty).contains(thisLfParticipantId)
-                    }.toSeq
+          val counterpartiesToParticipant = activeContractsOfCounterparties.iterator
+            .flatMap(_.stakeholders)
+            .distinct
+            .filter(counterpartiesSet)
+            .map(party => party -> partyToParticipant.getOrElse(party, Set.empty))
+            .toMap
 
-                  ContractChange(
-                    counterpartyStakeholders,
-                    locallyHostedStakeholders,
-                    activeContractOfCounterparty.contractId,
-                    activeContractOfCounterparty.reassignmentCounter,
-                    isActivation = true,
-                  )
-              }
-
-              val counterpartiesToParticipant = activeContractsOfCounterparties.iterator
-                .flatMap(_.stakeholders)
-                .distinct
-                .filter(counterpartiesSet)
-                .map(party => party -> partyToParticipant.getOrElse(party, Set.empty))
-                .toMap
-
-              ProcessingContext(
-                reinitializingTimepoint,
-                NotCheckpointFence(
-                  topologySnapshot,
-                  ContractChangeBatch.create(
-                    counterpartiesToParticipant,
-                    contractChanges,
-                    enableAdditionalConsistencyChecks,
-                  ),
-                ),
-              )
-            }
-          }
+          ProcessingContext(
+            reinitializingTimepoint,
+            NotCheckpointFence(
+              topologySnapshot,
+              ContractChangeBatch.create(
+                counterpartiesToParticipant,
+                contractChanges,
+                enableAdditionalConsistencyChecks,
+              ),
+            ),
+          )
+        }
       }
 
     acsUpdates.concat(
@@ -222,11 +234,13 @@ class ReinitializingDigestProcessorImpl(
 
   private[commitment] def writeTombstonesToJournals(
       tombstoneTimepoint: Timepoint
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    metrics.reinitializeTombstones.updateValue(0)
     Seq[AcsDigestStore.DigestJournal[?]](acsDigestStore.party, acsDigestStore.participant)
       .parTraverse_(store =>
         writeTombstonesTo(store)(tombstoneTimepoint, writeJournalTombstonesBatchSize)
       )
+  }
 
   private def writeTombstonesTo[K](journal: AcsDigestStore.DigestJournal[K])(
       tombstoneTimepoint: Timepoint,
@@ -235,7 +249,9 @@ class ReinitializingDigestProcessorImpl(
     DigestJournal
       .processSnapshotInBatchesE(journal)(tombstoneTimepoint.offset, pageSize) { acsDigests =>
         val tombstones = createTombstonesFrom(acsDigests, tombstoneTimepoint)
-        journal.upsertDigestUpdates(tombstones)
+        journal.upsertDigestUpdates(tombstones).map { _ =>
+          metrics.reinitializeTombstones.updateValue(_ + tombstones.size)
+        }
       }
 
   private def createTombstonesFrom[K](

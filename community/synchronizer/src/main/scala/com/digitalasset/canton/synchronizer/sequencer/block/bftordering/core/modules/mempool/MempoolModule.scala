@@ -60,7 +60,7 @@ class MempoolModule[E <: Env[E]](
         scheduleMempoolBatchCreationClockTick()
 
       // From clients
-      case r @ Mempool.OrderRequest(tracedTx, from, sender) =>
+      case r @ Mempool.OrderRequest(tracedTx, from, sender, _) =>
         val orderingRequest = tracedTx.value
         val span = startSpan("BFTOrderer.Mempool")._1
 

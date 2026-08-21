@@ -6,23 +6,29 @@ package com.digitalasset.canton.admin.api.client.data
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{
-  SizeLimits as SizeLimitsInternal,
+  SynchronizerLimits as SynchronizerLimitsInternal,
   TransactionProtocolLimits as TransactionProtocolLimitsInternal,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import io.scalaland.chimney.dsl.*
 
-final case class SizeLimits(transactionProtocolLimits: TransactionProtocolLimits)
+final case class SynchronizerLimits(transactionProtocolLimits: TransactionProtocolLimits)
     extends PrettyPrinting {
-  override protected def pretty: Pretty[SizeLimits] = prettyOfClass(
+  override protected def pretty: Pretty[SynchronizerLimits] = prettyOfClass(
     param("transaction protocol limits", _.transactionProtocolLimits)
   )
 
-  def toInternal: SizeLimitsInternal = this.transformInto[SizeLimitsInternal]
+  def toInternal: SynchronizerLimitsInternal = this.transformInto[SynchronizerLimitsInternal]
 }
 
-object SizeLimits {
-  lazy val default: SizeLimits = SizeLimitsInternal.default.transformInto[SizeLimits]
-  lazy val max: SizeLimits = SizeLimitsInternal.max.transformInto[SizeLimits]
+object SynchronizerLimits {
+  lazy val default: SynchronizerLimits =
+    SynchronizerLimitsInternal.default.transformInto[SynchronizerLimits]
+  lazy val max: SynchronizerLimits =
+    SynchronizerLimitsInternal.max.transformInto[SynchronizerLimits]
+
+  def defaultFor(protocolVersion: ProtocolVersion): SynchronizerLimits =
+    SynchronizerLimitsInternal.defaultFor(protocolVersion).transformInto[SynchronizerLimits]
 }
 
 final case class TransactionProtocolLimits(maxActAs: PositiveInt) extends PrettyPrinting {

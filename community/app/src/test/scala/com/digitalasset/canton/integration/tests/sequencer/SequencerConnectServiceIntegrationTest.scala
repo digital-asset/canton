@@ -142,7 +142,8 @@ trait SequencerConnectServiceIntegrationTest
 
       sequencer1.synchronizer_parameters.static
         .get()
-        .toInternal shouldBe expectedSynchronizerParameters
+        .toInternal
+        .value shouldBe expectedSynchronizerParameters
     }
 
     "respond to SynchronizerClientBootstrapInfo requests" in { implicit env =>

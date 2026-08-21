@@ -242,9 +242,9 @@ class ParticipantMetrics(
               value = value,
             )
           )
-        case Some(gauge) =>
+        case previous @ Some(gauge) =>
           gauge.updateValue(value)
-          Some(gauge)
+          previous
       }
       .discard
   }

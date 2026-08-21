@@ -32,6 +32,7 @@ import manage_flaky_issues
 import parse_failing_tests
 import report_to_datadog
 import select_rota
+import generate_watchdog_xml
 
 
 def _artifact_dir() -> str:
@@ -52,6 +53,7 @@ def _run_self_tests() -> int:
         ("manage_flaky_issues", manage_flaky_issues.self_test),
         ("select_rota", select_rota.self_test),
         ("alert_slack", alert_slack.self_test),
+        ("generate_watchdog_xml", generate_watchdog_xml.self_test),
     ]
     rc = 0
     for name, fn in checks:

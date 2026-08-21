@@ -10,7 +10,7 @@ import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.protocol.SizeLimits
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -313,31 +313,13 @@ trait StoreBasedTopologySnapshotTest
       }
     }
 
-    "get correct size limits" in {
+    "get correct synchronizer limits" in {
       val fixture = new Fixture()
 
-      val expectedSizeLimits =
-        //        if (testedProtocolVersion >= ProtocolVersion.v36) SizeLimits.default else SizeLimits.max
-        // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
-        SizeLimits.max
+      val expectedSynchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+      val synchronizerLimits = fixture.client.getSynchronizerLimits
 
-      for {
-        _ <- fixture.add(
-          sequencedTimestamp = ts,
-          effectiveTimestamp = Some(ts),
-          transactions = Seq(dpc1),
-        )
-        _ = fixture.client.observed(
-          ts.immediateSuccessor,
-          ts.immediateSuccessor,
-          SequencerCounter(0),
-          Seq(),
-        )
-        latestTs = fixture.client.latestTopologyChangeTimestamp
-        sizeLimits <- fixture.client.getSizeLimits(latestTs)
-      } yield {
-        sizeLimits shouldBe expectedSizeLimits
-      }
+      synchronizerLimits shouldBe expectedSynchronizerLimits
     }
 
     "waiting for snapshots" should {
