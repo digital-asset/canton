@@ -10,7 +10,6 @@ import com.digitalasset.canton.ledger.api.ProxyCloseable
 import com.digitalasset.canton.ledger.api.auth.RequiredClaims
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import io.grpc.ServerServiceDefinition
-import io.grpc.stub.StreamObserver
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -27,23 +26,6 @@ final class PartyManagementAlphaServiceAuthorization(
     PartyManagementAlphaServiceGrpc.bindService(this, executionContext)
 
   override def close(): Unit = service.close()
-
-  override def exportPartyAcs(
-      request: ExportPartyAcsRequest,
-      responseObserver: StreamObserver[ExportPartyAcsResponse],
-  ): Unit =
-    authorizer.stream(service.exportPartyAcs)(exportPartyAcsClaims(request)*)(
-      request,
-      responseObserver,
-    )
-
-  // TODO(#31414): Figure out auth for OnPR requests including requests with
-  //  grpc input/request stream. `AddPartyWithAcs` is unauthenticated atm,
-  //  and the stabs at `ExportPartyAcs` and `GetAddPartyStatus` might be wrong
-  //  or incomplete.
-  override def addPartyWithAcs(
-      responseObserver: StreamObserver[AddPartyWithAcsResponse]
-  ): StreamObserver[AddPartyWithAcsRequest] = service.addPartyWithAcs(responseObserver)
 
   override def getAddPartyStatus(
       request: GetAddPartyStatusRequest
@@ -68,12 +50,6 @@ final class PartyManagementAlphaServiceAuthorization(
 }
 
 object PartyManagementAlphaServiceAuthorization {
-  def exportPartyAcsClaims(
-      request: ExportPartyAcsRequest
-  ): List[RequiredClaim[ExportPartyAcsRequest]] =
-    RequiredClaims(
-      RequiredClaim.AdminOrIdpAdminOrOperateAsParty[ExportPartyAcsRequest](Seq(request.partyId))
-    )
 
   def getAddPartyStatusClaims: List[RequiredClaim[GetAddPartyStatusRequest]] =
     RequiredClaims(

@@ -39,6 +39,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Ref.Identifier
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Flow
@@ -242,7 +243,8 @@ object AcsChangesReader {
       case _ => None
     }
 
-  private def acsChangeOf(reassignment: Reassignment): AcsChange = {
+  @VisibleForTesting
+  private[canton] def acsChangeOf(reassignment: Reassignment): AcsChange = {
     val activations =
       mutable.Map.empty[LfContractId, ContractStakeholdersAndReassignmentCounter]
     val deactivations =
@@ -265,7 +267,8 @@ object AcsChangesReader {
           LfContractId.assertFromString(unassigned.contractId),
           ContractStakeholdersAndReassignmentCounter(
             stakeholders = unassigned.witnessParties.view.map(LfPartyId.assertFromString).toSet,
-            reassignmentCounter = ReassignmentCounter(unassigned.reassignmentCounter),
+            // Deactivations name the active counter, as in AcsChangeSupport.fromCommitSet.
+            reassignmentCounter = ReassignmentCounter(unassigned.reassignmentCounter) - 1,
           ),
         )
       case ReassignmentEvent.Event.Empty => ()

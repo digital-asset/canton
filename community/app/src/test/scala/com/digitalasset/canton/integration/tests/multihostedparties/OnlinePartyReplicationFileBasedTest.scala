@@ -154,7 +154,7 @@ sealed trait OnlinePartyReplicationFileBasedTest
       )
 
     // 2. Export the ACS snapshot from SP
-    sourceParticipant.ledger_api.parties.export_party_acs(
+    sourceParticipant.parties.export_party_acs(
       externalParty,
       daId,
       targetParticipant,
@@ -209,7 +209,7 @@ sealed trait OnlinePartyReplicationFileBasedTest
 
     // 3. Have OnPR import the ACS on the TP
     val addPartyRequestId = clue("Initiate add party with acs snapshot file")(
-      targetParticipant.ledger_api.parties.add_party_with_acs(
+      targetParticipant.parties.add_party_with_acs_async(
         importFilePath = acsSnapshotFilename,
         party = externalParty,
         synchronizerId = daId,

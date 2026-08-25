@@ -29,6 +29,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   CheckpointType,
   DigestJournal,
 }
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -148,8 +149,18 @@ class ReinitializingDigestProcessorImpl(
     metrics.bufferDigestPipelineSize.updateValue(bufferSize.toLong)
     metrics.reinitializeParties.updateValue(0)
     metrics.reinitializeContractChanges.updateValue(0)
+    // TODO(#35072): make configurable in AcsCommitmentConfig
+    val configOverrides = ActiveContractsServiceStreamsConfigOverrides(
+      maxParallelActiveIdQueries = 12,
+      maxParallelPayloadCreateQueries = 6,
+    )
     val acsUpdates = indexService
-      .counterParties(synchronizerId, reinitializingTimepoint.offset, party = None)
+      .counterParties(
+        synchronizerId = synchronizerId,
+        activeAt = reinitializingTimepoint.offset,
+        party = None,
+        configOverrides = configOverrides,
+      )
       .viaMat(KillSwitches.single)(Keep.right)
       .grouped(counterpartyBatchSize)
       .mapAsync(acsCommitmentConfig.acsFetchParallelism.unwrap) { counterparties =>
@@ -158,7 +169,13 @@ class ReinitializingDigestProcessorImpl(
 
         Future(
           indexService
-            .acs(synchronizerId, reinitializingTimepoint.offset, counterpartiesSet, Set.empty)
+            .acs(
+              synchronizerId = synchronizerId,
+              activeAt = reinitializingTimepoint.offset,
+              stakeholders1 = counterpartiesSet,
+              stakeholders2 = Set.empty,
+              configOverrides = configOverrides,
+            )
             .grouped(acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap)
             .map(counterpartiesSet -> _)
         )

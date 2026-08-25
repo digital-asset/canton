@@ -7,12 +7,8 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyManagementAlphaServiceGrpc.PartyManagementAlphaService
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
-  AddPartyWithAcsRequest,
-  AddPartyWithAcsResponse,
   AuthorizePartyUpdateRequest,
   AuthorizePartyUpdateResponse,
-  ExportPartyAcsRequest,
-  ExportPartyAcsResponse,
   GeneratePartyTopologyUpdateRequest,
   GeneratePartyTopologyUpdateResponse,
   GetAddPartyStatusRequest,
@@ -31,7 +27,6 @@ import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.user.store.UserManagementStore
 import com.digitalasset.canton.user.{IdentityProviderId, UserRight}
 import com.digitalasset.daml.lf.data.Ref
-import io.grpc.stub.StreamObserver
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -54,16 +49,6 @@ private[apiserver] final class ApiPartyManagementAlphaService(
 
   override def bindService(): ServerServiceDefinition =
     PartyManagementAlphaServiceGrpc.bindService(this, executionContext)
-
-  override def exportPartyAcs(
-      request: ExportPartyAcsRequest,
-      responseObserver: StreamObserver[ExportPartyAcsResponse],
-  ): Unit = partyReplicationEndpoints.exportPartyAcs(request, responseObserver)
-
-  override def addPartyWithAcs(
-      responseObserver: StreamObserver[AddPartyWithAcsResponse]
-  ): StreamObserver[AddPartyWithAcsRequest] =
-    partyReplicationEndpoints.addPartyWithAcs(responseObserver)
 
   override def getAddPartyStatus(
       request: GetAddPartyStatusRequest

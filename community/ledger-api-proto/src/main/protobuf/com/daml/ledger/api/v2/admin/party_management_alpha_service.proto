@@ -7,7 +7,6 @@ package com.daml.ledger.api.v2.admin;
 
 import "com/daml/ledger/api/v2/crypto.proto";
 import "com/daml/ledger/api/v2/state_service.proto";
-import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
@@ -50,49 +49,6 @@ service PartyManagementAlphaService {
   // Returns INVALID_ARGUMENT if the parameters are invalid or inconsistent with the current
   // topology state.
   rpc AuthorizePartyUpdate(AuthorizePartyUpdateRequest) returns (AuthorizePartyUpdateResponse);
-
-  // Exports the specified party's Active Contract Set (ACS) in the specified synchronizer so that the party
-  // along with the ACS can be added to the specified target participant using the 'AddPartyWithAcs' endpoint.
-  // This request requires that the party has been authorized for onboarding to the target participant.
-  //
-  // Returns the party's ACS effective at the onboarding authorization timestamp.
-  rpc ExportPartyAcs(ExportPartyAcsRequest) returns (stream ExportPartyAcsResponse);
-
-  // Adds a party already hosted on one or more source participants to this target participant
-  // in the specified synchronizer, along with the party's provided Active Contract Set (ACS).
-  //
-  // Behavioral Flow:
-  //
-  // 1. Topology Verification (Synchronous): Expects to find an authorized PTP (PartyToParticipant)
-  //    topology with the `onboarding` flag set. If this is missing or invalid, the call fails immediately.
-  // 2. ACS Import (Synchronous): Imports the ACS snapshot into the participant-internal stores and runs
-  //    associated payload validations.
-  // 3. Indexer Processing (Asynchronous): Proceeds to perform background processing, including
-  //    feeding the imported changes into the indexer.
-  // 4. Topology Finalization (Asynchronous): The target participant authorizes a final topology
-  //    change to clear the `onboarding` flag.
-  //
-  // Retries and Idempotency: Safe to retry this endpoint.
-  //
-  // Synchronous Failure Scenarios
-  // The synchronous phase can fail and return an error due to:
-
-  // - Validation Errors: For example, a missing an effective PTP topology transaction with set onboarding flag.
-  // - Connectivity Issues: Loss of participant connectivity to the party replication synchronizer
-  //   during the synchronous window.
-  // - Data Validation: Faults or internal store issues uncovered during the ACS payload import phase.
-  //
-  // Security and Trust Notice:
-  // This operation assumes full trust in the source participant to provide a complete and
-  // untampered state. Because the target participant cannot independently verify the historical
-  // provenance of the imported contracts, validation is performed on a best-effort basis.
-  // Use only when the source participant is a known, trusted authority!
-  //
-  // TODO(#31414): Address remaining idempotency semantics:
-  // Currently, retrying this request after it has fully and successfully completed results in an error.
-  // Update this implementation to make a successful retry a clean no-op instead of throwing a
-  // "party already hosted" error.
-  rpc AddPartyWithAcs(stream AddPartyWithAcsRequest) returns (AddPartyWithAcsResponse);
 
   // TODO(#31414): There's no add_party_request_id; querying the status must be trivial like:
   //  By querying the status using semantic data—"What is the status of Party X moving to Target Participant Y on Synchronizer Z?"
@@ -170,101 +126,6 @@ message AuthorizePartyUpdateRequest {
 }
 
 message AuthorizePartyUpdateResponse {}
-
-message ExportPartyAcsRequest {
-  // The identifier of the party being replicated.
-  // Requires the party to be active on the target participant for the export to succeed.
-  //
-  // Required
-  string party_id = 1;
-
-  // The identifier of the synchronizer managing the contracts to be exported.
-  // Scopes the ACS export to contracts assigned to this synchronizer.
-  //
-  // Required
-  string synchronizer_id = 2;
-
-  // The unique identifier of the target participant where the party will be replicated.
-  // Scopes the ACS export to contracts missing from this participant.
-  //
-  // Required
-  string target_participant_uid = 3;
-
-  // TODO(#31414): Remove: Possibly replace with a timestamp (record time); that is the validFrom of the effective topology PTP mapping transaction
-  // The exclusive ledger offset used as the starting point for the export.
-  // Locates the party's most recent activation on the target participant.
-  //
-  // Required
-  int64 begin_offset_exclusive = 4;
-
-  // TODO(#31414): Removable iff we use timestamp
-  // The maximum duration to wait for the party's activation topology transaction.
-  // Defaults to a system timeout if left unset.
-  //
-  // Optional
-  google.protobuf.Duration wait_for_activation_timeout = 5;
-}
-
-message ExportPartyAcsResponse {
-  // A streamed chunk of the Active Contract Set (ACS) snapshot.
-  // Contains raw binary Ledger API active contract messages wrapped in `ActiveContract`.
-  //
-  // Optional: can be empty
-  bytes chunk = 1;
-}
-
-message AddPartyWithAcsRequest {
-  // The raw binary data of the ACS snapshot to be imported.
-  // Splits data arbitrarily across chunks based on gRPC message size limits.
-  //
-  // Optional: can be empty
-  bytes acs_snapshot = 1;
-
-  // The arguments used for request validation and initialization.
-  // Requires presence in the first stream message and absence in subsequent messages.
-  //
-  // Optional
-  AddPartyArguments arguments = 2;
-}
-
-message AddPartyArguments {
-  // The identifier of the party to be replicated.
-  //
-  // Required
-  string party_id = 1;
-
-  // The identifier of the synchronizer where the party will be replicated.
-  //
-  // Required
-  string synchronizer_id = 2;
-
-  // The unique identifier of a source participant already hosting the party.
-  //
-  // Required
-  string source_participant_uid = 3;
-
-  // TODO(#31414): Remove: Either by inferring it internally or require record time (validFrom of the effective topology transaction)
-  // TODO(#31414): Ensure that it will work with offboarding and re-onboarding
-  // The serial number of the PartyToParticipant topology transaction.
-  // Maps the party to this target participant.
-  //
-  // Required
-  uint32 topology_serial = 4;
-
-  // TODO(#31414): Remove: Figure it out from the topology transaction
-  // The permission level of the party on the target participant.
-  //
-  // Required
-  ParticipantPermission participant_permission = 5;
-}
-
-message AddPartyWithAcsResponse {
-  // TODO(#31414): Remove request ID as it can be computed from already known arguments
-  // The unique identifier used to track the add party request.
-  //
-  // Required
-  string add_party_request_id = 1;
-}
 
 message GetAddPartyStatusRequest {
   // TODO(#31414): Replace with underlying request ID hash arguments to compute the ID internally as needed

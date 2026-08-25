@@ -21,7 +21,11 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.component.IndexComponentTest.ServiceParams
-import com.digitalasset.canton.platform.config.IndexServiceConfig
+import com.digitalasset.canton.platform.config.{
+  ActiveContractsServiceStreamsConfig,
+  ActiveContractsServiceStreamsConfigOverrides,
+  IndexServiceConfig,
+}
 import com.digitalasset.canton.protocol.{ContractInstance, TestUpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref
@@ -35,6 +39,13 @@ import org.slf4j.event.Level
 import scala.concurrent.Promise
 
 trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest {
+
+  private val configOverrides = ActiveContractsServiceStreamsConfigOverrides(
+    maxParallelActiveIdQueries =
+      ActiveContractsServiceStreamsConfig.default.maxParallelActiveIdQueries,
+    maxParallelPayloadCreateQueries =
+      ActiveContractsServiceStreamsConfig.default.maxParallelPayloadCreateQueries,
+  )
 
   private val nextRecordTime = new SingleStepIncreasingRecordTime
 
@@ -94,7 +105,12 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
       activeAt: Offset,
       party: Option[Ref.Party],
   ): Source[Ref.Party, NotUsed] =
-    internalIndexService.counterParties(synchronizerId, activeAt, party)
+    internalIndexService.counterParties(
+      synchronizerId = synchronizerId,
+      activeAt = activeAt,
+      party = party,
+      configOverrides = configOverrides,
+    )
 
   private def acsUpdatesRaw(
       fromExclusive: Option[Offset],
@@ -488,7 +504,8 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
 
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
-      val unassignCounter = 42L
+      val activeCounter = 41L
+      val unassignCounter = activeCounter + 1
       ingestUpdates(
         sequencedUnassign(nextRecordTime(), contract, unassignCounter) -> Vector.empty
       )
@@ -502,7 +519,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
         dsoParty.value,
         alice.value,
       )
-      stakeholdersAndCounter.reassignmentCounter.v shouldBe unassignCounter
+      stakeholdersAndCounter.reassignmentCounter.v shouldBe activeCounter
     }
 
     "emit one ACS change for a transaction with multiple creates and archives" in {
@@ -676,6 +693,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(party1.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -694,6 +712,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(party1.value),
           stakeholders2 = Set(party1.value),
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -706,6 +725,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(party1.value),
           stakeholders2 = Set(partyCommon.value),
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -718,6 +738,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(partyCommon.value),
           stakeholders2 = Set(party1.value),
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -730,6 +751,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(party2.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -748,6 +770,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(partyCommon.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -775,6 +798,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set.empty,
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -790,6 +814,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set.empty,
           stakeholders2 = Set(party1.value),
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -809,6 +834,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -838,6 +864,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set(bob.value),
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -867,6 +894,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue shouldBe empty
@@ -881,6 +909,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAt,
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue shouldBe empty
@@ -900,6 +929,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeBeforeArchive,
           stakeholders1 = Set(acsArchivedParty.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -920,6 +950,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           activeAt = activeAfterArchive,
           stakeholders1 = Set(acsArchivedParty.value),
           stakeholders2 = Set.empty,
+          configOverrides = configOverrides,
         )
         .runWith(Sink.seq)
         .futureValue shouldBe empty

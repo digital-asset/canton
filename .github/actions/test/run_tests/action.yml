@@ -6,6 +6,10 @@ inputs:
     description: Collect postgres query stats and run stats analysis test
     required: false
     default: 'false'
+  setup_gcp_kms:
+    description: Whether to run the GCP KMS setup helper
+    required: false
+    default: 'true'
   command:
     description: |
       SBT command template used to run tests.
@@ -129,6 +133,7 @@ runs:
         workspace-path: ${{ inputs.release_path }}
 
     - name: Setup GCP KMS
+      if: inputs.setup_gcp_kms == 'true'
       uses: ./.github/actions/test/setup_gcp_kms
 
     - name: Validate sharding inputs

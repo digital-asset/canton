@@ -1006,6 +1006,7 @@ trait IndexComponentTest
         eventFormat = allPartyEventFormat,
         activeAt = Some(Offset.tryFromLong(activeAt)),
         rangeInfo = rangeInfo,
+        configOverrides = None,
       )
       .runWith(Sink.seq)
       .futureValue

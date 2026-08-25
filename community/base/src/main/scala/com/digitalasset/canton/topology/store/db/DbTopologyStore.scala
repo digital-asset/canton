@@ -1160,27 +1160,15 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     if (filterNamespace.isEmpty && explicitUidFilters.isEmpty) {
       forwardBatch(None, None)
     } else {
-      // split both filters into batches. we need to jump through a few hoops to go
-      // from Option[NonEmpty[Seq[X]]] to
-      // Seq[ // collection containing the batches
-      //   Option[ // we need to retain optionality, so that we can zip the filters together and allow for a different number of uid/namespaces filter batches
-      //     NonEmpty[Seq[X]] // finally the actual batch
-      //   ]
-      // ]
-      // because grouped doesn't return NonEmpty collections.
-      val chunkedUids = explicitUidFilters.flatTraverse(uids =>
+      // split both filters into batches
+      val chunkedUids = explicitUidFilters.traverse(uids =>
         uids
-          .grouped(batchingConfig.maxItemsInBatch.value)
+          .grouped1(batchingConfig.maxItemsInBatch.value)
           .toSeq
-          .map[Option[NonEmpty[Seq[UniqueIdentifier]]]](NonEmpty.from)
       )
       val chunkedNamespaces =
-        filterNamespace.flatTraverse(ns =>
-          ns.grouped(batchingConfig.maxItemsInBatch.value)
-            .toSeq
-            .map[Option[NonEmpty[Seq[Namespace]]]](NonEmpty.from)
-        )
-      // since the filters are ORed in the query, we can simply interlace them in the same chunk.
+        filterNamespace.traverse(ns => ns.grouped1(batchingConfig.maxItemsInBatch.value).toSeq)
+      // since the filters are effectively ORed in the query, we can simply interlace them in the same chunk.
       // if one of the filters has fewer chunks, we simply pad with None
       val chunkedFilters = chunkedUids.zipAll(chunkedNamespaces, None, None)
 
@@ -1211,7 +1199,6 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
-    val hasUidFilter = filterUid.nonEmpty || filterNamespace.nonEmpty
     val filterUidStr = filterUid.map(f => s"uids ${f.mkString(", ")}")
     val filterNamespaceStr = filterNamespace.map(f => s"namespaces ${f.mkString(", ")}")
     val filterOpStr = filterOp.map(f => s"op $f")
@@ -1225,21 +1212,23 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     val isProposalFilter = sql" AND is_proposal = $isProposal"
     val changeOpFilter = filterOp.fold(sql"")(op => sql" AND operation = $op")
     val mappingTypeFilter = typeFilter(types)
-    val uidNamespaceTableJoinFilter =
-      if (hasUidFilter) {
-        val namespaces: Array[String] =
-          (filterNamespace.toList.flatMap(_.map(_.unwrap)) ++
-            filterUid.toList.flatMap(_.map(_.namespace.unwrap))).toArray
-        val idents: Array[String185] =
-          (filterNamespace.toList.flatMap(_.map((_: Namespace) => String185.empty)) ++
-            filterUid.toList.flatMap(_.map(_.identifier))).toArray
-        Some(
-          (
-            sql" unnest($namespaces, $idents) as uids(ns, ident) ",
-            sql" uids.ns = namespace AND (uids.ident = identifier OR uids.ident = '') ",
-          )
-        )
-      } else None
+
+    val nsFilter = filterNamespace.map { namespacesToFilter =>
+      val namespaces = namespacesToFilter.map(_.unwrap).toArray
+      (
+        sql" unnest($namespaces) as namespaces(ns) ",
+        sql" namespaces.ns = namespace ",
+      )
+    }
+
+    val uidFilter = filterUid.map { uidsToFilter =>
+      val namespaces = uidsToFilter.map(_.namespace.unwrap).toArray
+      val idents: Array[String185] = uidsToFilter.map(_.identifier).toArray
+      (
+        sql" unnest($namespaces, $idents) as uids(ns, ident) ",
+        sql" uids.ns = namespace AND uids.ident = identifier ",
+      )
+    }
 
     val nonPaginationFilters =
       timeRangeFilter ++ isProposalFilter ++ changeOpFilter ++ mappingTypeFilter
@@ -1256,12 +1245,14 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
           nonPaginationFilters ++ paginationFilter,
           limit = s" LIMIT $pageLimit ",
           orderBy = " ORDER BY identifier, namespace ",
-          tableJoinFilter = uidNamespaceTableJoinFilter,
+          uidFilter = uidFilter,
+          nsFilter = nsFilter,
         )
       case _ =>
         buildQueryForTransactions(
           nonPaginationFilters,
-          tableJoinFilter = uidNamespaceTableJoinFilter,
+          uidFilter = uidFilter,
+          nsFilter = nsFilter,
         )
     }
 
@@ -1322,18 +1313,34 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       limit: String = "",
       orderBy: String = " ORDER BY id ",
       includeRejected: Boolean = false,
-      tableJoinFilter: Option[(SQLActionBuilder, SQLActionBuilder)] = None,
+      uidFilter: Option[(SQLActionBuilder, SQLActionBuilder)] = None,
+      nsFilter: Option[(SQLActionBuilder, SQLActionBuilder)] = None,
   ): QueryAction = {
-    val targetTable: SQLActionBuilder = tableJoinFilter match {
-      case None => sql" common_topology_transactions "
-      case Some((leftTable, onFilter)) =>
-        leftTable ++ sql" JOIN common_topology_transactions ON " ++ onFilter
+
+    def baseQuery(targetTable: SQLActionBuilder) =
+      sql"SELECT instance, sequenced, valid_from, valid_until, rejection_reason, id FROM " ++ targetTable ++ sql" WHERE store_id = $storeIndex" ++
+        subQuery ++ (if (!includeRejected) sql" AND rejection_reason IS NULL" else sql"")
+
+    def queryWithFilter(filter: (SQLActionBuilder, SQLActionBuilder)) = {
+      val (leftTable, onFilter) = filter
+      val targetTable = leftTable ++ sql" JOIN common_topology_transactions ON " ++ onFilter
+      baseQuery(targetTable)
     }
-    val query =
-      sql"SELECT instance, sequenced, valid_from, valid_until, rejection_reason FROM " ++ targetTable ++ sql" WHERE store_id = $storeIndex" ++
-        subQuery ++ (if (!includeRejected) sql" AND rejection_reason IS NULL"
-                     else sql"") ++ sql" #$orderBy #$limit"
-    query.as[QueryResult]
+
+    val query = (uidFilter, nsFilter) match {
+      case (None, None) => baseQuery(sql" common_topology_transactions ")
+      case (Some(uids), None) => queryWithFilter(uids)
+      case (None, Some(namespaces)) => queryWithFilter(namespaces)
+      case (Some(uids), Some(namespaces)) =>
+        val uidQuery = queryWithFilter(uids)
+        val nsQuery = queryWithFilter(namespaces)
+
+        sql"select all_results.* from (" ++ uidQuery ++ sql" union all " ++ nsQuery ++ sql") all_results"
+    }
+
+    val queryWithOrderByAndLimit = query ++ sql" #$orderBy #$limit"
+
+    queryWithOrderByAndLimit.as[QueryResult]
   }
 
   private val TxEntryWithIdFields =

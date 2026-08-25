@@ -8,6 +8,9 @@ inputs:
   exclude_unstable_tests:
     default: "true"
     description: Exclude unstable tests
+  include_only_requires_external_kms_tests:
+    default: "false"
+    description: Include only tests tagged RequiresExternalKms
   execution_context_size:
     default: "2"
     description: Execution context size
@@ -20,6 +23,9 @@ inputs:
   override_java_version_for_tests:
     default: ""
     description: Override Java Version for tests
+  setup_gcp_kms:
+    default: "true"
+    description: Whether to run setup_gcp_kms in the underlying test action
   shard_index:
     description: Index of test shard
     required: false
@@ -53,33 +59,52 @@ runs:
       shell: bash
       env:
         EXCLUDE_UNSTABLE_TESTS: ${{ inputs.exclude_unstable_tests }}
+        INCLUDE_ONLY_REQUIRES_EXTERNAL_KMS_TESTS: ${{ inputs.include_only_requires_external_kms_tests }}
       run: |
+        TEST_TAG_FLAGS=()
+
         if [[ "$EXCLUDE_UNSTABLE_TESTS" == "true" ]]; then
-          UNSTABLE_FLAGS="-l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
-          CMD="dumpClassPath \"\$RUN_SPLITTED_TESTS_CMD -- $UNSTABLE_FLAGS\" checkErrors"
-        else
-          CMD='dumpClassPath "$RUN_SPLITTED_TESTS_CMD" checkErrors'
+          TEST_TAG_FLAGS+=("-l" "UnstableTest" "-l" "com.digitalasset.canton.annotations.UnstableTest")
         fi
+
+        if [[ "$INCLUDE_ONLY_REQUIRES_EXTERNAL_KMS_TESTS" == "true" ]]; then
+          TEST_TAG_FLAGS+=("-n" "RequiresExternalKms" "-n" "com.digitalasset.canton.annotations.RequiresExternalKms")
+        else
+          TEST_TAG_FLAGS+=("-l" "RequiresExternalKms" "-l" "com.digitalasset.canton.annotations.RequiresExternalKms")
+        fi
+
+        CMD="dumpClassPath \"\$RUN_SPLITTED_TESTS_CMD -- ${TEST_TAG_FLAGS[*]}\" checkErrors"
         echo "command=$CMD" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve test selection exclude patterns
+      id: resolve-exclude-patterns
+      shell: bash
+      run: |
+        {
+          echo "exclude_patterns<<EOF"
+          printf '%s\n' \
+            'com\.digitalasset\.canton\.integration\.tests\.manual' \
+            'com\.digitalasset\.canton\.integration\.tests\.crashrecovery' \
+            'com\.digitalasset\.canton\.nightly' \
+            'com\.digitalasset\.canton\.integration\.tests\.nightly' \
+            'com\.digitalasset\.canton\.integration\.tests\.toxiproxy' \
+            'com\.digitalasset\.canton\.integration\.tests\.release' \
+            'com\.digitalasset\.canton\.integration\.tests\.benchmarks' \
+            'com\.digitalasset\.canton\.integration\.tests\.continuity' \
+            'com\.digitalasset\.canton\.integration\.tests\.variations' \
+            'com\.digitalasset\.canton\.integration\.tests\.modelbased' \
+            'com\.digitalasset\.canton\.integration\.tests\.docs\.snippet' \
+            'com\.digitalasset\.canton\.integration\.tests\.UpgradesMatrixIntegration'
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
     - uses: ./.github/actions/test/run_tests
       with:
         collect_postgres_query_stats: ${{ inputs.collect_postgres_query_stats }}
+        setup_gcp_kms: ${{ inputs.setup_gcp_kms }}
         command: ${{ steps.build-sbt-command.outputs.command }}
         execution_context_size: ${{ inputs.execution_context_size }}
-        exclude_patterns: |
-          com\.digitalasset\.canton\.integration\.tests\.manual
-          com\.digitalasset\.canton\.integration\.tests\.crashrecovery
-          com\.digitalasset\.canton\.nightly
-          com\.digitalasset\.canton\.integration\.tests\.nightly
-          com\.digitalasset\.canton\.integration\.tests\.toxiproxy
-          com\.digitalasset\.canton\.integration\.tests\.release
-          com\.digitalasset\.canton\.integration\.tests\.benchmarks
-          com\.digitalasset\.canton\.integration\.tests\.continuity
-          com\.digitalasset\.canton\.integration\.tests\.variations
-          com\.digitalasset\.canton\.integration\.tests\.modelbased
-          com\.digitalasset\.canton\.integration\.tests\.docs\.snippet
-          com\.digitalasset\.canton\.integration\.tests\.UpgradesMatrixIntegration
+        exclude_patterns: ${{ steps.resolve-exclude-patterns.outputs.exclude_patterns }}
         num_parallel_tasks: ${{ inputs.num_parallel_tasks }}
         num_test_buckets: ${{ inputs.num_test_buckets }}
         override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}

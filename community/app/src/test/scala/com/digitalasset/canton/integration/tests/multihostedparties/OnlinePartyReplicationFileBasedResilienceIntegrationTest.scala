@@ -163,7 +163,7 @@ class OnlinePartyReplicationFileBasedResilienceIntegrationTest
         )
 
         val firstImportF = Future {
-          targetParticipant.ledger_api.parties.add_party_with_acs(
+          targetParticipant.parties.add_party_with_acs_async(
             importFilePath = acsSnapshotFilename,
             party = externalParty,
             synchronizerId = daId,
@@ -196,7 +196,7 @@ class OnlinePartyReplicationFileBasedResilienceIntegrationTest
         retry = true
 
         val addPartyRequestId = clue("Retry to add party after node restart") {
-          targetParticipant.ledger_api.parties.add_party_with_acs(
+          targetParticipant.parties.add_party_with_acs_async(
             importFilePath = acsSnapshotFilename,
             party = externalParty,
             synchronizerId = daId,
@@ -250,7 +250,7 @@ class OnlinePartyReplicationFileBasedResilienceIntegrationTest
           .forLogger[EnvironmentDefinition]
       )(
         within = intercept[CommandFailure] {
-          targetParticipant.ledger_api.parties.add_party_with_acs(
+          targetParticipant.parties.add_party_with_acs_async(
             importFilePath = acsSnapshotFilename2,
             party = externalParty2,
             synchronizerId = daId,
@@ -270,7 +270,7 @@ class OnlinePartyReplicationFileBasedResilienceIntegrationTest
       // Attempt to retry with a mismatched parameter (Observation instead of Confirmation)
       clue("Retry with mismatched participant permission should fail immediately") {
         assertThrowsAndLogsCommandFailures(
-          targetParticipant.ledger_api.parties.add_party_with_acs(
+          targetParticipant.parties.add_party_with_acs_async(
             importFilePath = acsSnapshotFilename2,
             party = externalParty2,
             synchronizerId = daId,
@@ -283,7 +283,7 @@ class OnlinePartyReplicationFileBasedResilienceIntegrationTest
       }
 
       val addPartyRequestId = clue("Retry to add party after error") {
-        targetParticipant.ledger_api.parties.add_party_with_acs(
+        targetParticipant.parties.add_party_with_acs_async(
           importFilePath = acsSnapshotFilename2,
           party = externalParty2,
           synchronizerId = daId,
@@ -320,7 +320,7 @@ class OnlinePartyReplicationFileBasedResilienceIntegrationTest
       )
 
       val addPartyRequestId = clue("Add party with empty acs snapshot file")(
-        targetParticipant.ledger_api.parties.add_party_with_acs(
+        targetParticipant.parties.add_party_with_acs_async(
           importFilePath = emptyAcsSnapshotFilename,
           party = emptyAcsParty,
           synchronizerId = daId,

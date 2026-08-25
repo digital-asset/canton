@@ -329,13 +329,14 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
         val ledgerEnd = index.currentLedgerEnd()
         index
           .getActiveContracts(
-            eventFormat,
-            ledgerEnd.map(_.lastOffset),
-            AcsRangeInfo(
+            eventFormat = eventFormat,
+            activeAt = ledgerEnd.map(_.lastOffset),
+            rangeInfo = AcsRangeInfo(
               continuationPointer = continuationPointer,
               requestChecksum = AcsContinuationToken.emptyChecksum,
               limit = limit.map(_.toLong),
             ),
+            configOverrides = None,
           )
           .runWith(Sink.collection)
           .map(_.toVector)

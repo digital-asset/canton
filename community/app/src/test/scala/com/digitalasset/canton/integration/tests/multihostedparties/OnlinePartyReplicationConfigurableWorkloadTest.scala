@@ -250,7 +250,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
         loggerFactory.assertLogsUnorderedOptional(
           {
             val addPartyRequestId = clue("Initiate add party with acs snapshot file")(
-              targetParticipant.ledger_api.parties.add_party_with_acs(
+              targetParticipant.parties.add_party_with_acs_async(
                 importFilePath = acsSnapshotFilename,
                 party = aliceE,
                 synchronizerId = daId,

@@ -184,7 +184,6 @@ import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.ForwardingStreamObserver
 import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
-import com.digitalasset.canton.participant.admin.party.PartyParticipantPermission
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -203,7 +202,7 @@ import com.digitalasset.canton.user.{
   IdentityProviderConfig as ApiIdentityProviderConfig,
   IdentityProviderId,
 }
-import com.digitalasset.canton.util.{BinaryFileUtil, GrpcStreamingUtils, ResourceUtil}
+import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{
   GrpcServiceInvocationMethod,
   LfPackageId,
@@ -215,15 +214,12 @@ import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.*
-import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.scalaland.chimney.dsl.*
 
-import java.io.{File, FileInputStream}
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -507,96 +503,6 @@ object LedgerApiCommands {
 
       override def createService(channel: ManagedChannel): PartyManagementAlphaServiceStub =
         PartyManagementAlphaServiceGrpc.stub(channel)
-    }
-
-    final case class ExportPartyAcs(
-        party: PartyId,
-        synchronizerId: SynchronizerId,
-        targetParticipantId: ParticipantId,
-        beginOffsetExclusive: Long,
-        waitForActivationTimeout: Option[config.NonNegativeFiniteDuration],
-        observer: StreamObserver[ExportPartyAcsResponse],
-    ) extends BaseCommand[
-          ExportPartyAcsRequest,
-          CancellableContext,
-          CancellableContext,
-        ] {
-
-      override protected def createRequest(): Either[String, ExportPartyAcsRequest] =
-        Right(
-          ExportPartyAcsRequest(
-            party.toProtoPrimitive,
-            synchronizerId.toProtoPrimitive,
-            targetParticipantId.uid.toProtoPrimitive,
-            beginOffsetExclusive,
-            waitForActivationTimeout.map(_.toProtoPrimitive),
-          )
-        )
-
-      override protected def submitRequest(
-          service: PartyManagementAlphaServiceStub,
-          request: ExportPartyAcsRequest,
-      ): Future[CancellableContext] = {
-        val context = Context.current().withCancellation()
-        context.run(() => service.exportPartyAcs(request, observer))
-        Future.successful(context)
-      }
-
-      override protected def handleResponse(
-          response: CancellableContext
-      ): Either[String, CancellableContext] = Right(response)
-
-      override def timeoutType: GrpcAdminCommand.TimeoutType =
-        GrpcAdminCommand.DefaultUnboundedTimeout
-    }
-
-    final case class AddPartyWithAcs(
-        importFile: File,
-        party: PartyId,
-        synchronizerId: SynchronizerId,
-        sourceParticipant: ParticipantId,
-        serial: PositiveInt,
-        participantPermission: ParticipantPermission,
-    ) extends BaseCommand[
-          Unit,
-          AddPartyWithAcsResponse,
-          String,
-        ] {
-
-      override protected def createRequest(): Either[String, Unit] =
-        Right(())
-
-      override protected def submitRequest(
-          service: PartyManagementAlphaServiceStub,
-          request: Unit,
-      ): Future[AddPartyWithAcsResponse] =
-        ResourceUtil.withResource(new FileInputStream(importFile)) { inputStream =>
-          val isFirstChunk = new AtomicBoolean(true)
-          GrpcStreamingUtils.streamToServer(
-            service.addPartyWithAcs,
-            bytes => {
-              val isFirst = isFirstChunk.getAndSet(false)
-              AddPartyWithAcsRequest(
-                ByteString.copyFrom(bytes),
-                arguments = Option.when(isFirst)(
-                  AddPartyArguments(
-                    partyId = party.toProtoPrimitive,
-                    synchronizerId = synchronizerId.toProtoPrimitive,
-                    sourceParticipantUid = sourceParticipant.uid.toProtoPrimitive,
-                    topologySerial = serial.value,
-                    participantPermission =
-                      PartyParticipantPermission.toLapiProtoPrimitive(participantPermission),
-                  )
-                ),
-              )
-            },
-            inputStream,
-          )
-        }
-
-      override protected def handleResponse(
-          response: AddPartyWithAcsResponse
-      ): Either[String, String] = Right(response.addPartyRequestId)
     }
 
     final case class GetAddPartyStatus(requestId: String)

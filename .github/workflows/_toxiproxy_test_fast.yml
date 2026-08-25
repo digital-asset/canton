@@ -6,15 +6,18 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
+      include_only_requires_external_kms_tests:
+        type: boolean
+        default: false
     secrets:
       DATADOG_API_KEY:
-        required: true
+        required: false
       GCLOUD_SERVICE_KEY:
-        required: true
+        required: false
       AWS_ACCESS_KEY_ID:
-        required: true
+        required: false
       AWS_SECRET_ACCESS_KEY:
-        required: true
+        required: false
       AWS_SESSION_TOKEN:
         required: false
       AWS_REGION:
@@ -31,9 +34,10 @@ jobs:
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: ${{ inputs.include_only_requires_external_kms_tests && 1 || 6 }}
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        # KMS mode has only 2 test files, so 1 shard is enough. Keep in sync with num_test_buckets below.
+        shard: ${{ fromJSON(inputs.include_only_requires_external_kms_tests && '[0]' || '[0, 1, 2, 3, 4, 5]') }}
     timeout-minutes: 180
     env:
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
@@ -71,16 +75,29 @@ jobs:
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
 
+      - name: Compute RequiresExternalKms filter flag
+        id: kms_filter
+        shell: bash
+        run: |
+          if [[ "${{ inputs.include_only_requires_external_kms_tests }}" == "true" ]]; then
+            echo "flag=-n RequiresExternalKms -n com.digitalasset.canton.annotations.RequiresExternalKms" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=-l RequiresExternalKms -l com.digitalasset.canton.annotations.RequiresExternalKms" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run Toxiproxy Fast Tests
         id: run_toxiproxy_tests
         uses: ./.github/actions/test/run_tests
         with:
           command: >-
-            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest
+            -l com.digitalasset.canton.annotations.UnstableTest
+            ${{ steps.kms_filter.outputs.flag }}"
           reset_classes_if_requested: 'false'
           execution_context_size: "8"
           fail_on_error_in_output: 'false'
-          num_test_buckets: '6'
+          setup_gcp_kms: ${{ inputs.include_only_requires_external_kms_tests }}
+          num_test_buckets: ${{ inputs.include_only_requires_external_kms_tests && '1' || '6' }}
           shard_index: ${{ matrix.shard }}
           num_parallel_tasks: '1'
           timings_file: ${{ github.job }}/.timings/timings.json

@@ -104,6 +104,18 @@ jobs:
   test:
     name: Test
     needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      include_only_requires_external_kms_tests: false
+      override_java_version_for_tests: ""
+      protocol_version: ""
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_requires_external_kms:
+    name: Test (RequiresExternalKms)
+    needs: [pick_runner, test]
     if: |
       github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
@@ -111,6 +123,7 @@ jobs:
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
+      include_only_requires_external_kms_tests: true
       override_java_version_for_tests: ""
       protocol_version: ""
       runner: ${{ needs.pick_runner.outputs.runner }}
@@ -167,6 +180,15 @@ jobs:
   crash_recovery_test:
     name: Crash Recovery Test
     needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/_crash_recovery_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  crash_recovery_test_requires_external_kms:
+    name: Crash Recovery Test (RequiresExternalKms)
+    needs: [pick_runner, crash_recovery_test]
     if: |
       github.event_name != 'merge_group' &&
       (github.event_name != 'pull_request' ||
@@ -174,6 +196,7 @@ jobs:
     uses: ./.github/workflows/_crash_recovery_test.yml
     secrets: inherit
     with:
+      include_only_requires_external_kms_tests: true
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   ledger_api_compatibility_tests:
@@ -217,10 +240,7 @@ jobs:
     # release tags. Release tags are part of the published release validation flow, so we keep the
     # explicit `v*` tag clause here, matching the historical CircleCI behavior that was migrated to
     # GitHub Actions.
-    if: |
-      github.event_name != 'merge_group' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_protocol_continuity_test_latest.yml
     secrets: inherit
     with:
@@ -255,9 +275,7 @@ jobs:
   temp_acs_commitment_tests_pv_dev:
     name: Temp ACS Commitment Tests PV Dev
     needs: [pick_runner, compile]
-    if: |
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/_temp_acs_commitment_tests_pv_dev.yml
     secrets: inherit
     with:
@@ -266,11 +284,7 @@ jobs:
   test_data_continuity_dumps:
     name: Test Data Continuity Dumps
     needs: [pick_runner, compile]
-    if: |
-      github.event_name != 'merge_group' &&
-      github.ref_type != 'tag' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_test_data_continuity_dumps.yml
     # Full coverage on main and release-line branches, scoped down on regular PR branches. A PR
     # targeting a release-line still gets full coverage from the push to the release-line branch
@@ -297,14 +311,25 @@ jobs:
   test_protocol_version_36:
     name: Test Protocol Version 36
     needs: [pick_runner, compile]
-    if: |
-      github.event_name != 'merge_group' &&
-      github.ref_type != 'tag' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
+      protocol_version: '36'
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  test_protocol_version_36_requires_external_kms:
+    name: Test Protocol Version 36 (RequiresExternalKms)
+    needs: [pick_runner, test_protocol_version_36]
+    if: |
+      github.event_name != 'merge_group' &&
+      github.ref_type != 'tag'  &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    uses: ./.github/workflows/_test.yml
+    secrets: inherit
+    with:
+      include_only_requires_external_kms_tests: true
       protocol_version: '36'
       runner: ${{ needs.pick_runner.outputs.runner }}
 
@@ -321,13 +346,23 @@ jobs:
   toxiproxy_test_fast:
     name: Toxiproxy Test Fast
     needs: [pick_runner, compile]
+    if: github.event_name != 'merge_group'
+    uses: ./.github/workflows/_toxiproxy_test_fast.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  toxiproxy_test_fast_requires_external_kms:
+    name: Toxiproxy Test Fast (RequiresExternalKms)
+    needs: [pick_runner, toxiproxy_test_fast]
     if: |
-      github.event_name != 'merge_group' &&
+      github.event_name != 'merge_group'  &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/_toxiproxy_test_fast.yml
     secrets: inherit
     with:
+      include_only_requires_external_kms_tests: true
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   unstable_test:
@@ -366,10 +401,12 @@ jobs:
       - static_tests
       - compile
       - test
+      - test_requires_external_kms
       - build_docs
       - build_docs_snippets
       - build_scaladoc
       - crash_recovery_test
+      - crash_recovery_test_requires_external_kms
       - ledger_api_compatibility_tests
       - package_community
       - protobuf_continuity
@@ -381,8 +418,10 @@ jobs:
       - test_data_continuity_dumps
       - test_docker_images
       - test_protocol_version_36
+      - test_protocol_version_36_requires_external_kms
       - test_protocol_version_dev
       - toxiproxy_test_fast
+      - toxiproxy_test_fast_requires_external_kms
       - unstable_test
       - variations_test
       - variations_test_selected_users
@@ -414,10 +453,12 @@ jobs:
       - static_tests
       - compile
       - test
+      - test_requires_external_kms
       - build_docs
       - build_docs_snippets
       - build_scaladoc
       - crash_recovery_test
+      - crash_recovery_test_requires_external_kms
       - ledger_api_compatibility_tests
       - package_community
       - protobuf_continuity
@@ -429,8 +470,10 @@ jobs:
       - test_data_continuity_dumps
       - test_docker_images
       - test_protocol_version_36
+      - test_protocol_version_36_requires_external_kms
       - test_protocol_version_dev
       - toxiproxy_test_fast
+      - toxiproxy_test_fast_requires_external_kms
       - unstable_test
       - variations_test
       - variations_test_selected_users

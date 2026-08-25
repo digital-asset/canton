@@ -8,19 +8,22 @@ on:
       protocol_version:
         default: ""
         type: string
+      include_only_requires_external_kms_tests:
+        default: false
+        type: boolean
       runner:
         description: GitHub Actions runner label
         required: true
         type: string
     secrets:
       DATADOG_API_KEY:
-        required: true
+        required: false
       GCLOUD_SERVICE_KEY:
-        required: true
+        required: false
       AWS_ACCESS_KEY_ID:
-        required: true
+        required: false
       AWS_SECRET_ACCESS_KEY:
-        required: true
+        required: false
       AWS_SESSION_TOKEN:
         required: false
       AWS_REGION:
@@ -37,10 +40,11 @@ jobs:
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
-      max-parallel: 12
+      max-parallel: ${{ inputs.include_only_requires_external_kms_tests && 2 || 12 }}
       matrix:
-        # Keep in sync with num_test_buckets in run_ordinary_tests step below
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        # KMS mode targets only the security/kms package (~17 files), so 2 shards are enough.
+        # Keep in sync with num_test_buckets in run_ordinary_tests step below.
+        shard: ${{ fromJSON(inputs.include_only_requires_external_kms_tests && '[0, 1]' || '[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]') }}
     # This is a safety net, not the primary limit. A hung sbt run is caught first, and gracefully, by
     # the 40m GNU-timeout cap in run_ordinary_tests, which leaves the if-always cleanup and log-upload
     # steps intact. The job-level cap here only comes into play for hangs outside sbt (postgres
@@ -90,9 +94,11 @@ jobs:
         uses: ./.github/actions/test/run_ordinary_tests
         with:
           collect_postgres_query_stats: "true"
+          setup_gcp_kms: ${{ inputs.include_only_requires_external_kms_tests }}
           execution_context_size: "8"
           exclude_unstable_tests: "true"
-          num_test_buckets: "12"
+          include_only_requires_external_kms_tests: ${{ inputs.include_only_requires_external_kms_tests }}
+          num_test_buckets: ${{ inputs.include_only_requires_external_kms_tests && '2' || '12' }}
           num_parallel_tasks: "4"
           override_java_version_for_tests: ${{ inputs.override_java_version_for_tests }}
           artifact_name_suffix: >-

@@ -28,4 +28,5 @@ runs:
         fail_on_error_in_output: 'true'
         num_parallel_tasks: '1'
         num_test_buckets: '0'
+        setup_gcp_kms: 'false'
         succeed_on_error: false

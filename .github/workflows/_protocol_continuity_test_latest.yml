@@ -8,13 +8,13 @@ on:
         type: string
     secrets:
       DATADOG_API_KEY:
-        required: true
+        required: false
       GCLOUD_SERVICE_KEY:
-        required: true
+        required: false
       AWS_ACCESS_KEY_ID:
-        required: true
+        required: false
       AWS_SECRET_ACCESS_KEY:
-        required: true
+        required: false
       AWS_SESSION_TOKEN:
         required: false
       AWS_REGION:
@@ -68,8 +68,14 @@ jobs:
       - name: Run latest protocol continuity tests
         uses: ./.github/actions/test/run_tests
         with:
-          command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          command: >-
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD --
+            -l UnstableTest
+            -l com.digitalasset.canton.annotations.UnstableTest
+            -l RequiresExternalKms
+            -l com.digitalasset.canton.annotations.RequiresExternalKms" checkErrors
           execution_context_size: "8"
+          setup_gcp_kms: 'false'
           include_patterns: '^com\.digitalasset\.canton\.integration\.tests\.continuity\.latest'
           num_parallel_tasks: "1"
           num_test_buckets: "2"

@@ -55,6 +55,9 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   * @param pruningDbLockTimeout
   *   This timeout controls how long the system waits to acquire the table lock on the pruning
   *   service table.
+  * @param acsFilteringParallelism
+  *   The parallelism for filtering the active contracts service stream by synchronizer id and
+  *   stakeholders.
   */
 final case class IndexServiceConfig(
     bufferedEventsProcessingParallelism: Int =
@@ -88,6 +91,7 @@ final case class IndexServiceConfig(
     pruningDbLockTimeout: PositiveFiniteDuration = IndexServiceConfig.DefaultPruningDbLockTimeout,
     maxLookupLimit: Int = IndexServiceConfig.DefaultMaxLookupLimit,
     maxRejectedCompletionsByHash: Int = IndexServiceConfig.DefaultMaxRejectedCompletionsByHash,
+    acsFilteringParallelism: Int = IndexServiceConfig.DefaultAcsFilteringParallelism,
 )
 
 object IndexServiceConfig {
@@ -114,6 +118,7 @@ object IndexServiceConfig {
     PositiveFiniteDuration.ofSeconds(20)
   val DefaultMaxLookupLimit: Int = 1000
   val DefaultMaxRejectedCompletionsByHash: Int = 10
+  val DefaultAcsFilteringParallelism: Int = 16
 
   def DefaultQueryServicesThreadPoolSize(logger: Logger): Int = {
     val numberOfThreads = Threading.detectNumberOfThreads(logger).value
@@ -174,6 +179,19 @@ object ActiveContractsServiceStreamsConfig {
   val default: ActiveContractsServiceStreamsConfig = ActiveContractsServiceStreamsConfig()
 
 }
+
+/** Per-stream overrides of [[ActiveContractsServiceStreamsConfig]], allowing individual active
+  * contracts streams to deviate from the node-wide configuration.
+  *
+  * @param maxParallelActiveIdQueries
+  *   Overrides [[ActiveContractsServiceStreamsConfig.maxParallelActiveIdQueries]].
+  * @param maxParallelPayloadCreateQueries
+  *   Overrides [[ActiveContractsServiceStreamsConfig.maxParallelPayloadCreateQueries]].
+  */
+final case class ActiveContractsServiceStreamsConfigOverrides(
+    maxParallelActiveIdQueries: Int,
+    maxParallelPayloadCreateQueries: Int,
+)
 
 /** Updates stream configuration.
   *

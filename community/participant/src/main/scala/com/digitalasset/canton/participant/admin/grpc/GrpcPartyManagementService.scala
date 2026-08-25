@@ -103,6 +103,49 @@ class GrpcPartyManagementService(
     } yield v30.AddPartyAsyncResponse(addPartyRequestId = hash.toHexString))
   }
 
+  override def addPartyWithAcsAsync(
+      responseObserver: StreamObserver[AddPartyWithAcsAsyncResponse]
+  ): StreamObserver[AddPartyWithAcsAsyncRequest] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    GrpcStreamingUtils.streamGzippedChunksFromClient[
+      AddPartyWithAcsAsyncRequest,
+      AddPartyWithAcsAsyncResponse,
+      PartyReplicationArguments,
+      ActiveContract,
+    ](
+      responseObserver,
+      Failure(
+        new IllegalArgumentException(
+          "The request stream must contain at least one message with the required AddPartyArguments."
+        )
+      ),
+      getGzippedBytes = _.acsSnapshot,
+      parseMessage = ActiveContract.parseDelimitedFromTrusted,
+    )(contextFromFirstRequest =
+      firstRequest =>
+        (for {
+          argsP <- ProtoConverter
+            .required("arguments", firstRequest.arguments)
+            .leftMap(err => s"Arguments must be set on the first request: $err")
+          args <- verifyArguments(argsP)
+        } yield args)
+          .leftMap(err => new IllegalArgumentException(err))
+          .toTry
+    ) { case (args, source) =>
+      val resultET = for {
+        partyReplicator <- EitherT.fromEither[FutureUnlessShutdown](
+          ensureOnlinePartyReplicationEnabled()
+        )
+        requestId <- partyReplicator
+          .addPartyWithAcsAsync(args, source)
+          .leftMap(toStatusRuntimeException(Status.FAILED_PRECONDITION))
+      } yield AddPartyWithAcsAsyncResponse(requestId.toHexString)
+
+      EitherTUtil.toFutureUnlessShutdown(resultET)
+    }
+  }
+
   private def verifyArguments(
       argsP: v30.AddPartyArguments
   ): Either[String, PartyReplicationArguments] =

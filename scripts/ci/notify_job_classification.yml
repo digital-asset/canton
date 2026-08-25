@@ -12,8 +12,10 @@
 # build health), like the guard excludes them from the aggregators' `needs`.
 test_jobs:
   - test
+  - test_requires_external_kms
   - sequential_test
   - test_protocol_version_36
+  - test_protocol_version_36_requires_external_kms
   - test_protocol_version_dev
   - ledger_api_compatibility_tests
   - protocol_continuity_test_latest
@@ -21,6 +23,7 @@ test_jobs:
   - temp_acs_commitment_tests_pv_dev
   - test_data_continuity_dumps
   - toxiproxy_test_fast
+  - toxiproxy_test_fast_requires_external_kms
   - unstable_test
   - variations_test
   - variations_test_selected_users
@@ -41,3 +44,4 @@ infra_jobs:
   # Runs cleanup_test_job with report_to_datadog: false, so it never feeds the
   # flaky pipeline. Alert here, otherwise its failures would be silent.
   - crash_recovery_test
+  - crash_recovery_test_requires_external_kms
