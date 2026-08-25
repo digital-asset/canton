@@ -16,7 +16,7 @@ import com.digitalasset.canton.logging.audit.{ApiRequestLogger, ResponseKind, Tr
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CallMetadata
 import com.digitalasset.canton.platform.PackagePreferenceBackend
-import com.digitalasset.canton.tracing.{TraceContext, W3CTraceContext}
+import com.digitalasset.canton.tracing.{HeaderName, TraceContext, W3CTraceContext}
 import org.apache.pekko.http.scaladsl.model.{AttributeKeys, HttpRequest, MediaType, MediaTypes}
 import org.apache.pekko.http.scaladsl.server.RequestContext
 import org.apache.pekko.stream.Materializer
@@ -203,7 +203,7 @@ class RequestInterceptors(
 
   def loggingInterceptor() =
     RequestInterceptor.transformServerRequest { request =>
-      val incomingHeaders = request.headers.map(h => (h.name, h.value)).toMap
+      val incomingHeaders = request.headers.map(h => (HeaderName(h.name), h.value)).toMap
       val extractedW3cTrace = W3CTraceContext.fromHeaders(incomingHeaders)
       val requestParameters =
         s"[${request.queryParameters.toSeq.map { case (k, v) => s"$k=$v" }.mkString(", ")}]"
@@ -299,7 +299,7 @@ class RequestInterceptors(
 
     def apply[B](request: ServerRequest, result: RequestResult[B]): Future[RequestResult[B]] = {
       val addr = RequestInterceptorsUtil.extractAddress(request)
-      val incomingHeaders = request.headers.map(h => (h.name, h.value)).toMap
+      val incomingHeaders = request.headers.map(h => (HeaderName(h.name), h.value)).toMap
       val extractedW3cTrace = W3CTraceContext.fromHeaders(incomingHeaders)
       val callMetadata = CallMetadata(
         apiEndpoint = request.showShort,

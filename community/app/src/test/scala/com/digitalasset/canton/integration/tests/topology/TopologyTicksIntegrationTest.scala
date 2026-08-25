@@ -198,7 +198,7 @@ class TopologyTicksIntegrationTest
         )
         // doing a ping first to make create some events to make sure sequencer time is caught up to sim clock time
         participant1.health.ping(participant1)
-        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)
+        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
         // create the new sequencer's topology transaction without advancing time
         bootstrap.propose_new_sequencer_state(
@@ -212,14 +212,14 @@ class TopologyTicksIntegrationTest
         // advance time by half epsilon, so that new sequencer's topology transactions are not effective yet
         simClock.advance(epsilon.duration.dividedBy(2))
         participant1.health.ping(participant1)
-        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)
+        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
         // now propose new party topology transactions after new sequencer's topology transactions, but before they are effective
         val partyId = participant1.parties.enable("testParty3", synchronize = None)
-        participant1.ledger_api.parties.list().map(_.party) should not contain (partyId)
+        participant1.ledger_api.parties.list().map(_.party) should not contain partyId
         // advance time so new sequencer's topology transactions become effective, but not the new party topology transactions
         simClock.advance(epsilon.duration.dividedBy(2).plusMillis(1))
-        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)
+        TestUtils.waitForTargetTimeOnSynchronizerNode(simClock.now, logger)(sequencer1)
 
         // complete initialization of new sequencer
         bootstrap.wait_for_sequencer_state_to_be_effective(

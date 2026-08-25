@@ -43,7 +43,7 @@ trait HttpServiceUserFixture extends PekkoBeforeAndAfterAll { this: Suite with C
   }
 
   protected def extractHeaders(w3cContext: W3CTraceContext): Seq[HttpHeader] =
-    w3cContext.asHeaders.toSeq.map(h => HttpHeader.parse(h._1, h._2)).collect {
+    w3cContext.asHeaders.toSeq.map(h => HttpHeader.parse(h._1.value, h._2)).collect {
       case ParsingResult.Ok(header, _) =>
         header
     }

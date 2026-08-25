@@ -12,7 +12,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingRequest,
   OrderingRequestBatch,
 }
-import com.digitalasset.canton.tracing.{Traced, W3CTraceContext}
+import com.digitalasset.canton.tracing.{HeaderName, Traced, W3CTraceContext}
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -41,8 +41,8 @@ class BatchIdValidationTest extends AnyWordSpec with BftSequencerBaseTest {
                 W3CTraceContext
                   .fromHeaders(
                     Map(
-                      TraceParentHeaderName -> tp,
-                      TraceStateHeaderName -> ts,
+                      HeaderName(TraceParentHeaderName) -> tp,
+                      HeaderName(TraceStateHeaderName) -> ts,
                     )
                   )
                   .value

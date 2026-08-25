@@ -64,8 +64,8 @@ class TraceContextTest extends AnyWordSpec with Matchers with OptionValues with 
       val traceState = "dd=s:1;p:7358c6deaed4868f;t.dm:-1;t.tid:6a61d0a200000000;t.ksr:1"
 
       val headers = Map(
-        "traceparent" -> traceParent,
-        "tracestate" -> traceState,
+        HeaderName("traceparent") -> traceParent,
+        HeaderName("tracestate") -> traceState,
       )
 
       // deserialize the headers into a W3CTraceContext
@@ -86,7 +86,8 @@ class TraceContextTest extends AnyWordSpec with Matchers with OptionValues with 
       roundTripped.state.value shouldBe traceState
       roundTripped shouldBe w3c
 
-      W3CTraceContext.extractHeaders(traceContext) shouldBe headers
+      val stringHeaders = headers.map { case (hn, v) => (hn.value, v) }
+      W3CTraceContext.extractHeaders(traceContext) shouldBe stringHeaders
     }
 
     "convert back and forth from W3C trace context" in {

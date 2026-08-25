@@ -323,7 +323,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     val outputRef = mock[ModuleRef[Output.Message[ProgrammableUnitTestEnv]]]
     val timeoutManagerMock =
       mock[
-        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[ProgrammableUnitTestEnv], String]
+        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+          ProgrammableUnitTestEnv
+        ], Consensus.Message[ProgrammableUnitTestEnv], String]
       ]
     val stateTransferManager =
       createStateTransferManager[ProgrammableUnitTestEnv](
@@ -459,7 +461,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       val timeoutManager = mock[
         TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
           ProgrammableUnitTestEnv
-        ], String]
+        ], Consensus.Message[ProgrammableUnitTestEnv], String]
       ]
       val stateTransferManager =
         createStateTransferManager[ProgrammableUnitTestEnv](
@@ -511,7 +513,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       outputModuleRef: ModuleRef[Output.Message[E]] = fakeModuleExpectingSilence,
       p2pNetworkOutModuleRef: ModuleRef[P2PNetworkOut.Message],
       epochStore: EpochStore[E] = new InMemoryUnitTestEpochStore[E],
-      maybeCustomTimeoutManager: Option[TimeoutManager[E, Consensus.Message[E], String]] = None,
+      maybeCustomTimeoutManager: Option[
+        TimeoutManager[E, Consensus.Message[E], Consensus.Message[E], String]
+      ] = None,
   ): StateTransferManager[E] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
 

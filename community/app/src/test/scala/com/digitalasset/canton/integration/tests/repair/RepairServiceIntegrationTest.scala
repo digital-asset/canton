@@ -103,7 +103,12 @@ trait RepairServiceIntegrationTest
       Seq(sequencer1 -> daId, sequencer2 -> acmeId).foreach { case (sequencer, synchronizerId) =>
         sequencer.topology.synchronizer_parameters.propose_update(
           synchronizerId = synchronizerId,
-          _.update(reconciliationInterval = config.PositiveDurationSeconds.ofDays(365)),
+          _.update(
+            reconciliationInterval = config.PositiveDurationSeconds.ofDays(365),
+            // Flake prevention: Increase confirmation response and mediator reaction timeouts to avoid request timed out warnings on CI
+            mediatorReactionTimeout = config.NonNegativeFiniteDuration.ofMinutes(2),
+            confirmationResponseTimeout = config.NonNegativeFiniteDuration.ofMinutes(2),
+          ),
         )
       }
 

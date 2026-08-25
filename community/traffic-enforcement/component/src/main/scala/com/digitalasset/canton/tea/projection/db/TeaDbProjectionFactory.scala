@@ -4,6 +4,7 @@
 package com.digitalasset.canton.tea.projection.db
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.{DbStorage, DbStorageMulti, DbStorageSingle}
 import com.digitalasset.canton.tea.projection.{
@@ -36,6 +37,7 @@ private[projection] class TeaDbProjectionFactory(
     store: TeaDbTrafficStore,
     eventSource: EventSource,
     config: ProjectionConfig,
+    override protected val metrics: TrafficEnforcementMetrics,
     override val onEventCommitted: () => Unit = () => (),
 )(implicit system: ActorSystem[?])
     extends TeaProjectionFactory

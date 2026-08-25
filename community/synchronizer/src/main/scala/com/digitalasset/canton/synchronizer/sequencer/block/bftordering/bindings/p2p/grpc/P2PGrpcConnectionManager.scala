@@ -257,7 +257,9 @@ private[bftordering] final class P2PGrpcConnectionManager(
               )
               p2pEndpointId ->
                 (for {
-                  _ <- cwO.getOrElse(FutureUnlessShutdown.unit)
+                  // Use .unwrap to convert FutureUnlessShutdown to Future[UnlessShutdown[Unit]]
+                  // preventing flatMap short-circuiting on AbortedDueToShutdown
+                  _ <- cwO.map(_.unwrap).getOrElse(Future.successful(()))
                   chO = outgoingConnectionStatus.channelO
                   _ = logger.debug(
                     s"Closing connection to $p2pEndpointId with status $outgoingConnectionStatus, step 2: " +
@@ -267,15 +269,19 @@ private[bftordering] final class P2PGrpcConnectionManager(
                   _ <-
                     chO
                       .map { case (channel, authenticationContextO) =>
-                        shutdownGrpcChannelIfNeeded(p2pEndpointId, channel, authenticationContextO)
+                        shutdownGrpcChannelIfNeeded(
+                          p2pEndpointId,
+                          channel,
+                          authenticationContextO,
+                        ).unwrap
                       }
-                      .getOrElse(FutureUnlessShutdown.unit)
+                      .getOrElse(Future.successful(()))
                 } yield ())
             }
             .map { case (p2pEndpointId, closer) =>
               AsyncCloseable(
                 s"bft-ordering-grpc-networking-connection-manager-connection-$p2pEndpointId",
-                closer.unwrap,
+                closer,
                 timeouts.closing,
               )
             }
@@ -973,8 +979,14 @@ private[bftordering] final class P2PGrpcConnectionManager(
                                     s"for $p2pEndpointId due to shutdown",
                               ) match {
                               case Left(_) =>
-                                // The future is either unit or this very worker, so no need to wait for it, just terminate
-                                FutureUnlessShutdown.pure(None)
+                                // The future is either unit or this very worker, so no need to wait for it,
+                                // just terminate. Always shut down the gRPC channel allocated for this worker
+                                completeGrpcStreamObserver(peerSender, logger)
+                                shutdownGrpcChannelIfNeeded(
+                                  p2pEndpointId,
+                                  channel,
+                                  authenticationContextO,
+                                ).map(_ => None)
                               case Right(channel -> authenticationContextO) =>
                                 logger.debug(
                                   s"$logPrefix Closing the sender and " +

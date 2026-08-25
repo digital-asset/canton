@@ -8,11 +8,15 @@ import com.digitalasset.canton
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.config.{
+  ActiveRequestLimitsConfig,
+  BasicKeepAliveServerConfig,
   CantonConfig,
   PositiveFiniteDuration,
   QueryCostMonitoringConfig,
+  ServerConfig,
 }
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
@@ -24,6 +28,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.{
 }
 import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.BftSequencer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients
@@ -31,8 +36,20 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   BftBlockOrderingP2PSendDelayConfig,
   BftBlockOrderingStandalonePeerConfig,
   DefaultDedicatedExecutionContextDivisor,
+  DefaultDelayedInitQueueMaxSize,
+  DefaultEpochStateTransferTimeout,
   DefaultMaxBatchCreationInterval,
   DefaultMinRequestsInBatch,
+  DefaultNetworkSendAttempts,
+  DefaultNetworkSendRetryMaximumDelay,
+  DefaultNetworkSendRetryMinimumDelay,
+  DefaultOutputEnqueueMaxRetries,
+  DefaultOutputEnqueueMaxRetryDelay,
+  DefaultOutputFetchHowManyRecipients,
+  DefaultOutputFetchMinimumDelay,
+  DefaultOutputFetchTimeout,
+  DefaultOutputFetchTimeoutCap,
+  DefaultSendBlacklistTtl,
   P2PNetworkConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
@@ -91,6 +108,39 @@ final class UseBftSequencer(
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
     sequencerCoreSubscriptionConfig: BftBlockOrdererConfig.SequencerCoreSubscriptionConfig =
       BftBlockOrdererConfig.DefaultSequencerCoreSubscriptionConfig,
+    delayedInitQueueMaxSize: PositiveInt = PositiveInt.tryCreate(DefaultDelayedInitQueueMaxSize),
+    epochStateTransferRetryTimeout: PositiveFiniteDuration =
+      PositiveFiniteDuration.tryFromDuration(DefaultEpochStateTransferTimeout),
+    outputFetchTimeout: PositiveFiniteDuration =
+      PositiveFiniteDuration.tryFromDuration(DefaultOutputFetchTimeout),
+    outputFetchMinimumDelay: PositiveFiniteDuration =
+      PositiveFiniteDuration.tryFromDuration(DefaultOutputFetchMinimumDelay),
+    outputFetchTimeoutCap: PositiveFiniteDuration =
+      PositiveFiniteDuration.tryFromDuration(DefaultOutputFetchTimeoutCap),
+    outputFetchHowManyRecipients: PositiveInt = DefaultOutputFetchHowManyRecipients,
+    outputEnqueueMaxRetries: NonNegativeInt =
+      NonNegativeInt.tryCreate(DefaultOutputEnqueueMaxRetries),
+    outputEnqueueMaxRetryDelay: PositiveFiniteDuration =
+      PositiveFiniteDuration.tryFromDuration(DefaultOutputEnqueueMaxRetryDelay),
+    sendBlacklistTtl: PositiveFiniteDuration =
+      PositiveFiniteDuration.tryFromDuration(DefaultSendBlacklistTtl),
+    networkSendAttempts: PositiveInt = DefaultNetworkSendAttempts,
+    networkSendRetryMinimumDelay: PositiveFiniteDuration = DefaultNetworkSendRetryMinimumDelay,
+    networkSendRetryJitterCap: PositiveFiniteDuration = DefaultNetworkSendRetryMaximumDelay,
+    p2pServerMaxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
+    // Keep Canton defaults for P2P server-side flow control, i.e. automatic flow control
+    //  with implementation defaults for the initial window size
+    p2pServerFlowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow,
+    p2pServerInitialFlowControlWindow: Option[PositiveInt] =
+      ServerConfig.defaultInitialFlowControlWindow,
+    p2pServerMaxConcurrentCallsPerConnection: NonNegativeInt =
+      ServerConfig.defaultMaxConcurrentCallsPerConnection,
+    p2pServerLimits: Option[ActiveRequestLimitsConfig] = None,
+    p2pServerKeepAliveConfig: Option[BasicKeepAliveServerConfig] = Some(
+      BasicKeepAliveServerConfig()
+    ),
+    p2pClientChannelParams: ClientChannelParams =
+      ClientChannelParams.Default.copy(flowControlWindow = None),
 ) extends EnvironmentSetupPlugin {
 
   private val tmpDir = better.files.File(System.getProperty("java.io.tmpdir"))
@@ -152,6 +202,18 @@ final class UseBftSequencer(
                     standalone = standaloneOpt,
                     storage = Option.when(shouldUseMemoryStorageForBftOrderer)(Memory()),
                     sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
+                    delayedInitQueueMaxSize = delayedInitQueueMaxSize.value,
+                    epochStateTransferRetryTimeout = epochStateTransferRetryTimeout.underlying,
+                    outputFetchTimeout = outputFetchTimeout.underlying,
+                    outputFetchMinimumDelay = outputFetchMinimumDelay.underlying,
+                    outputFetchTimeoutCap = outputFetchTimeoutCap.underlying,
+                    outputFetchHowManyRecipients = outputFetchHowManyRecipients,
+                    outputEnqueueMaxRetries = outputEnqueueMaxRetries.value,
+                    outputEnqueueMaxRetryDelay = outputEnqueueMaxRetryDelay.underlying,
+                    sendBlacklistTtl = sendBlacklistTtl.underlying,
+                    networkSendAttempts = networkSendAttempts,
+                    networkSendRetryMinimumDelay = networkSendRetryMinimumDelay,
+                    networkSendRetryJitterCap = networkSendRetryJitterCap,
                   )
                   // server endpoint's lens
                   .focus(_.initialNetwork)
@@ -166,6 +228,18 @@ final class UseBftSequencer(
                       .replace("localhost")
                       .focus(_.externalPort)
                       .replace(instanceNameToPort(selfInstanceName))
+                      .focus(_.maxInboundMessageSize)
+                      .replace(p2pServerMaxInboundMessageSize)
+                      .focus(_.flowControlWindow)
+                      .replace(p2pServerFlowControlWindow)
+                      .focus(_.initialFlowControlWindow)
+                      .replace(p2pServerInitialFlowControlWindow)
+                      .focus(_.maxConcurrentCallsPerConnection)
+                      .replace(p2pServerMaxConcurrentCallsPerConnection)
+                      .focus(_.limits)
+                      .replace(p2pServerLimits)
+                      .focus(_.keepAliveServer)
+                      .replace(p2pServerKeepAliveConfig)
                   )
                   // peer endpoints' lens
                   .focus(_.initialNetwork)
@@ -182,6 +256,8 @@ final class UseBftSequencer(
                           .replace("localhost")
                           .focus(_.port)
                           .replace(port)
+                          .focus(_.channel)
+                          .replace(p2pClientChannelParams)
                       }
                   },
               )
@@ -218,7 +294,9 @@ final class UseBftSequencer(
           )
         }.toMap
         endpoints.map { case (selfInstanceName, selfEndpoint) =>
-          sequencersToEndpoints.addOne(selfInstanceName -> selfEndpoint)
+          sequencersToEndpoints.addOne(
+            selfInstanceName -> selfEndpoint.focus(_.channel).replace(p2pClientChannelParams)
+          )
           val otherInitialNamesAndEndpoints =
             if (dynamicallyOnboardedSequencerNames.contains(selfInstanceName))
               // Dynamically onboarded peers' endpoints are not part of the initial network but are added later
@@ -238,8 +316,16 @@ final class UseBftSequencer(
               externalTlsConfig = Some(
                 TlsClientConfig(trustCollectionFile = None, clientCert = None, enabled = false)
               ),
+              maxInboundMessageSize = p2pServerMaxInboundMessageSize,
+              flowControlWindow = p2pServerFlowControlWindow,
+              initialFlowControlWindow = p2pServerInitialFlowControlWindow,
+              maxConcurrentCallsPerConnection = p2pServerMaxConcurrentCallsPerConnection,
+              limits = p2pServerLimits,
+              keepAliveServer = p2pServerKeepAliveConfig,
             ),
-            peerEndpoints = otherInitialEndpoints,
+            peerEndpoints = otherInitialEndpoints.map(
+              _.focus(_.channel).replace(p2pClientChannelParams)
+            ),
             overwriteStoredEndpoints = shouldOverwriteStoredEndpoints,
           )
           val standaloneOpt = createStandaloneConfig(selfInstanceName, otherInitialNames)
@@ -276,6 +362,18 @@ final class UseBftSequencer(
               standalone = standaloneOpt,
               storage = Option.when(shouldUseMemoryStorageForBftOrderer)(Memory()),
               sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
+              delayedInitQueueMaxSize = delayedInitQueueMaxSize.value,
+              epochStateTransferRetryTimeout = epochStateTransferRetryTimeout.underlying,
+              outputFetchTimeout = outputFetchTimeout.underlying,
+              outputFetchMinimumDelay = outputFetchMinimumDelay.underlying,
+              outputFetchTimeoutCap = outputFetchTimeoutCap.underlying,
+              outputFetchHowManyRecipients = outputFetchHowManyRecipients,
+              outputEnqueueMaxRetries = outputEnqueueMaxRetries.value,
+              outputEnqueueMaxRetryDelay = outputEnqueueMaxRetryDelay.underlying,
+              sendBlacklistTtl = sendBlacklistTtl.underlying,
+              networkSendAttempts = networkSendAttempts,
+              networkSendRetryMinimumDelay = networkSendRetryMinimumDelay,
+              networkSendRetryJitterCap = networkSendRetryJitterCap,
             ),
           )
         }

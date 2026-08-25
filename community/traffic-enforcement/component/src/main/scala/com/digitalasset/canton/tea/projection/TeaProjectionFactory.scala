@@ -5,6 +5,7 @@ package com.digitalasset.canton.tea.projection
 
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.tea.projection.db.{TeaDbProjectionFactory, TeaDbTrafficStore}
@@ -32,6 +33,8 @@ import scala.concurrent.{ExecutionContext, Future}
   * over the in-memory and DB implementations
   */
 trait TeaProjectionFactory { this: NamedLogging =>
+
+  protected val metrics: TrafficEnforcementMetrics
 
   /** Build a projection behavior for a single ingestion stream, reusing the shared storage. */
   def projection(
@@ -68,14 +71,23 @@ trait TeaProjectionFactory { this: NamedLogging =>
           envelope: Traced[ProjectionEvent],
       ): Unit = {
         onEventCommitted()
+        metrics.projectionTimestamp.updateValue(
+          envelope.value.event.deltaEvent.timestamp.toEpochMilli
+        )
         logger.trace(s"Processed event ${envelope.value} for projectionId $projectionId")(
           envelope.traceContext
         )
       }
-      override def offsetProgress(projectionId: ProjectionId, env: Traced[ProjectionEvent]): Unit =
+      override def offsetProgress(
+          projectionId: ProjectionId,
+          env: Traced[ProjectionEvent],
+      ): Unit = {
+        metrics.projectionOffset.updateValue(env.value.event.offset)
         logger.info(s"Stored offset ${env.value.event.offset} for projectionId $projectionId")(
           env.traceContext
         )
+      }
+
       override def error(
           projectionId: ProjectionId,
           env: Traced[ProjectionEvent],
@@ -126,6 +138,7 @@ object TeaProjectionFactory {
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
       databaseQueryTimeout: PositiveFiniteDuration,
+      metrics: TrafficEnforcementMetrics,
       onEventCommitted: () => Unit = () => (),
   )(implicit system: ActorSystem[?]): (TeaProjectionFactory, TeaTrafficStore) = {
     import system.executionContext
@@ -140,13 +153,14 @@ object TeaProjectionFactory {
             store,
             eventSource,
             config,
+            metrics,
             onEventCommitted,
           )
         (projection, store)
       case _: MemoryStorage =>
         val store = new TeaMemoryTrafficStore(loggerFactory)
         val projection: TeaProjectionFactory =
-          new TeaMemoryProjectionFactory(loggerFactory, store, onEventCommitted)
+          new TeaMemoryProjectionFactory(loggerFactory, store, metrics, onEventCommitted)
         (projection, store)
     }
   }

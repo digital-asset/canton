@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.TimeoutManager
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.TimeoutManager.ConstantTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -50,7 +51,7 @@ class StateTransferManager[E <: Env[E]](
     override val loggerFactory: NamedLoggerFactory,
 )(
     private val maybeCustomTimeoutManager: Option[
-      TimeoutManager[E, Consensus.Message[E], String]
+      TimeoutManager[E, Consensus.Message[E], Consensus.Message[E], String]
     ] = None
 )(implicit
     synchronizerProtocolVersion: ProtocolVersion,
@@ -81,9 +82,9 @@ class StateTransferManager[E <: Env[E]](
   )
 
   private val timeoutManager = maybeCustomTimeoutManager.getOrElse(
-    new TimeoutManager[E, Consensus.Message[E], String](
+    new TimeoutManager[E, Consensus.Message[E], Consensus.Message[E], String](
       loggerFactory,
-      config.epochStateTransferRetryTimeout,
+      ConstantTimeout(config.epochStateTransferRetryTimeout),
       timeoutId = "state transfer",
       timeoutMetric = None,
     )

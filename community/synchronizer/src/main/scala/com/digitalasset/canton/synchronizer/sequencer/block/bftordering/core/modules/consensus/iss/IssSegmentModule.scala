@@ -16,9 +16,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule.{
   RelativeSegmentLatencyMetric,
   ViewChangeMetric,
+  ViewChangeTimeoutCalculator,
   reasonForNotAcceptingProposalsString,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.PbftBlockState.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.TimeoutManager.{
+  ConstantTimeout,
+  TimeoutCalculator,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
@@ -36,6 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.CommitCertificate
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.BlockMetadata
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
@@ -90,12 +96,14 @@ class IssSegmentModule[E <: Env[E]](
 
   private val segmentLatencyMetric = RelativeSegmentLatencyMetric(segmentState.leader, metrics)
 
-  private val baseViewChangeTimeout: FiniteDuration = viewChangeTimeoutOverride.getOrElse(
-    segmentState.epoch.currentMembership.orderingTopology.sequencingParameters.pbftViewChangeTimeout.toScala
-  )
+  private val baseViewChangeTimeout: TimeoutCalculator[PbftTimeout] =
+    ViewChangeTimeoutCalculator(
+      viewChangeTimeoutOverride,
+      segmentState.epoch.currentMembership.orderingTopology.sequencingParameters,
+    )
 
   private val viewChangeTimeoutManager =
-    new TimeoutManager[E, ConsensusSegment.Message, BlockNumber](
+    new TimeoutManager[E, ConsensusSegment.Message, PbftTimeout, BlockNumber](
       loggerFactory,
       baseViewChangeTimeout,
       segmentState.segment.firstBlockNumber,
@@ -103,9 +111,9 @@ class IssSegmentModule[E <: Env[E]](
     )
 
   private val blockStartTimeoutManager =
-    new TimeoutManager[E, ConsensusSegment.Message, BlockNumber](
+    new TimeoutManager[E, ConsensusSegment.Message, ConsensusSegment.Message, BlockNumber](
       loggerFactory,
-      emptyBlockCreationTimeout,
+      ConstantTimeout(emptyBlockCreationTimeout),
       segmentState.segment.firstBlockNumber,
       None,
     )
@@ -888,6 +896,28 @@ class IssSegmentModule[E <: Env[E]](
 }
 
 object IssSegmentModule {
+
+  final case class ViewChangeTimeoutCalculator(
+      viewChangeTimeoutOverride: Option[FiniteDuration],
+      sequencingParameters: SequencingParameters,
+  ) extends TimeoutCalculator[PbftTimeout] {
+    private def applyUpperBound(
+        duration: FiniteDuration,
+        upperBound: FiniteDuration,
+    ): FiniteDuration = duration.min(upperBound)
+
+    override def calculateTimeoutForEvent(event: PbftTimeout): FiniteDuration =
+      viewChangeTimeoutOverride.getOrElse(
+        sequencingParameters.pbftViewChangeTimeout.toScala
+          .plus(
+            applyUpperBound(
+              duration =
+                sequencingParameters.pbftViewChangeTimeoutStep.underlying * event.viewNumber,
+              upperBound = sequencingParameters.pbftViewChangeTimeoutUpperBound.underlying,
+            )
+          )
+      )
+  }
 
   private final case class ViewChangeMetric(leader: BftNodeId, metrics: BftOrderingMetrics)(implicit
       metricsContext: MetricsContext
