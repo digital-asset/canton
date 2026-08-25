@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.integration.tests.security.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.*
 import com.digitalasset.canton.integration.tests.security.kms.MigrationEncryptedToClearStoreIntegrationTest
 
 /** Tests a migration from an encrypted private store that uses AWS KMS to a clear crypto private
   * store.
   */
+@RequiresExternalKms
 class AwsMigrationEncryptedToClearStoreReferenceIntegrationTestPostgres
     extends MigrationEncryptedToClearStoreIntegrationTest
     with AwsEncryptedCryptoPrivateStoreTestBase {

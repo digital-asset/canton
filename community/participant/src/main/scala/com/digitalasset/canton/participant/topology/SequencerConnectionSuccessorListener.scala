@@ -131,6 +131,13 @@ class SequencerConnectionSuccessorListener(
       currentSuccessorConfigO =
         configStore.get(alias, KnownPhysicalSynchronizerId(successorPsid)).toOption
 
+      _ <- configStore
+        .deactivatePriorLsuTargets(successorPsid)
+        .tapLeft(err =>
+          logger.warn(s"Unable to deactivate prior LSU target configs of $successorPsid: $err")
+        )
+        .toOption
+
       updatedSuccessorConfig <- configStore
         .upsert(
           psid = successorPsid,

@@ -22,6 +22,10 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Resolve ref
+      id: resolve_ref
+      uses: ./.github/actions/utils/resolve_ref
+
     - name: Compute build hash
       id: compute_hash
       uses: ./.github/actions/cache/compute_build_hash
@@ -46,7 +50,7 @@ runs:
       with:
         path: ~/.ivy2/cache/
         key: >-
-          sbt-ivy-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+          sbt-ivy-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
 
     - name: Warn on Ivy cache save failure
       if: steps.save_ivy.outcome == 'failure'
@@ -74,7 +78,7 @@ runs:
       with:
         path: ~/.sbt/
         key: >-
-          sbt-home-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+          sbt-home-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
 
     - name: Warn on SBT cache save failure
       if: steps.save_sbt.outcome == 'failure'

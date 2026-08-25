@@ -35,11 +35,11 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
 import com.google.protobuf.ByteString
 import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
-import io.grpc.{Context, ManagedChannel}
+import io.grpc.{Context, ManagedChannel, Status}
 
 import java.io.InputStream
 import scala.concurrent.Future
@@ -351,12 +351,29 @@ object SequencerAdminCommands {
         request: Unit,
     ): Future[proto.InitializeSequencerFromGenesisStateResponse] =
       ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
+        val parameters = synchronizerParameters.protoVersion match {
+          case ProtoVersion(30) =>
+            proto.InitializeSequencerFromGenesisStateRequest.Parameters.V30(
+              synchronizerParameters.toProtoV30
+            )
+          case ProtoVersion(31) =>
+            proto.InitializeSequencerFromGenesisStateRequest.Parameters.V31(
+              synchronizerParameters.toProtoV31
+            )
+          case other =>
+            throw Status.INTERNAL
+              .withDescription(
+                s"Cannot serialize StaticSynchronizerParameters to proto version $other"
+              )
+              .asRuntimeException()
+        }
+
         GrpcStreamingUtils.streamToServer(
           service.initializeSequencerFromGenesisState,
           (topologySnapshot: Array[Byte]) =>
             proto.InitializeSequencerFromGenesisStateRequest(
               topologySnapshot = ByteString.copyFrom(topologySnapshot),
-              synchronizerParameters = Some(synchronizerParameters.toProtoV30),
+              parameters = parameters,
             ),
           inputStream,
         )
@@ -394,12 +411,29 @@ object SequencerAdminCommands {
         request: Unit,
     ): Future[proto.InitializeSequencerFromLsuPredecessorResponse] =
       ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
+        val parameters = synchronizerParameters.protoVersion match {
+          case ProtoVersion(30) =>
+            proto.InitializeSequencerFromLsuPredecessorRequest.Parameters.V30(
+              synchronizerParameters.toProtoV30
+            )
+          case ProtoVersion(31) =>
+            proto.InitializeSequencerFromLsuPredecessorRequest.Parameters.V31(
+              synchronizerParameters.toProtoV31
+            )
+          case other =>
+            throw Status.INTERNAL
+              .withDescription(
+                s"Cannot serialize StaticSynchronizerParameters to proto version $other"
+              )
+              .asRuntimeException()
+        }
+
         GrpcStreamingUtils.streamToServer(
           service.initializeSequencerFromLsuPredecessor,
           (topologySnapshot: Array[Byte]) =>
             proto.InitializeSequencerFromLsuPredecessorRequest(
               topologySnapshot = ByteString.copyFrom(topologySnapshot),
-              synchronizerParameters = Some(synchronizerParameters.toProtoV30),
+              parameters = parameters,
               ignorePsidCheck = ignorePsidCheck,
             ),
           inputStream,
@@ -436,12 +470,29 @@ object SequencerAdminCommands {
         request: Unit,
     ): Future[proto.InitializeSequencerFromGenesisStateV2Response] =
       ResourceUtil.withResource(topologySnapshotStream) { inputStream =>
+        val parameters = synchronizerParameters.protoVersion match {
+          case ProtoVersion(30) =>
+            proto.InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV30(
+              synchronizerParameters.toProtoV30
+            )
+          case ProtoVersion(31) =>
+            proto.InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV31(
+              synchronizerParameters.toProtoV31
+            )
+          case other =>
+            throw Status.INTERNAL
+              .withDescription(
+                s"Cannot serialize StaticSynchronizerParameters to proto version $other"
+              )
+              .asRuntimeException()
+        }
+
         GrpcStreamingUtils.streamToServer(
           service.initializeSequencerFromGenesisStateV2,
           (topologySnapshot: Array[Byte]) =>
             proto.InitializeSequencerFromGenesisStateV2Request(
               topologySnapshot = ByteString.copyFrom(topologySnapshot),
-              Some(synchronizerParameters.toProtoV30),
+              parameters,
             ),
           inputStream,
         )

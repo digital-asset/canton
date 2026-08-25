@@ -23,13 +23,17 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Resolve ref
+      id: resolve_ref
+      uses: ./.github/actions/utils/resolve_ref
+
     - name: Reset compile cache if necessary
       id: prepare_logic
       shell: bash
       run: ./scripts/ci/reset_compile_cache.sh
       env:
         RESET_IF_REQUESTED: ${{ inputs.reset_classes_if_requested }}
-        BRANCH_NAME: ${{ github.ref_name }}
+        BRANCH_NAME: ${{ steps.resolve_ref.outputs.resolved_ref }}
 
     - name: Compute Compile Hash
       id: compute_build_hash
@@ -50,9 +54,9 @@ runs:
         path: |
           **/target
         key: |-
-          compile-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ github.sha }}
+          compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ github.sha }}
         restore-keys: |-
-          compile-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
-          compile-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
-          compile-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
+          compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
+          compile-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
+          compile-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_build_hash.outputs.hash }}-sha=
         # Restore keys are prefix matching on the cache keys, which we use to fallback on previous caches when not specifying an exact sha

@@ -127,7 +127,7 @@ class GrpcVaultService(
           )
           name <- ProtoValidation.validate(
             filters.name,
-            Some("name"),
+            "name",
             ProtocolVersionValidation.AlwaysValidation,
           )
           purposeO <- ProtoValidation
@@ -433,11 +433,11 @@ class GrpcVaultService(
 
       kmsCrypto <- getKmsPrivateApi.toEitherT[FutureUnlessShutdown]
       kmsKeyId <- ProtoValidation
-        .validate(request.kmsKeyId, Some("kms_key_id"), ProtocolVersionValidation.AlwaysValidation)
+        .validate(request.kmsKeyId, "kms_key_id", ProtocolVersionValidation.AlwaysValidation)
         .leftMap(ProtoDeserializationFailure.WrapNoLogging(_).toCantonRpcError)
         .toEitherT[FutureUnlessShutdown]
       name <- ProtoValidation
-        .validate(request.name, Some("name"), ProtocolVersionValidation.AlwaysValidation)
+        .validate(request.name, "name", ProtocolVersionValidation.AlwaysValidation)
         .leftMap(ProtoDeserializationFailure.WrapNoLogging(_).toCantonRpcError)
         .toEitherT[FutureUnlessShutdown]
       pubKey <- registerKmsKey[SigningPublicKey](
@@ -485,11 +485,11 @@ class GrpcVaultService(
     val res = for {
       kmsCrypto <- getKmsPrivateApi.toEitherT[FutureUnlessShutdown]
       kmsKeyId <- ProtoValidation
-        .validate(request.kmsKeyId, Some("kms_key_id"), ProtocolVersionValidation.AlwaysValidation)
+        .validate(request.kmsKeyId, "kms_key_id", ProtocolVersionValidation.AlwaysValidation)
         .leftMap(ProtoDeserializationFailure.WrapNoLogging(_).toCantonRpcError)
         .toEitherT[FutureUnlessShutdown]
       name <- ProtoValidation
-        .validate(request.name, Some("name"), ProtocolVersionValidation.AlwaysValidation)
+        .validate(request.name, "name", ProtocolVersionValidation.AlwaysValidation)
         .leftMap(ProtoDeserializationFailure.WrapNoLogging(_).toCantonRpcError)
         .toEitherT[FutureUnlessShutdown]
       pubKey <- registerKmsKey[EncryptionPublicKey](
@@ -551,7 +551,7 @@ class GrpcVaultService(
     val newWrapperKeyId = ProtoValidation
       .validate(
         request.newWrapperKeyId,
-        Some("new_wrapper_key_id"),
+        "new_wrapper_key_id",
         ProtocolVersionValidation.AlwaysValidation,
       )
       .valueOr(err => throw ProtoDeserializationFailure.WrapNoLogging(err).toGrpcError)
@@ -678,7 +678,7 @@ class GrpcVaultService(
 
       password <- FutureUnlessShutdown.wrap(
         ProtoValidation
-          .validate(request.password, Some("password"), ProtocolVersionValidation.AlwaysValidation)
+          .validate(request.password, "password", ProtocolVersionValidation.AlwaysValidation)
           .valueOr(err => throw ProtoDeserializationFailure.WrapNoLogging(err).toGrpcError)
       )
       // Encrypt keypair if password is provided
@@ -761,7 +761,7 @@ class GrpcVaultService(
       )
       password <- FutureUnlessShutdown.wrap(
         ProtoValidation
-          .validate(request.password, Some("password"), ProtocolVersionValidation.AlwaysValidation)
+          .validate(request.password, "password", ProtocolVersionValidation.AlwaysValidation)
           .valueOr(err => throw ProtoDeserializationFailure.WrapNoLogging(err).toGrpcError)
       )
 

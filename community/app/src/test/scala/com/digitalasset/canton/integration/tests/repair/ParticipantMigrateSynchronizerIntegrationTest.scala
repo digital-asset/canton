@@ -110,6 +110,9 @@ final class ParticipantMigrateSynchronizerIntegrationTest
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
         // TODO(#34818) Enable the new pipeline
         ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .addConfigTransforms(ConfigTransforms.setProtocolVersion(targetProtocol)*)
 

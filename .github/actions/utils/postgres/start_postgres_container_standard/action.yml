@@ -5,12 +5,6 @@ inputs:
   shard-index:
     description: The index of the shard for which the Postgres container is being started.
     required: true
-  dockerhub-username:
-    description: DockerHub username for pulling the Postgres image.
-    required: true
-  dockerhub-password:
-    description: DockerHub password for pulling the Postgres image.
-    required: true
   image:
     description: Postgres Docker image. Defaults to the base action's pinned query-stats image when empty.
     required: false
@@ -52,5 +46,3 @@ runs:
         initdb-mount-path: 'initdb-test'
         image: ${{ inputs.image }}
         enable-query-stats: ${{ inputs.enable-query-stats }}
-        username: ${{ inputs.dockerhub-username }}
-        password: ${{ inputs.dockerhub-password }}

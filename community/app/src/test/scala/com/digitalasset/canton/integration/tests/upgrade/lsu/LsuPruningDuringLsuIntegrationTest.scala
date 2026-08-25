@@ -40,6 +40,13 @@ final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-pruning-during-lsu"
 
+  // TODO(#35107) Upon disabling the old ACS commitment processor
+  //  this test fails: (enable the new pipeline) and make the fix
+  override def configTransforms: Seq[ConfigTransform] =
+    super.configTransforms ++ Seq(
+      ConfigTransforms.enableOldAcsCommitmentProcessor
+    )
+
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,

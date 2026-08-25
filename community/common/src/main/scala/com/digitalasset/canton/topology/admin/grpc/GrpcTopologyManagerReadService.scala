@@ -107,7 +107,7 @@ object BaseQuery {
       proposals = baseQuery.proposals
       filterSignedKey <- ProtoValidation.validate(
         baseQuery.filterSignedKey,
-        Some("filter_signed_key"),
+        "filter_signed_key",
         ProtocolVersionValidation.AlwaysValidation,
       )
       timeQuery <- TimeQuery.fromProto(baseQuery.timeQuery, "time_query")
@@ -231,7 +231,7 @@ class GrpcTopologyManagerReadService(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, String] =
     wrapErrUS(
-      ProtoValidation.validate(value, Some(field), ProtocolVersionValidation.AlwaysValidation)
+      ProtoValidation.validate(value, field, ProtocolVersionValidation.AlwaysValidation)
     )
 
   private def collectFromStoresByFilterString(

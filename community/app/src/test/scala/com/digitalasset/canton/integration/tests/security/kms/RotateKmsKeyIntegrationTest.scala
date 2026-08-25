@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.security.kms
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.console.{LocalInstanceReference, LocalParticipantReference}
 import com.digitalasset.canton.crypto.admin.grpc.PrivateKeyMetadata
 import com.digitalasset.canton.crypto.{KeyPurpose, SigningKeyUsage}
@@ -80,6 +81,7 @@ trait RotateKmsKeyIntegrationTest
   )
 }
 
+@RequiresExternalKms
 class RotateAwsKmsKeyReferenceIntegrationTest
     extends RotateKmsKeyIntegrationTest
     with AwsKmsCryptoIntegrationTestBase {
@@ -100,6 +102,7 @@ class RotateAwsKmsKeyReferenceIntegrationTest
   )
 }
 
+@RequiresExternalKms
 class RotateGcpKmsKeyReferenceIntegrationTest
     extends RotateKmsKeyIntegrationTest
     with GcpKmsCryptoIntegrationTestBase {

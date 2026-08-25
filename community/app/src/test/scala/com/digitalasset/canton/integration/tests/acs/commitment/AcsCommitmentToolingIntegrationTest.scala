@@ -102,6 +102,8 @@ trait AcsCommitmentToolingIntegrationTest
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         // TODO(#34818) Enable the new pipeline
         ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
+        // TODO(#35107) Disable the old processor, enable the new pipeline and fix the test
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

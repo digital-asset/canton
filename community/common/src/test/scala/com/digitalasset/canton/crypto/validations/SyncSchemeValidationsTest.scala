@@ -16,7 +16,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.metrics.CommonMockMetrics
-import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
 import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
@@ -65,38 +65,41 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
    * to test validations when verifying or decrypting with unsupported schemes.
    */
   private lazy val restrictedStaticSynchronizerParameters: StaticSynchronizerParameters =
-    StaticSynchronizerParameters(
-      requiredSigningSpecs = RequiredSigningSpecs(
-        NonEmpty.mk(
-          Set,
-          SigningAlgorithmSpec.Ed25519,
-          SigningAlgorithmSpec.EcDsaSha384,
+    StaticSynchronizerParameters
+      .create(
+        requiredSigningSpecs = RequiredSigningSpecs(
+          NonEmpty.mk(
+            Set,
+            SigningAlgorithmSpec.Ed25519,
+            SigningAlgorithmSpec.EcDsaSha384,
+          ),
+          NonEmpty.mk(
+            Set,
+            SigningKeySpec.EcCurve25519,
+            SigningKeySpec.EcP384,
+          ),
         ),
-        NonEmpty.mk(
-          Set,
-          SigningKeySpec.EcCurve25519,
-          SigningKeySpec.EcP384,
+        requiredEncryptionSpecs = RequiredEncryptionSpecs(
+          NonEmpty.mk(
+            Set,
+            EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc,
+          ),
+          NonEmpty.mk(
+            Set,
+            EncryptionKeySpec.Rsa2048,
+          ),
         ),
-      ),
-      requiredEncryptionSpecs = RequiredEncryptionSpecs(
-        NonEmpty.mk(
-          Set,
-          EncryptionAlgorithmSpec.EciesHkdfHmacSha256Aes128Cbc,
-        ),
-        NonEmpty.mk(
-          Set,
-          EncryptionKeySpec.Rsa2048,
-        ),
-      ),
-      requiredSymmetricKeySchemes = CryptoProvider.Jce.symmetric.supported,
-      requiredHashAlgorithms = CryptoProvider.Jce.hash.supported,
-      requiredCryptoKeyFormats = CryptoProvider.Jce.supportedCryptoKeyFormats,
-      requiredSignatureFormats = NonEmpty.mk(Set, SignatureFormat.Der),
-      topologyChangeDelay = StaticSynchronizerParameters.defaultTopologyChangeDelay,
-      enableTransparencyChecks = false,
-      protocolVersion = testedProtocolVersion,
-      serial = NonNegativeInt.zero,
-    )
+        requiredSymmetricKeySchemes = CryptoProvider.Jce.symmetric.supported,
+        requiredHashAlgorithms = CryptoProvider.Jce.hash.supported,
+        requiredCryptoKeyFormats = CryptoProvider.Jce.supportedCryptoKeyFormats,
+        requiredSignatureFormats = NonEmpty.mk(Set, SignatureFormat.Der),
+        topologyChangeDelay = StaticSynchronizerParameters.defaultTopologyChangeDelay,
+        enableTransparencyChecks = false,
+        protocolVersion = testedProtocolVersion,
+        serial = NonNegativeInt.zero,
+        synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion),
+      )
+      .value
 
   private lazy val testingTopology: TestingIdentityFactory =
     TestingTopology()

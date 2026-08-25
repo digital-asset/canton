@@ -57,6 +57,7 @@ class ParticipantPruningIT(testDars: TestDars) extends LedgerTestSuite {
     "PRQueryLatestPrunedOffsets",
     "It should be possible to query the latest pruned offsets",
     allocate(SingleParty),
+    runConcurrently = false, // Pruning is involved
   )(implicit ec => { case Participants(Participant(ledger, Seq(alice))) =>
     for {
       (prunedUpToInclusive_initial, allDivulgencePrunedUpToInclusive_initial) <-

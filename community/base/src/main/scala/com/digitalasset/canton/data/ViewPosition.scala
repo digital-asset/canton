@@ -66,7 +66,7 @@ object ViewPosition {
   ): ParsingResult[ViewPosition] = {
     val v30.ViewPosition(positionP) = viewPositionP
     ProtoValidation
-      .validateLength(positionP, Some("position"), pvv, ProtoValidation.MaxCollectionSize)
+      .validateLength(positionP, "position", pvv, ProtoValidation.MaxCollectionSize)
       .flatMap(_.toList.traverse(MerkleSeqIndex.fromProtoV30(pvv, _)))
       .map(ViewPosition(_))
   }
@@ -157,7 +157,7 @@ object ViewPosition {
       ProtoValidation
         .validateLength(
           isRightP,
-          Some("is_right"),
+          "is_right",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )

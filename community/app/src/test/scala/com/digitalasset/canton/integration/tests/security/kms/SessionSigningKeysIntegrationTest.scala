@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.security.kms
 
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.testing.MetricValues.*
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.console.{
@@ -105,6 +106,7 @@ trait SessionSigningKeysIntegrationTest
     }
 }
 
+@RequiresExternalKms
 class AwsKmsSessionSigningKeysIntegrationTestPostgres
     extends SessionSigningKeysIntegrationTest
     with AwsKmsCryptoIntegrationTestBase {
@@ -121,6 +123,7 @@ class AwsKmsSessionSigningKeysIntegrationTestPostgres
   )
 }
 
+@RequiresExternalKms
 class GcpKmsSessionSigningKeysIntegrationTestPostgres
     extends SessionSigningKeysIntegrationTest
     with GcpKmsCryptoIntegrationTestBase {

@@ -10,6 +10,7 @@ import com.daml.test.evidence.tag.Reliability.{
   ReliabilityTest,
   Remediation,
 }
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.config.EncryptedPrivateStoreConfig
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.crypto.SigningKeyUsage.matchesRelevantUsages
@@ -229,6 +230,7 @@ trait ParticipantFailoverWithEncryptedPrivateKeyStoreIntegrationTest
   }
 }
 
+@RequiresExternalKms
 class ParticipantFailoverWithAwsEncryptedPrivateKeyStoreIntegrationTestPostgres
     extends ParticipantFailoverWithEncryptedPrivateKeyStoreIntegrationTest {
 
@@ -246,6 +248,7 @@ class ParticipantFailoverWithAwsEncryptedPrivateKeyStoreIntegrationTestPostgres
   setupPlugins(new UsePostgres(loggerFactory))
 }
 
+@RequiresExternalKms
 class ParticipantFailoverWithGcpEncryptedPrivateKeyStoreIntegrationTestPostgres
     extends ParticipantFailoverWithEncryptedPrivateKeyStoreIntegrationTest {
 

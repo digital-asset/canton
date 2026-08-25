@@ -653,7 +653,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           )
         expectedId = PhysicalSynchronizerId(
           SynchronizerId(UniqueIdentifier.tryCreate(name, ns.toProtoPrimitive)),
-          staticSynchronizerParameters.toInternal,
+          staticSynchronizerParameters.serial,
+          staticSynchronizerParameters.protocolVersion,
         )
         actualIdIfAllNodesAreInitialized <- in_synchronizer(neSequencers, neMediators)(expectedId)
       } yield actualIdIfAllNodesAreInitialized
@@ -677,7 +678,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         SynchronizerId(
           UniqueIdentifier.tryCreate(synchronizerName, synchronizerNamespace)
         ),
-        staticSynchronizerParameters.toInternal,
+        staticSynchronizerParameters.serial,
+        staticSynchronizerParameters.protocolVersion,
       )
 
       val tempStoreForBootstrap = synchronizerOwners

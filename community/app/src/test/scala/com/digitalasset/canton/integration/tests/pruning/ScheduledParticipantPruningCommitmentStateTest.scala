@@ -84,6 +84,9 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
           _.focus(_.parameters.stores.safeToPruneCommitmentState)
             .replace(Some(All))
         ),
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .withSetup { env =>
         import env.*

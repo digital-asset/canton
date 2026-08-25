@@ -22,6 +22,13 @@ final class LsuMissedLsuAnnouncementIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-missed-announcement"
 
+  // TODO(#35107) Upon disabling the old ACS commitment processor
+  //  this test fails: (enable the new pipeline) and make the fix
+  override def configTransforms: Seq[ConfigTransform] =
+    super.configTransforms ++ Seq(
+      ConfigTransforms.enableOldAcsCommitmentProcessor
+    )
+
   override protected val useStaticTime: Boolean = false
 
   registerPlugin(

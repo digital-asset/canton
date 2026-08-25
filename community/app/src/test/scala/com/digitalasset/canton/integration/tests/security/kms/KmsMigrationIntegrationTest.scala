@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.security.kms
 
 import better.files.File
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{KeyPurpose, SigningPublicKeyWithName}
@@ -73,7 +74,7 @@ trait KmsMigrationIntegrationTest
       acmeName,
       InitializedSynchronizer(
         synchronizerId,
-        EnvironmentDefinition.defaultStaticSynchronizerParameters.toInternal,
+        EnvironmentDefinition.defaultStaticSynchronizerParameters.toInternal.value,
         synchronizerOwners = Set(sequencer2),
       ),
     )
@@ -255,6 +256,7 @@ trait KmsMigrationIntegrationTest
   }
 }
 
+@RequiresExternalKms
 class AwsKmsMigrationBftOrderingIntegrationTestPostgres
     extends KmsMigrationIntegrationTest
     with AwsKmsCryptoIntegrationTestBase {
@@ -267,6 +269,7 @@ class AwsKmsMigrationBftOrderingIntegrationTestPostgres
 
 }
 
+@RequiresExternalKms
 class GcpKmsMigrationBftOrderingBlockIntegrationTestPostgres
     extends KmsMigrationIntegrationTest
     with GcpKmsCryptoIntegrationTestBase {

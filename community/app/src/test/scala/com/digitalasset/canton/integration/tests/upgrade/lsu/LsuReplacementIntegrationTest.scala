@@ -52,10 +52,10 @@ abstract class LsuReplacementIntegrationTest extends LsuBase {
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
-      // TODO(#34818) Enable the new pipeline
-      ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
+      // TODO(#35107) Upon disabling the old ACS commitment processor
+      //  this test fails: (enable the new pipeline) and make the fix
+      ConfigTransforms.enableOldAcsCommitmentProcessor,
     ) ++ ConfigTransforms.enableDevVersionSupport
-
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =

@@ -48,9 +48,25 @@ object ProtoUnvalidated {
       PartialTransformer[ProtoUnvalidatedString, String] { value =>
         partial.Result.fromEitherString(
           ProtoValidation
-            .validate(value, None, ProtocolVersionValidation.AlwaysValidation)
+            .validateNoField(value, ProtocolVersionValidation.AlwaysValidation)
             .left
             .map(_.message)
+        )
+      }
+
+    /** Lifts an element transformer through [[ProtoUnvalidatedSeq]], which no transformer can see
+      * into on its own, validating every element as the scalar bridge does.
+      */
+    // TODO(#35121) Generate the ledger-API protos with ProtoUnvalidatedSeq too; this bridge goes
+    //  once they validate their own repeated fields
+    implicit def protoUnvalidatedSeqToSeq[A, B](implicit
+        element: PartialTransformer[A, B]
+    ): PartialTransformer[ProtoUnvalidatedSeq[A], Seq[B]] =
+      PartialTransformer[ProtoUnvalidatedSeq[A], Seq[B]] { values =>
+        partial.Result.traverse[Seq[B], A, B](
+          values.elements.iterator,
+          element.transform,
+          failFast = false,
         )
       }
 

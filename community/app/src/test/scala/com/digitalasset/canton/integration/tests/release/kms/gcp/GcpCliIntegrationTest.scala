@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.release.kms.gcp
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.tests.release.kms.KmsCliIntegrationTest
 
 /** Cli integration test for GCP KMS configurations Before being able to run these tests locally,
   * you need to execute `sbt bundle`.
   */
+@RequiresExternalKms
 class GcpCliIntegrationTest extends KmsCliIntegrationTest {
   override lazy val kmsConfigs: Seq[String] = Seq(
     "community/app/src/test/resources/gcp-kms-provider-tagged.conf",

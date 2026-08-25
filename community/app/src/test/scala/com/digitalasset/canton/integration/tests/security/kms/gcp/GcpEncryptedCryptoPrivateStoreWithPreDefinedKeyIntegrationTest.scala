@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.security.kms.gcp
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.EnvironmentDefinition.allNodeNames
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.EncryptedCryptoPrivateStoreIntegrationTest
@@ -10,6 +11,7 @@ import com.digitalasset.canton.integration.tests.security.kms.EncryptedCryptoPri
 /** Tests the encrypted private store in a setting where the GCP KMS key IS pre-defined:
   * "canton-kms-test-key" where (a) only participant1 has an encrypted private store
   */
+@RequiresExternalKms
 class GcpEncryptedCryptoPrivateStoreWithPreDefinedKeyBftOrderingIntegrationTestPostgres
     extends EncryptedCryptoPrivateStoreIntegrationTest
     with GcpEncryptedCryptoPrivateStoreTestBase {
@@ -24,6 +26,7 @@ class GcpEncryptedCryptoPrivateStoreWithPreDefinedKeyBftOrderingIntegrationTestP
 
 /** (b) all nodes have an encrypted private store
   */
+@RequiresExternalKms
 class GcpEncryptedCryptoPrivateStoreWithPreDefinedKeyBftOrderingIntegrationTestAllPostgres
     extends EncryptedCryptoPrivateStoreIntegrationTest
     with GcpEncryptedCryptoPrivateStoreTestBase {

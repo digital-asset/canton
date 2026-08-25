@@ -48,7 +48,10 @@ class LsuOffsetByTimestampIntegrationTest extends LsuBase {
 
   override protected def configTransforms: Seq[ConfigTransform] =
     super.configTransforms ++ Seq(
-      ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration)
+      ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
+      // TODO(#35107) Upon disabling the old ACS commitment processor
+      //  this test fails: (enable the new pipeline) and make the fix
+      ConfigTransforms.enableOldAcsCommitmentProcessor,
     )
 
   override lazy val environmentDefinition: EnvironmentDefinition =

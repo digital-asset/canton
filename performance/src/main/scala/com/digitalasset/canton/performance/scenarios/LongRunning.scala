@@ -217,7 +217,10 @@ object LongRunning {
           new ParticipantSimulator(
             localNode,
             sequencers,
-            sequencers.head1.synchronizer_parameters.static.get().toInternal,
+            sequencers.head1.synchronizer_parameters.static
+              .get()
+              .toInternal
+              .valueOr(consoleEnvironment.raiseError),
             respondToAcsCommitments = true,
             loggerFactory,
             environmentTimeouts,

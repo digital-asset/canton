@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.security.kms
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
@@ -83,6 +84,7 @@ trait NamespaceIntermediateKmsKeyIntegrationTest
   )
 }
 
+@RequiresExternalKms
 class NamespaceIntermediateAwsKmsKeyReferenceIntegrationTest
     extends NamespaceIntermediateKmsKeyIntegrationTest
     with AwsKmsCryptoIntegrationTestBase {

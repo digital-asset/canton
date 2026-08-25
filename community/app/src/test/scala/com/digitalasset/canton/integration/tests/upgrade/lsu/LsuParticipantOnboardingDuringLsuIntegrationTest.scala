@@ -27,6 +27,13 @@ final class LsuParticipantOnboardingDuringLsuIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-participant-onboarding-during-lsu"
 
+  // TODO(#35107) Upon disabling the old ACS commitment processor
+  //  this test fails: (enable the new pipeline) and make the fix
+  override def configTransforms: Seq[ConfigTransform] =
+    super.configTransforms ++ Seq(
+      ConfigTransforms.enableOldAcsCommitmentProcessor
+    )
+
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected lazy val newOldSequencers: Map[String, String] =

@@ -370,7 +370,7 @@ class ApiPartyManagementServiceSpec
                         ProtoValidation
                           .validateLength(
                             keys,
-                            field = None,
+                            "keys",
                             ProtocolVersionValidation.AlwaysValidation,
                             ProtoValidation.MaxCollectionSize,
                           )
@@ -420,7 +420,7 @@ class ApiPartyManagementServiceSpec
                         ProtoValidation
                           .validateLength(
                             keys,
-                            field = None,
+                            "keys",
                             ProtocolVersionValidation.AlwaysValidation,
                             ProtoValidation.MaxCollectionSize,
                           )

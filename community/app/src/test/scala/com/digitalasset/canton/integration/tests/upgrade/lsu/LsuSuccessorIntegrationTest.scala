@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.digitalasset.canton.admin.api.client.data.SynchronizerLimits
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt.{one, zero}
 import com.digitalasset.canton.console.CommandFailure
@@ -48,8 +49,11 @@ sealed abstract class LsuSuccessorIntegrationTest(
         // Set the synchronizer's initial serial and PV
         new NetworkBootstrapper(
           S1M1.copy(
-            staticSynchronizerParameters =
-              S1M1.staticSynchronizerParameters.copy(protocolVersion = currPV, serial = currSerial)
+            staticSynchronizerParameters = S1M1.staticSynchronizerParameters.copy(
+              protocolVersion = currPV,
+              serial = currSerial,
+              synchronizerLimits = SynchronizerLimits.defaultFor(currPV),
+            )
           )
         )
       }

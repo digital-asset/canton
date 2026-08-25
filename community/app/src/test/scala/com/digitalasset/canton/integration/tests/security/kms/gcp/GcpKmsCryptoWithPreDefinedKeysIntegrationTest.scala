@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.security.kms.gcp
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.EnvironmentDefinition.allNodeNames
 import com.digitalasset.canton.integration.EnvironmentSetupPlugin
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -13,6 +14,7 @@ import com.digitalasset.canton.integration.tests.security.kms.KmsCryptoWithPreDe
   * tests) using a GCP KMS provider and pre-generated keys. Consequently, keys must be registered in
   * Canton and nodes MUST be manually initialized.
   */
+@RequiresExternalKms
 class GcpKmsCryptoWithPreDefinedKeysBftOrderingIntegrationTestAllNodes
     extends CryptoIntegrationTest(
       GcpKmsCryptoIntegrationTestBase.defaultGcpKmsCryptoConfig
@@ -35,6 +37,7 @@ class GcpKmsCryptoWithPreDefinedKeysBftOrderingIntegrationTestAllNodes
   * keys. Runs with persistence so we also check that it is able to recover from an unexpected
   * shutdown.
   */
+@RequiresExternalKms
 class GcpKmsCryptoWithPreDefinedKeysBftOrderingIntegrationTestPostgres
     extends CryptoIntegrationTest(
       GcpKmsCryptoIntegrationTestBase.defaultGcpKmsCryptoConfig

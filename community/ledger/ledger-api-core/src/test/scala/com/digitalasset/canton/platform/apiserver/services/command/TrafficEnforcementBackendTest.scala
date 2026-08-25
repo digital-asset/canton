@@ -5,14 +5,17 @@ package com.digitalasset.canton.platform.apiserver.services.command
 
 import cats.data.EitherT
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.daml.metrics.api.{MetricName, MetricsContext}
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient
-import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
+import com.digitalasset.canton.platform.apiserver.services.metrics.{
+  TrafficEnforcementInventory,
+  TrafficEnforcementMetrics,
+}
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.v1.{GetAccountRequest, GetAccountResponse}
 import com.digitalasset.canton.tracing.TraceContext
@@ -41,8 +44,9 @@ class TrafficEnforcementBackendTest
   private val alice = LfPartyId.assertFromString("Alice")
   private val bob = LfPartyId.assertFromString("Bob")
 
+  val parentName = MetricName("test")
   val noOpMetrics = new TrafficEnforcementMetrics(
-    parent = MetricName("test"),
+    inventory = new TrafficEnforcementInventory(parentName)(new HistogramInventory()),
     metricsFactory = NoOpMetricsFactory,
   )(MetricsContext.Empty)
 

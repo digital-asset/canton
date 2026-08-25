@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.manual
 
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   Port,
@@ -10,7 +11,13 @@ import com.digitalasset.canton.config.RequireTypes.{
   PositiveLong,
   PositiveNumeric,
 }
-import com.digitalasset.canton.config.{PositiveFiniteDuration, ReplicationConfig}
+import com.digitalasset.canton.config.{
+  ActiveRequestLimitsConfig,
+  BasicKeepAliveServerConfig,
+  PositiveFiniteDuration,
+  ReplicationConfig,
+  ServerConfig,
+}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
@@ -28,7 +35,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
 import com.digitalasset.canton.integration.tests.manual.BftOrderingBenchmark.{
   BftBlockOrderingP2PSendDelayConfigEntry,
-  DelaysConfig,
+  BftOrderingBenchmarkConfig,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -36,12 +43,26 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.metrics.MetricsConfig
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingP2PSendDelayConfig,
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultConsensusEmptyBlockCreationTimeout,
+  DefaultDelayedInitQueueMaxSize,
+  DefaultEpochStateTransferTimeout,
   DefaultMaxBatchCreationInterval,
   DefaultMinRequestsInBatch,
+  DefaultNetworkSendAttempts,
+  DefaultNetworkSendRetryMaximumDelay,
+  DefaultNetworkSendRetryMinimumDelay,
+  DefaultOutputEnqueueMaxRetries,
+  DefaultOutputEnqueueMaxRetryDelay,
+  DefaultOutputFetchHowManyRecipients,
+  DefaultOutputFetchMinimumDelay,
+  DefaultOutputFetchTimeout,
+  DefaultOutputFetchTimeoutCap,
+  DefaultSendBlacklistTtl,
   DefaultSequencerCoreSubscriptionConfig,
   SequencerCoreSubscriptionConfig,
 }
@@ -50,6 +71,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   DefaultMaxBatchesPerProposal,
   DefaultMaxRequestsInBatch,
   DefaultPbftViewChangeTimeout,
+  DefaultSegmentLength,
   SegmentLength,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
@@ -70,66 +92,44 @@ import com.digitalasset.canton.util.BytesUnit
 import eu.rekawek.toxiproxy
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import monocle.macros.syntax.lens.*
-import pureconfig.ConfigSource
+import pureconfig.error.{
+  CannotReadFile,
+  CannotReadResource,
+  CannotReadUrl,
+  ConfigReaderException,
+  ConfigReaderFailures,
+}
+import pureconfig.generic.ProductHint
 import pureconfig.generic.auto.*
+import pureconfig.generic.semiauto.deriveWriter
+import pureconfig.{ConfigObjectSource, ConfigSource}
 
-import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
+import java.net.URI
+import scala.concurrent.duration.DurationInt
 
-/** An example script to use this on canton-testing machines follows:
+/** Configured by passing a typesafe config URL, which may start with "classpath:///", to the system
+  * property `bft-ordering-benchmark.config`. If not provided, the default configuration file
+  * `bft-ordering-benchmark.conf` is loaded from the classpath. Example script:
   *
   * #!/usr/bin/env bash
   *
   * export LOG_LEVEL_CANTON=WARN
   *
-  * export SBT_OPTS="\
-  * -Xmx60G -Xms60G \
+  * export SBT_OPTS="-Xmx60G \
   * -Dscala.concurrent.context.numThreads=30 \
-  * -Dbft-ordering-benchmark.num-nodes=4 \
-  * -Dbft-ordering-benchmark.enable-prometheus-metrics=true \
-  * -Dbft-ordering-benchmark.enable-tracing=true \
-  * -Dbft-ordering-benchmark.tracing-reporting-port=8888 \
-  * -Dbft-ordering-benchmark.tracing-sampler-ratio=0.25 \
-  * -Dbft-ordering-benchmark.num-nodes=4 \
-  * -Dbft-ordering-benchmark.per-node-write-period=1millisecond \
-  * -Dbft-ordering-benchmark.benchmark-duration=1minute \
-  * -Dbft-ordering-benchmark.reporting-interval=30seconds \
-  * -Dbft-ordering-benchmark.transaction-sizes-and-weights={payloads=[{size-bytes=2000,weight=1}]} \
-  * -Dbft-ordering-benchmark.dedicated-execution-context-divisor=2 \
-  * -Dbft-ordering-benchmark.segment-length=15 \
-  * -Dbft-ordering-benchmark.empty-block-timeout=1s \
-  * -Dbft-ordering-benchmark.use-in-memory-storage=false \
-  * -Dbft-ordering-benchmark.pbft-view-change-timeout=5s \
-  * -Dbft-ordering-benchmark.blacklist-leader-selection-policy={how-long-to-blacklist={type=linear,maximumEpochBlacklisted=10},how-many-can-we-blacklist=num-faults-tolerated}\
-  * -Dbft-ordering-benchmark.min-requests-in-batch=10 \
-  * -Dbft-ordering-benchmark.max-requests-in-batch=50 \
-  * -Dbft-ordering-benchmark.max-batches-per-block-proposal=31 \
-  * -Dbft-ordering-benchmark.max-batch-creation-interval=150.milliseconds \
-  * -Dbft-ordering-benchmark.availability-min-proposal-creation-delay=250.milliseconds \
-  * -Dbft-ordering-benchmark.batch-cache-size-in-mb=25 \
-  * -Dbft-ordering-benchmark.num-db-connections-per-node=12 \
-  * -Dbft-ordering-benchmark.db-replication-enabled=true \
-  * -Dbft-ordering-benchmark.pruning-retention-period=30.minutes \
-  * -Dbft-ordering-benchmark.pruning-min-blocks-of-history=500 \
-  * -Dbft-ordering-benchmark.test-catchup={nodes-to-stop=[2],duration-nodes-are-down=1minutes,duration-node-need-to-startup=10seconds}\
-  * -Dbft-ordering-benchmark.test-pekko-source-buffer-size=1 \
-  * -Dbft-ordering-benchmark.test-pause-orderer-threshold-buffer-size=10 \
-  * -Dbft-ordering-benchmark.test-resume-orderer-threshold-buffer-size=5 \
-  * -Dbft-ordering-benchmark.test-backpressure={nodes-to-delay=[2],delay=1minute} \
-  * -Dbft-ordering-benchmark.test-p2p-send-delays={entries=[{sources=[1,2],config={delays-by-recipients=[{instance-names=[3,4],delay-distribution={type=constant-distribution,duration=300ms}}],default-delay-distribution={type=constant-distribution,duration=10ms}}}]}\
-  * -Dbft-ordering-benchmark.test-topology-broadcast-probability=0.5 \
-  * -Dbft-ordering-benchmark.test-pending-topology-changes-probability=0.5 \
-  * -Dbft-ordering-benchmark.test-get-ordering-topology-delay={type=constant-distribution,duration=100ms}
-  * \
+  * -Dbft-ordering-benchmark.config=file:///bftbench.conf"
   *
   * export CI=1 # When this defined, it ensures no dockerized Postgres is being used
   *
-  * export POSTGRES_HOST=db-testing.da-int.net export POSTGRES_USER=*
+  * export POSTGRES_HOST=db-testing.da-int.net
+  *
+  * export POSTGRES_USER=*
   *
   * export POSTGRES_PASSWORD=*
   *
   * export POSTGRES_DB=postgres
   *
-  * sbt "dumpClassPath; testOnly
+  * sbt "dumpClassPath; testOnly \
   * com.digitalasset.canton.integration.tests.manual.BftOrderingBenchmark"
   */
 @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -138,274 +138,57 @@ class BftOrderingBenchmark
     with SharedEnvironment
     with AwaitsBftSequencerAuthenticationDisseminationQuorum {
 
+  implicit def preventAllUnknownKeys[T]: ProductHint[T] = ProductHint[T](allowUnknownKeys = false)
+
   private val BFTOrderingBenchmarkPrefix = "bft-ordering-benchmark"
   private val PostgresProxyNameSuffix = "postgres"
 
-  private val numberOfNodes: Int =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.num-nodes"))
-      .map(_.toInt)
-      .getOrElse(4)
-
-  // Use a bigger segment length by default for better performance
-  private val segmentLength: Long =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.segment-length"))
-      .map(len => len.toLong)
-      .getOrElse(10L)
-
-  private val consensusEmptyBlockCreationTimeout: FiniteDuration =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.empty-block-timeout"))
-      .map(Duration(_).asInstanceOf[FiniteDuration])
-      .getOrElse(DefaultConsensusEmptyBlockCreationTimeout)
-
-  private val pbftViewChangeTimeout: PositiveFiniteDuration =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.pbft-view-change-timeout"))
-      .map(s => PositiveFiniteDuration.tryFromDuration(Duration(s)))
-      .getOrElse(DefaultPbftViewChangeTimeout.toConfig)
-
-  private val blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
-    Option(
-      System.getProperty(s"$BFTOrderingBenchmarkPrefix.blacklist-leader-selection-policy")
-    ).map { s =>
-      val result =
-        ConfigSource
-          .string(s)
-          .load[BlacklistLeaderSelectionPolicyConfig]
-      result.left.foreach(errors =>
-        logger.error(s"Failed to parse blacklist leader selection policy config: $errors")
-      )
-      result.getOrElse(throw new RuntimeException("Invalid configuration"))
-    }.getOrElse(DefaultLeaderSelectionPolicyConfig)
-
-  private val maxRequestsInBatch: Short =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.max-requests-in-batch"))
-      .map(_.toShort)
-      .getOrElse(DefaultMaxRequestsInBatch)
-
-  private val minRequestsInBatch: Short =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.min-requests-in-batch"))
-      .map(_.toShort)
-      .getOrElse(DefaultMinRequestsInBatch)
-
-  private val maxBatchCreationInterval: FiniteDuration =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.max-batch-creation-interval"))
-      .map(Duration(_).asInstanceOf[FiniteDuration])
-      .getOrElse(DefaultMaxBatchCreationInterval)
-
-  private val maxBatchesPerBlockProposal: Short =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.max-batches-per-block-proposal"))
-      .map(_.toShort)
-      .getOrElse(DefaultMaxBatchesPerProposal)
-
-  private val availabilityMinProposalCreationDelay: FiniteDuration =
-    Option(
-      System.getProperty(s"$BFTOrderingBenchmarkPrefix.availability-min-proposal-creation-delay")
-    ).map(Duration(_).asInstanceOf[FiniteDuration])
-      .getOrElse(DefaultAvailabilityMinProposalCreationDelay)
-
-  private val batchCacheSizeMb: Option[Long] =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.batch-cache-size-in-mb"))
-      .map(_.toLong)
-
-  private val dedicatedExecutionContextDivisor: Option[Int] =
-    Option(
-      System.getProperty(s"$BFTOrderingBenchmarkPrefix.dedicated-execution-context-divisor")
-    )
-      .map(_.toInt)
-
-  private val pruningRetentionPeriod: FiniteDuration =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.pruning-retention-period"))
-      .map(Duration(_).asInstanceOf[FiniteDuration])
-      .getOrElse(5.minutes)
-
-  private val pruningMinBlocksToKeepHistory: Int =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.pruning-min-blocks-of-history"))
-      .map(_.toInt)
-      .getOrElse(500)
-
-  private val useInMemoryStorageForBftOrderer: Boolean =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.use-in-memory-storage"))
-      .exists(_.toBoolean)
-
-  private val numberOfDbConnectionsPerNode: PositiveInt =
-    PositiveInt.tryCreate(
-      Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.num-db-connections-per-node"))
-        .map(_.toInt)
-        .getOrElse(12)
-    )
-
-  /** Tracing options. Disabled by default. */
-  private val (tracingEnabled, tracingReportingPort, tracingSamplerRatio) =
-    (
-      Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.enable-tracing"))
-        .exists(_.toBoolean),
-      Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.tracing-reporting-port"))
-        .map(_.toInt)
-        .getOrElse(4317),
-      Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.tracing-sampler-ratio"))
-        .map(_.toDouble)
-        .getOrElse(0.5),
-    )
-
-  private val transactionSizesAndWeights =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.transaction-sizes-and-weights"))
-      .map { s =>
-        val result =
-          ConfigSource
-            .string(s)
-            .load[BftBenchmarkConfig.TransactionSizesAndWeights]
-        result.left.foreach(errors =>
-          logger.error(s"Failed to parse transaction sizes and weights config: $errors")
+  private val classpathUriPrefix = "classpath:///"
+  private val defaultConfigLocation = s"$classpathUriPrefix$BFTOrderingBenchmarkPrefix.conf"
+  private val configSysProp: Option[String] = sys.props.get(s"$BFTOrderingBenchmarkPrefix.config")
+  private val (configLocation, isDefault) =
+    configSysProp.fold(defaultConfigLocation -> true)(_ -> false)
+  private val configSource: ConfigObjectSource =
+    if (configLocation.startsWith(classpathUriPrefix))
+      ConfigSource.resources(configLocation.stripPrefix(classpathUriPrefix))
+    else
+      ConfigSource.url(new URI(configLocation).toURL)
+  private val configWriter = deriveWriter[BftOrderingBenchmarkConfig]
+  private val bftOrderingBenchmarkConfig =
+    configSource.load[BftOrderingBenchmarkConfig] match {
+      case Right(res) =>
+        val configString = configWriter.to(res).render()
+        logger.info(
+          s"Successfully loaded BFT ordering benchmark config from $configLocation " +
+            s"(using default location: $isDefault): $configString"
         )
-        result.getOrElse(throw new RuntimeException("Invalid configuration"))
-      }
-      .getOrElse(
-        BftBenchmarkConfig.TransactionSizesAndWeights(
-          BftBenchmarkConfig.TransactionSizeAndWeight(
-            sizeBytes = NonNegativeInt.tryCreate(256),
-            weight = PositiveInt.tryCreate(1),
-          ) :: Nil
+        res
+      case Left(
+            ConfigReaderFailures(
+              CannotReadUrl(_, None) | CannotReadResource(_, None) | CannotReadFile(_, None),
+              tail*,
+            )
+          ) if isDefault && tail.isEmpty =>
+        val res = BftOrderingBenchmarkConfig()
+        configWriter.to(res).render()
+        logger.info(
+          s"No configuration source found at default config location $configLocation, using default config: $res"
         )
-      )
-
-  private val runDuration =
-    Option(
-      System.getProperty(s"$BFTOrderingBenchmarkPrefix.benchmark-duration")
-    )
-      .map(Duration(_))
-      .getOrElse(30 seconds)
-
-  private val perNodeWritePeriod =
-    Option(
-      System.getProperty(s"$BFTOrderingBenchmarkPrefix.per-node-write-period")
-    )
-      .map(Duration(_))
-      .getOrElse(100 milliseconds)
-
-  private val reportingIntervalOpt =
-    Option(
-      System.getProperty(
-        s"$BFTOrderingBenchmarkPrefix.reporting-interval"
-      )
-    )
-      .map(Duration(_))
-
-  /** A simulated network latency between sequencers. Disabled if [[None]]. */
-  private val sequencerToSequencerLatencyMillis: Option[Long] =
-    Option(
-      System.getProperty(s"$BFTOrderingBenchmarkPrefix.sequencer-to-sequencer-latency-millis")
-    ).map(_.toLong)
-
-  /** A simulated network latency between sequencers and their databases. Disabled if [[None]]. */
-  private val sequencerDbLatencyMillis: Option[Long] =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.sequencer-db-latency-millis"))
-      .map(_.toLong)
-
-  /** Whether DB replication (`DbMultiStorage`) is enabled. Default is [[Some(true)]]. To disable,
-    * set to [[Some(false)]]. Note that `DbMultiStorage` uses a separate connection pool, reserving
-    * roughly half of the total DB connections available in the [[num-db-connections-per-node]].
-    */
-  private val dbReplicationEnabled: Option[Boolean] =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.db-replication-enabled"))
-      .map(_.toBoolean)
-      .orElse(Some(true))
-
-  private val testCatchupConfig: BftBenchmarkConfig.TestCatchup =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-catchup"))
-      .map { s =>
-        val result =
-          ConfigSource
-            .string(s)
-            .load[BftBenchmarkConfig.TestCatchup]
-        result.left.foreach(errors => logger.error(s"Failed to parse testCatchup config: $errors"))
-        result.getOrElse(throw new RuntimeException("Invalid test catchup configuration"))
-      }
-      .getOrElse(BftBenchmarkConfig.TestCatchup.NoTestCatchup)
-
-  private val pekkoQueueSourceBufferSize: PositiveInt =
-    PositiveInt.tryCreate(
-      Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-pekko-source-buffer-size"))
-        .map(_.toInt)
-        .getOrElse(DefaultSequencerCoreSubscriptionConfig.pekkoQueueSourceBufferSize)
-    )
-
-  private val pauseOrdererThresholdBufferSize: PositiveInt =
-    PositiveInt.tryCreate(
-      Option(
-        System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-pause-orderer-threshold-buffer-size")
-      )
-        .map(_.toInt)
-        .getOrElse(DefaultSequencerCoreSubscriptionConfig.pauseOrdererThresholdBufferSize)
-    )
-
-  private val resumeOrdererThresholdBufferSize: PositiveInt =
-    PositiveInt.tryCreate(
-      Option(
-        System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-resume-orderer-threshold-buffer-size")
-      )
-        .map(_.toInt)
-        .getOrElse(DefaultSequencerCoreSubscriptionConfig.resumeOrdererThresholdBufferSize)
-    )
-
-  private val postOrderingDelayConfigO: Option[UseBftSequencer.PostOrderingDelayConfig] =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-backpressure"))
-      .map { s =>
-        val result =
-          ConfigSource
-            .string(s)
-            .load[UseBftSequencer.PostOrderingDelayConfig]
-        result.left.foreach(errors => logger.error(s"Failed to parse testCatchup config: $errors"))
-        result.getOrElse(throw new RuntimeException("Invalid test catchup configuration"))
-      }
-
-  private val p2pSendDelays: Map[String, BftBlockOrderingP2PSendDelayConfig] =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-p2p-send-delays"))
-      .map { s =>
-        val result =
-          ConfigSource
-            .string(s)
-            .load[DelaysConfig]
-        result.left.foreach(errors =>
-          logger.error(s"Failed to parse test p2p send delay config: $errors")
-        )
-        result.getOrElse(throw new RuntimeException("Invalid test p2p send delay configuration"))
-      }
-      .map(_.entries)
-      .getOrElse(Seq.empty)
-      .view
-      .flatMap { case BftBlockOrderingP2PSendDelayConfigEntry(sources, config) =>
-        sources.map(_ -> config)
-      }
-      .toMap
-
-  private val topologyBroadcastProbability: Option[Probability] =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-topology-broadcast-probability"))
-      .map(s => Probability(s.toDouble))
-
-  private val pendingTopologyChangesProbability: Option[Probability] =
-    Option(
-      System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-pending-topology-changes-probability")
-    ).map(s => Probability(s.toDouble))
-
-  private val getOrderingTopologyDelay: Option[FiniteDurationDistribution] =
-    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.test-get-ordering-topology-delay"))
-      .map { s =>
-        val result =
-          ConfigSource
-            .string(s)
-            .load[FiniteDurationDistribution]
-        result.left.foreach(errors =>
-          logger.error(s"Failed to parse test get ordering topology delay config: $errors")
-        )
-        result.getOrElse(
-          throw new RuntimeException("Invalid test get ordering topology delay configuration")
-        )
-      }
+        res
+      case Left(otherReadFailures) =>
+        val errorMsg =
+          s"Failed to load BFT ordering benchmark config from $configLocation (using default location: $isDefault)"
+        val exception = ConfigReaderException(otherReadFailures)
+        logger.error(errorMsg, exception)
+        fail(errorMsg, exception)
+    }
 
   registerPlugin(
     new UsePostgres(
       loggerFactory,
       customDbNames = Some((identity, "_bft_ordering_benchmark")),
-      customMaxConnectionsByNode = Some(_ => Some(numberOfDbConnectionsPerNode)),
+      customMaxConnectionsByNode =
+        Some(_ => Some(bftOrderingBenchmarkConfig.numberOfDbConnectionsPerNode)),
     )
   )
 
@@ -413,41 +196,79 @@ class BftOrderingBenchmark
     new UseBftSequencer(
       loggerFactory,
       shouldOverwriteStoredEndpoints = true,
-      shouldUseMemoryStorageForBftOrderer = useInMemoryStorageForBftOrderer,
+      shouldUseMemoryStorageForBftOrderer =
+        bftOrderingBenchmarkConfig.useInMemoryStorageForBftOrderer,
       shouldBenchmarkBftSequencer = true,
       useStandaloneConfig = Some(
         UseStandaloneConfig(
-          pbftViewChangeTimeout = pbftViewChangeTimeout,
-          segmentLength = segmentLength,
-          blacklistLeaderSelectionPolicyConfig = blacklistLeaderSelectionPolicyConfig,
-          maxRequestsInBatch = maxRequestsInBatch,
-          maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
-          postOrderingDelayConfig = postOrderingDelayConfigO,
-          topologyBroadcastProbability = topologyBroadcastProbability,
-          pendingTopologyChangesProbability = pendingTopologyChangesProbability,
-          getOrderingTopologyDelay = getOrderingTopologyDelay,
+          pbftViewChangeTimeout = bftOrderingBenchmarkConfig.pbftViewChangeTimeout,
+          segmentLength = bftOrderingBenchmarkConfig.segmentLength.value,
+          blacklistLeaderSelectionPolicyConfig =
+            bftOrderingBenchmarkConfig.blacklistLeaderSelectionPolicyConfig,
+          maxRequestsInBatch = bftOrderingBenchmarkConfig.maxRequestsInBatch,
+          maxBatchesPerBlockProposal = bftOrderingBenchmarkConfig.maxBatchesPerBlockProposal,
+          postOrderingDelayConfig = bftOrderingBenchmarkConfig.postOrderingDelayConfig,
+          topologyBroadcastProbability =
+            bftOrderingBenchmarkConfig.topologyBroadcastProbability.map(Probability.apply),
+          pendingTopologyChangesProbability =
+            bftOrderingBenchmarkConfig.pendingTopologyChangesProbability.map(Probability.apply),
+          getOrderingTopologyDelay = bftOrderingBenchmarkConfig.getOrderingTopologyDelay,
         )
       ),
-      p2pSendDelays = p2pSendDelays,
-      consensusEmptyBlockCreationTimeout = consensusEmptyBlockCreationTimeout,
+      p2pSendDelays = bftOrderingBenchmarkConfig.p2pSendDelays
+        .map(_.entries)
+        .getOrElse(Seq.empty)
+        .view
+        .flatMap { case BftBlockOrderingP2PSendDelayConfigEntry(sources, config) =>
+          sources.map(_ -> config)
+        }
+        .toMap,
+      consensusEmptyBlockCreationTimeout =
+        bftOrderingBenchmarkConfig.consensusEmptyBlockCreationTimeout.underlying,
       sequencingParameters = Some(
         SequencingParameters.create(
-          pbftViewChangeTimeout = pbftViewChangeTimeout.toInternal,
-          segmentLength = SegmentLength(PositiveLong.tryCreate(segmentLength)),
-          blacklistLeaderSelectionPolicyConfig = blacklistLeaderSelectionPolicyConfig,
-          maxRequestsInBatch = maxRequestsInBatch,
-          maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
+          pbftViewChangeTimeout = bftOrderingBenchmarkConfig.pbftViewChangeTimeout.toInternal,
+          segmentLength = SegmentLength(bftOrderingBenchmarkConfig.segmentLength),
+          blacklistLeaderSelectionPolicyConfig =
+            bftOrderingBenchmarkConfig.blacklistLeaderSelectionPolicyConfig,
+          maxRequestsInBatch = bftOrderingBenchmarkConfig.maxRequestsInBatch,
+          maxBatchesPerBlockProposal = bftOrderingBenchmarkConfig.maxBatchesPerBlockProposal,
         )(testedProtocolVersion)
       ),
-      minRequestsInBatch = minRequestsInBatch,
-      maxBatchCreationInterval = maxBatchCreationInterval,
-      availabilityMinProposalCreationDelay = availabilityMinProposalCreationDelay,
-      dedicatedExecutionContextDivisor = dedicatedExecutionContextDivisor,
+      minRequestsInBatch = bftOrderingBenchmarkConfig.minRequestsInBatch,
+      maxBatchCreationInterval = bftOrderingBenchmarkConfig.maxBatchCreationInterval.underlying,
+      availabilityMinProposalCreationDelay =
+        bftOrderingBenchmarkConfig.availabilityMinProposalCreationDelay.underlying,
+      dedicatedExecutionContextDivisor =
+        bftOrderingBenchmarkConfig.dedicatedExecutionContextDivisor.map(_.value),
       sequencerCoreSubscriptionConfig = SequencerCoreSubscriptionConfig(
-        pekkoQueueSourceBufferSize = pekkoQueueSourceBufferSize.value,
-        pauseOrdererThresholdBufferSize = pauseOrdererThresholdBufferSize.value,
-        resumeOrdererThresholdBufferSize = resumeOrdererThresholdBufferSize.value,
+        pekkoQueueSourceBufferSize = bftOrderingBenchmarkConfig.pekkoQueueSourceBufferSize.value,
+        pauseOrdererThresholdBufferSize =
+          bftOrderingBenchmarkConfig.pauseOrdererThresholdBufferSize.value,
+        resumeOrdererThresholdBufferSize =
+          bftOrderingBenchmarkConfig.resumeOrdererThresholdBufferSize.value,
       ),
+      delayedInitQueueMaxSize = bftOrderingBenchmarkConfig.delayedInitQueueMaxSize,
+      epochStateTransferRetryTimeout = bftOrderingBenchmarkConfig.epochStateTransferRetryTimeout,
+      outputFetchTimeout = bftOrderingBenchmarkConfig.outputFetchTimeout,
+      outputFetchMinimumDelay = bftOrderingBenchmarkConfig.outputFetchMinimumDelay,
+      outputFetchTimeoutCap = bftOrderingBenchmarkConfig.outputFetchTimeoutCap,
+      outputFetchHowManyRecipients = bftOrderingBenchmarkConfig.outputFetchHowManyRecipients,
+      outputEnqueueMaxRetries = bftOrderingBenchmarkConfig.outputEnqueueMaxRetries,
+      outputEnqueueMaxRetryDelay = bftOrderingBenchmarkConfig.outputEnqueueMaxRetryDelay,
+      sendBlacklistTtl = bftOrderingBenchmarkConfig.sendBlacklistTtl,
+      networkSendAttempts = bftOrderingBenchmarkConfig.networkSendAttempts,
+      networkSendRetryMinimumDelay = bftOrderingBenchmarkConfig.networkSendRetryMinimumDelay,
+      networkSendRetryJitterCap = bftOrderingBenchmarkConfig.networkSendRetryJitterCap,
+      p2pServerMaxInboundMessageSize = bftOrderingBenchmarkConfig.p2pServerMaxInboundMessageSize,
+      p2pServerFlowControlWindow = bftOrderingBenchmarkConfig.p2pServerFlowControlWindow,
+      p2pServerInitialFlowControlWindow =
+        bftOrderingBenchmarkConfig.p2pServerInitialFlowControlWindow,
+      p2pServerMaxConcurrentCallsPerConnection =
+        bftOrderingBenchmarkConfig.p2pServerMaxConcurrentCallsPerConnection,
+      p2pServerLimits = bftOrderingBenchmarkConfig.p2pServerLimits,
+      p2pServerKeepAliveConfig = bftOrderingBenchmarkConfig.p2pServerKeepAliveConfig,
+      p2pClientChannelParams = bftOrderingBenchmarkConfig.p2pClientChannelParams,
     )
   registerPlugin(bftSequencerPlugin)
 
@@ -458,32 +279,32 @@ class BftOrderingBenchmark
     EnvironmentDefinition
       .buildBaseEnvironmentDefinition(
         numParticipants = 0,
-        numSequencers = numberOfNodes,
+        numSequencers = bftOrderingBenchmarkConfig.numberOfNodes.value,
         numMediators = 1,
       )
       .clearConfigTransforms() // to disable globally unique ports
       .addConfigTransforms(
         ReplayTestCommon.configTransforms(
-          prometheusHttpServerPort = Port.tryCreate(19091),
-          prefix = BFTOrderingBenchmarkPrefix,
+          metricsConfigOverride = Some(bftOrderingBenchmarkConfig.metricsConfig)
         )*
       )
       .addConfigTransform(ConfigTransforms.enableNonStandardConfig)
-      .addConfigTransform(ConfigTransforms.updateAllSequencerConfigs { case (_, config) =>
-        batchCacheSizeMb.fold(config) { batchSizeInMb =>
-          config
+      .addConfigTransform(ConfigTransforms.updateAllSequencerConfigs { case (_, sequencerConfig) =>
+        bftOrderingBenchmarkConfig.batchCacheSizeMb.fold(sequencerConfig) { batchSizeInMb =>
+          sequencerConfig
             .focus(_.parameters.caching.bftOrderingBatchCache)
             .modify(
-              _.copy(maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(batchSizeInMb)))
+              _.copy(maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(batchSizeInMb.value)))
             )
         }
       })
       .addConfigTransforms(
-        ConfigTransforms.updateAllSequencerConfigs { case (_, config) =>
-          dbReplicationEnabled.fold(config) { replicationEnabled =>
-            config
-              .focus(_.replication)
-              .replace(Some(ReplicationConfig(enabled = Some(replicationEnabled))))
+        ConfigTransforms.updateAllSequencerConfigs { case (_, sequencerConfig) =>
+          bftOrderingBenchmarkConfig.dbReplicationEnabled.fold(sequencerConfig) {
+            replicationEnabled =>
+              sequencerConfig
+                .focus(_.replication)
+                .replace(Some(ReplicationConfig(enabled = Some(replicationEnabled))))
           }
         }
       )
@@ -491,9 +312,12 @@ class BftOrderingBenchmark
         _.focus(_.monitoring.tracing.tracer).replace(
           TracingConfig.Tracer(
             exporter =
-              if (tracingEnabled) TracingConfig.Exporter.Otlp(port = tracingReportingPort)
+              if (bftOrderingBenchmarkConfig.tracingEnabled)
+                TracingConfig.Exporter
+                  .Otlp(port = bftOrderingBenchmarkConfig.tracingReportingPort.unwrap)
               else TracingConfig.Exporter.Disabled,
-            sampler = TracingConfig.Sampler.TraceIdRatio(ratio = tracingSamplerRatio),
+            sampler = TracingConfig.Sampler
+              .TraceIdRatio(ratio = bftOrderingBenchmarkConfig.tracingSamplerRatio),
           )
         )
       )
@@ -515,10 +339,12 @@ class BftOrderingBenchmark
       }
 
   val toxiProxyPlugin: Option[UseToxiproxy] =
-    if (sequencerToSequencerLatencyMillis.isDefined || sequencerDbLatencyMillis.isDefined) {
+    if (
+      bftOrderingBenchmarkConfig.sequencerToSequencerLatencyMillis.isDefined || bftOrderingBenchmarkConfig.sequencerDbLatencyMillis.isDefined
+    ) {
       Some({
         val sequencerToPostgresProxyConfigs: Seq[ProxyConfig] =
-          (1 to numberOfNodes).map { sequencerIndex =>
+          (1 to bftOrderingBenchmarkConfig.numberOfNodes.value).map { sequencerIndex =>
             SequencerToPostgres(
               s"sequencer$sequencerIndex-to-$PostgresProxyNameSuffix",
               s"sequencer$sequencerIndex",
@@ -526,7 +352,7 @@ class BftOrderingBenchmark
           }
         val sequencerPeerToPeerProxyConfigs: Seq[ProxyConfig] =
           for {
-            toSequencerIndex <- (1 to numberOfNodes)
+            toSequencerIndex <- (1 to bftOrderingBenchmarkConfig.numberOfNodes.value)
           } yield {
             BftSequencerPeerToPeer(
               s"to-peer$toSequencerIndex",
@@ -549,9 +375,9 @@ class BftOrderingBenchmark
     val isDbProxy = proxyName.endsWith(PostgresProxyNameSuffix)
     val maybeLatency =
       if (isDbProxy) {
-        sequencerDbLatencyMillis
+        bftOrderingBenchmarkConfig.sequencerDbLatencyMillis
       } else {
-        sequencerToSequencerLatencyMillis
+        bftOrderingBenchmarkConfig.sequencerToSequencerLatencyMillis
       }
 
     maybeLatency.foreach { latency =>
@@ -560,7 +386,7 @@ class BftOrderingBenchmark
       // TODO(#28117) support two-way latencies
       proxy
         .toxics()
-        .latency(s"upstream-latency-$proxyName", ToxicDirection.UPSTREAM, latency)
+        .latency(s"upstream-latency-$proxyName", ToxicDirection.UPSTREAM, latency.value)
     }
   }
 
@@ -576,8 +402,10 @@ class BftOrderingBenchmark
         .set_bft_schedule(
           cron = "0 * * * * ?",
           maxDuration = 15.seconds,
-          retention = pruningRetentionPeriod,
-          minBlocksToKeep = pruningMinBlocksToKeepHistory,
+          retention = config.PositiveDurationSeconds.ofSeconds(
+            bftOrderingBenchmarkConfig.pruningRetentionPeriodSeconds.value
+          ),
+          minBlocksToKeep = bftOrderingBenchmarkConfig.pruningMinBlocksToKeepHistory.value,
         )
     }
 
@@ -586,14 +414,16 @@ class BftOrderingBenchmark
     waitUntilAllBftSequencersAuthenticateDisseminationQuorum(5.minutes)
 
     val nodesToStop = env.sequencers.local.zipWithIndex
-      .filter(x => testCatchupConfig.nodesToStop.contains(x._2))
+      .filter(x => bftOrderingBenchmarkConfig.testCatchupConfig.nodesToStop.contains(x._2))
       .map(_._1)
 
     if (nodesToStop.nonEmpty) {
 
       nodesToStop.foreach(_.stop())
 
-      env.actorSystem.scheduler.scheduleOnce(testCatchupConfig.durationNodesAreDown) {
+      env.actorSystem.scheduler.scheduleOnce(
+        bftOrderingBenchmarkConfig.testCatchupConfig.durationNodesAreDown
+      ) {
         nodesToStop.foreach(_.start())
       }
     }
@@ -602,11 +432,11 @@ class BftOrderingBenchmark
     val p2pEndpoints = bftSequencerPlugin.p2pEndpoints.getOrElse(fail("No P2P endpoints found"))
     val benchmarkToolConfig =
       BftBenchmarkConfig(
-        transactionSizesAndWeights = transactionSizesAndWeights.payloads,
-        testCatchup = testCatchupConfig,
-        runDuration = runDuration,
-        perNodeWritePeriod = perNodeWritePeriod,
-        reportingInterval = reportingIntervalOpt,
+        transactionSizesAndWeights = bftOrderingBenchmarkConfig.transactionSizesAndWeights.payloads,
+        testCatchup = bftOrderingBenchmarkConfig.testCatchupConfig,
+        runDuration = bftOrderingBenchmarkConfig.runDuration.underlying,
+        perNodeWritePeriod = bftOrderingBenchmarkConfig.perNodeWritePeriod.underlying,
+        reportingInterval = bftOrderingBenchmarkConfig.reportingInterval.map(_.underlying),
         nodes = env.sequencers.local.zipWithIndex.map { case (sequencer, idx) =>
           val name = sequencer.name
           val p2pConfig = p2pEndpoints(name)
@@ -641,4 +471,180 @@ private object BftOrderingBenchmark {
   )
 
   private final case class DelaysConfig(entries: Seq[BftBlockOrderingP2PSendDelayConfigEntry])
+
+  /** Configuration for the BFT ordering benchmark test.
+    *
+    * Loaded via Typesafe Config (pureconfig). See `bft-ordering-benchmark.conf` for a ready-to-use
+    * example.
+    *
+    * Refer to `BftBlockOrdererConfig` and ancillary classes for the meaning of parameters not
+    * documented below.
+    *
+    * @param numberOfNodes
+    *   Number of BFT sequencer nodes in the network (default: 4).
+    * @param runDuration
+    *   Total duration of the benchmark run (default: 1 minute, meant for quick test runs).
+    * @param perNodeWritePeriod
+    *   Interval between write submissions per node (default: 100ms).
+    * @param reportingInterval
+    *   How often to print benchmark progress metrics (default: None, i.e., disabled).
+    * @param segmentLength
+    *   Number of blocks per PBFT consensus segment (default: 10).
+    * @param consensusEmptyBlockCreationTimeout
+    *   Timeout before an empty block is proposed when there are no pending requests (default: 5s).
+    * @param pbftViewChangeTimeout
+    *   Timeout before triggering a PBFT view change (default: 10s).
+    * @param blacklistLeaderSelectionPolicyConfig
+    *   Policy controlling how slow leaders are blacklisted from future segment assignments.
+    * @param dedicatedExecutionContextDivisor
+    *   Optional divisor for sizing the dedicated execution context thread pool.
+    * @param useInMemoryStorageForBftOrderer
+    *   If true, uses in-memory storage for the BFT orderer instead of the database (default:
+    *   false).
+    * @param numberOfDbConnectionsPerNode
+    *   Number of database connections allocated per sequencer node (default: 12).
+    * @param tracingEnabled
+    *   Whether OpenTelemetry tracing is enabled (default: false).
+    * @param tracingReportingPort
+    *   Port for the OTLP tracing exporter (default: 4317).
+    * @param tracingSamplerRatio
+    *   Ratio of traces to sample, must be between 0.0 and 1.0 (default: 0.5).
+    * @param transactionSizesAndWeights
+    *   Distribution of transaction sizes and their relative weights for load generation.
+    * @param sequencerToSequencerLatencyMillis
+    *   Optional simulated latency (in ms) between sequencer peers via Toxiproxy.
+    * @param sequencerDbLatencyMillis
+    *   Optional simulated latency (in ms) between sequencers and the database via Toxiproxy.
+    * @param dbReplicationEnabled
+    *   Whether database replication is enabled (default: Some(true)).
+    * @param testCatchupConfig
+    *   Catchup configuration used during the benchmark run (default: no catchup).
+    * @param pekkoQueueSourceBufferSize
+    *   Buffer size for the Pekko queue source in the sequencer core subscription.
+    * @param pauseOrdererThresholdBufferSize
+    *   Buffer threshold at which the orderer is paused to apply backpressure.
+    * @param resumeOrdererThresholdBufferSize
+    *   Buffer threshold at which the orderer is resumed after backpressure.
+    * @param postOrderingDelayConfig
+    *   Optional artificial delay applied after ordering on specified nodes.
+    * @param p2pSendDelays
+    *   Optional per-source P2P send delay configuration.
+    * @param topologyBroadcastProbability
+    *   Optional probability of broadcasting topology changes (for simulation).
+    * @param pendingTopologyChangesProbability
+    *   Optional probability of injecting pending topology changes (for simulation).
+    * @param getOrderingTopologyDelay
+    *   Optional delay distribution applied when fetching the ordering topology (for simulation).
+    */
+  private final case class BftOrderingBenchmarkConfig(
+      numberOfNodes: PositiveInt = PositiveInt.tryCreate(4),
+      runDuration: PositiveFiniteDuration = PositiveFiniteDuration.tryFromDuration(1.minute),
+      perNodeWritePeriod: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(100.milliseconds),
+      reportingInterval: Option[PositiveFiniteDuration] = None,
+      metricsConfig: MetricsConfig =
+        ReplayTestCommon.prometheusMetricsConfig(Port.tryCreate(19091)),
+      segmentLength: PositiveLong = DefaultSegmentLength.length,
+      consensusEmptyBlockCreationTimeout: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultConsensusEmptyBlockCreationTimeout),
+      pbftViewChangeTimeout: PositiveFiniteDuration = DefaultPbftViewChangeTimeout.toConfig,
+      blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
+        DefaultLeaderSelectionPolicyConfig,
+      maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
+      minRequestsInBatch: Short = DefaultMinRequestsInBatch,
+      maxBatchCreationInterval: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultMaxBatchCreationInterval),
+      maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
+      availabilityMinProposalCreationDelay: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultAvailabilityMinProposalCreationDelay),
+      batchCacheSizeMb: Option[PositiveLong] = None,
+      dedicatedExecutionContextDivisor: Option[PositiveInt] = None,
+      pruningRetentionPeriodSeconds: PositiveLong = PositiveLong.tryCreate(300), // 5 minutes
+      pruningMinBlocksToKeepHistory: PositiveInt = PositiveInt.tryCreate(500),
+      useInMemoryStorageForBftOrderer: Boolean = false,
+      numberOfDbConnectionsPerNode: PositiveInt = PositiveInt.tryCreate(12),
+      delayedInitQueueMaxSize: PositiveInt = PositiveInt.tryCreate(DefaultDelayedInitQueueMaxSize),
+      epochStateTransferRetryTimeout: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultEpochStateTransferTimeout),
+      outputFetchTimeout: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultOutputFetchTimeout),
+      outputFetchMinimumDelay: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultOutputFetchMinimumDelay),
+      outputFetchTimeoutCap: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultOutputFetchTimeoutCap),
+      outputFetchHowManyRecipients: PositiveInt = DefaultOutputFetchHowManyRecipients,
+      outputEnqueueMaxRetries: NonNegativeInt =
+        NonNegativeInt.tryCreate(DefaultOutputEnqueueMaxRetries),
+      outputEnqueueMaxRetryDelay: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultOutputEnqueueMaxRetryDelay),
+      sendBlacklistTtl: PositiveFiniteDuration =
+        PositiveFiniteDuration.tryFromDuration(DefaultSendBlacklistTtl),
+      networkSendAttempts: PositiveInt = DefaultNetworkSendAttempts,
+      networkSendRetryMinimumDelay: PositiveFiniteDuration = DefaultNetworkSendRetryMinimumDelay,
+      networkSendRetryJitterCap: PositiveFiniteDuration = DefaultNetworkSendRetryMaximumDelay,
+      p2pServerMaxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
+      // Keep Canton defaults for P2P server-side flow control, i.e. automatic flow control
+      //  with implementation defaults for the initial window size
+      p2pServerFlowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow,
+      p2pServerInitialFlowControlWindow: Option[PositiveInt] =
+        ServerConfig.defaultInitialFlowControlWindow,
+      p2pServerMaxConcurrentCallsPerConnection: NonNegativeInt =
+        ServerConfig.defaultMaxConcurrentCallsPerConnection,
+      p2pServerLimits: Option[ActiveRequestLimitsConfig] = None,
+      p2pServerKeepAliveConfig: Option[BasicKeepAliveServerConfig] = Some(
+        BasicKeepAliveServerConfig()
+      ),
+      p2pClientChannelParams: ClientChannelParams =
+        ClientChannelParams.Default.copy(flowControlWindow = None),
+      tracingEnabled: Boolean = false,
+      tracingReportingPort: Port = Port.tryCreate(4317),
+      tracingSamplerRatio: Double = 0.5,
+      transactionSizesAndWeights: BftBenchmarkConfig.TransactionSizesAndWeights =
+        BftBenchmarkConfig.TransactionSizesAndWeights(
+          BftBenchmarkConfig.TransactionSizeAndWeight(
+            sizeBytes = NonNegativeInt.tryCreate(3000),
+            weight = PositiveInt.tryCreate(1),
+          ) :: Nil
+        ),
+      sequencerToSequencerLatencyMillis: Option[PositiveLong] = None,
+      sequencerDbLatencyMillis: Option[PositiveLong] = None,
+      dbReplicationEnabled: Option[Boolean] = Some(true),
+      testCatchupConfig: BftBenchmarkConfig.TestCatchup =
+        BftBenchmarkConfig.TestCatchup.NoTestCatchup,
+      pekkoQueueSourceBufferSize: PositiveInt = PositiveInt.tryCreate(
+        DefaultSequencerCoreSubscriptionConfig.pekkoQueueSourceBufferSize
+      ),
+      pauseOrdererThresholdBufferSize: PositiveInt = PositiveInt.tryCreate(
+        DefaultSequencerCoreSubscriptionConfig.pauseOrdererThresholdBufferSize
+      ),
+      resumeOrdererThresholdBufferSize: PositiveInt = PositiveInt.tryCreate(
+        DefaultSequencerCoreSubscriptionConfig.resumeOrdererThresholdBufferSize
+      ),
+      postOrderingDelayConfig: Option[UseBftSequencer.PostOrderingDelayConfig] = None,
+      p2pSendDelays: Option[DelaysConfig] = None,
+      topologyBroadcastProbability: Option[Double] = None,
+      pendingTopologyChangesProbability: Option[Double] = None,
+      getOrderingTopologyDelay: Option[FiniteDurationDistribution] = None,
+  ) {
+    require(
+      tracingSamplerRatio >= 0.0 && tracingSamplerRatio <= 1.0,
+      "tracingSamplerRatio must be between 0.0 and 1.0",
+    )
+    require(
+      minRequestsInBatch > 0 && minRequestsInBatch <= maxRequestsInBatch,
+      "minRequestsInBatch must be greater than 0 and less than or equal to maxRequestsInBatch",
+    )
+    require(
+      maxBatchesPerBlockProposal > 0,
+      "maxBatchesPerBlockProposal must be greater than 0",
+    )
+    require(
+      topologyBroadcastProbability.forall(p => p >= 0.0 && p <= 1.0),
+      "topologyBroadcastProbability must be between 0.0 and 1.0",
+    )
+    require(
+      pendingTopologyChangesProbability.forall(p => p >= 0.0 && p <= 1.0),
+      "pendingTopologyChangesProbability must be between 0.0 and 1.0",
+    )
+  }
 }

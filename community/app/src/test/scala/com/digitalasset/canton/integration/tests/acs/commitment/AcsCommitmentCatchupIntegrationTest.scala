@@ -64,6 +64,9 @@ sealed trait AcsCommitmentCatchupIntegrationTest
           _.focus(_.parameters.engine.enableAdditionalConsistencyChecks)
             .replace(true)
         ),
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

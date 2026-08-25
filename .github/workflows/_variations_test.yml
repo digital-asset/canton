@@ -2,10 +2,6 @@ name: Variations Test
 on:
   workflow_call:
     secrets:
-      DOCKERHUB_USERNAME:
-        required: true
-      DOCKERHUB_PASSWORD:
-        required: true
       GCLOUD_SERVICE_KEY:
         required: true
       DATADOG_API_KEY:
@@ -81,8 +77,6 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3]
     env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
       GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       EXECUTOR_JVM_HEAP_SIZE: 14000M
@@ -96,8 +90,6 @@ jobs:
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: ${{ matrix.shard }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Set Canton Protocol Version
         if: ${{ inputs.protocol_version != '' }}

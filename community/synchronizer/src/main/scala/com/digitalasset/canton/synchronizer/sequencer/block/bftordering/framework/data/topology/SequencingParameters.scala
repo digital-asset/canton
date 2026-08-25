@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
+import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -42,6 +44,8 @@ import java.time.Duration
   */
 final case class SequencingParameters private (
     pbftViewChangeTimeout: PositiveFiniteDuration,
+    pbftViewChangeTimeoutStep: NonNegativeFiniteDuration,
+    pbftViewChangeTimeoutUpperBound: NonNegativeFiniteDuration,
     segmentLength: SegmentLength,
     blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
     maxRequestsInBatch: Short,
@@ -81,6 +85,9 @@ final case class SequencingParameters private (
 
   def update(
       pbftViewChangeTimeout: PositiveFiniteDuration = this.pbftViewChangeTimeout,
+      pbftViewChangeTimeoutStep: NonNegativeFiniteDuration = this.pbftViewChangeTimeoutStep,
+      pbftViewChangeTimeoutUpperBound: NonNegativeFiniteDuration =
+        this.pbftViewChangeTimeoutUpperBound,
       segmentLength: SegmentLength = this.segmentLength,
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig =
         this.blacklistLeaderSelectionPolicyConfig,
@@ -89,6 +96,8 @@ final case class SequencingParameters private (
   ): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout = pbftViewChangeTimeout,
+      pbftViewChangeTimeoutStep = pbftViewChangeTimeoutStep,
+      pbftViewChangeTimeoutUpperBound = pbftViewChangeTimeoutUpperBound,
       segmentLength = segmentLength,
       blacklistLeaderSelectionPolicyConfig = blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch = maxRequestsInBatch,
@@ -105,6 +114,8 @@ final case class SequencingParameters private (
     Option(blacklistLeaderSelectionPolicyConfig.toProto),
     maxRequestsInBatch.toInt,
     maxBatchesPerBlockProposal.toInt,
+    pbftViewChangeTimeoutStep = Option(pbftViewChangeTimeoutStep.toProtoPrimitive),
+    pbftViewChangeTimeoutUpperBound = Option(pbftViewChangeTimeoutUpperBound.toProtoPrimitive),
   )
 }
 
@@ -112,6 +123,12 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
 
   val DefaultPbftViewChangeTimeout: PositiveFiniteDuration =
     PositiveFiniteDuration.tryCreate(Duration.ofSeconds(10))
+
+  val DefaultPbftViewChangeTimeoutStep: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.tryFromJavaDuration(Duration.ofSeconds(2))
+
+  val DefaultPbftViewChangeTimeoutUpperBound: NonNegativeFiniteDuration =
+    NonNegativeFiniteDuration.tryFromJavaDuration(Duration.ofSeconds(30))
 
   final case class SegmentLength(length: PositiveLong) {
     def epochLength(numberOfSequencers: Long): EpochLength = EpochLength(
@@ -143,6 +160,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
   def Default(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       DefaultPbftViewChangeTimeout,
+      DefaultPbftViewChangeTimeoutStep,
+      DefaultPbftViewChangeTimeoutUpperBound,
       DefaultSegmentLength,
       DefaultLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
@@ -153,6 +172,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
   def NoBlacklisting(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       DefaultPbftViewChangeTimeout,
+      DefaultPbftViewChangeTimeoutStep,
+      DefaultPbftViewChangeTimeoutUpperBound,
       DefaultSegmentLength,
       NoBlacklistingLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
@@ -171,6 +192,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       )
     } yield SequencingParameters(
       pbftViewChangeTimeout,
+      DefaultPbftViewChangeTimeoutStep,
+      DefaultPbftViewChangeTimeoutUpperBound,
       DefaultSegmentLength,
       DefaultLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
@@ -185,6 +208,16 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       pbftViewChangeTimeout <- PositiveFiniteDuration.fromProtoPrimitiveO("pbftViewChangeTimeout")(
         proto.pbftViewChangeTimeout
       )
+      pbftViewChangeTimeoutStep <- proto.pbftViewChangeTimeoutStep
+        .traverse(
+          NonNegativeFiniteDuration.fromProtoPrimitive("pbftViewChangeTimeoutStep")(_)
+        )
+        .map(_.getOrElse(DefaultPbftViewChangeTimeoutStep))
+      pbftViewChangeTimeoutUpperBound <- proto.pbftViewChangeTimeoutUpperBound
+        .traverse(
+          NonNegativeFiniteDuration.fromProtoPrimitive("pbftViewChangeTimeoutUpperBound")
+        )
+        .map(_.getOrElse(DefaultPbftViewChangeTimeoutUpperBound))
       segmentLength <- PositiveLong
         .create(proto.segmentLength)
         .left
@@ -206,6 +239,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       }
     } yield SequencingParameters(
       pbftViewChangeTimeout,
+      pbftViewChangeTimeoutStep,
+      pbftViewChangeTimeoutUpperBound,
       segmentLength,
       blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch,
@@ -239,9 +274,14 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
         DefaultLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
       maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
+      pbftViewChangeTimeoutStep: NonNegativeFiniteDuration = DefaultPbftViewChangeTimeoutStep,
+      pbftViewChangeTimeoutUpperBound: NonNegativeFiniteDuration =
+        DefaultPbftViewChangeTimeoutUpperBound,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout,
+      pbftViewChangeTimeoutStep = pbftViewChangeTimeoutStep,
+      pbftViewChangeTimeoutUpperBound = pbftViewChangeTimeoutUpperBound,
       segmentLength,
       blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch,

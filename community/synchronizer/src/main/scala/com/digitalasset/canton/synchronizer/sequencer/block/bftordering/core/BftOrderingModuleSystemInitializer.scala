@@ -298,7 +298,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             timeouts,
           )
         },
-        output = (availabilityRef, consensusRef) =>
+        output = (availabilityRef, consensusRef, mempoolRef) =>
           new OutputModule(
             outputModuleStartupState,
             orderingTopologyProvider,
@@ -309,6 +309,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             metrics,
             availabilityRef,
             consensusRef,
+            mempoolRef,
             loggerFactory,
             timeouts,
             requestInspector,

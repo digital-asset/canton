@@ -15,6 +15,7 @@ import com.digitalasset.canton.examples.java.iou.Amount
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -38,6 +39,11 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
+      .addConfigTransforms(
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor
+      )
       .withSetup { implicit env =>
         import env.*
 

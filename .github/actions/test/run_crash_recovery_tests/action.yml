@@ -99,5 +99,5 @@ runs:
         num_test_buckets: ${{ inputs.num_test_buckets }}
         shard_index: ${{ inputs.shard_index }}
         collect_postgres_query_stats: "true"
-        report_to_datadog: "false"
+        report_to_datadog: "true"
         test_job_success: ${{ steps.run_sbt_tests.outcome == 'success' }}

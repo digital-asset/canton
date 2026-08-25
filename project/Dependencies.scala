@@ -74,7 +74,7 @@ object Dependencies {
   lazy val munit_version = "1.3.4"
   lazy val grpc_version = resolveDependency("io.grpc", "grpc-api").revision
 
-  lazy val pekko_http_backend_version = "3.9.0"
+  lazy val pekko_http_backend_version = "3.11.0"
   lazy val protostuff_version = "3.1.40"
   lazy val postgres_version = "42.7.11"
   lazy val pprint_version = "0.9.3"
@@ -91,7 +91,7 @@ object Dependencies {
   lazy val scalatest_version = "3.2.19"
   lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
-  lazy val shapeless_version = "2.3.7"
+  lazy val shapeless_version = "2.3.13"
   lazy val slf4j_version = resolveDependency("org.slf4j", "jul-to-slf4j").revision
   lazy val zio_version = "2.1.7"
 
@@ -373,6 +373,9 @@ object Dependencies {
       name = "circe-core_2.13",
     ),
   )
+
+  lazy val tapir_core =
+    "com.softwaremill.sttp.tapir" %% "tapir-core" % tapir_version excludeAll (tapirExclusions: _*)
 
   lazy val tapir_json_circe =
     "com.softwaremill.sttp.tapir" %% "tapir-json-circe" % tapir_version excludeAll (tapirExclusions: _*)

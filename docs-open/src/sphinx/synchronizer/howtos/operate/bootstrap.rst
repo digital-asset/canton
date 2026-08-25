@@ -147,7 +147,7 @@ Propose and export the decentralized namespace declaration with the first Sequen
 .. snippet:: decentralized_synchronizer_install_separate_consoles
     .. success:: seq1DND.writeToFile("tmp/synchronizer-bootstrapping-files/decentralized-namespace.proto")
     .. success:: val synchronizerId = SynchronizerId(UniqueIdentifier.tryCreate("mySynchronizer", seq1DND.mapping.namespace.toProtoPrimitive))
-    .. success:: val physicalSynchronizerId = PhysicalSynchronizerId(synchronizerId, synchronizerParameters.toInternal)
+    .. success:: val physicalSynchronizerId = PhysicalSynchronizerId(synchronizerId, synchronizerParameters.serial, synchronizerParameters.protocolVersion)
 
 On the second Sequencer's console, load the first Sequencer's decentralized namespace declaration, sign it, and share it again:
 
@@ -360,7 +360,7 @@ Propose and export the decentralized namespace declaration with the first Sequen
 .. snippet:: decentralized_synchronizer_install_subset_owners
     .. success:: seq1DND.writeToFile("tmp/synchronizer-bootstrapping-files/decentralized-namespace.proto")
     .. success:: val synchronizerId = SynchronizerId(UniqueIdentifier.tryCreate("mySynchronizer", seq1DND.mapping.namespace.toProtoPrimitive))
-    .. success:: val physicalSynchronizerId = PhysicalSynchronizerId(synchronizerId, synchronizerParameters.toInternal)
+    .. success:: val physicalSynchronizerId = PhysicalSynchronizerId(synchronizerId, synchronizerParameters.serial, synchronizerParameters.protocolVersion)
 
 On the second Sequencer's console, load the first Sequencer's decentralized namespace declaration, sign it, and share it again:
 

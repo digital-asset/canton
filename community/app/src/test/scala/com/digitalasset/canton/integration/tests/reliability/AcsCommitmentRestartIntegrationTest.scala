@@ -71,6 +71,8 @@ trait AcsCommitmentRestartIntegrationTest
         // Disable traffic accounting as the feature does not support restarting the ledger end
         // performed in this test
         ConfigTransforms.disableTrafficAccounting,
+        // TODO(#35107) Disable the old processor and fix the test
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

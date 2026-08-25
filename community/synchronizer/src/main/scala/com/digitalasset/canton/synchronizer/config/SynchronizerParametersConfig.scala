@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.synchronizer.config
 
+import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, NonNegativeFiniteDuration, ProtocolConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
@@ -42,6 +43,8 @@ import com.digitalasset.nonempty.NonEmpty
   * @param dontWarnOnDeprecatedPV
   *   If true, then this synchronizer will not emit a warning when configured to use a deprecated
   *   protocol version (such as 2.0.0).
+  * @param synchronizerLimits
+  *   Size limits on various collections, globally enforced on this synchronizer
   */
 final case class SynchronizerParametersConfig(
     requiredSigningAlgorithmSpecs: Option[NonEmpty[Set[SigningAlgorithmSpec]]] = None,
@@ -57,6 +60,7 @@ final case class SynchronizerParametersConfig(
     override val alphaVersionSupport: Boolean = false,
     override val betaVersionSupport: Boolean = false,
     override val dontWarnOnDeprecatedPV: Boolean = false,
+    synchronizerLimits: Option[SynchronizerLimits] = None,
 ) extends ProtocolConfig
     with PrettyPrinting {
 
@@ -73,6 +77,7 @@ final case class SynchronizerParametersConfig(
     param("alphaVersionSupport", _.alphaVersionSupport),
     param("betaVersionSupport", _.betaVersionSupport),
     param("dontWarnOnDeprecatedPV", _.dontWarnOnDeprecatedPV),
+    param("synchronizerLimits", _.synchronizerLimits),
   )
 
   /** Converts the synchronizer parameters config into a synchronizer parameters protocol message.
@@ -139,25 +144,30 @@ final case class SynchronizerParametersConfig(
         .getOrElse(
           StaticSynchronizerParameters.defaultTopologyChangeDelay
         )
-    } yield {
-      StaticSynchronizerParameters(
-        requiredSigningSpecs = RequiredSigningSpecs(
-          newRequiredSigningAlgorithmSpecs,
-          newRequiredSigningKeySpecs,
-        ),
-        requiredEncryptionSpecs = RequiredEncryptionSpecs(
-          newRequiredEncryptionAlgorithmSpecs,
-          newRequiredEncryptionKeySpecs,
-        ),
-        requiredSymmetricKeySchemes = newRequiredSymmetricKeySchemes,
-        requiredHashAlgorithms = newRequiredHashAlgorithms,
-        requiredCryptoKeyFormats = newCryptoKeyFormats,
-        requiredSignatureFormats = newSignatureFormats,
-        topologyChangeDelay = newTopologyChangeDelay,
-        enableTransparencyChecks = false,
-        protocolVersion = protocolVersion,
-        serial = serial,
+      newSynchronizerLimits = synchronizerLimits.getOrElse(
+        SynchronizerLimits.defaultFor(protocolVersion)
       )
-    }
+      staticSynchronizerParameters <- StaticSynchronizerParameters
+        .create(
+          requiredSigningSpecs = RequiredSigningSpecs(
+            newRequiredSigningAlgorithmSpecs,
+            newRequiredSigningKeySpecs,
+          ),
+          requiredEncryptionSpecs = RequiredEncryptionSpecs(
+            newRequiredEncryptionAlgorithmSpecs,
+            newRequiredEncryptionKeySpecs,
+          ),
+          requiredSymmetricKeySchemes = newRequiredSymmetricKeySchemes,
+          requiredHashAlgorithms = newRequiredHashAlgorithms,
+          requiredCryptoKeyFormats = newCryptoKeyFormats,
+          requiredSignatureFormats = newSignatureFormats,
+          topologyChangeDelay = newTopologyChangeDelay,
+          enableTransparencyChecks = false,
+          protocolVersion = protocolVersion,
+          serial = serial,
+          synchronizerLimits = newSynchronizerLimits,
+        )
+        .leftMap(_.toString)
+    } yield staticSynchronizerParameters
   }
 }

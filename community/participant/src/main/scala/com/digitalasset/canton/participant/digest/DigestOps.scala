@@ -13,8 +13,6 @@ import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ReassignmentCounter}
-import com.digitalasset.nonempty.NonEmpty
-import com.digitalasset.nonempty.NonEmptyReturningOps.`NE Iterable Ops`
 
 object DigestOps {
 
@@ -22,10 +20,9 @@ object DigestOps {
       contractChangeBatch: ContractChangeBatch,
       traceChanges: Boolean,
   ): Seq[DigestDelta] = {
-    val partyDeltas = contractChangeBatch.changes.iterator
+    val partyDeltas = contractChangeBatch.changes.view
       .flatMap(partyDeltasForSingleContractChange(_, traceChanges))
-      .toSeq
-      .groupBy1(delta => (delta.partyId, delta.operation))
+      .groupBy(delta => (delta.partyId, delta.operation))
       .map { case ((party, operation), deltas) =>
         (party, operation) -> DigestDelta.Party(
           party,
@@ -36,29 +33,28 @@ object DigestOps {
 
     val partiesByParticipant = DigestOps.invertMap(contractChangeBatch.partyHostings)
 
-    val participantDeltas: Seq[DigestDelta] = partiesByParticipant.flatMap {
+    val participantDeltas: Seq[DigestDelta] = partiesByParticipant.iterator.flatMap {
       case (counterParticipant, parties) =>
         def combineDigestsForOperation(
             operation: DigestOperation
         ): Option[DigestDelta.Participant] = {
           val digestsForCounterParticipant =
-            // start with an iterator and convert to a Seq to not calculate the hashcode of potentially many digests
             parties.iterator
-              .flatMap(party => partyDeltas.get((party, operation)).map(_.digest))
-              .toSeq
-          NonEmpty.from(digestsForCounterParticipant).map { digestsNE =>
+              .flatMap(party => partyDeltas.get((party, operation)))
+              .map(_.digest)
+          Option.when(digestsForCounterParticipant.hasNext)(
             DigestDelta.Participant(
               participantId = counterParticipant,
-              digest = DigestOps.combineDigests(digestsNE),
+              digest = DigestOps.combineDigests(digestsForCounterParticipant),
               operation = operation,
             )
-          }
+          )
         }
 
         combineDigestsForOperation(Add).toList ++ combineDigestsForOperation(Remove)
     }.toSeq
 
-    partyDeltas.values.toSeq ++ participantDeltas
+    (partyDeltas.values.iterator ++ participantDeltas).toSeq
   }
 
   def partyDeltasForSingleContractChange(
@@ -69,29 +65,26 @@ object DigestOps {
     val locallyHostedStakeholderIds =
       contractChange.locallyHostedStakeholders.toSet
 
-    val partyPairsToCompute = for {
-      local <- locallyHostedStakeholderIds
-      stakeholder <- stakeholderIds
-
-    } yield orderedPartyPair((local, stakeholder))
-
-    val digestPerPartyPair = partyPairsToCompute.map { case (fromParty, toParty) =>
-      (fromParty, toParty) -> DigestOps.singleDigest(
-        contractId = contractChange.cid,
-        reassignmentCounter = contractChange.rc,
-        partyId1 = fromParty,
-        partyId2 = toParty,
-        isActivation = contractChange.isActivation,
-        traceChanges = traceChanges,
-      )
-    }.toMap
-
     val digestOperation: DigestOperation =
       if (contractChange.isActivation) DigestOperation.Add else DigestOperation.Remove
 
     stakeholderIds.iterator.map { stakeholderId =>
-      val partyPairs = locallyHostedStakeholderIds.map((_, stakeholderId)).map(orderedPartyPair)
-      val digest = DigestOps.combineDigests(partyPairs.map(digestPerPartyPair))
+      val deltas = locallyHostedStakeholderIds.iterator
+        .map { locallyHostedStakeholder =>
+          orderedPartyPair((locallyHostedStakeholder, stakeholderId))
+        }
+        .distinct
+        .map { case (fromParty, toParty) =>
+          DigestOps.singleDigest(
+            contractId = contractChange.cid,
+            reassignmentCounter = contractChange.rc,
+            partyId1 = fromParty,
+            partyId2 = toParty,
+            isActivation = contractChange.isActivation,
+            traceChanges = traceChanges,
+          )
+        }
+      val digest = DigestOps.combineDigests(deltas)
 
       DigestDelta.Party(
         stakeholderId,
@@ -101,8 +94,8 @@ object DigestOps {
     }
   }
 
-  def combineDigests(allDigests: Iterable[TracedLtHash16Blake3]): TracedLtHash16Blake3 =
-    allDigests.foldLeft(TracedLtHash16Blake3.empty) { case (acc, digest) =>
+  def combineDigests(allDigests: IterableOnce[TracedLtHash16Blake3]): TracedLtHash16Blake3 =
+    allDigests.iterator.foldLeft(TracedLtHash16Blake3.empty) { case (acc, digest) =>
       acc.union(digest)
       acc
     }

@@ -77,12 +77,12 @@ object SerializableTraceContext
     for {
       traceparent <- ProtoValidation.validate(
         tc.traceparent,
-        Some("traceparent"),
+        "traceparent",
         ProtocolVersionValidation.AlwaysValidation,
       )
       tracestate <- ProtoValidation.validate(
         tc.tracestate,
-        Some("tracestate"),
+        "tracestate",
         ProtocolVersionValidation.AlwaysValidation,
       )
     } yield SerializableTraceContext(W3CTraceContext.toTraceContext(traceparent, tracestate))

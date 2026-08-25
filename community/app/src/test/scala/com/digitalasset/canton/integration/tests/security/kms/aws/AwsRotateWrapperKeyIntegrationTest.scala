@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.integration.tests.security.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.{UseAwsKms, UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.RotateWrapperKeyIntegrationTest
 
 /** Tests a manual rotation of the wrapper key, where an AWS KMS key is SPECIFIED -
   * "alias/canton-kms-rotation-test-key" - and selected to be the new wrapper key.
   */
+@RequiresExternalKms
 class AwsRotateWrapperKeyWithPreDefinedKeyReferenceIntegrationTestPostgres
     extends RotateWrapperKeyIntegrationTest
     with AwsEncryptedCryptoPrivateStoreTestBase {

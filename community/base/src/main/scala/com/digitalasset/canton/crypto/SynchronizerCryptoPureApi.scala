@@ -67,7 +67,7 @@ final class SynchronizerCryptoPureApi(
       _ <- pureCrypto.verifySignature(bytes, publicKey, signature, usage)
     } yield ()
 
-  override private[crypto] def decryptWithInternal[M](
+  override def decryptWith[M](
       encrypted: AsymmetricEncrypted[M],
       privateKey: EncryptionPrivateKey,
   )(
@@ -79,7 +79,7 @@ final class SynchronizerCryptoPureApi(
         Some(privateKey.keySpec),
         encrypted.encryptionAlgorithmSpec,
       )
-      res <- pureCrypto.decryptWithInternal(encrypted, privateKey)(deserialize)
+      res <- pureCrypto.decryptWith(encrypted, privateKey)(deserialize)
     } yield res
 
   override def defaultSymmetricKeyScheme: SymmetricKeyScheme = pureCrypto.defaultSymmetricKeyScheme
@@ -153,7 +153,7 @@ final class SynchronizerCryptoPureApi(
 
   override def signingMetrics: SigningMetrics = pureCrypto.signingMetrics
 
-  override private[crypto] def signBytesInternal(
+  override private[crypto] def signBytes(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],

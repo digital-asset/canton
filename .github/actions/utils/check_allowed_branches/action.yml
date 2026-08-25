@@ -6,6 +6,10 @@ inputs:
     description: Comma-separated allowed branches
     required: true
     default: 'main'
+  branch-name:
+    description: Branch or ref name to evaluate
+    required: false
+    default: ''
 
 outputs:
   branch_allowed:
@@ -17,12 +21,16 @@ runs:
   steps:
     - id: check
       shell: bash
+      env:
+        PROVIDED_BRANCH_NAME: ${{ inputs.branch-name }}
+        CURRENT_REF_NAME: ${{ github.ref_name }}
       run: |
         BRANCHES="${{ inputs.allowed-branches }}"
-        if printf '%s\n' "$BRANCHES" | tr ',' '\n' | grep -Fxq "${{ github.ref_name }}"; then
+        BRANCH_NAME="${PROVIDED_BRANCH_NAME:-$CURRENT_REF_NAME}"
+        if printf '%s\n' "$BRANCHES" | tr ',' '\n' | grep -Fxq "$BRANCH_NAME"; then
           echo "send=true" >> $GITHUB_OUTPUT
-          echo "Branch ${{ github.ref_name }} allowed"
+          echo "Branch $BRANCH_NAME allowed"
         else
           echo "send=false" >> $GITHUB_OUTPUT
-          echo "Branch ${{ github.ref_name }} not allowed [$BRANCHES]"
+          echo "Branch $BRANCH_NAME not allowed [$BRANCHES]"
         fi

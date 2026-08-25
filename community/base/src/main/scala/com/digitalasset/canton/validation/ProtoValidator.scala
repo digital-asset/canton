@@ -9,16 +9,17 @@ import com.digitalasset.canton.ProtoDeserializationError.StringConversionError
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.ProtocolVersion
 
-/** Validates an untrusted value of type `A` at the deserialization boundary. The content check is
-  * gated on the negotiated protocol version so older peers stay compatible. Protocol-version
-  * dispatch lives in [[ProtoValidation]]; this trait only owns the check and its version gate.
+/** Validates an untrusted value of type `A` at the deserialization boundary. The content check runs
+  * from the validating protocol version on, so older peers stay compatible. Protocol-version
+  * dispatch lives in [[ProtoValidation]]; this trait only owns the check and the version it runs
+  * from.
   */
 trait ProtoValidator[A] {
 
   /** The unconditional content check. */
   private[validation] def validate(value: A, field: Option[String]): ParsingResult[A]
 
-  /** Run [[validate]] only once the negotiated version enforces it; older versions pass through
+  /** Run [[validate]] only from the validating protocol version on; older versions pass through
     * unchecked.
     */
   private[validation] def validate(
@@ -26,7 +27,7 @@ trait ProtoValidator[A] {
       pv: ProtocolVersion,
       field: Option[String],
   ): ParsingResult[A] =
-    if (pv > ProtocolVersion.v35) validate(value, field) else Right(value)
+    if (pv >= ProtocolVersion.stringValidation) validate(value, field) else Right(value)
 }
 
 object ProtoValidator {

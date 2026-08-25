@@ -987,6 +987,8 @@ trait SynchronizerChangeRealClockIntegrationTest
           {
             P2.synchronizers.reconnect(iouSynchronizerAlias, synchronize = Some(timeouts.default))
             P3.synchronizers.reconnect(iouSynchronizerAlias, synchronize = Some(timeouts.default))
+            // Process the replayed requests so their timeout warnings land in this block
+            assertPingSucceeds(P2, P3, synchronizerId = Some(iouSynchronizerId))
           },
           // After reconnecting, P2 and P3 send their confirmation responses, which may exceed
           // the confirmation response timeout.

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.EncryptedCryptoPrivateStoreIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.aws.AwsEncryptedCryptoPrivateStoreTestBase
@@ -11,6 +12,7 @@ import com.digitalasset.canton.integration.tests.security.kms.aws.AwsEncryptedCr
   * will (a) create a new temporary SINGLE-REGION key that is scheduled for deletion at the end of
   * the test. Creating a new key costs a small fee so this test is only run nightly.
   */
+@RequiresExternalKms
 class AwsEncryptedCryptoPrivateStoreNoPreDefinedKeyReferenceIntegrationTestPostgres
     extends EncryptedCryptoPrivateStoreIntegrationTest
     with AwsEncryptedCryptoPrivateStoreTestBase {
@@ -27,6 +29,7 @@ class AwsEncryptedCryptoPrivateStoreNoPreDefinedKeyReferenceIntegrationTestPostg
 /** (b) create a new temporary MULTI-REGION key that is scheduled for deletion at the end of the
   * test.
   */
+@RequiresExternalKms
 class AwsEncryptedCryptoPrivateStoreNoPreDefinedKeyMultiRegionReferenceIntegrationTestPostgres
     extends EncryptedCryptoPrivateStoreIntegrationTest
     with AwsEncryptedCryptoPrivateStoreTestBase {

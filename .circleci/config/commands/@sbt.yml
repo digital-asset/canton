@@ -18,7 +18,7 @@ save_sbt_cache:
         job_name: "Uploading Coursier cache"
         # The cache is stored only when the build definition or dependencies change
         key: >-
-          cache=canton-coursier
+          cache=canton-coursier-1
           repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)
@@ -115,7 +115,7 @@ restore_sbt_cache:
         # If this is not possible and Dependencies.scala hasn't changed, populate the cache with slightly outdated data.
         # This will speed up compilation, because most libraries are already in the cache.
         key: >-
-          cache=canton-coursier
+          cache=canton-coursier-1
           repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)

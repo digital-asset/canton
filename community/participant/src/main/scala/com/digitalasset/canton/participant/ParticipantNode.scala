@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant
 
 import cats.Eval
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
@@ -94,12 +95,16 @@ import com.digitalasset.canton.topology.admin.grpc.TopologyStoreInitializationSt
   NotInitialized,
 }
 import com.digitalasset.canton.topology.admin.grpc.{PsidLookupAt, TopologyStoreInitializationStatus}
-import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
-import com.digitalasset.canton.topology.store.TopologyStore
+import com.digitalasset.canton.topology.client.{
+  CachingTopologySnapshot,
+  StoreBasedTopologySnapshot,
+  SynchronizerTopologyClient,
+}
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
+import com.digitalasset.canton.topology.store.{NoPackageDependencies, TopologyStore}
 import com.digitalasset.canton.topology.transaction.HostingParticipant
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, SingleUseCell}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil, SingleUseCell}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -683,6 +688,7 @@ class ParticipantNodeBootstrap(
                       loggerFactory = loggerFactory,
                       timeouts = timeouts,
                       clock = clock,
+                      metrics = metrics.trafficEnforcement,
                       onEventCommitted =
                         arguments.testingConfig.trafficEnforcementProjectionEventCommitted,
                     )
@@ -1017,6 +1023,26 @@ class ParticipantNodeBootstrap(
                 topologyLookupForAcsDigestProcessing,
                 syncPersistentStateManager.acsDigestStore,
                 syncPersistentStateManager.acsCommitmentPeriodStore,
+                cachingTopologySnapshotLookup = (synchronizerId, ts) => {
+                  val psid = sync.activePsidLookup
+                    .activePsidAt(synchronizerId, ts)
+                    .valueOr(ErrorUtil.invalidState(_))
+                  syncPersistentStateManager.get(psid).map { state =>
+                    val snapshot = new StoreBasedTopologySnapshot(
+                      psid,
+                      ts,
+                      state.topologyStore,
+                      NoPackageDependencies,
+                      loggerFactory.append("psid", psid.toString),
+                    )
+                    new CachingTopologySnapshot(
+                      snapshot,
+                      parameters.cachingConfigs,
+                      loggerFactory,
+                      futureSupervisor,
+                    )
+                  }
+                },
                 ledgerApiServerContainer.asEval.value.internalIndexService,
                 ledgerApiStore,
                 ledgerApiStore.stringInterningView,

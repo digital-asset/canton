@@ -3,7 +3,13 @@
 
 package com.digitalasset.canton.tea.projection.memory
 
+import com.daml.metrics.api.testing.InMemoryMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.platform.apiserver.services.metrics.{
+  TrafficEnforcementInventory,
+  TrafficEnforcementMetrics,
+}
 import com.digitalasset.canton.tea.projection.{
   TeaProjectionFactory,
   TeaProjectionTest,
@@ -25,9 +31,14 @@ class MemoryTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaP
     implicit val ec: ExecutionContext = system.executionContext
     val memoryStore = new TeaMemoryTrafficStore(loggerFactory)
     new Backend {
+      override val metricsFactory = new InMemoryMetricsFactory
+      override val metrics = new TrafficEnforcementMetrics(
+        inventory = new TrafficEnforcementInventory(MetricName("test"))(new HistogramInventory()),
+        metricsFactory = metricsFactory,
+      )(MetricsContext.Empty)
       override val store: TeaTrafficStore = memoryStore
       override def newProjection(): TeaProjectionFactory =
-        new TeaMemoryProjectionFactory(loggerFactory, memoryStore)
+        new TeaMemoryProjectionFactory(loggerFactory, memoryStore, metrics)
     }
   }
 

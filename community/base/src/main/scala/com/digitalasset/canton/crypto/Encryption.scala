@@ -93,25 +93,12 @@ trait EncryptionOps extends DecryptionMetricsSupport {
       symmetricKey: SymmetricKey,
   ): Either[EncryptionError, ByteString]
 
-  /** Decrypts a message encrypted using `encryptWith`. Records latency for the decryption
-    * operation.
-    */
+  /** Decrypts a message encrypted asymmetrically. */
   def decryptWith[M](encrypted: AsymmetricEncrypted[M], privateKey: EncryptionPrivateKey)(
-      deserialize: ByteString => Either[DeserializationError, M]
-  ): Either[DecryptionError, M] =
-    decryptionMetrics.decryptLatency.time(decryptWithInternal(encrypted, privateKey)(deserialize))
-
-  /** Internal decryption primitive implemented by concrete backends. This bypasses higher-level
-    * wrappers (e.g. metrics and validation) and should only be used by internal decryption logic.
-    */
-  private[crypto] def decryptWithInternal[M](
-      encrypted: AsymmetricEncrypted[M],
-      privateKey: EncryptionPrivateKey,
-  )(
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M]
 
-  /** Decrypts a message encrypted using `encryptWith` */
+  /** Decrypts a message encrypted symmetrically. */
   def decryptWith[M](encrypted: Encrypted[M], symmetricKey: SymmetricKey)(
       deserialize: ByteString => Either[DeserializationError, M]
   ): Either[DecryptionError, M]
@@ -139,19 +126,6 @@ trait EncryptionPrivateOps extends DecryptionMetricsSupport {
   def decrypt[M](encrypted: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
   )(implicit
-      executionContext: ExecutionContext,
-      traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, DecryptionError, M] =
-    EitherTUtil.timed(decryptionMetrics.decryptLatency)(
-      decryptInternal(encrypted)(deserialize)
-    )
-
-  /** Internal decryption primitive implemented by concrete backends. This bypasses higher-level
-    * wrappers (e.g. metrics and validation) and should only be used by internal decryption logic.
-    */
-  private[crypto] def decryptInternal[M](encrypted: AsymmetricEncrypted[M])(
-      deserialize: ByteString => Either[DeserializationError, M]
-  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DecryptionError, M]
 
@@ -167,7 +141,7 @@ trait EncryptionPrivateStoreOps extends EncryptionPrivateOps {
   protected val encryptionOps: EncryptionOps
 
   /** Decrypts an encrypted message using the referenced private encryption key */
-  override private[crypto] def decryptInternal[M](encryptedMessage: AsymmetricEncrypted[M])(
+  override def decrypt[M](encryptedMessage: AsymmetricEncrypted[M])(
       deserialize: ByteString => Either[DeserializationError, M]
   )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, DecryptionError, M] =
     store

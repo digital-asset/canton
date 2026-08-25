@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules
 
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.WriteReadiness
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
@@ -27,10 +28,19 @@ object Mempool {
       from: Option[ModuleRef[SequencerNode.Message]] = None,
       // Only used for metrics, not populated by unit and simulation tests
       sender: Option[Member] = None,
+      // The maximum sequencing time of the underlying request, if known, so that the mempool can
+      //  discard expired requests without having to deserialize the payload. Not set for requests
+      //  without a well-defined max sequencing time, i.e. acknowledgement requests.
+      maxSequencingTime: Option[CantonTimestamp] = None,
   ) extends Message
 
   // From local availability
   final case class CreateLocalBatches(atMost: Short) extends Message
+
+  // From local output module, allows the mempool to discard queued requests whose
+  // max sequencing time has passed
+  final case class LatestKnownSequencingTimeUpdate(latestKnownSequencingTime: CantonTimestamp)
+      extends Message
 
   final case object MempoolBatchCreationClockTick extends Message
 

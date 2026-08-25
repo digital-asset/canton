@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.security.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.EnvironmentDefinition.allNodeNames
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.CryptoIntegrationTest
@@ -11,6 +12,7 @@ import com.digitalasset.canton.integration.tests.security.kms.KmsCryptoWithPreDe
 /** Runs a crypto integration tests with ALL nodes using an AWS KMS provider and pre-generated keys.
   * Consequently keys must be registered in Canton and nodes MUST be manually initialized.
   */
+@RequiresExternalKms
 class AwsKmsCryptoWithPreDefinedKeysReferenceIntegrationTestAllNodes
     extends CryptoIntegrationTest(
       AwsKmsCryptoIntegrationTestBase.defaultAwsKmsCryptoConfig
@@ -34,6 +36,7 @@ class AwsKmsCryptoWithPreDefinedKeysReferenceIntegrationTestAllNodes
   * but should still be able to run Canton. Consequently keys must be registered in Canton and the
   * participant node MUST be manually initialized.
   */
+@RequiresExternalKms
 class AwsKmsCryptoWithPreDefinedCrossAccountKeysReferenceIntegrationTest
     extends CryptoIntegrationTest(
       AwsKmsCryptoIntegrationTestBase.defaultAwsKmsCryptoConfig
@@ -64,6 +67,7 @@ class AwsKmsCryptoWithPreDefinedCrossAccountKeysReferenceIntegrationTest
   * pre-generated keys. Runs with persistence so we also check that it is able to recover from an
   * unexpected shutdown.
   */
+@RequiresExternalKms
 class AwsKmsCryptoWithPreDefinedKeysReferenceIntegrationTestPostgres
     extends CryptoIntegrationTest(
       AwsKmsCryptoIntegrationTestBase.defaultAwsKmsCryptoConfig

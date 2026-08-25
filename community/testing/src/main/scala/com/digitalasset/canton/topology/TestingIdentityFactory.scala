@@ -26,6 +26,7 @@ import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
+  SynchronizerLimits,
   SynchronizerParameters,
   TestSynchronizerParameters,
 }
@@ -533,6 +534,10 @@ class TestingIdentityFactory(
 
         override def latestTopologyChangeTimestamp: CantonTimestamp =
           currentSnapshotApproximationTimestamp
+
+        override def getSynchronizerLimits: SynchronizerLimits =
+          SynchronizerLimits.defaultFor(BaseTest.testedProtocolVersion)
+
       })(TraceContext.empty)
     )
     ips

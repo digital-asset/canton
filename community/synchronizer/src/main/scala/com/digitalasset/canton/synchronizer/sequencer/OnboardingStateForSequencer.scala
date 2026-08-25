@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -27,11 +28,24 @@ final case class OnboardingStateForSequencer(
   override protected val companionObj: OnboardingStateForSequencer.type =
     OnboardingStateForSequencer
 
-  private def toProtoV30: v30.OnboardingStateForSequencer = v30.OnboardingStateForSequencer(
-    Some(topologySnapshot.toProtoV30),
-    Some(staticSynchronizerParameters.toProtoV30),
-    Some(sequencerSnapshot.toProtoV30),
-  )
+  private def toProtoV30: v30.OnboardingStateForSequencer = {
+    val parameters = staticSynchronizerParameters.protoVersion match {
+      case ProtoVersion(30) =>
+        v30.OnboardingStateForSequencer.Parameters.V30(staticSynchronizerParameters.toProtoV30)
+      case ProtoVersion(31) =>
+        v30.OnboardingStateForSequencer.Parameters.V31(staticSynchronizerParameters.toProtoV31)
+      case other =>
+        throw new IllegalStateException(
+          s"Cannot serialize synchronizer parameters to proto version $other"
+        )
+    }
+
+    v30.OnboardingStateForSequencer(
+      Some(topologySnapshot.toProtoV30),
+      parameters,
+      Some(sequencerSnapshot.toProtoV30),
+    )
+  }
 }
 
 object OnboardingStateForSequencer extends VersioningCompanion[OnboardingStateForSequencer] {
@@ -55,11 +69,14 @@ object OnboardingStateForSequencer extends VersioningCompanion[OnboardingStateFo
         "topology_snapshot",
         value.topologySnapshot,
       )
-      staticSynchronizerParams <- ProtoConverter.parseRequired(
-        StaticSynchronizerParameters.fromProtoV30,
-        "static_synchronizer_parameters",
-        value.staticSynchronizerParameters,
-      )
+      staticSynchronizerParams <- value.parameters match {
+        case v30.OnboardingStateForSequencer.Parameters.V30(ssp) =>
+          StaticSynchronizerParameters.fromProtoV30(ssp)
+        case v30.OnboardingStateForSequencer.Parameters.V31(ssp) =>
+          StaticSynchronizerParameters.fromProtoV31(ssp)
+        case v30.OnboardingStateForSequencer.Parameters.Empty =>
+          Left(ProtoDeserializationError.FieldNotSet("parameters"))
+      }
       sequencerSnapshot <- ProtoConverter.parseRequired(
         SequencerSnapshot.fromProtoV30(staticSynchronizerParams.protocolVersion, _),
         "sequencer_snapshot",

@@ -157,7 +157,7 @@ abstract class InitialTopologySnapshotValidatorTest
         val signatures = ProtoValidation
           .validateLength(
             dndProto.signatures,
-            field = None,
+            "signatures",
             testedProtocolVersionValidation,
             ProtoValidation.MaxCollectionSize,
           )

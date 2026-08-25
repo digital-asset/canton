@@ -7,10 +7,6 @@ on:
         required: true
         type: string
     secrets:
-      DOCKERHUB_USERNAME:
-        required: true
-      DOCKERHUB_PASSWORD:
-        required: true
       DATADOG_API_KEY:
         required: true
       GCLOUD_SERVICE_KEY:
@@ -26,8 +22,6 @@ jobs:
     name: Smoke Test
     runs-on: ${{ inputs.runner }}
     env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
       GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
       EXECUTOR_JVM_HEAP_SIZE: 14000M
@@ -41,8 +35,6 @@ jobs:
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: 0
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Run smoke tests
         uses: ./.github/actions/test/run_tests

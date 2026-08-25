@@ -1,0 +1,87 @@
+name: Package Sequencer Driver API
+on:
+  workflow_call:
+    inputs:
+      is_nightly_workflow:
+        description: Whether this is a nightly workflow run
+        required: false
+        type: boolean
+        default: false
+      is_manual:
+        description: Whether this is a manual workflow run
+        required: false
+        type: boolean
+        default: false
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  package_sequencer_driver_api:
+    name: Package Sequencer Driver API
+    runs-on: ${{ inputs.runner }}
+    env:
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Package sequencer-driver-lib
+        uses: ./.github/actions/canton/package
+        env:
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          artifact_name: sequencer-driver-lib-release
+          artifact_suffix: .{jar,pom}
+          cmd: >-
+            sequencer-driver-lib/package
+            sequencer-driver-lib/packageSrc
+            sequencer-driver-lib/packageDoc
+            sequencer-driver-lib/makePom
+          location: sequencer-driver-lib/target/scala-2.13
+
+      - name: Package sequencer-driver-api-conformance-tests
+        uses: ./.github/actions/canton/package
+        env:
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          artifact_name: sequencer-driver-api-conformance-tests-release
+          artifact_suffix: .{jar,pom}
+          cmd: >-
+            sequencer-driver-api-conformance-tests/package
+            sequencer-driver-api-conformance-tests/packageSrc
+            sequencer-driver-api-conformance-tests/packageDoc
+            sequencer-driver-api-conformance-tests/makePom
+          location: community/sequencer-driver-api-conformance-tests/target/scala-2.13
+
+      - name: Package community-integration-testing-lib
+        uses: ./.github/actions/canton/package
+        env:
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          artifact_name: community-integration-testing-lib-release
+          artifact_suffix: .{jar,pom}
+          cmd: >-
+            community-integration-testing-lib/package
+            community-integration-testing-lib/packageSrc
+            community-integration-testing-lib/packageDoc
+            community-integration-testing-lib/makePom
+          location: community-integration-testing-lib/target/scala-2.13

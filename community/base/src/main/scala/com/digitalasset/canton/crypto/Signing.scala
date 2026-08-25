@@ -38,8 +38,8 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{Member, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, EitherUtil}
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.util.EitherUtil
+import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -77,28 +77,12 @@ trait SigningOps extends SigningMetricsSupport {
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = signingAlgorithmSpecs.default,
   )(implicit traceContext: TraceContext): Either[SigningError, Signature] =
-    signingMetrics.signingLatency.time(
-      signBytesInternal(hash.getCryptographicEvidence, signingKey, usage, signingAlgorithmSpec)
-    )
+    signBytes(hash.getCryptographicEvidence, signingKey, usage, signingAlgorithmSpec)
 
   /** Signs raw bytes using the private signing key. Convenience wrapper used when signing
     * non-hashed data.
     */
-  protected[crypto] def signBytes(
-      bytes: ByteString,
-      signingKey: SigningPrivateKey,
-      usage: NonEmpty[Set[SigningKeyUsage]],
-      signingAlgorithmSpec: SigningAlgorithmSpec = signingAlgorithmSpecs.default,
-  )(implicit traceContext: TraceContext): Either[SigningError, Signature] =
-    signingMetrics.signingLatency.time(
-      signBytesInternal(bytes, signingKey, usage, signingAlgorithmSpec)
-    )
-
-  /** Internal signing primitive implemented by concrete backends. Performs the actual cryptographic
-    * signing of raw bytes. This bypasses higher-level wrappers (e.g. metrics and validation) and
-    * should only be used by internal signing logic.
-    */
-  private[crypto] def signBytesInternal(
+  private[crypto] def signBytes(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -127,24 +111,18 @@ trait SigningPrivateOps extends SigningMetricsSupport {
 
   def signingSchemes: SigningCryptoSchemes
 
-  /** Signs the given hash using the referenced private signing key. Latency of the signing
-    * operation is recorded for all outcomes (successful signatures and signing failures).
-    */
+  /** Signs the given hash using the referenced private signing key. */
   def sign(
       hash: Hash,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = signingSchemes.algorithmSpecs.default,
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
+      tc: TraceContext
   ): EitherT[FutureUnlessShutdown, SigningError, Signature] =
-    EitherTUtil.timed(signingMetrics.signingLatency)(
-      signBytesInternal(hash.getCryptographicEvidence, signingKeyId, usage, signingAlgorithmSpec)
-    )
+    signBytes(hash.getCryptographicEvidence, signingKeyId, usage, signingAlgorithmSpec)
 
-  /** Signs the byte string directly, however it is encouraged to sign a hash. Latency of the
-    * signing operation is recorded for all outcomes (successful signatures and signing failures).
+  /** Signs the byte string directly, however it is encouraged to sign a hash.
     */
   def signBytes(
       bytes: ByteString,
@@ -152,23 +130,8 @@ trait SigningPrivateOps extends SigningMetricsSupport {
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = signingSchemes.algorithmSpecs.default,
   )(implicit
-      ec: ExecutionContext,
-      tc: TraceContext,
-  ): EitherT[FutureUnlessShutdown, SigningError, Signature] =
-    EitherTUtil.timed(signingMetrics.signingLatency)(
-      signBytesInternal(bytes, signingKeyId, usage, signingAlgorithmSpec)
-    )
-
-  /** Internal signing primitive that produces a signature for the given bytes. This bypasses
-    * higher-level wrappers (e.g. metrics and validation) and should only be used by internal
-    * signing logic.
-    */
-  private[crypto] def signBytesInternal(
-      bytes: ByteString,
-      signingKeyId: Fingerprint,
-      usage: NonEmpty[Set[SigningKeyUsage]],
-      signingAlgorithmSpec: SigningAlgorithmSpec = signingSchemes.algorithmSpecs.default,
-  )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, SigningError, Signature]
+      tc: TraceContext
+  ): EitherT[FutureUnlessShutdown, SigningError, Signature]
 
   /** Generates a new signing key pair with the given scheme and optional name, stores the private
     * key and returns the public key.
@@ -197,7 +160,7 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
 
   protected val signingOps: SigningOps
 
-  override private[crypto] def signBytesInternal(
+  override def signBytes(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -954,7 +917,7 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     * allowing all usages to maintain backward compatibility.
     */
   def fromProtoListWithDefaultV30(
-      usages: Seq[v30.SigningKeyUsage]
+      usages: ProtoUnvalidatedSeq[v30.SigningKeyUsage]
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
     ProtoValidation
       // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
@@ -970,7 +933,7 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
     * This is used for command requests, where `usage` is mandatory.
     */
   def fromProtoListWithoutDefaultV30(
-      usages: Seq[v30.SigningKeyUsage]
+      usages: ProtoUnvalidatedSeq[v30.SigningKeyUsage]
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
     ProtoValidation
       // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
@@ -988,7 +951,7 @@ object SigningKeyUsage extends PrettyPrintingCompanion[SigningKeyUsage] {
       )
 
   def fromProtoListWithoutDefaultV31(
-      usages: Seq[v31.SigningKeyUsage]
+      usages: ProtoUnvalidatedSeq[v31.SigningKeyUsage]
   ): ParsingResult[NonEmpty[Set[SigningKeyUsage]]] =
     ProtoValidation
       // TODO(#34479): validate the crypto key usage once the negotiated pvv is threaded here.
@@ -2594,7 +2557,7 @@ object SigningKeysWithThreshold {
       keysSeqP <- ProtoValidation
         .validateLength(
           value.keys,
-          Some("keys"),
+          "keys",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )
@@ -2623,7 +2586,7 @@ object SigningKeysWithThreshold {
       keysSeqP <- ProtoValidation
         .validateLength(
           value.keys,
-          Some("keys"),
+          "keys",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )

@@ -440,7 +440,7 @@ object TopologyMapping {
       case v31.TopologyMapping.Mapping.PartyToParticipant(value) =>
         PartyToParticipant.fromProtoV31(pvv, value)
       case v31.TopologyMapping.Mapping.SynchronizerParametersState(value) =>
-        SynchronizerParametersState.fromProtoV31(pvv, value)
+        SynchronizerParametersState.fromProtoV30(pvv, value)
       case v31.TopologyMapping.Mapping.SequencingDynamicParametersState(value) =>
         SequencingParametersState.fromProtoV30(pvv, value)
       case v31.TopologyMapping.Mapping.MediatorSynchronizerState(value) =>
@@ -509,7 +509,7 @@ object DelegationRestriction {
         ProtoValidation
           .validateLength(
             mappings,
-            Some("mappings"),
+            "mappings",
             pvv,
             ProtoValidation.MaxCollectionSize,
           )
@@ -537,7 +537,7 @@ object DelegationRestriction {
         ProtoValidation
           .validateLength(
             mappings,
-            Some("mappings"),
+            "mappings",
             pvv,
             ProtoValidation.MaxCollectionSize,
           )
@@ -1138,7 +1138,7 @@ object OwnerToKeyMapping extends TopologyMappingCompanion {
         Member.fromProtoPrimitive
       )
       keysSeqP <- ProtoValidation
-        .validateLength(keysP, Some("public_keys"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(keysP, "public_keys", pvv, ProtoValidation.MaxCollectionSize)
       keys <- ProtoConverter
         .parseRequiredNonEmpty(PublicKey.fromProtoPublicKeyV30, "public_keys", keysSeqP)
       otk <- create(member, keys).leftMap(ProtoDeserializationError.InvariantViolation(None, _))
@@ -1155,7 +1155,7 @@ object OwnerToKeyMapping extends TopologyMappingCompanion {
         Member.fromProtoPrimitive
       )
       keysSeqP <- ProtoValidation
-        .validateLength(keysP, Some("public_keys"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(keysP, "public_keys", pvv, ProtoValidation.MaxCollectionSize)
       keys <- ProtoConverter
         .parseRequiredNonEmpty(PublicKey.fromProtoPublicKeyV31, "public_keys", keysSeqP)
       otk <- create(member, keys).leftMap(ProtoDeserializationError.InvariantViolation(None, _))
@@ -1318,7 +1318,7 @@ object PartyToKeyMapping extends TopologyMappingCompanion {
         PartyId.fromProtoPrimitive
       )
       signingKeysSeqP <- ProtoValidation
-        .validateLength(signingKeysP, Some("signing_keys"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(signingKeysP, "signing_keys", pvv, ProtoValidation.MaxCollectionSize)
       signingKeysNE <-
         ProtoConverter.parseRequiredNonEmpty(
           SigningPublicKey.fromProtoV30,
@@ -1344,7 +1344,7 @@ object PartyToKeyMapping extends TopologyMappingCompanion {
         PartyId.fromProtoPrimitive
       )
       signingKeysSeqP <- ProtoValidation
-        .validateLength(signingKeysP, Some("signing_keys"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(signingKeysP, "signing_keys", pvv, ProtoValidation.MaxCollectionSize)
       signingKeysNE <-
         ProtoConverter.parseRequiredNonEmpty(
           SigningPublicKey.fromProtoV31,
@@ -1496,7 +1496,7 @@ object SynchronizerTrustCertificate extends TopologyMappingCompanion {
       featureFlagsP <- ProtoValidation
         .validateLength(
           valueP.featureFlags,
-          Some("feature_flags"),
+          "feature_flags",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )
@@ -2375,12 +2375,6 @@ final case class SynchronizerParametersState(
       synchronizerParameters = Some(parameters.toProtoV30),
     )
 
-  def toProtoSynchronizerParametersStateV31: v31.SynchronizerParametersState =
-    v31.SynchronizerParametersState(
-      synchronizerId = synchronizerId.toProtoPrimitive,
-      synchronizerParameters = Some(parameters.toProtoV31),
-    )
-
   def toProtoV30: Either[String, v30.TopologyMapping] =
     v30
       .TopologyMapping(
@@ -2393,7 +2387,7 @@ final case class SynchronizerParametersState(
     v31
       .TopologyMapping(
         v31.TopologyMapping.Mapping
-          .SynchronizerParametersState(toProtoSynchronizerParametersStateV31)
+          .SynchronizerParametersState(toProtoSynchronizerParametersStateV30)
       )
       .asRight
 
@@ -2430,25 +2424,6 @@ object SynchronizerParametersState extends TopologyMappingCompanion {
       )(SynchronizerId.fromProtoPrimitive)
       parameters <- ProtoConverter.parseRequired(
         DynamicSynchronizerParameters.fromProtoV30,
-        "synchronizer_parameters",
-        synchronizerParametersP,
-      )
-    } yield SynchronizerParametersState(synchronizerId, parameters)
-  }
-
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      value: v31.SynchronizerParametersState,
-  ): ParsingResult[SynchronizerParametersState] = {
-    val v31.SynchronizerParametersState(synchronizerIdP, synchronizerParametersP) = value
-    for {
-      synchronizerId <- ProtoValidation.validateThen(
-        synchronizerIdP,
-        "synchronizer_id",
-        pvv,
-      )(SynchronizerId.fromProtoPrimitive)
-      parameters <- ProtoConverter.parseRequired(
-        DynamicSynchronizerParameters.fromProtoV31,
         "synchronizer_parameters",
         synchronizerParametersP,
       )
@@ -2951,7 +2926,7 @@ object GrpcConnection {
       value: v30.LsuSequencerConnectionSuccessor.SequencerConnection,
   ): ParsingResult[GrpcConnection] =
     ProtoValidation
-      .validate(value.endpoints, Some("endpoints"), pvv, ProtoValidation.MaxCollectionSize)
+      .validate(value.endpoints, "endpoints", pvv, ProtoValidation.MaxCollectionSize)
       .flatMap(fromProtoPrimitives(_, value.customTrustCertificates))
 }
 

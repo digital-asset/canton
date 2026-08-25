@@ -13,7 +13,7 @@ import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.transaction.ParticipantSynchronizerLimits
 import com.digitalasset.canton.topology.{GeneratorsTopology, ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.version.{GeneratorsVersion, HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{GeneratorsLf, LfPartyId, LfVersioned}
 import com.digitalasset.daml.lf.transaction.{CreationTime, Versioned}
 import com.google.protobuf.ByteString
@@ -49,19 +49,25 @@ final class GeneratorsProtocol(
       topologyChangeDelay <- Arbitrary.arbitrary[NonNegativeFiniteDuration]
       enableTransparencyChecks <- Arbitrary.arbitrary[Boolean]
       serial <- Arbitrary.arbitrary[NonNegativeInt]
-
-      parameters = StaticSynchronizerParameters(
-        RequiredSigningSpecs(requiredSigningAlgorithmSpecs, requiredSigningKeySpecs),
-        RequiredEncryptionSpecs(requiredEncryptionAlgorithmSpecs, requiredEncryptionKeySpecs),
-        requiredSymmetricKeySchemes,
-        requiredHashAlgorithms,
-        requiredCryptoKeyFormats,
-        requiredSignatureFormats,
-        topologyChangeDelay,
-        enableTransparencyChecks,
+      synchronizerLimits <- GeneratorsVersion.defaultValueGen(
         protocolVersion,
-        serial,
+        StaticSynchronizerParameters.defaultSynchronizerLimitsUntil,
       )
+      parameters = StaticSynchronizerParameters
+        .create(
+          RequiredSigningSpecs(requiredSigningAlgorithmSpecs, requiredSigningKeySpecs),
+          RequiredEncryptionSpecs(requiredEncryptionAlgorithmSpecs, requiredEncryptionKeySpecs),
+          requiredSymmetricKeySchemes,
+          requiredHashAlgorithms,
+          requiredCryptoKeyFormats,
+          requiredSignatureFormats,
+          topologyChangeDelay,
+          enableTransparencyChecks,
+          protocolVersion,
+          serial,
+          synchronizerLimits,
+        )
+        .value
 
     } yield parameters)
 
@@ -118,12 +124,6 @@ final class GeneratorsProtocol(
           .choose(0L, 10000L)
           .map(NonNegativeFiniteDuration.tryOfMicros)
 
-//        synchronizerSizeLimits <-
-//          if (protocolVersion >= ProtocolVersion.v36) Arbitrary.arbitrary[SizeLimits]
-//          else Gen.const(SizeLimits.max)
-        // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
-        synchronizerSizeLimits <- Gen.const(SizeLimits.max)
-
         dynamicSynchronizerParameters = DynamicSynchronizerParameters.tryCreate(
           confirmationResponseTimeout,
           mediatorReactionTimeout,
@@ -138,7 +138,6 @@ final class GeneratorsProtocol(
           acsCommitmentsCatchupConfig,
           participantSynchronizerLimits,
           preparationTimeRecordTimeTolerance,
-          synchronizerSizeLimits,
         )(representativePV)
 
       } yield dynamicSynchronizerParameters

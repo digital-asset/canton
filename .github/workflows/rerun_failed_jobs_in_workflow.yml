@@ -18,9 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.pick_runner.outputs.runner }}
+    # Rerun failed jobs only on pull_request. Skip push (let flakes redden the branch) and
+    # merge_group (a failed check already ejects the PR, so a green rerun never merges).
     if: |
       github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.run_attempt == 1
+      github.event.workflow_run.run_attempt == 1 &&
+      !(github.event.workflow_run.name == 'Canton Build Required' &&
+        (github.event.workflow_run.event == 'push' ||
+         github.event.workflow_run.event == 'merge_group'))
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -36,7 +41,10 @@ jobs:
     timeout-minutes: 10
     if: |
       github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.run_attempt == 1
+      github.event.workflow_run.run_attempt == 1 &&
+      !(github.event.workflow_run.name == 'Canton Build Required' &&
+        (github.event.workflow_run.event == 'push' ||
+         github.event.workflow_run.event == 'merge_group'))
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5

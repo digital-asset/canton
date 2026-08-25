@@ -6,11 +6,6 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
-    secrets:
-      DOCKERHUB_USERNAME:
-        required: true
-      DOCKERHUB_PASSWORD:
-        required: true
 
 permissions:
   contents: read
@@ -21,8 +16,6 @@ jobs:
     name: Build Docs
     runs-on: ${{ inputs.runner }}
     env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
       EXECUTOR_JVM_HEAP_SIZE: 14000M
     steps:
       - name: Checkout
@@ -65,8 +58,6 @@ jobs:
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: 0
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Run docs-open tests
         uses: ./.github/actions/sbt/execute_sbt_command

@@ -10,6 +10,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.InProcessGrpcName
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.tea.ingestion.{TeaDebitIngestionService, TeaLedgerResources}
@@ -107,6 +108,7 @@ object TrafficEnforcementApp {
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
       clock: Clock,
+      metrics: TrafficEnforcementMetrics,
       onEventCommitted: () => Unit = () => (),
   )(implicit
       ec: ExecutionContext
@@ -145,6 +147,7 @@ object TrafficEnforcementApp {
         loggerFactory,
         timeouts,
         config.databaseQueryTimeout,
+        metrics,
         onEventCommitted,
       )
 

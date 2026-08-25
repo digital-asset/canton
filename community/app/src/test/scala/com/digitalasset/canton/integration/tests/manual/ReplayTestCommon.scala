@@ -53,7 +53,7 @@ object ReplayTestCommon {
         .getOrElse(5)
     )
 
-  private def prometheusMetricsConfig(httpServerPort: Port): MetricsConfig =
+  def prometheusMetricsConfig(httpServerPort: Port): MetricsConfig =
     MetricsConfig(
       reporters = Seq(
         Prometheus(
@@ -97,6 +97,7 @@ object ReplayTestCommon {
   def configTransforms(
       prometheusHttpServerPort: Port = Port.tryCreate(19090),
       prefix: String = ReplayTestSystemPropertyPrefix,
+      metricsConfigOverride: Option[MetricsConfig] = None,
   ): Seq[ConfigTransform] =
     ConfigTransforms.allDefaultsButGloballyUniquePorts ++ Seq(
       ConfigTransforms.disableAdditionalConsistencyChecks,
@@ -105,7 +106,8 @@ object ReplayTestCommon {
       ),
       _.focus(_.monitoring).replace(
         MonitoringConfig(
-          metrics = metricsConfig(prometheusHttpServerPort, prefix),
+          metrics =
+            metricsConfigOverride.getOrElse(metricsConfig(prometheusHttpServerPort, prefix)),
           tracing = TracingConfig(propagation = Propagation.Enabled),
         )
       ),

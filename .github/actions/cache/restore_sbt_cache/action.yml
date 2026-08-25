@@ -18,6 +18,10 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Resolve ref
+      id: resolve_ref
+      uses: ./.github/actions/utils/resolve_ref
+
     - name: Compute build hash
       id: compute_hash
       uses: ./.github/actions/cache/compute_build_hash
@@ -40,11 +44,11 @@ runs:
       with:
         path: ~/.ivy2/cache/
         key: >-
-          sbt-ivy-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+          sbt-ivy-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
         restore-keys: |-
-          sbt-ivy-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
-          sbt-ivy-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
-          sbt-ivy-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-ivy-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-ivy-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
+          sbt-ivy-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_hash.outputs.hash }}-sha=
 
     - name: Restore SBT cache
       id: restore_sbt
@@ -52,8 +56,8 @@ runs:
       with:
         path: ~/.sbt/
         key: >-
-          sbt-home-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+          sbt-home-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
         restore-keys: |-
-          sbt-home-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
-          sbt-home-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
-          sbt-home-os=${{ runner.os }}-branch=main-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-home-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=
+          sbt-home-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ steps.compute_main_sha.outputs.main_sha }}
+          sbt-home-os=${{ runner.os }}-branch=branch-main-hash=${{ steps.compute_hash.outputs.hash }}-sha=

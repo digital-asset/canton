@@ -56,6 +56,9 @@ abstract class RepairServiceIntegrationTest
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         // TODO(#23735): re-enable addition checks
         ConfigTransforms.disableAdditionalConsistencyChecks,
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .withSetup { implicit env =>
         import env.*

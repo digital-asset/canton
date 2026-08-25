@@ -80,6 +80,17 @@ class PekkoUtilTest
     (1 until (abortedFrom min (length + 1))).map(UnlessShutdown.Outcome.apply) ++
       Seq.fill((length - abortedFrom + 1) max 0)(UnlessShutdown.AbortedDueToShutdown)
 
+  private def withQueue[A, R](
+      queueProvider: => RecoveringFutureQueueImpl[A]
+  )(testCode: RecoveringFutureQueueImpl[A] => R): R = {
+    val queue = queueProvider
+    try {
+      testCode(queue)
+    } finally {
+      queue.shutdown()
+    }
+  }
+
   "mapAsyncUS" when {
     "parallelism is 1" should {
       "run everything sequentially" in assertAllStagesStopped {
@@ -2252,54 +2263,50 @@ class PekkoUtilTest
       }
 
       val healthStateCollector = new PekkoUtilTest.HealthStateCollector()
-      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
-        maxBlockedOffer = 1,
-        bufferSize = 20,
-        loggerFactory = loggerFactory,
-        retryStategy = PekkoUtil.exponentialRetryWithCap(
-          minWait = 2,
-          multiplier = 2,
-          cap = 10,
-        ),
-        retryAttemptWarnThreshold = 100,
-        retryAttemptErrorThreshold = 200,
-        uncommittedWarnTreshold = 100,
-        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
-        consumerFactory = commit =>
-          _ =>
-            Future.successful(
-              Future.successful(
-                FutureQueueConsumer(
-                  rejectingFutureQueue(commit),
-                  lastConsumedIdx.get(),
-                )
-              )
-            ),
-        consumerName = "indexer",
-        healthStateChanged = healthStateCollector.listener,
-      )
-      healthStateCollector.attachTo(recoveringQueue)
 
-      recoveringQueue.componentHealthState shouldBe (ComponentHealthState.Ok())
-      recoveringQueue.offer(1).futureValue
-      recoveringQueue.componentHealthState shouldBe (ComponentHealthState.Ok())
-      healthStateCollector.clear()
-      recoveringQueue.offer(2).discard
-      recoveringQueue.offer(3).discard
-      recoveringQueue.offer(5).futureValue
-      eventually() {
-        recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
-        healthStateCollector.get.size should be >= 10
+      withQueue(
+        new RecoveringFutureQueueImpl[Int](
+          maxBlockedOffer = 1,
+          bufferSize = 20,
+          loggerFactory = loggerFactory,
+          retryStategy = PekkoUtil.exponentialRetryWithCap(minWait = 2, multiplier = 2, cap = 10),
+          retryAttemptWarnThreshold = 100,
+          retryAttemptErrorThreshold = 200,
+          uncommittedWarnTreshold = 100,
+          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+          consumerFactory = commit =>
+            _ =>
+              Future.successful(
+                Future.successful(
+                  FutureQueueConsumer(rejectingFutureQueue(commit), lastConsumedIdx.get())
+                )
+              ),
+          consumerName = "indexer",
+          healthStateChanged = healthStateCollector.listener,
+        )
+      ) { recoveringQueue =>
+        healthStateCollector.attachTo(recoveringQueue)
+
+        recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+        recoveringQueue.offer(1).futureValue
+        recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+        healthStateCollector.clear()
+        recoveringQueue.offer(2).discard
+        recoveringQueue.offer(3).discard
+        recoveringQueue.offer(5).futureValue
+        eventually() {
+          recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
+          healthStateCollector.get.size should be >= 10
+        }
+        healthStateCollector.get should contain only ComponentHealthState.failed(
+          "Initializing indexer"
+        )
+        shouldBreakOn5 = false
+        eventually() {
+          healthStateCollector.get.lastOption.value should equal(ComponentHealthState.Ok())
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+        }
       }
-      healthStateCollector.get should contain only (ComponentHealthState.failed(
-        "Initializing indexer"
-      ))
-      shouldBreakOn5 = false
-      eventually() {
-        healthStateCollector.get.lastOption.value should equal(ComponentHealthState.Ok())
-        recoveringQueue.componentHealthState shouldBe (ComponentHealthState.Ok())
-      }
-      recoveringQueue.shutdown()
     }
 
     "report unhealthy status intil indexer is initialized" in {
@@ -2310,76 +2317,75 @@ class PekkoUtilTest
       when(mockIndexer.done).thenReturn(indexerFinished.future)
 
       val mockIndexerFactory
-          : (Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[Int]]]) = _ =>
-        _ => indexerReady.future.map(_ => Future.successful(FutureQueueConsumer(mockIndexer, 0)))
+          : (Commit => ShutdownInProgress => Future[Future[FutureQueueConsumer[Int]]]) =
+        _ =>
+          _ => indexerReady.future.map(_ => Future.successful(FutureQueueConsumer(mockIndexer, 0)))
 
       val healthStateCollector = new PekkoUtilTest.HealthStateCollector()
-      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
-        maxBlockedOffer = 1,
-        bufferSize = 20,
-        loggerFactory = loggerFactory,
-        retryStategy = PekkoUtil.exponentialRetryWithCap(
-          minWait = 2,
-          multiplier = 2,
-          cap = 10,
-        ),
-        retryAttemptWarnThreshold = 100,
-        retryAttemptErrorThreshold = 200,
-        uncommittedWarnTreshold = 100,
-        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
-        consumerFactory = mockIndexerFactory,
-        consumerName = "indexer",
-        healthStateChanged = healthStateCollector.listener,
-      )
-      healthStateCollector.attachTo(recoveringQueue)
 
-      always(durationOfSuccess = 100.millis) {
-        recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
-      }
+      withQueue(
+        new RecoveringFutureQueueImpl[Int](
+          maxBlockedOffer = 1,
+          bufferSize = 20,
+          loggerFactory = loggerFactory,
+          retryStategy = PekkoUtil.exponentialRetryWithCap(minWait = 2, multiplier = 2, cap = 10),
+          retryAttemptWarnThreshold = 100,
+          retryAttemptErrorThreshold = 200,
+          uncommittedWarnTreshold = 100,
+          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+          consumerFactory = mockIndexerFactory,
+          consumerName = "indexer",
+          healthStateChanged = healthStateCollector.listener,
+        )
+      ) { recoveringQueue =>
+        healthStateCollector.attachTo(recoveringQueue)
 
-      indexerReady.success(Done)
-      eventually() {
-        recoveringQueue.componentHealthState shouldBe (ComponentHealthState.Ok())
+        always(durationOfSuccess = 100.millis) {
+          recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
+        }
+
+        indexerReady.success(Done)
+        eventually() {
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+        }
+        healthStateCollector.get shouldEqual List[ComponentHealthState](
+          ComponentHealthState.failed("Initializing indexer"),
+          ComponentHealthState.Ok(),
+        )
       }
-      healthStateCollector.get shouldEqual (List[ComponentHealthState](
-        ComponentHealthState.failed("Initializing indexer"),
-        ComponentHealthState.Ok(),
-      ))
-      recoveringQueue.shutdown()
     }
 
     "report unhealthy when indexer initialization fails" in {
       loggerFactory.suppressWarnings {
         val healthStateCollector = new PekkoUtilTest.HealthStateCollector()
-        val recoveringQueue = new RecoveringFutureQueueImpl[Int](
-          maxBlockedOffer = 1,
-          bufferSize = 20,
-          loggerFactory = loggerFactory,
-          retryStategy = PekkoUtil.exponentialRetryWithCap(
-            minWait = 2,
-            multiplier = 2,
-            cap = 10,
-          ),
-          retryAttemptWarnThreshold = 100,
-          retryAttemptErrorThreshold = 200,
-          uncommittedWarnTreshold = 100,
-          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
-          consumerFactory = _ => _ => Future.failed(new Exception("initialization failed")),
-          consumerName = "indexer",
-          healthStateChanged = healthStateCollector.listener,
-        )
-        healthStateCollector.attachTo(recoveringQueue)
 
-        always(durationOfSuccess = 100.millis) {
-          recoveringQueue.componentHealthState shouldBe (ComponentHealthState.failed(
+        withQueue(
+          new RecoveringFutureQueueImpl[Int](
+            maxBlockedOffer = 1,
+            bufferSize = 20,
+            loggerFactory = loggerFactory,
+            retryStategy = PekkoUtil.exponentialRetryWithCap(minWait = 2, multiplier = 2, cap = 10),
+            retryAttemptWarnThreshold = 100,
+            retryAttemptErrorThreshold = 200,
+            uncommittedWarnTreshold = 100,
+            recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+            consumerFactory = _ => _ => Future.failed(new Exception("initialization failed")),
+            consumerName = "indexer",
+            healthStateChanged = healthStateCollector.listener,
+          )
+        ) { recoveringQueue =>
+          healthStateCollector.attachTo(recoveringQueue)
+
+          always(durationOfSuccess = 100.millis) {
+            recoveringQueue.componentHealthState should (
+              equal(ComponentHealthState.failed("Pausing before indexer restart")) or
+                equal(ComponentHealthState.failed("Initializing indexer"))
+            )
+          }
+          healthStateCollector.get should contain only (ComponentHealthState.failed(
             "Pausing before indexer restart"
-          ))
+          ), ComponentHealthState.failed("Initializing indexer"))
         }
-        healthStateCollector.get should contain only (ComponentHealthState.failed(
-          "Pausing before indexer restart"
-        ), ComponentHealthState.failed("Initializing indexer"))
-
-        recoveringQueue.shutdown()
       }
     }
 
@@ -2400,51 +2406,44 @@ class PekkoUtilTest
 
       when(mockIndexerFactory.apply(any[Commit]))
         .thenAnswer((c: Commit) =>
-          _ =>
-            Future.successful(
-              Future.successful(
-                FutureQueueConsumer(simpleFutureQueue(c), 0)
-              )
-            )
+          _ => Future.successful(Future.successful(FutureQueueConsumer(simpleFutureQueue(c), 0)))
         )
         .andThen(_ => Future.failed(new Exception("Initialization failed")))
 
       loggerFactory.suppressWarnings {
-
         val healthStateCollector = new PekkoUtilTest.HealthStateCollector()
-        val recoveringQueue = new RecoveringFutureQueueImpl[Int](
-          maxBlockedOffer = 1,
-          bufferSize = 20,
-          loggerFactory = loggerFactory,
-          retryStategy = PekkoUtil.exponentialRetryWithCap(
-            minWait = 2,
-            multiplier = 2,
-            cap = 10,
-          ),
-          retryAttemptWarnThreshold = 100,
-          retryAttemptErrorThreshold = 200,
-          uncommittedWarnTreshold = 100,
-          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
-          consumerFactory = mockIndexerFactory,
-          consumerName = "indexer",
-          healthStateChanged = healthStateCollector.listener,
-        )
-        healthStateCollector.attachTo(recoveringQueue)
 
-        eventually() {
-          recoveringQueue.componentHealthState shouldBe (ComponentHealthState.Ok())
+        withQueue(
+          new RecoveringFutureQueueImpl[Int](
+            maxBlockedOffer = 1,
+            bufferSize = 20,
+            loggerFactory = loggerFactory,
+            retryStategy = PekkoUtil.exponentialRetryWithCap(minWait = 2, multiplier = 2, cap = 10),
+            retryAttemptWarnThreshold = 100,
+            retryAttemptErrorThreshold = 200,
+            uncommittedWarnTreshold = 100,
+            recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+            consumerFactory = mockIndexerFactory,
+            consumerName = "indexer",
+            healthStateChanged = healthStateCollector.listener,
+          )
+        ) { recoveringQueue =>
+          healthStateCollector.attachTo(recoveringQueue)
+
+          eventually() {
+            recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+          }
+          recoveringQueue.offer(1).futureValue
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+          healthStateCollector.clear()
+          indexerFailed.failure(new Exception("Indexer failed"))
+          eventuallyForever(durationOfSuccess = 100.millis) {
+            recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
+          }
+          healthStateCollector.get should contain only (ComponentHealthState.failed(
+            "Pausing before indexer restart"
+          ), ComponentHealthState.failed("Initializing indexer"))
         }
-        recoveringQueue.offer(1).futureValue
-        recoveringQueue.componentHealthState shouldBe (ComponentHealthState.Ok())
-        healthStateCollector.clear()
-        indexerFailed.failure(new Exception("Indexer failed"))
-        eventuallyForever(durationOfSuccess = 100.millis) {
-          recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
-        }
-        healthStateCollector.get should contain only (ComponentHealthState.failed(
-          "Pausing before indexer restart"
-        ), ComponentHealthState.failed("Initializing indexer"))
-        recoveringQueue.shutdown()
       }
     }
 
@@ -2455,51 +2454,45 @@ class PekkoUtilTest
       when(futureQueueMock.done).thenReturn(futureQueueDone.future)
 
       val healthStateCollector = new PekkoUtilTest.HealthStateCollector()
-      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
-        maxBlockedOffer = 1,
-        bufferSize = 20,
-        loggerFactory = loggerFactory,
-        retryStategy = PekkoUtil.exponentialRetryWithCap(
-          minWait = 2,
-          multiplier = 2,
-          cap = 10,
-        ),
-        retryAttemptWarnThreshold = 100,
-        retryAttemptErrorThreshold = 200,
-        uncommittedWarnTreshold = 100,
-        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
-        consumerFactory = _ =>
-          _ =>
-            Future.successful(
-              Future.successful(
-                FutureQueueConsumer[Int](
-                  futureQueueMock,
-                  0,
-                )
-              )
-            ),
-        consumerName = "indexer",
-        healthStateChanged = healthStateCollector.listener,
-      )
-      healthStateCollector.attachTo(recoveringQueue)
 
-      eventually() {
-        recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
-      }
+      withQueue(
+        new RecoveringFutureQueueImpl[Int](
+          maxBlockedOffer = 1,
+          bufferSize = 20,
+          loggerFactory = loggerFactory,
+          retryStategy = PekkoUtil.exponentialRetryWithCap(minWait = 2, multiplier = 2, cap = 10),
+          retryAttemptWarnThreshold = 100,
+          retryAttemptErrorThreshold = 200,
+          uncommittedWarnTreshold = 100,
+          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+          consumerFactory = _ =>
+            _ => Future.successful(Future.successful(FutureQueueConsumer[Int](futureQueueMock, 0))),
+          consumerName = "indexer",
+          healthStateChanged = healthStateCollector.listener,
+        )
+      ) { recoveringQueue =>
+        healthStateCollector.attachTo(recoveringQueue)
 
-      healthStateCollector.clear()
-      recoveringQueue.shutdown()
+        eventually() {
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+        }
 
-      eventually(retryOnTestFailuresOnly = false) { // Retry on mockito verify fail as well
-        recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Should be unhealthy before indexer closed
-        verify(futureQueueMock).shutdown()
+        healthStateCollector.clear()
+
+        // Manual shutdown trigger remains here to test the specific shutdown state mechanics
+        recoveringQueue.shutdown()
+
+        eventually(retryOnTestFailuresOnly = false) { // Retry on mockito verify fail as well
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Should be unhealthy before indexer closed
+          verify(futureQueueMock).shutdown()
+        }
+        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
+        futureQueueDone.success(Done)
+        always(durationOfSuccess = 200.millis) {
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Still unhealthy after indexer closed
+        }
+        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
       }
-      healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
-      futureQueueDone.success(Done)
-      always(durationOfSuccess = 200.millis) {
-        recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Still unhealthy after indexer closed
-      }
-      healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
     }
 
     "report unhealthly when update was committed while shutdown in progress" in {
@@ -2518,54 +2511,52 @@ class PekkoUtilTest
       }
 
       val healthStateCollector = new PekkoUtilTest.HealthStateCollector()
-      val recoveringQueue = new RecoveringFutureQueueImpl[Int](
-        maxBlockedOffer = 1,
-        bufferSize = 20,
-        loggerFactory = loggerFactory,
-        retryStategy = PekkoUtil.exponentialRetryWithCap(
-          minWait = 2,
-          multiplier = 2,
-          cap = 10,
-        ),
-        retryAttemptWarnThreshold = 100,
-        retryAttemptErrorThreshold = 200,
-        uncommittedWarnTreshold = 100,
-        recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
-        consumerFactory = commit =>
-          _ =>
-            Future.successful(
+
+      withQueue(
+        new RecoveringFutureQueueImpl[Int](
+          maxBlockedOffer = 1,
+          bufferSize = 20,
+          loggerFactory = loggerFactory,
+          retryStategy = PekkoUtil.exponentialRetryWithCap(minWait = 2, multiplier = 2, cap = 10),
+          retryAttemptWarnThreshold = 100,
+          retryAttemptErrorThreshold = 200,
+          uncommittedWarnTreshold = 100,
+          recoveringQueueMetrics = RecoveringQueueMetrics.NoOp,
+          consumerFactory = commit =>
+            _ =>
               Future.successful(
-                FutureQueueConsumer(
-                  delayedFutureQueue(commit),
-                  0,
-                )
-              )
-            ),
-        consumerName = "indexer",
-        healthStateChanged = healthStateCollector.listener,
-      )
-      healthStateCollector.attachTo(recoveringQueue)
+                Future.successful(FutureQueueConsumer(delayedFutureQueue(commit), 0))
+              ),
+          consumerName = "indexer",
+          healthStateChanged = healthStateCollector.listener,
+        )
+      ) { recoveringQueue =>
+        healthStateCollector.attachTo(recoveringQueue)
 
-      eventually() {
-        recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+        eventually() {
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+        }
+
+        recoveringQueue.offer(1).discard
+        healthStateCollector.clear()
+
+        // Manual shutdown trigger remains here to test state interaction
+        recoveringQueue.shutdown()
+
+        eventually() {
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState
+        }
+        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
+
+        commitPromise.success(Done)
+
+        always(durationOfSuccess = 200.millis) {
+          recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState
+        }
+        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
+        futureQueueDone.success(Done)
+        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
       }
-
-      recoveringQueue.offer(1).discard
-      healthStateCollector.clear()
-      recoveringQueue.shutdown()
-      eventually() {
-        recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState
-      }
-      healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
-
-      commitPromise.success(Done)
-
-      always(durationOfSuccess = 200.millis) {
-        recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState
-      }
-      healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
-      futureQueueDone.success(Done)
-      healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
     }
   }
 

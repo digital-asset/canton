@@ -203,7 +203,7 @@ object EncryptedMultipleViews {
           ProtoValidation
             .validateLength(
               protoTrees.viewTrees,
-              Some("view_trees"),
+              "view_trees",
               pvv,
               ProtoValidation.MaxCollectionSize,
             )
@@ -703,7 +703,7 @@ object EncryptedSingleViewMessage
       viewHash <- ViewHash.fromProtoPrimitive(viewHashP)
       sessionKeyLookupSeqP <- ProtoValidation.validateLength(
         sessionKeyLookupP,
-        Some("session_key_lookup"),
+        "session_key_lookup",
         pvv,
         ProtoValidation.MaxCollectionSize,
       )
@@ -918,7 +918,7 @@ object EncryptedMultipleViewsMessage
       signature <- signatureP.traverse(Signature.fromProtoV30)
       viewHashesSeqP <- ProtoValidation.validateLength(
         viewHashesP,
-        Some("view_hashes"),
+        "view_hashes",
         pvv,
         ProtoValidation.MaxCollectionSize,
       )
@@ -930,7 +930,7 @@ object EncryptedMultipleViewsMessage
 
       sessionKeyLookupSeqP <- ProtoValidation.validateLength(
         sessionKeyLookupP,
-        Some("session_key_lookup"),
+        "session_key_lookup",
         pvv,
         ProtoValidation.MaxCollectionSize,
       )

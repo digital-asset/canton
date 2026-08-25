@@ -36,7 +36,7 @@ sealed trait TracedLtHash16Blake3 extends PrettyPrinting {
       traceData: Option[SingleTrace],
   ): Unit = {
     digest.add(bytes)
-    mutableTrace.addAll(traceData)
+    mutableTrace.addAll(traceData.toList)
   }
 
   /** Like [[com.digitalasset.canton.crypto.LtHash16Blake3.remove]], except trace data can be
@@ -47,7 +47,7 @@ sealed trait TracedLtHash16Blake3 extends PrettyPrinting {
       traceData: Option[SingleTrace],
   ): Unit = {
     digest.remove(bytes)
-    mutableTrace.addAll(traceData)
+    mutableTrace.addAll(traceData.toList)
   }
 
   /** Like [[com.digitalasset.canton.crypto.LtHash16Blake3.union]], but will append the trace
@@ -136,7 +136,7 @@ private[commitment] class TracedLtHash16Blake3Impl private (
     override protected val mutableTrace: SnapshottableVector[TraceElement],
 ) extends TracedLtHash16Blake3 {
 
-  def addAll(trace: IterableOnce[TraceElement]): Unit =
+  def addAll(trace: Iterable[TraceElement]): Unit =
     mutableTrace.addAll(trace)
 
   /** Equality is based on the digest, not the traced changes.

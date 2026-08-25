@@ -3,11 +3,14 @@
 
 package com.digitalasset.canton.tea.projection
 
+import com.daml.metrics.api.testing.InMemoryMetricsFactory
+import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.tea.projection.TrafficDelta.{creditBalanceDelta, debitBalanceDelta}
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.Traced
@@ -42,6 +45,8 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
   protected trait Backend {
     def store: TeaTrafficStore
     def newProjection(): TeaProjectionFactory
+    def metricsFactory: InMemoryMetricsFactory
+    def metrics: TrafficEnforcementMetrics
   }
 
   def additionalPekkoConfig: Config = ConfigFactory.empty()
@@ -150,6 +155,18 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
 
   private val alice = AccountId.tryCreate("alice")
 
+  def gaugeValue(name: MetricName, backend: Backend) =
+    backend.metricsFactory.metrics
+      .gauges(name)
+      .getOrElse(MetricsContext.Empty, sys.error(s"Gauge $name not found"))
+      .getValue
+
+  def eventGaugeValue(backend: Backend) =
+    gaugeValue(backend.metrics.projectionTimestamp.info.name, backend)
+
+  def offsetGaugeValue(backend: Backend) =
+    gaugeValue(backend.metrics.projectionOffset.info.name, backend)
+
   def teaProjection(): Unit = {
     "TeaProjection" should {
 
@@ -171,6 +188,8 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
             DeltaEvent(creditBalanceDelta(10), t1, eventSource),
             DeltaEvent(debitBalanceDelta(3), t2, eventSource),
           )
+          eventGaugeValue(backend) shouldBe t2.toEpochMilli
+          offsetGaugeValue(backend) shouldBe 2L
         } finally stopProjection(testKit, ref)
       }
 

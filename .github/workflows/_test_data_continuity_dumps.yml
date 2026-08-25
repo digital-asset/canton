@@ -14,10 +14,6 @@ on:
         required: true
         type: string
     secrets:
-      DOCKERHUB_USERNAME:
-        required: true
-      DOCKERHUB_PASSWORD:
-        required: true
       DATADOG_API_KEY:
         required: true
       GCLOUD_SERVICE_KEY:
@@ -59,8 +55,6 @@ jobs:
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: ${{ matrix.shard_index }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Download test names artifact
         uses: actions/download-artifact@v7

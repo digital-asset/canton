@@ -98,7 +98,7 @@ object ParticipantMetadata
       preparationTime <- CantonTimestamp.fromProtoPrimitive(preparationTimeP)
       workflowIdStr <- ProtoValidation.validate(
         workflowIdP,
-        Some("workflowId"),
+        "workflowId",
         pvv,
       )
       workflowId <- workflowIdStr match {

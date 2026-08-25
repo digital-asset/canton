@@ -91,6 +91,7 @@ import com.digitalasset.canton.user.{
   User,
   UserRight,
 }
+import com.digitalasset.canton.validation.ProtoUnvalidatedSeq
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
@@ -1001,10 +1002,13 @@ private[apiserver] final class ApiPartyManagementService private (
         .withFieldConst(_.scheme, SigningKeyScheme.SIGNING_KEY_SCHEME_UNSPECIFIED)
         .withFieldConst(
           _.usage,
-          Seq(
-            SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE,
-            SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP,
-            SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL,
+          // Chimney needs the field's exact type, so the fromSeq implicit cannot apply here.
+          ProtoUnvalidatedSeq(
+            Seq(
+              SigningKeyUsage.SIGNING_KEY_USAGE_NAMESPACE,
+              SigningKeyUsage.SIGNING_KEY_USAGE_PROOF_OF_OWNERSHIP,
+              SigningKeyUsage.SIGNING_KEY_USAGE_PROTOCOL,
+            )
           ),
         )
         .withFieldRenamed(_.keyData, _.publicKey)

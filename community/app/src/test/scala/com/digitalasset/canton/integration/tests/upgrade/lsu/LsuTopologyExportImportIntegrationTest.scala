@@ -47,7 +47,10 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
 
   override def configTransforms: Seq[ConfigTransform] =
     super.configTransforms ++ List(
-      ConfigTransforms.disableAutoInit(Set("sequencer3", "mediator3"))
+      ConfigTransforms.disableAutoInit(Set("sequencer3", "mediator3")),
+      // TODO(#35107) Upon disabling the old ACS commitment processor
+      //  this test fails: (enable the new pipeline) and make the fix
+      ConfigTransforms.enableOldAcsCommitmentProcessor,
     )
 
   override lazy val environmentDefinition: EnvironmentDefinition =

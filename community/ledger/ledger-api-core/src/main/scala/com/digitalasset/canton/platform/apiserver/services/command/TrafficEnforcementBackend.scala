@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.*
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
@@ -51,19 +52,71 @@ class TrafficEnforcementBackend(
     extends NamedLogging
     with FlagCloseable {
 
-  /** Validates that the account associated with the given account ID has sufficient balance to
+  /** Validates that the account associated with the given actAs parties has sufficient balance to
     * cover the specified traffic cost.
     *
-    * @param accountId
-    *   The account ID a request is expected to debit traffic cost from
+    * @param actAs
+    *   The command's actAs parties, which should contain exactly one party for traffic enforcement.
+    *   If it does not, the traffic validation for the request is either skipped (with an
+    *   informational message logged) or the submission is rejected, depending on
+    *   `rejectMultiPartySubmissions`.
     * @param trafficCost
     *   The expected traffic cost of the submission request
     * @return
-    *   A successful `Right` if the balance covers the cost, if cost enforcement is disabled, or if
-    *   a degradable lookup failure lets the submission through unchecked; a `Left` if the balance
-    *   is insufficient; otherwise a failed future.
+    *   Success if validation is successful
     */
   def validateTraffic(
+      actAs: Seq[LfPartyId],
+      trafficCost: Long,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext.fromTracedLogger(logger)
+    metrics.enforcementCheckDuration.timeEitherFUSWithLabels(
+      validateTrafficInternal(actAs, trafficCost),
+      labelMapping = {
+        case Left(e) => e.code.id
+        case Right(_) => "success"
+      },
+    )
+  }
+
+  private def validateTrafficInternal(
+      actAs: Seq[LfPartyId],
+      trafficCost: Long,
+  )(implicit
+      traceContext: TraceContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
+    logger.debug(
+      s"Validating traffic enforcement for actAs parties: $actAs, trafficCost: $trafficCost"
+    )
+    actAs match {
+      case singleActAs :: Nil if singleActAs == adminParty =>
+        logger.debug(
+          show"Skipping traffic enforcement validation for participant admin party: $singleActAs"
+        )
+        EitherT.pure(())
+      case singleActAs :: Nil =>
+        // In Canton 3.5, the account ID is bound to the submitter party
+        validateAccount(accountId = singleActAs, trafficCost = trafficCost)
+          .leftWiden[TrafficEnforcementErrors.TrafficEnforcementError]
+      case nonSingletonActAs if rejectMultiPartySubmissions =>
+        EitherT.leftT[FutureUnlessShutdown, Unit](
+          TrafficEnforcementErrors.MultiPartySubmissionRejected.Reject(
+            show"Traffic enforcement rejected submission with non-singleton actAs parties: $nonSingletonActAs"
+          )
+        )
+      case nonSingletonActAs =>
+        logger.info(
+          show"Skipping traffic enforcement validation due to non-singleton actAs parties: $nonSingletonActAs"
+        )
+        EitherT.pure(())
+    }
+  }
+
+  private def validateAccount(
       accountId: String,
       trafficCost: Long,
   )(implicit
@@ -91,6 +144,7 @@ class TrafficEnforcementBackend(
                   s"Traffic enforcement account lookup failed for account $accountId; degrading" +
                     s" and allowing the submission to proceed without a balance check.\n$grpcError"
                 )
+                metrics.allowedSubmissionOnLookupFailures.mark()
                 FutureUnlessShutdown.pure(None)
               case Left(grpcError) =>
                 FutureUnlessShutdown.failed(
@@ -107,7 +161,7 @@ class TrafficEnforcementBackend(
             EitherT.cond[FutureUnlessShutdown](
               accountResponse.balance >= trafficCost,
               (), {
-                metrics.notEnoughTraffic.mark()
+                metrics.insufficientBalanceRejections.mark()
                 TrafficEnforcementErrors.InsufficientBalance.Reject(
                   s"Insufficient balance (${accountResponse.balance}) for actual traffic cost ($trafficCost) for account $accountId"
                 )
@@ -116,55 +170,6 @@ class TrafficEnforcementBackend(
         }
       } yield ()
     }
-
-  /** Validates that the account associated with the given actAs parties has sufficient balance to
-    * cover the specified traffic cost.
-    *
-    * @param actAs
-    *   The command's actAs parties, which should contain exactly one party for traffic enforcement.
-    *   If it does not, the traffic validation for the request is either skipped (with an
-    *   informational message logged) or the submission is rejected, depending on
-    *   `rejectMultiPartySubmissions`.
-    * @param trafficCost
-    *   The expected traffic cost of the submission request
-    * @return
-    *   Success if validation is successful
-    */
-  def validateTraffic(
-      actAs: Seq[LfPartyId],
-      trafficCost: Long,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] = {
-    implicit val errorLoggingContext: ErrorLoggingContext =
-      ErrorLoggingContext.fromTracedLogger(logger)
-    logger.debug(
-      s"Validating traffic enforcement for actAs parties: $actAs, trafficCost: $trafficCost"
-    )
-
-    actAs match {
-      case singleActAs :: Nil if singleActAs == adminParty =>
-        logger.debug(
-          show"Skipping traffic enforcement validation for participant admin party: $singleActAs"
-        )
-        EitherT.pure(())
-      case singleActAs :: Nil =>
-        // In Canton 3.5, the account ID is bound to the submitter party
-        validateTraffic(accountId = singleActAs, trafficCost = trafficCost)
-          .leftWiden[TrafficEnforcementErrors.TrafficEnforcementError]
-      case nonSingletonActAs if rejectMultiPartySubmissions =>
-        EitherT.leftT[FutureUnlessShutdown, Unit](
-          TrafficEnforcementErrors.MultiPartySubmissionRejected.Reject(
-            show"Traffic enforcement rejected submission with non-singleton actAs parties: $nonSingletonActAs"
-          )
-        )
-      case nonSingletonActAs =>
-        logger.info(
-          show"Skipping traffic enforcement validation due to non-singleton actAs parties: $nonSingletonActAs"
-        )
-        EitherT.pure(())
-    }
-  }
 
   override def onClosed(): Unit =
     LifeCycle.close(trafficServiceClient)(logger)

@@ -165,7 +165,7 @@ object ContractAuthenticationData {
         // Bound before the sortedness scan: that scan walks the whole collection.
         relativeArgumentSuffixes <- ProtoValidation.validateLength(
           relativeArgumentSuffixesP,
-          Some("relative_argument_suffixes"),
+          "relative_argument_suffixes",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )

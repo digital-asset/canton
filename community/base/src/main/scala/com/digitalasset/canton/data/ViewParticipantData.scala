@@ -21,7 +21,11 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
+import com.digitalasset.canton.validation.{
+  ProtoUnvalidatedSeq,
+  ProtoUnvalidatedString,
+  ProtoValidation,
+}
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{
   LfCommand,
@@ -598,7 +602,7 @@ object ViewParticipantData
       resolvedKeysSeqP <- ProtoValidation
         .validateLength(
           resolvedKeysP,
-          Some("resolved_keys"),
+          "resolved_keys",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )
@@ -763,8 +767,8 @@ object ViewParticipantData
       bytes: ByteString,
   )(
       saltP: Option[com.digitalasset.canton.crypto.v30.Salt],
-      coreInputsP: Seq[v30.InputContract],
-      createdInSubviewArchivedInCoreP: Seq[ProtoUnvalidatedString],
+      coreInputsP: ProtoUnvalidatedSeq[v30.InputContract],
+      createdInSubviewArchivedInCoreP: ProtoUnvalidatedSeq[ProtoUnvalidatedString],
       externalCallResults: Seq[ViewExternalCallResult],
   ): ParsingResult[ViewParticipantData] =
     for {
@@ -862,12 +866,12 @@ object ViewParticipantData
         callIndex <- ProtoConverter.parseNonNegativeInt("call_index", callIndexP)
         extensionId <- ProtoValidation.validate(
           extensionIdP,
-          Some("extension_id"),
+          "extension_id",
           pvv,
         )
         functionId <- ProtoValidation.validate(
           functionIdP,
-          Some("function_id"),
+          "function_id",
           pvv,
         )
         checkingParties <- ProtoValidation

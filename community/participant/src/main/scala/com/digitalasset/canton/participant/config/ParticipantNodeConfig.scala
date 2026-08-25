@@ -437,13 +437,14 @@ final case class ParticipantNodeParameterConfig(
   *   whether the old ACS commitment processor should be disabled or not for protocol versions >=
   *   [[com.digitalasset.canton.version.ProtocolVersion.acsCommitmentRedesign]]. Default is false.
   * @param maxNumUpdatesBetweenCheckpoints
-  *   the maximum number of acs updates after which a checkpoint should be written.
+  *   the maximum number of acs updates after which a checkpoint should be written. Default is
+  *   10000.
   * @param counterpartyBatchSize
   *   how many counterparties get their digest updated at a time in case of a local party onboarding
   *   or offboarding. With the assumption that a party may have a lot of counterparties, but each
   *   counterparty is only hosted on a small number of participants, this parameter essentially
   *   limits how many digests are loaded into memory: `numDigestsInMemory = counterPartyBatchSize *
-  *   hostingParticipantsOfCounterparties`
+  *   hostingParticipantsOfCounterparties`. Default is 1000.
   * @param tracing
   *   the tracing mode. Default is disabled.
   * @param receivedCommitmentValidationParallelism
@@ -459,7 +460,7 @@ final case class ParticipantNodeParameterConfig(
   * @param useSequentialDigestAccumulator
   *   whether to use the sequential or the batching digest accumulator. Default is true.
   * @param loadBatching
-  *   the batching config for loading digests in the digest accumulator
+  *   the batching config for loading digests in the digest accumulator.
   * @param maxNumLoadedDigests
   *   the maximum number of digests that may be loaded into memory during processing. Default is
   *   1000.
@@ -470,7 +471,7 @@ final case class ParticipantNodeParameterConfig(
   *   parallelism; otherwise batches will not be filled up. If batching is disabled, this number
   *   directly controls the number of parallel DB reads and should therefore be much smaller.
   * @param digestComputeParallelism
-  *   The maximum number of parallel digest computations.
+  *   The maximum number of parallel digest computations. Default is 8.
   * @param digestPipelineBufferSize
   *   The size of intermediate buffers in the digest processor pipeline. If the size is 0, no
   *   buffers are added. These buffers implicitly increase the `digestLoadParallelism` by twice the
@@ -485,6 +486,13 @@ final case class ParticipantNodeParameterConfig(
   *     [[com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdate.AcsChangeUpdate]]
   *   - When ingesting active contracts during reinitialization
   *   - When ingesting active contracts while processing a locally onboarded party
+  * @param contractChangeClassificationParallelism
+  *   the number of concurrent contract change classifications. Default is 8.
+  * @param acsFetchParallelism
+  *   the number of concurrent acs streams that are prepared. This counteracts the high fixed cost
+  *   of establishing an ACS stream for many parties. The ACS stream of the first batch of
+  *   counterparties is fully consumed before the pipeline starts to consume the ACS stream of the
+  *   second batch of counterparties.
   */
 final case class AcsCommitmentConfig(
     enableRunningDigestProcessor: Boolean = false,
@@ -504,6 +512,8 @@ final case class AcsCommitmentConfig(
     digestPipelineBufferSize: NonNegativeInt = NonNegativeInt.zero,
     matchingParallelism: PositiveInt = PositiveInt.tryCreate(20),
     contractChangeClassificationBatchSize: PositiveInt = PositiveInt.tryCreate(100),
+    contractChangeClassificationParallelism: PositiveInt = PositiveInt.tryCreate(8),
+    acsFetchParallelism: PositiveInt = PositiveInt.tryCreate(16),
 )
 
 /** Config for [[com.digitalasset.canton.participant.commitment.AcsCommitmentSender]]

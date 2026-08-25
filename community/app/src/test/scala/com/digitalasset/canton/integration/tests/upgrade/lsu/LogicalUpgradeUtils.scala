@@ -34,9 +34,10 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.{FutureHelpers, SequencerAlias}
 import com.google.protobuf.ByteString
+import org.scalatest.EitherValues
 import org.scalatest.OptionValues.*
 
-trait LogicalUpgradeUtils extends FutureHelpers {
+trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
   protected def testName: String
   protected def logger: TracedLogger
 
@@ -151,7 +152,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       case newMediator: MediatorReference =>
         migrateMediator(
           newMediator,
-          PhysicalSynchronizerId(synchronizerId, newStaticSynchronizerParameters.toInternal),
+          PhysicalSynchronizerId(synchronizerId, newStaticSynchronizerParameters.toInternal.value),
           newSequencers,
           exportDirectory,
           newNodeToOldNodeName.get(migratedNode.name).value,

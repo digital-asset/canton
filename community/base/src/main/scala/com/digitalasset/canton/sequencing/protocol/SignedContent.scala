@@ -275,7 +275,7 @@ object SignedContent
     for {
       contentB <- ProtoConverter.required("content", content)
       signaturesSeq <- ProtoValidation
-        .validateLength(signatures, Some("signature"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(signatures, "signature", pvv, ProtoValidation.MaxCollectionSize)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "signature",

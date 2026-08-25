@@ -70,6 +70,8 @@ trait AcsCommitmentRepairIntegrationTest
           _.focus(_.parameters.engine.enableAdditionalConsistencyChecks)
             .replace(true)
         ),
+        // TODO(#35107) Disable the old processor and fix the test
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay)
