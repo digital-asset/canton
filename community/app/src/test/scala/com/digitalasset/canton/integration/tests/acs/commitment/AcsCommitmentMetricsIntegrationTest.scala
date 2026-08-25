@@ -59,6 +59,8 @@ trait AcsCommitmentMetricsIntegrationTest
     EnvironmentDefinition.P3_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        // TODO(#35107) Disable the old processor and fix the test
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
         _.focus(_.monitoring.metrics)
           .replace(

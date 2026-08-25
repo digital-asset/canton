@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.release.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.tests.release.kms.KmsCliIntegrationTest
 
 /** Cli integration test for AWS KMS configurations Before being able to run these tests locally,
   * you need to execute `sbt bundle`.
   */
+@RequiresExternalKms
 class AwsCliIntegrationTest extends KmsCliIntegrationTest {
   override lazy val kmsConfigs: Seq[String] = Seq(
     "community/app/src/test/resources/aws-kms-provider-tagged.conf",

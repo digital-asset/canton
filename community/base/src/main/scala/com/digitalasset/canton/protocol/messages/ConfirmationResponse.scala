@@ -325,7 +325,7 @@ object ConfirmationResponses extends VersioningCompanionMemoization[Confirmation
         ParticipantId.fromProtoPrimitive
       )
       responsesSeqP <- ProtoValidation
-        .validateLength(responsesP, Some("responses"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(responsesP, "responses", pvv, ProtoValidation.MaxCollectionSize)
       responses <- ProtoConverter.parseRequiredNonEmpty(
         ConfirmationResponse.fromProtoV30(pvv, _),
         "responses",

@@ -45,7 +45,10 @@ sealed trait OfflinePartyMigrationAcsCommitmentIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair)
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       // do no delay sending commitments
       .updateTestingConfig(

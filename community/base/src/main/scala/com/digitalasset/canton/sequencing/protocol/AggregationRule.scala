@@ -636,7 +636,7 @@ object AggregationRule
         eligibleMembersSeqP <- ProtoValidation
           .validateLength(
             eligibleMembersP,
-            Some("eligible_members"),
+            "eligible_members",
             pvv,
             ProtoValidation.MaxCollectionSize,
           )

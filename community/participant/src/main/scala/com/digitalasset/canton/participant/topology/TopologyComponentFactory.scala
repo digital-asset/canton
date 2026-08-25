@@ -307,14 +307,7 @@ class TopologyComponentFactory(
       asOf: CantonTimestamp,
       packageDependencyResolver: PackageDependencyResolver,
       preferCaching: Boolean,
-  )(implicit executionContext: ExecutionContext): TopologySnapshot = {
-    val snapshot = new StoreBasedTopologySnapshot(
-      psid,
-      asOf,
-      topologyStore,
-      packageDependencyResolver,
-      loggerFactory,
-    )
+  )(implicit executionContext: ExecutionContext): TopologySnapshot =
     if (preferCaching) {
       new WriteThroughCacheTopologySnapshot(
         psid,
@@ -324,9 +317,15 @@ class TopologyComponentFactory(
         asOf,
         loggerFactory,
       )
-    } else
-      snapshot
-  }
+    } else {
+      new StoreBasedTopologySnapshot(
+        psid,
+        asOf,
+        topologyStore,
+        packageDependencyResolver,
+        loggerFactory,
+      )
+    }
 
   def createHeadTopologySnapshot()(implicit
       executionContext: ExecutionContext

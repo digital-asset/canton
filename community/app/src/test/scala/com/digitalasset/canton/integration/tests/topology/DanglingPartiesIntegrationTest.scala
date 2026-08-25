@@ -48,9 +48,14 @@ class DanglingPartiesIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
-      .addConfigTransform(ConfigTransforms.updateAllParticipantConfigs { case (_, config) =>
-        config.focus(_.topology.disableOptionalTopologyChecks).replace(true)
-      })
+      .addConfigTransforms(
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
+        ConfigTransforms.updateAllParticipantConfigs { case (_, config) =>
+          config.focus(_.topology.disableOptionalTopologyChecks).replace(true)
+        },
+      )
       .withSetup { env =>
         import env.*
 

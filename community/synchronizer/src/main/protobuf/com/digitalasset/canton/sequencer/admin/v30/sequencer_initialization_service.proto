@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.sequencer.admin.v30;
 
 import "com/digitalasset/canton/protocol/v30/sequencing.proto";
+import "com/digitalasset/canton/protocol/v31/sequencing.proto";
 
 // Service allowing a sequencer node to initialize the sequencer instance.
 // Should typically only be exposed to the sequencer node and not all clients
@@ -37,7 +38,10 @@ message InitializeSequencerFromGenesisStateRequest {
   // the topology snapshot will be persisted in the synchronizer store of the sequencer
   bytes topology_snapshot = 1;
 
-  com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters synchronizer_parameters = 2;
+  oneof parameters {
+    com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
+    com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 3;
+  }
 }
 
 message InitializeSequencerFromGenesisStateResponse {
@@ -50,7 +54,10 @@ message InitializeSequencerFromGenesisStateResponse {
 message InitializeSequencerFromLsuPredecessorRequest {
   bytes topology_snapshot = 1;
 
-  com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters synchronizer_parameters = 2;
+  oneof parameters {
+    com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
+    com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 4;
+  }
 
   /*
      If true, it will not be checked that that current physical synchronizer id matches the successor in the topology state.
@@ -77,7 +84,10 @@ message InitializeSequencerFromGenesisStateV2Request {
   // the topology snapshot will be persisted in the synchronizer store of the sequencer
   bytes topology_snapshot = 1;
 
-  com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters synchronizer_parameters = 2;
+  oneof parameters {
+    com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters synchronizer_parameters_v30 = 2;
+    com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters synchronizer_parameters_v31 = 3;
+  }
 }
 
 message InitializeSequencerFromGenesisStateV2Response {

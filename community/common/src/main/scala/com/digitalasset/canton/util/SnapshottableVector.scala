@@ -32,8 +32,13 @@ class SnapshottableVector[A] {
     *   `addAll` is likely starving, because it needs to be re-executed due to the faster concurrent
     *   change via `add`.
     */
-  def addAll(xs: IterableOnce[A]): Unit =
-    vector.getAndUpdate(init => init.appendedAll(xs)).discard
+  def addAll(xs: Iterable[A]): Unit =
+    // avoid updating the internal reference if there is nothing to add
+    if (xs.nonEmpty) {
+      // xs is an `Iterable` and not `IterableOnce`, so that re-executions of the lambda (in case of a concurrent call)
+      // doesn't get an empty iterator, leading to incorrect results.
+      vector.getAndUpdate(init => init.appendedAll(xs)).discard
+    }
 
   override def toString: String = vector.get.toString
 }
@@ -41,7 +46,7 @@ class SnapshottableVector[A] {
 object SnapshottableVector {
   def empty[A]: SnapshottableVector[A] = new SnapshottableVector[A]
 
-  def from[A](xs: IterableOnce[A]): SnapshottableVector[A] = {
+  def from[A](xs: Iterable[A]): SnapshottableVector[A] = {
     val e = empty[A]
     e.addAll(xs)
     e

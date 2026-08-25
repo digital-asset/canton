@@ -97,6 +97,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
+  Mempool,
   Output,
   SequencerNode,
 }
@@ -2035,6 +2036,7 @@ class OutputModuleTest
       initialMembership: Membership = defaultTestMembership,
       availabilityRef: ModuleRef[Availability.Message[E]] = fakeModuleExpectingSilence,
       consensusRef: ModuleRef[Consensus.Message[E]] = fakeModuleExpectingSilence,
+      mempoolRef: ModuleRef[Mempool.Message] = fakeIgnoringModule,
       store: OutputMetadataStore[E] = createOutputMetadataStore[E],
       epochStoreReader: EpochStoreReader[E] = createEpochStore[E],
       blacklistLeaderSelectionPolicyState: Option[BlacklistLeaderSelectionPolicyState] = None,
@@ -2091,6 +2093,7 @@ class OutputModuleTest
       SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
       availabilityRef,
       consensusRef,
+      mempoolRef,
       loggerFactory,
       timeouts,
       requestInspector,

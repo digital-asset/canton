@@ -25,6 +25,13 @@ import java.time.Duration
 final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-incorrect-sequencer-identity"
 
+  // TODO(#35107) Upon disabling the old ACS commitment processor
+  //  this test fails: (enable the new pipeline) and make the fix
+  override def configTransforms: Seq[ConfigTransform] =
+    super.configTransforms ++ Seq(
+      ConfigTransforms.enableOldAcsCommitmentProcessor
+    )
+
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
@@ -159,6 +166,13 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
   */
 final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-sequencer-successor-is-predecessor"
+
+  // TODO(#35107) Upon disabling the old ACS commitment processor
+  //  this test fails: (enable the new pipeline) and make the fix
+  override def configTransforms: Seq[ConfigTransform] =
+    super.configTransforms ++ Seq(
+      ConfigTransforms.enableOldAcsCommitmentProcessor
+    )
 
   registerPlugin(
     new UseBftSequencer(

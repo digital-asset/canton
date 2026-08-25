@@ -119,7 +119,7 @@ object RecipientsTree {
       childTrees <- ProtoValidation
         .validateLength(
           treeProto.children,
-          Some("children"),
+          "children",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )

@@ -151,7 +151,7 @@ class GrpcTopologyAggregationService(
       filterParty <- wrapErrUS(
         ProtoValidation.validate(
           filterPartyP,
-          Some("filter_party"),
+          "filter_party",
           ProtocolVersionValidation.AlwaysValidation,
         )
       )
@@ -159,7 +159,7 @@ class GrpcTopologyAggregationService(
         ProtoValidation
           .validate(
             filterParticipantP,
-            Some("filter_participant"),
+            "filter_participant",
             ProtocolVersionValidation.AlwaysValidation,
           )
       )
@@ -269,7 +269,7 @@ class GrpcTopologyAggregationService(
       filterKeyOwnerUid <- wrapErrUS(
         ProtoValidation.validate(
           request.filterKeyOwnerUid,
-          Some("filter_key_owner_uid"),
+          "filter_key_owner_uid",
           ProtocolVersionValidation.AlwaysValidation,
         )
       )

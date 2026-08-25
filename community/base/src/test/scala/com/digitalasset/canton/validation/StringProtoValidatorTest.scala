@@ -25,15 +25,15 @@ class StringProtoValidatorTest extends AnyWordSpec with EitherValues with Matche
     }
   }
 
-  "ProtoValidator[String] version gate" should {
-    "reject bad content from v36" in {
+  "ProtoValidator[String] validating protocol version" should {
+    "reject bad content from that version on" in {
       validator
-        .validate(bad, ProtocolVersion.v36, field)
+        .validate(bad, ProtocolVersion.stringValidation, field)
         .left
         .value shouldBe a[StringConversionError]
     }
 
-    "pass bad content through before v36 (backwards compatibility)" in {
+    "pass bad content through below it (backwards compatibility)" in {
       validator.validate(bad, ProtocolVersion.v35, field).value shouldBe bad
     }
   }

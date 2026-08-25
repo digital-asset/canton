@@ -13,11 +13,40 @@ object ProtoValidation {
   // TODO(#34856) Replace with per-field limits; Int.MaxValue makes the bound check a no-op
   val MaxCollectionSize: Int = Int.MaxValue
 
-  /** Validate `value` via its `ProtoValidator`, dispatching on the `ProtocolVersionValidation`:
-    * `PV` gates the check on the negotiated version, `NoValidation` passes through unchecked, and
-    * `AlwaysValidation` runs the check unconditionally.
+  /** Validate `value` via its `ProtoValidator`.
+    *
+    * @param field
+    *   the validated field, named in the error; `validateNoField` is the only caller without one
+    * @param pvv
+    *   `PV` runs the check from the validating protocol version on, `NoValidation` passes through
+    *   unchecked, `AlwaysValidation` runs it unconditionally
     */
   def validate[A](
+      value: ProtoUnvalidated[A],
+      field: String,
+      pvv: ProtocolVersionValidation,
+  )(implicit validator: ProtoValidator[A]): ParsingResult[A] =
+    validateOptionalField(value, Some(field), pvv)
+
+  /** `validate` an optional field, validating the content when present. */
+  def validate[A](
+      value: Option[ProtoUnvalidated[A]],
+      field: String,
+      pvv: ProtocolVersionValidation,
+  )(implicit validator: ProtoValidator[A]): ParsingResult[Option[A]] =
+    value.traverse(validate(_, field, pvv))
+
+  /** `validate` a value with no field to blame: needed by the Chimney bridge, whose failure path
+    * comes from the transformer. Package-private so no `fromProto` can drop the name that
+    * `validate` requires.
+    */
+  private[validation] def validateNoField[A](
+      value: ProtoUnvalidated[A],
+      pvv: ProtocolVersionValidation,
+  )(implicit validator: ProtoValidator[A]): ParsingResult[A] =
+    validateOptionalField(value, None, pvv)
+
+  private def validateOptionalField[A](
       value: ProtoUnvalidated[A],
       field: Option[String],
       pvv: ProtocolVersionValidation,
@@ -29,29 +58,15 @@ object ProtoValidation {
         validator.validate(value.unvalidated, field)
     }
 
-  /** `validate` an optional field, validating the content when present. */
-  def validate[A](
-      value: Option[ProtoUnvalidated[A]],
-      field: Option[String],
-      pvv: ProtocolVersionValidation,
-  )(implicit validator: ProtoValidator[A]): ParsingResult[Option[A]] =
-    value.traverse(validate(_, field, pvv))
-
-  /** `validate` every element of a repeated field (fails on the first invalid element). */
-  def validate[A](
-      values: Seq[ProtoUnvalidated[A]],
-      field: Option[String],
-      pvv: ProtocolVersionValidation,
-  )(implicit validator: ProtoValidator[A]): ParsingResult[Seq[A]] =
-    values.traverse(validate(_, field, pvv))
-
-  /** `validate`, then `parse` the value with its field name — e.g. `validateThen(msg.f, "f",
-    * pvv)(Xyz.fromProtoPrimitive)`.
+  /** `validate`, then `parse`, e.g. `validateThen(msg.f, "f", pvv)(Xyz.fromProtoPrimitive)`.
+    *
+    * @param parse
+    *   applied to the validated value with the field name
     */
   def validateThen[A, B](value: ProtoUnvalidated[A], field: String, pvv: ProtocolVersionValidation)(
       parse: (A, String) => ParsingResult[B]
   )(implicit validator: ProtoValidator[A]): ParsingResult[B] =
-    validate(value, Some(field), pvv).flatMap(parse(_, field))
+    validate(value, field, pvv).flatMap(parse(_, field))
 
   /** `validateThen` an optional field, validating and parsing the content when present. */
   def validateThen[A, B](
@@ -63,16 +78,6 @@ object ProtoValidation {
   ): ParsingResult[Option[B]] =
     value.traverse(validateThen(_, field, pvv)(parse))
 
-  /** `validateThen` every element of a repeated field (fails on the first invalid element). */
-  def validateThen[A, B](
-      values: Seq[ProtoUnvalidated[A]],
-      field: String,
-      pvv: ProtocolVersionValidation,
-  )(parse: (A, String) => ParsingResult[B])(implicit
-      validator: ProtoValidator[A]
-  ): ParsingResult[Seq[B]] =
-    values.traverse(validateThen(_, field, pvv)(parse))
-
   /** Bound a repeated field and hand back its raw elements; an unbounded length is itself
     * unvalidated input. The whole check for a repeated message field, whose elements validate
     * themselves in their own `fromProto`. For [[ProtoUnvalidated]] elements use `validate`, which
@@ -81,31 +86,32 @@ object ProtoValidation {
     * @param field
     *   the bounded field, named in the error
     * @param pvv
-    *   `PV` gates the bound on the negotiated version (so older peers stay compatible),
-    *   `NoValidation` leaves it unbounded, `AlwaysValidation` bounds it unconditionally
+    *   `PV` applies the bound from the validating protocol version on (so older peers stay
+    *   compatible), `NoValidation` leaves it unbounded, `AlwaysValidation` bounds it
+    *   unconditionally
     * @param maxLength
     *   the largest accepted element count
     */
   def validateLength[E](
-      values: Seq[E],
-      field: Option[String],
+      seq: ProtoUnvalidatedSeq[E],
+      field: String,
       pvv: ProtocolVersionValidation,
       maxLength: Int,
   ): ParsingResult[Seq[E]] = {
     def bounded: ParsingResult[Seq[E]] =
       Either.cond(
-        values.sizeIs <= maxLength,
-        values,
+        seq.sizeIs <= maxLength,
+        seq.elements,
         InvariantViolation(
-          field.getOrElse(""),
-          s"repeated field has ${values.size} elements, exceeding the maximum of $maxLength",
+          field,
+          s"repeated field has ${seq.size} elements, exceeding the maximum of $maxLength",
         ),
       )
 
     pvv match {
       case ProtocolVersionValidation.PV(pv) =>
-        if (pv > ProtocolVersion.v35) bounded else Right(values)
-      case ProtocolVersionValidation.NoValidation => Right(values)
+        if (pv >= ProtocolVersion.boundsCheck) bounded else Right(seq.elements)
+      case ProtocolVersionValidation.NoValidation => Right(seq.elements)
       case ProtocolVersionValidation.AlwaysValidation => bounded
     }
   }
@@ -117,32 +123,32 @@ object ProtoValidation {
     *   applied to each element with the field name
     */
   def validateLengthThen[E, B](
-      values: Seq[E],
+      seq: ProtoUnvalidatedSeq[E],
       field: String,
       pvv: ProtocolVersionValidation,
       maxLength: Int,
   )(parse: (E, String) => ParsingResult[B]): ParsingResult[Seq[B]] =
-    validateLength(values, Some(field), pvv, maxLength).flatMap(_.traverse(parse(_, field)))
+    validateLength(seq, field, pvv, maxLength).flatMap(_.traverse(parse(_, field)))
 
   /** [[validateLength]], then the matching [[ProtoValidator]] on every element. */
   def validate[A](
-      values: Seq[ProtoUnvalidated[A]],
-      field: Option[String],
+      seq: ProtoUnvalidatedSeq[ProtoUnvalidated[A]],
+      field: String,
       pvv: ProtocolVersionValidation,
       maxLength: Int,
   )(implicit validator: ProtoValidator[A]): ParsingResult[Seq[A]] =
-    validateLength(values, field, pvv, maxLength).flatMap(_.traverse(validate(_, field, pvv)))
+    validateLength(seq, field, pvv, maxLength).flatMap(_.traverse(validate(_, field, pvv)))
 
   /** `validate`, then `parse` every element, e.g. `validateThen(msg.parties, "parties",
     * pvv)(PartyId.fromProtoPrimitive)`.
     */
   def validateThen[A, B](
-      values: Seq[ProtoUnvalidated[A]],
+      seq: ProtoUnvalidatedSeq[ProtoUnvalidated[A]],
       field: String,
       pvv: ProtocolVersionValidation,
       maxLength: Int,
   )(parse: (A, String) => ParsingResult[B])(implicit
       validator: ProtoValidator[A]
   ): ParsingResult[Seq[B]] =
-    validate(values, Some(field), pvv, maxLength).flatMap(_.traverse(parse(_, field)))
+    validate(seq, field, pvv, maxLength).flatMap(_.traverse(parse(_, field)))
 }

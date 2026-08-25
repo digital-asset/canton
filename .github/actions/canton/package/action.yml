@@ -6,6 +6,10 @@ inputs:
     default: .tar.gz
     required: false
     description: Suffix to append to the artifact name (e.g., .tar.gz)
+  artifact_name:
+    required: false
+    default: ""
+    description: Explicit artifact name to use for upload. If empty, defaults to "<job>-release<artifact_suffix>".
   cmd:
     required: true
     description: SBT command to execute for packaging
@@ -41,5 +45,5 @@ runs:
     - name: Upload release artifact
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ github.job }}-release${{ inputs.artifact_suffix }}
+        name: ${{ inputs.artifact_name || format('{0}-release{1}', github.job, inputs.artifact_suffix) }}
         path: tmp-release

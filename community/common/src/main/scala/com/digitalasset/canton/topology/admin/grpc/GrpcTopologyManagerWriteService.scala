@@ -102,7 +102,7 @@ class GrpcTopologyManagerWriteService(
           ProtoValidation
             .validateLength(
               forceChanges,
-              Some("force_changes"),
+              "force_changes",
               ProtocolVersionValidation.AlwaysValidation,
               ProtoValidation.MaxCollectionSize,
             )
@@ -160,7 +160,7 @@ class GrpcTopologyManagerWriteService(
           forceFlags <- ProtoValidation
             .validateLength(
               forceChanges,
-              Some("force_changes"),
+              "force_changes",
               ProtocolVersionValidation.AlwaysValidation,
               ProtoValidation.MaxCollectionSize,
             )
@@ -236,7 +236,7 @@ class GrpcTopologyManagerWriteService(
       forceFlags <- ProtoValidation
         .validateLength(
           requestP.forceFlags,
-          Some("force_flags"),
+          "force_flags",
           ProtocolVersionValidation.AlwaysValidation,
           ProtoValidation.MaxCollectionSize,
         )
@@ -273,7 +273,7 @@ class GrpcTopologyManagerWriteService(
         ProtoValidation
           .validateLength(
             request.forceChanges,
-            Some("force_changes"),
+            "force_changes",
             // Always validate the length and not dependent on the store's protocol version
             ProtocolVersionValidation.AlwaysValidation,
             ProtoValidation.MaxCollectionSize,
@@ -472,7 +472,7 @@ class GrpcTopologyManagerWriteService(
         .fromEither[FutureUnlessShutdown](
           ProtoValidation.validateLength(
             request.proposals,
-            Some("proposals"),
+            "proposals",
             ProtocolVersionValidation.AlwaysValidation,
             ProtoValidation.MaxCollectionSize,
           )
@@ -534,7 +534,7 @@ class GrpcTopologyManagerWriteService(
         .fromProtoPrimitive(request.protocolVersion)
         .leftMap(ProtoDeserializationFailure.Wrap(_))
       name <- ProtoValidation
-        .validate(request.name, Some("name"), ProtocolVersionValidation.AlwaysValidation)
+        .validate(request.name, "name", ProtocolVersionValidation.AlwaysValidation)
         .leftMap(ProtoDeserializationFailure.Wrap(_))
       storeId <- TemporaryStore
         .create(name)

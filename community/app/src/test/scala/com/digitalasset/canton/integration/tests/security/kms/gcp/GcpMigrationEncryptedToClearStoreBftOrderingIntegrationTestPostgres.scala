@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.security.kms.gcp
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.{
   EncryptedPrivateStoreStatus,
   UseBftSequencer,
@@ -14,6 +15,7 @@ import com.digitalasset.canton.integration.tests.security.kms.MigrationEncrypted
 /** Tests a migration from an encrypted private store that uses GCP KMS to a clear crypto private
   * store.
   */
+@RequiresExternalKms
 class GcpMigrationEncryptedToClearStoreBftOrderingIntegrationTestPostgres
     extends MigrationEncryptedToClearStoreIntegrationTest
     with GcpEncryptedCryptoPrivateStoreTestBase {

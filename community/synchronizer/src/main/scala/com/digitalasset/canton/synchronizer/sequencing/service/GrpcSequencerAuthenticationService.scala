@@ -68,7 +68,7 @@ class GrpcSequencerAuthenticationService(
     (for {
       memberStr <- eitherT(
         ProtoValidation
-          .validate(request.member, Some("member"), pvv)
+          .validate(request.member, "member", pvv)
           .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
       )
       member <- eitherT(deserializeMember(memberStr))
@@ -127,7 +127,7 @@ class GrpcSequencerAuthenticationService(
       _ <- eitherT(handshakeValidation(request))
       memberStr <- eitherT(
         ProtoValidation
-          .validate(request.member, Some("member"), pvv)
+          .validate(request.member, "member", pvv)
           .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), true))
       )
       member <- eitherT(deserializeMember(memberStr))
@@ -146,7 +146,7 @@ class GrpcSequencerAuthenticationService(
       val loggedMemberProtocolVersions = ProtoValidation
         .validateLength(
           request.memberProtocolVersions,
-          Some("member_protocol_versions"),
+          "member_protocol_versions",
           pvv,
           sequencerLimits.maxMemberProtocolVersions.value,
         )
@@ -216,7 +216,7 @@ class GrpcSequencerAuthenticationService(
   // to "invalid" (the request has already been rejected in the for-comprehension by then).
   private def memberForLogging(member: ProtoUnvalidatedString): String =
     ProtoValidation
-      .validate(member, Some("member"), pvv)
+      .validate(member, "member", pvv)
       .getOrElse("invalid")
 
   /** Validates the handshake request.
@@ -229,7 +229,7 @@ class GrpcSequencerAuthenticationService(
       memberProtocolVersions <- ProtoValidation
         .validateLength(
           request.memberProtocolVersions,
-          Some("member_protocol_versions"),
+          "member_protocol_versions",
           pvv,
           sequencerLimits.maxMemberProtocolVersions.value,
         )
@@ -237,7 +237,7 @@ class GrpcSequencerAuthenticationService(
       clientVersion <- ProtoValidation
         .validate(
           request.clientVersion,
-          Some("client_version"),
+          "client_version",
           pvv,
         )
         .leftMap(err => (Status.INVALID_ARGUMENT.withDescription(err.toString), false))

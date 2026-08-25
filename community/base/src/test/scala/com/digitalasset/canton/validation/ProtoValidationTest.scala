@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.validation
 
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, StringConversionError}
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -11,88 +13,98 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
 
-  private val field = Some("f")
+  // every entry point requires the name; only the errors carry it as an Option
+  private val fieldName = "f"
+  private val field = Some(fieldName)
   private val bad = "a\u0000b" // NUL, rejected by the content check
   // Proto string fields arrive wrapped; wrap test inputs the same way.
   private def u(s: String): ProtoUnvalidatedString = ProtoUnvalidatedString(s)
-  private def seq(ss: String*): Seq[ProtoUnvalidatedString] = ss.map(u)
-  private val pvv36 = ProtocolVersionValidation.PV(ProtocolVersion.v36)
-  private val pvv35 = ProtocolVersionValidation.PV(ProtocolVersion.v35)
+  private def seq[E](es: E*): ProtoUnvalidatedSeq[E] = ProtoUnvalidatedSeq(es)
+  private def seqStr(ss: String*): ProtoUnvalidatedSeq[ProtoUnvalidatedString] = seq(ss.map(u)*)
+  // Each check has its own validating protocol version, so pin each fixture to that alias.
+  private val pvvStrings = ProtocolVersionValidation.PV(ProtocolVersion.stringValidation)
+  private val pvvBounds = ProtocolVersionValidation.PV(ProtocolVersion.boundsCheck)
+  private val pvv35 = ProtocolVersionValidation.PV(ProtocolVersion.v35) // below both of them
+
+  /** The field an error blames, the caller's only pointer to what failed. */
+  private def fieldOf(err: ProtoDeserializationError): Option[String] = err match {
+    case StringConversionError(_, f) => f
+    case InvariantViolation(f, _) => f
+    case other => fail(s"expected an error carrying a field, got $other")
+  }
 
   "ProtoValidation.validate" should {
-    "gate a validation on a protocol version" in {
-      // We use the string validator instance in this test. String validation is only enabled in pv36 or later
+    "validate only from the validating protocol version on" in {
+      // We use the string validator instance, whose validating protocol version is stringValidation.
       ProtoValidation
-        .validate(u(bad), field, ProtocolVersionValidation.PV(ProtocolVersion.v36))
+        .validate(u(bad), fieldName, pvvStrings)
         .left
         .value shouldBe a[StringConversionError]
       ProtoValidation
-        .validate(u(bad), field, ProtocolVersionValidation.PV(ProtocolVersion.v35))
+        .validate(u(bad), fieldName, pvv35)
         .value shouldBe bad
     }
 
     "pass through a trusted NoValidation source unchecked" in {
       ProtoValidation
-        .validate(u(bad), field, ProtocolVersionValidation.NoValidation)
+        .validate(u(bad), fieldName, ProtocolVersionValidation.NoValidation)
         .value shouldBe bad
     }
 
     "enforce with AlwaysValidation regardless of protocol version" in {
       ProtoValidation
-        .validate(u(bad), field, ProtocolVersionValidation.AlwaysValidation)
+        .validate(u(bad), fieldName, ProtocolVersionValidation.AlwaysValidation)
         .left
         .value shouldBe a[StringConversionError]
     }
 
     "validate an optional field" in {
       ProtoValidation
-        .validate(Option(bad).map(u), field, ProtocolVersionValidation.PV(ProtocolVersion.v36))
+        .validate(Option(bad).map(u), fieldName, pvvStrings)
         .left
         .value shouldBe a[StringConversionError]
       ProtoValidation
         .validate(
           Option.empty[ProtoUnvalidatedString],
-          field,
-          ProtocolVersionValidation.PV(ProtocolVersion.v36),
+          fieldName,
+          pvvStrings,
         )
         .value shouldBe None
     }
 
-    "validate every element of a repeated field" in {
-      ProtoValidation
-        .validate(Seq("ok", bad).map(u), field, ProtocolVersionValidation.PV(ProtocolVersion.v36))
-        .left
-        .value shouldBe a[StringConversionError]
-      ProtoValidation
-        .validate(
-          Seq("ok", "fine").map(u),
-          field,
-          ProtocolVersionValidation.PV(ProtocolVersion.v36),
-        )
-        .value shouldBe Seq("ok", "fine")
-    }
-
     "return the validated field name in the error" in {
       val err = ProtoValidation
-        .validate(u(bad), field, ProtocolVersionValidation.PV(ProtocolVersion.v36))
+        .validate(u(bad), fieldName, pvvStrings)
         .left
         .value
 
       err shouldBe a[StringConversionError]
-      err.asInstanceOf[StringConversionError].field shouldBe field
+      fieldOf(err) shouldBe field
+    }
+
+    "return the field name from the optional overload too" in {
+      fieldOf(
+        ProtoValidation.validate(Option(u(bad)), fieldName, pvvStrings).left.value
+      ) shouldBe field
+    }
+
+    "still check the content on the no-field path, reporting no field name" in {
+      fieldOf(
+        ProtoValidation.validateNoField(u(bad), pvvStrings).left.value
+      ) shouldBe None
     }
   }
 
   "ProtoValidation.validateLength" should {
     "return the raw elements when the collection is within the bound" in {
       ProtoValidation
-        .validateLength(seq("a", "b"), field, pvv36, maxLength = 2)
+        .validateLength(seqStr("a", "b"), fieldName, pvvBounds, maxLength = 2)
         .value shouldBe Seq(u("a"), u("b"))
     }
 
     "reject a collection longer than the bound" in {
       val err = ProtoValidation
-        .validateLength(seq("a", "b", "c"), field, pvv36, maxLength = 2)
+        .validateLength(seqStr("a", "b", "c"), fieldName, pvvBounds, maxLength = 2)
         .left
         .value
 
@@ -100,24 +112,39 @@ class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
       err.message should include("3 elements, exceeding the maximum of 2")
     }
 
-    "gate the bound on the protocol version" in {
+    "bound only from the validating protocol version on" in {
       ProtoValidation
-        .validateLength(seq("a", "b", "c"), field, pvv35, maxLength = 1)
+        .validateLength(seqStr("a", "b", "c"), fieldName, pvv35, maxLength = 1)
         .value shouldBe Seq(u("a"), u("b"), u("c"))
     }
 
     "not bound a trusted NoValidation source" in {
       ProtoValidation
-        .validateLength(seq("a", "b", "c"), field, ProtocolVersionValidation.NoValidation, 1)
+        .validateLength(
+          seqStr("a", "b", "c"),
+          fieldName,
+          ProtocolVersionValidation.NoValidation,
+          maxLength = 1,
+        )
         .value shouldBe Seq(u("a"), u("b"), u("c"))
     }
 
     "bound an AlwaysValidation read unconditionally" in {
       ProtoValidation
-        .validateLength(seq("a", "b", "c"), field, ProtocolVersionValidation.AlwaysValidation, 3)
+        .validateLength(
+          seqStr("a", "b", "c"),
+          fieldName,
+          ProtocolVersionValidation.AlwaysValidation,
+          maxLength = 3,
+        )
         .value shouldBe Seq(u("a"), u("b"), u("c"))
       ProtoValidation
-        .validateLength(seq("a", "b", "c"), field, ProtocolVersionValidation.AlwaysValidation, 2)
+        .validateLength(
+          seqStr("a", "b", "c"),
+          fieldName,
+          ProtocolVersionValidation.AlwaysValidation,
+          maxLength = 2,
+        )
         .left
         .value shouldBe a[InvariantViolation]
     }
@@ -126,13 +153,13 @@ class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
   "ProtoValidation.validateLengthThen" should {
     "bound the collection, then parse every element" in {
       ProtoValidation
-        .validateLengthThen(Seq(1, 2), "f", pvv36, maxLength = 2)((i, _) => Right(i + 1))
+        .validateLengthThen(seq(1, 2), "f", pvvBounds, maxLength = 2)((i, _) => Right(i + 1))
         .value shouldBe Seq(2, 3)
     }
 
     "reject a collection longer than the bound without parsing" in {
       ProtoValidation
-        .validateLengthThen(Seq(1, 2, 3), "f", pvv36, maxLength = 2)((_, _) =>
+        .validateLengthThen(seq(1, 2, 3), "f", pvvBounds, maxLength = 2)((_, _) =>
           fail("parsed an element of an over-long collection")
         )
         .left
@@ -143,10 +170,10 @@ class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
   "ProtoValidation.validate for collections" should {
     "bound the collection and validate every element" in {
       ProtoValidation
-        .validate(seq("ok", "fine"), field, pvv36, ProtoValidation.MaxCollectionSize)
+        .validate(seqStr("ok", "fine"), fieldName, pvvBounds, ProtoValidation.MaxCollectionSize)
         .value shouldBe Seq("ok", "fine")
       ProtoValidation
-        .validate(seq("ok", bad), field, pvv36, ProtoValidation.MaxCollectionSize)
+        .validate(seqStr("ok", bad), fieldName, pvvBounds, ProtoValidation.MaxCollectionSize)
         .left
         .value shouldBe a[StringConversionError]
     }
@@ -154,13 +181,28 @@ class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
     "check the bound before the elements" in {
       // `bad` would fail the content check, but the length is rejected first.
       ProtoValidation
-        .validate(seq("ok", bad), field, pvv36, maxLength = 1)
+        .validate(seqStr("ok", bad), fieldName, pvvBounds, maxLength = 1)
         .left
         .value shouldBe a[InvariantViolation]
     }
 
-    "gate both checks on the protocol version" in {
-      ProtoValidation.validate(seq("ok", bad), field, pvv35, maxLength = 1).value shouldBe
+    "name the field in both the content and the length error" in {
+      fieldOf(
+        ProtoValidation
+          .validate(seqStr(bad), fieldName, pvvBounds, ProtoValidation.MaxCollectionSize)
+          .left
+          .value
+      ) shouldBe field
+      fieldOf(
+        ProtoValidation
+          .validate(seqStr("ok", "fine"), fieldName, pvvBounds, maxLength = 1)
+          .left
+          .value
+      ) shouldBe field
+    }
+
+    "run both checks only from the validating protocol version on" in {
+      ProtoValidation.validate(seqStr("ok", bad), fieldName, pvv35, maxLength = 1).value shouldBe
         Seq("ok", bad)
     }
   }
@@ -168,20 +210,37 @@ class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
   "ProtoValidation.validateThen for collections" should {
     "validate then parse every element with the field name" in {
       ProtoValidation
-        .validateThen(seq("ok", "fine"), "f", pvv36, ProtoValidation.MaxCollectionSize)((v, _) =>
-          Right(v.length)
+        .validateThen(seqStr("ok", "fine"), "f", pvvBounds, ProtoValidation.MaxCollectionSize)(
+          (v, _) => Right(v.length)
         )
         .value shouldBe Seq(2, 4)
     }
 
     "fail the validation before parsing" in {
       ProtoValidation
-        .validateThen(seq("ok", bad), "f", pvv36, ProtoValidation.MaxCollectionSize)((v, _) =>
-          Right(v.length)
+        .validateThen(seqStr("ok", bad), "f", pvvBounds, ProtoValidation.MaxCollectionSize)(
+          (v, _) => Right(v.length)
         )
         .left
         .value shouldBe a[StringConversionError]
     }
   }
 
+  "the repeated-string transformation" should {
+    "make a community-base proto collection readable only through ProtoValidation" in {
+      // Guards the field_transformation in the root package.proto: `all` is a ProtoUnvalidatedSeq,
+      // so it has no map of its own and must go through ProtoValidation to be read.
+      val proto =
+        v30.Stakeholders(
+          all = Seq("alice", "bob").map(u),
+          signatories = Seq.empty[ProtoUnvalidatedString],
+        )
+
+      proto.all shouldBe a[ProtoUnvalidatedSeq[?]]
+
+      ProtoValidation
+        .validate(proto.all, "all", pvvBounds, ProtoValidation.MaxCollectionSize)
+        .value shouldBe Seq("alice", "bob")
+    }
+  }
 }

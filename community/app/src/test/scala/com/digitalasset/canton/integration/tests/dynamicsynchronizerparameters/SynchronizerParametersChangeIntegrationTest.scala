@@ -11,7 +11,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
   OnboardingRestriction,
   ParticipantSynchronizerLimits,
-  SizeLimits,
   TrafficControlParameters,
 }
 import com.digitalasset.canton.config
@@ -131,16 +130,6 @@ sealed trait SynchronizerParametersChangeIntegrationTest
 
   "A synchronizer operator" can {
     "list and set synchronizer parameters" in { implicit env =>
-      // Ensure we get the correct default size limits
-      // (for PV <= 35, the default should be max values so that the behavior does not change)
-      val defaultSizeLimits = defaultParameters.sizeLimits
-      val expectedDefaultSizeLimits =
-//        if (testedProtocolVersion >= ProtocolVersion.v36) SizeLimits.default else SizeLimits.max
-        // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
-        SizeLimits.max
-
-      defaultSizeLimits shouldBe expectedDefaultSizeLimits
-
       val synchronizerParameters1 = increaseConfirmationResponseTimeout(defaultParameters)
       val synchronizerParameters2 = increaseConfirmationResponseTimeout(synchronizerParameters1)
       val synchronizerParameters3 = increaseConfirmationResponseTimeout(synchronizerParameters2)
@@ -270,9 +259,6 @@ sealed trait SynchronizerParametersChangeIntegrationTest
       myParticipant.topology.synchronizer_parameters
         .get_dynamic_synchronizer_parameters(synchronizerId)
         .participantSynchronizerLimits
-      myParticipant.topology.synchronizer_parameters
-        .get_dynamic_synchronizer_parameters(synchronizerId)
-        .sizeLimits
       // user-manual-entry-begin:-end: GetSingleDynamicSynchronizerParameter
 
       // user-manual-entry-begin:-begin: SetDynamicSynchronizerParameters
@@ -335,7 +321,6 @@ sealed trait SynchronizerParametersChangeIntegrationTest
               _onboardingRestriction,
               _acsCommitmentsCatchupConfig,
               _preparationTimeRecordTimeTolerance,
-              _synchronizerSizeLimits,
             ) =>
           ()
       }
@@ -446,9 +431,6 @@ sealed trait SynchronizerParametersChangeIntegrationTest
         participantSynchronizerLimits =
           ParticipantSynchronizerLimits(confirmationRequestsMaxRate = NonNegativeInt.zero),
         preparationTimeRecordTimeTolerance = d,
-        //      sizeLimits = if (protocolVersion >= ProtocolVersion.v36) SizeLimits.default else SizeLimits.max,
-        // TODO(i32231): Uncomment the above and remove the line below once protoV31 is wired in TopologyTransaction
-        sizeLimits = SizeLimits.max,
       )
       ex.getMessage shouldBe "The preparationTimeRecordTimeTolerance (10s) must be at most half of the mediatorDeduplicationTimeout (10s)."
     }

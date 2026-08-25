@@ -103,7 +103,7 @@ sealed trait ParticipantSimulatorIntegrationTest
       val simulator = new ParticipantSimulator(
         sequencer1,
         Seq(sequencer1),
-        sequencer1.synchronizer_parameters.static.get().toInternal,
+        sequencer1.synchronizer_parameters.static.get().toInternal.value,
         respondToAcsCommitments = true,
         environment.loggerFactory,
         environmentTimeouts,

@@ -164,6 +164,13 @@ object ConfigTransforms {
         .replace(true)
     )
 
+  // TODO(#35107) remove after all tests work without this config transformation
+  lazy val enableOldAcsCommitmentProcessor: ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
+        .replace(false)
+    )
+
   def setAcsCommitmentSendDelay(min: Double, max: Double): ConfigTransform =
     updateAllParticipantConfigs_(
       _.focus(_.parameters.acsCommitments.sender)
@@ -346,6 +353,7 @@ object ConfigTransforms {
         ),
         ConfigTransforms.setAcsCommitmentSendDelay(0.0d, 0.0d),
         enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev,
+        disableOldAcsCommitmentProcessor,
       ) ++
       enableTrafficAccountingForExternalPartiesTests
 

@@ -13,7 +13,11 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
+import com.digitalasset.canton.validation.{
+  ProtoUnvalidatedSeq,
+  ProtoUnvalidatedString,
+  ProtoValidation,
+}
 import com.digitalasset.canton.version.*
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.nonempty.NonEmpty
@@ -302,7 +306,7 @@ object SubmitterMetadata
       bytes: DataByteString,
   )(
       saltOP: Option[com.digitalasset.canton.crypto.v30.Salt],
-      actAsP: Seq[ProtoUnvalidatedString],
+      actAsP: ProtoUnvalidatedSeq[ProtoUnvalidatedString],
       userIdP: ProtoUnvalidatedString,
       commandIdP: ProtoUnvalidatedString,
       submittingParticipantUidP: ProtoUnvalidatedString,
@@ -339,7 +343,7 @@ object SubmitterMetadata
         .leftMap(e => ProtoDeserializationError.ValueConversionError("salt", e.message))
       submissionIdStr <- ProtoValidation.validate(
         submissionIdP,
-        Some("submissionId"),
+        "submissionId",
         pvv,
       )
       submissionIdO <- Option

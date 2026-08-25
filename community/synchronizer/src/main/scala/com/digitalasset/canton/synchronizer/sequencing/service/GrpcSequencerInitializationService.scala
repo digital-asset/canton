@@ -19,7 +19,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
-import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, v30}
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.admin.v30.SequencerInitializationServiceGrpc.SequencerInitializationService
 import com.digitalasset.canton.sequencer.admin.v30.{
   InitializeSequencerFromGenesisStateRequest,
@@ -33,7 +33,7 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   InitializeSequencerFromOnboardingStateV2Request,
   InitializeSequencerFromOnboardingStateV2Response,
 }
-import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.Synchronizer.FailedToInitialiseSynchronizerNode
 import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.{
   InitializeSequencerRequest,
@@ -78,20 +78,29 @@ class GrpcSequencerInitializationService(
       responseObserver: StreamObserver[InitializeSequencerFromGenesisStateResponse]
   ): StreamObserver[InitializeSequencerFromGenesisStateRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    GrpcStreamingUtils.streamFromClient[
-      InitializeSequencerFromGenesisStateRequest,
-      InitializeSequencerFromGenesisStateResponse,
-      Option[v30.StaticSynchronizerParameters],
-    ](
+    GrpcStreamingUtils.streamFromClient(
       _.topologySnapshot,
-      _.synchronizerParameters,
-      (topologySnapshot, synchronizerParams) =>
+      _.parameters,
+      (
+          topologySnapshot: ByteString,
+          parameters: InitializeSequencerFromGenesisStateRequest.Parameters,
+      ) => {
+        val synchronizerParametersE = parameters match {
+          case InitializeSequencerFromGenesisStateRequest.Parameters.V30(ssp) =>
+            StaticSynchronizerParameters.fromProtoV30(ssp)
+          case InitializeSequencerFromGenesisStateRequest.Parameters.V31(ssp) =>
+            StaticSynchronizerParameters.fromProtoV31(ssp)
+          case InitializeSequencerFromGenesisStateRequest.Parameters.Empty =>
+            Left(FieldNotSet("InitializeSequencerFromGenesisStateRequest.parameters"))
+        }
+
         initializeSequencerFromState(
           topologySnapshot,
-          synchronizerParams,
+          synchronizerParametersE,
           doResetTimes = true,
           ignoreLsuPsidCheck = false,
-        ).map(InitializeSequencerFromGenesisStateResponse(_)),
+        ).map(InitializeSequencerFromGenesisStateResponse(_))
+      },
       responseObserver,
     )
   }
@@ -102,16 +111,25 @@ class GrpcSequencerInitializationService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamFromClient(
       _.topologySnapshot,
-      req => (req.synchronizerParameters, req.ignorePsidCheck),
+      req => (req.parameters, req.ignorePsidCheck),
       (
           topologySnapshot: ByteString,
-          ctx: (Option[v30.StaticSynchronizerParameters], Boolean),
+          ctx: (InitializeSequencerFromLsuPredecessorRequest.Parameters, Boolean),
       ) => {
-        val (synchronizerParams, ignoreLsuPsidCheck) = ctx
+        val (parameters, ignoreLsuPsidCheck) = ctx
+
+        val synchronizerParametersE = parameters match {
+          case InitializeSequencerFromLsuPredecessorRequest.Parameters.V30(ssp) =>
+            StaticSynchronizerParameters.fromProtoV30(ssp)
+          case InitializeSequencerFromLsuPredecessorRequest.Parameters.V31(ssp) =>
+            StaticSynchronizerParameters.fromProtoV31(ssp)
+          case InitializeSequencerFromLsuPredecessorRequest.Parameters.Empty =>
+            Left(FieldNotSet("InitializeSequencerFromLsuPredecessorRequest.parameters"))
+        }
 
         initializeSequencerFromGenesisStateV2(
           topologySnapshot,
-          synchronizerParams,
+          synchronizerParametersE,
           doResetTimes = false,
           ignoreLsuPsidCheck = ignoreLsuPsidCheck,
         ).map(_ => InitializeSequencerFromLsuPredecessorResponse())
@@ -138,7 +156,7 @@ class GrpcSequencerInitializationService(
     */
   private def initializeSequencerFromState(
       topologySnapshot: ByteString,
-      synchronizerParameters: Option[v30.StaticSynchronizerParameters],
+      synchronizerParametersE: ParsingResult[StaticSynchronizerParameters],
       doResetTimes: Boolean,
       ignoreLsuPsidCheck: Boolean,
   )(implicit traceContext: TraceContext): Future[Boolean] = {
@@ -150,7 +168,7 @@ class GrpcSequencerInitializationService(
       )
       replicated <- initializeSequencerFromGenesisStateInternal(
         topologyState,
-        synchronizerParameters,
+        synchronizerParametersE,
         doResetTimes = doResetTimes,
         ignoreLsuPsidCheck = ignoreLsuPsidCheck,
       )
@@ -164,24 +182,38 @@ class GrpcSequencerInitializationService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamFromClient(
       _.topologySnapshot,
-      _.synchronizerParameters,
+      _.parameters,
       (
           topologySnapshot: ByteString,
-          synchronizerParams: Option[v30.StaticSynchronizerParameters],
-      ) =>
+          parameters: InitializeSequencerFromGenesisStateV2Request.Parameters,
+      ) => {
+        val synchronizerParametersE = parameters match {
+          case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV30(
+                ssp
+              ) =>
+            StaticSynchronizerParameters.fromProtoV30(ssp)
+          case InitializeSequencerFromGenesisStateV2Request.Parameters.SynchronizerParametersV31(
+                ssp
+              ) =>
+            StaticSynchronizerParameters.fromProtoV31(ssp)
+          case InitializeSequencerFromGenesisStateV2Request.Parameters.Empty =>
+            Left(FieldNotSet("InitializeSequencerFromGenesisStateV2Request.parameters"))
+        }
+
         initializeSequencerFromGenesisStateV2(
           topologySnapshot,
-          synchronizerParams,
+          synchronizerParametersE,
           doResetTimes = true,
           ignoreLsuPsidCheck = false,
-        ).map(InitializeSequencerFromGenesisStateV2Response(_)),
+        ).map(InitializeSequencerFromGenesisStateV2Response(_))
+      },
       responseObserver,
     )
   }
 
   private def initializeSequencerFromGenesisStateV2(
       topologySnapshot: ByteString,
-      synchronizerParameters: Option[v30.StaticSynchronizerParameters],
+      synchronizerParametersE: ParsingResult[StaticSynchronizerParameters],
       doResetTimes: Boolean,
       ignoreLsuPsidCheck: Boolean,
   )(implicit
@@ -202,7 +234,7 @@ class GrpcSequencerInitializationService(
       )
       replicated <- initializeSequencerFromGenesisStateInternal(
         topologyState,
-        synchronizerParameters,
+        synchronizerParametersE,
         doResetTimes = doResetTimes,
         ignoreLsuPsidCheck = ignoreLsuPsidCheck,
       )
@@ -225,22 +257,16 @@ class GrpcSequencerInitializationService(
     */
   private def initializeSequencerFromGenesisStateInternal(
       topologyState: GenericStoredTopologyTransactions,
-      synchronizerParameters: Option[v30.StaticSynchronizerParameters],
+      synchronizerParametersE: ParsingResult[StaticSynchronizerParameters],
       doResetTimes: Boolean,
       ignoreLsuPsidCheck: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, RpcError, Boolean] =
     for {
-      synchronizerParameters <- EitherT.fromEither[Future](
-        ProtoConverter
-          .parseRequired(
-            StaticSynchronizerParameters.fromProtoV30,
-            "synchronizer_parameters",
-            synchronizerParameters,
-          )
-          .leftMap(ProtoDeserializationFailure.Wrap(_))
-      )
+      synchronizerParameters <- EitherT
+        .fromEither[Future](synchronizerParametersE)
+        .leftMap(ProtoDeserializationFailure.Wrap(_))
       // reset effective time and sequenced time if we are initializing the sequencer from the beginning
       genesisState: StoredTopologyTransactions[TopologyChangeOp, TopologyMapping] =
         if (doResetTimes) resetTimes(topologyState) else topologyState

@@ -2,9 +2,12 @@ name: Canton Build Required
 on:
   push:
     branches:
-      - '**'
+      - 'main'
+      - 'release-line*'
     tags:
       - 'v*'
+  pull_request: {}
+  merge_group:
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -20,13 +23,17 @@ on:
 # On all other branches, runs are grouped by workflow and branch, so a newer push cancels
 # any in-progress run for the same branch.
 concurrency:
-  group: |-
-    ${{ case(
-      github.ref_name == 'main', github.run_id,
-      startsWith(github.ref_name, 'release-line'), github.run_id,
-      format('{0}-{1}', github.workflow, github.ref_name)
-    ) }}
-  cancel-in-progress: ${{ github.ref_name != 'main' && !startsWith(github.ref_name, 'release-line') }}
+  group: >-
+    ${{
+      case(
+        github.event_name == 'pull_request', format('{0}-pr-{1}', github.workflow, github.event.pull_request.number),
+        github.event_name == 'merge_group', github.run_id,
+        github.ref_name == 'main', github.run_id,
+        startsWith(github.ref_name, 'release-line'), github.run_id,
+        format('{0}-{1}', github.workflow, github.ref_name)
+      )
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -98,14 +105,9 @@ jobs:
     name: Test
     needs: [pick_runner, compile]
     if: |
-      (
-        github.ref_type == 'branch' &&
-        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+      github.event_name != 'merge_group' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
@@ -121,10 +123,10 @@ jobs:
       - build_scaladoc
       - package_community
     if: |
-      github.ref == 'refs/heads/main' ||
-      startsWith(github.ref, 'refs/heads/release-line') ||
+      github.event_name == 'push' &&
       (
-        github.ref_type == 'tag' &&
+        github.ref == 'refs/heads/main' ||
+        startsWith(github.ref, 'refs/heads/release-line') ||
         startsWith(github.ref, 'refs/tags/v')
       )
     uses: ./.github/workflows/_build_docs.yml
@@ -136,15 +138,10 @@ jobs:
     name: Build Docs Snippets
     needs: [pick_runner, compile]
     if: |
+      github.event_name == 'push' &&
       (
-        github.ref_type == 'branch' &&
-        (
-          github.ref == 'refs/heads/main' ||
-          startsWith(github.ref, 'refs/heads/release-line')
-        )
-      ) ||
-      (
-        github.ref_type == 'tag' &&
+        github.ref == 'refs/heads/main' ||
+        startsWith(github.ref, 'refs/heads/release-line') ||
         startsWith(github.ref, 'refs/tags/v')
       )
     uses: ./.github/workflows/_build_docs_snippets.yml
@@ -156,15 +153,10 @@ jobs:
     name: Build Scaladoc
     needs: [pick_runner, compile]
     if: |
+      github.event_name == 'push' &&
       (
-        github.ref_type == 'branch' &&
-        (
-          github.ref == 'refs/heads/main' ||
-          startsWith(github.ref, 'refs/heads/release-line')
-        )
-      ) ||
-      (
-        github.ref_type == 'tag' &&
+        github.ref == 'refs/heads/main' ||
+        startsWith(github.ref, 'refs/heads/release-line') ||
         startsWith(github.ref, 'refs/tags/v')
       )
     uses: ./.github/workflows/_build_scaladoc.yml
@@ -176,14 +168,9 @@ jobs:
     name: Crash Recovery Test
     needs: [pick_runner, compile]
     if: |
-      (
-        github.ref_type == 'branch' &&
-        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+      github.event_name != 'merge_group' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/_crash_recovery_test.yml
     secrets: inherit
     with:
@@ -192,18 +179,7 @@ jobs:
   ledger_api_compatibility_tests:
     name: Ledger API Compatibility Tests
     needs: [pick_runner, compile]
-    if: |
-      (
-        github.ref_type == 'branch' &&
-        (
-          github.ref == 'refs/heads/main' ||
-          startsWith(github.ref, 'refs/heads/release-line')
-        )
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name == 'push'
     uses: ./.github/workflows/_ledger_api_compatibility_tests.yml
     secrets: inherit
     with:
@@ -212,15 +188,7 @@ jobs:
   package_community:
     name: Package Community
     needs: [pick_runner, compile]
-    if: |
-      (
-        github.ref_type == 'branch' &&
-        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_package_community.yml
     secrets: inherit
     with:
@@ -236,9 +204,7 @@ jobs:
     # running it again on a release tag would be redundant with the branch/release-line commit
     # that the tag points to. We still exclude merge-queue branches, matching the historical
     # CircleCI behavior that was migrated to GitHub Actions.
-    if: |
-      github.ref_type == 'branch' &&
-      !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+    if: github.event_name != 'merge_group' && github.ref_type != 'tag'
     uses: ./.github/workflows/_protobuf_continuity.yml
     secrets: inherit
     with:
@@ -252,14 +218,9 @@ jobs:
     # explicit `v*` tag clause here, matching the historical CircleCI behavior that was migrated to
     # GitHub Actions.
     if: |
-      (
-        github.ref_type == 'branch' &&
-        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+      github.event_name != 'merge_group' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/_protocol_continuity_test_latest.yml
     secrets: inherit
     with:
@@ -268,12 +229,6 @@ jobs:
   scalafix:
     name: Scalafix
     needs: [pick_runner, compile]
-    if: |
-      github.ref_type == 'branch' ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
     uses: ./.github/workflows/_scalafix.yml
     secrets: inherit
     with:
@@ -281,18 +236,7 @@ jobs:
 
   sequential_test:
     name: Sequential Test
-    if: |
-      (
-        github.ref_type == 'branch' &&
-        (
-            github.ref == 'refs/heads/main' ||
-            startsWith(github.ref, 'refs/heads/release-line')
-        )
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name == 'push'
     needs: [pick_runner, test, compile]
     uses: ./.github/workflows/_sequential_test.yml
     secrets: inherit
@@ -302,9 +246,7 @@ jobs:
   smoke_test:
     name: Smoke Test
     needs: [pick_runner, compile]
-    if: |
-      github.ref_type == 'branch' &&
-      startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+    if: github.event_name == 'merge_group'
     uses: ./.github/workflows/_smoke_test.yml
     secrets: inherit
     with:
@@ -314,12 +256,8 @@ jobs:
     name: Temp ACS Commitment Tests PV Dev
     needs: [pick_runner, compile]
     if: |
-      github.ref_type == 'branch' &&
-      (
-        github.ref != 'refs/heads/main' &&
-        !startsWith(github.ref, 'refs/heads/release-line') &&
-        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
-      )
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/_temp_acs_commitment_tests_pv_dev.yml
     secrets: inherit
     with:
@@ -329,29 +267,28 @@ jobs:
     name: Test Data Continuity Dumps
     needs: [pick_runner, compile]
     if: |
-      github.ref_type == 'branch' &&
-      !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      github.event_name != 'merge_group' &&
+      github.ref_type != 'tag' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/_test_data_continuity_dumps.yml
     # Full coverage on main and release-line branches, scoped down on regular PR branches. A PR
     # targeting a release-line still gets full coverage from the push to the release-line branch
     # once it merges, right before the release that usually follows.
     with:
-      full_coverage: ${{ github.ref_name == 'main' || startsWith(github.ref_name, 'release-line') }}
+      full_coverage: >-
+        ${{
+          github.event_name == 'push' &&
+          github.ref_type == 'branch' &&
+          (github.ref_name == 'main' || startsWith(github.ref_name, 'release-line'))
+        }}
       runner: ${{ needs.pick_runner.outputs.runner }}
     secrets: inherit
 
   test_docker_images:
     name: Test Docker Images
     needs: [pick_runner, package_community]
-    if: |
-      (
-        github.ref_type == 'branch' &&
-        !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_test_docker_images.yml
     secrets: inherit
     with:
@@ -361,8 +298,10 @@ jobs:
     name: Test Protocol Version 36
     needs: [pick_runner, compile]
     if: |
-      github.ref_type == 'branch' &&
-      !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
+      github.event_name != 'merge_group' &&
+      github.ref_type != 'tag' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
@@ -372,18 +311,7 @@ jobs:
   test_protocol_version_dev:
     name: Test Protocol Version Dev
     needs: [pick_runner, test_protocol_version_36]
-    if: |
-      (
-        github.ref_type == 'branch' &&
-        (
-            github.ref == 'refs/heads/main' ||
-            startsWith(github.ref, 'refs/heads/release-line')
-        )
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name == 'push'
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
@@ -394,14 +322,9 @@ jobs:
     name: Toxiproxy Test Fast
     needs: [pick_runner, compile]
     if: |
-      (
-        github.ref_type == 'branch' &&
-        !startsWith(github.ref_name, 'gh-readonly-queue/main/')
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref_name, 'v')
-      )
+      github.event_name != 'merge_group' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     uses: ./.github/workflows/_toxiproxy_test_fast.yml
     secrets: inherit
     with:
@@ -410,18 +333,7 @@ jobs:
   unstable_test:
     name: Unstable Test
     needs: [pick_runner, package_community]
-    if: |
-      (
-        github.ref_type == 'branch' &&
-        (
-          github.ref == 'refs/heads/main' ||
-          startsWith(github.ref, 'refs/heads/release-line')
-        )
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name == 'push'
     uses: ./.github/workflows/_unstable_test.yml
     secrets: inherit
     with:
@@ -430,18 +342,7 @@ jobs:
   variations_test:
     name: Variations Test
     needs: [pick_runner, test]
-    if: |
-      (
-        github.ref_type == 'branch' &&
-        (
-            github.ref == 'refs/heads/main' ||
-            startsWith(github.ref, 'refs/heads/release-line')
-        )
-      ) ||
-      (
-        github.ref_type == 'tag' &&
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name == 'push'
     uses: ./.github/workflows/_variations_test.yml
     secrets: inherit
     with:
@@ -450,13 +351,7 @@ jobs:
   variations_test_selected_users:
     name: Variations Test (Selected Users)
     needs: [pick_runner, compile]
-    if: |
-      github.ref_type == 'branch' &&
-      (
-          github.ref != 'refs/heads/main' &&
-          !startsWith(github.ref, 'refs/heads/release-line') &&
-          !startsWith(github.ref, 'refs/heads/gh-readonly-queue/main/')
-      )
+    if: github.event_name == 'pull_request'
     uses: ./.github/workflows/_variations_test.yml
     secrets: inherit
     with:

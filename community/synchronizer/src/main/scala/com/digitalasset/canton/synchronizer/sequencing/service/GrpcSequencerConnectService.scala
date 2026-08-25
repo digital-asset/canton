@@ -47,8 +47,8 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{EitherTUtil, EitherUtil, OptionUtil}
-import com.digitalasset.canton.validation.ProtoValidation
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion, ProtocolVersionValidation}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.{Status, StatusRuntimeException}
 
@@ -97,11 +97,17 @@ class GrpcSequencerConnectService(
       request: GetSynchronizerParametersRequest
   ): Future[GetSynchronizerParametersResponse] =
     mapErrorEither(
-      staticSynchronizerParameters.protoVersion.v match {
-        case 30 =>
+      staticSynchronizerParameters.protoVersion match {
+        case ProtoVersion(30) =>
           Right(
             GetSynchronizerParametersResponse(
-              Parameters.ParametersV1(staticSynchronizerParameters.toProtoV30)
+              Parameters.V30(staticSynchronizerParameters.toProtoV30)
+            )
+          )
+        case ProtoVersion(31) =>
+          Right(
+            GetSynchronizerParametersResponse(
+              Parameters.V31(staticSynchronizerParameters.toProtoV31)
             )
           )
         case unsupported =>
@@ -155,7 +161,7 @@ class GrpcSequencerConnectService(
         clientProtocolVersions <- ProtoValidation
           .validateLength(
             request.clientProtocolVersions,
-            Some("client_protocol_versions"),
+            "client_protocol_versions",
             pvv,
             maxClientProtocolVersions,
           )
@@ -163,7 +169,7 @@ class GrpcSequencerConnectService(
         clientVersion <- ProtoValidation
           .validate(
             request.clientVersion,
-            Some("client_version"),
+            "client_version",
             pvv,
           )
           .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.toString))
@@ -277,12 +283,12 @@ class GrpcSequencerConnectService(
 
   private[service] def parseAndValidateOnboardingTransactions(
       participantId: ParticipantId,
-      topologyTransactions: Seq[protocol.v30.SignedTopologyTransaction],
+      topologyTransactions: ProtoUnvalidatedSeq[protocol.v30.SignedTopologyTransaction],
   ): Either[Status, Seq[GenericSignedTopologyTransaction]] =
     for {
       _ <-
-        // For protocol versions <= 35, we use the previous length check instead of the generic tooling
-        if (serverProtocolVersion <= ProtocolVersion.v35) {
+        // Below boundsCheck the bound is not enforced, so keep the previous length check
+        if (serverProtocolVersion < ProtocolVersion.boundsCheck) {
           EitherUtil.condUnit(
             topologyTransactions.sizeIs <= maxOnboardingTransactions.value,
             invalidArgument(

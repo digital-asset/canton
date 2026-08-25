@@ -32,14 +32,6 @@ inputs:
     description: Action-relative path to directory mounted to /docker-entrypoint-initdb.d. If empty, no initdb directory is mounted.
     required: false
     default: ""
-  username:
-    description: DockerHub username
-    required: false
-    default: ""
-  password:
-    description: DockerHub password
-    required: false
-    default: ""
 
 outputs:
   container-name:
@@ -49,11 +41,34 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Login to DockerHub for Postgres image
-      uses: ./.github/actions/utils/dockerhub_login
-      with:
-        username: ${{ inputs.username }}
-        password: ${{ inputs.password }}
+    - name: Diagnostics (docker info)
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::group::Docker info"
+        docker info
+        echo "::endgroup::"
+
+    - name: Resolve and validate Postgres image
+      id: resolve_image
+      shell: bash
+      env:
+        INPUT_IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+
+        # Single source of truth for the pinned image, kept in sync by hand (the build-image
+        # bump script only rewrites .circleci/config). Callers can override via the image input.
+        if [[ -n "$INPUT_IMAGE" ]]; then
+          image="$INPUT_IMAGE"
+        else
+          image="digitalasset/query-stats-postgres:17-343483aee440"
+        fi
+
+        echo "Using Postgres image: $image"
+        echo "image=$image" >> "$GITHUB_OUTPUT"
+
+        docker pull "$image"
 
     - name: Start Postgres container
       id: start
@@ -68,16 +83,10 @@ runs:
         POSTGRES_PASSWORD: ${{ inputs.postgres-password }}
         POSTGRES_USER: ${{ inputs.postgres-user }}
         POSTGRES_PORT: ${{ inputs.postgres-port }}
-        IMAGE: ${{ inputs.image }}
+        IMAGE: ${{ steps.resolve_image.outputs.image }}
         ENABLE_QUERY_STATS: ${{ inputs.enable-query-stats }}
       run: |
         CONTAINER_NAME="canton-postgres-${RUN_ID}-${SHARD_INDEX}"
-
-        # Single source of truth for the pinned image, kept in sync by hand (the build-image
-        # bump script only rewrites .circleci/config). Callers can override via the image input.
-        if [[ -z "$IMAGE" ]]; then
-          IMAGE="digitalasset/query-stats-postgres:17-343483aee440"
-        fi
 
         INITDB_VOLUME_ARG=""
         if [[ -n "$INITDB_MOUNT_PATH" ]]; then

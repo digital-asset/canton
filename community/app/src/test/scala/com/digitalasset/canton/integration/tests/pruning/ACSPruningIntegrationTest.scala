@@ -24,7 +24,11 @@ trait ACSPruningIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
-      .addConfigTransforms(ConfigTransforms.useStaticTime)
+      .addConfigTransforms(
+        ConfigTransforms.useStaticTime,
+        // TODO(#35107) Disable the old processor and fix the test
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
+      )
       .withSetup { env =>
         import env.*
 

@@ -88,40 +88,69 @@ object LtHash16Blake3 {
 
     override protected val shortBuffer: ShortBuffer = asShortBuffer(buffer)
 
-    private def vectorOp(other: ShortBuffer, f: (Short, Short) => Int): Unit = {
+    private def hashInput(bytes: Array[Byte]): ShortBuffer = {
+      val hash = Blake3Xof.digest(bytes, BYTE_LENGTH)
+      asShortBuffer(hash)
+    }
+
+    // add, remove, union, and removeAll have a very similar implementation except for the buffer operation.
+    // The reason that this operation is not passed as a binary operator is that scala starts to box the parameters,
+    // which we want to avoid.
+
+    /** Adds the given bytes to this digest. */
+    override def add(bytes: Array[Byte]): Unit = {
+      val other = hashInput(bytes)
       val sBuf = shortBuffer
       for (i <- 0 until VECTOR_LENGTH) {
-        val newVal = f(sBuf.get(i), other.get(i))
+        val newVal = sBuf.get(i) + other.get(i)
         // Note that the potential loss of the highest bit due to conversion to short is intentional here, as this
         // gives us the desired semantics of addition modulo 2^16.
         sBuf.put(i, newVal.toShort).discard[ShortBuffer]
       }
     }
 
-    private def hashInput(bytes: Array[Byte]): ShortBuffer = {
-      val hash = Blake3Xof.digest(bytes, BYTE_LENGTH)
-      asShortBuffer(hash)
-    }
-
-    /** Adds the given bytes to this digest. */
-    override def add(bytes: Array[Byte]): Unit =
-      vectorOp(hashInput(bytes), _ + _)
-
     /** Removes the given bytes from this digest. */
-    override def remove(bytes: Array[Byte]): Unit =
-      vectorOp(hashInput(bytes), _ - _)
+    override def remove(bytes: Array[Byte]): Unit = {
+      val other = hashInput(bytes)
+      val sBuf = shortBuffer
+      for (i <- 0 until VECTOR_LENGTH) {
+        val newVal = sBuf.get(i) - other.get(i)
+        // Note that the potential loss of the highest bit due to conversion to short is intentional here, as this
+        // gives us the desired semantics of addition modulo 2^16.
+        sBuf.put(i, newVal.toShort).discard[ShortBuffer]
+      }
+
+    }
 
     /** Adds all elements in the other digest to this digest. The caller must ensure that the other
       * digest's set of bytes is disjoint from this digest's set of bytes.
       */
-    override def union(other: LtHash16Blake3): Unit =
-      vectorOp(other.shortBuffer, _ + _)
+    override def union(other: LtHash16Blake3): Unit = {
+      val otherBuffer = other.shortBuffer
+      val sBuf = shortBuffer
+      for (i <- 0 until VECTOR_LENGTH) {
+        val newVal = sBuf.get(i) + otherBuffer.get(i)
+        // Note that the potential loss of the highest bit due to conversion to short is intentional here, as this
+        // gives us the desired semantics of addition modulo 2^16.
+        sBuf.put(i, newVal.toShort).discard[ShortBuffer]
+      }
+
+    }
 
     /** Removes all elements in the other digest from this digest. The caller must ensure that the
       * other digest's set of bytes is a subset of this digest's set of bytes.
       */
-    override def removeAll(other: LtHash16Blake3): Unit =
-      vectorOp(other.shortBuffer, _ - _)
+    override def removeAll(other: LtHash16Blake3): Unit = {
+      val otherBuffer = other.shortBuffer
+      val sBuf = shortBuffer
+      for (i <- 0 until VECTOR_LENGTH) {
+        val newVal = sBuf.get(i) - otherBuffer.get(i)
+        // Note that the potential loss of the highest bit due to conversion to short is intentional here, as this
+        // gives us the desired semantics of addition modulo 2^16.
+        sBuf.put(i, newVal.toShort).discard[ShortBuffer]
+      }
+
+    }
 
     def getByteString: ByteString =
       ByteString.copyFrom(buffer)

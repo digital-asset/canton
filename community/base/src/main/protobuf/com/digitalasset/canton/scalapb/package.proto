@@ -11,12 +11,31 @@ option (scalapb.options) = {
   scope: PACKAGE
   preserve_unknown_fields: false
   no_default_values_in_constructor: true
-  // Wrap every proto `string` field in ProtoUnvalidatedString so the raw value cannot be read
-  // without going through ProtoValidation.validate (trusted callers pass NoValidation).
   field_transformations: [
+    // Every proto `string` becomes a ProtoUnvalidatedString, so the raw value cannot be read
+    // without going through ProtoValidation.validate (trusted callers pass NoValidation).
     {
       when: { type: TYPE_STRING }
       set: { [scalapb.field] { type: "com.digitalasset.canton.validation.ProtoUnvalidatedString" } }
+    },
+    // Every `repeated` field becomes a ProtoUnvalidatedSeq, so its elements cannot be reached
+    // without ProtoValidation.validateLength: reading the length costs nothing, processing an
+    // unbounded number of elements is the risk. Matching LABEL_REPEATED rather than each element
+    // type covers any field type, including ones protobuf gains later. The wire format is
+    // unchanged.
+    //
+    // NOTE: a `map<K, V>` field is LABEL_REPEATED too (of a synthetic MapEntry) and so is wrapped by
+    // this rule. community-base has none today; adding one needs this revisited.
+    {
+      when: { label: LABEL_REPEATED }
+      set: {
+        [scalapb.field] {
+          collection: {
+            type: "com.digitalasset.canton.validation.ProtoUnvalidatedSeq"
+            adapter: "com.digitalasset.canton.validation.ProtoUnvalidatedSeq.Adapter"
+          }
+        }
+      }
     }
   ]
 };

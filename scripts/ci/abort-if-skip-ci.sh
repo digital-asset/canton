@@ -6,8 +6,10 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
   REPO="${GITHUB_REPOSITORY}"
   if [[ -n "${GITHUB_EVENT_NUMBER:-}" ]]; then
     PULL_NUMBER="${GITHUB_EVENT_NUMBER}"
+  elif [[ -n "${GITHUB_HEAD_REF:-}" ]]; then
+    PULL_NUMBER=$(gh pr list --head "${GITHUB_HEAD_REF}" --limit 1 --json number --jq '.[0].number' || echo "")
   else
-    PULL_NUMBER=$(gh pr list --head "${GITHUB_REF_NAME}" --limit 1 --json number --jq '.[0].number' || echo "")
+    PULL_NUMBER=""
   fi
 elif [[ "${CIRCLECI:-}" == "true" ]]; then
   PLATFORM="cci"

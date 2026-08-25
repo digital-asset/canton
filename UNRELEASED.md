@@ -50,6 +50,10 @@ One of the improvements allows the aggregator to detect sequencers that provide 
   }
   ```
 
+### Synchronizer Limits
+
+Added `SynchronizerLimits` in the `StaticSynchronizerParameters`, which are size limits on various collections, globally enforced by all synchronizer members. These limits are effective only starting with PV36.
+
 ### Topic A
 Template for a bigger topic
 #### Background
@@ -86,15 +90,25 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
 
 ### Removal of the legacy JSON API endpoints and fields
 
-*BREAKING*: The Ledger JSON API has been cleaned up of endpoints and fields pertaining to streaming queries
-that have been deprecated since 3.4 and announced for removal in 3.5:
-
-- `POST /v2/commands/submit-and-wait-for-transaction-tree` has been removed. Use
-  `POST /v2/commands/submit-and-wait-for-transaction` with `transactionFormat.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
-  instead. Note that the response carries a flat `transaction.events` array rather than a `transactionTree.eventsById` map.
-- `(WebSocket) GET /v2/updates` and `POST /v2/updates` no longer accept the `filter` and `verbose` fields. `updateFormat` is now required.
-- `(WebSocket) GET /v2/state/active-contracts` and `POST /v2/state/active-contracts` no longer accept the `filter` and `verbose` fields.
-  `eventFormat` is now required.
+*BREAKING*: The Ledger JSON API has been cleaned up of endpoints and fields/params that were deprecated
+and announced for removal in Canton 3.5. The following changes have been made:
+- The following endpoints have been removed:
+  - `GET /v2/interactive-submission/preferred-package-version`. Use `POST /v2/interactive-submission/preferred-packages` instead.
+  - `GET /v2/package-vetting`. Use `POST /v2/package-vetting/list` instead.
+  - `POST /v2/package-vetting`. Use `POST /v2/package-vetting/update` instead.
+  - `(WebSocket) GET`/`POST /v2/updates/trees`. Use `/v2/updates` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+  - `(WebSocket) GET`/`POST /v2/updates/flats`. Use `/v2/updates` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
+  - `GET /v2/updates/transaction-tree-by-offset/{offset}`. Use `POST /v2/updates/update-by-offset` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`.
+  - `POST /v2/updates/transaction-by-offset`. Use `POST /v2/updates/update-by-offset` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
+  - `GET /v2/updates/transaction-tree-by-id/{update-id}`. Use `POST /v2/updates/update-by-id` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+  - `POST /v2/updates/transaction-by-id`. Use `POST /v2/updates/update-by-id` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
+  - `POST /v2/commands/submit-and-wait-for-transaction-tree` has been removed. Use
+    `POST /v2/commands/submit-and-wait-for-transaction` with `transactionFormat.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
+    instead. Note that the response carries a flat `transaction.events` array rather than a `transactionTree.eventsById` map.
+- The following existing endpoints no longer support deprecated fields:
+  - `(WebSocket) GET /v2/updates` and `POST /v2/updates` no longer accept the `filter` and `verbose` fields. `updateFormat` is now required.
+  - `(WebSocket) GET /v2/state/active-contracts` and `POST /v2/state/active-contracts` no longer accept the `filter` and `verbose` fields.
+    `eventFormat` is now required.
 
 The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, `JsTransactionTree` and
 `JsSubmitAndWaitForTransactionTreeResponse` schemas have been dropped from the OpenAPI and AsyncAPI definitions.

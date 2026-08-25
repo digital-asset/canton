@@ -312,8 +312,41 @@ runs:
       with:
         output_dir: .ci-test-results/first-run
 
+    - name: Resolve ref
+      id: resolve_ref
+      uses: ./.github/actions/utils/resolve_ref
+
+    - name: Failed-only rerun policy
+      id: rerun_policy
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        RESOLVED_REF: ${{ steps.resolve_ref.outputs.resolved_ref }}
+        REF_KIND: ${{ steps.resolve_ref.outputs.ref_kind }}
+      run: |
+        # Rerun failed test classes on PRs and the merge queue, but not on main/release-line/tag
+        # pushes, so a flake reddens the branch honestly. resolve_ref keeps the ref event-aware.
+        rerun=true
+        if [[ "$EVENT_NAME" == "push" ]]; then
+          case "$RESOLVED_REF" in
+            main|release-line*)
+              rerun=false
+              ;;
+            v*)
+              if [[ "$REF_KIND" == "tag" ]]; then
+                rerun=false
+              fi
+              ;;
+          esac
+        fi
+        echo "rerun=$rerun" >> "$GITHUB_OUTPUT"
+
     - name: Prepare Failed-only Rerun Command
-      if: steps.build_cmd.outputs.skip_tests != 'true' && steps.run_sbt_tests.outcome != 'success' && inputs.succeed_on_error != 'true'
+      if: >
+        steps.build_cmd.outputs.skip_tests != 'true' &&
+        steps.run_sbt_tests.outcome != 'success' &&
+        inputs.succeed_on_error != 'true' &&
+        steps.rerun_policy.outputs.rerun == 'true'
       id: failed_rerun_cmd
       uses: ./.github/actions/test/prepare_rerun_command
       with:

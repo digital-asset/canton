@@ -8,7 +8,7 @@ inputs:
   image:
     description: Toxiproxy Docker image
     required: false
-    default: ghcr.io/shopify/toxiproxy:2.1.5
+    default: ""
   control-port:
     description: |
       Host port mapped to Toxiproxy control API (bridge mode only).
@@ -40,13 +40,35 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Resolve Toxiproxy image
+      id: resolve_image
+      shell: bash
+      env:
+        INPUT_IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+
+        # Single source of truth for the pinned image, kept in sync by hand (the build-image
+        # bump script only rewrites .circleci/config). Callers can override via the image input.
+        if [[ -n "$INPUT_IMAGE" ]]; then
+          image="$INPUT_IMAGE"
+        else
+          image="ghcr.io/shopify/toxiproxy:2.1.5"
+        fi
+
+        echo "Using Toxiproxy image: $image"
+        echo "image=$image" >> "$GITHUB_OUTPUT"
+
+        # Fail fast with a clearer error when registry/mirror access is broken.
+        docker pull "$image"
+
     - name: Start Toxiproxy container
       id: start
       shell: bash
       env:
         SHARD_INDEX: ${{ inputs.shard-index }}
         RUN_ID: ${{ github.run_id }}
-        IMAGE: ${{ inputs.image }}
+        IMAGE: ${{ steps.resolve_image.outputs.image }}
         CONTROL_PORT: ${{ inputs.control-port }}
         NETWORK_MODE: ${{ inputs.network-mode }}
         PROXY_PORTS_RANGE: ${{ inputs.proxy-ports-range }}

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.kms.gcp
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.tests.nightly.kms.KmsCryptoNoPreDefinedKeysIntegrationTest
 import com.digitalasset.canton.integration.tests.security.CryptoIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpKmsCryptoIntegrationTestBase
@@ -10,6 +11,7 @@ import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpKmsCryptoIn
 /** Runs a ping while one participant is using a GCP KMS provider and letting Canton generate its
   * own keys (i.e. auto-init == true)
   */
+@RequiresExternalKms
 class GcpKmsCryptoNoPreDefinedKeysReferenceIntegrationTest
     extends CryptoIntegrationTest(
       GcpKmsCryptoIntegrationTestBase.defaultGcpKmsCryptoConfig

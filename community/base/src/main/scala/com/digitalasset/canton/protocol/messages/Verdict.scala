@@ -14,7 +14,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.ProtoValidation
+import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.empty
@@ -188,7 +188,7 @@ object Verdict
       ParticipantReject(reasons)(Verdict.protocolVersionRepresentativeFor(protocolVersion))
 
     private def fromProtoRejectionReasonsV30(
-        reasonsP: Seq[v30.RejectionReason],
+        reasonsP: ProtoUnvalidatedSeq[v30.RejectionReason],
         pv: RepresentativeProtocolVersion[Verdict.type],
         pvv: ProtocolVersionValidation,
     ): ParsingResult[ParticipantReject] =

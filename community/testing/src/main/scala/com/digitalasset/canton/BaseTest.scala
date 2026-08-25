@@ -22,6 +22,7 @@ import com.digitalasset.canton.logging.{LogEntry, NamedLogging, SuppressingLogge
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
+  SynchronizerLimits,
 }
 import com.digitalasset.canton.scalatest.{ScalaFuturesWithPatience, ScalatestEssentials}
 import com.digitalasset.canton.sequencing.HandlerResult
@@ -523,7 +524,7 @@ trait BaseTest
     id.map(_.logical)
 }
 
-object BaseTest {
+object BaseTest extends EitherValues {
   implicit class RichSynchronizerIdO(val id: SynchronizerId) {
     def toPhysical: PhysicalSynchronizerId =
       PhysicalSynchronizerId(id, NonNegativeInt.zero, testedProtocolVersion)
@@ -632,18 +633,21 @@ object BaseTest {
         StaticSynchronizerParameters.defaultTopologyChangeDelay,
       protocolVersion: ProtocolVersion = testedProtocolVersion,
   ): StaticSynchronizerParameters =
-    StaticSynchronizerParameters(
-      requiredSigningSpecs = SymbolicCryptoProvider.supportedSigningSpecs,
-      requiredEncryptionSpecs = SymbolicCryptoProvider.supportedEncryptionSpecs,
-      requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
-      requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
-      requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
-      requiredSignatureFormats = SymbolicCryptoProvider.supportedSignatureFormats,
-      topologyChangeDelay = topologyChangeDelay,
-      enableTransparencyChecks = false,
-      protocolVersion = protocolVersion,
-      serial = NonNegativeInt.zero,
-    )
+    StaticSynchronizerParameters
+      .create(
+        requiredSigningSpecs = SymbolicCryptoProvider.supportedSigningSpecs,
+        requiredEncryptionSpecs = SymbolicCryptoProvider.supportedEncryptionSpecs,
+        requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
+        requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
+        requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
+        requiredSignatureFormats = SymbolicCryptoProvider.supportedSignatureFormats,
+        topologyChangeDelay = topologyChangeDelay,
+        enableTransparencyChecks = false,
+        protocolVersion = protocolVersion,
+        serial = NonNegativeInt.zero,
+        synchronizerLimits = SynchronizerLimits.defaultFor(protocolVersion),
+      )
+      .value
 
   lazy val defaultMaxBytesToDecompress: MaxBytesToDecompress = MaxBytesToDecompress(
     DynamicSynchronizerParameters.defaultMaxRequestSize.value

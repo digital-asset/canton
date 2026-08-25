@@ -9,10 +9,6 @@ on:
     secrets:
       DATADOG_API_KEY:
         required: false
-      DOCKERHUB_USERNAME:
-        required: false
-      DOCKERHUB_PASSWORD:
-        required: false
       GCLOUD_SERVICE_KEY:
         required: false
       AWS_ACCESS_KEY_ID:
@@ -60,8 +56,6 @@ jobs:
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: ${{ matrix.shard }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Prepare test inputs and timings
         uses: ./.github/actions/test/prepare_test_inputs_with_timings

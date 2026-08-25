@@ -72,7 +72,7 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       val envelopes = ProtoValidation
         .validateLength(
           protoBatch.compressedEnvelopes,
-          field = None,
+          "compressed_envelopes",
           testedProtocolVersionValidation,
           ProtoValidation.MaxCollectionSize,
         )

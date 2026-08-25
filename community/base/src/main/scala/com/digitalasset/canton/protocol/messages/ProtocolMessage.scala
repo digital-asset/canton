@@ -288,7 +288,7 @@ object SignedProtocolMessage
       typedMessage <- TypedSignedProtocolMessageContent
         .fromByteString(pvv, typedMessageBytes)
       signaturesSeqP <- ProtoValidation
-        .validateLength(signaturesP, Some("signatures"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(signaturesP, "signatures", pvv, ProtoValidation.MaxCollectionSize)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "signatures",

@@ -60,7 +60,7 @@ class MempoolModule[E <: Env[E]](
         scheduleMempoolBatchCreationClockTick()
 
       // From clients
-      case r @ Mempool.OrderRequest(tracedTx, from, sender) =>
+      case r @ Mempool.OrderRequest(tracedTx, from, sender, _) =>
         val orderingRequest = tracedTx.value
         val span = startSpan("BFTOrderer.Mempool")._1
 
@@ -146,6 +146,10 @@ class MempoolModule[E <: Env[E]](
 
         createAndSendBatches()
         emitStateStats(metrics, mempoolState)
+
+      // From local output module
+      // TODO(#34672): discard queued requests whose max sequencing time has passed
+      case Mempool.LatestKnownSequencingTimeUpdate(_) => ()
 
       // From P2P output module
       case upd @ Mempool.P2PConnectivityUpdate(membership, authenticatedCountIncludingSelf) =>

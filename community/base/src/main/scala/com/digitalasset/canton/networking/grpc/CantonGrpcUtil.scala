@@ -491,7 +491,7 @@ object CantonGrpcUtil {
       apiInfoResponse <- sendF.leftMap(_.toString)
       apiInfo <- EitherT.fromEither[FutureUnlessShutdown](
         ProtoValidation
-          .validate(apiInfoResponse.name, Some("name"), ProtocolVersionValidation.AlwaysValidation)
+          .validate(apiInfoResponse.name, "name", ProtocolVersionValidation.AlwaysValidation)
           .leftMap(_.message)
       )
       _ <-

@@ -97,7 +97,7 @@ object LegacyAcsCommitmentProtocolMessage
       signaturesSeqP <- ProtoValidation
         .validateLength(
           signaturesP,
-          Some("signatures"),
+          "signatures",
           ProtocolVersionValidation.PV(expectedProtocolVersion),
           ProtoValidation.MaxCollectionSize,
         )

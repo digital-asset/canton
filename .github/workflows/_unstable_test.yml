@@ -9,10 +9,6 @@ on:
     secrets:
       DATADOG_API_KEY:
         required: true
-      DOCKERHUB_USERNAME:
-        required: true
-      DOCKERHUB_PASSWORD:
-        required: true
       GCLOUD_SERVICE_KEY:
         required: true
       AWS_ACCESS_KEY_ID:
@@ -62,8 +58,6 @@ jobs:
         uses: ./.github/actions/utils/postgres/start_postgres_container_standard
         with:
           shard-index: 0
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Start Toxiproxy container
         id: start_toxiproxy

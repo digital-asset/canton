@@ -20,6 +20,10 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Resolve ref
+      id: resolve_ref
+      uses: ./.github/actions/utils/resolve_ref
+
     - name: Choose volunteer
       id: choose_volunteer
       # Pick the rota for the failed job from the rota Google Sheet: a blackduck
@@ -42,13 +46,14 @@ runs:
       uses: ./.github/actions/utils/check_allowed_branches
       with:
         allowed-branches: ${{ inputs.allowed_branches }}
+        branch-name: ${{ steps.resolve_ref.outputs.resolved_ref }}
 
     - name: Build Slack message
       id: slack_message
       shell: bash
       env:
         FAILED_JOB: ${{ inputs.failed_job }}
-        REF_NAME: ${{ github.ref_name }}
+        REF_NAME: ${{ steps.resolve_ref.outputs.resolved_ref }}
         VOLUNTEER: ${{ steps.choose_volunteer.outputs.volunteer }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
       run: |

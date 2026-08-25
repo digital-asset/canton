@@ -393,7 +393,7 @@ object VaultAdminCommands {
       ProtoValidation
         .validate(
           response.wrapperKeyId,
-          Some("wrapper_key_id"),
+          "wrapper_key_id",
           ProtocolVersionValidation.AlwaysValidation,
         )
         .leftMap(_.message)

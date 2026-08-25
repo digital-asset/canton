@@ -120,7 +120,7 @@ object AcsCommitmentSummary extends VersioningCompanionMemoization[AcsCommitment
     commitmentTick <- CantonTimestamp.fromProtoPrimitive(protoMsg.commitmentTick)
     addressedCounterparticipantsP <- ProtoValidation.validateLength(
       protoMsg.addressedCounterparticipants,
-      Some("addressed_counterparticipants"),
+      "addressed_counterparticipants",
       pvv,
       ProtoValidation.MaxCollectionSize,
     )

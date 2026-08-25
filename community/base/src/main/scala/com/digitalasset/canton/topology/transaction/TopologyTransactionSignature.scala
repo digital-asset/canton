@@ -109,7 +109,7 @@ object MultiTransactionSignature {
       // Bound the collection; parseRequiredNonEmpty still validates each element.
       transactionHashesSeqP <- ProtoValidation.validateLength(
         transactionHashesP,
-        Some("transaction_hashes"),
+        "transaction_hashes",
         pvv,
         ProtoValidation.MaxCollectionSize,
       )
@@ -120,7 +120,7 @@ object MultiTransactionSignature {
       )
       signaturesSeqP <- ProtoValidation.validateLength(
         signaturesP,
-        Some("signatures"),
+        "signatures",
         pvv,
         ProtoValidation.MaxCollectionSize,
       )

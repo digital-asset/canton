@@ -96,6 +96,9 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
+      // TODO(#35107) Upon disabling the old ACS commitment processor
+      //  this test fails: (enable the new pipeline) and make the fix
+      ConfigTransforms.enableOldAcsCommitmentProcessor,
       ConfigTransforms.updateSequencerConfig("sequencer2")(
         _.focus(_.parameters.lsuRepair.globalMaxSequencingTimeExclusive)
           .replace(Some(upgradeTime2))

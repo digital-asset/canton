@@ -326,7 +326,7 @@ def build_summary(files, shards, parse_errors, limit):
             )
         lines.append("")
 
-    lines.append("### Not passed tests (global)")
+    lines.append("### Still failing after rerun (global)")
     if all_not_passed:
         shown = min(len(all_not_passed), limit)
         lines.append(
@@ -522,7 +522,7 @@ def test_build_summary_handles_empty_input_glob():
     summary = build_summary([], [], [], limit=10)
     assert "- Summary files found: 0" in summary
     assert "- Shards reported: 0" in summary
-    assert "### Not passed tests (global)" in summary
+    assert "### Still failing after rerun (global)" in summary
     assert "- none" in summary
 
 

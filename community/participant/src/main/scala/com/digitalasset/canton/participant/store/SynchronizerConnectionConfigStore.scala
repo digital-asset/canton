@@ -40,6 +40,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ReleaseProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.digitalasset.nonempty.NonEmpty
@@ -288,6 +289,37 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
     } yield atTimestamp
   }
 
+  /** Sets the status of all configs whose status is currently
+    * [[com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.LsuTarget]] to
+    * [[com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.Inactive]] if
+    * their
+    * [[com.digitalasset.canton.participant.store.StoredSynchronizerConnectionConfig.configuredPsid]]
+    * is smaller than `boundExclusive`.
+    */
+  def deactivatePriorLsuTargets(upperBoundExclusive: PhysicalSynchronizerId)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SynchronizerConnectionConfigStore.Error, Unit] = {
+    val configuredBound = KnownPhysicalSynchronizerId(upperBoundExclusive)
+    for {
+      alias <- EitherT.fromOption[FutureUnlessShutdown](
+        aliasResolution.aliasForSynchronizerId(upperBoundExclusive.logical),
+        UnknownId(upperBoundExclusive.logical),
+      )
+      allConfigs <- EitherT.fromEither[FutureUnlessShutdown](getAllFor(alias))
+      priorsToDeactivate = allConfigs.filter { config =>
+        import scala.math.Ordered.orderingToOrdered
+        config.status == SynchronizerConnectionConfigStore.LsuTarget && config.configuredPsid < configuredBound
+      }
+      _ = logger.info(
+        s"Deactivating the synchronizer connection configs subsumed by the new LSU target $upperBoundExclusive: ${priorsToDeactivate
+            .mkString(", ")}"
+      )
+      _ <- MonadUtil.sequentialTraverse_(priorsToDeactivate) { config =>
+        setStatus(alias, config.configuredPsid, SynchronizerConnectionConfigStore.Inactive)
+      }
+    } yield ()
+  }
+
   /** Retrieves all configured synchronizers connection configs
     */
   def getAll(): Seq[StoredSynchronizerConnectionConfig]
@@ -335,10 +367,8 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
 
   def getAllStatusesFor(
       id: SynchronizerId
-  ): Either[UnknownId, NonEmpty[Seq[SynchronizerConnectionConfigStore.Status]]] = for {
-    alias <- aliasResolution.aliasForSynchronizerId(id).toRight(UnknownId(id))
-    configs <- getAllFor(alias).leftMap(_ => UnknownId(id))
-  } yield configs.map(_.status)
+  ): Either[UnknownId, NonEmpty[Seq[SynchronizerConnectionConfigStore.Status]]] =
+    getAllFor(id).map(_.map(_.status))
 
   /** Dump and refresh all connection configs. Used when a warm participant replica becomes active
     * to ensure it has accurate configs cached.

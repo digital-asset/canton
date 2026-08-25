@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config
 import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -58,12 +59,19 @@ final class LsuSessionSigningKeysIntegrationTest
   override protected def configTransforms: Seq[ConfigTransform] =
     super.configTransforms :+ ConfigTransforms.setSigningKeysIfPV35OrHigher(
       SessionSigningKeysConfig.enabled
-    )
+    ) :+
+      // TODO(#35107) Upon disabling the old ACS commitment processor
+      //  this test fails: (enable the new pipeline) and make the fix
+      ConfigTransforms.enableOldAcsCommitmentProcessor
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S2M2_Config
       .withNetworkBootstrap(implicit env => new NetworkBootstrapper(EnvironmentDefinition.S1M1))
       .addConfigTransforms(configTransforms*)
-      .withSetup(implicit env => defaultEnvironmentSetup())
+      .withSetup(implicit env =>
+        // Increase the reconciliation interval to ensure ACS commitments don't interfere with the test (static
+        // time advances may produce ACS commitments with invalid session signing key signatures)
+        defaultEnvironmentSetup(reconciliationInterval = config.PositiveDurationSeconds.ofHours(1))
+      )
 
   "Logical synchronizer upgrade" should {
     "work with session signing keys" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {

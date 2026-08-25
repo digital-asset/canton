@@ -63,6 +63,9 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
     List(
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
+      // TODO(#35107) Upon disabling the old ACS commitment processor
+      //  this test fails: (enable the new pipeline) and make the fix
+      ConfigTransforms.enableOldAcsCommitmentProcessor,
     ) ++ ConfigTransforms.enableDevVersionSupport
   }
 

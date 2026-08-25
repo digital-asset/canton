@@ -12,6 +12,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.SequencerLimits
 import com.digitalasset.canton.synchronizer.sequencing.authentication.MemberAuthenticationService
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.nonempty.NonEmpty
@@ -113,10 +114,19 @@ class GrpcSequencerAuthenticationServiceTest
 
       val response = service.challenge(request).futureValue
       response.nonce shouldBe expectedNonce.toProtoPrimitive
-      response.fingerprints shouldBe Seq(expectedFingerprint.unwrap.toProtoUnvalidated)
+      // The response's repeated field is a ProtoUnvalidatedSeq, so read it back through the bound
+      // rather than comparing the wrapper itself against a Seq.
+      ProtoValidation
+        .validateLength(
+          response.fingerprints,
+          "fingerprints",
+          testedProtocolVersionValidation,
+          ProtoValidation.MaxCollectionSize,
+        )
+        .value shouldBe Seq(expectedFingerprint.unwrap.toProtoUnvalidated)
     }
 
-    "reject challenge requests with too many member protocol versions" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "reject challenge requests with too many member protocol versions" onlyRunWithOrGreaterThan ProtocolVersion.boundsCheck in {
       val sequencerLimits = SequencerLimits()
       val maxMemberProtocolVersions = sequencerLimits.maxMemberProtocolVersions.value
       val request = mkChallengeRequest("", Seq.fill(maxMemberProtocolVersions + 1)(30))

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.release.kms.driver
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.integration.tests.release.kms.KmsCliIntegrationTest
 
@@ -11,6 +12,7 @@ import com.digitalasset.canton.integration.tests.release.kms.KmsCliIntegrationTe
   * Before being able to run these tests locally, you need to execute `sbt bundle` and `sbt
   * aws-kms-driver/assembly`.
   */
+@RequiresExternalKms
 class AwsKmsDriverCliIntegrationTest extends KmsCliIntegrationTest {
 
   private lazy val driverVersion = sys.env.getOrElse("RELEASE_SUFFIX", BuildInfo.version)

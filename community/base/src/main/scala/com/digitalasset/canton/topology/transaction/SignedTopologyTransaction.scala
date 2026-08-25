@@ -434,7 +434,7 @@ object SignedTopologyTransaction
       multiTransactionHashes <- ProtoValidation
         .validateLength(
           multiTransactionSignaturesPO,
-          Some("multi_transaction_signatures"),
+          "multi_transaction_signatures",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )
@@ -546,7 +546,7 @@ object SignedTopologyTransactions
     for {
       signedTransactionsP <- ProtoValidation.validateLength(
         proto.signedTransactions,
-        Some("signed_transactions"),
+        "signed_transactions",
         pvv,
         ProtoValidation.MaxCollectionSize,
       )

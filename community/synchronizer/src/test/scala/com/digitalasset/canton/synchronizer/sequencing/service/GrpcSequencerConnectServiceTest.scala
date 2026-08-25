@@ -144,8 +144,9 @@ class GrpcSequencerConnectServiceTest
       val result = env.service
         .parseAndValidateOnboardingTransactions(env.participantId, tooManyTxs.map(_.toProtoV30))
 
-      // The length check in < PV36 has a different error message than the check from the proto validation tooling
-      if (testedProtocolVersion <= ProtocolVersion.v35) {
+      // Below boundsCheck the manual length check applies, with a different error message than the
+      // check from the proto validation tooling
+      if (testedProtocolVersion < ProtocolVersion.boundsCheck) {
         result.left.value.getDescription should include("Too many topology transactions")
       } else {
         result.left.value.getDescription should include(
@@ -292,7 +293,7 @@ class GrpcSequencerConnectServiceTest
 
     // --- handshake clientProtocolVersions size limit ---
 
-    "reject a handshake request that exceeds the clientProtocolVersions limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+    "reject a handshake request that exceeds the clientProtocolVersions limit" onlyRunWithOrGreaterThan ProtocolVersion.boundsCheck in {
       val env = new Env()
       val maxClientProtocolVersions = sequencerLimits.maxClientProtocolVersions.value
       val exceedingClientProtocolVersions =

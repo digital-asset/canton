@@ -3,12 +3,14 @@
 
 package com.digitalasset.canton.integration.tests.toxiproxy.fast.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.toxiproxy.{ParticipantToAwsKms, ProxyConfig}
 import com.digitalasset.canton.integration.tests.security.kms.aws.AwsKmsCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.tests.toxiproxy.fast.kms.KmsFaultTest
 
 import scala.concurrent.duration.*
 
+@RequiresExternalKms
 class AwsKmsFaultTest extends KmsFaultTest with AwsKmsCryptoIntegrationTestBase {
 
   override lazy val proxyConf: ProxyConfig =

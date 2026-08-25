@@ -53,18 +53,18 @@ class GrpcIdentityInitializationService(
     val ret = for {
       identifier <- handleProtoFailure(
         ProtoValidation
-          .validate(identifierP, Some("identifier"), ProtocolVersionValidation.AlwaysValidation)
+          .validate(identifierP, "identifier", ProtocolVersionValidation.AlwaysValidation)
       )
       namespace <- handleProtoFailure(
         ProtoValidation
-          .validate(namespaceP, Some("namespace"), ProtocolVersionValidation.AlwaysValidation)
+          .validate(namespaceP, "namespace", ProtocolVersionValidation.AlwaysValidation)
       )
       // parse topology transactions
       certificates <- handleProtoFailure(
         ProtoValidation
           .validateLength(
             certificatesP,
-            Some("certificates"),
+            "certificates",
             ProtocolVersionValidation.AlwaysValidation,
             ProtoValidation.MaxCollectionSize,
           )

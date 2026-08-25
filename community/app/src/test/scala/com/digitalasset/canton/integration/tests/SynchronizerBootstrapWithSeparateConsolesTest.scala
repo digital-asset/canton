@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.{
   UniqueIdentifier,
 }
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 
 /** This test simulates the case when the mediator and sequencer nodes are in separate consoles and
@@ -81,11 +82,12 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
         {
           EnvironmentDefinition.defaultStaticSynchronizerParameters.writeToFile(
             paramsFile
-          )
+          ): @nowarn("cat=deprecation")
         }
 
         // load the static synchronizer parameters
-        val synchronizerParams = StaticSynchronizerParameters.tryReadFromFile(paramsFile)
+        val synchronizerParams =
+          StaticSynchronizerParameters.tryReadFromFile(paramsFile): @nowarn("cat=deprecation")
 
         // Sequencer1 console:
         // * extract sequencer1's and mediator1's identity+pubkey topology transactions and share via files
@@ -140,7 +142,7 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
           )
 
           physicalSynchronizerId =
-            PhysicalSynchronizerId(synchronizerId, synchronizerParams.toInternal)
+            PhysicalSynchronizerId(synchronizerId, synchronizerParams.toInternal.value)
         }
 
         // Sequencer2 console:
@@ -210,7 +212,8 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
               .export_topology_snapshotV2(store = TopologyStoreId.Authorized)
 
           // load the static synchronizer parameters
-          val synchronizerParams = StaticSynchronizerParameters.tryReadFromFile(paramsFile)
+          val synchronizerParams =
+            StaticSynchronizerParameters.tryReadFromFile(paramsFile): @nowarn("cat=deprecation")
 
           // and finally initialize the sequencer with the topology snapshot
           sequencer1.setup.assign_from_genesis_stateV2(initialSnapshot, synchronizerParams)
@@ -233,7 +236,8 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
               .export_topology_snapshotV2(store = TopologyStoreId.Authorized)
 
           // load the static synchronizer parameters
-          val synchronizerParams = StaticSynchronizerParameters.tryReadFromFile(paramsFile)
+          val synchronizerParams =
+            StaticSynchronizerParameters.tryReadFromFile(paramsFile): @nowarn("cat=deprecation")
 
           // and finally initialize the sequencer with the topology snapshot
           sequencer2.setup.assign_from_genesis_stateV2(initialSnapshot, synchronizerParams)

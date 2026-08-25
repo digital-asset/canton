@@ -42,7 +42,11 @@ import com.digitalasset.canton.util.retry.{
   Pause,
   RetryWithDelay,
 }
-import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
+import com.digitalasset.canton.validation.{
+  ProtoUnvalidatedSeq,
+  ProtoUnvalidatedString,
+  ProtoValidation,
+}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.nonempty.NonEmpty
 import io.grpc.{Status, StatusRuntimeException}
@@ -211,7 +215,7 @@ class AuthenticationTokenProvider(
       endpoint: Endpoint,
       authenticationClient: GrpcClient[SequencerAuthenticationServiceStub],
       nonce: Nonce,
-      fingerprintsP: Seq[ProtoUnvalidatedString],
+      fingerprintsP: ProtoUnvalidatedSeq[ProtoUnvalidatedString],
       protocolVersion: ProtocolVersion,
   )(implicit
       tc: TraceContext

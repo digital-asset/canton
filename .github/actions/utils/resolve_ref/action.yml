@@ -1,0 +1,81 @@
+name: Resolve Ref
+description: >-
+  Resolves a consistent ref value across push, pull_request, and merge_group
+  events, and exposes additional outputs suitable for cache/concurrency keys.
+
+outputs:
+  resolved_ref:
+    description: Event-aware ref value (head_ref for pull_request, ref_name otherwise)
+    value: ${{ steps.resolve.outputs.resolved_ref }}
+  resolved_ref_slug:
+    description: Slugified resolved_ref with '/' replaced by '-'
+    value: ${{ steps.resolve.outputs.resolved_ref_slug }}
+  ref_group_key:
+    description: Stable event-aware key useful for cache/concurrency grouping
+    value: ${{ steps.resolve.outputs.ref_group_key }}
+  ref_kind:
+    description: Ref kind for the current event (branch, tag, pull_request, merge_group)
+    value: ${{ steps.resolve.outputs.ref_kind }}
+  event_name:
+    description: Current GitHub event name
+    value: ${{ steps.resolve.outputs.event_name }}
+  head_ref:
+    description: GitHub head ref (set for pull_request)
+    value: ${{ steps.resolve.outputs.head_ref }}
+  base_ref:
+    description: GitHub base ref (set for pull_request)
+    value: ${{ steps.resolve.outputs.base_ref }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        REF_NAME: ${{ github.ref_name }}
+        REF_TYPE: ${{ github.ref_type }}
+        HEAD_REF: ${{ github.head_ref }}
+        BASE_REF: ${{ github.base_ref }}
+        PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+      run: |
+        set -euo pipefail
+
+        resolved_ref="$REF_NAME"
+        ref_kind="$REF_TYPE"
+        ref_group_key="${EVENT_NAME}-${REF_NAME}"
+
+        case "$EVENT_NAME" in
+          pull_request)
+            resolved_ref="$HEAD_REF"
+            ref_kind="pull_request"
+            if [[ -n "$PR_NUMBER" ]]; then
+              ref_group_key="pr-${PR_NUMBER}"
+            else
+              ref_group_key="pr-${HEAD_REF}"
+            fi
+            ;;
+          merge_group)
+            ref_kind="merge_group"
+            ref_group_key="merge-group-${REF_NAME}"
+            ;;
+          push)
+            if [[ "$REF_TYPE" == "tag" ]]; then
+              ref_group_key="tag-${REF_NAME}"
+            else
+              ref_group_key="branch-${REF_NAME}"
+            fi
+            ;;
+        esac
+
+        resolved_ref_slug="${resolved_ref//\//-}"
+
+        {
+          echo "resolved_ref=${resolved_ref}"
+          echo "resolved_ref_slug=${resolved_ref_slug}"
+          echo "ref_group_key=${ref_group_key}"
+          echo "ref_kind=${ref_kind}"
+          echo "event_name=${EVENT_NAME}"
+          echo "head_ref=${HEAD_REF}"
+          echo "base_ref=${BASE_REF}"
+        } >> "$GITHUB_OUTPUT"

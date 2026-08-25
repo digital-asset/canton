@@ -325,7 +325,7 @@ class JcePureCrypto(
         SymmetricKey.create(CryptoKeyFormat.Raw, bytes.unwrap, scheme)
     }
 
-  override private[crypto] def signBytesInternal(
+  override private[crypto] def signBytes(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -362,16 +362,19 @@ class JcePureCrypto(
             )
 
         }
-        signature <- Either
-          .catchOnly[GeneralSecurityException] {
-            val signer = JSignature.getInstance(
-              signingAlgorithmSpec.jcaAlgorithmName,
-              JceSecurityProvider.bouncyCastleProvider,
-            )
-            signer.initSign(privateKeyParsed)
-            signer.update(bytes.toByteArray)
-            signer.sign()
-          }
+        signature <- signingMetrics.signingLatency
+          .time(
+            Either
+              .catchOnly[GeneralSecurityException] {
+                val signer = JSignature.getInstance(
+                  signingAlgorithmSpec.jcaAlgorithmName,
+                  JceSecurityProvider.bouncyCastleProvider,
+                )
+                signer.initSign(privateKeyParsed)
+                signer.update(bytes.toByteArray)
+                signer.sign()
+              }
+          )
           .bimap(
             err => SigningError.FailedToSign(show"$err"),
             signatureBytes =>
@@ -672,7 +675,7 @@ class JcePureCrypto(
       case Left(err) => Left(err)
     }
 
-  override private[crypto] def decryptWithInternal[M](
+  override def decryptWith[M](
       encrypted: AsymmetricEncrypted[M],
       privateKey: EncryptionPrivateKey,
   )(
@@ -715,30 +718,33 @@ class JcePureCrypto(
                   DecryptionError.FailedToDeserialize(DefaultDeserializationError(err.show))
                 )
               (iv, ciphertext) = ciphertextSplit
-              decrypter <- Either
-                .catchOnly[GeneralSecurityException] {
-                  val cipher = Cipher
-                    .getInstance(
-                      EciesHmacSha256Aes128CbcParams.jceInternalName,
-                      JceSecurityProvider.bouncyCastleProvider,
+              plaintext <- decryptionMetrics.decryptLatency.time(
+                for {
+                  decrypter <- Either
+                    .catchOnly[GeneralSecurityException] {
+                      val cipher = Cipher.getInstance(
+                        EciesHmacSha256Aes128CbcParams.jceInternalName,
+                        JceSecurityProvider.bouncyCastleProvider,
+                      )
+                      cipher.init(
+                        Cipher.DECRYPT_MODE,
+                        ecPrivateKey,
+                        EciesHmacSha256Aes128CbcParams.parameterSpec(iv.toByteArray),
+                      )
+                      cipher
+                    }
+                    .leftMap(err =>
+                      DecryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
                     )
-                  cipher.init(
-                    Cipher.DECRYPT_MODE,
-                    ecPrivateKey,
-                    EciesHmacSha256Aes128CbcParams.parameterSpec(iv.toByteArray),
-                  )
-                  cipher
-                }
-                .leftMap(err =>
-                  DecryptionError.InvalidEncryptionKey(ThrowableUtil.messageWithStacktrace(err))
-                )
-              plaintext <- Either
-                .catchOnly[GeneralSecurityException](
-                  decrypter.doFinal(ciphertext.toByteArray)
-                )
-                .leftMap(err =>
-                  DecryptionError.FailedToDecrypt(ThrowableUtil.messageWithStacktrace(err))
-                )
+                  plaintext <- Either
+                    .catchOnly[GeneralSecurityException](
+                      decrypter.doFinal(ciphertext.toByteArray)
+                    )
+                    .leftMap(err =>
+                      DecryptionError.FailedToDecrypt(ThrowableUtil.messageWithStacktrace(err))
+                    )
+                } yield plaintext
+              )
               message <- deserialize(ByteString.copyFrom(plaintext))
                 .leftMap(DecryptionError.FailedToDeserialize.apply)
             } yield message
@@ -749,31 +755,35 @@ class JcePureCrypto(
                 { case k: RSAPrivateKey => Right(k) },
                 DecryptionError.InvalidEncryptionKey.apply,
               )
-              decrypter <- Either
-                .catchOnly[GeneralSecurityException] {
-                  val cipher = Cipher
-                    .getInstance(
-                      RsaOaepSha256Params.jceInternalName,
-                      JceSecurityProvider.bouncyCastleProvider,
-                    )
-                  cipher.init(
-                    Cipher.DECRYPT_MODE,
-                    rsaPrivateKey,
-                  )
-                  cipher
-                }
-                .leftMap(err => DecryptionError.InvalidEncryptionKey(err.toString))
-              plaintext <- Try[Array[Byte]](
-                decrypter.doFinal(encrypted.ciphertext.toByteArray)
-              ).toEither.leftMap {
-                case err: DataLengthException =>
-                  DecryptionError
-                    .FailedToDecrypt(
-                      s"Most probably using a wrong secret key to decrypt the ciphertext: ${err.toString}"
-                    )
-                case err =>
-                  DecryptionError.FailedToDecrypt(ThrowableUtil.messageWithStacktrace(err))
-              }
+              plaintext <- decryptionMetrics.decryptLatency.time(
+                for {
+                  decrypter <- Either
+                    .catchOnly[GeneralSecurityException] {
+                      val cipher = Cipher
+                        .getInstance(
+                          RsaOaepSha256Params.jceInternalName,
+                          JceSecurityProvider.bouncyCastleProvider,
+                        )
+                      cipher.init(
+                        Cipher.DECRYPT_MODE,
+                        rsaPrivateKey,
+                      )
+                      cipher
+                    }
+                    .leftMap(err => DecryptionError.InvalidEncryptionKey(err.toString))
+                  plaintext <- Try[Array[Byte]](
+                    decrypter.doFinal(encrypted.ciphertext.toByteArray)
+                  ).toEither.leftMap {
+                    case err: DataLengthException =>
+                      DecryptionError
+                        .FailedToDecrypt(
+                          s"Most probably using a wrong secret key to decrypt the ciphertext: ${err.toString}"
+                        )
+                    case err =>
+                      DecryptionError.FailedToDecrypt(ThrowableUtil.messageWithStacktrace(err))
+                  }
+                } yield plaintext
+              )
               message <- deserialize(ByteString.copyFrom(plaintext))
                 .leftMap(DecryptionError.FailedToDeserialize.apply)
             } yield message

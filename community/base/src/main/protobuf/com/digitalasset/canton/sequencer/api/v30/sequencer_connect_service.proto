@@ -7,6 +7,7 @@ package com.digitalasset.canton.sequencer.api.v30;
 
 import "com/digitalasset/canton/protocol/v30/sequencing.proto";
 import "com/digitalasset/canton/protocol/v30/topology.proto";
+import "com/digitalasset/canton/protocol/v31/sequencing.proto";
 
 service SequencerConnectService {
   rpc Handshake(SequencerConnect.HandshakeRequest) returns (SequencerConnect.HandshakeResponse);
@@ -50,7 +51,8 @@ message SequencerConnect {
 
   message GetSynchronizerParametersResponse {
     oneof parameters {
-      com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters parameters_v1 = 2;
+      com.digitalasset.canton.protocol.v30.StaticSynchronizerParameters v30 = 2;
+      com.digitalasset.canton.protocol.v31.StaticSynchronizerParameters v31 = 3;
     }
   }
 

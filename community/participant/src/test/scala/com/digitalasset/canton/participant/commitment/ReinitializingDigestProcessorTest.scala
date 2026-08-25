@@ -7,7 +7,6 @@ import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.{InternalIndexService, SynchronizerIndex}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   CheckpointFence,
   ContractChange,
@@ -130,9 +129,7 @@ class ReinitializingDigestProcessorTest
           PositiveInt.tryCreate(contractChangeClassificationBatchSize),
       ),
       getTopologySnapshot = ts =>
-        FutureUnlessShutdown.pure(
-          testingTopologyFactory.topologySnapshot(timestampOfSnapshot = ts.value)
-        ),
+        Some(testingTopologyFactory.topologySnapshot(timestampOfSnapshot = ts.value)),
       enableAdditionalConsistencyChecks = true,
       metrics = metrics,
       loggerFactory = loggerFactory,

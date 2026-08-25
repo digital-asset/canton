@@ -7,7 +7,6 @@ package com.digitalasset.canton.protocol.v31;
 
 import "com/digitalasset/canton/crypto/v31/crypto.proto";
 import "com/digitalasset/canton/protocol/v30/topology.proto";
-import "com/digitalasset/canton/protocol/v31/synchronizer_parameters.proto";
 import "scalapb/scalapb.proto";
 
 // [start NamespaceDelegation definition]
@@ -116,19 +115,6 @@ message PartyToParticipant {
 }
 // [doc-entry-end: PartyToParticipant]
 
-// which dynamic synchronizer parameters are supposed to be used on the given synchronizer
-// authorization: whoever controls the synchronizer
-// UNIQUE(synchronizer_id)
-//
-// Differences with v30:
-// - use v31.DynamicSynchronizerParameters
-message SynchronizerParametersState {
-  // synchronizer affected by the new synchronizer parameters
-  string synchronizer_id = 1;
-
-  DynamicSynchronizerParameters synchronizer_parameters = 2;
-}
-
 // Difference with v30:
 // - updated namespace_delegation, owner_to_key_mapping and party_to_participant to v31
 //
@@ -147,7 +133,7 @@ message TopologyMapping {
 
     PartyToParticipant party_to_participant = 9;
 
-    SynchronizerParametersState synchronizer_parameters_state = 11;
+    v30.SynchronizerParametersState synchronizer_parameters_state = 11;
     v30.MediatorSynchronizerState mediator_synchronizer_state = 12;
     v30.SequencerSynchronizerState sequencer_synchronizer_state = 13;
     v30.DynamicSequencingParametersState sequencing_dynamic_parameters_state = 15;

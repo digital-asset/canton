@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.kms.gcp
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.RotateWrapperKeyIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpEncryptedCryptoPrivateStoreTestBase
@@ -10,6 +11,7 @@ import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpEncryptedCr
 /** Tests a manual rotation of a GCP wrapper key, where NO KEY is SPECIFIED as the new wrapper key
   * and, as such, Canton will automatically generate a new one.
   */
+@RequiresExternalKms
 class GcpRotateWrapperKeyNoPreDefinedKeyBftOrderingIntegrationTestPostgres
     extends RotateWrapperKeyIntegrationTest
     with GcpEncryptedCryptoPrivateStoreTestBase {

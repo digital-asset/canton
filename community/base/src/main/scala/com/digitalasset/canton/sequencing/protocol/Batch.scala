@@ -198,7 +198,7 @@ object Batch
       uncompressedBatchProto <- ProtoConverter.protoParser(v30.Batch.parseFrom)(uncompressed)
       v30.Batch(envelopesProto) = uncompressedBatchProto
       envelopes <- ProtoValidation
-        .validateLength(envelopesProto, Some("envelopes"), pvv, ProtoValidation.MaxCollectionSize)
+        .validateLength(envelopesProto, "envelopes", pvv, ProtoValidation.MaxCollectionSize)
         .flatMap(_.toList.traverse(ClosedUncompressedEnvelope.fromProtoV30(pvv, _)))
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield Batch[ClosedEnvelope](envelopes)(rpv)
@@ -229,7 +229,7 @@ object Batch
       recipientsList <- ProtoValidation
         .validateLength(
           decompressedRecipientsProto.recipients,
-          Some("recipients"),
+          "recipients",
           pvv,
           ProtoValidation.MaxCollectionSize,
         )
@@ -238,7 +238,7 @@ object Batch
 
       compressedEnvelopesSeq <- ProtoValidation.validateLength(
         compressedEnvelopes,
-        Some("compressed_envelopes"),
+        "compressed_envelopes",
         pvv,
         ProtoValidation.MaxCollectionSize,
       )

@@ -218,7 +218,7 @@ final class TrafficEnforcementDatabaseFaultCatchUpIntegrationTest extends TeaDat
           eventually(timeUntilSuccess = 60.seconds, retryOnTestFailuresOnly = false) {
             restarted.participant1.ledger_api.traffic
               .get_account(alice.toProtoPrimitive)
-              .balance shouldBe backlogCost
+              .balance shouldBe -backlogCost
           }
         }
       }

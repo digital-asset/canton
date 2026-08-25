@@ -61,7 +61,12 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
-      .addConfigTransforms(ConfigTransforms.useStaticTime)
+      .addConfigTransforms(
+        ConfigTransforms.useStaticTime,
+        // TODO(#35107) Upon disabling the old ACS commitment processor
+        //  this test fails: (enable the new pipeline) and make the fix
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
+      )
 
   "Upgrade time on old synchronizer" should {
     "is respected by sequencers and participants" in { implicit env =>

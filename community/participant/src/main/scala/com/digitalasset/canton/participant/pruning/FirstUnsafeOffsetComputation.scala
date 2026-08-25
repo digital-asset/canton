@@ -97,7 +97,7 @@ class FirstUnsafeOffsetComputation(
             else
               configs.forgetNE
                 .traverse_ {
-                  case Active | Inactive | LsuSource | LsuTarget => Right(())
+                  case Active | Inactive | LsuSource | LsuTarget => Either.unit
                   case migratingStatus @ (HardMigratingSource | HardMigratingTarget) =>
                     logger.info(
                       s"Unable to prune while $lsid is being migrated ($migratingStatus)"

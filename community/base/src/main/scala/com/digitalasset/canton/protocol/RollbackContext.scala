@@ -164,7 +164,7 @@ object PathRollbackContext {
 
           rbScopeSeq <- ProtoValidation.validateLength(
             rbScope,
-            Some("rollback_scope"),
+            "rollback_scope",
             pvv,
             ProtoValidation.MaxCollectionSize,
           )

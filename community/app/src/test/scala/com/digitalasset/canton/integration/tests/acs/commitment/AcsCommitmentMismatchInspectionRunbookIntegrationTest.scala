@@ -56,6 +56,8 @@ trait AcsCommitmentMismatchInspectionRunbookIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
+        // TODO(#35107) Disable the old processor and fix the test
+        ConfigTransforms.enableOldAcsCommitmentProcessor,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

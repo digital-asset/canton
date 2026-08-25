@@ -255,26 +255,33 @@ private[index] class IndexServiceImpl(
       eventFormat = eventFormat,
       activeAt = Some(activeAt),
       rangeInfo = AcsRangeInfo.empty,
-    )
-      .mapConcat(_.contractEntry.activeContract.toList)
-      .filter(_.synchronizerId == synchronizerIdString)
-      .mapConcat { activeContract =>
-        activeContract.createdEvent.toList.flatMap { createdEvent =>
-          val stakeholders =
-            (createdEvent.signatories.view ++ createdEvent.observers.view)
-              .map(Party.assertFromString)
-              .toSet
-          Option
-            .when(stakeholders2.isEmpty || stakeholders.exists(stakeholders2))(
-              InternalIndexService.ActiveContract(
-                contractId = LfContractId.assertFromString(createdEvent.contractId),
-                stakeholders = stakeholders,
-                reassignmentCounter = ReassignmentCounter(activeContract.reassignmentCounter),
-              )
+    ).async
+      // TODO(#35072) make configurable and add some grouping
+      .mapAsync(parallelism = 16) { getActiveContractsResponse =>
+        Future {
+          getActiveContractsResponse.contractEntry.activeContract
+            .filter(
+              _.synchronizerId == synchronizerIdString
             )
-            .toList
-        }
+            .flatMap { activeContract =>
+              activeContract.createdEvent.flatMap { createdEvent =>
+                val stakeholders =
+                  (createdEvent.signatories.view ++ createdEvent.observers.view)
+                    .map(Party.assertFromString)
+                    .toSet
+                Option
+                  .when(stakeholders2.isEmpty || stakeholders.exists(stakeholders2))(
+                    InternalIndexService.ActiveContract(
+                      contractId = LfContractId.assertFromString(createdEvent.contractId),
+                      stakeholders = stakeholders,
+                      reassignmentCounter = ReassignmentCounter(activeContract.reassignmentCounter),
+                    )
+                  )
+              }
+            }
+        }(executionContext)
       }
+      .collect { case Some(contract) => contract }
   }
 
   //  this flow adds checkpoint messages if the condition is met in the following way:

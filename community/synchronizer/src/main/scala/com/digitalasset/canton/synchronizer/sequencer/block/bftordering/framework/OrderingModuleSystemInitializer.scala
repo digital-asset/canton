@@ -70,7 +70,7 @@ class OrderingModuleSystemInitializer[
       consensusRef,
       outputRef,
     )
-    val output = moduleFactories.output(availabilityRef, consensusRef)
+    val output = moduleFactories.output(availabilityRef, consensusRef, mempoolRef)
     val consensus =
       moduleFactories.consensus(p2pNetworkOutRef, availabilityRef, outputRef)
 
@@ -138,6 +138,7 @@ object OrderingModuleSystemInitializer {
       output: (
           ModuleRef[Availability.Message[E]],
           ModuleRef[Consensus.Message[E]],
+          ModuleRef[Mempool.Message],
       ) => Output[E],
       pruning: () => Pruning[E],
   )

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.RotateWrapperKeyIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.aws.AwsEncryptedCryptoPrivateStoreTestBase
@@ -10,6 +11,7 @@ import com.digitalasset.canton.integration.tests.security.kms.aws.AwsEncryptedCr
 /** Tests a manual rotation of an AWS wrapper key, where NO KEY is SPECIFIED as the new wrapper key
   * and, as such, Canton will automatically generate a new one.
   */
+@RequiresExternalKms
 class AwsRotateWrapperKeyNoPreDefinedKeyReferenceIntegrationTestPostgres
     extends RotateWrapperKeyIntegrationTest
     with AwsEncryptedCryptoPrivateStoreTestBase {

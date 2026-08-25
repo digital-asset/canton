@@ -10,6 +10,10 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Resolve ref
+      id: resolve_ref
+      uses: ./.github/actions/utils/resolve_ref
+
     - name: Compute Compile Hash
       id: compute_hash
       uses: ./.github/actions/cache/compute_build_hash
@@ -26,4 +30,4 @@ runs:
         path: |
           **/target
         key: |-
-          compile-os=${{ runner.os }}-branch=${{ github.ref_name }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}
+          compile-os=${{ runner.os }}-branch=${{ steps.resolve_ref.outputs.ref_group_key }}-hash=${{ steps.compute_hash.outputs.hash }}-sha=${{ github.sha }}

@@ -466,6 +466,19 @@ class CommitmentMetrics private[metrics] (
     )
   )
 
+  val reinitializeTombstones: Gauge[Int] = metricsFactory.gauge[Int](
+    MetricInfo(
+      prefix :+ "reinitialize-tombstones",
+      summary = "Counts the number of tombstones that have been written",
+      description =
+        """This metric measures progress in the number of persisted tombstones during the digest processor reinitialization.
+          |This metric is reset to 0 at the start of reinitialization.
+          |""".stripMargin,
+      qualification = MetricQualification.Debug,
+    ),
+    0,
+  )
+
   val reinitializeParties: Gauge[Int] = metricsFactory.gauge[Int](
     MetricInfo(
       prefix :+ "reinitialize-parties",

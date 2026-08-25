@@ -8,6 +8,15 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+# GitHub renders at most 1 MiB per step summary and drops anything larger. Stay
+# comfortably under that so a shard with many failures still produces a valid
+# summary rather than a rejected oversized one, the remainder stays in the
+# uploaded artifact.
+SUMMARY_BUDGET_BYTES = 900_000
+# Headroom kept below the budget for the trailing "and N more" line when the
+# first detail block has to be byte-truncated to fit.
+SUMMARY_TRAILER_RESERVE_BYTES = 256
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -41,9 +50,29 @@ def parse_args():
         "--limit",
         type=int,
         default=100,
-        help="Maximum number of not-passed tests to list in the markdown details section.",
+        help="Maximum number of not-passed tests to detail in the markdown summary.",
+    )
+    parser.add_argument(
+        "--trace-lines",
+        type=int,
+        default=60,
+        help="Maximum number of failure-output lines to show per test before truncating.",
     )
     return parser.parse_args()
+
+
+def failure_text(elem):
+    """Full failure/error text for a testcase child element.
+
+    The `message` attribute holds the one-line summary (typically the assertion),
+    the element body holds the stack trace. Joining both reproduces what the CI
+    Tests tab used to show for a failed test.
+    """
+    message = (elem.get("message") or "").strip()
+    body = (elem.text or "").strip()
+    if message and body:
+        return message + "\n" + body
+    return message or body
 
 
 def gather_results(paths):
@@ -56,6 +85,7 @@ def gather_results(paths):
     errored_tests = []
     not_passed_tests = []
     not_passed_classes = []
+    not_passed_details = {}
 
     for path in paths:
         try:
@@ -69,18 +99,23 @@ def gather_results(paths):
             name = testcase.attrib.get("name", "")
             full_name = f"{classname}.{name}" if classname else name
 
-            if testcase.find("error") is not None:
+            error_elem = testcase.find("error")
+            failure_elem = testcase.find("failure")
+
+            if error_elem is not None:
                 errors += 1
                 if full_name:
                     errored_tests.append(full_name)
                     not_passed_tests.append(full_name)
+                    not_passed_details.setdefault(full_name, failure_text(error_elem))
                 if classname:
                     not_passed_classes.append(classname)
-            elif testcase.find("failure") is not None:
+            elif failure_elem is not None:
                 failures += 1
                 if full_name:
                     failed_tests.append(full_name)
                     not_passed_tests.append(full_name)
+                    not_passed_details.setdefault(full_name, failure_text(failure_elem))
                 if classname:
                     not_passed_classes.append(classname)
             elif testcase.find("skipped") is not None:
@@ -105,12 +140,63 @@ def gather_results(paths):
         "total": total,
         "not_passed_classes": unique_not_passed_classes,
         "not_passed_tests": unique_not_passed,
+        # Kept in memory for the markdown only, stripped before the JSON payload so
+        # the persisted shard state (consumed by aggregate_test_summaries.py) keeps
+        # its name-only schema.
+        "not_passed_details": not_passed_details,
     }
+
+
+def fence_for(text):
+    """Return a backtick fence long enough that `text` cannot close it early."""
+    fence = "```"
+    while fence in text:
+        fence += "`"
+    return fence
+
+
+def render_detail(full_name, text, trace_lines, max_bytes=None):
+    """Render one collapsible block with the test name and its failure output.
+
+    GitHub only renders markdown inside `<details>` when a blank line separates
+    the HTML tags from the inner block, so keep a blank line after `</summary>`
+    and before `</details>`, otherwise the fenced code block is not rendered.
+
+    When `max_bytes` is set, the failure text is byte-truncated so the rendered
+    block fits within that budget. `trace_lines` caps the line count but not the
+    byte size (a single line can be arbitrarily long), so this is the only guard
+    that keeps one pathological block from pushing the whole summary over the
+    limit and getting it dropped.
+    """
+    header = f"<details><summary>❌ {html.escape(full_name)}</summary>"
+    if not text:
+        return "\n".join(
+            [header, "", "(no failure output captured, see the artifact)", "", "</details>"]
+        )
+    output_lines = text.splitlines()
+    shown = output_lines[:trace_lines]
+    hidden = len(output_lines) - len(shown)
+    if hidden > 0:
+        shown.append(f"... ({hidden} more lines, full trace in the artifact)")
+    body_text = "\n".join(shown)
+    fence = fence_for(body_text)
+    if max_bytes is not None:
+        marker = "... (truncated, full trace in the artifact)"
+        # Everything except the body: header, blank lines, both fences, the
+        # truncation marker and the closing tag. Budget the body against the rest.
+        scaffold = "\n".join([header, "", fence, "", marker, fence, "", "</details>"])
+        allowed = max_bytes - len(scaffold.encode("utf-8"))
+        encoded = body_text.encode("utf-8")
+        if allowed < len(encoded):
+            body_text = encoded[: max(allowed, 0)].decode("utf-8", errors="ignore")
+            return "\n".join([header, "", fence, body_text, marker, fence, "", "</details>"])
+    return "\n".join([header, "", fence, body_text, fence, "", "</details>"])
 
 
 def build_summary(args, files, results, rerun_metadata=None):
     failures_unique = results.get("failures_unique", results["failures"])
     errors_unique = results.get("errors_unique", results["errors"])
+    details = results.get("not_passed_details", {})
 
     lines = []
     lines.append(f"## Test summary (shard {args.shard_index}/{args.total_shards})")
@@ -149,23 +235,42 @@ def build_summary(args, files, results, rerun_metadata=None):
             lines.append("</details>")
             lines.append("")
 
-    lines.append("### Not passed tests")
-    if results["not_passed_tests"]:
-        total_not_passed = len(results["not_passed_tests"])
-        shown_not_passed = min(total_not_passed, args.limit)
-        lines.append(
-            f"<details><summary>Show failed and error tests ({total_not_passed}, shown {shown_not_passed})</summary>"
-        )
-        lines.append("")
-        for test_name in results["not_passed_tests"][: args.limit]:
-            lines.append(f"- {html.escape(test_name)}")
-        if total_not_passed > args.limit:
-            remaining = total_not_passed - args.limit
-            lines.append(f"- and {remaining} more")
-        lines.append("")
-        lines.append("</details>")
-    else:
+    lines.append("### Not passed tests (after rerun)")
+    not_passed = results["not_passed_tests"]
+    if not not_passed:
         lines.append("- none")
+        return "\n".join(lines) + "\n"
+
+    total_not_passed = len(not_passed)
+    lines.append(f"Failed or errored tests: {total_not_passed}")
+    lines.append("")
+
+    running = len(("\n".join(lines) + "\n").encode("utf-8"))
+    shown_count = 0
+    for name in not_passed[: args.limit]:
+        block = render_detail(name, details.get(name, ""), args.trace_lines)
+        block_bytes = len(block.encode("utf-8")) + 1
+        if running + block_bytes > SUMMARY_BUDGET_BYTES:
+            if shown_count == 0:
+                # Even the first block overflows the budget (a single very long
+                # failure line is not bounded by --trace-lines). Byte-truncate it
+                # so the summary still renders instead of GitHub dropping it whole,
+                # then defer the rest to the artifact.
+                budget = SUMMARY_BUDGET_BYTES - running - SUMMARY_TRAILER_RESERVE_BYTES
+                block = render_detail(
+                    name, details.get(name, ""), args.trace_lines, max_bytes=budget
+                )
+                lines.append(block)
+                shown_count += 1
+            break
+        lines.append(block)
+        running += block_bytes
+        shown_count += 1
+
+    remaining = total_not_passed - shown_count
+    if remaining > 0:
+        lines.append("")
+        lines.append(f"- and {remaining} more, full details in the artifact")
 
     return "\n".join(lines) + "\n"
 
@@ -195,11 +300,14 @@ def main():
     if args.json_output:
         json_output_path = Path(args.json_output)
         json_output_path.parent.mkdir(parents=True, exist_ok=True)
+        results_for_json = {
+            key: value for key, value in results.items() if key != "not_passed_details"
+        }
         payload = {
             "shard_index": args.shard_index,
             "total_shards": args.total_shards,
             "junit_files": len(files),
-            "results": results,
+            "results": results_for_json,
         }
         if rerun_metadata is not None:
             payload["rerun"] = rerun_metadata
@@ -212,9 +320,13 @@ def self_test():
     test_gather_results_deduplicates()
     test_gather_results_skips_empty_full_name()
     test_gather_results_handles_parse_error()
+    test_failure_text_joins_message_and_body()
+    test_render_detail_truncates_and_fences()
     test_build_summary_no_failures()
     test_build_summary_with_failures()
     test_build_summary_limit()
+    test_build_summary_respects_budget()
+    test_build_summary_truncates_oversized_first_block()
     print("All self-checks passed")
 
 
@@ -269,6 +381,10 @@ def test_gather_results_deduplicates():
         assert r["not_passed_classes"] == ["com.example.Foo"], (
             f"Expected 1 unique not-passed class after dedup, got {r['not_passed_classes']}"
         )
+        # First occurrence wins for the captured detail.
+        assert r["not_passed_details"]["com.example.Foo.testA"] == "boom", (
+            f"Expected first failure text, got {r['not_passed_details']}"
+        )
 
 
 def test_gather_results_skips_empty_full_name():
@@ -301,13 +417,31 @@ def test_gather_results_handles_parse_error():
         assert r["total"] == 0, f"Expected total 0 for unparseable file, got {r['total']}"
 
 
-def _make_args(shard_index="1", total_shards="4", limit=100):
+def test_failure_text_joins_message_and_body():
+    elem = ET.fromstring('<failure message="msg">body</failure>')
+    assert failure_text(elem) == "msg\nbody", failure_text(elem)
+    elem = ET.fromstring("<failure>body only</failure>")
+    assert failure_text(elem) == "body only", failure_text(elem)
+    elem = ET.fromstring('<error message="msg only"/>')
+    assert failure_text(elem) == "msg only", failure_text(elem)
+
+
+def test_render_detail_truncates_and_fences():
+    block = render_detail("com.example.Foo.testA", "\n".join(f"line {i}" for i in range(10)), 3)
+    assert "<details><summary>❌ com.example.Foo.testA</summary>" in block, block
+    assert "line 0" in block and "line 2" in block, block
+    assert "line 9" not in block and "7 more lines" in block, block
+    assert fence_for("has ``` inside") == "````"
+
+
+def _make_args(shard_index="1", total_shards="4", limit=100, trace_lines=60):
     import types
 
     args = types.SimpleNamespace(
         shard_index=shard_index,
         total_shards=total_shards,
         limit=limit,
+        trace_lines=trace_lines,
     )
     return args
 
@@ -347,11 +481,16 @@ def test_build_summary_with_failures():
         "total": 5,
         "not_passed_classes": ["com.example.Foo", "com.example.Bar"],
         "not_passed_tests": ["com.example.Foo.testA", "com.example.Bar.testB"],
+        "not_passed_details": {
+            "com.example.Foo.testA": "assert boom\n\tat Foo.scala:1",
+            "com.example.Bar.testB": "other boom",
+        },
     }
     summary = build_summary(args, [], results)
-    assert "<details>" in summary, "Expected details block when failures present"
-    assert "- com.example.Foo.testA" in summary
-    assert "- com.example.Bar.testB" in summary
+    assert "<details><summary>❌ com.example.Foo.testA</summary>" in summary, summary
+    assert "assert boom" in summary, "Expected the failure message in the summary"
+    assert "\tat Foo.scala:1" in summary, "Expected the stack frame in the summary"
+    assert "```" in summary, "Expected a fenced code block"
 
 
 def test_build_summary_limit():
@@ -368,10 +507,74 @@ def test_build_summary_limit():
         "total": 5,
         "not_passed_classes": [f"com.example.Test{i}" for i in range(5)],
         "not_passed_tests": not_passed,
+        "not_passed_details": {name: "boom" for name in not_passed},
     }
     summary = build_summary(args, [], results)
     assert "and 3 more" in summary, f"Expected 'and 3 more' in: {summary}"
-    assert "shown 2" in summary, f"Expected 'shown 2' in: {summary}"
+    assert summary.count("<details>") == 2, "Expected only the limit's worth of detail blocks"
+
+
+def test_build_summary_respects_budget():
+    global SUMMARY_BUDGET_BYTES
+    args = _make_args(limit=100, trace_lines=1000)
+    names = [f"com.example.T{i}.t" for i in range(10)]
+    results = {
+        "passed": 0,
+        "failures": 10,
+        "failures_unique": 10,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 10,
+        "not_passed_classes": [f"com.example.T{i}" for i in range(10)],
+        "not_passed_tests": names,
+        "not_passed_details": {name: "boom\n" * 200 for name in names},
+    }
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        # Fits one full block (~1KB) but not two, so the first is shown in full
+        # and the rest are deferred to the artifact.
+        SUMMARY_BUDGET_BYTES = 1500
+        summary = build_summary(args, [], results)
+    finally:
+        SUMMARY_BUDGET_BYTES = original
+    assert summary.count("<details>") == 1, "Expected the budget to stop after the first block"
+    assert "boom" in summary, "Expected the first block to be shown in full"
+    assert "and 9 more, full details in the artifact" in summary, summary
+
+
+def test_build_summary_truncates_oversized_first_block():
+    global SUMMARY_BUDGET_BYTES
+    args = _make_args(limit=100, trace_lines=100)
+    names = [f"com.example.Big{i}.t" for i in range(3)]
+    # A single very long line: --trace-lines caps the line count, not the byte
+    # size, so this one block would blow the budget on its own. It must be
+    # truncated rather than emitted whole (which would get the summary dropped).
+    results = {
+        "passed": 0,
+        "failures": 3,
+        "failures_unique": 3,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 3,
+        "not_passed_classes": [f"com.example.Big{i}" for i in range(3)],
+        "not_passed_tests": names,
+        "not_passed_details": {names[0]: "x" * 5000, names[1]: "boom", names[2]: "boom"},
+    }
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        SUMMARY_BUDGET_BYTES = 1000
+        summary = build_summary(args, [], results)
+    finally:
+        SUMMARY_BUDGET_BYTES = original
+    encoded_len = len(summary.encode("utf-8"))
+    assert summary.count("<details>") == 1, summary
+    assert "truncated, full trace in the artifact" in summary, summary
+    assert "and 2 more, full details in the artifact" in summary, summary
+    assert encoded_len <= 1000, f"summary is {encoded_len} bytes, over the budget"
 
 
 if __name__ == "__main__":

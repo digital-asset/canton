@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.console.commands
 
+import cats.syntax.either.*
 import com.digitalasset.canton.admin.api.client.commands.SequencerAdminCommands.{
   InitializeFromGenesisState,
   InitializeFromGenesisStateV2,
@@ -174,7 +175,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
       runner.adminCommand(
         InitializeFromGenesisState(
           genesisState.newInput(),
-          synchronizerParameters.toInternal,
+          synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError),
         )
       )
     }
@@ -202,7 +203,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
       runner.adminCommand(
         InitializeFromGenesisStateV2(
           genesisState.newInput(),
-          synchronizerParameters.toInternal,
+          synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError),
         )
       )
     }
@@ -234,7 +235,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
           new BufferedInputStream(
             new java.io.FileInputStream(inputFile)
           ),
-          synchronizerParameters.toInternal,
+          synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError),
           ignorePsidCheck = ignorePsidCheck,
         )
       )

@@ -1674,6 +1674,10 @@ object BuildCommon {
             scalapb_runtime_grpc,
             scalatestMockito % Test,
             scalatest % Test,
+            tapir_core % Test,
+            tapir_json_circe % Test,
+            circe_core % Test,
+            circe_parser % Test,
             wartremover_dep,
           ),
           scala213 = Seq(mockito_scala % Test),
@@ -2068,6 +2072,10 @@ object BuildCommon {
         .settings(
           scalacOptions += "-Ytasty-reader",
           sharedCantonCommunitySettings,
+          // Prevent new GET endpoints with request bodies (bad HTTP practice)
+          Compile / compile / wartremoverErrors += Wart.custom(
+            "com.digitalasset.canton.GetEndpointWithBody"
+          ),
           Test / PB.targets := Seq(
             // build java codegen too
             PB.gens.java -> (Test / sourceManaged).value / "protobuf",

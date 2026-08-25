@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.kms.gcp
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.security.kms.EncryptedCryptoPrivateStoreIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpEncryptedCryptoPrivateStoreTestBase
@@ -11,6 +12,7 @@ import com.digitalasset.canton.integration.tests.security.kms.gcp.GcpEncryptedCr
   * will (a) create a new temporary SINGLE-REGION key that is scheduled for deletion at the end of
   * the test. Creating a new key costs a small fee so this test is only run nightly.
   */
+@RequiresExternalKms
 class GcpEncryptedCryptoPrivateStoreNoPreDefinedKeyBftOrderingIntegrationTestPostgres
     extends EncryptedCryptoPrivateStoreIntegrationTest
     with GcpEncryptedCryptoPrivateStoreTestBase {
@@ -26,6 +28,7 @@ class GcpEncryptedCryptoPrivateStoreNoPreDefinedKeyBftOrderingIntegrationTestPos
 
 /** In GCP to use a multi-region key we need to use a different keyring
   */
+@RequiresExternalKms
 class GcpEncryptedCryptoPrivateStoreNoPreDefinedKeyMultiRegionBftOrderingIntegrationTestPostgres
     extends EncryptedCryptoPrivateStoreIntegrationTest
     with GcpEncryptedCryptoPrivateStoreTestBase {

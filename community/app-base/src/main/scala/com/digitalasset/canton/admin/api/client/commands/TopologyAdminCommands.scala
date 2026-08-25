@@ -1464,7 +1464,7 @@ object TopologyAdminCommands {
         ProtoValidation
           .validate(
             response.uniqueIdentifier,
-            Some("unique_identifier"),
+            "unique_identifier",
             ProtocolVersionValidation.AlwaysValidation,
           )
           .leftMap(_.message)

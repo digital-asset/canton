@@ -9,6 +9,7 @@ import "com/digitalasset/canton/crypto/v30/crypto.proto";
 import "com/digitalasset/canton/protocol/v30/common_stable.proto";
 import "com/digitalasset/canton/protocol/v30/sequencing.proto";
 import "com/digitalasset/canton/protocol/v30/traffic_control_parameters.proto";
+import "google/protobuf/duration.proto";
 import "google/rpc/status.proto";
 import "scalapb/scalapb.proto";
 
@@ -131,4 +132,44 @@ message SubmissionRequest {
 
   // Optional submission cost computed by the sender. Must be provided if traffic control is enabled on the receiving synchronizer.
   v30.SequencingSubmissionCost submission_cost = 8;
+}
+
+// size limits on various collections, globally enforced on a synchronizer
+message SynchronizerLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  TransactionProtocolLimits transaction_protocol_limits = 1;
+}
+
+// size limits on collections within the transaction protocol
+message TransactionProtocolLimits {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // maximum number of `actAs` entries in a transaction
+  uint32 max_act_as = 1;
+}
+
+// Differences with v30:
+// - add `synchronizer_limits`
+message StaticSynchronizerParameters {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  com.digitalasset.canton.crypto.v30.RequiredSigningSpecs required_signing_specs = 1;
+  com.digitalasset.canton.crypto.v30.RequiredEncryptionSpecs required_encryption_specs = 2;
+  repeated com.digitalasset.canton.crypto.v30.SymmetricKeyScheme required_symmetric_key_schemes = 3;
+  repeated com.digitalasset.canton.crypto.v30.HashAlgorithm required_hash_algorithms = 4;
+  repeated com.digitalasset.canton.crypto.v30.CryptoKeyFormat required_crypto_key_formats = 5;
+  repeated com.digitalasset.canton.crypto.v30.SignatureFormat required_signature_formats = 6;
+  int32 protocol_version = 7;
+
+  // Serial of the synchronizer. Must be non-negative.
+  int32 serial = 8;
+
+  // Flag to enable transparency checks.
+  bool enable_transparency_checks = 9;
+
+  google.protobuf.Duration topology_change_delay = 10;
+
+  // Size limits to be enforced on this synchronizer
+  com.digitalasset.canton.protocol.v31.SynchronizerLimits synchronizer_limits = 11;
 }

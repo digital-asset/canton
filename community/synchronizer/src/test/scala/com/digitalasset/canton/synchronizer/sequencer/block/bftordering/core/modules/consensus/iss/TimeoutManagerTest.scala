@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.TimeoutManager.ConstantTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   ProgrammableUnitTestContext,
   ProgrammableUnitTestEnv,
@@ -33,9 +34,14 @@ class TimeoutManagerTest extends AsyncWordSpec with BftSequencerBaseTest {
   "TimeoutManager" should {
     "be able to schedule, reschedule and cancel events" in {
       val timeoutManager =
-        new TimeoutManager[ProgrammableUnitTestEnv, ConsensusSegment.Message, BlockNumber](
+        new TimeoutManager[
+          ProgrammableUnitTestEnv,
+          ConsensusSegment.Message,
+          ConsensusSegment.Message,
+          BlockNumber,
+        ](
           loggerFactory,
-          BftBlockOrdererConfig().consensusBlockCompletionTimeout,
+          ConstantTimeout(BftBlockOrdererConfig().consensusBlockCompletionTimeout),
           timeoutId = BlockNumber.First,
           timeoutMetric = None,
         )

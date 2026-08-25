@@ -349,7 +349,7 @@ class DbSynchronizerConnectionConfigStore private[store] (
             .collect { case (_, LsuSource) => () }
             .fold(().asRight[LsuOngoing])(_ => LsuOngoing(predecessor.psid, psid).asLeft)
 
-        case _ => Right(())
+        case _ => Either.unit
       }
 
       _ <- EitherT.fromEither[DBIO](lsuOngoingCheckResult)

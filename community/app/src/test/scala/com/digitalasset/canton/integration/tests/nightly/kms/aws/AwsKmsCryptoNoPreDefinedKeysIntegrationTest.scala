@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.nightly.kms.aws
 
+import com.digitalasset.canton.annotations.RequiresExternalKms
 import com.digitalasset.canton.integration.tests.nightly.kms.KmsCryptoNoPreDefinedKeysIntegrationTest
 import com.digitalasset.canton.integration.tests.security.CryptoIntegrationTest
 import com.digitalasset.canton.integration.tests.security.kms.aws.AwsKmsCryptoIntegrationTestBase
@@ -10,6 +11,7 @@ import com.digitalasset.canton.integration.tests.security.kms.aws.AwsKmsCryptoIn
 /** Runs a ping while one participant is using an AWS KMS provider and letting Canton generate its
   * own keys (i.e. auto-init == true)
   */
+@RequiresExternalKms
 class AwsKmsCryptoNoPreDefinedKeysReferenceIntegrationTest
     extends CryptoIntegrationTest(
       AwsKmsCryptoIntegrationTestBase.defaultAwsKmsCryptoConfig

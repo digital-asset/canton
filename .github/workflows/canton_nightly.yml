@@ -46,6 +46,16 @@ jobs:
       is_manual: false
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  package_sequencer_driver_api:
+    name: Package Sequencer Driver API
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_sequencer_driver_api.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: true
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   build_scaladoc:
     name: Build Scaladoc
     needs: [pick_runner, compile]
@@ -116,6 +126,7 @@ jobs:
       - pick_runner
       - compile
       - package_community
+      - package_sequencer_driver_api
       - build_scaladoc
       - build_docs_snippets
       - build_docs

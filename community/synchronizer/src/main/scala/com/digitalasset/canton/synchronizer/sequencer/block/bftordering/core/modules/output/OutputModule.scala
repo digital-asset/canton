@@ -86,6 +86,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
+  Mempool,
   Output,
   SequencerNode,
 }
@@ -128,6 +129,7 @@ class OutputModule[E <: Env[E]](
     metrics: BftOrderingMetrics,
     override val availability: ModuleRef[Availability.Message[E]],
     override val consensus: ModuleRef[Consensus.Message[E]],
+    override val mempool: ModuleRef[Mempool.Message],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
     requestInspector: RequestInspector = DefaultRequestInspector, // For testing

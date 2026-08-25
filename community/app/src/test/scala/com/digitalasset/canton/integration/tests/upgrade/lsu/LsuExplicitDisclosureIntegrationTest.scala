@@ -7,11 +7,15 @@ import com.daml.ledger.javaapi.data.DisclosedContract
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.damltests.java.explicitdisclosure.PriceQuotation
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.integration.{
+  ConfigTransform,
+  ConfigTransforms,
+  EnvironmentDefinition,
+}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.Party
 
@@ -29,6 +33,13 @@ final class LsuExplicitDisclosureIntegrationTest extends LsuBase {
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected def testName: String = "lsu-explicit-disclosure"
+
+  // TODO(#35107) Upon disabling the old ACS commitment processor
+  //  this test fails: (enable the new pipeline) and make the fix
+  override def configTransforms: Seq[ConfigTransform] =
+    super.configTransforms ++ Seq(
+      ConfigTransforms.enableOldAcsCommitmentProcessor
+    )
 
   override protected lazy val newOldSequencers: Map[String, String] = Map(
     "sequencer2" -> "sequencer1"

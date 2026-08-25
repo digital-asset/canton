@@ -339,7 +339,7 @@ object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName
       )
       // TODO(#34479): validate the crypto key name once the negotiated pvv is threaded here.
       name <- ProtoValidation
-        .validate(key.name, Some("name"), ProtocolVersionValidation.NoValidation)
+        .validate(key.name, "name", ProtocolVersionValidation.NoValidation)
         .flatMap(KeyName.fromProtoPrimitive)
     } yield {
       (publicKey: @unchecked) match {
@@ -357,7 +357,7 @@ object PublicKeyWithName extends HasVersionedMessageCompanionE[PublicKeyWithName
       )
       // TODO(#34479): validate the crypto key name once the negotiated pvv is threaded here.
       name <- ProtoValidation
-        .validate(key.name, Some("name"), ProtocolVersionValidation.NoValidation)
+        .validate(key.name, "name", ProtocolVersionValidation.NoValidation)
         .flatMap(KeyName.fromProtoPrimitive)
     } yield {
       (publicKey: @unchecked) match {
