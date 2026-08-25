@@ -972,8 +972,6 @@ class ParticipantNodeBootstrap(
                   PartyReplicationEndpoints(
                     container.asEval.value,
                     sync,
-                    topologyLookup,
-                    parameters.processingTimeouts,
                   )
                 ),
                 trafficEnforcementBackendO = trafficEnforcementBackendO,

@@ -888,6 +888,18 @@ trait TopologyStoreTest
               ),
             )
 
+            uidAndNamespaceFilterTransactions <- findPositiveTransactions(
+              store,
+              ts6,
+              filterNamespace = Some(
+                NonEmpty(Seq, p1Namespace)
+              ),
+              filterUid = Some(
+                // p1's uid filter should be subsumed by p1's namespace query
+                NonEmpty(Seq, p1Id.uid, p2Id.uid)
+              ),
+            )
+
             essentialStateTransactions <- FutureUnlessShutdown.outcomeF(
               store
                 .findEssentialStateAtSequencedTime(
@@ -966,6 +978,10 @@ trait TopologyStoreTest
             expectTransactions(
               namespaceFilterTransactions,
               Seq(nsd_p2, dnd_p1seq, otk_p2, ptp_fred_p1, dtc_p2_synchronizer1),
+            )
+            expectTransactions(
+              uidAndNamespaceFilterTransactions,
+              Seq(nsd_p1, otk_p1, dtc_p1_synchronizer1, otk_p2, dtc_p2_synchronizer1),
             )
 
             // Essential state currently encompasses all transactions at the specified time

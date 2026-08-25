@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversi
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdateResponse
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
@@ -119,6 +120,7 @@ private[dao] final class UpdateReader(
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
+      configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] =
@@ -132,6 +134,7 @@ private[dao] final class UpdateReader(
               activeAt = offset -> maxSeqId,
               eventProjectionProperties = eventProjectionProperties,
               rangeInfo = rangeInfo,
+              configOverrides = configOverrides,
             )
           )
         Source

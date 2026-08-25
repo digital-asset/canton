@@ -107,6 +107,7 @@ final class ApiStateService(
                 requestChecksum = checksum,
                 limit = None,
               ),
+              configOverrides = None,
             )
         }
       }
@@ -171,6 +172,7 @@ final class ApiStateService(
                 requestChecksum = AcsContinuationToken.emptyChecksum,
                 limit = Some(maxPageSize + 1L),
               ),
+              configOverrides = None,
             )
             .runWith(
               Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]]

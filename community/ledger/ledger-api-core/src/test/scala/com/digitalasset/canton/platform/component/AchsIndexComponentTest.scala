@@ -275,6 +275,7 @@ class AchsIndexComponentTest
         eventFormat = allPartyEventFormat,
         activeAt = Some(Offset.tryFromLong(queryOffset)),
         rangeInfo = AcsRangeInfo.empty,
+        configOverrides = None,
       )
       .zipWithIndex
       .mapAsync(1) { case (elem, idx) =>

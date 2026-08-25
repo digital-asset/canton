@@ -298,6 +298,7 @@ class IndexComponentLoadTest
         eventFormat = eventFormat(dsoParty.value),
         activeAt = ledgerEndOffset,
         rangeInfo = AcsRangeInfo.empty,
+        configOverrides = None,
       )
       .zipWithIndex
       .runWith(Sink.last)
@@ -329,6 +330,7 @@ class IndexComponentLoadTest
           AcsContinuationToken.emptyChecksum,
           Some(pageSize.toLong),
         ),
+        configOverrides = None,
       )
       .runWith(Sink.collection[GetActiveContractsResponse, Vector[GetActiveContractsResponse]])
       .flatMap { page =>

@@ -4,18 +4,13 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
-  AddPartyWithAcsRequest,
-  AddPartyWithAcsResponse,
   AuthorizePartyUpdateRequest,
-  ExportPartyAcsRequest,
-  ExportPartyAcsResponse,
   GeneratePartyTopologyUpdateRequest,
   GeneratePartyTopologyUpdateResponse,
   GetAddPartyStatusRequest,
   GetAddPartyStatusResponse,
 }
 import com.digitalasset.canton.topology.Party
-import io.grpc.stub.StreamObserver
 
 import scala.concurrent.Future
 
@@ -23,17 +18,6 @@ import scala.concurrent.Future
   * canton-internal implementation.
   */
 trait PartyReplicationEndpoints {
-
-  /** Export party ACS */
-  def exportPartyAcs(
-      request: ExportPartyAcsRequest,
-      responseObserver: StreamObserver[ExportPartyAcsResponse],
-  ): Unit
-
-  /** Import party ACS in "online" fashion (OnPR) */
-  def addPartyWithAcs(
-      responseObserver: StreamObserver[AddPartyWithAcsResponse]
-  ): StreamObserver[AddPartyWithAcsRequest]
 
   /** Obtain online party replication status of an earlier [[addPartyWithAcs]] call */
   def getAddPartyStatus(request: GetAddPartyStatusRequest): Future[GetAddPartyStatusResponse]

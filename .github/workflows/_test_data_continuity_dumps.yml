@@ -15,9 +15,9 @@ on:
         type: string
     secrets:
       DATADOG_API_KEY:
-        required: true
+        required: false
       GCLOUD_SERVICE_KEY:
-        required: true
+        required: false
 
 permissions:
   contents: read
@@ -86,7 +86,9 @@ jobs:
         uses: ./.github/actions/test/run_tests
         with:
           command: >-
-            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest
+            -l com.digitalasset.canton.annotations.UnstableTest -l RequiresExternalKms
+            -l com.digitalasset.canton.annotations.RequiresExternalKms" checkErrors
           # Full runs keep both suites (all DataContinuityTestPostgres classes). Scoped runs keep
           # only the Basic classes and drop the costlier SynchronizerChange ones.
           exclude_patterns: >-
@@ -94,6 +96,7 @@ jobs:
             && '^(?!.*com\.digitalasset\.canton\.integration\.tests\.manual\..*DataContinuityTestPostgres).*$'
             || '^(?!.*com\.digitalasset\.canton\.integration\.tests\.manual\..*BasicDataContinuityTestPostgres).*$' }}
           execution_context_size: "8"
+          setup_gcp_kms: 'false'
           num_parallel_tasks: '1'
           num_test_buckets: ${{ inputs.full_coverage && '8' || '4' }}
           shard_index: ${{ matrix.shard_index }}

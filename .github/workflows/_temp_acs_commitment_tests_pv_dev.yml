@@ -11,13 +11,13 @@ on:
         type: string
     secrets:
       DATADOG_API_KEY:
-        required: true
+        required: false
       GCLOUD_SERVICE_KEY:
-        required: true
+        required: false
       AWS_ACCESS_KEY_ID:
-        required: true
+        required: false
       AWS_SECRET_ACCESS_KEY:
-        required: true
+        required: false
       AWS_SESSION_TOKEN:
         required: false
       AWS_REGION:

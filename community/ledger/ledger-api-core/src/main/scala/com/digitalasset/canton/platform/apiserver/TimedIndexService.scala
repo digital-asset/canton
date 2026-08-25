@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.topology.SynchronizerId
@@ -93,12 +94,13 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       eventFormat: EventFormat,
       activeAt: Option[Offset],
       rangeInfo: AcsRangeInfo,
+      configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] =
     Timed.source(
       metrics.services.index.getActiveContracts,
-      delegate.getActiveContracts(eventFormat, activeAt, rangeInfo),
+      delegate.getActiveContracts(eventFormat, activeAt, rangeInfo, configOverrides),
     )
 
   override def acs(
@@ -106,12 +108,19 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       activeAt: Offset,
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
+      configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[InternalIndexService.ActiveContract, NotUsed] =
     Timed.source(
       metrics.services.index.acs,
-      delegate.acs(synchronizerId, activeAt, stakeholders1, stakeholders2),
+      delegate.acs(
+        synchronizerId = synchronizerId,
+        activeAt = activeAt,
+        stakeholders1 = stakeholders1,
+        stakeholders2 = stakeholders2,
+        configOverrides = configOverrides,
+      ),
     )
 
   override def lookupActiveContract(

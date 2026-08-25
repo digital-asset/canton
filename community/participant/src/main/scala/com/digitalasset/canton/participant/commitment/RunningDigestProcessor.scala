@@ -46,6 +46,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   CheckpointType,
   allCheckpointsFilter,
 }
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, LfContractId}
 import com.digitalasset.canton.time.RefinedDuration
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -453,9 +454,19 @@ class RunningDigestProcessorImpl(
     metrics.runningDigestProcessor.localPartyChangeContractChanges.updateValue(0)
     metrics.runningDigestProcessor.localPartyChangeCounterparties.updateValue(0)
 
+    // TODO(#35072): make configurable in AcsCommitmentConfig
+    val configOverrides = ActiveContractsServiceStreamsConfigOverrides(
+      maxParallelActiveIdQueries = 12,
+      maxParallelPayloadCreateQueries = 6,
+    )
     val acsUpdates = indexService
       // load the ACS of the party to determine the counterparties that need to have their digest updated
-      .counterParties(synchronizerId, offset, Some(partyAffectedByTopologyChange))
+      .counterParties(
+        synchronizerId = synchronizerId,
+        activeAt = offset,
+        party = Some(partyAffectedByTopologyChange),
+        configOverrides = configOverrides,
+      )
       .grouped(acsCommitmentConfig.counterpartyBatchSize.unwrap)
       .mapAsync(acsCommitmentConfig.acsFetchParallelism.unwrap) { counterparties =>
         metrics.runningDigestProcessor.localPartyChangeCounterparties.updateValue(
@@ -472,6 +483,7 @@ class RunningDigestProcessorImpl(
               offset,
               counterpartiesSet,
               Set(partyAffectedByTopologyChange),
+              configOverrides = configOverrides,
             )
             .grouped(acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap)
             .map(counterpartiesSet -> _)

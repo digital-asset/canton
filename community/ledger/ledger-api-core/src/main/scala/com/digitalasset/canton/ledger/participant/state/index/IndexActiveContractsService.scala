@@ -9,6 +9,7 @@ import com.digitalasset.canton.ledger.api.EventFormat
 import com.digitalasset.canton.ledger.api.messages.state.AcsRangeInfo
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref.Party
 import org.apache.pekko.NotUsed
@@ -23,6 +24,7 @@ trait IndexActiveContractsService {
       eventFormat: EventFormat,
       activeAt: Option[Offset],
       rangeInfo: AcsRangeInfo,
+      configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed]
@@ -32,6 +34,7 @@ trait IndexActiveContractsService {
       activeAt: Offset,
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
+      configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[InternalIndexService.ActiveContract, NotUsed]

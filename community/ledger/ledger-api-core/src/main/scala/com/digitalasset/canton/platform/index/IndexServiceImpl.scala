@@ -53,7 +53,10 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.pekkostreams.dispatcher.Dispatcher
 import com.digitalasset.canton.pekkostreams.dispatcher.DispatcherImpl.DispatcherIsClosedException
 import com.digitalasset.canton.pekkostreams.dispatcher.SubSource.RangeSource
-import com.digitalasset.canton.platform.config.UpdateServiceConfig
+import com.digitalasset.canton.platform.config.{
+  ActiveContractsServiceStreamsConfigOverrides,
+  UpdateServiceConfig,
+}
 import com.digitalasset.canton.platform.index.IndexServiceImpl.*
 import com.digitalasset.canton.platform.index.IndexServiceOwner.GetPackagePreferenceForViewsUpgrading
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
@@ -116,6 +119,7 @@ private[index] class IndexServiceImpl(
     ledgerEndCache: LedgerEndCache,
     updateServiceConfig: UpdateServiceConfig,
     maxRejectedCompletionsByHash: Int,
+    acsFilteringParallelism: Int,
 ) extends IndexService
     with NamedLogging {
 
@@ -238,6 +242,7 @@ private[index] class IndexServiceImpl(
       activeAt: Offset,
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
+      configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[InternalIndexService.ActiveContract, NotUsed] = {
@@ -255,9 +260,9 @@ private[index] class IndexServiceImpl(
       eventFormat = eventFormat,
       activeAt = Some(activeAt),
       rangeInfo = AcsRangeInfo.empty,
+      configOverrides = Some(configOverrides),
     ).async
-      // TODO(#35072) make configurable and add some grouping
-      .mapAsync(parallelism = 16) { getActiveContractsResponse =>
+      .mapAsync(parallelism = acsFilteringParallelism) { getActiveContractsResponse =>
         Future {
           getActiveContractsResponse.contractEntry.activeContract
             .filter(
@@ -392,6 +397,7 @@ private[index] class IndexServiceImpl(
       eventFormat: EventFormat,
       activeAt: Option[Offset],
       rangeInfo: AcsRangeInfo,
+      configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -422,6 +428,7 @@ private[index] class IndexServiceImpl(
                 filter = templateFilter,
                 eventProjectionProperties = eventProjectionProperties,
                 rangeInfo = rangeInfo,
+                configOverrides = configOverrides,
               )
           }
         activeContractsSource

@@ -19,6 +19,7 @@ import com.digitalasset.canton.ledger.api.{
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref.Party
@@ -44,6 +45,7 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
         ),
         activeAt = validAt,
         rangeInfo = AcsRangeInfo.empty,
+        configOverrides = None,
       )(loggingContext)
 
   override def topologyTransactions(
@@ -115,18 +117,26 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
       activeAt: Offset,
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
+      configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit traceContext: TraceContext): Source[InternalIndexService.ActiveContract, NotUsed] =
     if (stakeholders1.isEmpty)
       Source.failed(
         new IllegalArgumentException("acs requires a non-empty stakeholders1 set")
       )
     else
-      indexService.acs(synchronizerId, activeAt, stakeholders1, stakeholders2)(loggingContext)
+      indexService.acs(
+        synchronizerId = synchronizerId,
+        activeAt = activeAt,
+        stakeholders1 = stakeholders1,
+        stakeholders2 = stakeholders2,
+        configOverrides = configOverrides,
+      )(loggingContext)
 
   override def counterParties(
       synchronizerId: SynchronizerId,
       activeAt: Offset,
       party: Option[Party],
+      configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed] =
     indexService
       .acs(
@@ -135,6 +145,7 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
         // an empty stakeholders1 means "any party"
         stakeholders1 = party.toList.toSet,
         stakeholders2 = Set.empty,
+        configOverrides = configOverrides,
       )(loggingContext)
       .mapConcat(_.stakeholders)
       // Emits each distinct element of the stream only once.

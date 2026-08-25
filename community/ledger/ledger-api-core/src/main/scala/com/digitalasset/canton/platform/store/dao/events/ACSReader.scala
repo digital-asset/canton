@@ -27,7 +27,10 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTr
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
-import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfig
+import com.digitalasset.canton.platform.config.{
+  ActiveContractsServiceStreamsConfig,
+  ActiveContractsServiceStreamsConfigOverrides,
+}
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.ScalaPbStreamingOptimizations.ScalaPbMessageWithPrecomputedSerializedSize
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
@@ -117,6 +120,7 @@ class ACSReader(
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
+      configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -134,6 +138,7 @@ class ACSReader(
       activeAt,
       eventProjectionProperties,
       rangeInfo,
+      configOverrides,
     )
       .watchTermination()(endSpanOnTermination(span))
   }
@@ -143,6 +148,7 @@ class ACSReader(
       activeAt: (Offset, Long),
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
+      configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed] = {
@@ -162,20 +168,33 @@ class ACSReader(
           ),
       )(query)
 
+    val effectiveConfig = configOverrides.fold(config) {
+      case ActiveContractsServiceStreamsConfigOverrides(
+            maxParallelActiveIdQueries,
+            maxParallelPayloadCreateQueries,
+          ) =>
+        config.copy(
+          maxParallelActiveIdQueries = maxParallelActiveIdQueries,
+          maxParallelPayloadCreateQueries = maxParallelPayloadCreateQueries,
+        )
+    }
     val allFilterParties = filter.allFilterParties
     val decomposedFilters = FilterUtils.decomposeFilters(filter).toVector
     val activeIdQueriesLimiter =
-      new QueueBasedConcurrencyLimiter(config.maxParallelActiveIdQueries, executionContext)
+      new QueueBasedConcurrencyLimiter(effectiveConfig.maxParallelActiveIdQueries, executionContext)
     val localPayloadQueriesLimiter =
-      new QueueBasedConcurrencyLimiter(config.maxParallelPayloadCreateQueries, executionContext)
+      new QueueBasedConcurrencyLimiter(
+        effectiveConfig.maxParallelPayloadCreateQueries,
+        executionContext,
+      )
     val idQueryPageSizing = IdPageSizing.calculateFrom(
       maxIdPageSize = Math.min(
-        rangeInfo.limit.map(_.toInt).getOrElse(config.maxIdsPerIdPage),
-        config.maxIdsPerIdPage,
+        rangeInfo.limit.map(_.toInt).getOrElse(effectiveConfig.maxIdsPerIdPage),
+        effectiveConfig.maxIdsPerIdPage,
       ),
-      workingMemoryInBytesForIdPages = config.maxWorkingMemoryInBytesForIdPages,
+      workingMemoryInBytesForIdPages = effectiveConfig.maxWorkingMemoryInBytesForIdPages,
       numOfDecomposedFilters = decomposedFilters.size,
-      numOfPagesInIdPageBuffer = config.maxPagesPerIdPagesBuffer,
+      numOfPagesInIdPageBuffer = effectiveConfig.maxPagesPerIdPagesBuffer,
       loggerFactory = loggerFactory,
     )
 
@@ -215,7 +234,7 @@ class ACSReader(
           achsLastInput = None,
           initialFromIdInclusive = initialFromIdInclusive,
         )(filter)
-          .buffer(config.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
+          .buffer(effectiveConfig.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
           .mapConcat(_._2)
       } else {
         EventSeqIdRange
@@ -237,7 +256,7 @@ class ACSReader(
                       dispatcher.executeSql(metrics.index.db.getAchsIdRanges)(f)
                     )
                   ),
-                idFilterQueryParallelism = config.idFilterQueryParallelism,
+                idFilterQueryParallelism = effectiveConfig.idFilterQueryParallelism,
                 executeFetchPage = f =>
                   activeIdQueriesLimiter.execute(
                     globalIdQueriesLimiter.execute(
@@ -272,7 +291,7 @@ class ACSReader(
                   initialFromIdInclusive = initialFromIdInclusive,
                 )(filter)
               }(executionContext)
-              .buffer(config.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
+              .buffer(effectiveConfig.maxPagesPerIdPagesBuffer, OverflowStrategy.backpressure)
               .mapConcat(_._2)
           }
       }
@@ -315,7 +334,7 @@ class ACSReader(
                     dispatcher.executeSql(metrics.index.db.getActiveContractIdRanges)(f)
                   )
                 ),
-              idFilterQueryParallelism = config.idFilterQueryParallelism,
+              idFilterQueryParallelism = effectiveConfig.idFilterQueryParallelism,
               executeFetchPage = f =>
                 activeIdQueriesLimiter.execute(
                   globalIdQueriesLimiter.execute(
@@ -555,7 +574,7 @@ class ACSReader(
 
     // Pekko requires for this buffer's size to be a power of two.
     val inputBufferSize =
-      Utils.largestSmallerOrEqualPowerOfTwo(config.maxParallelPayloadCreateQueries)
+      Utils.largestSmallerOrEqualPowerOfTwo(effectiveConfig.maxParallelPayloadCreateQueries)
 
     def activeContractsStream(startSequentialIdInclusive: Long) =
       limitIfNeeded(rangeInfo.limit)(
@@ -564,13 +583,13 @@ class ACSReader(
           .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
       )
         .batchN(
-          maxBatchSize = config.maxPayloadsPerPayloadsPage,
-          maxBatchCount = config.maxParallelPayloadCreateQueries + 1,
+          maxBatchSize = effectiveConfig.maxPayloadsPerPayloadsPage,
+          maxBatchCount = effectiveConfig.maxParallelPayloadCreateQueries + 1,
         )
         .addAttributes(Attributes.inputBuffer(initial = inputBufferSize, max = inputBufferSize))
-        .mapAsync(config.maxParallelPayloadCreateQueries)(fetchActivePayloads)
+        .mapAsync(effectiveConfig.maxParallelPayloadCreateQueries)(fetchActivePayloads)
         .mapConcat(identity)
-        .mapAsync(config.contractProcessingParallelism)(
+        .mapAsync(effectiveConfig.contractProcessingParallelism)(
           toApiResponseActiveContract(eventProjectionProperties, rangeInfo.requestChecksum)
         )
     def incompleteReassignments(limit: Option[Long]) = Source.lazyFutureSource(() =>
@@ -587,24 +606,26 @@ class ACSReader(
           }
         val offsets = allOffsets.filter(_ >= offsetToContinueFrom)
         def incompleteOffsetPages: () => Iterator[Vector[Offset]] =
-          () => offsets.sliding(config.maxIncompletePageSize, config.maxIncompletePageSize)
+          () =>
+            offsets
+              .sliding(effectiveConfig.maxIncompletePageSize, effectiveConfig.maxIncompletePageSize)
 
         val incompleteAssigned: Source[(Long, GetActiveContractsResponse), NotUsed] =
           limitIfNeeded(limit)(
             Source
               .fromIterator(incompleteOffsetPages)
-              .mapAsync(config.maxParallelActiveIdQueries)(
+              .mapAsync(effectiveConfig.maxParallelActiveIdQueries)(
                 fetchAssignIdsForOffsets
               )
               .mapConcat(identity)
               .dropWhile(_ <= sequentialIdToContinueFrom)
-              .grouped(config.maxIncompletePageSize)
-              .mapAsync(config.maxParallelPayloadCreateQueries)(
+              .grouped(effectiveConfig.maxIncompletePageSize)
+              .mapAsync(effectiveConfig.maxParallelPayloadCreateQueries)(
                 fetchAssignPayloads
               )
               .mapConcat(_.filter(assignMeetsConstraints))
           )
-            .mapAsync(config.contractProcessingParallelism)(
+            .mapAsync(effectiveConfig.contractProcessingParallelism)(
               toApiResponseIncompleteAssigned(eventProjectionProperties, rangeInfo.requestChecksum)
             )
 
@@ -612,23 +633,23 @@ class ACSReader(
           limitIfNeeded(limit)(
             Source
               .fromIterator(incompleteOffsetPages)
-              .mapAsync(config.maxParallelActiveIdQueries)(
+              .mapAsync(effectiveConfig.maxParallelActiveIdQueries)(
                 fetchUnassignIdsForOffsets
               )
               .mapConcat(identity)
               .dropWhile(_ <= sequentialIdToContinueFrom)
-              .grouped(config.maxIncompletePageSize)
-              .mapAsync(config.maxParallelPayloadCreateQueries)(
+              .grouped(effectiveConfig.maxIncompletePageSize)
+              .mapAsync(effectiveConfig.maxParallelPayloadCreateQueries)(
                 fetchUnassignPayloads
               )
               .mapConcat(_.filter(unassignMeetsConstraints))
-              .grouped(config.maxIncompletePageSize)
-              .mapAsync(config.maxParallelPayloadCreateQueries)(
+              .grouped(effectiveConfig.maxIncompletePageSize)
+              .mapAsync(effectiveConfig.maxParallelPayloadCreateQueries)(
                 fetchActivationEventsForUnassignedBatch
               )
               .mapConcat(identity)
           )
-            .mapAsync(config.contractProcessingParallelism)(
+            .mapAsync(effectiveConfig.contractProcessingParallelism)(
               toApiResponseIncompleteUnassigned(
                 eventProjectionProperties,
                 rangeInfo.requestChecksum,

@@ -151,6 +151,7 @@ final class IndexServiceOwner(
         ledgerEndCache = inMemoryState.ledgerEndCache,
         updateServiceConfig = updateServiceConfig,
         maxRejectedCompletionsByHash = config.maxRejectedCompletionsByHash,
+        acsFilteringParallelism = config.acsFilteringParallelism,
       )
     } yield new TimedIndexService(indexService, metrics)
   }

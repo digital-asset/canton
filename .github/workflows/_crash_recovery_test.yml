@@ -6,6 +6,9 @@ on:
         description: GitHub Actions runner label
         required: true
         type: string
+      include_only_requires_external_kms_tests:
+        default: false
+        type: boolean
     secrets:
       DATADOG_API_KEY:
         required: false
@@ -31,9 +34,10 @@ jobs:
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: ${{ inputs.include_only_requires_external_kms_tests && 1 || 6 }}
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        # KMS mode has only 1 test file, so 1 shard is enough. Keep in sync with num_test_buckets below.
+        shard: ${{ fromJSON(inputs.include_only_requires_external_kms_tests && '[0]' || '[0, 1, 2, 3, 4, 5]') }}
     timeout-minutes: 180
     env:
       DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
@@ -68,10 +72,12 @@ jobs:
         uses: ./.github/actions/test/run_crash_recovery_tests
         with:
           exclude_unstable_tests: 'true'
+          include_only_requires_external_kms_tests: ${{ inputs.include_only_requires_external_kms_tests }}
+          setup_gcp_kms: ${{ inputs.include_only_requires_external_kms_tests }}
           include_patterns: |
             ^com\.digitalasset\.canton\.integration\.tests\.crashrecovery
           execution_context_size: '8'
-          num_test_buckets: '6'
+          num_test_buckets: ${{ inputs.include_only_requires_external_kms_tests && '1' || '6' }}
           shard_index: ${{ matrix.shard }}
           succeed_on_error: 'false'
           test_file: test-full-class-names.log

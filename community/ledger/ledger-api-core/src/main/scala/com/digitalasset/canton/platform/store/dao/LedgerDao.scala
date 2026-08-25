@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.dao.BufferedCommandCompletionsReader.CompletionsByHash
 import com.digitalasset.canton.platform.store.dao.events.OffsetRange
@@ -47,6 +48,7 @@ private[platform] trait LedgerDaoUpdateReader {
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
       rangeInfo: AcsRangeInfo,
+      configOverrides: Option[ActiveContractsServiceStreamsConfigOverrides],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[GetActiveContractsResponse, NotUsed]

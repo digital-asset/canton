@@ -28,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   AuthorizationLevel,
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexUpdateService.UpdatesResponse
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.CommonTopologyTransactionProperties
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.SynchronizerId
@@ -78,6 +79,7 @@ trait InternalIndexService {
       activeAt: Offset,
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
+      configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit traceContext: TraceContext): Source[InternalIndexService.ActiveContract, NotUsed]
 
   /** @return
@@ -89,6 +91,7 @@ trait InternalIndexService {
       synchronizerId: SynchronizerId,
       activeAt: Offset,
       party: Option[Party],
+      configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed]
 }
 

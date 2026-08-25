@@ -7,12 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
-  AddPartyArguments,
-  AddPartyWithAcsRequest,
-  AddPartyWithAcsResponse,
   AuthorizePartyUpdateRequest,
-  ExportPartyAcsRequest,
-  ExportPartyAcsResponse,
   GeneratePartyTopologyUpdateRequest,
   GeneratePartyTopologyUpdateResponse,
   GetAddPartyStatusRequest,
@@ -21,7 +16,6 @@ import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
 import com.daml.ledger.api.v2.state_service.ParticipantPermission
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction as LapiTopologyTransaction
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.validation.CryptoValidator
@@ -30,18 +24,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
-import com.digitalasset.canton.participant.admin.data.ActiveContract
-import com.digitalasset.canton.participant.admin.grpc.ParticipantCommon
-import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow.PartyReplicationArguments
-import com.digitalasset.canton.participant.admin.party.PartyReplicationEndpoints.{
-  ValidPartyReplicationCommonRequestParams,
-  extractOffsetAndTimestamp,
-  findSinglePartyActivationTopologyTransaction,
-  validatePartyReplicationCommonRequestParams,
-}
 import com.digitalasset.canton.participant.sync.CantonSyncService
-import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyReplicationEndpoints
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -63,15 +46,11 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil.RichEither
-import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils}
 import com.google.protobuf.duration.Duration
-import io.grpc.stub.StreamObserver
 import io.grpc.{Status, StatusRuntimeException}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Sink
 
-import java.io.OutputStream
-import java.util.zip.GZIPOutputStream
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.util.{Failure, Success}
 
@@ -79,14 +58,11 @@ object PartyReplicationEndpoints {
   def apply(
       partyReplicator: PartyReplicator,
       sync: CantonSyncService,
-      topologyLookup: TopologyLookup,
-      timeouts: ProcessingTimeout,
   )(implicit
       loggingContext: ErrorLoggingContext,
       ec: ExecutionContextExecutor,
-      actorSystem: ActorSystem,
   ): PartyReplicationEndpoints =
-    new PartyReplicationEndpointsImpl(partyReplicator, sync, topologyLookup, timeouts)
+    new PartyReplicationEndpointsImpl(partyReplicator, sync)
 
   private[admin] final case class ValidPartyReplicationCommonRequestParams(
       party: PartyId,
@@ -196,211 +172,10 @@ object PartyReplicationEndpoints {
 class PartyReplicationEndpointsImpl(
     partyReplicator: PartyReplicator,
     sync: CantonSyncService,
-    topologyLookup: TopologyLookup,
-    timeouts: ProcessingTimeout,
 )(implicit
     loggingContext: ErrorLoggingContext,
     ec: ExecutionContextExecutor,
-    actorSystem: ActorSystem,
 ) extends PartyReplicationEndpoints {
-
-  override def exportPartyAcs(
-      request: ExportPartyAcsRequest,
-      responseObserver: StreamObserver[ExportPartyAcsResponse],
-  ): Unit = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-
-    GrpcStreamingUtils.streamToClient(
-      (out: OutputStream) => processExportPartyAcsRequest(request, new GZIPOutputStream(out)),
-      responseObserver,
-      byteString => ExportPartyAcsResponse(byteString),
-      timeouts.unbounded.duration,
-      chunkSizeO = None,
-    )
-  }
-
-  private def processExportPartyAcsRequest(
-      request: ExportPartyAcsRequest,
-      out: OutputStream,
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val res = for {
-      ledgerEnd <- EitherT
-        .fromEither[FutureUnlessShutdown](ParticipantCommon.findLedgerEnd(sync))
-        .leftMap(PartyManagementServiceError.InvalidState.Error(_))
-      allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
-
-      validRequest <- EitherT.fromEither[FutureUnlessShutdown](
-        validatePartyReplicationCommonRequestParams(
-          request.partyId,
-          request.synchronizerId,
-          request.beginOffsetExclusive,
-          request.waitForActivationTimeout,
-        )(ledgerEnd, allLogicalSynchronizerIds)
-          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
-      )
-
-      ValidPartyReplicationCommonRequestParams(
-        party,
-        synchronizerId,
-        beginOffsetExclusive,
-        waitForActivationTimeout,
-      ) = validRequest
-
-      indexService <- EitherT.fromOption[FutureUnlessShutdown](
-        sync.internalIndexService,
-        PartyManagementServiceError.InvalidState.Error("Unavailable internal index service"),
-      )
-
-      targetParticipant <- EitherT.fromEither[FutureUnlessShutdown](
-        UniqueIdentifier
-          .fromProtoPrimitive(request.targetParticipantUid, "target_participant_uid")
-          .map(ParticipantId(_))
-          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
-      )
-
-      topologyTx <-
-        findSinglePartyActivationTopologyTransaction(
-          indexService,
-          party,
-          beginOffsetExclusive,
-          synchronizerId,
-          targetParticipant = targetParticipant,
-          waitForActivationTimeout,
-        )
-
-      (activationOffset, activationTimestamp) = extractOffsetAndTimestamp(topologyTx)
-
-      snapshot <- topologyLookup
-        .maybeOfflineAwaitTopologySnapshot(
-          synchronizerId,
-          activationTimestamp.value.immediateSuccessor,
-        )
-        .leftMap(err =>
-          PartyManagementServiceError.InvalidState
-            .Error(
-              s"Unable to query topology for $synchronizerId at ${activationTimestamp.value.immediateSuccessor}: $err"
-            )
-        )
-
-      activeParticipants <- EitherT.right(snapshot.activeParticipantsOf(party.toLf))
-      _ <-
-        EitherT.cond[FutureUnlessShutdown](
-          activeParticipants.exists { case (participantId, participantAttributes) =>
-            participantId == targetParticipant &&
-            participantAttributes.onboarding
-          },
-          (),
-          PartyManagementServiceError.AcsExportMissingTargetOnboardingMapping.Error(
-            party,
-            targetParticipant,
-          ): PartyManagementServiceError,
-        )
-
-      partiesHostedByTargetParticipant <- EitherT.right(
-        snapshot.inspectKnownParties(
-          filterParty = "",
-          filterParticipant = targetParticipant.filterString,
-          // we cannot filter by participant in the db, therefore we also cannot impose a limit.
-          limit = Int.MaxValue,
-        )
-      )
-
-      // Set removal (excl) is O(1); filterNot is O(N)
-      otherPartiesHostedByTargetParticipant = partiesHostedByTargetParticipant
-        .excl(party)
-        .excl(targetParticipant.adminParty)
-
-      _ <- ParticipantCommon
-        .writeAcsSnapshot(
-          indexService,
-          Set(party),
-          atOffset = activationOffset,
-          out,
-          excludedStakeholders = otherPartiesHostedByTargetParticipant,
-          Some(synchronizerId),
-        )(ec, traceContext, actorSystem)
-        .leftMap(msg =>
-          PartyManagementServiceError.IOStream.Error(msg): PartyManagementServiceError
-        )
-    } yield ()
-
-    CantonGrpcUtil.mapErrNewEUS(res.leftMap(_.toCantonRpcError))
-  }
-
-  override def addPartyWithAcs(
-      responseObserver: StreamObserver[AddPartyWithAcsResponse]
-  ): StreamObserver[AddPartyWithAcsRequest] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-
-    GrpcStreamingUtils.streamGzippedChunksFromClient[
-      AddPartyWithAcsRequest,
-      AddPartyWithAcsResponse,
-      PartyReplicationArguments,
-      ActiveContract,
-    ](
-      responseObserver,
-      Failure(
-        new IllegalArgumentException(
-          "The request stream must contain at least one message with the required AddPartyArguments."
-        )
-      ),
-      getGzippedBytes = _.acsSnapshot,
-      parseMessage = ActiveContract.parseDelimitedFromTrusted,
-    )(contextFromFirstRequest =
-      firstRequest =>
-        (for {
-          argsP <- ProtoConverter
-            .required("arguments", firstRequest.arguments)
-            .leftMap(err => s"Arguments must be set on the first request: $err")
-          args <- verifyArguments(argsP)
-        } yield args)
-          .leftMap(err => new IllegalArgumentException(err))
-          .toTry
-    ) { case (args, source) =>
-      val resultET = for {
-        requestId <- partyReplicator
-          .addPartyWithAcsAsync(args, source)
-          .leftMap(toStatusRuntimeException(Status.FAILED_PRECONDITION))
-      } yield AddPartyWithAcsResponse(requestId.toHexString)
-
-      EitherTUtil.toFutureUnlessShutdown(resultET)
-    }
-  }
-
-  private def verifyArguments(
-      argsP: AddPartyArguments
-  ): Either[String, PartyReplicationArguments] =
-    for {
-      partyId <- convert(argsP.partyId, "party_id", PartyId(_))
-      sourceParticipantId <- convert(
-        argsP.sourceParticipantUid,
-        "source_participant_uid",
-        ParticipantId(_),
-      )
-      synchronizerId <- convert(
-        argsP.synchronizerId,
-        "synchronizer_id",
-        SynchronizerId(_),
-      )
-      serial <- ProtoConverter
-        .parsePositiveInt("topology_serial", argsP.topologySerial)
-        .leftMap(_.message)
-      participantPermission <- argsP.participantPermission match {
-        case ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION =>
-          Right(TopologyParticipantPermission.Submission)
-        case ParticipantPermission.PARTICIPANT_PERMISSION_OBSERVATION =>
-          Right(TopologyParticipantPermission.Observation)
-        case ParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION =>
-          Right(TopologyParticipantPermission.Confirmation)
-        case invalidPermission => Left(s"Invalid permission $invalidPermission")
-      }
-    } yield PartyReplicationArguments(
-      partyId,
-      synchronizerId,
-      sourceParticipantId,
-      serial,
-      participantPermission,
-    )
 
   private def convert[T](
       rawId: String,

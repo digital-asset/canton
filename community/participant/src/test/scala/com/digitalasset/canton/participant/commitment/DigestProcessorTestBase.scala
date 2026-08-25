@@ -14,6 +14,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.participant.store.AcsDigestStore.{AcsDigest, RawDigest}
 import com.digitalasset.canton.participant.store.TestDigestUtils
+import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
 import com.digitalasset.canton.topology.transaction.ParticipantAttributes
@@ -102,6 +103,7 @@ object DigestProcessorTestBase extends TestDigestUtils {
           activeAt: Offset,
           stakeholders1: Set[Party],
           stakeholders2: Set[Party],
+          configOverrides: ActiveContractsServiceStreamsConfigOverrides,
       )(implicit
           traceContext: TraceContext
       ): Source[InternalIndexService.ActiveContract, NotUsed] = {
@@ -127,6 +129,7 @@ object DigestProcessorTestBase extends TestDigestUtils {
           synchronizerId: SynchronizerId,
           activeAt: Offset,
           party: Option[Party],
+          configOverrides: ActiveContractsServiceStreamsConfigOverrides,
       )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed] = Source(
         party
           .flatMap(partyToContracts.sets.get(_))

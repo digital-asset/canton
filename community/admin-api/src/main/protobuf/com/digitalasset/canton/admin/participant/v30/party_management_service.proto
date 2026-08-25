@@ -40,6 +40,22 @@ service PartyManagementService {
   // Returns a 'request_id' that is stable across each retry with the same request parameters.
   rpc AddPartyAsync(AddPartyAsyncRequest) returns (AddPartyAsyncResponse);
 
+  // Online party replication endpoint.
+  //
+  // Add a party already hosted on one or more source participants to this target participant
+  // in the specified synchronizer along with the party's Active Contract Set (ACS) streamed
+  // in the request.
+  // Uploads the ACS synchronously and then performs the party addition asynchronously.
+  //
+  // This operation assumes full trust in the source participant to provide a complete and
+  // untampered state. Because the target participant cannot independently verify
+  // the historical provenance of the imported contracts,
+  // validation is performed on a best-effort basis.
+  // Use only when the source participant is a known, trusted authority.
+  //
+  // Returns a 'request_id' that is stable across each retry with the same request parameters.
+  rpc AddPartyWithAcsAsync(stream AddPartyWithAcsAsyncRequest) returns (AddPartyWithAcsAsyncResponse);
+
   // Offline party replication focussed ACS export.
   //
   // Exports the ACS of a single party from a source participant, so that the party can be
@@ -98,6 +114,7 @@ service PartyManagementService {
 message AddPartyAsyncRequest {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
+  // Arguments common among AddPartyAsync and AddPartyWithAcs requests.
   // Required
   AddPartyArguments arguments = 1;
 }
@@ -124,6 +141,29 @@ message AddPartyArguments {
 }
 
 message AddPartyAsyncResponse {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // The identifier used to uniquely track the add party request.
+  string add_party_request_id = 1;
+}
+
+message AddPartyWithAcsAsyncRequest {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // The raw binary of the ACS snapshot to be imported
+  // The binary content does not align on individual active contracts! It may contain bytes that are part of
+  // an active contract, or include several active contracts - depending on how much data fits into the
+  // configured gRPC message size.
+  // Required
+  bytes acs_snapshot = 1;
+
+  // Arguments common among AddPartyAsync and AddPartyWithAcs requests.
+  // The add party arguments used for request validation and initialization.
+  // Required for the first message of the stream, should be empty for subsequent messages.
+  AddPartyArguments arguments = 2;
+}
+
+message AddPartyWithAcsAsyncResponse {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
   // The identifier used to uniquely track the add party request.
