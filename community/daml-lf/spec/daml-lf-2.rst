@@ -4656,7 +4656,7 @@ External call functions
   non-canonical hexadecimal, or if the external call cannot be completed
   successfully.
 
-  [*Available in version >= 2.dev*]
+  [*Available in version >= 2.4*]
 
 Debugging functions
 ~~~~~~~~~~~~~~~~~~~
@@ -5007,10 +5007,10 @@ program exception using:
 External Call
 .............
 
-[*Available in versions >= 2.dev*]
+[*Available in versions >= 2.4*]
 
 The deserialization process will reject any Daml-LF program whose language
-version is before 2.dev and that uses the builtin function ``EXTERNAL_CALL``.
+version is before 2.4 and that uses the builtin function ``EXTERNAL_CALL``.
 
 .. Local Variables:
 .. eval: (flyspell-mode 1)
