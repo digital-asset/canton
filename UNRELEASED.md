@@ -86,6 +86,7 @@ The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, 
 `JsSubmitAndWaitForTransactionTreeResponse` schemas have been dropped from the OpenAPI and AsyncAPI definitions.
 
 ### Minor Improvements
+- Interactive submissions can use hashing scheme version `HASHING_SCHEME_VERSION_V4` on synchronizers running protocol version 36 or later (previously only on development-protocol synchronizers). V4 additionally covers recorded external-call results in the prepared transaction hash.
 - Security. The HTTP server now rejects too deeply nested json structures. The check uses the same values as the already existing gRPC check for nested daml records. This means
     that the Ledger JSON API client may now observe an error from HTTP (BadRequest) where previously the `INVALID_ARGUMENT/COMMAND_PREPROCESSING_FAILED` or  `INVALID_ARGUMENT/VALUE_NESTING` error was returned.
 - The submitter does not have to be a stakeholder of all contracts during automatic reassignment, only of those that are actually reassigned to a target synchronizer. The previous check was considered too strict: it required the submitter to be a stakeholder of all involved contracts, even ones that were, for instance, disclosed contracts already on the target synchronizer.

@@ -223,7 +223,7 @@ class ExternalTransactionProcessorSpec
       result.value.hashVersion shouldBe HashingSchemeVersion.V4
     }
 
-    "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is below dev" onlyRunWhen (_ < ProtocolVersion.dev) in {
+    "reject prepared transactions when the requested hashing scheme is V4 and the protocol version is below v36" onlyRunWhen (_ < ProtocolVersion.v36) in {
       val transaction = VersionedTransaction(
         LfSerializationVersion.V2,
         Map.empty,
@@ -236,7 +236,7 @@ class ExternalTransactionProcessorSpec
         .mkString(", ")
       result.left.value.reason shouldBe
         s"Hashing scheme version V4 is not supported on protocol version $testedProtocolVersion." +
-        " Minimum protocol version for hashing version V4: dev." +
+        " Minimum protocol version for hashing version V4: 36." +
         s" Supported hashing version on protocol version $testedProtocolVersion: $supportedSchemes"
     }
   }

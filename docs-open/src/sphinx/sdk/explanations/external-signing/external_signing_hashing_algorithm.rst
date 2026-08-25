@@ -48,6 +48,7 @@ Protocol Version    Supported Hashing Schemes
 ==================  =========================
 v34                 V2
 v35                 V2, V3
+v36                 V2, V3, V4
 ==================  =========================
 
 Transaction Nodes

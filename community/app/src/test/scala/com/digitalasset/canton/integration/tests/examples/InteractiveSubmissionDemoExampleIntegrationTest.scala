@@ -80,11 +80,10 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
   }
 
   private val supportedHashingSchemeVersions =
-    // TODO(i32856): Remove the get / flatMap when PV Dev has a matching supported scheme
-    HashingSchemeVersion.MinimumProtocolVersionToHashingVersion
-      .get(testedProtocolVersion)
+    HashingSchemeVersion
+      .getHashingSchemeVersionsForProtocolVersion(testedProtocolVersion)
+      .forgetNE
       .toList
-      .flatMap(_.forgetNE)
 
   // TODO(i33946): Implement V4 hashing scheme in the python demo and re-enable the test
   supportedHashingSchemeVersions
