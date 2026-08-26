@@ -12,6 +12,7 @@ import com.digitalasset.canton.extcall.java as M
 import com.digitalasset.canton.integration.plugins.{UseExtensionService, UseH2}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -26,8 +27,9 @@ import scala.jdk.OptionConverters.*
 
 /** End-to-end coverage for Daml external calls against a (mock) extension service: the submitting
   * participant records the service's output in the transaction and re-validates it in the
-  * confirmation workflow. The external-call wire data exists only at protocol version dev, so the
-  * tests are dev-gated and run in the dev-protocol-version CI job.
+  * confirmation workflow. The external-call wire data exists from protocol version 36 onwards, so
+  * the tests are gated on v36. The test package still targets LF 2.dev (the pinned damlc cannot
+  * compile external calls at 2.4 yet), so dev version support is enabled on the participant.
   */
 class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
@@ -37,10 +39,12 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
   registerPlugin(extensionService)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1.withSetup { env =>
-      import env.*
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
-    }
+    EnvironmentDefinition.P1_S1M1
+      .addConfigTransforms(ConfigTransforms.setDevVersionSupport(true)*)
+      .withSetup { env =>
+        import env.*
+        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      }
 
   private val uuidRegex = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
@@ -67,7 +71,7 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
   }
 
   "a Daml external call" should {
-    "be recorded at submission and re-validated in the confirmation workflow" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "be recorded at submission and re-validated in the confirmation workflow" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         extensionService.reset()
         val owner = setUpOwner("external-call-owner")
