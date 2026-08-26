@@ -103,7 +103,7 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
         calls.map(_.externalCallId).distinct should have size 2
     }
 
-    "fail the submission when the extension service cannot be reached" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "fail the submission when the extension service cannot be reached" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         extensionService.reset()
         val owner = setUpOwner("external-call-unreachable-owner")
@@ -145,7 +145,7 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
         extensionService.observedCalls shouldBe empty
     }
 
-    "fail the submission when the service output is not canonical hex" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "fail the submission when the service output is not canonical hex" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         extensionService.reset()
         try {
@@ -165,7 +165,7 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
         } finally extensionService.reset()
     }
 
-    "fail the submission when the call arguments are not canonical hex" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "fail the submission when the call arguments are not canonical hex" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         extensionService.reset()
         val owner = setUpOwner("external-call-preparation-owner")
@@ -184,7 +184,7 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
         extensionService.observedCalls shouldBe empty
     }
 
-    "reject the request when the recorded output cannot be re-validated" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject the request when the recorded output cannot be re-validated" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()
@@ -227,7 +227,7 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
         } finally extensionService.reset()
     }
 
-    "reject the request when re-validation returns non-canonical output" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject the request when re-validation returns non-canonical output" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()
@@ -254,7 +254,7 @@ class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEn
         } finally extensionService.reset()
     }
 
-    "reject and alarm when re-validation disagrees with the recorded output" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject and alarm when re-validation disagrees with the recorded output" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()
