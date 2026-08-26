@@ -3,9 +3,9 @@ on:
   workflow_call:
     secrets:
       GCLOUD_SERVICE_KEY:
-        required: true
+        required: false
       DATADOG_API_KEY:
-        required: true
+        required: false
     inputs:
       only_for_selected_users:
         default: false
@@ -69,7 +69,14 @@ jobs:
   variations_test:
     name: Variations Test (shard ${{ matrix.shard }})
     needs: variations_test_gate
-    if: ${{ needs.variations_test_gate.outputs.should_run == 'true' }}
+    if: >-
+      ${{
+        needs.variations_test_gate.outputs.should_run == 'true' &&
+        (
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      }}
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false

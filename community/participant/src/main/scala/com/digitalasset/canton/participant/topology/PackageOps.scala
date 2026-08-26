@@ -183,7 +183,7 @@ class PackageOpsImpl(
     val psids = stateManager.getAll.view.values.map(_.psid).toList
     val snapshots: List[TopologySnapshot] =
       psids
-        .map(stateManager.topologyFactoryFor)
+        .map(stateManager.topologyFactoryFor(_))
         .flatMap(_.map(_.createHeadTopologySnapshot()))
 
     EitherT.right(for {

@@ -20,7 +20,6 @@ import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClient,
   TopologySnapshot,
 }
-import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{NoPackageDependencies, TopologyStore}
 import com.digitalasset.canton.topology.{
@@ -168,16 +167,9 @@ final class TopologyLookup(
         futureSupervisor = futureSupervisor,
         loggerFactory = loggerFactory,
       )
-      _ <- EitherT.liftF(client.updateKnownTimestampsDuringStartup())
-      _ = cleanSynchronizerRecordTime(psid.logical).foreach(sequencedTime =>
-        client.updateHead(
-          SequencedTime(sequencedTime),
-          EffectiveTime(
-            sequencedTime.add(
-              syncPersistentState.staticSynchronizerParameters.topologyChangeDelay.toScala
-            )
-          ),
-          ApproximateTime(sequencedTime),
+      _ <- EitherT.liftF(
+        client.updateKnownTimestampsDuringStartup(cleanSynchronizerRecordTime =
+          cleanSynchronizerRecordTime(psid.logical)
         )
       )
 

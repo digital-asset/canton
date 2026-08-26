@@ -195,11 +195,12 @@ message ActiveContract {
   // Required
   string synchronizer_id = 2;
 
-  // Each corresponding assigned and unassigned event has the same reassignment_counter. This strictly increases
-  // with each unassign command for the same contract. Creation of the contract corresponds to reassignment_counter
-  // equals zero.
-  // This field will be the reassignment_counter of the latest observable activation event on this synchronizer, which is
-  // before the active_at_offset.
+  // The reassignment counter of this event.
+  //
+  // Reassignment counters strictly increase with each unassign command for the same contract. Creation
+  // of the contract corresponds to a reassignment_counter equal to zero.
+  // This field will be the reassignment_counter of the latest observable activation event on this synchronizer,
+  // which is before the active_at_offset.
   //
   // Required
   uint64 reassignment_counter = 3;

@@ -15,7 +15,10 @@ import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.repair.ChangeAssignation.Changes
+import com.digitalasset.canton.participant.admin.repair.ChangeAssignation.{
+  Changes,
+  ContractIdWithCounter,
+}
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ContractState
 import com.digitalasset.canton.protocol.*
@@ -57,8 +60,11 @@ private final class ChangeAssignation(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val contractIdCounters = unassignmentData.payload.contractsBatch.contractIdCounters.toSeq
-    val contractIds = contractIdCounters.map(_._1)
+    val contractIdCounters = unassignmentData.payload.contractsBatch.contractIdCounters
+      .map((ContractIdWithCounter.apply _).tupled)
+      .toSeq
+
+    val contractIds = contractIdCounters.map(_.contractId)
 
     for {
       contractStatusAtSource <- EitherT.right(
@@ -115,21 +121,30 @@ private final class ChangeAssignation(
       }.toMap
 
     for {
-      filteredContractsIds <- filterContracts(
+      filteredContracts <- filterContracts(
         changes.payload.map { case (cid, _) => cid },
         skipInactive = skipInactive,
-      ).flatMap { filteredContracts =>
-        EitherT.fromEither[FutureUnlessShutdown](filteredContracts.traverse {
-          case (cid, reassignmentCounter) =>
-            val newReassignmentCounterE =
-              reassignmentCounterOverride.get(cid).fold(reassignmentCounter.increment)(Right(_))
+      )
 
-            newReassignmentCounterE.map(newReassignmentCounter => (cid, newReassignmentCounter))
-        })
+      counters <- EitherT.fromEither[FutureUnlessShutdown](filteredContracts.traverse {
+        case (cid, reassignmentCounter) =>
+          reassignmentCounter.increment.map { unassignmentCounter =>
+            val assignmentCounter =
+              reassignmentCounterOverride.getOrElse(cid, unassignmentCounter)
+            (cid, unassignmentCounter, assignmentCounter)
+          }
+      })
+
+      unassignmentCidCounterMap = counters.map { case (cid, unassignmentCounter, _) =>
+        cid -> unassignmentCounter
+      }.toMap
+
+      assignmentCidWithCounter = counters.map { case (cid, _, assignmentCounter) =>
+        ContractIdWithCounter(cid, assignmentCounter)
       }
 
-      _ = logger.debug(s"Contracts changing assignation: $filteredContractsIds")
-      changeBatch <- readContracts(filteredContractsIds)
+      _ = logger.debug(s"Contracts changing assignation: $assignmentCidWithCounter")
+      changeBatch <- readContracts(assignmentCidWithCounter)
       _ = logger.debug(
         s"Contracts that need to change assignation with persistence status: $changeBatch"
       )
@@ -149,13 +164,18 @@ private final class ChangeAssignation(
           "target",
         )
       )
-      _ <- persistUnassignAndAssign(batchesWithSourceTors, batchesWithTargetTors).toEitherT
+      _ <- persistUnassignAndAssign(
+        batchesWithSourceTors,
+        batchesWithTargetTors,
+        unassignmentCidCounterMap,
+      ).toEitherT
       _ <- EitherT.right(
         publishReassignmentEvents(
           repairSource.unwrap.timestamp,
           batchesWithSourceTors,
           batchesWithTargetTors,
           internalContractIds,
+          unassignmentCidCounterMap,
         )
       )
     } yield ()
@@ -289,28 +309,27 @@ private final class ChangeAssignation(
       .leftMap(e => s"Failed to look up stakeholder of contracts in synchronizer $sourceLsid: $e")
 
   private def readContracts(
-      contractIds: Seq[(LfContractId, ReassignmentCounter)]
+      contractIdsWithCounter: Seq[ContractIdWithCounter]
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Changes] = {
-    val cids = contractIds.map(_._1)
+    val cids = contractIdsWithCounter.map(_.contractId)
 
     contractStore
       .lookupManyExistingUncached(cids)
       .leftMap(contractId => s"Failed to look up contract $contractId in synchronizer $sourceLsid")
       .flatMap { contracts =>
         val contractsById = contracts.view.map(contract => contract.contractId -> contract).toMap
-        val contractCounters = contractIds.flatMap { case (cid, counter) =>
-          // TODO(#26468): Use representative package
-          contractsById.get(cid).map { contract =>
-            (
-              contract,
-              Source(contract.templateId.packageId),
-              Target(contract.templateId.packageId),
-              counter,
-            )
-          }
-        }
+        val contractWithCounter = contractIdsWithCounter
+          .flatMap { cidWithCounter =>
+            // TODO(#26468): Use representative package
+            contractsById.get(cidWithCounter.contractId).map { contract =>
+              val sourcePkg = Source(contract.templateId.packageId)
+              val targetPkg = Target(contract.templateId.packageId)
 
-        val batches = ContractsReassignmentBatch.partition(contractCounters)
+              (contract, sourcePkg, targetPkg, cidWithCounter.counter)
+            }
+          }
+
+        val batches = ContractsReassignmentBatch.partition(contractWithCounter)
 
         EitherT.rightT[FutureUnlessShutdown, String](Changes(batches))
       }
@@ -344,14 +363,15 @@ private final class ChangeAssignation(
   private def persistUnassignAndAssign(
       batchesWithSourceTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
       batchesWithTargetTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
+      unassignmentCounters: Map[LfContractId, ReassignmentCounter],
   )(implicit
       traceContext: TraceContext
   ): CheckedT[FutureUnlessShutdown, String, ActiveContractStore.AcsWarning, Unit] = {
     val unassignF = sourcePersistentState.unwrap.activeContractStore
       .unassignContracts(
         batchesWithSourceTors.flatMap { case (batch, sourceTor) =>
-          batch.contractIdCounters.map { case (cid, reassignmentCounter) =>
-            (cid, targetLsid, reassignmentCounter, sourceTor.toToc)
+          batch.contractIds.map { cid =>
+            (cid, targetLsid, unassignmentCounterOf(unassignmentCounters, cid), sourceTor.toToc)
           }
         }
       )
@@ -376,11 +396,12 @@ private final class ChangeAssignation(
       batchesWithSourceTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
       batchesWithTargetTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
       internalContractIds: Map[LfContractId, Long],
+      unassignmentCountersMap: Map[LfContractId, ReassignmentCounter],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val updates =
-      unassignment(unassignmentTs, batchesWithSourceTors) ++
+      unassignment(unassignmentTs, batchesWithSourceTors, unassignmentCountersMap) ++
         assignment(unassignmentTs, batchesWithTargetTors, internalContractIds)
     FutureUnlessShutdown.outcomeF(
       MonadUtil.sequentialTraverse(updates)(repairIndexer.offer).map(_ => ())
@@ -390,6 +411,7 @@ private final class ChangeAssignation(
   private def unassignment(
       unassignmentTs: CantonTimestamp,
       batchesWithSourceTors: Seq[(ContractsReassignmentBatch, TimeOfRepair)],
+      unassignmentCountersMap: Map[LfContractId, ReassignmentCounter],
   )(implicit
       traceContext: TraceContext
   ): Seq[RepairUpdate] =
@@ -398,6 +420,8 @@ private final class ChangeAssignation(
         sourceLsid,
         targetLsid,
         unassignmentTs,
+        // ReassignmentId has to match between the unassign and assign events. Because this ID is
+        // computed by hashing contract counters, we use the assignment batch counters for both events.
         batch.contractIdCounters,
       )
       Update.RepairReassignmentAccepted(
@@ -417,7 +441,8 @@ private final class ChangeAssignation(
             packageName = reassign.packageName,
             stakeholders = batch.stakeholders.all,
             assignmentExclusivity = None,
-            reassignmentCounter = reassign.counter.v,
+            reassignmentCounter =
+              unassignmentCounterOf(unassignmentCountersMap, reassign.contract.contractId).v,
             nodeId = idx,
             keyOpt = reassign.contract.contractKeyWithMaintainers,
           )
@@ -491,10 +516,29 @@ private final class ChangeAssignation(
       batches.zip(timesOfRepair),
       s"Not enough $side repair counters: have ${timesOfRepair.size}, need at least ${batches.size}",
     )
+
+  private def unassignmentCounterOf(
+      unassignmentCounters: Map[LfContractId, ReassignmentCounter],
+      contractId: LfContractId,
+  )(implicit traceContext: TraceContext): ReassignmentCounter = checked {
+    // the counter was computed for every contract in the batches
+    unassignmentCounters.getOrElse(
+      contractId,
+      ErrorUtil.invalidState(
+        s"The unassignment reassignment counter for contract $contractId was not found"
+      ),
+    )
+  }
+
 }
 
 // TODO(i14540): this needs to be called by RepairService to commit the changes
 private[repair] object ChangeAssignation {
+
+  final case class ContractIdWithCounter(
+      contractId: LfContractId,
+      counter: ReassignmentCounter,
+  )
 
   /** Carries the times-of-repair to use for each [[Update]] emitted by the change assignation flow.
     * Each batch produced downstream consumes one [[TimeOfRepair]] from the corresponding sequence,

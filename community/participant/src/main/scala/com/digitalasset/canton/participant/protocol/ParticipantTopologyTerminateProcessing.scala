@@ -14,17 +14,21 @@ import com.digitalasset.canton.data.{
   SynchronizerSuccessor,
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.participant.state.Update
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   Onboarding,
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
+import com.digitalasset.canton.ledger.participant.state.{SynchronizerUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  OnboardingClearanceScheduler,
+  PartyReplicator,
+}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.{
@@ -43,7 +47,8 @@ import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, Parti
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{SequencerCounter, topology}
+import com.digitalasset.canton.{LfPartyId, SequencerCounter, topology}
+import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
 
@@ -83,6 +88,7 @@ class ParticipantTopologyTerminateProcessing(
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
     onboardingClearanceScheduler: OnboardingClearanceScheduler,
+    partyReplicatorO: Option[PartyReplicator],
     metrics: ParticipantMetrics,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends topology.processing.TerminateProcessing
@@ -320,12 +326,36 @@ class ParticipantTopologyTerminateProcessing(
       sequencedTime: SequencedTime,
       sc: SequencerCounter,
       eventInfo: EventInfo,
-  )(implicit traceContext: TraceContext): UnlessShutdown[Unit] =
+  )(implicit traceContext: TraceContext): UnlessShutdown[Unit] = {
+    val flushPartyReplicationPublications =
+      partyReplicatorO match {
+        case Some(partyReplicator)
+            if eventInfo.clearingOnboardingLocallyHostedParty && !pauseSynchronizerIndexingDuringPartyReplication =>
+          val onboardingParties = NonEmpty
+            .from(eventInfo.event.events.collect[LfPartyId] {
+              case PartyToParticipantAuthorization(party, _, AuthorizationEvent.Added(_)) => party
+            })
+            .getOrElse(ErrorUtil.invalidState("Expect at least one added party"))
+          logger.info(
+            s"Flushing activation changes before clearing onboarding flag at $sequencedTime with $effectiveTime on behalf of $onboardingParties with $eventInfo"
+          )
+          partyReplicator.flushContractActivationChangesToIndexer(
+            onboardingParties,
+            store.storeId.psid.logical,
+            effectiveTime,
+          )(_)
+
+        case Some(_) | None =>
+          (_: SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown.unit
+      }
+
     (for {
       _ <- EitherT(
         recordOrderPublisher.scheduleFloatingEventPublication(
           timestamp = effectiveTime.value,
           eventFactory = _ => Some(eventInfo.event),
+          onScheduled = () => FutureUnlessShutdown.unit,
+          publishBefore = flushPartyReplicationPublications,
         )
       )
       _ <- EitherT(
@@ -349,6 +379,7 @@ class ParticipantTopologyTerminateProcessing(
           s"Cannot schedule topology event as record time is already at $invalidTime (publication with sequencer counter: $sc, sequenced time: $sequencedTime, effective time: $effectiveTime)"
         )
     }
+  }
 
   /** Scheduling missing events at synchronizer initialization.
     *

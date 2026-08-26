@@ -20,7 +20,10 @@ import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
+import com.digitalasset.canton.participant.admin.party.{
+  OnboardingClearanceScheduler,
+  PartyReplicator,
+}
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
@@ -83,7 +86,7 @@ class TopologyComponentFactory(
     loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext) {
 
-  private val topologyStateCache = new TopologyStateWriteThroughCache(
+  private lazy val topologyStateCache = new TopologyStateWriteThroughCache(
     topologyStore,
     batching.topologyCacheAggregator,
     cacheEvictionThreshold = topology.topologyStateCacheEvictionThreshold,
@@ -107,6 +110,7 @@ class TopologyComponentFactory(
       sequencedEventStore: SequencedEventStore,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       ledgerApiStore: LedgerApiStore,
+      partyReplicatorO: Option[PartyReplicator],
       metrics: ParticipantMetrics,
   ): TopologyTransactionProcessor.Factory = new TopologyTransactionProcessor.Factory {
     override def create(
@@ -129,6 +133,7 @@ class TopologyComponentFactory(
         synchronizerConnectionConfigStore = synchronizerConnectionConfigStore,
         pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
         onboardingClearanceScheduler = onboardingClearanceScheduler,
+        partyReplicatorO = partyReplicatorO,
         metrics = metrics,
         loggerFactory,
       )
@@ -284,6 +289,7 @@ class TopologyComponentFactory(
   def createTopologyClient(
       packageDependencyResolver: PackageDependencyResolver,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
+      cleanSynchronizerRecordTime: Option[CantonTimestamp],
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -295,6 +301,7 @@ class TopologyComponentFactory(
       topologyStateCache,
       synchronizerUpgradeTime = synchronizerPredecessor.map(_.upgradeTime),
       sequencerSnapshotTimestamp = None,
+      cleanSynchronizerRecordTime = cleanSynchronizerRecordTime,
       packageDependencyResolver,
       caching,
       enableConsistencyChecks,

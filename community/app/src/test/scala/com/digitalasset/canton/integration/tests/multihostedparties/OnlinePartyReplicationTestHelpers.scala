@@ -418,14 +418,20 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
       val missingFromTP = acsSP -- acsTP.keySet
       val missingFromSP = acsTP -- acsSP.keySet
 
-      assert(
-        missingFromTP.isEmpty,
-        s"These ${missingFromTP.size} contracts for party $replicatedParty are missing from the TP: $missingFromTP",
-      )
-      assert(
-        missingFromSP.isEmpty,
-        s"These ${missingFromSP.size} contracts for party $replicatedParty are missing from the SP: $missingFromSP",
-      )
+      val errors = Seq(
+        Option.when(missingFromTP.nonEmpty)(
+          s"These ${missingFromTP.size} contracts for party $replicatedParty are missing from the TP: $missingFromTP"
+        ),
+        Option.when(missingFromSP.nonEmpty)(
+          s"These ${missingFromSP.size} contracts for party $replicatedParty are missing from the SP: $missingFromSP"
+        ),
+      ).flatten
+
+      if (errors.nonEmpty) {
+        val errorMsg = errors.mkString(" ")
+        logger.info(errorMsg)
+        fail(errorMsg)
+      } else succeed
     }
 
   protected def ensureActiveContractsInSyncBetweenLedgerApiAndSyncService(

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.multihostedparties
 
 import cats.Monad
-import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -388,23 +387,20 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         )(
           targetParticipantIndexingWorkflow
             .indexNextContractActivationChangeBatch(
-              replicationParams,
+              replicationParams.partyId.toLf,
+              replicationParams.synchronizerId,
               _,
               indexingStore,
               recordOrderPublisher,
               pureCrypto,
             )
-            .fold(
-              // Stop recursion if we get an error which will fail the test
-              err => Right(Left(err)),
-              updatedProgress =>
-                // Or stop if we are done indexing
-                Either
-                  .cond(updatedProgress.isIndexingCurrentlyAlmostDone, Right(()), updatedProgress),
+            .map(updatedProgress =>
+              // Or stop if we are done indexing
+              Either
+                .cond(updatedProgress.isIndexingCurrentlyAlmostDone, Right(()), updatedProgress)
             )
         )
         .futureValueUS
-        .valueOr[Unit](err => s"Indexing failed: $err")
 
       clue(s"Creating contract $lastContractIndex")(
         createCycleContract(

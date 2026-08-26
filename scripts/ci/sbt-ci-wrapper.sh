@@ -107,6 +107,31 @@ SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS="${SBT_BOOTSTRAP_RETRY_SLEEP_SECONDS:-30}"
 SBT_BOOTSTRAP_RETRY_PATTERN="${SBT_BOOTSTRAP_RETRY_PATTERN:-Server returned HTTP response code: 429|CantDownloadModule|could not retrieve sbt}"
 FAIL_ON_ERROR_IN_OUTPUT="${FAIL_ON_ERROR_IN_OUTPUT:-1}"
 
+# Fork pull requests in GitHub Actions do not get repository secrets. Force-disable Datadog
+# reporting there to avoid failing cleanup paths that would otherwise require DATADOG_API_KEY.
+if [[ "$IS_GHA" == "true" && "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_EVENT_PATH:-}" && -f "${GITHUB_EVENT_PATH}" ]]; then
+  IS_FORK_PR=$(python3 - <<'PY'
+import json
+import os
+
+event_path = os.environ["GITHUB_EVENT_PATH"]
+with open(event_path, encoding="utf-8") as f:
+    payload = json.load(f)
+
+head_repo = (((payload.get("pull_request") or {}).get("head") or {}).get("repo") or {}).get("full_name")
+base_repo = (payload.get("repository") or {}).get("full_name")
+print("true" if head_repo and base_repo and head_repo != base_repo else "false")
+PY
+  )
+
+  if [[ "$IS_FORK_PR" == "true" ]]; then
+    if [[ "${REPORT_TO_DATADOG,,}" == "true" || "${REPORT_TO_DATADOG}" == "1" ]]; then
+      info "Fork pull_request detected, disabling REPORT_TO_DATADOG for this run."
+    fi
+    REPORT_TO_DATADOG="false"
+  fi
+fi
+
 if [[ "${DEBUG,,}" == "true" || "${DEBUG,,}" == "1" ]]; then
   FAIL_ON_ERROR_IN_OUTPUT="false"
 fi

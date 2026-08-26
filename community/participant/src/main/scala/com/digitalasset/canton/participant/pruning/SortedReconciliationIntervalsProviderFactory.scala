@@ -39,6 +39,7 @@ class SortedReconciliationIntervalsProviderFactory(
       topologyFactory.createTopologyClient(
         NoPackageDependencies,
         synchronizerPredecessor,
+        cleanSynchronizerRecordTime = None,
       )
     )
   } yield {

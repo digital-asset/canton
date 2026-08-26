@@ -4210,9 +4210,10 @@ fileComments:
 
               Required
             reassignment_counter: |-
-              Each corresponding assigned and unassigned event has the same reassignment_counter. This strictly increases
-              with each unassign command for the same contract. Creation of the contract corresponds to reassignment_counter
-              equals zero.
+              The reassignment counter associated with this assignment on the target synchronizer.
+
+              Reassignment counters strictly increase with each unassign command for the same contract.
+              Creation of the contract corresponds to reassignment_counter equal to zero.
 
               Required
             reassignment_id: |-
@@ -4327,9 +4328,10 @@ fileComments:
 
               Required
             reassignment_counter: |-
-              Each corresponding assigned and unassigned event has the same reassignment_counter. This strictly increases
-              with each unassign command for the same contract. Creation of the contract corresponds to reassignment_counter
-              equals zero.
+              The reassignment counter associated with this unassignment on the source synchronizer.
+
+              Reassignment counters strictly increase with each unassign command for the same contract.
+              Creation of the contract corresponds to reassignment_counter equal to zero.
 
               Required
             witness_parties: |-
@@ -4500,11 +4502,12 @@ fileComments:
 
               Required
             reassignment_counter: |-
-              Each corresponding assigned and unassigned event has the same reassignment_counter. This strictly increases
-              with each unassign command for the same contract. Creation of the contract corresponds to reassignment_counter
-              equals zero.
-              This field will be the reassignment_counter of the latest observable activation event on this synchronizer, which is
-              before the active_at_offset.
+              The reassignment counter of this event.
+
+              Reassignment counters strictly increase with each unassign command for the same contract. Creation
+              of the contract corresponds to a reassignment_counter equal to zero.
+              This field will be the reassignment_counter of the latest observable activation event on this synchronizer,
+              which is before the active_at_offset.
 
               Required
       ConnectedSynchronizer:

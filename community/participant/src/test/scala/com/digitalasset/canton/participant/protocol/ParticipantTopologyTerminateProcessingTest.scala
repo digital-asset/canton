@@ -19,7 +19,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   AuthorizationLevel,
   GenericTopologyEvent,
 }
-import com.digitalasset.canton.ledger.participant.state.{FloatingUpdate, Update}
+import com.digitalasset.canton.ledger.participant.state.{FloatingUpdate, SynchronizerUpdate, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
@@ -108,9 +108,11 @@ final class ParticipantTopologyTerminateProcessingTest
       recordOrderPublisher.scheduleFloatingEventPublication(
         any[CantonTimestamp],
         eventCaptor.capture(),
+        any[() => FutureUnlessShutdown[Unit]],
+        any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
       )(any[TraceContext])
     )
-      .thenReturn(Outcome(Right(())))
+      .thenReturn(Outcome(Right(FutureUnlessShutdown.unit)))
 
     val pendingOnboardingClearanceStoreMock = spy(
       new InMemoryPendingOperationStore[OnboardingClearanceOperation, SynchronizerId](
@@ -135,6 +137,7 @@ final class ParticipantTopologyTerminateProcessingTest
       synchronizerConnectionConfigStore = mock[SynchronizerConnectionConfigStore],
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
       onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
+      partyReplicatorO = None,
       metrics,
       loggerFactory,
     )
@@ -310,6 +313,8 @@ final class ParticipantTopologyTerminateProcessingTest
         verify(rop, times(1)).scheduleFloatingEventPublication(
           any[CantonTimestamp],
           any[CantonTimestamp => Option[FloatingUpdate]],
+          any[() => FutureUnlessShutdown[Unit]],
+          any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
         )(any[TraceContext])
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
@@ -348,6 +353,8 @@ final class ParticipantTopologyTerminateProcessingTest
         verify(rop, times(1)).scheduleFloatingEventPublication(
           any[CantonTimestamp],
           any[CantonTimestamp => Option[FloatingUpdate]],
+          any[() => FutureUnlessShutdown[Unit]],
+          any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
         )(any[TraceContext])
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
@@ -386,6 +393,8 @@ final class ParticipantTopologyTerminateProcessingTest
         verify(rop, times(1)).scheduleFloatingEventPublication(
           any[CantonTimestamp],
           any[CantonTimestamp => Option[FloatingUpdate]],
+          any[() => FutureUnlessShutdown[Unit]],
+          any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
         )(any[TraceContext])
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
@@ -430,6 +439,8 @@ final class ParticipantTopologyTerminateProcessingTest
           verify(rop, times(expectedEventsCount)).scheduleFloatingEventPublication(
             any[CantonTimestamp],
             any[CantonTimestamp => Option[FloatingUpdate]],
+            any[() => FutureUnlessShutdown[Unit]],
+            any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
           )(any[TraceContext])
           val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
           events.size shouldBe expectedEventsCount
@@ -461,6 +472,8 @@ final class ParticipantTopologyTerminateProcessingTest
         verify(rop, times(1)).scheduleFloatingEventPublication(
           any[CantonTimestamp],
           any[CantonTimestamp => Option[FloatingUpdate]],
+          any[() => FutureUnlessShutdown[Unit]],
+          any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
         )(any[TraceContext])
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
@@ -556,6 +569,8 @@ final class ParticipantTopologyTerminateProcessingTest
           rop.scheduleFloatingEventPublication(
             any[CantonTimestamp],
             any[CantonTimestamp => Option[FloatingUpdate]],
+            any[() => FutureUnlessShutdown[Unit]],
+            any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
           )(any[TraceContext])
         )
           .thenReturn(Outcome(Left(CantonTimestamp.ofEpochSecond(15))))
@@ -567,6 +582,8 @@ final class ParticipantTopologyTerminateProcessingTest
           verify(rop, times(1)).scheduleFloatingEventPublication(
             any[CantonTimestamp],
             any[CantonTimestamp => Option[FloatingUpdate]],
+            any[() => FutureUnlessShutdown[Unit]],
+            any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
           )(any[TraceContext])
           err.getMessage should include(
             "Cannot schedule topology event as record time is already at"
@@ -908,6 +925,8 @@ final class ParticipantTopologyTerminateProcessingTest
         verify(rop, times(2)).scheduleFloatingEventPublication(
           any[CantonTimestamp],
           any[CantonTimestamp => Option[FloatingUpdate]],
+          any[() => FutureUnlessShutdown[Unit]],
+          any[(SynchronizerUpdate => FutureUnlessShutdown[Unit]) => FutureUnlessShutdown[Unit]],
         )(any[TraceContext])
         val events =
           eventCaptor.getAllValues.asScala.zip(Seq(cts0, cts1)).flatMap { case (f, ts) => f(ts) }

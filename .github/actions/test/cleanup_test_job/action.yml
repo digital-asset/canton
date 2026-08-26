@@ -103,7 +103,13 @@ runs:
 
     - name: Collect Failing Test Data And Send to Datadog
       uses: ./.github/actions/cache/collect_failing_test_data_and_send_to_datadog
-      if: always() && inputs.report_to_datadog == 'true'
+      if: |
+        always() &&
+        inputs.report_to_datadog == 'true' &&
+        (
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
       with:
         matrix-shard: ${{ inputs.shard_index }}
 

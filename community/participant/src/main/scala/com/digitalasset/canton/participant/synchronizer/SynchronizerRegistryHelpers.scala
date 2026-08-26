@@ -132,7 +132,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       synchronizerLoggerFactory = loggerFactory.append("psid", psid.toString)
 
       topologyFactory <- syncPersistentStateManager
-        .topologyFactoryFor(psid)
+        .topologyFactoryFor(psid, Some(metrics.topologyCache))
         .toRight(
           SynchronizerRegistryError.SynchronizerRegistryInternalError
             .InvalidState(
@@ -144,8 +144,11 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       topologyClient <- EitherT.right(
         synchronizeWithClosing("create caching client")(
           topologyFactory.createTopologyClient(
-            new PackageDependencyResolverImpl(participantId, packageMetadataView, loggerFactory),
-            synchronizerPredecessor,
+            packageDependencyResolver =
+              new PackageDependencyResolverImpl(participantId, packageMetadataView, loggerFactory),
+            synchronizerPredecessor = synchronizerPredecessor,
+            cleanSynchronizerRecordTime = syncPersistentStateManager.ledgerApiStore.value.ledgerEnd
+              .flatMap(_.synchronizerIndices.get(psid.logical).map(_.recordTime)),
           )
         )
       )

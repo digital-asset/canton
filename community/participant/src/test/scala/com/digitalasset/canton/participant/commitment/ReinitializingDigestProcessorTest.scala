@@ -7,6 +7,7 @@ import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.{InternalIndexService, SynchronizerIndex}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   CheckpointFence,
   ContractChange,
@@ -36,12 +37,15 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
+import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.{
   DefaultTestIdentities,
   ParticipantId,
+  SynchronizerId,
   TestingIdentityFactory,
   TestingTopology,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext}
 import org.apache.pekko.stream.scaladsl.Sink
 import org.apache.pekko.stream.testkit.scaladsl.TestSink
@@ -128,8 +132,21 @@ class ReinitializingDigestProcessorTest
         contractChangeClassificationBatchSize =
           PositiveInt.tryCreate(contractChangeClassificationBatchSize),
       ),
-      getTopologySnapshot = ts =>
-        Some(testingTopologyFactory.topologySnapshot(timestampOfSnapshot = ts.value)),
+      digestProcessorTopologyLookup = new DigestProcessorTopologyLookup {
+        override def topologyClientForRunningDigestProcessor(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+            previousTopologyClientO: Option[SynchronizerTopologyClient],
+        )(implicit traceContext: TraceContext): FutureUnlessShutdown[SynchronizerTopologyClient] =
+          ???
+
+        override def topologySnapshotForReinitialization(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+        )(implicit traceContext: TraceContext): Option[TopologySnapshot] = Some(
+          testingTopologyFactory.topologySnapshot(timestampOfSnapshot = timestamp)
+        )
+      },
       enableAdditionalConsistencyChecks = true,
       metrics = metrics,
       loggerFactory = loggerFactory,

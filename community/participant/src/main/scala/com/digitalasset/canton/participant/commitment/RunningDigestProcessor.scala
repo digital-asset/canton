@@ -49,14 +49,14 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, LfContractId}
 import com.digitalasset.canton.time.RefinedDuration
-import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
   SynchronizerParametersState,
   TopologyTransaction,
 }
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.signalling.Notification
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
@@ -119,7 +119,7 @@ class RunningDigestProcessorImpl(
     protected override val acsDigestStore: AcsDigestStore,
     tickSignaller: TickSignaller,
     indexService: InternalIndexService,
-    getTopologySnapshot: Traced[CantonTimestamp] => FutureUnlessShutdown[TopologySnapshot],
+    digestProcessorTopologyLookup: DigestProcessorTopologyLookup,
     enableAdditionalConsistencyChecks: Boolean,
     periodWriter: AcsCommitmentPeriodWriter,
     override private[canton] val metrics: CommitmentMetrics,
@@ -151,14 +151,28 @@ class RunningDigestProcessorImpl(
           // The pipeline always starts at a checkpoint. So we never have to emit a checkpoint
           // before the first event.
           previousEventCheckpoint = None,
+          previousTopologyClient = None,
         )
       ) { (state, context) =>
         implicit val traceContext: TraceContext = context.traceContext
-        val CheckpointingState(numEventsSinceLastCheckpoint, previousRecordTime, _) = state
+        val CheckpointingState(
+          numEventsSinceLastCheckpoint,
+          previousRecordTime,
+          _,
+          previousTopologyClient,
+        ) = state
         val ProcessingContext(timepoint, event) = context
         val recordTime = timepoint.recordTime
         for {
-          topologySnapshot <- getTopologySnapshot(Traced(recordTime))
+          topologyClient <- digestProcessorTopologyLookup.topologyClientForRunningDigestProcessor(
+            synchronizerId,
+            recordTime,
+            previousTopologyClient,
+          )
+          // technically we should call something like `tryGetSnapshot`, because we know that the topology for the record time is known,
+          // otherwise the indexer wouldn't have produced an event with that record time.
+          // TODO(#33084): handle the topology client being shut down between acquiring it and calling awaitSnapshot
+          topologySnapshot <- topologyClient.awaitSnapshot(recordTime)
           dynamicParameters <- getDynamicSynchronizerParametersOrFail(topologySnapshot)
         } yield {
           // first determine whether the event should be emitted at all, and whether it triggers a checkpoint
@@ -230,7 +244,12 @@ class RunningDigestProcessorImpl(
           }
           val result = preEventCheckpoint.toList ++ eventToEmit.toList
           val newState =
-            CheckpointingState(updatedNumEventsSinceLastCheckpoint, recordTime, postEventCheckpoint)
+            CheckpointingState(
+              updatedNumEventsSinceLastCheckpoint,
+              recordTime,
+              postEventCheckpoint,
+              Some(topologyClient),
+            )
           newState -> result
         }
       }(NamedLoggingContext(loggerFactory, traceContext))
@@ -281,8 +300,8 @@ class RunningDigestProcessorImpl(
     */
   def classification: Flow[Classifcation_Input, Classification_Output, NotUsed] =
     Flow[Classifcation_Input]
-      .flatMap { context =>
-        context.traverse[Source[*, NotUsed], CheckpointFenceOr[Classification]] {
+      .mapAsync(acsCommitmentConfig.classificationParallelism.unwrap) { context =>
+        Future(context.traverse[Source[*, NotUsed], CheckpointFenceOr[Classification]] {
           // propagate checkpoint fences
           case fence: CheckpointFence => Source.single(fence: CheckpointFenceOr[Classification])
           case other @ NotCheckpointFence(topoSnapshot, value) =>
@@ -349,8 +368,9 @@ class RunningDigestProcessorImpl(
                 // ignore incoming offset checkpoints for now
                 Source.empty
             }
-        }
+        })
       }
+      .flatten
       .map(updateMetric(metrics.runningDigestProcessor.latestClassifiedRecordTime, _))
 
   /** Determines the classification for a topology event and register the corresponding change in
@@ -831,5 +851,6 @@ object RunningDigestProcessorImpl {
       numEventsSinceLastCheckpoint: Int,
       previousRecordTime: CantonTimestamp,
       previousEventCheckpoint: Option[ProcessingContext[CheckpointFence]],
+      previousTopologyClient: Option[SynchronizerTopologyClient],
   )
 }

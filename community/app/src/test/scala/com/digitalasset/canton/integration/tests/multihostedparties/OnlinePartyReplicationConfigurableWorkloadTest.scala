@@ -267,13 +267,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
               targetParticipant,
               addPartyRequestId,
               None,
-              // TODO(#32580): Keep workload running until the end of test once indexing no longer gets
-              //  stuck in the face of uninterrupted workload.
-              () =>
-                if (!stopWorkload) {
-                  logger.info(s"TP done with ACS import")
-                  stopWorkload = true
-                },
+              () => (),
               waitAtMost = maxExpectedTestDuration,
             )
           },

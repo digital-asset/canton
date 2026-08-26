@@ -8,7 +8,6 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UnassignedWrapper,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.examples.java.iou.Iou
@@ -23,13 +22,10 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
   SharedEnvironment,
 }
-import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.{ReassignmentCounter, config}
-import org.scalatest.Assertion
 
 import scala.jdk.CollectionConverters.*
 
@@ -53,12 +49,7 @@ abstract class RepairServiceIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S2M1_S2M1
       .addConfigTransforms(
-        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
-        // TODO(#23735): re-enable addition checks
-        ConfigTransforms.disableAdditionalConsistencyChecks,
-        // TODO(#35107) Upon disabling the old ACS commitment processor
-        //  this test fails: (enable the new pipeline) and make the fix
-        ConfigTransforms.enableOldAcsCommitmentProcessor,
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
       )
       .withSetup { implicit env =>
         import env.*
@@ -191,72 +182,25 @@ abstract class RepairServiceIntegrationTest
           reassignmentCounterOverride = Map(cid -> ReassignmentCounter(2)),
         )
 
-        // Because we changed the reassignment counter of a contract, the running commitments will not match the ACS
-        // This is why we repair the commitments
-        val expectedLogs: Seq[(LogEntryOptionality, LogEntry => Assertion)] = Seq(
-          (
-            LogEntryOptionality.OptionalMany,
-            { entry =>
-              entry.errorMessage should (include("ACS_COMMITMENT_INTERNAL_ERROR") and include(
-                "Detected an inconsistency between the running commitment and the ACS"
-              ))
-              entry.loggerName should include regex s"AcsCommitmentProcessor.*participant1"
-            },
-          )
-        )
+        participant1.synchronizers.reconnect_all()
 
-        loggerFactory.assertLogsUnorderedOptional(
-          {
-            participant1.synchronizers.reconnect_all()
-            // TODO(i23735) remove this comment when fixed
-            //  first wait for the assignation change to go through, and only then reinitialize the commitments
-            val afterAssignation = participant1.ledger_api.state.acs
-              .active_contracts_of_party(payer)
-              .filter(_.createdEvent.value.contractId == cid.coid)
-              .loneElement
-            afterAssignation.synchronizerId shouldBe acmeId.logical.toProtoPrimitive
-            afterAssignation.reassignmentCounter shouldBe 2
+        val afterAssignation = participant1.ledger_api.state.acs
+          .active_contracts_of_party(payer)
+          .filter(_.createdEvent.value.contractId == cid.coid)
+          .loneElement
 
-            // TODO(i23735): when we fix the issue, the commitment reinitialization below shouldn't be necessary,
-            //  because upon reconnection recovery events would essentially get commitments back to a good state
-            //  Repairing commitments happens when we are connected to the synchronizer, so we reconnect first.
-            //  In between reconnecting and repairing, a commitment tick might still happen, which is why we still
-            //  have the log suppression until after repairing the commitments
-            val reinitCmtsResult = participant1.commitments.reinitialize_commitments(
-              Seq.empty,
-              Seq.empty,
-              Seq.empty,
-              NonNegativeDuration.ofSeconds(30),
-            )
-            reinitCmtsResult.map(_.synchronizerId) should contain theSameElementsAs Seq(
-              daId.logical,
-              acmeId.logical,
-            )
-            forAll(reinitCmtsResult) { result =>
-              withClue(s"For synchronizer ${result.synchronizerId} ") {
-                result.acsTimestamp shouldBe defined
-              }
-            }
+        afterAssignation.synchronizerId shouldBe acmeId.logical.toProtoPrimitive
+        afterAssignation.reassignmentCounter shouldBe 2
 
-            // TODO(i23735): When we fix that, we should have no more ACS_COMMITMENT_INTERNAL_ERROR logs, and the
-            //  log suppression and the comment below should be removed
-            //  After reinitializing the commitments, there should not be any more ACS_COMMITMENT_INTERNAL_ERROR. However,
-            //  there are still some happening in flakes, because seemingly we don't wait for all events to be processed
-            //  before reinitializing commitments. Writing the exat conditions to wait for is time consuming, and pretty
-            //  useless because the repair command for changing the reassignment counter is broken, and needs to be fixed
-            //  in #23735
+        val archiveCmd = participant1.ledger_api.javaapi.state.acs
+          .await(Iou.COMPANION)(payer, predicate = _.id.toLf == cid)
+          .id
+          .exerciseArchive()
+          .commands()
+          .asScala
+          .toSeq
 
-            val archiveCmd = participant1.ledger_api.javaapi.state.acs
-              .await(Iou.COMPANION)(payer, predicate = _.id.toLf == cid)
-              .id
-              .exerciseArchive()
-              .commands()
-              .asScala
-              .toSeq
-            participant1.ledger_api.javaapi.commands.submit(Seq(payer), archiveCmd)
-          },
-          expectedLogs *,
-        )
+        participant1.ledger_api.javaapi.commands.submit(Seq(payer), archiveCmd)
       }
     }
   }

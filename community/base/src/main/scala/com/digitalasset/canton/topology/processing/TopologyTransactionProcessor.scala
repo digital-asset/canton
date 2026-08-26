@@ -502,6 +502,7 @@ object TopologyTransactionProcessor {
       cache,
       synchronizerUpgradeTime = upgradeTimeFromPredecessor,
       sequencerSnapshotTimestamp = sequencerSnapshotTimestamp,
+      cleanSynchronizerRecordTime = None, // not available for synchronizer nodes
       NoPackageDependencies,
       parameters.cachingConfigs,
       parameters.enableAdditionalConsistencyChecks,

@@ -487,7 +487,6 @@ abstract class ParticipantRestartTest
             env.environment.clock,
             Eval.now(pnps.ledgerApiStore),
             Eval.now(pnps.contractStore),
-            ParticipantTestMetrics,
             futureSupervisor,
             loggerFactory,
           )

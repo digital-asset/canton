@@ -7,7 +7,6 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -32,7 +31,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
@@ -85,7 +84,7 @@ class ReinitializingDigestProcessorImpl(
     digestAccumulator: DigestAccumulator,
     protected override val acsDigestStore: AcsDigestStore,
     indexService: InternalIndexService,
-    getTopologySnapshot: Traced[CantonTimestamp] => Option[TopologySnapshot],
+    digestProcessorTopologyLookup: DigestProcessorTopologyLookup,
     ledgerApiStore: LedgerApiStore,
     enableAdditionalConsistencyChecks: Boolean,
     private[canton] override val metrics: CommitmentMetrics,
@@ -119,7 +118,10 @@ class ReinitializingDigestProcessorImpl(
       _ <- writeTombstonesToJournals(
         tombstoneTimepoint = reinitializingTimepoint
       )
-      topologySnapshotO = getTopologySnapshot(Traced(reinitializingTimepoint.recordTime))
+      topologySnapshotO = digestProcessorTopologyLookup.topologySnapshotForReinitialization(
+        synchronizerId,
+        reinitializingTimepoint.recordTime,
+      )
       topologySnapshot = topologySnapshotO.getOrElse(
         ErrorUtil.invalidState(
           s"Unable to get a topology snapshot for $synchronizerId at $reinitializingTimepoint"
