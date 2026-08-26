@@ -54,14 +54,19 @@ import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.PartyInfo
-import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.TopologyTransactionTestFactory
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   SynchronizerParametersState,
   TopologyTransaction,
 }
-import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, TestingTopology}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  ParticipantId,
+  SynchronizerId,
+  TestingTopology,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.signalling.{LocalEventSignaller, NotificationSignal}
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, LfPartyId}
@@ -128,6 +133,13 @@ class RunningDigestProcessorTest
       TestCommitmentMetrics(),
       loggerFactory,
     )
+    val mockTopologyClient = mock[SynchronizerTopologyClient]
+    when(mockTopologyClient.awaitSnapshot(any[CantonTimestamp])(anyTraceContext)).thenAnswer(
+      (timestamp: CantonTimestamp, _: TraceContext) =>
+        FutureUnlessShutdown.pure(
+          testingTopology.topologySnapshot(timestampOfSnapshot = timestamp)
+        )
+    )
 
     new RunningDigestProcessorImpl(
       participant,
@@ -144,8 +156,19 @@ class RunningDigestProcessorTest
       acsDigestStore,
       tickSignaller,
       indexService,
-      getTopologySnapshot = ts =>
-        FutureUnlessShutdown.pure(testingTopology.topologySnapshot(timestampOfSnapshot = ts.value)),
+      new DigestProcessorTopologyLookup {
+        override def topologyClientForRunningDigestProcessor(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+            previousTopologyClientO: Option[SynchronizerTopologyClient],
+        )(implicit traceContext: TraceContext): FutureUnlessShutdown[SynchronizerTopologyClient] =
+          FutureUnlessShutdown.pure(mockTopologyClient)
+
+        override def topologySnapshotForReinitialization(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+        )(implicit traceContext: TraceContext): Option[TopologySnapshot] = ???
+      },
       enableAdditionalConsistencyChecks = true,
       new AcsCommitmentPeriodWriter(acsDigestStore, acsPeriodStore, loggerFactory),
       metrics,

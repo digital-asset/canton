@@ -464,6 +464,9 @@ final case class ParticipantNodeParameterConfig(
   * @param maxNumLoadedDigests
   *   the maximum number of digests that may be loaded into memory during processing. Default is
   *   1000.
+  * @param digestUpdatePersistenceBatchFactor
+  *   the maximum size of digest update batches is calculated by multiplying `maxNumLoadedDigests *
+  *   digestUpdatePersistenceBatchFactor`. Default is 2.
   * @param digestLoadParallelism
   *   The maximum number of concurrently buffered reads for loading digests. Default is 1000. If
   *   [[com.digitalasset.canton.participant.config.AcsCommitmentConfig.loadBatching]] enables
@@ -487,7 +490,10 @@ final case class ParticipantNodeParameterConfig(
   *   - When ingesting active contracts during reinitialization
   *   - When ingesting active contracts while processing a locally onboarded party
   * @param contractChangeClassificationParallelism
-  *   the number of concurrent contract change classifications. Default is 8.
+  *   the number of concurrent contract change classifications when loading the ACS for parties.
+  *   Default is 8.
+  * @param classificationParallelism
+  *   the number of concurrent ACS update classifications. Default is 8.
   * @param acsFetchParallelism
   *   the number of concurrent acs streams that are prepared. This counteracts the high fixed cost
   *   of establishing an ACS stream for many parties. The ACS stream of the first batch of
@@ -507,12 +513,14 @@ final case class AcsCommitmentConfig(
     useSequentialDigestAccumulator: Boolean = true,
     loadBatching: BatchAggregatorConfig = BatchAggregatorConfig(),
     maxNumLoadedDigests: PositiveInt = PositiveInt.tryCreate(1000),
+    digestUpdatePersistenceBatchFactor: PositiveInt = PositiveInt.two,
     digestLoadParallelism: PositiveInt = PositiveInt.tryCreate(1000),
     digestComputeParallelism: PositiveInt = PositiveInt.tryCreate(8),
     digestPipelineBufferSize: NonNegativeInt = NonNegativeInt.zero,
     matchingParallelism: PositiveInt = PositiveInt.tryCreate(20),
     contractChangeClassificationBatchSize: PositiveInt = PositiveInt.tryCreate(100),
     contractChangeClassificationParallelism: PositiveInt = PositiveInt.tryCreate(8),
+    classificationParallelism: PositiveInt = PositiveInt.tryCreate(8),
     acsFetchParallelism: PositiveInt = PositiveInt.tryCreate(16),
 )
 

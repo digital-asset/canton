@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant
 
 import cats.Eval
 import cats.data.EitherT
-import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
@@ -36,10 +35,11 @@ import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHan
 import com.digitalasset.canton.participant.ParticipantNodeBootstrap.ParticipantServices
 import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
-import com.digitalasset.canton.participant.admin.party.{PartyReplicationEndpoints, PartyReplicator}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationEndpoints
 import com.digitalasset.canton.participant.commitment.{
   AcsCommitmentProcessorManager,
   DigestProcessorFactoryImpl,
+  DigestProcessorTopologyLookupImpl,
   ReceivedAcsCommitmentMatcherFactoryImpl,
 }
 import com.digitalasset.canton.participant.config.*
@@ -95,16 +95,12 @@ import com.digitalasset.canton.topology.admin.grpc.TopologyStoreInitializationSt
   NotInitialized,
 }
 import com.digitalasset.canton.topology.admin.grpc.{PsidLookupAt, TopologyStoreInitializationStatus}
-import com.digitalasset.canton.topology.client.{
-  CachingTopologySnapshot,
-  StoreBasedTopologySnapshot,
-  SynchronizerTopologyClient,
-}
+import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
+import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
-import com.digitalasset.canton.topology.store.{NoPackageDependencies, TopologyStore}
 import com.digitalasset.canton.topology.transaction.HostingParticipant
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil, SingleUseCell}
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, SingleUseCell}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -394,6 +390,7 @@ class ParticipantNodeBootstrap(
           crypto.pureCrypto,
           participantServices.participantTopologyDispatcher,
           participantServices.cantonSyncService,
+          participantServices,
           adminTokenDispenser,
           recordSequencerInteractions,
           replaySequencerConfig,
@@ -507,7 +504,6 @@ class ParticipantNodeBootstrap(
           clock,
           persistentState.map(_.ledgerApiStore),
           persistentState.map(_.contractStore),
-          arguments.metrics,
           futureSupervisor,
           loggerFactory,
         )
@@ -919,35 +915,6 @@ class ParticipantNodeBootstrap(
           connectedSynchronizerAcsCommitmentProcessorHealth.set(sync.acsCommitmentProcessorHealth)
         }
 
-        partyReplicatorContainerO = config.parameters.alphaOnlinePartyReplicationSupport.map(
-          config =>
-            new LifeCycleContainer[PartyReplicator](
-              stateName = "party-replicator",
-              create = () =>
-                FutureUnlessShutdown.pure(
-                  new PartyReplicator(
-                    participantId,
-                    sync,
-                    clock,
-                    config,
-                    parameters.batchingConfig,
-                    storage,
-                    futureSupervisor,
-                    parameters.exitOnFatalFailures,
-                    parameters.processingTimeouts,
-                    loggerFactory,
-                  )
-                ),
-              loggerFactory = loggerFactory,
-            )
-        )
-        _ <- partyReplicatorContainerO match {
-          // Initialize party replication only if configured and the participant is active
-          case Some(partyReplicatorContainer) if sync.isActive() =>
-            EitherT.right[String](partyReplicatorContainer.initializeNext())
-          case _ => EitherT.right[String](FutureUnlessShutdown.unit)
-        }
-
         ledgerApiServerContainer = new LifeCycleContainer[LedgerApiServer](
           stateName = "ledger-api-server",
           create = () =>
@@ -968,9 +935,9 @@ class ParticipantNodeBootstrap(
                 participantId = participantId.toLf,
                 participantNodePersistentState = persistentState,
                 sync = sync,
-                partyReplicationEndpointsO = partyReplicatorContainerO.map(container =>
+                partyReplicationEndpointsO = sync.partyReplicatorO.map(
                   PartyReplicationEndpoints(
-                    container.asEval.value,
+                    _,
                     sync,
                   )
                 ),
@@ -994,53 +961,18 @@ class ParticipantNodeBootstrap(
             "ACS commitment processor manager",
             create = () => {
               val ledgerApiStore = ledgerApiIndexerContainer.asEval.flatMap(_.ledgerApiStore).value
-              val topologyLookupForAcsDigestProcessing = new TopologyLookup(
-                clock = clock,
-                topologyConfig = parameters.topologyConfig,
-                timeouts = timeouts,
-                futureSupervisor = futureSupervisor,
-                topologyManagerO = sync.lookupTopologyManager,
-                psidLookup = sync.activePsidLookup,
-                topologyClientO = lookupTopologyClient,
-                syncPersistentStateO = psid =>
-                  // TODO(#33084): This is not good, but makes LsuLateParticipantUpgradeTest and LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest green :(
-                  //               In a late/manual lsu, the new psid might become active before the stores are even initialized.
-                  //               That's why RepairServiceHelpers uses latestKnownPsid.
-                  syncPersistentStateManager
-                    .latestKnownPsid(psid.logical)
-                    .flatMap(syncPersistentStateManager.get),
-                cleanSynchronizerRecordTime = lsid =>
-                  ledgerApiStore
-                    .cleanSynchronizerIndex(lsid)
-                    .map(_.recordTime),
-                loggerFactory = loggerFactory,
-              )
 
               val digestProcessorFactory = new DigestProcessorFactoryImpl(
                 participantId,
-                topologyLookupForAcsDigestProcessing,
                 syncPersistentStateManager.acsDigestStore,
                 syncPersistentStateManager.acsCommitmentPeriodStore,
-                cachingTopologySnapshotLookup = (synchronizerId, ts) => {
-                  val psid = sync.activePsidLookup
-                    .activePsidAt(synchronizerId, ts)
-                    .valueOr(ErrorUtil.invalidState(_))
-                  syncPersistentStateManager.get(psid).map { state =>
-                    val snapshot = new StoreBasedTopologySnapshot(
-                      psid,
-                      ts,
-                      state.topologyStore,
-                      NoPackageDependencies,
-                      loggerFactory.append("psid", psid.toString),
-                    )
-                    new CachingTopologySnapshot(
-                      snapshot,
-                      parameters.cachingConfigs,
-                      loggerFactory,
-                      futureSupervisor,
-                    )
-                  }
-                },
+                new DigestProcessorTopologyLookupImpl(
+                  ledgerApiStore,
+                  sync,
+                  parameters.cachingConfigs,
+                  futureSupervisor,
+                  loggerFactory,
+                ),
                 ledgerApiServerContainer.asEval.value.internalIndexService,
                 ledgerApiStore,
                 ledgerApiStore.stringInterningView,
@@ -1118,7 +1050,7 @@ class ParticipantNodeBootstrap(
             clock,
             adminServerRegistry,
             adminTokenDispenser,
-            partyReplicatorContainerO.map(_.asEval),
+            sync.partyReplicatorO,
             ledgerApiIndexerContainer.asEval.flatMap(_.ledgerApiStore),
             futureSupervisor,
             loggerFactory,
@@ -1215,7 +1147,6 @@ class ParticipantNodeBootstrap(
         addCloseable(indexedStringStore)
         addCloseable(topologyDispatcher)
         addCloseable(schedulers)
-        partyReplicatorContainerO.foreach(repl => addCloseable(repl.currentAutoCloseable()))
         addCloseable(ledgerApiServerContainer.currentAutoCloseable())
         acsDigestProcessorManagerO.foreach(mgr => addCloseable(mgr.currentAutoCloseable()))
         addCloseable(ledgerApiDependentServices)
@@ -1238,7 +1169,6 @@ class ParticipantNodeBootstrap(
           ledgerApiIndexerContainer = ledgerApiIndexerContainer,
           cantonSyncService = sync,
           schedulers = schedulers,
-          partyReplicatorContainerO = partyReplicatorContainerO,
           ledgerApiServerContainer = ledgerApiServerContainer,
           startableStoppableLedgerApiDependentServices = ledgerApiDependentServices,
           participantTopologyDispatcher = topologyDispatcher,
@@ -1340,7 +1270,6 @@ object ParticipantNodeBootstrap {
       trafficEnforcementAppContainerO: Option[LifeCycleContainer[TrafficEnforcementApp]],
       cantonSyncService: CantonSyncService,
       schedulers: Schedulers,
-      partyReplicatorContainerO: Option[LifeCycleContainer[PartyReplicator]],
       ledgerApiServerContainer: LifeCycleContainer[LedgerApiServer],
       startableStoppableLedgerApiDependentServices: StartableStoppableLedgerApiDependentServices,
       participantTopologyDispatcher: ParticipantTopologyDispatcher,
@@ -1358,6 +1287,7 @@ class ParticipantNode(
     val cryptoPureApi: CryptoPureApi,
     identityPusher: ParticipantTopologyDispatcher,
     private[canton] val sync: CantonSyncService,
+    private[canton] val participantServices: ParticipantServices,
     override val adminTokenDispenser: CantonAdminTokenDispenser,
     val recordSequencerInteractions: AtomicReference[Option[RecordingConfig]],
     val replaySequencerConfig: AtomicReference[Option[ReplayConfig]],

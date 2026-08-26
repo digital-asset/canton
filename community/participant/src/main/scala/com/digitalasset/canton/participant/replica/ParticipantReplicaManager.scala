@@ -78,7 +78,6 @@ class ParticipantReplicaManager(
           _ = logger.info(
             "Participant replica is becoming active: CantonSyncService caches refreshed"
           )
-          _ <- participantServices.partyReplicatorContainerO.traverse(_.initializeNext())
           // Start up the Ledger API server
           _ <- participantServices.ledgerApiServerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Server started")
@@ -171,7 +170,6 @@ class ParticipantReplicaManager(
         // Stop the Ledger API server
         participantServices.ledgerApiServerContainer.closeCurrent()
         logger.info("Participant replica is becoming passive: Ledger API Server stopped")
-        participantServices.partyReplicatorContainerO.foreach(_.closeCurrent())
         for {
           // Explicitly disconnect from synchronizers
           _ <- EitherTUtil

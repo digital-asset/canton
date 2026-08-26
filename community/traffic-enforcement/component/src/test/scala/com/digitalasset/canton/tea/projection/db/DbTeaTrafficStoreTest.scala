@@ -5,12 +5,16 @@ package com.digitalasset.canton.tea.projection.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.concurrent.Threading
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.{DbConfig, DbParametersConfig, PositiveFiniteDuration}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.Profile
+import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.TrafficEnforcementErrors.TrafficEnforcementError
@@ -98,6 +102,10 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
 
           // Run on the raw (non-idempotency-wrapping) storage: the wrapper re-runs every write
           // once more after the first completes, which would re-acquire this lock forever.
+          // NOTE: `lockHeld` holds a JDBC connection open until `releaseLock` is fulfilled. The storage
+          // configures the connection pool to have at most as many connections as there are threads.
+          // We therefore need to ensure that the test runs with at least 2 threads so that the `getBalance`
+          // call below does not block forever trying to obtain a connection.
           val lockHeld = storage.underlying.queryAndUpdate(
             (for {
               _ <- sqlu"lock table par_traffic_enforcement_balance in access exclusive mode"
@@ -132,6 +140,15 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
   }
 }
 
-class DbTeaTrafficStorePostgresTest extends DbTeaTrafficStoreTest with PostgresTest
+class DbTeaTrafficStorePostgresTest extends DbTeaTrafficStoreTest with PostgresTest {
+  override def mkDbConfig(basicConfig: DbBasicConfig): DbConfig.Postgres = {
+    // Ensure that the DB has at least 2 connections (see NOTE above)
+    val nbThreads = Threading.detectNumberOfThreads(NamedLogging.noopNoTracingLogger)
+    val nbConnections = nbThreads.max(PositiveInt.two)
+
+    val defaultDbConfig = super.mkDbConfig(basicConfig)
+    defaultDbConfig.copy(parameters = DbParametersConfig(maxConnections = Some(nbConnections)))
+  }
+}
 
 class DbTeaTrafficStoreH2Test extends DbTeaTrafficStoreTest with H2Test

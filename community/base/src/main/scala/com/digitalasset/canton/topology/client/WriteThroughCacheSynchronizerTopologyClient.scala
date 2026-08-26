@@ -231,13 +231,18 @@ class WriteThroughCacheSynchronizerTopologyClient(
   override def updateKnownTimestampsDuringStartup(
       sequencerSnapshotTimestamp: Option[SequencedTime],
       synchronizerUpgradeTime: Option[SequencedTime],
+      cleanSynchronizerRecordTime: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     delegate
-      .updateKnownTimestampsDuringStartup(sequencerSnapshotTimestamp, synchronizerUpgradeTime)
+      .updateKnownTimestampsDuringStartup(
+        sequencerSnapshotTimestamp,
+        synchronizerUpgradeTime,
+        cleanSynchronizerRecordTime,
+      )
       .map { _ =>
         cacheDuringCrashRecovery
           .set(
-            Some((EffectiveTime(delegate.latestTopologyChangeTimestamp), stateLookup.makeCopy()))
+            Some((EffectiveTime(delegate.topologyKnownUntilTimestamp), stateLookup.makeCopy()))
           )
         ()
       }
@@ -337,6 +342,7 @@ object WriteThroughCacheSynchronizerTopologyClient {
       stateLookup: TopologyStateLookup,
       synchronizerUpgradeTime: Option[CantonTimestamp],
       sequencerSnapshotTimestamp: Option[SequencedTime],
+      cleanSynchronizerRecordTime: Option[CantonTimestamp],
       packageDependencyResolver: PackageDependencyResolver,
       cachingConfigs: CachingConfigs,
       enableConsistencyChecks: Boolean,
@@ -375,6 +381,7 @@ object WriteThroughCacheSynchronizerTopologyClient {
       .updateKnownTimestampsDuringStartup(
         sequencerSnapshotTimestamp = sequencerSnapshotTimestamp,
         synchronizerUpgradeTime = synchronizerUpgradeTime.map(SequencedTime(_)),
+        cleanSynchronizerRecordTime = cleanSynchronizerRecordTime,
       )
       .map(_ => caching)
   }

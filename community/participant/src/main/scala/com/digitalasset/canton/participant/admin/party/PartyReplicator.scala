@@ -6,11 +6,13 @@ package com.digitalasset.canton.participant.admin.party
 import cats.data.EitherT
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
+import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.participant.state.SynchronizerUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
@@ -72,6 +74,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{
   EitherTUtil,
+  ErrorUtil,
   FutureUnlessShutdownUtil,
   MonadUtil,
   SimpleExecutionQueue,
@@ -80,7 +83,6 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
-import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 
@@ -109,7 +111,7 @@ final class PartyReplicator(
       PartyReplicator.defaultProgressSchedulingInterval,
 )(implicit
     executionContext: ExecutionContext,
-    actorSystem: ActorSystem,
+    mat: Materializer,
 ) extends FlagCloseable
     with HasCloseContext
     with NamedLogging {
@@ -303,8 +305,6 @@ final class PartyReplicator(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, AddPartyRequestId] = {
-
-    implicit val mat: Materializer = Materializer.matFromSystem(actorSystem)
 
     val PartyReplicationArguments(
       partyId,
@@ -1274,16 +1274,54 @@ final class PartyReplicator(
         val pureCrypto = connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
 
         for {
-          progress <- indexingWorkflow.indexNextContractActivationChangeBatch(
-            params,
-            indexingProgress,
-            indexingStore,
-            recordOrderPublisher,
-            pureCrypto,
+          progress <- EitherT.right[String](
+            indexingWorkflow.indexNextContractActivationChangeBatch(
+              params.partyId.toLf,
+              params.synchronizerId,
+              indexingProgress,
+              indexingStore,
+              recordOrderPublisher,
+              pureCrypto,
+            )
           )
           _ <- partyReplicationStateManager.update_(requestId, _.updateIndexing(progress))
         } yield ()
     }
+
+  private[participant] def flushContractActivationChangesToIndexer(
+      partyIds: NonEmpty[Set[LfPartyId]],
+      synchronizerId: SynchronizerId,
+      publishAt: EffectiveTime,
+  )(publishUpdate: SynchronizerUpdate => FutureUnlessShutdown[Unit])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val connectedSynchronizer =
+      syncService
+        .readyConnectedSynchronizerById(synchronizerId)
+        .getOrElse(
+          ErrorUtil.invalidState(
+            s"Synchronizer $synchronizerId not connected while flushing ${partyIds.mkString(", ")} to indexer"
+          )
+        )
+
+    val indexingStore =
+      connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+        .getOrElse(
+          ErrorUtil.invalidState(
+            s"Synchronizer $synchronizerId not connected while flushing ${partyIds.mkString(", ")} to indexer"
+          )
+        )
+
+    val pureCrypto = connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
+
+    indexingWorkflow.flushContractActivationChangesToIndexer(
+      partyIds,
+      synchronizerId,
+      publishAt,
+      indexingStore,
+      pureCrypto,
+    )(publishUpdate)
+  }
 
   /** This completes party replication by executing the following final steps if they are found to
     * not have been executed yet:
@@ -1352,11 +1390,13 @@ final class PartyReplicator(
               )
           }
 
-          // Delete the items from the party replication indexing store since all contract
+          // If pausing the indexer, delete the items from the party replication indexing store since all contract
           // activation changes have been indexed.
-          _ <- EitherT.right[String](
-            connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
-              .traverse(_.purgeContractActivationChanges())
+          _ <- EitherTUtil.ifThenET(config.pauseSynchronizerIndexingDuringPartyReplication)(
+            EitherT.right[String](
+              connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
+                .traverse(_.purgeContractActivationChanges())
+            )
           )
 
           status <-

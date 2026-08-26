@@ -230,6 +230,7 @@ class InFlightSubmissionSynchronizerTracker(
               )
               .value
           },
+          publishBefore = _ => FutureUnlessShutdown.unit,
         )
       )
         .mapK(FutureUnlessShutdown.liftK)

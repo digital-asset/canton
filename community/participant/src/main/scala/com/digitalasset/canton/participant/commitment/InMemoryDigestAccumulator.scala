@@ -70,6 +70,7 @@ class InMemoryDigestAccumulator(
     override protected val loggerFactory: NamedLoggerFactory,
     stringInterning: StringInterning,
     maxNumLoadedDigests: Int,
+    digestUpdatePersistenceBatchFactor: Int,
     digestLoadParallelism: Int,
     digestComputeParallelism: Int,
     bufferSize: Int,
@@ -139,6 +140,17 @@ class InMemoryDigestAccumulator(
       .withBlocker(storeBlocker)(directExecutionContext)
       .async
       .buffered(metrics.bufferDigestPipelineBeforePersistence, bufferSize)
+      .batchWeighted(
+        maxNumLoadedDigests.toLong * digestUpdatePersistenceBatchFactor,
+        input => {
+          val emittedDigestUpdates = input.value.getOption.flatMap(_._2).map(_._1.size.toLong)
+          // count the number of individual digest updates
+          emittedDigestUpdates
+            // or count other events (like checkpoints) as single entry
+            .getOrElse(1L)
+        },
+        NonEmpty(Vector, _),
+      )(_ :+ _)
       // We must persist the digest updates sequentially because two consecutive copy snapshots may
       // update the same digest keys at the same offsets (e.g., if the aggregation blocked with a full accumulator)
       // and thus we must avoid the later copy to be overwritten by the earlier copy
@@ -529,34 +541,36 @@ class InMemoryDigestAccumulator(
     * the stores
     */
   private def persistDigestUpdates(
-      input: CopySnapshotOutput
-  ): FutureUnlessShutdown[PersistDigestUpdatesOutput] = {
-    implicit val traceContext: TraceContext = input.traceContext
-    input
-      .traverse(_.traverse(_.traverse(_.traverse { case (updates, usageCounters) =>
-        val (participantUpdates, partyUpdates) = updates.partitionMap { update =>
+      input: NonEmpty[Vector[CopySnapshotOutput]]
+  ): FutureUnlessShutdown[Vector[PersistDigestUpdatesOutput]] = {
+    implicit val traceContext: TraceContext =
+      TraceContext.ofBatch("DigestAccumulator.persistUpdates")(input.map(_.traceContext))(logger)
+
+    val (participantUpdates, partyUpdates) =
+      input.forgetNE
+        .flatMap(_.value.getOption.toList.flatMap(_._2.toList.flatMap(_._1)))
+        .partitionMap { update =>
           update.partitionMap(_.toEither)
         }
-        for {
-          _ <- digestStore.party.upsertDigestUpdates(partyUpdates)
-          _ <- digestStore.participant.upsertDigestUpdates(participantUpdates)
-        } yield {
-          usageCounters
-        }
-      })))
-      .map { output =>
-        metrics.runningDigestProcessor.latestAccumulatedRecordTime.updateValue(
-          input.recordTime.toMicros
-        )
-        output
-      }
+    for {
+      _ <- digestStore.party.upsertDigestUpdates(partyUpdates)
+      _ <- digestStore.participant.upsertDigestUpdates(participantUpdates)
+    } yield {
+      metrics.runningDigestProcessor.latestAccumulatedRecordTime.updateValue(
+        input.last1.recordTime.toMicros
+      )
+      // return the loaded identifiers
+      input.map(_.map(_.map(_.map(_.map { case (_digestUpdateSnapshot, loadedIdentifiers) =>
+        loadedIdentifiers
+      }))))
+    }
   }
 
   /** Deregisters the usages from [[digests]] and evicts unused accumulators. */
   private def deregister(
-      input: PersistDigestUpdatesOutput
+      inputs: Vector[PersistDigestUpdatesOutput]
   ): immutable.Iterable[CheckpointToBeWritten] =
-    input match {
+    inputs.flatMap {
       case context @ ProcessingContext(_, NotCheckpointFence(_, (_, usagesO))) =>
         usagesO.foreach { usages =>
           doDeregister(usages)(context.traceContext)

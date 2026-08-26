@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.commitment
 
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
@@ -13,12 +12,10 @@ import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.{AcsCommitmentPeriodStore, AcsDigestStore}
-import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.ErrorUtil
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.ExecutionContext
@@ -40,13 +37,9 @@ trait DigestProcessorFactory {
 
 class DigestProcessorFactoryImpl(
     participantId: ParticipantId,
-    topologyLookup: TopologyLookup,
     acsDigestStoreLookup: SynchronizerId => Option[AcsDigestStore],
     acsCommitmentPeriodStoreLookup: SynchronizerId => Option[AcsCommitmentPeriodStore],
-    cachingTopologySnapshotLookup: (
-        SynchronizerId,
-        CantonTimestamp,
-    ) => Option[TopologySnapshot],
+    digestProcessorTopologyLookup: DigestProcessorTopologyLookup,
     internalIndexService: InternalIndexService,
     ledgerApiStore: LedgerApiStore,
     stringInterning: StringInterning,
@@ -78,6 +71,8 @@ class DigestProcessorFactoryImpl(
         loggerFactoryWithSynchronizer,
         stringInterning,
         maxNumLoadedDigests = acsCommitmentConfig.maxNumLoadedDigests.unwrap,
+        digestUpdatePersistenceBatchFactor =
+          acsCommitmentConfig.digestUpdatePersistenceBatchFactor.unwrap,
         digestLoadParallelism = acsCommitmentConfig.digestLoadParallelism.unwrap,
         digestComputeParallelism = acsCommitmentConfig.digestComputeParallelism.unwrap,
         bufferSize = acsCommitmentConfig.digestPipelineBufferSize.unwrap,
@@ -117,15 +112,7 @@ class DigestProcessorFactoryImpl(
       acsDigestStore,
       tickSignaller,
       internalIndexService,
-      getTopologySnapshot = tracedTimestamp =>
-        EitherTUtil.toFutureUnlessShutdown(
-          topologyLookup
-            .maybeOfflineAwaitTopologySnapshot(synchronizerId, tracedTimestamp.value)(
-              tracedTimestamp.traceContext
-            )
-            // TODO(#33084): cleanup error types
-            .leftMap(_.asGrpcError)
-        ),
+      digestProcessorTopologyLookup,
       enableAdditionalConsistencyChecks = enableAdditionalConsistencyChecks,
       periodWriter,
       metrics,
@@ -155,8 +142,7 @@ class DigestProcessorFactoryImpl(
       digestAccumulator,
       acsDigestStore,
       indexService = internalIndexService,
-      getTopologySnapshot = tracedTimestamp =>
-        cachingTopologySnapshotLookup(synchronizerId, tracedTimestamp.value),
+      digestProcessorTopologyLookup,
       ledgerApiStore,
       enableAdditionalConsistencyChecks = enableAdditionalConsistencyChecks,
       metrics,

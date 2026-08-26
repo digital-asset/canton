@@ -13,9 +13,8 @@ import com.digitalasset.canton.participant.protocol.party.PartyReplicationAcsRea
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import org.apache.pekko.NotUsed
-import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.stream.KillSwitches
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.{KillSwitches, Materializer}
 
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.annotation.tailrec
@@ -37,7 +36,7 @@ private[party] final class PartyReplicationAcsReader(
 )(implicit
     ec: ExecutionContext,
     traceContext: TraceContext,
-    actorSystem: ActorSystem,
+    mat: Materializer,
 ) extends NamedLogging
     with FlagCloseable {
 

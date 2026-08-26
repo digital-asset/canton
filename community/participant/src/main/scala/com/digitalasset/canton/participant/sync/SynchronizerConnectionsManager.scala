@@ -36,6 +36,7 @@ import com.digitalasset.canton.participant.admin.data.{LateLsuRequest, ManualLsu
 import com.digitalasset.canton.participant.admin.party.{
   OnboardingClearanceScheduler,
   PartyReplicationTopologyWorkflow,
+  PartyReplicator,
 }
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -151,6 +152,7 @@ private[sync] class SynchronizerConnectionsManager(
     ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
     connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
     externalCallValidator: ExternalCallValidator,
+    partyReplicatorO: Option[PartyReplicator],
 )(implicit ec: ExecutionContextExecutor, mat: Materializer, val tracer: Tracer)
     extends FlagCloseable
     with Spanning
@@ -1287,6 +1289,7 @@ private[sync] class SynchronizerConnectionsManager(
                   synchronizerHandle.syncPersistentState.sequencedEventStore,
                   synchronizerConnectionConfig.predecessor,
                   ledgerApiIndexer.asEval.value.ledgerApiStore.value,
+                  partyReplicatorO,
                   metrics,
                 ),
               missingKeysAlerter,

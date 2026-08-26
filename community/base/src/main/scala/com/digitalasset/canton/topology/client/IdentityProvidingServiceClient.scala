@@ -761,15 +761,19 @@ trait SynchronizerTopologyClientWithInit
     *   - max timestamp that exists in the store (including proposals & rejected)
     *   - sequencer snapshot timestamp (if provided)
     *   - synchronizer upgrade time (if provided)
+    *   - the clean synchronizer record time (if provided)
     *
     * @param sequencerSnapshotTimestamp
     *   lastTs from sequencer snapshot
     * @param synchronizerUpgradeTime
     *   upgradeTime from the predecessor synchronizer
+    * @param cleanSynchronizerRecordTime
+    *   the clean synchronizer record time, up to which the indexer has processed events
     */
   def updateKnownTimestampsDuringStartup(
       sequencerSnapshotTimestamp: Option[SequencedTime] = None,
       synchronizerUpgradeTime: Option[SequencedTime] = None,
+      cleanSynchronizerRecordTime: Option[CantonTimestamp] = None,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]

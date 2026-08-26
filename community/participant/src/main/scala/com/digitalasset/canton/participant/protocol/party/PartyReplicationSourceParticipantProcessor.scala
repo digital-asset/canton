@@ -29,7 +29,7 @@ import com.digitalasset.canton.{RepairCounter, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
-import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.ExecutionContext
@@ -72,7 +72,7 @@ final class PartyReplicationSourceParticipantProcessor private (
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
     protected val testOnlyInterceptor: PartyReplicationTestInterceptor,
-)(implicit override val executionContext: ExecutionContext, actorSystem: ActorSystem)
+)(implicit override val executionContext: ExecutionContext, mat: Materializer)
     extends PartyReplicationProcessor {
   protected val processorStore: SourceParticipantStore =
     InMemoryProcessorStore.sourceParticipant(loggerFactory, timeouts)
@@ -317,7 +317,7 @@ object PartyReplicationSourceParticipantProcessor {
         PartyReplicationTestInterceptor.AlwaysProceed,
   )(implicit
       executionContext: ExecutionContext,
-      actorSystem: ActorSystem,
+      mat: Materializer,
   ): PartyReplicationSourceParticipantProcessor =
     new PartyReplicationSourceParticipantProcessor(
       requestId,

@@ -56,7 +56,7 @@ class StartableStoppableLedgerApiDependentServices(
     clock: Clock,
     registry: CantonMutableHandlerRegistry,
     adminTokenDispenser: CantonAdminTokenDispenser,
-    partyReplicatorEvalO: Option[Eval[PartyReplicator]],
+    partyReplicatorO: Option[PartyReplicator],
     ledgerApiStore: Eval[LedgerApiStore],
     futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
@@ -99,8 +99,6 @@ class StartableStoppableLedgerApiDependentServices(
           )
         case None =>
           logger.debug("Starting Ledger API-dependent canton services")
-
-          val partyReplicatorO = partyReplicatorEvalO.map(_.value)
 
           val adminWorkflowServices =
             new AdminWorkflowServices(

@@ -33,6 +33,9 @@ NIGHTLY_CONSECUTIVE_FAILURES: Final[int] = 3
 NIGHTLY_BROKEN_LABEL: Final[str] = "broken-nightly"
 # Nightly cron from .circleci/config/workflows/canton_nightly.yml: "0 22 * * 1-5".
 NIGHTLY_CRON_HOUR_UTC: Final[int] = 22
+# Nightly jobs that keep a historical name instead of the `nightly_` prefix. Matched
+# on the job name (CIRCLE_JOB / GITHUB_JOB), so keep in sync across a GHA migration.
+NIGHTLY_JOBS_WITHOUT_PREFIX: Final[frozenset[str]] = frozenset({"toxiproxy_test_slow"})
 
 milestone = "Flaky Tests"  # flaky tests milestone M97 (milestone number 31)
 flaky_test_project = "PVT_kwDOAJX-Fc4AbncN"  # https://github.com/orgs/DACH-NY/projects/38/
@@ -135,12 +138,12 @@ def should_report_issues():
 
 
 def is_nightly_job(job: str) -> bool:
-    """Nightly test jobs are the `nightly_*` jobs in canton_nightly.yml.
+    """`nightly_*` jobs plus NIGHTLY_JOBS_WITHOUT_PREFIX, from canton_nightly.yml.
 
-    `unstable_test` also runs nightly but is intentionally allowed to fail, so it
-    is excluded: broken-nightly is for genuinely broken tests, not unstable ones.
+    The `unstable_*` jobs run nightly too but are allowed to fail, so they are
+    excluded: broken-nightly is for genuinely broken tests, not unstable ones.
     """
-    return bool(job) and job.startswith("nightly_")
+    return bool(job) and (job.startswith("nightly_") or job in NIGHTLY_JOBS_WITHOUT_PREFIX)
 
 
 # --- gh CLI wrapper -------------------------------------------------------
@@ -462,8 +465,11 @@ def test_create_issue_table_row():
 def test_is_nightly_job():
     assert is_nightly_job("nightly_integration_test")
     assert is_nightly_job("nightly_test_upgrades_matrix")
+    assert is_nightly_job("toxiproxy_test_slow")  # nightly, keeps its historical name
     assert not is_nightly_job("test_with_java17")
+    assert not is_nightly_job("toxiproxy_test_fast")  # runs per-commit, not nightly
     assert not is_nightly_job("unstable_test")  # intentionally unstable, excluded
+    assert not is_nightly_job("unstable_test_slow")  # intentionally unstable, excluded
     assert not is_nightly_job("")
 
 

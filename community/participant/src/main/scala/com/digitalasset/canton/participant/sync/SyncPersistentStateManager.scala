@@ -5,6 +5,8 @@ package com.digitalasset.canton.participant.sync
 
 import cats.Eval
 import cats.data.EitherT
+import com.daml.metrics.CacheMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.TopologyConfig
@@ -16,7 +18,6 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
-import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerAliasResolution,
@@ -73,7 +74,10 @@ trait SyncPersistentStateLookup {
   def latestKnownPsid(synchronizerId: SynchronizerId): Option[PhysicalSynchronizerId]
   def latestKnownProtocolVersion(synchronizerId: SynchronizerId): Option[ProtocolVersion]
 
-  def topologyFactoryFor(psid: PhysicalSynchronizerId): Option[TopologyComponentFactory]
+  def topologyFactoryFor(
+      psid: PhysicalSynchronizerId,
+      topologyCacheMetrics: Option[CacheMetrics] = None,
+  ): Option[TopologyComponentFactory]
 
   def get(psid: PhysicalSynchronizerId): Option[SyncPersistentState]
 
@@ -133,9 +137,8 @@ class SyncPersistentStateManager(
     val synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     synchronizerCryptoFactory: StaticSynchronizerParameters => SynchronizerCrypto,
     clock: Clock,
-    ledgerApiStore: Eval[LedgerApiStore],
+    val ledgerApiStore: Eval[LedgerApiStore],
     val contractStore: Eval[ContractStore],
-    participantMetrics: ParticipantMetrics,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -497,7 +500,8 @@ class SyncPersistentStateManager(
       )
 
   override def topologyFactoryFor(
-      psid: PhysicalSynchronizerId
+      psid: PhysicalSynchronizerId,
+      topologyCacheMetrics: Option[CacheMetrics],
   ): Option[TopologyComponentFactory] =
     get(psid).map(state =>
       new TopologyComponentFactory(
@@ -514,7 +518,8 @@ class SyncPersistentStateManager(
         parameters.alphaOnlinePartyReplicationSupport,
         exitOnFatalFailures = parameters.exitOnFatalFailures,
         state.topologyStore,
-        topologyCacheMetrics = participantMetrics.topologyCache,
+        topologyCacheMetrics =
+          topologyCacheMetrics.getOrElse(new CacheMetrics("noop", NoOpMetricsFactory)),
         loggerFactory.append("psid", psid.toString),
       )
     )

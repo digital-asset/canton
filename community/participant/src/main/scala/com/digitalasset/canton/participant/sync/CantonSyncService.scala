@@ -63,6 +63,7 @@ import com.digitalasset.canton.participant.admin.data.{
 }
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
+import com.digitalasset.canton.participant.admin.party.PartyReplicator
 import com.digitalasset.canton.participant.admin.repair.{CommitmentsService, RepairService}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -224,6 +225,21 @@ class CantonSyncService(
       SynchronizerId.fromString,
     )
 
+  private[participant] val partyReplicatorO = parameters.alphaOnlinePartyReplicationSupport.map(
+    new PartyReplicator(
+      participantId,
+      this,
+      clock,
+      _,
+      parameters.batchingConfig,
+      syncPersistentStateManager.storage,
+      futureSupervisor,
+      parameters.exitOnFatalFailures,
+      parameters.processingTimeouts,
+      loggerFactory,
+    )
+  )
+
   private val connectionsManager = new SynchronizerConnectionsManager(
     participantId,
     synchronizerRegistry,
@@ -255,6 +271,7 @@ class CantonSyncService(
     ledgerApiIndexer,
     connectedSynchronizersLookupContainer,
     externalCallValidator,
+    partyReplicatorO,
   )
 
   private def connectedSynchronizersLookup: ConnectedSynchronizersLookup =
@@ -1726,6 +1743,7 @@ class CantonSyncService(
       pruningProcessor,
       syncCrypto,
       connectionsManager,
+      LifeCycle.toCloseableOption(partyReplicatorO),
       transactionRoutingProcessor,
       synchronizerRegistry,
       synchronizerConnectionConfigStore,

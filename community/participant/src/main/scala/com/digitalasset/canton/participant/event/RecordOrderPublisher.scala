@@ -169,6 +169,7 @@ class RecordOrderPublisher private (
     FutureUnlessShutdown.outcomeF(taskScheduler.flush())
 
   /** Schedule a floating event, if the current synchronizer time is earlier than timestamp.
+    *
     * @param timestamp
     *   The desired timestamp of the publication: if cannot be met, the function will return a Left.
     * @param eventFactory
@@ -179,6 +180,8 @@ class RecordOrderPublisher private (
     *   A function creating a FutureUnlessShutdown[T]. This function will be only executed, if the
     *   scheduling is possible. If scheduling is possible, execution of the floating event
     *   publication will wait for the onScheduled operation to finish.
+    * @param publishBefore
+    *   additional events to publish before the floating update and at the same record time
     * @param traceContext
     *   Should be the TraceContext of the event
     * @return
@@ -189,6 +192,9 @@ class RecordOrderPublisher private (
       timestamp: CantonTimestamp,
       eventFactory: CantonTimestamp => Option[FloatingUpdate],
       onScheduled: () => FutureUnlessShutdown[T], // perform will wait for this to complete
+      publishBefore: (
+          SynchronizerUpdate => FutureUnlessShutdown[Unit]
+      ) => FutureUnlessShutdown[Unit],
   )(implicit
       traceContext: TraceContext
   ): UnlessShutdown[Either[CantonTimestamp, FutureUnlessShutdown[T]]] =
@@ -196,7 +202,10 @@ class RecordOrderPublisher private (
       // Unsupervised because it is to be expected that this promise never completes if scheduling is not possible.
       val promise = PromiseUnlessShutdown.unsupervised[Unit]()
       val waitFor = promise.futureUS.flatMap(_ => onScheduled())
-      val task = FloatingEventPublicationTask(waitFor, timestamp)(() => eventFactory(timestamp))
+      val task = FloatingEventPublicationTask(waitFor, timestamp)(
+        () => eventFactory(timestamp),
+        publishBefore,
+      )
       taskScheduler.scheduleTaskIfLater(desiredTimestamp = timestamp, task).toLeft(()).map {
         (_: Unit) =>
           promise.outcome_(())
@@ -225,6 +234,7 @@ class RecordOrderPublisher private (
       timestamp = timestamp,
       eventFactory = eventFactory,
       onScheduled = () => FutureUnlessShutdown.unit,
+      publishBefore = _ => FutureUnlessShutdown.unit,
     ).map(_.map(_ => ()))
 
   /** Schedule a floating event immediately: with the synchronizer time of the last published event.
@@ -410,7 +420,10 @@ class RecordOrderPublisher private (
       waitFor: FutureUnlessShutdown[T], // ability to hold back publication execution
       override val timestamp: CantonTimestamp,
   )(
-      eventO: () => Option[FloatingUpdate]
+      eventO: () => Option[FloatingUpdate],
+      publishBefore: (
+          SynchronizerUpdate => FutureUnlessShutdown[Unit]
+      ) => FutureUnlessShutdown[Unit],
   )(implicit val traceContext: TraceContext)
       extends PublicationTask {
 
@@ -419,7 +432,10 @@ class RecordOrderPublisher private (
         case Success(Outcome(_)) =>
           eventO() match {
             case Some(event) =>
-              publishOrBuffer(event, s"floating event with timestamp $timestamp")
+              for {
+                _ <- publishBefore(publishLedgerApiIndexerEvent(_))
+                _ <- publishOrBuffer(event, s"floating event with timestamp $timestamp")
+              } yield ()
             case None =>
               logger.debug(
                 s"Skip publishing floating event with timestamp $timestamp: nothing to publish"

@@ -193,6 +193,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
           ),
           synchronizerUpgradeTime = None,
           sequencerSnapshotTimestamp = None,
+          cleanSynchronizerRecordTime = None,
           NoPackageDependencies,
           CachingConfigs(),
           // turn off consistency checks for performance tests

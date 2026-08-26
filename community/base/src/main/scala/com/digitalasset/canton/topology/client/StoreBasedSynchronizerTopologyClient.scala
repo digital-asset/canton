@@ -444,6 +444,7 @@ class StoreBasedSynchronizerTopologyClient(
   override def updateKnownTimestampsDuringStartup(
       sequencerSnapshotTimestamp: Option[SequencedTime],
       synchronizerUpgradeTime: Option[SequencedTime],
+      cleanSynchronizerRecordTime: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     logger.debug("Updating the topology client with known timestamps from the topology store")
     for {
@@ -540,18 +541,25 @@ class StoreBasedSynchronizerTopologyClient(
               s"Taking into account adjusted store max timestamp $sequencingTime, $effectiveTime"
             )
           }
-          val upgradeTimes = synchronizerUpgradeTime.map { sequencedTime =>
+          val upgradeTime = synchronizerUpgradeTime.map { sequencedTime =>
             logger.debug(s"Taking into account synchronizer upgrade at $sequencedTime")
             (
               sequencedTime,
               EffectiveTime(sequencedTime.value) + staticSynchronizerParameters.topologyChangeDelay,
             )
           }
+          val synchronizerRecordTime = cleanSynchronizerRecordTime.map { recordTime =>
+            logger.debug(s"Taking into account clean synchronizer record time $recordTime")
+            (
+              SequencedTime(recordTime),
+              EffectiveTime(recordTime) + staticSynchronizerParameters.topologyChangeDelay,
+            )
+          }
           val initialHeadTimestamps =
-            (adjustedStoreMaxTimestamp.toList ++ upgradeTimes.toList).maxByOption {
-              case (_, effectiveTime: EffectiveTime) =>
+            (adjustedStoreMaxTimestamp.toList ++ upgradeTime ++ synchronizerRecordTime)
+              .maxByOption { case (_, effectiveTime: EffectiveTime) =>
                 effectiveTime
-            }
+              }
 
           updateLatestTopologyChange()
           initialHeadTimestamps.foreach { case (sequencedTime, effectiveTime) =>
