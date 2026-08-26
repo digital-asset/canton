@@ -6,7 +6,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.TimeoutManager.TimeoutMetric
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.TimeoutManager.{
+  TimeoutCalculator,
+  TimeoutMetric,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   CancellableEvent,
   Env,
@@ -23,9 +26,14 @@ import scala.concurrent.duration.FiniteDuration
   *
   * It is thread-safe, so it can be used like `context.delayedEvent` from non-actor threads as well.
   */
-class TimeoutManager[E <: Env[E], ParentModuleMessageT, TimeoutIdT](
+class TimeoutManager[
+    E <: Env[E],
+    ParentModuleMessageT,
+    TimeoutMessageT <: ParentModuleMessageT,
+    TimeoutIdT,
+](
     override val loggerFactory: NamedLoggerFactory,
-    timeout: FiniteDuration,
+    timeoutCalculator: TimeoutCalculator[TimeoutMessageT],
     timeoutId: TimeoutIdT,
     timeoutMetric: Option[TimeoutMetric],
 )(implicit metricsContext: MetricsContext)
@@ -34,12 +42,13 @@ class TimeoutManager[E <: Env[E], ParentModuleMessageT, TimeoutIdT](
   private val timeoutCancellable: AtomicReference[Option[(Instant, CancellableEvent)]] =
     new AtomicReference(None)
 
-  def scheduleTimeout[TimeoutMessageT <: ParentModuleMessageT](
+  def scheduleTimeout(
       timeoutEvent: TimeoutMessageT
   )(implicit
       context: E#ActorContextT[ParentModuleMessageT],
       traceContext: TraceContext,
   ): Unit = {
+    val timeout = timeoutCalculator.calculateTimeoutForEvent(timeoutEvent)
     val cancellableEvent = context.delayedEvent(timeout, timeoutEvent)
     val timeNow = Instant.now()
     timeoutCancellable.getAndSet(Some(timeNow -> cancellableEvent)) match {
@@ -70,6 +79,16 @@ class TimeoutManager[E <: Env[E], ParentModuleMessageT, TimeoutIdT](
 }
 
 object TimeoutManager {
+
+  trait TimeoutCalculator[Event] {
+    def calculateTimeoutForEvent(event: Event): FiniteDuration
+  }
+
+  final case class ConstantTimeout[Event](timeout: FiniteDuration)
+      extends TimeoutCalculator[Event] {
+    override def calculateTimeoutForEvent(event: Event): FiniteDuration = timeout
+  }
+
   trait TimeoutMetric {
     def scheduleChangedAfter(duration: Duration): Unit
   }

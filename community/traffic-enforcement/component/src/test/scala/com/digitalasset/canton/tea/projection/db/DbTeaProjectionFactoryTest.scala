@@ -3,9 +3,15 @@
 
 package com.digitalasset.canton.tea.projection.db
 
+import com.daml.metrics.api.testing.InMemoryMetricsFactory
+import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.platform.apiserver.services.metrics.{
+  TrafficEnforcementInventory,
+  TrafficEnforcementMetrics,
+}
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.DbStorage
@@ -58,6 +64,12 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
 
   override protected def createBackend()(implicit system: ActorSystem[?]): Backend =
     new Backend {
+      override val metricsFactory = new InMemoryMetricsFactory
+      override val metrics = new TrafficEnforcementMetrics(
+        inventory = new TrafficEnforcementInventory(MetricName("test"))(new HistogramInventory()),
+        metricsFactory = metricsFactory,
+      )(MetricsContext.Empty)
+
       override val store: TeaTrafficStore = dbStore
       // The slick projection needs the raw single/multi storage, not the idempotency wrapper.
       override def newProjection(): TeaProjectionFactory =
@@ -67,6 +79,7 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
           dbStore,
           EventSource.LedgerAPICompletions,
           ProjectionConfig(),
+          metrics,
         )
     }
 

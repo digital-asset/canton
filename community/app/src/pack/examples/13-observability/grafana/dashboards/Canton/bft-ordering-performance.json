@@ -887,8 +887,8 @@
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "sum by (namespace, job, node) (irate(daml_sequencer_bftordering_p2p_send_sends_retried{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
-              "legendFormat": "{{namespace}}.{{node}}",
+              "expr": "sum by (namespace, job, node, target_sequencer) (irate(daml_sequencer_bftordering_p2p_send_sends_retried{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
+              "legendFormat": "{{namespace}}.{{node}}.{{target_sequencer}}",
               "range": true,
               "refId": "A"
             }

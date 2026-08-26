@@ -14,9 +14,8 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import monocle.macros.syntax.lens.*
-
-import scala.collection.immutable.Seq
 
 sealed trait BftSynchronizerSequencerConnectionManipulationTest
     extends CommunityIntegrationTest
@@ -125,20 +124,38 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
     participant1.synchronizers.disconnect(daName)
     participant2.synchronizers.disconnect(daName)
 
-    sequencer1.stop()
-    sequencer2.start()
+    loggerFactory.assertLogsUnorderedOptional(
+      {
+        sequencer1.stop()
+        sequencer2.start()
 
-    clue("reconnecting nodes after switching from p1 to p2") {
-      Seq(mediator1, mediator2).foreach(_.start())
-      participant1.synchronizers.reconnect(daName)
-      participant2.synchronizers.reconnect(daName)
-    }
+        clue("reconnecting nodes after switching from sequencer1 to sequencer2") {
+          mediator1.start()
+          participant1.synchronizers.reconnect(daName)
+          participant2.synchronizers.reconnect(daName)
+        }
 
-    clue("pinging works again") {
-      participant1.health.ping(participant2.id, timeout = pingTimeout)
-    }
+        clue("pinging works again") {
+          participant1.health.ping(participant2.id, timeout = pingTimeout)
+        }
 
-    sequencer1.start()
+        sequencer1.start()
+      },
+      (
+        LogEntryOptionality.OptionalMany,
+        _.warningMessage should include("Connection has failed validation"),
+      ),
+      (
+        LogEntryOptionality.OptionalMany,
+        _.warningMessage should include(
+          "Mempool received client request but this node is currently blacklisted, rejecting"
+        ),
+      ),
+      (
+        LogEntryOptionality.OptionalMany,
+        _.warningMessage should include("Network error: TransportError"),
+      ),
+    )
   }
 }
 

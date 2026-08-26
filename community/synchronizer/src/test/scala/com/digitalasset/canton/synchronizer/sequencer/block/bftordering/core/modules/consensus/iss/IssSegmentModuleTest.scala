@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.HasExecutionContext
+import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -14,6 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.UnitTestContext.DelayCount
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule.ViewChangeTimeoutCalculator
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.bootstrapEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
@@ -46,6 +48,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
   OrderingTopology,
+  SequencingParameters,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.ConsensusMessage.SegmentCompletedEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.SegmentCancelledEpoch
@@ -64,13 +67,14 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   fakeIgnoringModule,
   fakeRecordingModule,
 }
-import com.digitalasset.canton.time.SimClock
+import com.digitalasset.canton.time.{PositiveFiniteDuration, SimClock}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 class IssSegmentModuleTest
     extends AsyncWordSpec
@@ -2310,6 +2314,41 @@ class IssSegmentModuleTest
         context.delayedMessages shouldBe Seq(nestedTimeout)
       }
     }
+  }
+
+  "ViewChangeTimeoutCalculator" should {
+    val baseLine = PositiveFiniteDuration.tryOfSeconds(5)
+    val blockMetadata = block0Metadata1Node
+
+    def computeViewTimeouts(calculator: ViewChangeTimeoutCalculator): Seq[FiniteDuration] =
+      Seq(0L, 1, 2, 3).map { view =>
+        calculator.calculateTimeoutForEvent(PbftNormalTimeout(blockMetadata, ViewNumber(view)))
+      }
+
+    "with steps and upper bound" in {
+      val sequencingParameters = SequencingParameters.create(
+        pbftViewChangeTimeout = baseLine,
+        pbftViewChangeTimeoutStep = NonNegativeFiniteDuration.tryFromDuration(2.seconds),
+        pbftViewChangeTimeoutUpperBound = NonNegativeFiniteDuration.tryFromDuration(5.seconds),
+      )
+      val calculator = ViewChangeTimeoutCalculator(None, sequencingParameters)
+
+      // the upper bound is only applying to the steps, so the highest we will go to is 5+5=10
+      computeViewTimeouts(calculator) shouldBe Seq(5.seconds, 7.seconds, 9.seconds, 10.seconds)
+    }
+
+    "with override" in {
+      val overrideConfig = Some(20.seconds)
+      val sequencingParameters = SequencingParameters.create(
+        pbftViewChangeTimeout = baseLine,
+        pbftViewChangeTimeoutStep = NonNegativeFiniteDuration.tryFromDuration(2.seconds),
+        pbftViewChangeTimeoutUpperBound = NonNegativeFiniteDuration.tryFromDuration(5.seconds),
+      )
+      val calculator = ViewChangeTimeoutCalculator(overrideConfig, sequencingParameters)
+
+      computeViewTimeouts(calculator) shouldBe Seq(20.seconds, 20.seconds, 20.seconds, 20.seconds)
+    }
+
   }
 
   def createIssSegmentModule[E <: BaseIgnoringUnitTestEnv[E]](

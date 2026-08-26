@@ -36,7 +36,10 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.CircuitBreakerConfig
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{BftSequencer, External}
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
@@ -79,8 +82,10 @@ object SynchronizerChangeIntegrationTest {
 
 /** Abstract class for tests of the synchronizer change demo scenario.
   */
-abstract class SynchronizerChangeIntegrationTest(config: SynchronizerChangeIntegrationTest.Config)
-    extends CommunityIntegrationTest
+abstract class SynchronizerChangeIntegrationTest(
+    config: SynchronizerChangeIntegrationTest.Config,
+    disableCircuitBreakers: Boolean = false,
+) extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax
     with AcsInspection
@@ -100,6 +105,21 @@ abstract class SynchronizerChangeIntegrationTest(config: SynchronizerChangeInteg
   protected lazy val exclusivityTimeout: NonNegativeFiniteDuration =
     config.assignmentExclusivityTimeout
 
+  /** Flake prevention: Disables sequencer circuit breakers to prevent spurious test failures. In
+    * resource-constrained CI environments, or when using a sim clock to advance time, the circuit
+    * breaker can trip, resulting in false-positive sync rejection errors rather than standard
+    * timeouts.
+    */
+  private def disableCircuitBreakersConfig(config: SequencerNodeConfig): SequencerNodeConfig = {
+    val disabledCb = CircuitBreakerConfig(enabled = false)
+
+    config.focus(_.sequencer).modify {
+      case bft: BftSequencer => bft.focus(_.block.circuitBreaker).replace(disabledCb)
+      case ext: External => ext.focus(_.block.circuitBreaker).replace(disabledCb)
+      case other => other
+    }
+  }
+
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P5_S1M1_S1M1
       .addConfigTransforms(
@@ -111,6 +131,10 @@ abstract class SynchronizerChangeIntegrationTest(config: SynchronizerChangeInteg
             config.targetTimestampForwardTolerance.duration
           ),
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        // Flake prevention: strip circuit breakers to prevent flaky sync rejections
+        ConfigTransforms.updateAllSequencerConfigs((_, config) =>
+          if (disableCircuitBreakers) disableCircuitBreakersConfig(config) else config
+        ),
       )
       .addConfigTransforms(additionalConfigTransforms*)
       .withSetup(setUp)
@@ -331,7 +355,8 @@ abstract class SynchronizerChangeSimClockIntegrationTest
         simClock = true,
         assignmentExclusivityTimeout = NonNegativeFiniteDuration.tryOfMinutes(10L),
         targetTimestampForwardTolerance = NonNegativeFiniteDuration.tryOfSeconds(30),
-      )
+      ),
+      disableCircuitBreakers = true,
     )
     with SecurityTestSuite {
 

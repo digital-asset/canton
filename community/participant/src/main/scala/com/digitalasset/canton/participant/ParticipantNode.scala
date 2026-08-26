@@ -640,6 +640,7 @@ class ParticipantNodeBootstrap(
                       loggerFactory = loggerFactory,
                       timeouts = timeouts,
                       clock = clock,
+                      metrics = metrics.trafficEnforcement,
                       onEventCommitted =
                         arguments.testingConfig.trafficEnforcementProjectionEventCommitted,
                     )
@@ -663,6 +664,7 @@ class ParticipantNodeBootstrap(
                       adminParty = participantId.adminParty.toLf,
                       processingTimeout = timeouts,
                       loggerFactory = loggerFactory,
+                      metrics = metrics.trafficEnforcement,
                     )
                   ),
                 loggerFactory = loggerFactory,

@@ -149,6 +149,8 @@ import scala.util.Random
   * @param outputFetchTimeoutCap
   *   The maximum jittered duration that a node's availability module will wait while fetching batch
   *   data from a peer. The minimum delay is added to the jittered delay.
+  * @param outputFetchHowManyRecipients
+  *   The number of recipients that a batch will be attempted to be fetched from in parallel.
   * @param outputEnqueueMaxRetries
   *   The maximum number of retry attempts when enqueuing ordered output blocks for delivery to the
   *   sequencer core.
@@ -176,11 +178,6 @@ import scala.util.Random
   *   ordering component in isolation. If set to [[scala.None]] (default), the BFT layer behaves as
   *   normal with the co-located Sequencer component. It can only be enabled with
   *   "canton.parameters.non-standard-config = yes".
-  * @param sendDelay
-  *   Optionally, a delay to apply to outgoing P2P messages from the BFT ordering node. This is
-  *   useful for performance and scale testing. If set to [[scala.None]] (default), no artificial
-  *   send delay is introduced. It can only be enabled with "canton.parameters.non-standard-config =
-  *   yes".
   * @param storage
   *   Optionally, a dedicated storage solution for the BFT ordering layer, separate from the
   *   co-located sequencer. If set to [[scala.None]], the BFT layer shares the same storage as the

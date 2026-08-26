@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-FROM europe-docker.pkg.dev/da-images/public/docker/da-base-image:full-1.0.12@sha256:134d8e3391d66c893115a35b85dfc5708616cb846cec05918c8228310f83b867
+FROM europe-docker.pkg.dev/da-images/public/docker/da-base-image:full-1.0.13@sha256:a00f8aadb2c317ebe952d8c96bda5032f85bb29e30acdb257bd848b63b35e447
 
 # Create repeatable-migrations directory
 WORKDIR /app/repeatable-migrations

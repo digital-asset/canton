@@ -12,19 +12,18 @@ import com.digitalasset.base.error.GrpcStatuses
 import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.MultiPartySubmission
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.{DbConfig, StorageConfig}
+import com.digitalasset.canton.config.StorageConfig
 import com.digitalasset.canton.console.{
   CommandFailure,
   LocalSequencerReference,
   ParticipantReference,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, Offset}
+import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.examples.java.cycle as C
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
-  UsePostgres,
   UseProgrammableSequencer,
   UseReferenceBlockSequencer,
 }
@@ -43,7 +42,6 @@ import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCo
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidDeduplicationPeriodField
 import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.UnsafeToPrune
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.{
   SubmissionAlreadyInFlight,
   TimeoutError,
@@ -56,7 +54,6 @@ import com.digitalasset.canton.topology.{
   PhysicalSynchronizerId,
   SynchronizerId,
 }
-import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, LedgerSubmissionId, config}
 import com.digitalasset.daml.lf.data.Ref
 import com.google.rpc.error_details.ErrorInfo
@@ -333,7 +330,7 @@ trait CommandDeduplicationIntegrationTest
 
     }
 
-  "do not deduplicate across submitters" onlyRunWithLocalParty (MultiPartySubmission) in
+  "do not deduplicate across submitters" onlyRunWithLocalParty MultiPartySubmission in
     WithContext { (alice, _) => implicit env =>
       import env.*
 
@@ -700,7 +697,7 @@ trait CommandDeduplicationIntegrationTest
 
 }
 
-trait CommandDeduplicationTestHelpers { this: BaseTest with HasProgrammableSequencer =>
+trait CommandDeduplicationTestHelpers { this: BaseTest & HasProgrammableSequencer =>
   protected def WithContext(
       code: (Party, SimClock) => TestConsoleEnvironment => Unit
   ): TestConsoleEnvironment => Unit = { implicit env =>
@@ -813,245 +810,6 @@ class CommandDeduplicationBftOrderingIntegrationTestInMemory
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-abstract class CommandDeduplicationPruningIntegrationTest
-    extends CommunityIntegrationTest
-    with SharedEnvironment
-    with HasProgrammableSequencer
-    with CommandDeduplicationTestHelpers {
-  lazy val maxDedupDuration = java.time.Duration.ofHours(1)
-
-  private val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
-
-  override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
-      .addConfigTransforms(
-        ConfigTransforms.useStaticTime,
-        ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-      )
-      .withSetup { implicit env =>
-        import env.*
-
-        // Make sure that ACS commitments do not block pruning
-        runOnAllInitializedSynchronizersForAllOwners((owner, synchronizer) =>
-          owner.topology.synchronizer_parameters
-            .propose_update(
-              synchronizer.synchronizerId,
-              _.update(reconciliationInterval = reconciliationInterval),
-            )
-        )
-
-        participant1.synchronizers.connect_local(sequencer1, alias = daName)
-        participant1.dars.upload(CantonExamplesPath)
-
-        participant1.parties.testing.enable("Alice")
-      }
-
-  "block pruning for the max deduplication duration" in
-    WithContext { (alice, simClock) => implicit env =>
-      import env.*
-
-      val createCycleContract =
-        new C.Cycle(
-          "Command-Dedup-Contract-Pruning",
-          alice.toProtoPrimitive,
-        ).create.commands.loneElement
-      val commandId1 = "warm-up"
-      val commandId2 = "at-max-dedup-boundary"
-      val commandId3 = "yet-another-commandId"
-      def commandId4DuplicateRejected = commandId2
-      def commandId5OutsideDedupBoundaryAccepted = commandId2
-      val commandId6DeduplicationPeriodAccepted = "fresh-command-id"
-      val commandId7DeduplicationPeriodTooLong = "command-id-too-long-period"
-
-      def submit(
-          commandId: String,
-          dedupPeriod: DeduplicationPeriod = DeduplicationDuration(java.time.Duration.ofMinutes(1)),
-          submissionId: String = "",
-      ): Long =
-        participant1.ledger_api.javaapi.commands
-          .submit(
-            Seq(alice),
-            Seq(createCycleContract),
-            synchronizerId = Some(daId), // Run on DA synchronizer
-            commandId = commandId,
-            submissionId = submissionId,
-            deduplicationPeriod = dedupPeriod.some,
-          )
-          .getOffset
-
-      def submitAsync(
-          commandId: String,
-          dedupPeriod: DeduplicationPeriod,
-          submissionId: String,
-      ): Unit =
-        participant1.ledger_api.javaapi.commands.submit_async(
-          Seq(alice),
-          Seq(createCycleContract),
-          synchronizerId = Some(daId), // Run on DA synchronizer
-          commandId = commandId,
-          submissionId = submissionId,
-          deduplicationPeriod = dedupPeriod.some,
-        )
-
-      // send three transactions at t, t+1ms, and t+1ms+max_dedup_duration
-      val after1 = submit(commandId1)
-      simClock.advance(java.time.Duration.ofMillis(1))
-      val before2 = simClock.now
-      val after2 = submit(commandId2)
-      simClock.advance(maxDedupDuration)
-      val after3 = submit(commandId3)
-
-      // We must not prune anything published within the max deduplication duration,
-      // so we can prune only up to the first transaction
-      val safe1 = eventually() {
-        val safe = participant1.pruning.find_safe_offset().value
-        safe should be >= after1
-        safe
-      }
-      eventually() {
-        val noOutstandingCommitmentsO = participant1.testing.state_inspection
-          .noOutstandingCommitmentsTs(daName, CantonTimestamp.MaxValue)
-        logger.debug(s"No outstanding commitment at $noOutstandingCommitmentsO")
-        noOutstandingCommitmentsO.value should be > before2
-      }
-
-      // Test that we get a meaningful error message if we try to prune with a too high offset
-      loggerFactory.assertThrowsAndLogs[CommandFailure](
-        participant1.pruning.prune(after2),
-        logEntry => {
-          logEntry.errorMessage should include(UnsafeToPrune.id)
-          logEntry.errorMessage should include(
-            show"due to max deduplication duration of $maxDedupDuration"
-          )
-          logEntry.errorMessage should include(s"safe_offset=>$safe1")
-        },
-      )
-
-      participant1.pruning.prune(after1)
-
-      logger.debug("resubmitting second command")
-      val submissionId = "resubmission"
-      submitAsync(
-        commandId4DuplicateRejected,
-        DeduplicationDuration(maxDedupDuration),
-        submissionId,
-      )
-      val (completion4, _offset4) =
-        findCompletionFor(participant1, alice, after3, commandId2, submissionId)
-      checkIsAlreadyExists(completion4, submissionId, after2)
-
-      // After advancing the time a bit, and wait for a timeproof (needed that the participants publication time moves higher) we should be able to prune more and resubmit
-      simClock.advance(java.time.Duration.ofMillis(1L))
-      participant1.testing.fetch_synchronizer_time(daId)
-      val safe2 = eventually() {
-        val safe = participant1.pruning.find_safe_offset().value
-        safe should be >= after2
-        safe
-      }
-      participant1.pruning.prune(safe2)
-      val after5 = submit(
-        commandId5OutsideDedupBoundaryAccepted,
-        DeduplicationDuration(maxDedupDuration),
-      )
-      val outsideDedupBoundaryTs =
-        valueOrFail(
-          participant1.testing.state_inspection
-            .lookupPublicationTime(after5)
-            .value
-            .futureValueUS
-        )(s"Failed to locate publication time")
-
-      logger.debug("submit fresh command with long dedup duration")
-      simClock.advanceTo(
-        before2.plus(
-          maxDedupDuration
-            .multipliedBy(2)
-            // +1 millisecond to account for the millisecond added above between command submissions 4 and 5:
-            .plusMillis(1)
-        )
-      )
-      val after6 = submit(
-        commandId6DeduplicationPeriodAccepted,
-        DeduplicationDuration(maxDedupDuration.multipliedBy(2)),
-      )
-
-      logger.debug("submit command with too long dedup duration")
-      val submissionIdTooLongDuration = "submission-id-too-long-duration"
-      val dedupPeriod7 = DeduplicationDuration(maxDedupDuration.multipliedBy(2).plusMillis(1))
-      submitAsync(
-        commandId7DeduplicationPeriodTooLong,
-        dedupPeriod7,
-        submissionIdTooLongDuration,
-      )
-      val (completion7, offset7) = findCompletionFor(
-        participant1,
-        alice,
-        after6,
-        commandId7DeduplicationPeriodTooLong,
-        submissionIdTooLongDuration,
-      )
-      checkDedupPeriodTooLong(completion7, submissionIdTooLongDuration, after2)
-
-      // The logic in advanceTimeUntilFirstTimeProofRequest somewhat arbitrarily bumps the simClock by n seconds.
-      // Per flake #12257, if the initial advanceTimeUntilFirstTimeProofRequest adds more seconds than the subsequent
-      // call to advanceTimeUntilFirstTimeProofRequest, this can result in the event at offset `after5` being published
-      // at less than maxDedupDuration earlier than the last event in this test, thus preventing
-      // find_safe_offset()/prune(after5) at the end of this test from succeeding.
-      if (outsideDedupBoundaryTs.plus(maxDedupDuration) > simClock.now) {
-        simClock.advanceTo(outsideDedupBoundaryTs.plus(maxDedupDuration))
-      }
-
-      // Additionally add another millisecond because max-deduplication-time checks are "inclusive". This also avoids the flake
-      // in #12257 in which the "command 5" event is published exactly 1 hour before the last (command 8) event.
-      // Adding one additional millisecond ensures that the "command 5" event can be pruned (whereas the "command 6"
-      // event happening almost an hour later and thus still cannot) ensuring that at the end of this test the safe
-      // pruning offset matches "after5". The unpredictability stems from the eventually(simClock.advance) in
-      // `advanceTimeUntilFirstTimeProofRequest`:
-      simClock.advance(java.time.Duration.ofMillis(1L))
-
-      logger.debug("submit command with too early deduplication offset")
-      val submissionIdTooEarlyOffset = "submission-id-too-early-offset"
-      val dedupPeriod8 = DeduplicationOffset(Some(Offset.tryFromLong(after1)))
-      submitAsync(
-        commandId7DeduplicationPeriodTooLong,
-        dedupPeriod8,
-        submissionIdTooEarlyOffset,
-      )
-      val (completion8, _offset8) = findCompletionFor(
-        participant1,
-        alice,
-        offset7,
-        commandId7DeduplicationPeriodTooLong,
-        submissionIdTooEarlyOffset,
-      )
-      checkDedupPeriodTooLong(completion8, submissionIdTooEarlyOffset, after2)
-
-      logger.debug("submit command with participant begin deduplication offset")
-      val submissionIdParticipantBegin = "submission-id-participant-begin"
-      val dedupPeriod9 = DeduplicationOffset(None)
-      submitAsync(
-        commandId7DeduplicationPeriodTooLong,
-        dedupPeriod9,
-        submissionIdParticipantBegin,
-      )
-      val (completion9, _offset9) = findCompletionFor(
-        participant1,
-        alice,
-        offset7,
-        commandId7DeduplicationPeriodTooLong,
-        submissionIdTooEarlyOffset,
-      )
-      checkDedupPeriodTooLong(completion9, submissionIdTooEarlyOffset, after2)
-
-      val safe5 = eventually() {
-        val safe = participant1.pruning.find_safe_offset().value
-        safe should be >= after5
-        safe
-      }
-      participant1.pruning.prune(safe5)
-    }
-}
-
 private object CommandDeduplicationIntegrationTest {
   final case class DelayPromises(
       requestReceived: Future[Unit],
@@ -1059,11 +817,4 @@ private object CommandDeduplicationIntegrationTest {
       responseReceived: Future[Unit],
       responseRelease: Promise[Unit],
   )
-}
-
-class CommandDeduplicationPruningIntegrationTestPostgres
-    extends CommandDeduplicationPruningIntegrationTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
-  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

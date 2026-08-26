@@ -203,7 +203,7 @@ final class ProtobufCompatibilityReaderTest
       // Added CantonBFT sequencer_id info to configured endpoints returned by `list_configured_endpoints` console admin function when a peer successfully authenticated as a sequencer over that endpoint
       """com/digitalasset/canton/sequencer/admin/v30/sequencer_bft_administration_service.proto:Previously present field "5" with name "sequencer_id" on message "PeerEndpoint" was deleted.""",
     ),
-    (3, 5) -> Seq.empty,
+    (3, 5) -> Seq(),
   )
 
   "protobuf" should {

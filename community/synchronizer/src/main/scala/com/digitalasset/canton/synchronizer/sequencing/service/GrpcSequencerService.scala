@@ -577,7 +577,7 @@ class GrpcSequencerService(
                     "enqueueing a message was dropped, even though the queue was configured to backpressure"
                   )
                 case QueueOfferResult.QueueClosed =>
-                  // the closure of the queue should be propagated via the normal normal pekko stream mechanism
+                  // the closure of the queue should be propagated via the normal pekko stream mechanism
                   FutureUnlessShutdown.unit
               }
           else FutureUnlessShutdown.abortedDueToShutdown
@@ -606,9 +606,13 @@ class GrpcSequencerService(
         PromiseUnlessShutdown.unsupervised[Either[Status, GrpcManagedSubscription[?]]]()
       completion.onComplete {
         case Failure(ex) =>
-        // the logging and handling of the subscription error is handled elsewhere
+          // Immediately fail the queue so pending queue.offer calls unblock
+          queue.fail(ex)
+        // The logging and handling of the subscription error is handled elsewhere
         case Success(()) =>
           logger.info(s"Subscription cancelled by client ${request.member}.")
+          // Immediately complete the queue so pending queue.offer calls return QueueClosed
+          queue.complete()
           // Instead upon cancellation, we close the subscription once/if it has been successfully created.
           createSubscriptionP.future.onComplete {
             case Success(Outcome(Right(subscription))) =>

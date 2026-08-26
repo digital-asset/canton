@@ -371,6 +371,12 @@ object BuildCommon {
         "synchronizer",
       )
 
+      // the traffic enforcement api keeps its protos directly under `protobuf`
+      val trafficEnforcementProto: Seq[(File, String)] = packProtobufDependencyFiles(
+        "community" / "traffic-enforcement" / "api" / "protobuf",
+        "traffic-enforcement",
+      )
+
       val communityJsonApiOpenapi: Seq[(File, String)] = packOpenapiFiles(
         "community" / "ledger" / "ledger-json-api",
         "json-ledger-api",
@@ -410,7 +416,7 @@ object BuildCommon {
       val apiFiles =
         ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto ++
           scalapbProto ++ googleRpcProtos ++ damlLfLedgerApiValueProto ++ communityJsonApiOpenapi ++ damlLfSnapshotProto ++
-          damlLfArchiveProto ++ damlLfTransactionProto
+          damlLfArchiveProto ++ damlLfTransactionProto ++ trafficEnforcementProto
 
       log.info("Invoking bundle generator")
       // add license to package

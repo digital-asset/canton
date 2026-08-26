@@ -4,6 +4,7 @@
 package com.digitalasset.canton.tea.projection.memory
 
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.tea.projection.{EventId, ProjectionEvent, TeaProjectionFactory}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.apache.pekko.Done
@@ -20,6 +21,7 @@ import scala.concurrent.{ExecutionContext, Future}
 private[projection] class TeaMemoryProjectionFactory(
     override val loggerFactory: NamedLoggerFactory,
     store: TeaMemoryTrafficStore,
+    override protected val metrics: TrafficEnforcementMetrics,
     override val onEventCommitted: () => Unit = () => (),
 )(implicit
     ec: ExecutionContext
