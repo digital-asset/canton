@@ -165,7 +165,7 @@ final class GeneratorsData(
   )
 
   private val viewExternalCallResultsGen: Gen[Seq[ViewParticipantData.ViewExternalCallResult]] =
-    if (protocolVersion >= ProtocolVersion.dev) {
+    if (protocolVersion >= ProtocolVersion.v36) {
       boundedListGen {
         for {
           extensionId <- Gen.identifier

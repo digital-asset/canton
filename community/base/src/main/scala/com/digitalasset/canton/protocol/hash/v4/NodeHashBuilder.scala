@@ -11,9 +11,9 @@ import com.digitalasset.daml.lf.transaction.{ExternalCallResult, Node}
 
 /** Node hash builder for HashingSchemeVersion.V4.
   *
-  * V4 extends V3 by including development-version exercise external-call results in the prepared
-  * transaction hash. This binds the result payloads shown in a prepared transaction to the external
-  * party's signature.
+  * V4 extends V3 by including exercise external-call results (serialization version 3 and later) in
+  * the prepared transaction hash. This binds the result payloads shown in a prepared transaction to
+  * the external party's signature.
   */
 private[hash] class NodeHashBuilder(
     purpose: HashPurpose,

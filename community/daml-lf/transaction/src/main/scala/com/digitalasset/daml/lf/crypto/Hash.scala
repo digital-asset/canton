@@ -482,7 +482,7 @@ object Hash {
         if (keyOpt.nonEmpty) notSupported("keyOpt in Exercise node") // 2.dev feature
         if (byKey == true) notSupported("byKey in Exercise node") // 2.dev feature
         if (externalCallResults.nonEmpty)
-          notSupported("externalCallResults in Exercise node") // 2.dev feature
+          notSupported("externalCallResults in Exercise node") // requires hashing scheme V4
         addContext("Exercise Node")
           .withContext("Node Version")(_.addString(SerializationVersion.toProtoValue(version)))
           .addByte(NodeBuilder.NodeTag.ExerciseTag.tag, "Node Tag")

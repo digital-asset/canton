@@ -333,7 +333,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
     ): Result[ImmArray[lf.transaction.ExternalCallResult]] =
       if (
         value.externalCallResults.nonEmpty &&
-        serializationVersion < LfSerializationVersion.VDev
+        serializationVersion < LfSerializationVersion.V3
       )
         Result.fromErrorString(
           s"External call results are not supported in nodes with LF Serialization version ${serializationVersion.pretty}"

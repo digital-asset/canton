@@ -541,7 +541,7 @@ class TransactionViewTest
     }
 
     "external call results have duplicate occurrence identities" must {
-      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
@@ -559,7 +559,7 @@ class TransactionViewTest
     }
 
     "external call results on a non-exercise root action" must {
-      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reject creation" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         create(
           externalCallResults = Seq(viewExternalCallResult(exerciseIndex = 7))
         ).left.value shouldBe "External call results require an exercise root action"
@@ -569,7 +569,7 @@ class TransactionViewTest
     "the same external call is recorded with conflicting outputs in one view" must {
       // Distinct occurrences share a semantic key but record different outputs: the participant
       // data is well-formed on its own; the disagreement is caught when the view is validated.
-      "reject the view as malformed without leaking the payloads" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reject the view as malformed without leaking the payloads" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
@@ -605,7 +605,7 @@ class TransactionViewTest
       // The aggregation spans the whole subtree: a key recorded in the parent core and again,
       // differently, in a subview core is a disagreement even though neither view's participant
       // data conflicts on its own.
-      "reject the parent view as malformed" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reject the parent view as malformed" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         val view = factory.SingleExercise(seed = ExampleTransactionFactory.lfHash(3)).view0
         def withCall(output: String): TransactionView =
           TransactionView.Optics.viewParticipantDataUnsafe.modify(vpd =>
@@ -701,14 +701,14 @@ class TransactionViewTest
       }
     }
 
-    "external call results on a non-dev protocol version" must {
+    "external call results on a protocol version before v36" must {
       "reject creation" onlyRunWithOrLessThan ProtocolVersion.v35 in {
         create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
           externalCallResults = Seq(viewExternalCallResult(exerciseIndex = 7)),
         ).left.value shouldBe
-          s"External call results are supported only from protocol version ${ProtocolVersion.dev} onwards"
+          s"External call results are supported only from protocol version ${ProtocolVersion.v36} onwards"
       }
     }
 
@@ -765,7 +765,7 @@ class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "reconstruct dev external call results" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reconstruct external call results" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,
@@ -785,7 +785,7 @@ class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "reconstruct dev keyed external call results" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reconstruct keyed external call results" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         val key = ExampleTransactionFactory.globalKeyWithMaintainers()
 
         val usedContract = ExampleContractFactory.build(
@@ -824,7 +824,7 @@ class TransactionViewTest
           .map(_.unwrap) shouldBe Right(Right(vpd))
       }
 
-      "serialize external call checking parties canonically" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "serialize external call checking parties canonically" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         val vpd = create(
           actionDescription = exerciseActionDescription,
           coreInputs = exerciseCoreInputs,

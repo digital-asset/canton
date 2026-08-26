@@ -16,16 +16,18 @@ object SerializationVersion {
 
   case object V1 extends SerializationVersion(1)
   case object V2 extends SerializationVersion(2)
+  case object V3 extends SerializationVersion(3)
   case object VDev extends SerializationVersion(Int.MaxValue)
 
   implicit val `SerializationVersion Ordering`: Ordering[SerializationVersion] =
     Ordering.by(_.idx)
 
-  private[lf] val All: List[SerializationVersion] = List(V1, V2, VDev)
+  private[lf] val All: List[SerializationVersion] = List(V1, V2, V3, VDev)
 
   private[this] val fromStringMapping = Map(
     "2.1" -> V1, // called "2.1" instead of "1" for backwards compatibility with canton <=3.2
     "2" -> V2,
+    "3" -> V3,
     "dev" -> VDev,
   )
 
@@ -74,9 +76,10 @@ object SerializationVersion {
   // TODO https://github.com/digital-asset/daml/issues/22365 adopt ranges more thoroughly
   private[lf] val minChoiceAuthorizers = SerializationVersion.VDev
 
-  // External call results are a dev-only transaction feature on this branch.
-  // The corresponding language feature gate lands later in the stack.
-  private[lf] val minExternalCallResults: SerializationVersion = VDev
+  // V3 releases external call results out of the dev staging area for protocol version 36
+  // (the LF feature is promoted to 2.4-staging in a companion change), mirroring how contract
+  // keys were released as V2.
+  private[lf] val minExternalCallResults: SerializationVersion = SerializationVersion.V3
 
   private[lf] def txVersion(tx: Transaction): SerializationVersion = {
     import scala.Ordering.Implicits.*

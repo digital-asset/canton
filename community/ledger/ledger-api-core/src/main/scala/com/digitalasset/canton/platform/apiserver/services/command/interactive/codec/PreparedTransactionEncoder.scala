@@ -59,6 +59,7 @@ final class PreparedTransactionEncoder(
   private val nodeTransformers = Map(
     SerializationVersion.V1 -> v1.nodeTransformer(SerializationVersion.V1),
     SerializationVersion.V2 -> v1.nodeTransformer(SerializationVersion.V2),
+    SerializationVersion.V3 -> v1.nodeTransformer(SerializationVersion.V3),
     SerializationVersion.VDev -> v1.nodeTransformer(SerializationVersion.VDev),
   )
 
@@ -154,7 +155,7 @@ final class PreparedTransactionEncoder(
     )(implicit serializationVersion: SerializationVersion): Result[Seq[isdv1.ExternalCallResult]] =
       if (
         exerciseNode.externalCallResults.nonEmpty &&
-        serializationVersion < SerializationVersion.VDev
+        serializationVersion < SerializationVersion.V3
       )
         Result.fromErrorString(
           s"External call results are not supported in nodes with LF Serialization version ${serializationVersion.pretty}"

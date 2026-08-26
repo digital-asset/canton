@@ -299,7 +299,7 @@ class NextGenTransactionTreeFactory(
 
     // contract IDs have not yet been suffixed
     val coreOtherBuilder = List.newBuilder[((LfNodeId, LfActionNode), RollbackScope)]
-    val collectExternalCallResults = protocolVersion >= ProtocolVersion.dev
+    val collectExternalCallResults = protocolVersion >= ProtocolVersion.v36
     lazy val externalCallResultsBuilder =
       List.newBuilder[ViewParticipantData.ViewExternalCallResult]
 
@@ -390,7 +390,7 @@ class NextGenTransactionTreeFactory(
                     val currentExerciseIndex = NonNegativeInt.tryCreate(exerciseIndex)
                     exerciseIndex += 1
                     if (
-                      exercise.version >= LfSerializationVersion.VDev &&
+                      exercise.version >= LfSerializationVersion.V3 &&
                       exercise.externalCallResults.nonEmpty
                     )
                       externalCallResultsBuilder ++= externalCallResultsFromCoreNode(

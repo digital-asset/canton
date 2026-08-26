@@ -128,18 +128,18 @@ final class TransactionCoderSpec
     "do Node.Exercise with external call results" in {
       forAll(danglingRefExerciseNodeGen) { exerciseNode =>
         val normalizedNode = normalizeExe(exerciseNode).copy(
-          version = SerializationVersion.VDev,
+          version = SerializationVersion.V3,
           externalCallResults = ImmArray(externalCallResult()),
         )
 
         val Right(encodedNode) =
           TransactionCoder.internal.encodeNode(
-            enclosingVersion = SerializationVersion.VDev,
+            enclosingVersion = SerializationVersion.V3,
             nodeId = NodeId(0),
             node = normalizedNode,
           )
 
-        TransactionCoder.internal.decodeNode(SerializationVersion.VDev, encodedNode) shouldBe Right(
+        TransactionCoder.internal.decodeNode(SerializationVersion.V3, encodedNode) shouldBe Right(
           (NodeId(0), normalizedNode)
         )
       }
@@ -183,7 +183,7 @@ final class TransactionCoderSpec
     "do Node.QueryByKey" in {
       forAll(for {
         (nodeVersion, txVersion) <- versionInIncreasingOrder(versions =
-          List(SerializationVersion.V2, SerializationVersion.VDev)
+          List(SerializationVersion.V2, SerializationVersion.V3, SerializationVersion.VDev)
         )
         queryByKeyNode <- queryByKeyNodeGenWithVersion(nodeVersion)
       } yield (nodeVersion, txVersion, queryByKeyNode)) {
@@ -377,7 +377,7 @@ final class TransactionCoderSpec
       forAll(danglingRefExerciseNodeGen) { exerciseNode =>
         val result = externalCallResult()
         val nodeWithoutExternalCallResults = normalizeExe(exerciseNode).copy(
-          version = SerializationVersion.VDev,
+          version = SerializationVersion.V3,
           externalCallResults = ImmArray.Empty,
         )
         val expectedNode =
@@ -385,7 +385,7 @@ final class TransactionCoderSpec
 
         val Right(encoded) = TransactionCoder.internal
           .encodeNode(
-            enclosingVersion = SerializationVersion.VDev,
+            enclosingVersion = SerializationVersion.V3,
             nodeId = NodeId(0),
             node = nodeWithoutExternalCallResults,
           )
@@ -405,7 +405,7 @@ final class TransactionCoderSpec
         val withExternalCallResults = withExternalCallResultsBuilder.build()
 
         TransactionCoder.internal.decodeNode(
-          SerializationVersion.VDev,
+          SerializationVersion.V3,
           withExternalCallResults,
         ) shouldBe Right(
           (NodeId(0), expectedNode)

@@ -19,6 +19,7 @@ object LfSerializationVersionToProtocolVersions {
     SortedMap(
       LfSerializationVersion.V1 -> ProtocolVersion.v34,
       LfSerializationVersion.V2 -> ProtocolVersion.v35,
+      LfSerializationVersion.V3 -> ProtocolVersion.v36,
       LfSerializationVersion.VDev -> ProtocolVersion.dev,
     )(LfSerializationVersion.`SerializationVersion Ordering`.reverse)
 
