@@ -391,8 +391,6 @@ enum BuiltinFunction {
   TYPE_REP_TYCON_NAME = 3011; // *Available in versions >= 2.dev*
 
   //SECP256K1_VALIDATE_KEY = 4001; // REMAINS HERE TEMPORARELY TO PARSE CHECKED IN DARS
-
-  reserved 5001; // was the 2.dev staging position of EXTERNAL_CALL
 }
 
 // Builtin literals
