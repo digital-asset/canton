@@ -76,8 +76,6 @@ message Node {
     repeated string authorizers = 1001; // *since version dev*
     // Results of external calls made during this exercise
     repeated ExternalCallResult external_call_results = 9; // *since serialization version 3*
-
-    reserved 1002; // was the dev staging position of external_call_results
   }
 
   message Rollback {
