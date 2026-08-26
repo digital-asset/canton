@@ -924,8 +924,9 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
 
 /** Runs the external-call Daml Script tests against a mock extension service. The scripts hardcode
   * the plugin's default extension id and default response, so the plugin is registered with its
-  * defaults. `DA.ExternalCall.externalCall` only exists at LF 2.dev and the external-call wire data
-  * only at protocol version dev, hence the dev gating.
+  * defaults. The external-call wire data exists from protocol version 36 onwards, hence the v36
+  * gating; the script project still targets LF 2.dev (the pinned damlc cannot compile external
+  * calls at 2.4 yet), so dev version support stays enabled.
   */
 class DamlScriptExternalCallIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   import DamlScriptIT.ExpectedResult.*
@@ -933,7 +934,7 @@ class DamlScriptExternalCallIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   registerPlugin(new UseExtensionService(loggerFactory))
 
   override lazy val projectName = "ScriptExternalCallTests"
-  override lazy val protocolVersionForTesting = ProtocolVersion.dev
+  override lazy val protocolVersionForTesting = ProtocolVersion.v36
 
   override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
