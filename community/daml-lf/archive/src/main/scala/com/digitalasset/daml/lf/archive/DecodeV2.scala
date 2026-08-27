@@ -1873,6 +1873,14 @@ private[lf] object DecodeV2 {
         minVersion = LV.featureExternalCall.versionRange.min,
         versionRange = Some(LV.featureExternalCall.versionRange),
       ),
+      // Accepts DARs from a damlc that still encodes the builtin at its old dev id (2.dev
+      // packages only); remove once the re-pinned damlc emits EXTERNAL_CALL.
+      BuiltinFunctionInfo(
+        EXTERNAL_CALL_LEGACY_DEV,
+        BExternalCall,
+        minVersion = LV.v2_dev,
+        versionRange = Some(VersionRange(LV.v2_dev, LV.v2_dev)),
+      ),
     )
   }
 

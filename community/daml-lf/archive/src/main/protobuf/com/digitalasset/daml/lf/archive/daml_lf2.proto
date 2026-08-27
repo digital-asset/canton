@@ -391,6 +391,10 @@ enum BuiltinFunction {
   TYPE_REP_TYCON_NAME = 3011; // *Available in versions >= 2.dev*
 
   //SECP256K1_VALIDATE_KEY = 4001; // REMAINS HERE TEMPORARELY TO PARSE CHECKED IN DARS
+
+  // REMAINS HERE TEMPORARILY TO PARSE DARS FROM A damlc THAT STILL ENCODES THE OLD DEV ID;
+  // remove once the re-pinned damlc emits EXTERNAL_CALL = 74.
+  EXTERNAL_CALL_LEGACY_DEV = 5001;
 }
 
 // Builtin literals
