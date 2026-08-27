@@ -1,0 +1,26 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module ExternalCallTest where
+
+import DA.ExternalCall (externalCall)
+
+-- | Exercised by the external-call integration tests: records the result of an
+-- external call to a configured extension service in the transaction. The
+-- config and input arguments are hex-encoded byte strings; the result is the
+-- service response as a hex-encoded byte string.
+template ExternalCallTester
+  with
+    owner : Party
+  where
+    signatory owner
+
+    nonconsuming choice CallExtension : Text
+      with
+        extensionId : Text
+        functionId : Text
+        configHex : Text
+        inputHex : Text
+      controller owner
+      do
+        externalCall extensionId functionId configHex inputHex
