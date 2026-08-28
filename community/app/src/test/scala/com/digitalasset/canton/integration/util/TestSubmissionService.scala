@@ -36,6 +36,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.participant.ParticipantNode
 import com.digitalasset.canton.platform.apiserver.SubmissionSeed
+import com.digitalasset.canton.platform.execution.{ExternalCallHandler, ExternalCallMode}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
@@ -71,7 +72,8 @@ class TestSubmissionService(
     packageResolver: PackageResolver,
     syncService: SyncService,
     mkPackageMap: TraceContext => Future[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
-    interpretationConfig: InterpretationConfig = InterpretationConfig.Default,
+    externalCallHandler: ExternalCallHandler,
+    interpretationConfig: InterpretationConfig,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -421,21 +423,19 @@ class TestSubmissionService(
             case Result.Need.Prefetch(_, _) =>
               drive(im.resume(()))
 
-            // TODO(https://github.com/digital-asset/canton/issues/564): skip external calls in
-            // tests, or mock the response instead?
-            case Result.Need.ExternalCall(extensionId, functionId, _, _) =>
-              Future.successful(
-                Left(
-                  Error.Interpretation(
-                    Error.Interpretation.Internal(
-                      "test",
-                      s"External calls are not supported in TestSubmissionService: extension=$extensionId, function=$functionId",
-                      None,
-                    ),
-                    None,
+            case Result.Need.ExternalCall(extensionId, functionId, configHash, input) =>
+              for {
+                result <- externalCallHandler
+                  .handleExternalCall(
+                    extensionId,
+                    functionId,
+                    configHash,
+                    input,
+                    ExternalCallMode.Submission,
                   )
-                )
-              )
+                  .failOnShutdownToAbortException("test external call")
+                r <- drive(im.resume(result))
+              } yield r
           }
       }
 
@@ -469,9 +469,17 @@ object TestSubmissionService {
       customKeyResolver: Option[TestKeyResolver] = None,
       checkAuthorization: Boolean = true,
       enableLfDev: Boolean = false,
-      interpretationConfig: InterpretationConfig = InterpretationConfig.Default,
+      externalCallHandler: ExternalCallHandler = ExternalCallHandler.Unsupported,
+      interpretationConfig: Option[InterpretationConfig] = None,
   )(implicit env: TestConsoleEnvironment): TestSubmissionService = {
     import env.*
+
+    // Keep the interpretation-time allowed versions in step with the engine's: when dev is
+    // enabled, `Engine.checkAllowedDeps` reads the allowed versions from the interpretation
+    // config, not the engine config, so a stable-only config would reject a dev package.
+    val effectiveInterpretationConfig = interpretationConfig.getOrElse(
+      if (enableLfDev) InterpretationConfig.Dev else InterpretationConfig.Default
+    )
 
     val participantNode = participant.underlying.value
     val loggerFactory = participantNode.loggerFactory
@@ -509,7 +517,8 @@ object TestSubmissionService {
       packageResolver,
       participantNode.sync,
       mkPackageMap(participantNode)(_),
-      interpretationConfig,
+      externalCallHandler,
+      effectiveInterpretationConfig,
       loggerFactory,
     )
   }
