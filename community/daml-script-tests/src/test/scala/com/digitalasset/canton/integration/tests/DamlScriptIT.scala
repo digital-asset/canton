@@ -7,7 +7,7 @@ import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.{UseExtensionService, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
@@ -917,6 +917,30 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
     "NUCKTests:queryNByKeyMultiple" -> Success(),
     "NUCKTests:queryNByKeyUnauthorized" -> Success(),
     "NUCKTests:exerciseByKeyWithInvisibleButDisclosedKey" -> Success(),
+  )
+
+  doRunTests(scriptIdsToTest)
+}
+
+/** Runs the external-call Daml Script tests against a mock extension service. The scripts hardcode
+  * the plugin's default extension id and default response, so the plugin is registered with its
+  * defaults. `DA.ExternalCall.externalCall` only exists at LF 2.dev and the external-call wire data
+  * only at protocol version dev, hence the dev gating.
+  */
+class DamlScriptExternalCallIT extends DamlScriptIT(LanguageVersion.v2_dev) {
+  import DamlScriptIT.ExpectedResult.*
+
+  registerPlugin(new UseExtensionService(loggerFactory))
+
+  override lazy val projectName = "ScriptExternalCallTests"
+  override lazy val protocolVersionForTesting = ProtocolVersion.dev
+
+  override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
+
+  override def expectedResults = super.expectedResults ++ List(
+    "ExternalCallTests:externalCallReturnsServiceOutput" ->
+      Success(Json.fromString(UseExtensionService.defaultResponseHex)),
+    "ExternalCallTests:unknownExtensionFailsWithExternalCallError" -> Success(),
   )
 
   doRunTests(scriptIdsToTest)
