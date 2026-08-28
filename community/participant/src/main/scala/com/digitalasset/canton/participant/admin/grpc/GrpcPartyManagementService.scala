@@ -10,6 +10,7 @@ import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction as LapiTo
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.admin.participant.v30.*
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -44,6 +45,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil, retry}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
@@ -178,6 +180,27 @@ class GrpcPartyManagementService(
       serial,
       participantPermission,
     )
+
+  override def getAddPartyStatus(
+      request: v30.GetAddPartyStatusRequest
+  ): Future[v30.GetAddPartyStatusResponse] =
+    (for {
+      partyReplicator <- ensureOnlinePartyReplicationEnabled()
+
+      requestId <- Hash
+        .fromHexString(request.addPartyRequestId)
+        .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err.message))
+
+      status <- partyReplicator
+        .getAddPartyStatus(requestId)
+        .toRight(
+          toStatusRuntimeException(Status.UNKNOWN)(
+            s"Add party request id ${request.addPartyRequestId} not found"
+          )
+        )
+      apiStatus = com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
+        .fromInternal(status)
+    } yield v30.GetAddPartyStatusResponse(Some(apiStatus.toProtoV30))).toFuture(identity)
 
   private def convert[T](
       rawId: String,

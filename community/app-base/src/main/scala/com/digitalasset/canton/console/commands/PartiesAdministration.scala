@@ -39,6 +39,7 @@ import com.digitalasset.canton.grpc.OutputFileStreamObserver
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.{
   ContractImportMode,
+  PartyReplicationStatus,
   RepresentativePackageIdOverride,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -551,6 +552,21 @@ class ParticipantPartiesAdministrationGroup(
       )
     }
   }
+
+  @Help.Summary("Obtain status on a pending `add_party_async` call", FeatureFlag.Preview)
+  @Help.Description(
+    """Retrieve status information on a party previously added via the `add_party_async`
+      |endpoint by specifying the previously returned `addPartyRequestId` parameter.
+      """
+  )
+  def get_add_party_status(addPartyRequestId: String): PartyReplicationStatus =
+    check(FeatureFlag.Preview) {
+      consoleEnvironment.run {
+        reference.adminCommand(
+          ParticipantAdminCommands.PartyManagement.GetAddPartyStatus(addPartyRequestId)
+        )
+      }
+    }
 
   @Help.Summary("Finds a party's highest activation offset")
   @Help.Description(

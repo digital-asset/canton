@@ -19,8 +19,10 @@ import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforc
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.v1.GetAccountRequest
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.Spanning.SpanWrapper
+import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
+import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContext
 
@@ -48,9 +50,10 @@ class TrafficEnforcementBackend(
     metrics: TrafficEnforcementMetrics,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext)
+)(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
-    with FlagCloseable {
+    with FlagCloseable
+    with Spanning {
 
   /** Validates that the account associated with the given actAs parties has sufficient balance to
     * cover the specified traffic cost.
@@ -74,17 +77,21 @@ class TrafficEnforcementBackend(
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
     metrics.enforcementCheckDuration.timeEitherFUSWithLabels(
-      validateTrafficInternal(actAs, trafficCost),
+      withSpan(TrafficEnforcementBackend.EnforcementSpanName) { spanTraceContext => span =>
+        decide(actAs, trafficCost, span)(spanTraceContext, errorLoggingContext)
+      },
       labelMapping = {
         case Left(e) => e.code.id
         case Right(_) => "success"
       },
+      failedStatus = TrafficEnforcementOutcome.Failed,
     )
   }
 
-  private def validateTrafficInternal(
+  private def decide(
       actAs: Seq[LfPartyId],
       trafficCost: Long,
+      span: SpanWrapper,
   )(implicit
       traceContext: TraceContext,
       errorLoggingContext: ErrorLoggingContext,
@@ -97,12 +104,22 @@ class TrafficEnforcementBackend(
         logger.debug(
           show"Skipping traffic enforcement validation for participant admin party: $singleActAs"
         )
+        recordOutcome(
+          span,
+          TrafficEnforcementOutcome.Skipped,
+          Some(TrafficEnforcementOutcome.AdminParty),
+        )
         EitherT.pure(())
       case singleActAs :: Nil =>
         // In Canton 3.5, the account ID is bound to the submitter party
-        validateAccount(accountId = singleActAs, trafficCost = trafficCost)
+        validateBalance(accountId = singleActAs, trafficCost = trafficCost, span = span)
           .leftWiden[TrafficEnforcementErrors.TrafficEnforcementError]
       case nonSingletonActAs if rejectMultiPartySubmissions =>
+        recordOutcome(
+          span,
+          TrafficEnforcementOutcome.Rejected,
+          Some(TrafficEnforcementOutcome.MultiPartySubmission),
+        )
         EitherT.leftT[FutureUnlessShutdown, Unit](
           TrafficEnforcementErrors.MultiPartySubmissionRejected.Reject(
             show"Traffic enforcement rejected submission with non-singleton actAs parties: $nonSingletonActAs"
@@ -112,20 +129,30 @@ class TrafficEnforcementBackend(
         logger.info(
           show"Skipping traffic enforcement validation due to non-singleton actAs parties: $nonSingletonActAs"
         )
+        recordOutcome(
+          span,
+          TrafficEnforcementOutcome.Skipped,
+          Some(TrafficEnforcementOutcome.NonSingletonActAs),
+        )
         EitherT.pure(())
     }
   }
 
-  private def validateAccount(
+  private def validateBalance(
       accountId: String,
       trafficCost: Long,
+      span: SpanWrapper,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.InsufficientBalance.Reject, Unit] =
-    if (!enforceCostOnSubmissions)
+    if (!enforceCostOnSubmissions) {
+      recordOutcome(
+        span,
+        TrafficEnforcementOutcome.Skipped,
+        Some(TrafficEnforcementOutcome.EnforcementDisabled),
+      )
       EitherT.pure[FutureUnlessShutdown, TrafficEnforcementErrors.InsufficientBalance.Reject](())
-    else {
-      metrics.balanceLookups.mark()
+    } else {
       implicit val errorLoggingContext: ErrorLoggingContext =
         ErrorLoggingContext.fromTracedLogger(logger)
       for {
@@ -144,9 +171,20 @@ class TrafficEnforcementBackend(
                   s"Traffic enforcement account lookup failed for account $accountId; degrading" +
                     s" and allowing the submission to proceed without a balance check.\n$grpcError"
                 )
-                metrics.allowedSubmissionOnLookupFailures.mark()
+                recordOutcome(
+                  span,
+                  TrafficEnforcementOutcome.Degraded,
+                  Some(TrafficEnforcementOutcome.LookupUnavailable),
+                )
+                span.recordException(grpcError.asRuntimeException)
                 FutureUnlessShutdown.pure(None)
               case Left(grpcError) =>
+                recordOutcome(
+                  span,
+                  TrafficEnforcementOutcome.Failed,
+                  Some(TrafficEnforcementOutcome.LookupFailed),
+                )
+                // The span picks up the exception and the ERROR status from closeSpan as it propagates.
                 FutureUnlessShutdown.failed(
                   RichTrafficServiceClient.normalizeTeaError(grpcError)
                 )
@@ -158,24 +196,45 @@ class TrafficEnforcementBackend(
               ()
             )
           case Some(accountResponse) =>
-            EitherT.cond[FutureUnlessShutdown](
-              accountResponse.balance >= trafficCost,
-              (), {
-                metrics.insufficientBalanceRejections.mark()
+            if (accountResponse.balance >= trafficCost) {
+              recordOutcome(span, TrafficEnforcementOutcome.Accepted)
+              EitherT.pure[
+                FutureUnlessShutdown,
+                TrafficEnforcementErrors.InsufficientBalance.Reject,
+              ](())
+            } else {
+              recordOutcome(
+                span,
+                TrafficEnforcementOutcome.Rejected,
+                Some(TrafficEnforcementOutcome.InsufficientBalance),
+              )
+              EitherT.leftT[FutureUnlessShutdown, Unit](
                 TrafficEnforcementErrors.InsufficientBalance.Reject(
                   s"Insufficient balance (${accountResponse.balance}) for actual traffic cost ($trafficCost) for account $accountId"
                 )
-              },
-            )
+              )
+            }
         }
       } yield ()
     }
+
+  private def recordOutcome(
+      span: SpanWrapper,
+      outcome: String,
+      reason: Option[String] = None,
+  ): Unit = {
+    span.setAttribute(TrafficEnforcementOutcome.OutcomeAttribute, outcome)
+    reason.foreach(span.setAttribute(TrafficEnforcementOutcome.ReasonAttribute, _))
+    metrics.markDecision(outcome, reason)
+  }
 
   override def onClosed(): Unit =
     LifeCycle.close(trafficServiceClient)(logger)
 }
 
 object TrafficEnforcementBackend {
+
+  private[command] val EnforcementSpanName: String = "TrafficEnforcementBackend.validateTraffic"
 
   /** Let the submission through only when the lookup could not produce an answer, never when the
     * traffic service produced one: a refusal is a deterministic answer, and a client cancellation
@@ -206,7 +265,8 @@ object TrafficEnforcementBackend {
       loggerFactory: NamedLoggerFactory,
       metrics: TrafficEnforcementMetrics,
   )(implicit
-      ec: ExecutionContextIdlenessExecutorService
+      ec: ExecutionContextIdlenessExecutorService,
+      tracer: Tracer,
   ): TrafficEnforcementBackend = {
     val trafficServiceClient = trafficEnforcementServerConfig match {
       case internal: TrafficEnforcementServerConfig.Internal =>

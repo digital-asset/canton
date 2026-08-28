@@ -24,7 +24,7 @@ import com.digitalasset.canton.networking.grpc.{
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.v1.*
 import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficServiceStub
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.inprocess.InProcessChannelBuilder
 import io.grpc.{ManagedChannel, StatusRuntimeException}
 
@@ -85,6 +85,22 @@ class RichTrafficServiceClient(
       logger = logger,
       logPolicy = RichTrafficServiceClient.doNotLogRefusedRequests,
       retryPolicy = RichTrafficServiceClient.retryUnlessClientGaveUp,
+    )
+
+  def pruneEvents(
+      request: PruneEventsRequest
+  )(implicit
+      traceContext: TraceContext,
+      @unused ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, GrpcError, PruneEventsResponse] =
+    CantonGrpcUtil.sendGrpcRequest(client, serverName)(
+      _.pruneEvents(request),
+      requestDescription = "prune-events",
+      timeout = timeouts.network.duration,
+      logger = logger,
+      logPolicy = RichTrafficServiceClient.doNotLogRefusedRequests,
+      // Response is not idempotent, so we don't retry. The traffic service will log the error and the caller can retry if they want.
+      retryPolicy = CantonGrpcUtil.RetryPolicy.noRetry,
     )
 }
 
@@ -155,6 +171,7 @@ object RichTrafficServiceClient {
       InProcessChannelBuilder
         .forName(grpcChannelName)
         .executor(executor)
+        .intercept(TraceContextGrpc.clientInterceptor())
         .build()
 
     new RichTrafficServiceClient(

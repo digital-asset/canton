@@ -1,27 +1,19 @@
 name: Add compliance label
 
 on:
-  pull_request:
+  # Use pull_request_target so the job gets a read/write token on PRs from forks.
+  # On the plain pull_request event a fork PR receives a read-only GITHUB_TOKEN and the
+  # label write fails with 403. This is safe here because the job never checks out or runs
+  # fork-controlled code, it only reads the changed-file list and adds a label.
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
-  pick_runner:
-    name: Pick runner
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.pick_runner.outputs.runner }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          sparse-checkout: .github
-      - id: pick_runner
-        uses: ./.github/actions/utils/pick_runner
-
   add-compliance-label:
     name: Add Standard-Change label if compliance paths are modified
-    needs: pick_runner
-    runs-on: ${{ needs.pick_runner.outputs.runner }}
+    # Pure GitHub API calls, so use a GitHub-hosted runner. This keeps fork-triggered
+    # pull_request_target runs off the self-hosted fleet and removes the only checkout.
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write

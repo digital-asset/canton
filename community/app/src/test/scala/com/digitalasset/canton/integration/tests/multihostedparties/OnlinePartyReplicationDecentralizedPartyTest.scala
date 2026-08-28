@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.digitalasset.canton.BaseTest.CantonLfV21
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.LocalInstanceReference
@@ -187,9 +188,16 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
     // Wait until the party is authorized for onboarding on the TP, before archiving replicated contracts.
     canSourceProceedWithOnPR = false
     eventually(timeUntilSuccess = 1.minute) {
-      val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)
-      logger.info(s"Waiting until party onboarding topology has been authorized: $tpStatus")
+      val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
+      logger.info(s"Waiting for $targetParticipant to be authorized: $tpStatus")
       tpStatus.authorizationO.nonEmpty shouldBe true
+
+      val lapiTpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
+        decentralizedParty,
+        daId,
+        targetParticipant.id,
+      )
+      lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
     }
     val sequencer = getProgrammableSequencer(sequencer1.name)
     sequencer.setPolicy_("hold SP exercise confirmation until OnPR contract replicated") {

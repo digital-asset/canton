@@ -2,48 +2,65 @@
   "slack_id_by_name": {
     "Andreas Lochbihler": "U9AGNADBJ",
     "Cristina Basescu": "U056R7C1H1A",
+
+
+    "Soren Bleikertz": "U276HDDB6",
+
     "Christian Grigis": "U03RK2ZNZFH",
+    "Fredrik Lindskog": "U0BNPLGPHB9",
     "João Sá Sousa": "U03A208N537",
     "Matthias Schmalz": "U990L3H0R",
     "Simran Tinani": "U0A0VU32CS0",
-    "Soren Bleikertz": "U276HDDB6",
     "Thibault Jeandet": "U03NCGBFCDP",
     "Simon Maxen": "UPED4TSGN",
+
     "Gerolf Seitz": "U5LC1FB6D",
+    "Kirill Zhuravlev": "U046D8XGD7H",
     "Meriam Lachkar": "U03FH83LRNH",
+    "Oleg Pasteliak": "U0BEAG6LZSB",
     "Oliver Seeliger": "UF766DLN4",
     "Ostap Stoliarchuk": "U0ASDV1UV2S",
     "Rafael Guglielmetti": "U020XUXADCP",
     "Yves Geissbuehler": "U04DC4NAK1S",
-    "Adrien Piquerez": "U08LBV2U75H",
-    "Andreas Triantafyllos": "U03HVEFHGLU",
-    "Andris Szatmári": "U9AM249RP",
-    "Gergely Homanyi": "U1CNLNUV7",
-    "Jaroslaw Ratajski": "U029VGVV25Q",
-    "Marcin Ziolek": "U57BTEKR9",
-    "Márton Nagy": "U01A2K1NWAX",
-    "Tudor Voicu": "U01B2BD2CP4",
+
     "Daniel Gustafsson": "U04S25SG9D5",
     "Danilo Faria": "U04TG4XMJ",
     "Fabio Tudone": "USE2D5GB1",
+    "Mojtaba Eslahi Kelorazi": "U0ASG28M66N",
     "Thomas Tantillo": "U04P9CS4F6Z",
+
     "Thibault Bene": "U0AHRL04HPV",
+
+    "Marcin Ziolek": "U57BTEKR9",
+
+    "Jasper Van der Jeugt": "U09R7LWCQPJ",
+
+    "Andreas Triantafyllos": "U03HVEFHGLU",
+    "Gergely Homanyi": "U1CNLNUV7",
+    "Gyorgy Farkas": "U4E3KKDQA",
+    "Márton Nagy": "U01A2K1NWAX",
+
     "Carl Pulley": "U03K3A3UAGY",
     "Dylan Thinnes": "U03HCPABC9M",
-    "Eugene Maysyuk": "U09RWCE91GE",
-    "Jan Karwowski": "U09CZKQKLAG",
-    "Jasper Van der Jeugt": "U09R7LWCQPJ",
-    "Mikolaj Koziel": "U0AH3QPE9M0",
-    "Mojtaba Eslahi Kelorazi": "U0ASG28M66N",
     "Paul Brauner": "U05KX5V7KJN",
-    "Pawel Ulewicz": "U07RW0BEB8V",
-    "Remy Haemmerle": "UEGT3JT0Q",
     "Roger Bosman": "U08QFCVJBML",
     "Samuel Williams": "U04M62HVADS",
-    "Tamas Oltyan": "U0ACDK36MHB",
-    "Viktor Kalashnykov": "U09H5S4AV2L",
+
+    "Remy Haemmerle": "UEGT3JT0Q",
+
+    "Adrien Piquerez": "U08LBV2U75H",
+    "Andris Szatmári": "U9AM249RP",
+    "Jaroslaw Ratajski": "U029VGVV25Q",
+    "Tudor Voicu": "U01B2BD2CP4",
+
+
+    "Eugene Maysyuk": "U09RWCE91GE",
+    "Jan Karwowski": "U09CZKQKLAG",
     "Kamil Orlowski": "U0BDK5NHFUK",
-    "Gyorgy Farkas": "U4E3KKDQA"
+    "Mikolaj Koziel": "U0AH3QPE9M0",
+    "Pawel Ulewicz": "U07RW0BEB8V",
+    "Tamas Oltyan": "U0ACDK36MHB",
+    "Viktor Kalashnykov": "U09H5S4AV2L"
   },
   "fallback_pool": [
     "Thibault Bene",

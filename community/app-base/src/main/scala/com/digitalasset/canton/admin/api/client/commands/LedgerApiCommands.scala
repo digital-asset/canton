@@ -4,6 +4,7 @@
 package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
+import cats.syntax.option.*
 import cats.syntax.traverse.*
 import com.daml.jwt.JwksUrl
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandInspectionServiceGrpc.CommandInspectionServiceStub
@@ -21,7 +22,10 @@ import com.daml.ledger.api.v2.admin.package_management_service.PackageManagement
 import com.daml.ledger.api.v2.admin.participant_pruning_service.*
 import com.daml.ledger.api.v2.admin.participant_pruning_service.ParticipantPruningServiceGrpc.ParticipantPruningServiceStub
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyManagementAlphaServiceGrpc.PartyManagementAlphaServiceStub
-import com.daml.ledger.api.v2.admin.party_management_alpha_service.{PartyReplicationStatus as _, *}
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
+  PartyReplicationStatus as LapiPartyReplicationStatus,
+  *,
+}
 import com.daml.ledger.api.v2.admin.party_management_service.*
 import com.daml.ledger.api.v2.admin.party_management_service.PartyManagementServiceGrpc.PartyManagementServiceStub
 import com.daml.ledger.api.v2.admin.user_management_service.UserManagementServiceGrpc.UserManagementServiceStub
@@ -183,7 +187,6 @@ import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConf
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.ForwardingStreamObserver
-import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -191,6 +194,8 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficServiceStub
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -505,15 +510,24 @@ object LedgerApiCommands {
         PartyManagementAlphaServiceGrpc.stub(channel)
     }
 
-    final case class GetAddPartyStatus(requestId: String)
-        extends BaseCommand[
+    final case class GetAddPartyStatus(
+        partyId: PartyId,
+        synchronizerId: SynchronizerId,
+        targetParticipantId: ParticipantId,
+    ) extends BaseCommand[
           GetAddPartyStatusRequest,
           GetAddPartyStatusResponse,
-          PartyReplicationStatus,
+          LapiPartyReplicationStatus,
         ] {
 
       override protected def createRequest(): Either[String, GetAddPartyStatusRequest] =
-        Right(GetAddPartyStatusRequest(requestId))
+        Right(
+          GetAddPartyStatusRequest(
+            partyId.toProtoPrimitive,
+            synchronizerId.toProtoPrimitive,
+            targetParticipantId.uid.toProtoPrimitive,
+          )
+        )
 
       override protected def submitRequest(
           service: PartyManagementAlphaServiceStub,
@@ -522,10 +536,9 @@ object LedgerApiCommands {
 
       override protected def handleResponse(
           response: GetAddPartyStatusResponse
-      ): Either[String, PartyReplicationStatus] =
+      ): Either[String, LapiPartyReplicationStatus] =
         ProtoConverter
           .required("status", response.status)
-          .flatMap(PartyReplicationStatus.fromLapiProto)
           .leftMap(_.toString)
     }
 
@@ -2630,6 +2643,22 @@ object LedgerApiCommands {
           request: UpdateAccountRequest,
       ): Future[UpdateAccountResponse] =
         service.updateAccount(request)
+    }
+
+    final case class PruneEvents(
+        beforeInclusive: CantonTimestamp
+    ) extends BaseCommand[
+          PruneEventsRequest,
+          PruneEventsResponse,
+        ] {
+      override protected def createRequest(): Either[String, PruneEventsRequest] =
+        Right(PruneEventsRequest(beforeInclusive.toProtoTimestamp.some))
+
+      override protected def submitRequest(
+          service: TrafficServiceStub,
+          request: PruneEventsRequest,
+      ): Future[PruneEventsResponse] =
+        service.pruneEvents(request)
     }
   }
 }

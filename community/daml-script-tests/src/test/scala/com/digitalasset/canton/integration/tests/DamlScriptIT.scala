@@ -77,8 +77,8 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
          |  command: ${cmd.mkString(" ")}
          |  cause: $cause
          |  cwd: $damlProjectDir (switch DamlScriptId.debug to true to keep this temporary directory)
-         |  DAML_VERSION=${sys.env.getOrElse("DAML_VERSION", "<not set>")}
-         |  DPM_REGISTRY=${sys.env.getOrElse("DPM_REGISTRY", "<not set>")}
+         |  DAML_VERSION=${getEnv("damlVersion", "<not set>")}
+         |  DPM_REGISTRY=${getEnv("dpmRegistry", "<not set>")}
          |  stdout: $stdout
          |  stderr: $stderr
          |""".stripMargin
@@ -171,22 +171,21 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
         throw new java.lang.Error("could not find daml project in resources: " + projectName)
     }
 
-  private def setEnv(): Unit = {
-    def getEnv(name: String, default: String): String =
-      sys.props.get(name) match {
-        case Some(value) =>
-          // on CI we should get the value from the configMap
-          value
-        case None =>
-          logger.warn(s"Using default value for $name: $default.")
-          default
-      }
+  private def getEnv(name: String, default: String): String =
+    sys.props.get(name) match {
+      case Some(value) =>
+        // on CI we should get the value from the configMap
+        value
+      case None =>
+        logger.warn(s"Using default value for $name: $default.")
+        default
+    }
 
+  private def setEnv(): Unit =
     env = Seq(
       "DAML_VERSION" -> getEnv("damlVersion", BuildInfo.damlLibrariesVersion),
       "DPM_REGISTRY" -> getEnv("dpmRegistry", "europe-docker.pkg.dev/da-images/public-unstable"),
     )
-  }
 
   private def buildDamlScriptProject(
       projectName: String,

@@ -11,7 +11,6 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
-  SharedEnvironment,
   TestConsoleEnvironment,
 }
 import com.digitalasset.daml.lf.data.Ref
@@ -32,7 +31,7 @@ import java.nio.file.{FileSystems, Files, Path}
 // make the test base an abstract class
 abstract class GenerateSnapshotsBase
     extends CommunityIntegrationTest
-    with SharedEnvironment
+    with SharedEnvironmentWithStaticTime
     with EntitySyntax
     with BeforeAndAfterAll {
 
@@ -63,7 +62,7 @@ abstract class GenerateSnapshotsBase
       .getPathMatcher(s"glob:$scriptDarDir/*.dar")
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    super.environmentDefinition
       .addConfigTransforms(
         ConfigTransforms.enableNonStandardConfig,
         ConfigTransforms.updateAllParticipantConfigs_(
@@ -145,19 +144,13 @@ abstract class GenerateSnapshotsBase
 
       exitCode match {
         case 1 =>
-          // Check that all daml script test failures are due to GetTime calls and duplicate party allocation failures
+          // Check that all daml script test failures are due to duplicate party allocation failures
           val failureLines = stdout
             .toString()
             .split("\n")
             .filter(_.contains("FAILURE"))
           assert(
-            failureLines
-              .forall { line =>
-                line.contains(
-                  "UNIMPLEMENTED: Method not found: com.daml.ledger.api.v2.testing.TimeService/GetTime"
-                )
-                || line.contains("Party already exists")
-              },
+            failureLines.forall(_.contains("Party already exists")),
             s"dpm script failed with exit code 1: \n" + stdout.toString(),
           )
           println(

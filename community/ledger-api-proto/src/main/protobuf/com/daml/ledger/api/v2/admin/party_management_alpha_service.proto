@@ -7,7 +7,6 @@ package com.daml.ledger.api.v2.admin;
 
 import "com/daml/ledger/api/v2/crypto.proto";
 import "com/daml/ledger/api/v2/state_service.proto";
-import "google/protobuf/timestamp.proto";
 
 option csharp_namespace = "Com.Daml.Ledger.Api.V2.Admin";
 option java_outer_classname = "PartyManagementAlphaServiceOuterClass";
@@ -50,11 +49,8 @@ service PartyManagementAlphaService {
   // topology state.
   rpc AuthorizePartyUpdate(AuthorizePartyUpdateRequest) returns (AuthorizePartyUpdateResponse);
 
-  // TODO(#31414): There's no add_party_request_id; querying the status must be trivial like:
-  //  By querying the status using semantic data—"What is the status of Party X moving to Target Participant Y on Synchronizer Z?"
-  //
-  // Status endpoint that given an 'add_party_request_id' returns status information about progress,
-  // completion, or errors of a previous call to 'AddPartyWithAcs' on the target participant.
+  // Query the status of an ongoing party replication with information about progress,
+  // completion, or errors.
   rpc GetAddPartyStatus(GetAddPartyStatusRequest) returns (GetAddPartyStatusResponse);
 }
 
@@ -128,11 +124,20 @@ message AuthorizePartyUpdateRequest {
 message AuthorizePartyUpdateResponse {}
 
 message GetAddPartyStatusRequest {
-  // TODO(#31414): Replace with underlying request ID hash arguments to compute the ID internally as needed
-  // The unique identifier tracking the add party request.
+  // The party replicating to the target participant.
   //
   // Required
-  string add_party_request_id = 1;
+  string party_id = 1;
+
+  // The synchronizer in which the party is being replicated.
+  //
+  // Required
+  string synchronizer_id = 2;
+
+  // The unique identifier of the target participant where the party is replicating to.
+  //
+  // Required
+  string target_participant_uid = 3;
 }
 
 message GetAddPartyStatusResponse {
@@ -140,92 +145,44 @@ message GetAddPartyStatusResponse {
   PartyReplicationStatus status = 1;
 }
 
-// Describes the various lifecycle states of a party replication operation.
+// Describes the status of a party replication operation.
 message PartyReplicationStatus {
-  // Static parameters that remain constant throughout the party replication operation.
-  message ReplicationParameters {
-    // Required
-    string request_id = 1;
-    // Required
-    string party_id = 2;
-    // Required
-    string synchronizer_id = 3;
-    // Required
-    string source_participant_uid = 4;
-    // Required
-    string target_participant_uid = 5;
+  // Enum indicating the broad operational status of replicating party to the target participant.
+  enum State {
+    // The status is unknown or unspecified.
+    STATE_UNSPECIFIED = 0;
 
-    // TODO(#31414): Remove: Avoid leaking internal implementation detail
-    //
-    // Required
-    uint32 topology_serial = 6;
+    // The party replication operation is actively running.
+    // This state encompasses all intermediate phases (e.g., topology authorization,
+    // ACS data transfer, ledger indexing). Transient errors that trigger automatic
+    // retries will not change the overall state from IN_PROGRESS.
+    STATE_IN_PROGRESS = 1;
+
+    // The party has been successfully replicated and fully onboarded on the target participant.
+    // The Active Contract Set (ACS) is completely synchronized, the onboarding topology
+    // flag has been cleared, and the party is ready to participate in transactions.
+    STATE_COMPLETED = 2;
+
+    // The party replication operation has encountered a terminal failure.
+    // Operator intervention or a new replication request is required to proceed.
+    // Diagnostic details are provided in the `error` field.
+    STATE_FAILED = 3;
   }
 
-  // Onboarding authorizations provided by party owners and the target participant.
-  message PartyReplicationAuthorization {
-    // The timestamp when onboarding authorization becomes effective and the ACS snapshot is anchored.
-    //
-    // Required
-    google.protobuf.Timestamp onboarding_at = 1;
-
-    // Indicates whether the party is fully onboarded to the target participant.
-    // Clears the onboarding flag to allow active processing of transactions.
-    //
-    // Required
-    bool is_onboarding_flag_cleared = 2;
-  }
-
-  // Progress metrics for the active contract set replication.
-  message AcsReplicationProgress {
-    // The total number of ACS contracts persisted by the target participant.
-    //
-    // Required
-    uint64 processed_contract_count = 1;
-
-    // Indicates whether the ACS replication phase has fully completed.
-    //
-    // Required
-    bool fully_processed_acs = 2;
-  }
-
-  // Progress metrics for indexing the replication changes into the Ledger API.
-  message AcsIndexingProgress {}
-
-  // Error details populated when a replication fails or requires operator intervention.
-  message PartyReplicationError {
+  message ErrorDetails {
     // The descriptive error message.
     //
     // Required
-    string error_message = 2;
+    string message = 1;
   }
 
-  // Static party replication parameters.
+  // The overall lifecycle state of the replication operation.
   //
   // Required
-  ReplicationParameters parameters = 1;
+  State state = 1;
 
-  // Topology authorization details; set once the party is authorized on the target participant.
+  // Diagnostic details, populated when an error occurs (i.e., when state is STATE_FAILED).
   //
   // Optional
-  PartyReplicationAuthorization authorization = 2;
-
-  // ACS replication progress; set once the data transfer begins.
-  //
-  // Optional
-  AcsReplicationProgress replication = 3;
-
-  // Indexing progress metrics; set once background ledger indexing begins.
-  //
-  // Optional
-  AcsIndexingProgress indexing = 4;
-
-  // Indicates whether the party replication operation has completed successfully.
-  //
-  // Required
-  bool has_completed = 5;
-
-  // Diagnostic details; populated during transient or terminal failures.
-  //
-  // Optional
-  PartyReplicationError error_message = 6;
+  ErrorDetails error = 2;
 }

@@ -1,0 +1,29 @@
+-- Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module GetAndSetTime where
+
+import DA.Time (addRelTime, minutes)
+import Daml.Script
+
+template T
+  with
+    p : Party
+    t : Time
+  where
+    signatory p
+
+    choice Add : ContractId T
+      with
+        n : Int
+      controller p
+      do create (T p (t `addRelTime` minutes n))
+
+createAndSetTime = do
+  alice <- allocateParty "alice"
+  now1 <- getTime
+  _ <- submit alice (createAndExerciseCmd (T alice now1) (Add 7))
+  setTime (now1 `addRelTime` minutes 10)
+  now2 <- getTime
+  _ <- submit alice (createAndExerciseCmd (T alice now2) (Add 10))
+  pure ()

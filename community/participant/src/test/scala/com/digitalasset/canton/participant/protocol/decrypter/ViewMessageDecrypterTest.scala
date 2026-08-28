@@ -195,8 +195,8 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
               .encryptView(TransactionViewType)(
                 lightTree(i),
                 viewKeyData(i),
+                Signature.noSignature,
                 snapshot,
-                signingTimestampOverrides = None,
                 testedProtocolVersion,
               )
               .futureValueUS
@@ -208,8 +208,8 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
             .encryptView(TransactionViewType)(
               childLvt,
               viewKeyData(child),
+              Signature.noSignature,
               snapshot,
-              signingTimestampOverrides = None,
               testedProtocolVersion,
             )
             .futureValueUS
@@ -237,8 +237,8 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
             .encryptView(TransactionViewType)(
               parentLvt,
               viewKeyData(parent),
+              Signature.noSignature,
               snapshot,
-              signingTimestampOverrides = None,
               testedProtocolVersion,
             )
             .futureValueUS

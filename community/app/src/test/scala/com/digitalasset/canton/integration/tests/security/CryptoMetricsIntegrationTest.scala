@@ -14,9 +14,12 @@ import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriver
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
+  ConfigTransform,
+  ConfigTransforms,
   EnvironmentSetupPlugin,
   SharedEnvironment,
 }
+import monocle.macros.syntax.lens.*
 
 /** Integration tests verifying that cryptographic operations using KMS providers are correctly
   * instrumented to correctly record crypto-related metrics.
@@ -27,6 +30,14 @@ import com.digitalasset.canton.integration.{
 trait CryptoMetricsIntegrationTest {
   self: CommunityIntegrationTest & CantonEnvironmentSetup =>
 
+  val disableSessionKeysConfigTransform: ConfigTransform =
+    ConfigTransforms.updateAllParticipantConfigs_(
+      _.focus(_.parameters.caching.sessionEncryptionKeyCache.enabled)
+        .replace(false)
+        .focus(_.crypto.sessionSigningKeys.enabled)
+        .replace(false)
+    )
+
   "signing, decryption latencies, and KMS metrics are recorded" in { implicit env =>
     import env.*
 
@@ -34,11 +45,13 @@ trait CryptoMetricsIntegrationTest {
     participant1.crypto.privateCrypto.isInstanceOf[KmsPrivateCrypto] shouldBe true
     participant2.crypto.privateCrypto.isInstanceOf[JcePrivateCrypto] shouldBe true
 
-    def metricCounts(p: LocalParticipantReference): (Int, Int) = {
+    case class MetricCounts(signingCount: Int, decryptCount: Int)
+
+    def metricCounts(p: LocalParticipantReference): MetricCounts = {
       val crypto = p.underlying.value.metrics.cryptoMetrics
-      (
-        crypto.signingMetrics.signingLatency.valuesWithContext.values.flatten.size,
-        crypto.decryptionMetrics.decryptLatency.valuesWithContext.values.flatten.size,
+      MetricCounts(
+        signingCount = crypto.signingMetrics.signingLatency.valuesWithContext.values.flatten.size,
+        decryptCount = crypto.decryptionMetrics.decryptLatency.valuesWithContext.values.flatten.size,
       )
     }
 
@@ -52,35 +65,33 @@ trait CryptoMetricsIntegrationTest {
     // The ping command consists of 2 transactions:
     // 1. The first transaction is a request from participant1 to create the ping contract that requires the
     // confirmation of participant1. It involves the following signing and decryption operations:
-    //    - participant1 signs the submission request and adds a submitting participant signature to the messages
-    //      that make up the confirmation request (one for the informee message and one for the encrypted view
-    //      message) - total 3 signing operations
-    //    - participant1 decrypts the encrypted view message - total 1 decryption operation
+    //    - participant1 signs the submission request and adds one submitting participant signature to the messages
+    //      that make up the confirmation request (informee message and encrypted view messages) - total 2 signing
+    //      operations
+    //    - participants decrypt the encrypted view message - total 1 decryption operation each
     //    - participant1 signs a confirmation response and the wrapper submission request - total 2 signing operations
     // 2. The second transaction is a request from participant2 to archive the previous ping contract that requires
     //    the confirmation of both participants. It involves the following signing and decryption operations:
-    //    - participant2 signs the submission request and adds a submitting participant signature to the messages
-    //      that make up the confirmation request (one for the informee message and one for the encrypted view
-    //      message) - total 3 signing operations
-    //    - participant2 decrypts the encrypted view message - total 1 decryption operation
-    //    - participant1 decrypts the encrypted view message, but the randomness is already in the
-    //      cache - total 0 decryption operations
+    //    - participant2 signs the submission request and adds one submitting participant signature to the messages
+    //      that make up the confirmation request (informee message and encrypted view messages) - total 2 signing
+    //      operations
+    //    - participants decrypt the encrypted view message - total 1 decryption operation each
     //    - participant1 and participant2 sign a confirmation response and the wrapper submission request - total 2
     //      signing operations for each participant
     //
-    // Total signing operations: participant1 = 3 + 2 + 2 = 7, participant2 = 3 + 2 = 5
+    // Total signing operations: participant1 = 2 + 2 + 2 = 6, participant2 = 2 + 2 = 4
     // Total decryption operations: participant1 = 1 + 0 = 1, participant2 = 1
     val expectedDeltas = Map(
-      participant1 -> (/* expected signing */ 7, /* expected decrypt */ 1),
-      participant2 -> (5, 1),
+      participant1 -> MetricCounts(signingCount = 6, decryptCount = 2),
+      participant2 -> MetricCounts(signingCount = 4, decryptCount = 2),
     )
 
     // Even when KMS is not used, signing and decryption operations always record latency metrics.
     forAll(participants) { p =>
-      val (initialSigning, initialDecrypt) = initialCounts(p)
-      val (finalSigning, finalDecrypt) = metricCounts(p)
+      val MetricCounts(initialSigning, initialDecrypt) = initialCounts(p)
+      val MetricCounts(finalSigning, finalDecrypt) = metricCounts(p)
 
-      val (expectedSigningDelta, expectedDecryptDelta) = expectedDeltas(p)
+      val MetricCounts(expectedSigningDelta, expectedDecryptDelta) = expectedDeltas(p)
 
       (finalSigning - initialSigning) shouldBe expectedSigningDelta
       (finalDecrypt - initialDecrypt) shouldBe expectedDecryptDelta
@@ -95,6 +106,8 @@ class GcpKmsCryptoMetricsIntegrationTestPostgres
     with SharedEnvironment
     with CryptoMetricsIntegrationTest
     with GcpKmsCryptoIntegrationTestBase {
+  override protected def otherConfigTransforms: Seq[ConfigTransform] =
+    super.otherConfigTransforms ++ Seq(disableSessionKeysConfigTransform)
   setupPlugins(
     withAutoInit = false,
     storagePlugin = Some(new UsePostgres(loggerFactory)),
@@ -107,6 +120,8 @@ class MockKmsCryptoMetricsIntegrationTestPostgres
     with SharedEnvironment
     with CryptoMetricsIntegrationTest
     with MockKmsDriverCryptoIntegrationTestBase {
+  override protected def otherConfigTransforms: Seq[ConfigTransform] =
+    super.otherConfigTransforms ++ Seq(disableSessionKeysConfigTransform)
   setupPlugins(
     withAutoInit = true,
     storagePlugin = Option.empty[EnvironmentSetupPlugin],

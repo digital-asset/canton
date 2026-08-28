@@ -71,6 +71,35 @@ class BlockedProgressDetectorTest extends AnyWordSpec with BftSequencerBaseTest 
       isProgressBlocked(1) shouldBe false
       isProgressBlocked(2) shouldBe true
     }
+
+    "detect most segments are complete when a strong quorum of segments are complete" in {
+      val otherSegment2 = Segment(otherId2, NonEmpty(Seq, 7L, 9L).map(BlockNumber(_)))
+      val otherSegment3 = Segment(otherId3, NonEmpty(Seq, 8L, 10L).map(BlockNumber(_)))
+
+      val otherSegments = Map(
+        otherId -> otherSegment,
+        otherId2 -> otherSegment2,
+        otherId3 -> otherSegment3,
+      )
+
+      new BlockedProgressDetector(
+        mySegment,
+        otherSegments,
+        isBlockComplete = blockNumber =>
+          Seq(otherSegment, otherSegment2)
+            .exists(_.slotNumbers.contains(blockNumber)),
+        isBlockEmpty = _ => true,
+      ).areMostSegmentsComplete shouldBe false
+
+      new BlockedProgressDetector(
+        mySegment,
+        otherSegments,
+        isBlockComplete = blockNumber =>
+          Seq(otherSegment, otherSegment2, otherSegment3)
+            .exists(_.slotNumbers.contains(blockNumber)),
+        isBlockEmpty = _ => true,
+      ).areMostSegmentsComplete shouldBe true
+    }
   }
 }
 
@@ -78,6 +107,10 @@ object BlockedProgressDetectorTest {
 
   private val myId = BftNodeId("self")
   private val otherId = BftNodeId("otherId")
+  private val otherId2 = BftNodeId("otherId2")
+  private val otherId3 = BftNodeId("otherId3")
+
   private val mySegment = Segment(myId, NonEmpty(Seq, 1L, 3L, 5L).map(BlockNumber(_)))
   private val otherSegment = Segment(otherId, NonEmpty(Seq, 2L, 4L, 6L).map(BlockNumber(_)))
+
 }

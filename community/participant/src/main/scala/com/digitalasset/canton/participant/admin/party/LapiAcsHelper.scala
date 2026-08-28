@@ -39,7 +39,8 @@ private[participant] object LapiAcsHelper {
       excludedStakeholders: Set[PartyId],
       synchronizerId: Option[SynchronizerId],
       contractSynchronizerRenames: Map[String, String] = Map.empty,
-  )(implicit traceContext: TraceContext): Source[ActiveContractValueClass, NotUsed] =
+  )(implicit traceContext: TraceContext): Source[ActiveContractValueClass, NotUsed] = {
+    val excludeStakeholdersS = excludedStakeholders.map(_.toProtoPrimitive)
     indexService
       .activeContracts(parties.map(_.toLf), Some(atOffset))
       .map(response => response.getActiveContract)
@@ -50,17 +51,18 @@ private[participant] object LapiAcsHelper {
       .filter { contract =>
         val event = contract.getCreatedEvent
         val stakeholders = (event.signatories ++ event.observers).toSet
-        val excludeStakeholdersS = excludedStakeholders.map(_.toProtoPrimitive)
-        excludeStakeholdersS.intersect(stakeholders).isEmpty
+        !stakeholders.exists(excludeStakeholdersS)
       }
       .map { contract =>
-        if (contractSynchronizerRenames.contains(contract.synchronizerId)) {
-          val synchronizerId = contractSynchronizerRenames
-            .getOrElse(contract.synchronizerId, contract.synchronizerId)
-          contract.copy(synchronizerId = synchronizerId)
-        } else {
-          contract
-        }
+        val contractWithRenamedSynchronizer =
+          if (contractSynchronizerRenames.contains(contract.synchronizerId)) {
+            val synchronizerId = contractSynchronizerRenames
+              .getOrElse(contract.synchronizerId, contract.synchronizerId)
+            contract.copy(synchronizerId = synchronizerId)
+          } else {
+            contract
+          }
+        ActiveContractValueClass.tryCreate(contractWithRenamedSynchronizer)
       }
-      .map(ActiveContractValueClass.tryCreate)
+  }
 }

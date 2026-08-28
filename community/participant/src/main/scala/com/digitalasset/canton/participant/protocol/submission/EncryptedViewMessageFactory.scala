@@ -6,10 +6,8 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functor.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -64,8 +62,8 @@ object EncryptedViewMessageFactory {
   def encryptView[VT <: ViewType](viewType: VT)(
       viewTree: viewType.View,
       viewKeyData: (SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]]),
+      submittingParticipantSignature: Signature,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      signingTimestampOverrides: Option[SigningTimestampOverrides],
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
@@ -75,16 +73,16 @@ object EncryptedViewMessageFactory {
       encryptGroupedViews(viewType)(
         NonEmpty.mk(Seq, viewTree),
         viewKeyData,
+        submittingParticipantSignature,
         cryptoSnapshot,
-        signingTimestampOverrides,
         protocolVersion,
       ).widen[EncryptedViewMessage[VT]]
     } else
       encryptNonGroupedView(viewType)(
         viewTree,
         viewKeyData,
+        submittingParticipantSignature,
         cryptoSnapshot,
-        signingTimestampOverrides,
         protocolVersion,
       ).widen[EncryptedViewMessage[VT]]
 
@@ -97,8 +95,8 @@ object EncryptedViewMessageFactory {
   private[submission] def encryptGroupedViews[VT <: ViewType](viewType: VT)(
       viewTrees: NonEmpty[Seq[viewType.View]],
       viewKeyData: (SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]]),
+      submittingParticipantSignature: Signature,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      signingTimestampOverrides: Option[SigningTimestampOverrides],
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
@@ -140,12 +138,6 @@ object EncryptedViewMessageFactory {
             )
           )
       )
-      signature <- viewTrees.head1.toBeSigned
-        .traverse(rootHash =>
-          cryptoSnapshot
-            .sign(rootHash.unwrap, SigningKeyUsage.ProtocolOnly, signingTimestampOverrides)
-            .leftMap(err => FailedToSignViewMessage(err))
-        )
       multiView <- createMultiView()
     } yield EncryptedMultipleViewsMessage[VT](
       multiView,
@@ -153,7 +145,7 @@ object EncryptedViewMessageFactory {
       sessionKeyRandomnessMapNE,
       psid,
       cryptoSnapshot.pureCrypto.defaultSymmetricKeyScheme,
-      signature,
+      viewTrees.head1.toBeSigned.map(_ => submittingParticipantSignature),
       protocolVersion,
     )
   }
@@ -171,8 +163,8 @@ object EncryptedViewMessageFactory {
   private def encryptNonGroupedView[VT <: ViewType](viewType: VT)(
       viewTree: viewType.View,
       viewKeyData: (SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]]),
+      submittingParticipantSignature: Signature,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      signingTimestampOverrides: Option[SigningTimestampOverrides],
       protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
@@ -184,8 +176,8 @@ object EncryptedViewMessageFactory {
     singleMessage <- doEncryptNonGroupedView(viewType)(
       viewTree,
       viewKeyData,
+      submittingParticipantSignature,
       cryptoSnapshot,
-      signingTimestampOverrides,
       maxRequestSize,
       cryptoSnapshot.pureCrypto.defaultSymmetricKeyScheme,
       protocolVersion,
@@ -197,8 +189,8 @@ object EncryptedViewMessageFactory {
   private[submission] def encryptNonGroupedViews[VT <: ViewType](viewType: VT)(
       viewTreesWithRecipients: NonEmpty[Seq[(Recipients, viewType.View)]],
       viewKeyDataMap: ViewKeyDataMap,
+      submittingParticipantSignature: Signature,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      signingTimestampOverrides: Option[SigningTimestampOverrides],
       protocolVersion: ProtocolVersion,
       parallel: Boolean,
   )(implicit
@@ -221,8 +213,8 @@ object EncryptedViewMessageFactory {
             doEncryptNonGroupedView(viewType)(
               view,
               viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
+              submittingParticipantSignature,
               cryptoSnapshot,
-              signingTimestampOverrides,
               maxRequestSize,
               viewEncryptionScheme,
               protocolVersion,
@@ -233,8 +225,8 @@ object EncryptedViewMessageFactory {
             doEncryptNonGroupedView(viewType)(
               view,
               viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
+              submittingParticipantSignature,
               cryptoSnapshot,
-              signingTimestampOverrides,
               maxRequestSize,
               viewEncryptionScheme,
               protocolVersion,
@@ -248,14 +240,13 @@ object EncryptedViewMessageFactory {
   private def doEncryptNonGroupedView[VT <: ViewType](viewType: VT)(
       viewTree: viewType.View,
       viewKeyData: (SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]]),
+      submittingParticipantSignature: Signature,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      signingTimestampOverrides: Option[SigningTimestampOverrides],
       maxRequestSize: MaxRequestSize,
       viewEncryptionScheme: SymmetricKeyScheme,
       protocolVersion: ProtocolVersion,
   )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
+      ec: ExecutionContext
   ): EitherT[FutureUnlessShutdown, EncryptedViewMessageCreationError, EncryptedSingleViewMessage[
     VT
   ]] = {
@@ -273,12 +264,6 @@ object EncryptedViewMessageFactory {
 
     for {
       sessionKeyRandomnessMapNE <- sessionKeyRandomnessMapNEResult
-      signature <- viewTree.toBeSigned
-        .traverse(rootHash =>
-          cryptoSnapshot
-            .sign(rootHash.unwrap, SigningKeyUsage.ProtocolOnly, signingTimestampOverrides)
-            .leftMap(err => FailedToSignViewMessage(err))
-        )
       encryptedView <- EitherT.fromEither[FutureUnlessShutdown](
         EncryptedView
           .compressed[VT](cryptoSnapshot.pureCrypto, sessionKey, viewType)(
@@ -288,7 +273,7 @@ object EncryptedViewMessageFactory {
           .leftMap[EncryptedViewMessageCreationError](FailedToEncryptViewMessage.apply)
       )
     } yield EncryptedSingleViewMessage(
-      signature,
+      viewTree.toBeSigned.map(_ => submittingParticipantSignature),
       viewTree.viewHash,
       sessionKeyRandomnessMapNE,
       encryptedView,
@@ -690,13 +675,6 @@ object EncryptedViewMessageFactory {
   final case class FailedToCreateEncryptionKey(cause: EncryptionKeyCreationError)
       extends EncryptedViewMessageCreationError {
     override protected def pretty: Pretty[FailedToCreateEncryptionKey] = prettyOfClass(
-      unnamedParam(_.cause)
-    )
-  }
-
-  final case class FailedToSignViewMessage(cause: SyncCryptoError)
-      extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[FailedToSignViewMessage] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }

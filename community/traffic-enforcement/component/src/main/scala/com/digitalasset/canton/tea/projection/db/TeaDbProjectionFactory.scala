@@ -7,14 +7,16 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.resource.{DbStorage, DbStorageMulti, DbStorageSingle}
+import com.digitalasset.canton.tea.projection.TeaProjectionFactory.ApplyDeltaSpanName
 import com.digitalasset.canton.tea.projection.{
   EventId,
   EventSource,
   ProjectionEvent,
   TeaProjectionFactory,
 }
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.typesafe.config.{Config, ConfigFactory}
+import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.Done
 import org.apache.pekko.actor.typed.{ActorSystem, Behavior}
 import org.apache.pekko.projection.slick.{SlickHandler, SlickProjection}
@@ -39,7 +41,7 @@ private[projection] class TeaDbProjectionFactory(
     config: ProjectionConfig,
     override protected val metrics: TrafficEnforcementMetrics,
     override val onEventCommitted: () => Unit = () => (),
-)(implicit system: ActorSystem[?])
+)(implicit system: ActorSystem[?], tracer: Tracer)
     extends TeaProjectionFactory
     with NamedLogging {
   implicit val ec: ExecutionContext = system.executionContext
@@ -100,35 +102,39 @@ private[projection] class TeaDbProjectionFactory(
     override def process(envelope: Traced[ProjectionEvent]): DBIO[Done] = {
       val account = envelope.value.account
       val event = envelope.value.event
-      implicit val traceContext = envelope.traceContext
+      implicit val traceContext: TraceContext = envelope.traceContext
 
       logger.debug(s"Persisting event ${envelope.value}")
 
-      // Classifies the exception so it can be reported under TRAFFIC_UPDATE_OUT_OF_BOUND.
-      val reject = TeaDbTrafficStore.rejection(account, event.deltaEvent.delta)
+      withSpanDBIO(ApplyDeltaSpanName) { implicit traceContext => span =>
+        setApplyDeltaSpanAttributes(span, envelope.value, eventSource)
 
-      // We don't add 'transactionally' on purpose here, as this DBIO is picked up by the pekko projection
-      // which will add the offset persistence to it and wrap the whole thing into a transaction
-      // to provide exactlyOnce semantics
-      store
-        .persistDeltaDBIO(
-          accountId = account,
-          eventId = EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),
-          trafficDelta = event.deltaEvent.delta,
-          timestamp = event.deltaEvent.timestamp,
-          eventSource = eventSource,
-        )
-        .asTry
-        .flatMap {
-          case Success(_) => DBIO.successful(Done)
-          // Both branches fail the action, the difference is only that a rejected delta is reported
-          // under its own error code rather than as a raw JDBC failure.
-          // TODO(#34424): decide the failure policy for a rejected delta. Failing stalls the
-          //  projection, skipping the event drops the delta and needs a different transaction shape,
-          //  since the event row inserted above has to roll back while the offset bump commits.
-          case Failure(ex) if reject.isDefinedAt(ex) => DBIO.failed(reject(ex).asGrpcError)
-          case Failure(ex) => DBIO.failed(ex)
-        }
+        // Classifies the exception so it can be reported under TRAFFIC_UPDATE_OUT_OF_BOUND.
+        val reject = TeaDbTrafficStore.rejection(account, event.deltaEvent.delta)
+
+        // We don't add 'transactionally' on purpose here, as this DBIO is picked up by the pekko projection
+        // which will add the offset persistence to it and wrap the whole thing into a transaction
+        // to provide exactlyOnce semantics
+        store
+          .persistDeltaDBIO(
+            accountId = account,
+            eventId = EventId.tryCreate(s"${projectionId.id}-${envelope.value.event.offset}"),
+            trafficDelta = event.deltaEvent.delta,
+            timestamp = event.deltaEvent.timestamp,
+            eventSource = eventSource,
+          )
+          .asTry
+          .flatMap {
+            case Success(_) => DBIO.successful(Done)
+            // Both branches fail the action, the difference is only that a rejected delta is reported
+            // under its own error code rather than as a raw JDBC failure.
+            // TODO(#34424): decide the failure policy for a rejected delta. Failing stalls the
+            //  projection, skipping the event drops the delta and needs a different transaction shape,
+            //  since the event row inserted above has to roll back while the offset bump commits.
+            case Failure(ex) if reject.isDefinedAt(ex) => DBIO.failed(reject(ex).asGrpcError)
+            case Failure(ex) => DBIO.failed(ex)
+          }
+      }
     }
   }
 }

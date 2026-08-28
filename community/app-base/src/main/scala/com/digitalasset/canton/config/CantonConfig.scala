@@ -1177,12 +1177,6 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererP2PNetworkConfigReader
         : ConfigReader[BftBlockOrdererConfig.P2PNetworkConfig] =
       deriveReader[BftBlockOrdererConfig.P2PNetworkConfig]
-    lazy implicit val bftBlockOrdererBftBlockOrderingStandalonePeerConfigReader
-        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig] =
-      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig]
-    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneNetworkConfigReader
-        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig] =
-      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig]
     lazy implicit val finiteDurationDistributionConstantConfigReader
         : ConfigReader[ConstantDistribution] =
       deriveReader[ConstantDistribution]
@@ -1202,12 +1196,24 @@ object CantonConfig {
       deriveReader[FiniteDurationDistribution]
     lazy implicit val probabilityConfigReader: ConfigReader[Probability] =
       deriveReader[Probability]
-    lazy implicit val bftBlockOrdererBftBlockOrderingP2PSendDelayDelayByRecipientsConfigReader
+    lazy implicit val bftBlockOrdererBftBlockOrderingTestSlowdownP2PSendDelayDelayByRecipientsConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients]
-    lazy implicit val bftBlockOrdererBftBlockOrderingP2PSendDelayConfigReader
+    lazy implicit val bftBlockOrdererBftBlockOrderingTestSlowdownP2PSendDelayConfigReader
         : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig] =
       deriveReader[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownTopologyDelayConfigReader
+        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig] =
+      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownConfigReader
+        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig] =
+      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandalonePeerConfigReader
+        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig] =
+      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneNetworkConfigReader
+        : ConfigReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig] =
+      deriveReader[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig]
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigReader
         : ConfigReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist] =
       deriveReader[BlacklistLeaderSelectionPolicyConfig.HowLongToBlacklist]
@@ -1325,83 +1331,82 @@ object CantonConfig {
     lazy implicit final val sequencerTrafficConfigReader: ConfigReader[SequencerTrafficConfig] =
       deriveReader[SequencerTrafficConfig]
 
-    lazy implicit final val monitoringConfigReader: ConfigReader[MonitoringConfig] = {
-      implicit val tracingConfigDisabledSpanExporterReader
-          : ConfigReader[TracingConfig.Exporter.Disabled.type] =
-        deriveReader[TracingConfig.Exporter.Disabled.type]
-      @nowarn("cat=deprecation")
-      implicit val tracingConfigZipkinSpanExporterReader
-          : ConfigReader[TracingConfig.Exporter.Zipkin] =
-        deriveReader[TracingConfig.Exporter.Zipkin]
-      implicit val tracingConfigOtlpSpanExporterReader: ConfigReader[TracingConfig.Exporter.Otlp] =
-        deriveReader[TracingConfig.Exporter.Otlp]
-      implicit val tracingConfigSpanExporterReader: ConfigReader[TracingConfig.Exporter] =
-        deriveReader[TracingConfig.Exporter]
-      implicit val tracingConfigAlwaysOnSamplerReader
-          : ConfigReader[TracingConfig.Sampler.AlwaysOn] =
-        deriveReader[TracingConfig.Sampler.AlwaysOn]
-      implicit val tracingConfigAlwaysOffSamplerReader
-          : ConfigReader[TracingConfig.Sampler.AlwaysOff] =
-        deriveReader[TracingConfig.Sampler.AlwaysOff]
-      implicit val tracingConfigTraceIdRatioSamplerReader
-          : ConfigReader[TracingConfig.Sampler.TraceIdRatio] =
-        deriveReader[TracingConfig.Sampler.TraceIdRatio]
-      implicit val tracingConfigSamplerReader: ConfigReader[TracingConfig.Sampler] =
-        deriveReader[TracingConfig.Sampler]
-      implicit val tracingConfigBatchSpanProcessorReader
-          : ConfigReader[TracingConfig.BatchSpanProcessor] =
-        deriveReader[TracingConfig.BatchSpanProcessor]
-      implicit val tracingConfigTracerReader: ConfigReader[TracingConfig.Tracer] =
-        deriveReader[TracingConfig.Tracer]
+    implicit val tracingConfigDisabledSpanExporterReader
+        : ConfigReader[TracingConfig.Exporter.Disabled.type] =
+      deriveReader[TracingConfig.Exporter.Disabled.type]
+    @nowarn("cat=deprecation")
+    implicit val tracingConfigZipkinSpanExporterReader
+        : ConfigReader[TracingConfig.Exporter.Zipkin] =
+      deriveReader[TracingConfig.Exporter.Zipkin]
+    implicit val tracingConfigOtlpSpanExporterReader: ConfigReader[TracingConfig.Exporter.Otlp] =
+      deriveReader[TracingConfig.Exporter.Otlp]
+    implicit val tracingConfigSpanExporterReader: ConfigReader[TracingConfig.Exporter] =
+      deriveReader[TracingConfig.Exporter]
+    implicit val tracingConfigAlwaysOnSamplerReader: ConfigReader[TracingConfig.Sampler.AlwaysOn] =
+      deriveReader[TracingConfig.Sampler.AlwaysOn]
+    implicit val tracingConfigAlwaysOffSamplerReader
+        : ConfigReader[TracingConfig.Sampler.AlwaysOff] =
+      deriveReader[TracingConfig.Sampler.AlwaysOff]
+    implicit val tracingConfigTraceIdRatioSamplerReader
+        : ConfigReader[TracingConfig.Sampler.TraceIdRatio] =
+      deriveReader[TracingConfig.Sampler.TraceIdRatio]
+    implicit val tracingConfigSamplerReader: ConfigReader[TracingConfig.Sampler] =
+      deriveReader[TracingConfig.Sampler]
+    implicit val tracingConfigBatchSpanProcessorReader
+        : ConfigReader[TracingConfig.BatchSpanProcessor] =
+      deriveReader[TracingConfig.BatchSpanProcessor]
+    implicit val tracingConfigTracerReader: ConfigReader[TracingConfig.Tracer] =
+      deriveReader[TracingConfig.Tracer]
 
-      implicit val tracingConfigReader: ConfigReader[TracingConfig] =
-        deriveReader[TracingConfig]
-      implicit val deadlockDetectionConfigReader: ConfigReader[DeadlockDetectionConfig] =
-        deriveReader[DeadlockDetectionConfig]
-      implicit val metricsFilterConfigReader: ConfigReader[MetricsFilterConfig] =
-        deriveReader[MetricsFilterConfig]
-      implicit val metricsConfigPrometheusReader: ConfigReader[MetricsReporterConfig.Prometheus] =
-        deriveReader[MetricsReporterConfig.Prometheus]
-      implicit val metricsConfigCsvReader: ConfigReader[MetricsReporterConfig.Csv] =
-        deriveReader[MetricsReporterConfig.Csv]
-      implicit val metricsConfigLoggingReader: ConfigReader[MetricsReporterConfig.Logging] =
-        deriveReader[MetricsReporterConfig.Logging]
-      implicit val metricsConfigJvmConfigReader: ConfigReader[MetricsConfig.JvmMetrics] =
-        deriveReader[MetricsConfig.JvmMetrics]
-      implicit val metricsReporterConfigReader: ConfigReader[MetricsReporterConfig] =
-        deriveReader[MetricsReporterConfig]
-      implicit val histogramExponentialConfigReader: ConfigReader[HistogramDefinition.Exponential] =
-        deriveReader[HistogramDefinition.Exponential]
-      implicit val histogramBucketConfigReader: ConfigReader[HistogramDefinition.Buckets] =
-        deriveReader[HistogramDefinition.Buckets]
-      implicit val histogramAggregationTypeConfigReader
-          : ConfigReader[HistogramDefinition.AggregationType] =
-        deriveReader[HistogramDefinition.AggregationType]
-      implicit val histogramDefinitionConfigReader: ConfigReader[HistogramDefinition] =
-        deriveReader[HistogramDefinition]
-      implicit val metricQualificationConfigReader: ConfigReader[MetricQualification] =
-        ConfigReader.fromString[MetricQualification](catchConvertError { s =>
-          s.toLowerCase() match {
-            case "debug" => Right(MetricQualification.Debug)
-            case "errors" => Right(MetricQualification.Errors)
-            case "saturation" => Right(MetricQualification.Saturation)
-            case "traffic" => Right(MetricQualification.Traffic)
-            case "latency" => Right(MetricQualification.Latency)
-            case _ => Left("not one of 'errors', 'saturation', 'traffic', 'latency', 'debug'")
-          }
-        })
-      implicit val metricsConfigReader: ConfigReader[MetricsConfig] =
-        deriveReader[MetricsConfig]
+    implicit val tracingConfigReader: ConfigReader[TracingConfig] =
+      deriveReader[TracingConfig]
+    implicit val deadlockDetectionConfigReader: ConfigReader[DeadlockDetectionConfig] =
+      deriveReader[DeadlockDetectionConfig]
+    implicit val metricsFilterConfigReader: ConfigReader[MetricsFilterConfig] =
+      deriveReader[MetricsFilterConfig]
+    implicit val metricsConfigPrometheusReader: ConfigReader[MetricsReporterConfig.Prometheus] =
+      deriveReader[MetricsReporterConfig.Prometheus]
+    implicit val metricsConfigCsvReader: ConfigReader[MetricsReporterConfig.Csv] =
+      deriveReader[MetricsReporterConfig.Csv]
+    implicit val metricsConfigLoggingReader: ConfigReader[MetricsReporterConfig.Logging] =
+      deriveReader[MetricsReporterConfig.Logging]
+    implicit val metricsConfigJvmConfigReader: ConfigReader[MetricsConfig.JvmMetrics] =
+      deriveReader[MetricsConfig.JvmMetrics]
+    implicit val metricsReporterConfigReader: ConfigReader[MetricsReporterConfig] =
+      deriveReader[MetricsReporterConfig]
+    implicit val histogramExponentialConfigReader: ConfigReader[HistogramDefinition.Exponential] =
+      deriveReader[HistogramDefinition.Exponential]
+    implicit val histogramBucketConfigReader: ConfigReader[HistogramDefinition.Buckets] =
+      deriveReader[HistogramDefinition.Buckets]
+    implicit val histogramAggregationTypeConfigReader
+        : ConfigReader[HistogramDefinition.AggregationType] =
+      deriveReader[HistogramDefinition.AggregationType]
+    implicit val histogramDefinitionConfigReader: ConfigReader[HistogramDefinition] =
+      deriveReader[HistogramDefinition]
+    implicit val metricQualificationConfigReader: ConfigReader[MetricQualification] =
+      ConfigReader.fromString[MetricQualification](catchConvertError { s =>
+        s.toLowerCase() match {
+          case "debug" => Right(MetricQualification.Debug)
+          case "errors" => Right(MetricQualification.Errors)
+          case "saturation" => Right(MetricQualification.Saturation)
+          case "traffic" => Right(MetricQualification.Traffic)
+          case "latency" => Right(MetricQualification.Latency)
+          case _ => Left("not one of 'errors', 'saturation', 'traffic', 'latency', 'debug'")
+        }
+      })
+    implicit val metricsConfigReader: ConfigReader[MetricsConfig] =
+      deriveReader[MetricsConfig]
 
-      implicit val loggingConfigReader: ConfigReader[LoggingConfig] = {
-        implicit val apiLoggingConfigReader: ConfigReader[ApiLoggingConfig] =
-          deriveReader[ApiLoggingConfig]
-        implicit val gcLoggingConfigReader: ConfigReader[GCLoggingConfig] =
-          deriveReader[GCLoggingConfig]
-        deriveReader[LoggingConfig]
-      }
-      deriveReader[MonitoringConfig]
+    implicit val loggingConfigReader: ConfigReader[LoggingConfig] = {
+      implicit val apiLoggingConfigReader: ConfigReader[ApiLoggingConfig] =
+        deriveReader[ApiLoggingConfig]
+      implicit val gcLoggingConfigReader: ConfigReader[GCLoggingConfig] =
+        deriveReader[GCLoggingConfig]
+      deriveReader[LoggingConfig]
     }
+
+    lazy implicit final val monitoringConfigReader: ConfigReader[MonitoringConfig] =
+      deriveReader[MonitoringConfig]
 
     import Crypto.*
     lazy implicit final val sessionSigningKeysConfigReader: ConfigReader[SessionSigningKeysConfig] =
@@ -2006,9 +2011,6 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftP2PNetworkConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.P2PNetworkConfig] =
       deriveWriter[BftBlockOrdererConfig.P2PNetworkConfig]
-    lazy implicit val bftBlockOrdererBftBlockOrderingStandalonePeerConfigWriter
-        : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig] =
-      deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig]
     lazy implicit val finiteDurationDistributionConstantConfigWriter
         : ConfigWriter[ConstantDistribution] =
       deriveWriter[ConstantDistribution]
@@ -2028,12 +2030,21 @@ object CantonConfig {
       deriveWriter[FiniteDurationDistribution]
     lazy implicit val probabilityConfigWriter: ConfigWriter[Probability] =
       deriveWriter[Probability]
-    lazy implicit val bftBlockOrdererBftBlockOrderingP2PSendDelayDelayByRecipientsConfigWriter
+    lazy implicit val bftBlockOrdererBftBlockOrderingTestSlowdownP2PSendDelayDelayByRecipientsConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients] =
       deriveWriter[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig.DelayByRecipients]
-    lazy implicit val bftBlockOrdererBftBlockOrderingP2PSendDelayConfigWriter
+    lazy implicit val bftBlockOrdererBftBlockOrderingTestSlowdownP2PSendDelayConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig] =
       deriveWriter[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownTopologyDelayConfigWriter
+        : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig] =
+      deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTopologyDelayConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneTestSlowdownConfigWriter
+        : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig] =
+      deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig]
+    lazy implicit val bftBlockOrdererBftBlockOrderingStandalonePeerConfigWriter
+        : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig] =
+      deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandalonePeerConfig]
     lazy implicit val bftBlockOrdererBftBlockOrderingStandaloneNetworkConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig] =
       deriveWriter[BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig]
@@ -2158,80 +2169,79 @@ object CantonConfig {
     lazy implicit final val remoteMediatorConfigWriter: ConfigWriter[RemoteMediatorConfig] =
       deriveWriter[RemoteMediatorConfig]
 
-    lazy implicit final val monitoringConfigWriter: ConfigWriter[MonitoringConfig] = {
-      implicit val tracingConfigDisabledSpanExporterWriter
-          : ConfigWriter[TracingConfig.Exporter.Disabled.type] =
-        deriveWriter[TracingConfig.Exporter.Disabled.type]
-      @nowarn("cat=deprecation")
-      implicit val tracingConfigZipkinSpanExporterWriter
-          : ConfigWriter[TracingConfig.Exporter.Zipkin] =
-        deriveWriter[TracingConfig.Exporter.Zipkin]
-      implicit val tracingConfigOtlpSpanExporterWriter: ConfigWriter[TracingConfig.Exporter.Otlp] =
-        deriveWriter[TracingConfig.Exporter.Otlp]
-      implicit val tracingConfigSpanExporterWriter: ConfigWriter[TracingConfig.Exporter] =
-        deriveWriter[TracingConfig.Exporter]
-      implicit val tracingConfigAlwaysOnSamplerWriter
-          : ConfigWriter[TracingConfig.Sampler.AlwaysOn] =
-        deriveWriter[TracingConfig.Sampler.AlwaysOn]
-      implicit val tracingConfigAlwaysOffSamplerWriter
-          : ConfigWriter[TracingConfig.Sampler.AlwaysOff] =
-        deriveWriter[TracingConfig.Sampler.AlwaysOff]
-      implicit val tracingConfigTraceIdRatioSamplerWriter
-          : ConfigWriter[TracingConfig.Sampler.TraceIdRatio] =
-        deriveWriter[TracingConfig.Sampler.TraceIdRatio]
-      implicit val tracingConfigSamplerWriter: ConfigWriter[TracingConfig.Sampler] =
-        deriveWriter[TracingConfig.Sampler]
-      implicit val tracingConfigBatchSpanProcessorWriter
-          : ConfigWriter[TracingConfig.BatchSpanProcessor] =
-        deriveWriter[TracingConfig.BatchSpanProcessor]
-      implicit val tracingConfigTracerWriter: ConfigWriter[TracingConfig.Tracer] =
-        deriveWriter[TracingConfig.Tracer]
+    implicit val tracingConfigDisabledSpanExporterWriter
+        : ConfigWriter[TracingConfig.Exporter.Disabled.type] =
+      deriveWriter[TracingConfig.Exporter.Disabled.type]
+    @nowarn("cat=deprecation")
+    implicit val tracingConfigZipkinSpanExporterWriter
+        : ConfigWriter[TracingConfig.Exporter.Zipkin] =
+      deriveWriter[TracingConfig.Exporter.Zipkin]
+    implicit val tracingConfigOtlpSpanExporterWriter: ConfigWriter[TracingConfig.Exporter.Otlp] =
+      deriveWriter[TracingConfig.Exporter.Otlp]
+    implicit val tracingConfigSpanExporterWriter: ConfigWriter[TracingConfig.Exporter] =
+      deriveWriter[TracingConfig.Exporter]
+    implicit val tracingConfigAlwaysOnSamplerWriter: ConfigWriter[TracingConfig.Sampler.AlwaysOn] =
+      deriveWriter[TracingConfig.Sampler.AlwaysOn]
+    implicit val tracingConfigAlwaysOffSamplerWriter
+        : ConfigWriter[TracingConfig.Sampler.AlwaysOff] =
+      deriveWriter[TracingConfig.Sampler.AlwaysOff]
+    implicit val tracingConfigTraceIdRatioSamplerWriter
+        : ConfigWriter[TracingConfig.Sampler.TraceIdRatio] =
+      deriveWriter[TracingConfig.Sampler.TraceIdRatio]
+    implicit val tracingConfigSamplerWriter: ConfigWriter[TracingConfig.Sampler] =
+      deriveWriter[TracingConfig.Sampler]
+    implicit val tracingConfigBatchSpanProcessorWriter
+        : ConfigWriter[TracingConfig.BatchSpanProcessor] =
+      deriveWriter[TracingConfig.BatchSpanProcessor]
+    implicit val tracingConfigTracerWriter: ConfigWriter[TracingConfig.Tracer] =
+      deriveWriter[TracingConfig.Tracer]
 
-      implicit val tracingConfigWriter: ConfigWriter[TracingConfig] =
-        deriveWriter[TracingConfig]
-      implicit val deadlockDetectionConfigWriter: ConfigWriter[DeadlockDetectionConfig] =
-        deriveWriter[DeadlockDetectionConfig]
-      implicit val metricsFilterConfigWriter: ConfigWriter[MetricsFilterConfig] =
-        deriveWriter[MetricsFilterConfig]
-      implicit val metricsConfigPrometheusWriter: ConfigWriter[MetricsReporterConfig.Prometheus] =
-        deriveWriter[MetricsReporterConfig.Prometheus]
-      implicit val metricsConfigCsvWriter: ConfigWriter[MetricsReporterConfig.Csv] =
-        deriveWriter[MetricsReporterConfig.Csv]
-      implicit val metricsConfigLoggingWriter: ConfigWriter[MetricsReporterConfig.Logging] =
-        deriveWriter[MetricsReporterConfig.Logging]
-      implicit val metricsConfigJvmMetricsWriter: ConfigWriter[MetricsConfig.JvmMetrics] =
-        deriveWriter[MetricsConfig.JvmMetrics]
-      implicit val metricsReporterConfigWriter: ConfigWriter[MetricsReporterConfig] =
-        deriveWriter[MetricsReporterConfig]
-      implicit val histogramBucketConfigWriter: ConfigWriter[HistogramDefinition.Buckets] =
-        deriveWriter[HistogramDefinition.Buckets]
-      implicit val histogramExponentialConfigWriter: ConfigWriter[HistogramDefinition.Exponential] =
-        deriveWriter[HistogramDefinition.Exponential]
-      implicit val histogramAggregationTypeConfigWriter
-          : ConfigWriter[HistogramDefinition.AggregationType] =
-        deriveWriter[HistogramDefinition.AggregationType]
-      implicit val histogramDefinitionConfigWriter: ConfigWriter[HistogramDefinition] =
-        deriveWriter[HistogramDefinition]
-      implicit val metricQualificationConfigWriter: ConfigWriter[MetricQualification] =
-        ConfigWriter.toString[MetricQualification] {
-          case MetricQualification.Debug => "debug"
-          case MetricQualification.Errors => "errors"
-          case MetricQualification.Saturation => "saturation"
-          case MetricQualification.Traffic => "traffic"
-          case MetricQualification.Latency => "latency"
-        }
-      implicit val metricsConfigWriter: ConfigWriter[MetricsConfig] =
-        deriveWriter[MetricsConfig]
-
-      implicit val apiLoggingConfigWriter: ConfigWriter[ApiLoggingConfig] =
-        deriveWriter[ApiLoggingConfig]
-      lazy implicit val loggingConfigWriter: ConfigWriter[LoggingConfig] = {
-        implicit val gcLoggingConfigWriter: ConfigWriter[GCLoggingConfig] =
-          deriveWriter[GCLoggingConfig]
-        deriveWriter[LoggingConfig]
+    implicit val tracingConfigWriter: ConfigWriter[TracingConfig] =
+      deriveWriter[TracingConfig]
+    implicit val deadlockDetectionConfigWriter: ConfigWriter[DeadlockDetectionConfig] =
+      deriveWriter[DeadlockDetectionConfig]
+    implicit val metricsFilterConfigWriter: ConfigWriter[MetricsFilterConfig] =
+      deriveWriter[MetricsFilterConfig]
+    implicit val metricsConfigPrometheusWriter: ConfigWriter[MetricsReporterConfig.Prometheus] =
+      deriveWriter[MetricsReporterConfig.Prometheus]
+    implicit val metricsConfigCsvWriter: ConfigWriter[MetricsReporterConfig.Csv] =
+      deriveWriter[MetricsReporterConfig.Csv]
+    implicit val metricsConfigLoggingWriter: ConfigWriter[MetricsReporterConfig.Logging] =
+      deriveWriter[MetricsReporterConfig.Logging]
+    implicit val metricsConfigJvmMetricsWriter: ConfigWriter[MetricsConfig.JvmMetrics] =
+      deriveWriter[MetricsConfig.JvmMetrics]
+    implicit val metricsReporterConfigWriter: ConfigWriter[MetricsReporterConfig] =
+      deriveWriter[MetricsReporterConfig]
+    implicit val histogramBucketConfigWriter: ConfigWriter[HistogramDefinition.Buckets] =
+      deriveWriter[HistogramDefinition.Buckets]
+    implicit val histogramExponentialConfigWriter: ConfigWriter[HistogramDefinition.Exponential] =
+      deriveWriter[HistogramDefinition.Exponential]
+    implicit val histogramAggregationTypeConfigWriter
+        : ConfigWriter[HistogramDefinition.AggregationType] =
+      deriveWriter[HistogramDefinition.AggregationType]
+    implicit val histogramDefinitionConfigWriter: ConfigWriter[HistogramDefinition] =
+      deriveWriter[HistogramDefinition]
+    implicit val metricQualificationConfigWriter: ConfigWriter[MetricQualification] =
+      ConfigWriter.toString[MetricQualification] {
+        case MetricQualification.Debug => "debug"
+        case MetricQualification.Errors => "errors"
+        case MetricQualification.Saturation => "saturation"
+        case MetricQualification.Traffic => "traffic"
+        case MetricQualification.Latency => "latency"
       }
-      deriveWriter[MonitoringConfig]
+    implicit val metricsConfigWriter: ConfigWriter[MetricsConfig] =
+      deriveWriter[MetricsConfig]
+
+    implicit val apiLoggingConfigWriter: ConfigWriter[ApiLoggingConfig] =
+      deriveWriter[ApiLoggingConfig]
+    lazy implicit val loggingConfigWriter: ConfigWriter[LoggingConfig] = {
+      implicit val gcLoggingConfigWriter: ConfigWriter[GCLoggingConfig] =
+        deriveWriter[GCLoggingConfig]
+      deriveWriter[LoggingConfig]
     }
+
+    lazy implicit final val monitoringConfigWriter: ConfigWriter[MonitoringConfig] =
+      deriveWriter[MonitoringConfig]
 
     import Crypto.*
     lazy implicit final val sessionSigningKeysConfigWriter: ConfigWriter[SessionSigningKeysConfig] =

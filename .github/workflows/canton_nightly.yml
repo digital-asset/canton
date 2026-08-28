@@ -100,6 +100,7 @@ jobs:
     with:
       override_java_version_for_tests: "17"
       protocol_version: ""
+      job_name: test_with_java17
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_protocol_version_34:
@@ -110,6 +111,7 @@ jobs:
     with:
       override_java_version_for_tests: ""
       protocol_version: "34"
+      job_name: test_protocol_version_34
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   ledger_api_compatibility_tests:

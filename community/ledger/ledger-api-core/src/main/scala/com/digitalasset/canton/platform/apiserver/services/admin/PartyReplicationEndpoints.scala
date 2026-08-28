@@ -19,7 +19,7 @@ import scala.concurrent.Future
   */
 trait PartyReplicationEndpoints {
 
-  /** Obtain online party replication status of an earlier [[addPartyWithAcs]] call */
+  /** Obtain online party replication status */
   def getAddPartyStatus(request: GetAddPartyStatusRequest): Future[GetAddPartyStatusResponse]
 
   /** Generates a PartyToParticipant topology update transaction.

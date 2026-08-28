@@ -39,6 +39,7 @@ import com.digitalasset.canton.tracing.Traced
 import com.digitalasset.canton.version.*
 import com.google.protobuf.ByteString
 
+import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
 
 object Availability {
@@ -311,6 +312,12 @@ object Availability {
     ) extends LocalOutputFetch
 
     final case class FetchedBatchStored(batchId: BatchId) extends LocalOutputFetch
+
+    final case class PickedRecipientsForFetch(
+        chosenRecipients: Seq[BftNodeId],
+        batchId: BatchId,
+        instantWhenDidRequest: Instant,
+    ) extends LocalOutputFetch
   }
 
   object RemoteOutputFetch {

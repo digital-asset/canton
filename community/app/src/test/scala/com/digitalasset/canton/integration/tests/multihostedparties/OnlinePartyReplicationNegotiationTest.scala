@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.daml.ledger.api.v2.event.Event.Event.{Created, Exercised}
 import com.daml.ledger.api.v2.event.{CreatedEvent, Event}
 import com.daml.ledger.api.v2.state_service.ParticipantPermission as LapiParticipantPermission
@@ -229,7 +230,6 @@ sealed trait OnlinePartyReplicationNegotiationTest
           )
         )
       }
-
       val addPartyRequestId =
         clue("Initiate add party async")(
           targetParticipant.parties.add_party_async(
@@ -319,16 +319,32 @@ sealed trait OnlinePartyReplicationNegotiationTest
       // Clearing the onboarding flag takes up to max-decision-timeout (initial value of 60s),
       // so wait at least 1 minute.
       eventually(timeUntilSuccess = 2.minutes) {
-        val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
-          addPartyRequestId = addPartyRequestId
-        )
-        val spStatus = sourceParticipant.ledger_api.parties.get_add_party_status(
-          addPartyRequestId = addPartyRequestId
-        )
+        val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
+        val spStatus = sourceParticipant.parties.get_add_party_status(addPartyRequestId)
+
         logger.info(s"TP status: $tpStatus")
         logger.info(s"SP status: $spStatus")
         assert(tpStatus.hasCompleted, "Target participant must complete")
         assert(spStatus.hasCompleted, "Source participant must complete")
+
+        val tpLapiStatus = targetParticipant.ledger_api.parties.get_add_party_status(
+          alice,
+          daId,
+          targetParticipant.id,
+        )
+        val spLapiStatus = sourceParticipant.ledger_api.parties.get_add_party_status(
+          alice,
+          daId,
+          targetParticipant.id,
+        )
+        assert(
+          tpLapiStatus.state == LapiPartyReplicationStatus.State.STATE_COMPLETED,
+          "LAPI TP must be completed",
+        )
+        assert(
+          spLapiStatus.state == LapiPartyReplicationStatus.State.STATE_COMPLETED,
+          "LAPI SP must be completed",
+        )
       }
 
       // Ensure both SP and TP first publish the Onboarding topology event followed by Added.

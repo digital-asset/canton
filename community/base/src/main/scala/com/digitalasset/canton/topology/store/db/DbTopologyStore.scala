@@ -54,7 +54,7 @@ import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, TransactionIsolation}
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.collection.immutable
+import scala.collection.{immutable, mutable}
 import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
 
@@ -584,9 +584,11 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         sql" OR "
       ) ++ sql")"
 
+    // a mutable non-synchronized collection works here, because the query below is executed sequentially
+    val partiesFoundSoFar = new mutable.LinkedHashSet[PartyId]
+
     def inspectKnownPartiesRec(
-        idOffset: Option[Long],
-        partiesFoundSoFar: Vector[PartyId],
+        idOffset: Option[Long]
     ): FutureUnlessShutdown[Set[PartyId]] = {
       val query = buildQueryForTransactionsWithId[QueryResult](
         selectFields = TxEntryWithIdFields,
@@ -596,6 +598,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         orderBy = " order by id ",
         includeRejected = false,
       )
+
       storage.query(query, operationName = functionFullName).flatMap { rows =>
         val mappings = rows.map { case (_, (tx, _, _, _, _)) => tx.mapping }
         val parties = TopologyStore.determineValidParties(
@@ -604,29 +607,28 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
           filterParticipant = filterParticipant,
           limit = limit,
         )
-        val result = (partiesFoundSoFar ++ parties).distinct
+        partiesFoundSoFar.addAll(parties)
         // no need to recurse, if
         // * enough parties have been found
         // * the current query didn't yield any results
         // * the current query didn't fill the batch size, therefore there are no more results
         if (
-          result.sizeIs >= limit || rows.isEmpty || rows.sizeIs < batchingConfig.maxItemsInBatch.value
+          partiesFoundSoFar.sizeIs >= limit || rows.isEmpty || rows.sizeIs < batchingConfig.maxItemsInBatch.value
         ) {
           // only converting to a Set with the final result, to return the parties as they are found in id-order.
           // additionally, since we could have fetched more parties, we need to respect the user provided limit.
-          FutureUnlessShutdown.pure(result.distinct.take(limit).toSet)
+          FutureUnlessShutdown.pure(partiesFoundSoFar.iterator.take(limit).toSet)
         } else {
           // the results are ordered by id, so we can just take the last instead of the max
           val highestIdFound = rows.lastOption.map { case (id, _) => id }
           inspectKnownPartiesRec(
-            highestIdFound,
-            result,
+            highestIdFound
           )
         }
       }
     }
 
-    inspectKnownPartiesRec(None, Vector.empty)
+    inspectKnownPartiesRec(None)
   }
 
   override def findPositiveTransactions(

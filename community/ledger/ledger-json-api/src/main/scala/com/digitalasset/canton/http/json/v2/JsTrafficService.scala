@@ -6,6 +6,7 @@ package com.digitalasset.canton.http.json.v2
 import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput}
+import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.JsCantonError
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
@@ -13,6 +14,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -46,6 +49,10 @@ class JsTrafficService(
         JsTrafficService.updateAccountEndpoint,
         updateAccount,
       ),
+      withServerLogic(
+        JsTrafficService.pruneEventsEndpoint,
+        pruneEvents,
+      ),
     )
 
   private def getAccount(
@@ -64,6 +71,16 @@ class JsTrafficService(
       implicit val tc: TraceContext = callerContext.traceContext()
       trafficServiceClient(callerContext.token())
         .updateAccount(req.in)
+        .resultToRight
+  }
+
+  private def pruneEvents(
+      callerContext: CallerContext
+  ): TracedInput[PruneEventsRequest] => Future[Either[JsCantonError, PruneEventsResponse]] = {
+    req =>
+      implicit val tc: TraceContext = callerContext.traceContext()
+      trafficServiceClient(callerContext.token())
+        .pruneEvents(req.in)
         .resultToRight
   }
 
@@ -98,11 +115,22 @@ object JsTrafficService extends DocumentationEndpoints {
       // TODO(#33681): Use the regular proto-ref
       .description("Update the traffic account state for the given account ID.")
 
+  private val pruneEventsEndpoint =
+    traffic.post
+      .in("events" / "prune")
+      .in(jsonBody[PruneEventsRequest])
+      .out(jsonBody[PruneEventsResponse])
+      // TODO(#33681): Use the regular proto-ref
+      .description(
+        "Prune traffic events from the traffic enforcement service. This is an admin-only operation."
+      )
+
   // TODO(#33681): Not wired in the static documentation endpoints yet
   //               because the service is not yet stable and it's disabled by default
   override def documentation: Seq[AnyEndpoint] = List(
     getAccountEndpoint,
     updateAccountEndpoint,
+    pruneEventsEndpoint,
   )
 }
 
@@ -112,4 +140,6 @@ object JsTrafficServiceCodecs {
   implicit val getAccountResponseRW: Codec[GetAccountResponse] = deriveRelaxedCodec
   implicit val updateAccountRequestRW: Codec[UpdateAccountRequest] = deriveRelaxedCodec
   implicit val updateAccountResponseRW: Codec[UpdateAccountResponse] = deriveRelaxedCodec
+  implicit val pruneEventsRequestRW: Codec[PruneEventsRequest] = deriveRelaxedCodec
+  implicit val pruneEventsResponseRW: Codec[PruneEventsResponse] = deriveRelaxedCodec
 }

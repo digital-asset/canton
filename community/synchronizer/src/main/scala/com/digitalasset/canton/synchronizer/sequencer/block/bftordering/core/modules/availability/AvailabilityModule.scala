@@ -50,6 +50,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.{
   LocalDissemination,
+  LocalOutputFetch,
   RemoteProtocolMessage,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.AvailabilityModuleDependencies
@@ -79,7 +80,11 @@ import scala.concurrent.duration.*
 import scala.jdk.DurationConverters.*
 import scala.util.{Failure, Random, Success, Try}
 
-import AvailabilityModuleMetrics.{emitDisseminationStateStats, emitInvalidMessage}
+import AvailabilityModuleMetrics.{
+  emitDisseminationStateStats,
+  emitInvalidMessage,
+  emitOutputFetchLatency,
+}
 
 /** Trantor-inspired availability implementation.
   *
@@ -1239,6 +1244,13 @@ final class AvailabilityModule[E <: Env[E]](
             )
             return
         }
+        nodesThatTimedOut.foreach { nodeThatTimedOut =>
+          MetricsContext.withExtraMetricLabels(
+            metrics.availability.outputFetch.labels.From -> nodeThatTimedOut
+          ) { implicit mc =>
+            metrics.availability.outputFetch.timeouts.mark()
+          }
+        }
         val (firstChoiceRecipientsPool, secondChoiceRecipientsPool) =
           computePossibleFetchRequestRecipients(status.orderingMode, status.originalProof.acks)
         val logMessage =
@@ -1265,6 +1277,30 @@ final class AvailabilityModule[E <: Env[E]](
           epochNumber,
           missingBatchStatus.calculateTimeout(),
           nodesThatTimedOut,
+        )
+      case LocalOutputFetch.PickedRecipientsForFetch(
+            chosenRecipients,
+            batchId,
+            instantWhenDidRequest,
+          ) =>
+        val status = outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
+          case Some(value) => value
+          case None =>
+            logger.debug(
+              s"$messageType: picked recipients to send request for batch $batchId that is not missing anymore, ignoring"
+            )
+            return
+        }
+        // we only add each node once, so if we already requested we keep the older time
+        val newEntries = chosenRecipients
+          .filter(!status.firstTimeWeMadeRequest.contains(_))
+          .map(_ -> instantWhenDidRequest)
+          .toMap
+        outputFetchProtocolState.localOutputMissingBatches.update(
+          batchId,
+          status.copy(
+            firstTimeWeMadeRequest = status.firstTimeWeMadeRequest ++ newEntries
+          ),
         )
 
       // This message is only used for tests
@@ -1336,14 +1372,24 @@ final class AvailabilityModule[E <: Env[E]](
     val batchId = message.batchId
 
     outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
-      case Some(_) =>
+      case Some(missingBatchStatus) =>
         val batch = message.batch
         val from = message.from
+        val timeWeReceivedResponse = Instant.now()
         validateRemotelyFetchedBatch(batchId, batch, from).fold(
           _(), // Call log action if validation fails
           _ => {
             logger.debug(s"$messageType: received $batchId, persisting it")
             outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
+            missingBatchStatus.firstTimeWeMadeRequest.get(from).foreach {
+              timeWeMadeRequestToThisNode =>
+                emitOutputFetchLatency(
+                  metrics,
+                  from,
+                  timeWeMadeRequestToThisNode,
+                  timeWeReceivedResponse,
+                )
+            }
             pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
               case Failure(exception) =>
                 abort(s"Failed to add batch $batchId", exception)
@@ -1387,6 +1433,7 @@ final class AvailabilityModule[E <: Env[E]](
       numberOfAttempts = 1,
       jitterStream = jitterConstructor(config, random),
       orderingMode,
+      firstTimeWeMadeRequest = Map.empty,
     )
     outputFetchProtocolState.localOutputMissingBatches.update(
       proofOfAvailability.batchId,
@@ -1491,13 +1538,18 @@ final class AvailabilityModule[E <: Env[E]](
       return
     }
 
+    val timeWhenDoingRequest = Instant.now()
     sendToRandomAuthenticatedWithWorkflowBlacklisting(
       Availability.RemoteOutputFetch.FetchRemoteBatchData
         .create(batchId, epochNumber, from = thisNode),
       firstChoiceRecipientsPool,
       secondChoiceRecipientsPool,
       nodesThatTimedOut,
-      onRecipientsDecision = Some(chosenRecipients =>
+      onRecipientsDecision = Some { chosenRecipients =>
+        context.self.asyncSend(
+          Availability.LocalOutputFetch
+            .PickedRecipientsForFetch(chosenRecipients, batchId, timeWhenDoingRequest)
+        )
         context
           .delayedEvent(
             timeout,
@@ -1505,7 +1557,7 @@ final class AvailabilityModule[E <: Env[E]](
               .FetchRemoteBatchDataTimeout(chosenRecipients, batchId, epochNumber, timeout),
           )
           .discard
-      ),
+      },
       howManyRecipients = config.outputFetchHowManyRecipients,
     )
   }

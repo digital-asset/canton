@@ -105,11 +105,14 @@ import com.digitalasset.canton.networking.grpc.{
   GrpcError,
   RecordingStreamObserver,
 }
-import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.tea.v1.{GetAccountResponse, UpdateAccountResponse}
+import com.digitalasset.canton.tea.v1.{
+  GetAccountResponse,
+  PruneEventsResponse,
+  UpdateAccountResponse,
+}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{
@@ -2294,18 +2297,34 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         )
       }
 
-      // TODO(#35159): Revise command description
-      @Help.Summary("Obtain status on a pending `add_party_with_acs` call", FeatureFlag.Preview)
+      @Help.Summary(
+        "Query the status of an ongoing party replication",
+        FeatureFlag.Preview,
+      )
       @Help.Description(
-        """Retrieve status information on a party previously added via the `add_party_with_acs`
-          |endpoint by specifying the previously returned `addPartyRequestId` parameter.
+        """Query the status of an ongoing party replication with information about progress,
+          |completion, or errors.
+          |
+          |Parameters:
+          |- partyId: The party replicating to the target participant.
+          |- synchronizerId: The synchronizer in which the party is being replicated.
+          |- targetParticipantId: The unique identifier of the target participant where
+          |  the party is replicating to.
           """
       )
-      def get_add_party_status(addPartyRequestId: String): PartyReplicationStatus =
+      def get_add_party_status(
+          partyId: PartyId,
+          synchronizerId: SynchronizerId,
+          targetParticipantId: ParticipantId,
+      ): com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus =
         check(FeatureFlag.Preview) {
           consoleEnvironment.run {
             ledgerApiCommand(
-              LedgerApiCommands.PartyManagementAlphaService.GetAddPartyStatus(addPartyRequestId)
+              LedgerApiCommands.PartyManagementAlphaService.GetAddPartyStatus(
+                partyId,
+                synchronizerId,
+                targetParticipantId,
+              )
             )
           }
         }
@@ -3690,14 +3709,14 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
     @Help.Summary("Participant user traffic service")
     @Help.Group("Traffic")
     object traffic extends Helpful {
-      @Help.Summary("Get account details", FeatureFlag.Testing)
+      @Help.Summary("Get account details", FeatureFlag.Stable)
       @Help.Description("Get the details for the specified account-id")
       def get_account(accountId: String): GetAccountResponse =
         consoleEnvironment.run {
           ledgerApiCommand(LedgerApiCommands.Traffic.GetAccount(accountId))
         }
 
-      @Help.Summary("Update details for the account-id", FeatureFlag.Testing)
+      @Help.Summary("Update details for the account-id", FeatureFlag.Stable)
       @Help.Description(
         """Update the account details (by adding the balance delta) for the specified account-id.
           |If unset, the balance will not be updated
@@ -3713,6 +3732,26 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       ): UpdateAccountResponse = consoleEnvironment.run {
         ledgerApiCommand(
           LedgerApiCommands.Traffic.UpdateAccount(accountId, balanceDelta, deduplicationId)
+        )
+      }
+
+      @Help.Summary("Prune events before or at the given timestamp", FeatureFlag.Stable)
+      @Help.Description(
+        """Prune events before or at the given timestamp.
+          |This command will delete all events that have a record time before or at the given
+          |timestamp. This is useful for cleaning up old events and reducing the size of the
+          |event store.
+          |
+          |WARNING:
+          |- This operation is irreversible and should be used with caution.
+          |- Affects de-duplication. If an event is pruned, de-duplication UpdateAccount
+          |  requests on it will NOT be possible."""
+      )
+      def prune_events(
+          beforeOrAt: CantonTimestamp
+      ): PruneEventsResponse = consoleEnvironment.run {
+        ledgerApiCommand(
+          LedgerApiCommands.Traffic.PruneEvents(beforeOrAt)
         )
       }
     }

@@ -8,10 +8,10 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsAddActivationsParams,
   AchsLastPointers,
-  AchsRemoveDeactivatedParams,
   AchsState,
 }
 import com.digitalasset.canton.platform.store.backend.{EventStorageBackend, ParameterStorageBackend}
@@ -143,12 +143,6 @@ object AchsMaintenancePipe {
     )
   }
 
-  /** Represents a range of event sequential ids. */
-  final case class EventSeqIdRange(
-      startExclusive: Long,
-      endInclusive: Long,
-  )
-
   /** Represents a concrete range of event sequential ids for population and removal. */
   final case class AchsWorkRange(
       activationsPopulation: EventSeqIdRange,
@@ -207,11 +201,11 @@ object AchsMaintenancePipe {
   ): (AchsWorkRange, AchsState) = {
     val workRange = AchsWorkRange(
       activationsPopulation = EventSeqIdRange(
-        startExclusive = state.lastPointers.lastPopulated,
+        startInclusive = state.lastPointers.lastPopulated + 1L,
         endInclusive = state.lastPointers.lastPopulated + work.populate,
       ),
       deactivatedRemoval = EventSeqIdRange(
-        startExclusive = state.lastPointers.lastRemoved,
+        startInclusive = state.lastPointers.lastRemoved + 1L,
         endInclusive = state.lastPointers.lastRemoved + work.remove,
       ),
     )
@@ -295,18 +289,20 @@ object AchsMaintenancePipe {
       new LoggingContextWithTrace(LoggingEntries.empty, traceContext)
 
     val endInclusive = workRange.activationsPopulation.endInclusive
-    val startExclusive = workRange.activationsPopulation.startExclusive
+    val startInclusive = workRange.activationsPopulation.startInclusive
     // the populations should be active at the latest validAt which is the end of the deactivated removal range
     val activeAt = workRange.deactivatedRemoval.endInclusive
 
-    if (endInclusive > startExclusive) {
+    if (endInclusive >= startInclusive) {
       logger.debug(
-        s"Adding activations to ACHS in range ($startExclusive, $endInclusive] active at $activeAt."
+        s"Adding activations to ACHS in range [$startInclusive, $endInclusive] active at $activeAt."
       )
       persistActivationsF(
         AchsAddActivationsParams(
-          startExclusive = startExclusive,
-          endInclusive = endInclusive,
+          range = EventSeqIdRange(
+            startInclusive = startInclusive,
+            endInclusive = endInclusive,
+          ),
           activeAt = activeAt,
         )
       )(loggingContextWithTrace)
@@ -318,28 +314,28 @@ object AchsMaintenancePipe {
     * removing them.
     */
   private[platform] def removeDeactivatedFromAchs(
-      removeDeactivatedF: AchsRemoveDeactivatedParams => LoggingContextWithTrace => Future[Unit],
+      removeDeactivatedF: EventSeqIdRange => LoggingContextWithTrace => Future[Unit],
       executionContext: ExecutionContext,
       logger: TracedLogger,
   )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
     val endInclusive = workRange.deactivatedRemoval.endInclusive
-    val startExclusive = workRange.deactivatedRemoval.startExclusive
+    val startInclusive = workRange.deactivatedRemoval.startInclusive
     val populationEnd = workRange.activationsPopulation.endInclusive
 
     if (populationEnd <= 0L) {
       logger.debug(
-        s"Skipping ACHS removal as no population has been assigned up to this point (populationEnd=$populationEnd, removalStart=$startExclusive, removalEnd=$endInclusive)."
+        s"Skipping ACHS removal as no population has been assigned up to this point (populationEnd=$populationEnd, removalStart=$startInclusive, removalEnd=$endInclusive)."
       )
       Future.unit
-    } else if (endInclusive > startExclusive) {
+    } else if (endInclusive >= startInclusive) {
       val loggingContextWithTrace: LoggingContextWithTrace =
         new LoggingContextWithTrace(LoggingEntries.empty, traceContext)
       logger.debug(
-        s"Removing deactivated entries from ACHS in range ($startExclusive, $endInclusive]."
+        s"Removing deactivated entries from ACHS in range [$startInclusive, $endInclusive]."
       )
       removeDeactivatedF(
-        AchsRemoveDeactivatedParams(
-          startExclusive = startExclusive,
+        EventSeqIdRange(
+          startInclusive = startInclusive,
           endInclusive = endInclusive,
         )
       )(loggingContextWithTrace)

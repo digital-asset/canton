@@ -14,7 +14,7 @@ import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSu
 import com.digitalasset.canton.LfValue
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides.createTimestampsOverrideWithDefaultOffset
-import com.digitalasset.canton.crypto.{CryptoPureApi, SecureRandomness}
+import com.digitalasset.canton.crypto.{CryptoPureApi, SecureRandomness, SigningKeyUsage}
 import com.digitalasset.canton.damltests.java.explicitdisclosure.PriceQuotation
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
@@ -730,14 +730,23 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
               .currentSnapshotApproximation
               .futureValueUS
 
+            val submittingParticipantSignature = crypto
+              .sign(
+                newLtvt.rootHash.unwrap,
+                SigningKeyUsage.ProtocolOnly,
+                createTimestampsOverrideWithDefaultOffset(
+                  clock
+                ), // re-sign with new timestamps; does not affect the test
+              )
+              .valueOrFail("sign root hash")
+              .futureValueUS
+
             val newMessage = EncryptedViewMessageFactory
               .encryptView(TransactionViewType)(
                 newLtvt,
                 (viewKey, message.viewEncryptionKeyRandomness),
+                submittingParticipantSignature,
                 crypto,
-                createTimestampsOverrideWithDefaultOffset(
-                  clock
-                ), // re-sign with new timestamps; does not affect the test
                 testedProtocolVersion,
               )
               .valueOrFail("create new envelope")

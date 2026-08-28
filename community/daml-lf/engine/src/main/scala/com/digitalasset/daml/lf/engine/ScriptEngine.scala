@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package engine
 
-import com.digitalasset.daml.lf.data.Ref.Identifier
+import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFound}
@@ -177,5 +177,7 @@ object ScriptEngine {
         if (ref == LfDefRef(unsafeCoerceName))
           Some(SDefinition(SEMakeClo(ArraySeq.empty, 1, SELocA(0))))
         else compiledPackages.getDefinition(ref)
+      override def getPackageDependencies(pkgId: PackageId): Option[Set[PackageId]] =
+        compiledPackages.getPackageDependencies(pkgId)
     }
 }

@@ -8,9 +8,11 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.tea.projection.{
   AccountId,
   EventId,
@@ -21,6 +23,8 @@ import com.digitalasset.canton.tea.projection.{
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -110,5 +114,27 @@ class TrafficEnforcementService(
       case None =>
         FutureUnlessShutdown.pure(Right(UpdateAccountResponse(None)))
     }
+  }
+
+  def pruneEvents(request: PruneEventsRequest)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Either[RpcError, PruneEventsResponse]] = {
+
+    val result: EitherT[FutureUnlessShutdown, RpcError, PruneEventsResponse] = for {
+      ts <- EitherT.fromEither[FutureUnlessShutdown](
+        ProtoConverter
+          .parseRequired(
+            CantonTimestamp.fromProtoTimestamp,
+            "before_or_at",
+            request.beforeOrAt,
+          )
+          .leftMap(ProtoDeserializationFailure.Wrap(_))
+      )
+      pruneResult <- store.pruneEvents(ts).leftWiden[RpcError]
+    } yield {
+      PruneEventsResponse(pruneResult)
+    }
+
+    result.value
   }
 }

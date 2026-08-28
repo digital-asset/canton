@@ -104,7 +104,7 @@ def get_ci_job_name() -> str:
     if is_circle_ci():
         return os.environ.get("CIRCLE_JOB", "unknown")
     if is_github_actions_ci():
-        return os.environ.get("GITHUB_JOB", "unknown")
+        return os.environ.get("CANTON_CI_JOB_NAME") or os.environ.get("GITHUB_JOB", "unknown")
     return os.environ.get("CIRCLE_JOB", "unknown")
 
 

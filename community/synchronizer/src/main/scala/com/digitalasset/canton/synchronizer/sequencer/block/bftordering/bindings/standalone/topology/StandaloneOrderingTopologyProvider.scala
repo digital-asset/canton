@@ -31,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingTopology,
   SequencingParameters,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.DelayUtil
 import com.digitalasset.canton.version.ProtocolVersion
@@ -103,9 +104,10 @@ class StandaloneOrderingTopologyProvider(
       DynamicSynchronizerParameters.defaultMaxRequestSize.value,
       ConventionalBootstrapTopologyActivationTime,
       areTherePendingCantonTopologyChanges = Option.when(activationTime.isDefined)(
-        standaloneConfig.pendingTopologyChangesProbability.fold(false)(prob =>
-          checkPendingChanges && prob.flipCoin(rng)
-        )
+        standaloneConfig.testSlowdown
+          .flatMap(_.topologyDelay)
+          .flatMap(_.pendingTopologyChangesProbability)
+          .fold(false)(prob => checkPendingChanges && Probability(prob).flipCoin(rng))
       ),
     )
   }
@@ -116,7 +118,9 @@ class StandaloneOrderingTopologyProvider(
   )(implicit
       traceContext: TraceContext
   ): PekkoEnv#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[PekkoEnv])]] =
-    standaloneConfig.getOrderingTopologyDelay
+    standaloneConfig.testSlowdown
+      .flatMap(_.topologyDelay)
+      .flatMap(_.getOrderingTopologyDelay)
       .fold[PekkoEnv#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[PekkoEnv])]]](
         PekkoFutureUnlessShutdown.pure(
           Some(

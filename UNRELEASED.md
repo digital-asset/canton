@@ -18,37 +18,9 @@ Re-implemented the Sequencer Aggregator to be more resilient to misbehaving sequ
 One of the improvements allows the aggregator to detect sequencers that provide an incorrect event after that event has already reached consensus with sufficiently many other sequencers. A cache of past processed events is kept for that purpose, whose size is controlled by the `sequencer-client.past-events-cache-size` configuration option (default: 1000).
 
 ### Traffic Enforcement App
-- Added `reject-multi-party-submissions` to the participant's traffic enforcement configuration.
-  Multi-party submissions normally bypass traffic enforcement, since TEA accounts are bound to a
-  single party. Setting this to `true` rejects them instead. Disabled by default.
-
-  ```
-  canton.participants.participant1.traffic-enforcement {
-    enabled = true
-    reject-multi-party-submissions = true
-  }
-  ```
-- Added `allow-submissions-on-degradation` to the participant's traffic enforcement
-  configuration. When the balance can't be determined, for example during a database outage, this
-  lets the submission proceed unchecked instead of failing it, logged at WARN. The submission is
-  still charged, so an account without enough traffic ends up with a negative balance until it is
-  topped up. Does not apply when the traffic service itself refuses the request. Disabled by
-  default.
-- Added `database-query-timeout` (default 1 second) and `account-lookup-timeout` (default 20
-  seconds) to the internal traffic enforcement server's configuration, bounding the database read
-  behind `GetAccount` and the overall call respectively. The former must be at least one
-  millisecond and the latter must be strictly larger so a timed-out query still leaves room for a retry.
-
-  ```
-  canton.participants.participant1.traffic-enforcement {
-    enabled = true
-    allow-submissions-on-degradation = true
-    traffic-enforcement-server {
-      database-query-timeout = "1s"
-      account-lookup-timeout = "20s"
-    }
-  }
-  ```
+- Add admin endpoint to prune events from the traffic enforcement event table - `PruneEvents`.
+  This is used to keep the event table from growing indefinitely. This does not affect the account balance.
+  WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
 
 ### Synchronizer Limits
 
@@ -191,6 +163,10 @@ The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, 
 - *BREAKING*: Updated the list of default cipher suites according to the current OWASP recommendations.
 - getLedgerEnd endpoint in StateService can now return latest observed record time for the requested synchronizers along with ledger end offset.
 - Participant health state now includes indexer as a soft dependency. Indexer health state will be present in readiness endpoint response, but it won't influece response code.
+- CantonBFT: fixed an issue with the P2P grpc connection channel to ensure it closes properly during shutdown.
+- CantonBFT: added metrics about how much time batch fetches take and to count batch fetch timeouts,
+  in both cases labelled by counterparty node.
+- Removed redundant root-hash signature from informee and encrypted view messages.
 
 The list of removed suites:
   - `TLS_DHE_RSA_WITH_AES_256_GCM_SHA384`

@@ -171,7 +171,7 @@ private[lf] final class ConcurrentCompiledPackages(compilerConfig: Compiler.Conf
     packageDeps.clear()
   }
 
-  def getPackageDependencies(pkgId: PackageId): Option[Set[PackageId]] =
+  override def getPackageDependencies(pkgId: PackageId): Option[Set[PackageId]] =
     packageDeps.get(pkgId)
 }
 

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.digitalasset.canton.BaseTest.CantonLfV21
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference, ParticipantReference}
@@ -279,9 +280,16 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
     // Wait until the party is authorized for onboarding on the TP, before archiving replicated contracts.
     canSourceProceedWithOnPR = false
     eventually() {
-      val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)
+      val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
       logger.info(s"Waiting for $targetParticipant to be authorized: $tpStatus")
       tpStatus.authorizationO.nonEmpty shouldBe true
+
+      val lapiTpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
+        decentralizedParty,
+        daId,
+        targetParticipant.id,
+      )
+      lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
     }
 
     clue(s"Exercise during replication to TP ${targetParticipant.name}")(exerciseContract())

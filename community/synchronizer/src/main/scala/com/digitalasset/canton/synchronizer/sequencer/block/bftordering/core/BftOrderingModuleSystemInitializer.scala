@@ -280,6 +280,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
               stores.epochStore,
               dependencies,
               config.consensusEmptyBlockCreationTimeout,
+              config.consensusEnableFlushingSegment,
               config.viewChangeTimeoutOverride,
               loggerFactory,
               timeouts,

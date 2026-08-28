@@ -10,6 +10,8 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -34,6 +36,9 @@ final class TrafficServiceAuthorization(
 
   override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] =
     authorizer.rpc(service.updateAccount)(RequiredClaim.Admin())(request)
+
+  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
+    authorizer.rpc(service.pruneEvents)(RequiredClaim.Admin())(request)
 
   override def bindService(): ServerServiceDefinition =
     TrafficServiceGrpc.bindService(this, executionContext)

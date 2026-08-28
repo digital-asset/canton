@@ -18,10 +18,7 @@ import com.digitalasset.canton.platform.store.backend.Conversions.{
 }
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.*
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
-  AchsAddActivationsParams,
-  AchsRemoveDeactivatedParams,
-}
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.RowDef.*
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   CompositeSql,
@@ -1156,8 +1153,8 @@ abstract class EventStorageBackendTemplate(
       SELECT *
       FROM lapi_filter_activate_stakeholder filters
       WHERE
-        filters.event_sequential_id > ${params.startExclusive}
-        AND filters.event_sequential_id <= ${params.endInclusive}
+        filters.event_sequential_id >= ${params.range.startInclusive}
+        AND filters.event_sequential_id <= ${params.range.endInclusive}
         AND NOT EXISTS (
           SELECT 1
           FROM lapi_events_deactivate_contract deactivate_evs
@@ -1168,7 +1165,7 @@ abstract class EventStorageBackendTemplate(
     """.execute()(connection).discard
 
   override def removeDeactivatedFromAchs(
-      params: AchsRemoveDeactivatedParams
+      range: EventSeqIdRange
   )(connection: Connection): Unit =
     SQL"""
       DELETE FROM lapi_filter_achs_stakeholder
@@ -1177,8 +1174,8 @@ abstract class EventStorageBackendTemplate(
         FROM lapi_events_deactivate_contract deactivate_evs
         WHERE
           lapi_filter_achs_stakeholder.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
-          AND deactivate_evs.event_sequential_id <= ${params.endInclusive}
-          AND deactivate_evs.event_sequential_id > ${params.startExclusive}
+          AND deactivate_evs.event_sequential_id <= ${range.endInclusive}
+          AND deactivate_evs.event_sequential_id >= ${range.startInclusive}
       )
     """.execute()(connection).discard
 

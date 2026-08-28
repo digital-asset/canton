@@ -12,6 +12,8 @@ import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
 import com.digitalasset.canton.tea.v1.{
   GetAccountRequest,
   GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   TrafficServiceGrpc,
   UpdateAccountRequest,
   UpdateAccountResponse,
@@ -49,6 +51,15 @@ class TrafficEnforcementServiceGrpc(
     EitherT(
       service
         .updateAccount(request)
+        .map(_.leftMap(_.asGrpcError))
+    ).asGrpcResponse
+  }
+
+  override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    EitherT(
+      service
+        .pruneEvents(request)
         .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }

@@ -56,6 +56,20 @@ trait TeaTrafficStore {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Option[AccountState]]
 
+  /** Prune events at the given timestamp. This is used to keep the event table from growing
+    * indefinitely. This does not affect the account balance.
+    *
+    * @param beforeInclusive
+    *   timestamp to prune events before (inclusive)
+    * @return
+    *   the number of events pruned
+    */
+  def pruneEvents(
+      beforeInclusive: CantonTimestamp
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Int]
+
   // Note: only used internally for testing, need to add pagination and / or streaming when exposed
   /** Return events, ordered by timestamp, for an account from the given timestamp forward
     * (inclusive). Note that this might NOT be the order in which events were applied to the

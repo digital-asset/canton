@@ -3486,6 +3486,7 @@ object BuildCommon {
         `daml-lf-engine`,
         `daml-lf-interpreter`,
         `daml-lf-language`,
+        `daml-lf-snapshot-proto`,
         `daml-lf-transaction`,
       )
       .settings()

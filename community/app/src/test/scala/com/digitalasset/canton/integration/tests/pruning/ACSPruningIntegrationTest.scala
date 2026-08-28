@@ -9,6 +9,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 
 import java.time.Duration as JDuration
+import scala.jdk.javaapi.DurationConverters.toJava
 import scala.math.Ordering.Implicits.*
 
 trait ACSPruningIntegrationTest
@@ -25,9 +26,7 @@ trait ACSPruningIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
-        ConfigTransforms.useStaticTime,
-        // TODO(#35107) Disable the old processor and fix the test
-        ConfigTransforms.enableOldAcsCommitmentProcessor,
+        ConfigTransforms.useStaticTime
       )
       .withSetup { env =>
         import env.*
@@ -64,6 +63,17 @@ trait ACSPruningIntegrationTest
 
     // Advance the time sufficiently to trigger the pruning of the first ping
     clock.advance(waitingInterval)
+
+    clock.advance(
+      toJava(participant1.config.parameters.journalGarbageCollectionMinimumGap.underlying)
+    )
+    participants.all.foreach(_.testing.fetch_synchronizer_times())
+
+    // We need the second `fetch_synchronizer_times` call to produce the next block
+    // and trigger `EmptyAcsPublicationRequired`
+    clock.advance(
+      toJava(participant1.config.parameters.journalGarbageCollectionMinimumGap.underlying)
+    )
     participants.all.foreach(_.testing.fetch_synchronizer_times())
 
     logger.debug("Wait for the background pruning to kick in")

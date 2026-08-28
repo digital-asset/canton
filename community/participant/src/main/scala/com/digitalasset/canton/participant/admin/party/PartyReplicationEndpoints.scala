@@ -16,7 +16,6 @@ import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
 import com.daml.ledger.api.v2.state_service.ParticipantPermission
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction as LapiTopologyTransaction
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
-import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.validation.CryptoValidator
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
@@ -187,17 +186,28 @@ class PartyReplicationEndpointsImpl(
   override def getAddPartyStatus(
       request: GetAddPartyStatusRequest
   ): Future[GetAddPartyStatusResponse] = (for {
-    requestId <- Hash
-      .fromHexString(request.addPartyRequestId)
-      .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err.message))
+
+    partyId <- convert(request.partyId, "party_id", PartyId(_))
+      .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err))
+
+    synchronizerId <- convert(request.synchronizerId, "synchronizer_id", SynchronizerId(_))
+      .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err))
+
+    targetParticipantId <- convert(
+      request.targetParticipantUid,
+      "target_participant_uid",
+      ParticipantId(_),
+    )
+      .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err))
 
     status <- partyReplicator
-      .getAddPartyStatus(requestId)
+      .getAddPartyStatus(partyId, synchronizerId, targetParticipantId)
       .toRight(
-        toStatusRuntimeException(Status.UNKNOWN)(
-          s"Add party request id ${request.addPartyRequestId} not found"
+        toStatusRuntimeException(Status.NOT_FOUND)(
+          s"Party replication status not found for party ${request.partyId} on synchronizer ${request.synchronizerId}"
         )
       )
+
     apiStatus = com.digitalasset.canton.participant.admin.data.PartyReplicationStatus
       .fromInternal(status)
   } yield GetAddPartyStatusResponse(Some(apiStatus.toLapiProto))).toFuture(identity)

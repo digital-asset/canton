@@ -6,9 +6,9 @@ package com.digitalasset.canton.integration.tests.security
 import cats.data.EitherT
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.event.Event
+import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse.ContractEntry
 import com.daml.ledger.javaapi.data
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
 import com.digitalasset.canton.damltestslf23.java.da.types
@@ -50,6 +50,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   LedgerCommandId,
   LedgerUserId,
@@ -84,10 +85,11 @@ import scala.util.{Failure, Success}
   *
   * Currently, the test checks the following:
   *   - The affected participant does not crash right away.
-  *   - Well-defined behavior of ledger API
+  *   - Update streams of the ledger API (with transaction shapes "ledger effect" and "acs delta")
+  *   - State of the Canton ACS
+  *   - State of the ledger ACS (including incomplete reassignments)
   *
   * In the future, the test will also check:
-  *   - Correct states in the Canton ACS and ledger ACS.
   *   - Well-defined behavior of ACS commitment processor
   *   - The above holds even after restarts.
   *
@@ -140,6 +142,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         // Also enable multi-sync
         MultiSynchronizerFeatureFlag.enable(Seq(participant1), daId)
+        MultiSynchronizerFeatureFlag.enable(Seq(participant2), daId)
         MultiSynchronizerFeatureFlag.enable(Seq(participant1), acmeId)
 
         pureCryptoRef.set(sequencer1.crypto.pureCrypto)
@@ -261,7 +264,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         assertUnassigned(events, instance.contractId)
-        assertInactive(instance.contractId)
+        // TODO(i35161): Clarify if this should be unassignedCount = 1.
+        assertInactive(instance.contractId, unassignedCount = 0)
       }
 
       "not create a contract twice within the same transaction" in { implicit env =>
@@ -364,9 +368,10 @@ abstract sealed class LedgerConsistencyIntegrationTest
         events.assertStatusOk(participant1)
         val cid = inside(events.awaitTransactions(participant1).loneElement.events) {
           case Seq(ev1, ev2, ev3) =>
-            val exercisedId = exercisedIdOfEvent(ev1)
+            val exercisedId = exercisedIdOfEvent(ev1, acsDelta = false)
 
-            val createdCid = createdIdOfEvent(ev2)
+            // FIXME(i29855): creation should appear in the acs delta stream.
+            val createdCid = createdIdOfEvent(ev2, acsDelta = false)
             exercisedId shouldBe createdCid
 
             exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
@@ -449,7 +454,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
       "create the contract" in { implicit env =>
         import env.*
 
-        val (transactionTree, instance) = assignNonExistentContract()
+        val (transactionTree, instance, _) = assignNonExistentContract()
 
         archive(instance.contractId)
 
@@ -462,7 +467,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         val cid = createdIdOf(events)
-        assertActive(cid)
+        assertActive(cid, assignedCount = 1)
       }
 
       "archive the contract again" in { implicit env =>
@@ -529,6 +534,18 @@ abstract sealed class LedgerConsistencyIntegrationTest
               ),
           ),
         )
+
+        // Now assign the contract to double-check the state of the indexer
+        val (_, events3) = runMaliciously()(
+          assignMaliciously(instance, maintainer),
+          LogEntry.assertLogSeq(
+            Seq(
+              unexpectedMediatorApproval // WARN, as the contract is known to be archived
+            )
+          ),
+        )
+        assertAssigned(events3, instance.contractId)
+        assertActive(instance.contractId, assignedCount = 1)
       }
 
       "assign the contract" in { implicit env =>
@@ -545,7 +562,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         assertAssigned(events, instance.contractId)
-        assertActive(instance.contractId)
+        assertActive(instance.contractId, assignedCount = 1)
       }
 
       "unassign the contract" in { implicit env =>
@@ -563,7 +580,14 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         assertUnassigned(events, instance.contractId)
-        assertInactive(instance.contractId)
+        assertInactive(instance.contractId, unassignedCount = 1)
+
+        // Now assign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(2))
+        )
+        assertAssigned(events2, instance.contractId)
+        assertActive(instance.contractId, unassignedCount = 1, assignedCount = 1)
       }
 
       "query the contract by key" in { implicit env =>
@@ -605,13 +629,13 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         createdIdOf(events) shouldBe instance.contractId
-        assertActive(instance.contractId)
+        assertActive(instance.contractId, unassignedCount = 1, assignedCount = 1)
       }
 
       "archive the contract" in { implicit env =>
         import env.*
 
-        val (_, instance, _) = unassignNonExistentContract()
+        val (_, instance, counter) = unassignNonExistentContract()
 
         val (_, events) = runMaliciously()(
           archiveMaliciously(instance.contractId),
@@ -622,7 +646,19 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         exercisedIdOf(events) shouldBe instance.contractId
-        assertInactive(instance.contractId)
+        assertInactive(instance.contractId, unassignedCount = 1, assignedCount = 1)
+
+        // Now assign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 1)),
+          LogEntry.assertLogSeq(
+            Seq(
+              unexpectedMediatorApproval // WARN, as the contract is known to be archived
+            )
+          ),
+        )
+        assertAssigned(events2, instance.contractId)
+        assertActive(instance.contractId, unassignedCount = 1, assignedCount = 2)
       }
 
       "unassign the contract again" in { implicit env =>
@@ -643,7 +679,19 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         assertUnassigned(events, instance.contractId)
-        assertInactive(instance.contractId)
+        assertInactive(
+          instance.contractId,
+          unassignedCount =
+            1, // TODO(i35161): Clarify if this should be two, due to two previous unassignments.
+          assignedCount = 1,
+        )
+
+        // Now assign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 2))
+        )
+        assertAssigned(events2, instance.contractId)
+        assertActive(instance.contractId, unassignedCount = 1, assignedCount = 2)
       }
 
       "query the contract by key" in { implicit env =>
@@ -664,7 +712,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         exercisedIdOf(events, consuming = false).coid shouldBe mgmtContract.id.contractId
-        assertInactive(instance.contractId)
+        assertInactive(instance.contractId, unassignedCount = 1, assignedCount = 1)
       }
     }
 
@@ -713,7 +761,24 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         assertAssigned(events, instance.contractId)
-        assertActive(instance.contractId)
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 2, // FIXME(i31723): a contract should have only one active entry
+          unassignedCount = 0,
+          assignedCount = 1,
+        )
+        lookupActiveContractInstances(
+          instance.contractId.coid
+        ).loneElement.contractId shouldBe instance.contractId
+
+        // Now unassign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          unassignMaliciously(instance, reassignmentCounter = ReassignmentCounter(2))
+        )
+        assertUnassigned(events2, instance.contractId)
+        // FIXME(i31723): The ledger ACS ignores the deactivation. Instead assertInactive(instance.contractId, unassignedCount = 1, assignedCount = 1) should succeed.
+        assertLedgerAcsEntries(instance.contractId, 1, 1, 1)
+        lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
       "archive the contract twice within the same transaction" in { implicit env =>
@@ -750,6 +815,18 @@ abstract sealed class LedgerConsistencyIntegrationTest
         txEvents should have size 2
 
         assertInactive(instance.contractId)
+
+        // Now assign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          assignMaliciously(instance),
+          LogEntry.assertLogSeq(
+            Seq(
+              unexpectedMediatorApproval // WARN, as the contract is known to be archived
+            )
+          ),
+        )
+        assertAssigned(events2, instance.contractId)
+        assertActive(instance.contractId, assignedCount = 1)
       }
 
       "archive and then query the contract by key" in { implicit env =>
@@ -806,36 +883,21 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertActive(instance.contractId)
       }
 
-      "rollback the request when query by key yields a contract with the wrong key" in {
+      "rollback the request when query by key yields a contract with the wrong key" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         implicit env =>
+          import env.*
+
           val instance = create(keyText = "myKey")
 
-          val (_, events) =
-            runMaliciously()(
-              maliciousP1
-                .submitCommand(
-                  queryByKeyCmdsWithMetadata("myKey2"),
-                  // Use interceptor to change the result of QueryByKey to yield instance
-                  transactionInterceptor = modifyQueryByKeyResult(_ => Vector(instance.contractId)),
-                ),
-              LogEntry.assertLogSeq(
-                Seq(
-                  (
-                    _.shouldBeCantonError(
-                      ModelConformance,
-                      _ should (
-                        startWith regex raw"Rejected transaction due to a failed model conformance check:" and
-                          include regex raw"SPEEDY CRASH \(\S+\): Contract key mismatch: the ledger returned a contract whose key does not match the requested key\."
-                      ),
-                    ),
-                    "model conformance error",
-                  ),
-                  unexpectedMediatorApproval,
-                )
-              ),
+          maliciousP1
+            .submitCommand(
+              queryByKeyCmdsWithMetadata("myKey2"),
+              // Use interceptor to change the result of QueryByKey to yield instance
+              transactionInterceptor = modifyQueryByKeyResult(_ => Vector(instance.contractId)),
             )
+            .leftOrFailShutdown("Expected submission failure")
+            .futureValue should fullyMatch regex raw"(?s)Unable to create transaction tree: InvalidTransactionViewError\(.* does not have a matching key in the contract instance\n\)"
 
-          events.assertNoTransactions()
           assertActive(instance.contractId)
       }
 
@@ -919,7 +981,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
       "create the contract" in { implicit env =>
         import env.*
 
-        val (transactionTree, instance) = assignNonExistentContract()
+        val (transactionTree, instance, _) = assignNonExistentContract()
 
         // Now run the real creation
         val (_, events) = runMaliciously()(
@@ -931,23 +993,82 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         createdIdOf(events) shouldBe instance.contractId
-        assertActive(instance.contractId)
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 2, // FIXME(i31723): the contract should have only one active entry
+          unassignedCount = 0,
+          assignedCount = 1,
+        )
+        lookupActiveContractInstances(
+          instance.contractId.coid
+        ).loneElement.contractId shouldBe instance.contractId
+
+        // Now unassign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          unassignMaliciously(
+            instance,
+            // TODO(i35161): The counter needs to be reset to 1. Does that make sense?
+            reassignmentCounter = ReassignmentCounter(1),
+          ),
+          LogEntry.assertLogSeq(
+            Seq.empty,
+            Seq(
+              // The creation resets the reassignment counter to 0. Therefore, we must submit with 1 to make conflict detection happy.
+              // This, however, triggers the following warning when committing the unassignment.
+              _.shouldBeCantonError(
+                SyncServiceAlarm,
+                _ should startWith regex raw"Request \S+: An error occurred while persisting commit set: Chain\(AcsError\(ReassignmentCounterShouldIncrease\(",
+              )
+            ),
+          ),
+        )
+        assertUnassigned(events2, instance.contractId)
+        // FIXME(i31723): The ledger ACS ignores the deactivation. Instead assertInactive(instance.contractId, unassignedCount = 1, assignedCount = 1) should succeed.
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 1,
+          unassignedCount = 1,
+          assignedCount = 1,
+        )
+        lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
       "assign the contract again" in { implicit env =>
         import env.*
 
-        val (_, instance) = assignNonExistentContract()
+        val (_, instance, counter) = assignNonExistentContract()
 
         // Assign the contract again
         val (_, events) = runMaliciously()(
-          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(2)),
+          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 1)),
           LogEntry.assertLogSeq(Seq(unexpectedMediatorApproval)),
         )
 
         events.assertStatusOk(participant1)
         assertAssigned(events, instance.contractId)
-        assertActive(instance.contractId)
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 2, // FIXME(i31723): the contract should have only one active entry
+          unassignedCount = 0,
+          assignedCount = 2,
+        )
+        lookupActiveContractInstances(
+          instance.contractId.coid
+        ).loneElement.contractId shouldBe instance.contractId
+
+        // Now unassign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          unassignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 2))
+        )
+        assertUnassigned(events2, instance.contractId)
+        // FIXME(i31723): The ledger ACS ignores the deactivation. Instead assertInactive(instance.contractId, unassignedCount = 1, assignedCount = 2) should succeed.
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 1,
+          unassignedCount = 1,
+          assignedCount = 2,
+        )
+        lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
       "archive the contract and create it again" in { implicit env =>
@@ -969,7 +1090,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
           .commands()
           .asScala
 
-        val (transactionTree, instance) =
+        val (transactionTree, instance, _) =
           assignNonExistentContract(mkCreateCmds = _ => dummyCmd ++ createAndArchive)
 
         val revertedTransactionTree = GenTransactionTree.Optics.rootViewsUnsafe
@@ -998,20 +1119,23 @@ abstract sealed class LedgerConsistencyIntegrationTest
         events.assertStatusOk(participant1)
         inside(events.awaitTransactions(participant1).loneElement.events) {
           case Seq(ev1, ev2, ev3) =>
-            exercisedIdOfEvent(ev1) shouldBe instance.contractId
-            createdIdOfEvent(ev2) shouldBe instance.contractId
+            exercisedIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
+            createdIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
             exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
         }
 
-        participant1.ledger_api.state.acs
-          .active_contracts_of_party(defaultMaintainer)
-          .map(_.createdEvent.value.contractId) should contain(instance.contractId.coid)
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 1,
+          unassignedCount = 0,
+          assignedCount = 1,
+        )
         // FIXME(i29855): the Canton ACS reorders archive; create to create; archive
         //  Instead, assertActive(instance.contractId) should succeed
         lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
-      "create the contract again and archive it" in { implicit env =>
+      "create and archive the contract within the same transaction" in { implicit env =>
         import env.*
 
         // Overall strategy:
@@ -1025,7 +1149,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
           .asScala
           .toSeq
 
-        val (transactionTree, instance) =
+        val (transactionTree, instance, _) =
           assignNonExistentContract(mkCreateCmds = _ => createAndArchive)
 
         val (_, events) = runMaliciously()(
@@ -1041,14 +1165,17 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
         events.assertStatusOk(participant1)
         inside(events.awaitTransactions(participant1).loneElement.events) { case Seq(ev1, ev2) =>
-          createdIdOfEvent(ev1) shouldBe instance.contractId
-          exercisedIdOfEvent(ev2) shouldBe instance.contractId
+          createdIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
+          exercisedIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
         }
         // FIXME(i29855): The ledger acs currently ignores transient archivals
-        //  Instead, assertInactive(instance.contractId) should succeed.
-        participant1.ledger_api.state.acs
-          .active_contracts_of_party(defaultMaintainer)
-          .map(_.createdEvent.value.contractId) should contain(instance.contractId.coid)
+        //  Instead, assertInactive(instance.contractId, assignedCount = 1) should succeed.
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 1,
+          unassignedCount = 0,
+          assignedCount = 1,
+        )
         lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
     }
@@ -1232,7 +1359,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         createCommands(defaultMaintainer, defaultObserver, _),
   )(implicit
       env: TestConsoleEnvironment
-  ): (GenTransactionTree, ContractInstance) = {
+  ): (GenTransactionTree, ContractInstance, Long) = {
     import env.*
 
     // Create a contract
@@ -1245,9 +1372,17 @@ abstract sealed class LedgerConsistencyIntegrationTest
     )
     assignEvents.assertStatusOk(participant1)
 
-    assertActive(instance.contractId)
+    assertActive(instance.contractId, assignedCount = 1)
 
-    (transactionTree, instance)
+    val counter = assignEvents
+      .awaitAssignments(participant1)
+      .loneElement
+      .assignedWrapper
+      .events
+      .loneElement
+      .reassignmentCounter
+
+    (transactionTree, instance, counter)
   }
 
   private def assignMaliciously(
@@ -1293,18 +1428,17 @@ abstract sealed class LedgerConsistencyIntegrationTest
       env: TestConsoleEnvironment
   ): (GenTransactionTree, ContractInstance, Long) = {
     import env.*
-    val (transactionTree, instance) = assignNonExistentContract(maintainer, keyText, mkCreateCmds)
+    val (transactionTree, instance, counter) =
+      assignNonExistentContract(maintainer, keyText, mkCreateCmds)
 
-    val event = participant1.ledger_api.commands.submit_unassign(
+    participant1.ledger_api.commands.submit_unassign(
       defaultMaintainer,
       Seq(instance.contractId),
       daId,
       acmeId,
     )
 
-    val counter = event.events.loneElement.reassignmentCounter
-
-    (transactionTree, instance, counter)
+    (transactionTree, instance, counter + 1)
   }
 
   private def unassignMaliciously(
@@ -1360,7 +1494,9 @@ abstract sealed class LedgerConsistencyIntegrationTest
       )
   }
 
-  private def createdIdOf(events: TrackingResult)(implicit
+  // TODO(i31723): Note that in several cases create events have acsDelta = true even though the contract has been previously active.
+  //  Need to clarify if this is desired behavior.
+  private def createdIdOf(events: TrackingResult, acsDelta: Boolean = true)(implicit
       env: TestConsoleEnvironment
   ): LfContractId = {
     import env.*
@@ -1368,27 +1504,40 @@ abstract sealed class LedgerConsistencyIntegrationTest
     events.assertStatusOk(participant1)
     val tx = events.awaitTransactions(participant1).loneElement
     val event = tx.events.loneElement
-    createdIdOfEvent(event)
+    createdIdOfEvent(event, acsDelta)
   }
 
-  private def createdIdOfEvent(event: Event): LfContractId = {
-    val cidStr = event.event.created.value.contractId
+  private def createdIdOfEvent(event: Event, acsDelta: Boolean = true): LfContractId = {
+    val created = event.event.created.value
+    created.acsDelta shouldBe acsDelta
+    val cidStr = created.contractId
     LfContractId.assertFromString(cidStr)
   }
 
-  private def exercisedIdOf(events: TrackingResult, consuming: Boolean = true)(implicit
+  // TODO(i31723): Note that in several cases consuming exercise events have acsDelta = true even though the contract has been previously inactive.
+  //  Need to clarify if this is desired behavior.
+  private def exercisedIdOf(
+      events: TrackingResult,
+      consuming: Boolean = true,
+      acsDelta: Boolean = true,
+  )(implicit
       env: TestConsoleEnvironment
   ): LfContractId = {
     import env.*
 
     val tx = events.awaitTransactions(participant1).loneElement
     val event = tx.events.loneElement
-    exercisedIdOfEvent(event, consuming)
+    exercisedIdOfEvent(event, consuming, acsDelta)
   }
 
-  private def exercisedIdOfEvent(event: Event, consuming: Boolean = true): LfContractId = {
+  private def exercisedIdOfEvent(
+      event: Event,
+      consuming: Boolean = true,
+      acsDelta: Boolean = true,
+  ): LfContractId = {
     val exercise = event.event.exercised.value
     exercise.consuming shouldBe consuming
+    exercise.acsDelta shouldBe consuming && acsDelta
     val cidStr = exercise.contractId
     LfContractId.assertFromString(cidStr)
   }
@@ -1413,15 +1562,41 @@ abstract sealed class LedgerConsistencyIntegrationTest
       .loneElement shouldBe contractId.coid
   }
 
-  def assertActive(contractId: LfContractId)(implicit
+  def assertActive(
+      contractId: LfContractId,
+      unassignedCount: Long = 0,
+      assignedCount: Long = 0,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): Assertion = {
+    assertLedgerAcsEntries(contractId, activeCount = 1, unassignedCount, assignedCount)
+    lookupActiveContractInstances(contractId.coid).loneElement.contractId shouldBe contractId
+  }
+
+  private def assertLedgerAcsEntries(
+      contractId: LfContractId,
+      activeCount: Long,
+      unassignedCount: Long,
+      assignedCount: Long,
+  )(implicit
       env: TestConsoleEnvironment
   ): Assertion = {
     import env.*
 
-    participant1.ledger_api.state.acs
-      .active_contracts_of_party(defaultMaintainer)
-      .map(_.createdEvent.value.contractId) should contain(contractId.coid)
-    lookupActiveContractInstances(contractId.coid).loneElement.contractId shouldBe contractId
+    val contractEntries = participant1.ledger_api.state.acs
+      .of_party(defaultMaintainer)
+      .filter(_.contractId == contractId.coid)
+      .map(_.entry)
+
+    contractEntries.collect { case entry: ContractEntry.ActiveContract =>
+      entry
+    } should have size activeCount
+    contractEntries.collect { case entry: ContractEntry.IncompleteUnassigned =>
+      entry
+    } should have size unassignedCount
+    contractEntries.collect { case entry: ContractEntry.IncompleteAssigned =>
+      entry
+    } should have size assignedCount
   }
 
   /** Looks-up contract instances. Yields only instances that are active in the Canton ACS.
@@ -1433,20 +1608,19 @@ abstract sealed class LedgerConsistencyIntegrationTest
     participant1.testing.acs_search(daName, exactId = contractIdStr, limit = PositiveInt.one)
   }
 
-  def assertInactive(contractId: LfContractId)(implicit
+  def assertInactive(
+      contractId: LfContractId,
+      unassignedCount: Long = 0,
+      assignedCount: Long = 0,
+  )(implicit
       env: TestConsoleEnvironment
   ): Assertion = {
-    import env.*
-
-    participant1.ledger_api.state.acs
-      .active_contracts_of_party(defaultMaintainer)
-      .map(_.createdEvent.value.contractId) should not contain contractId.coid
+    assertLedgerAcsEntries(contractId, 0, unassignedCount, assignedCount)
     lookupActiveContractInstances(contractId.coid) shouldBe empty
   }
 }
 
 // Need to test all storage backends to cover all relevant code paths.
-@UnstableTest // TODO(i32414): remove this once the test is no longer flaky
 final class LedgerConsistencyIntegrationTestPostgres extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -1454,7 +1628,6 @@ final class LedgerConsistencyIntegrationTestPostgres extends LedgerConsistencyIn
 }
 
 // Need to test all storage backends to cover all relevant code paths.
-@UnstableTest // TODO(i33784): remove this once the test is no longer flaky
 final class LedgerConsistencyIntegrationTestH2 extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -1462,7 +1635,6 @@ final class LedgerConsistencyIntegrationTestH2 extends LedgerConsistencyIntegrat
 }
 
 // Need to test all storage backends to cover all relevant code paths.
-@UnstableTest // TODO(i32467): remove this once the test is no longer flaky
 final class LedgerConsistencyIntegrationTestInMemory extends LedgerConsistencyIntegrationTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))

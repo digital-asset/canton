@@ -170,13 +170,6 @@ class TransactionConfirmationRequestFactory(
     TransactionConfirmationRequest,
   ] =
     for {
-      transactionViewEnvelopes <- createTransactionViewEnvelopes(
-        transactionTree,
-        cryptoSnapshot,
-        signingTimestampOverrides,
-        sessionKeyStore,
-        protocolVersion,
-      )
       submittingParticipantSignature <- cryptoSnapshot
         .sign(
           transactionTree.rootHash.unwrap,
@@ -184,6 +177,13 @@ class TransactionConfirmationRequestFactory(
           signingTimestampOverrides,
         )
         .leftMap[TransactionConfirmationRequestCreationError](TransactionSigningError.apply)
+      transactionViewEnvelopes <- createTransactionViewEnvelopes(
+        transactionTree,
+        submittingParticipantSignature,
+        cryptoSnapshot,
+        sessionKeyStore,
+        protocolVersion,
+      )
     } yield {
       if (loggingConfig.eventDetails) {
         logger.debug(
@@ -282,8 +282,8 @@ class TransactionConfirmationRequestFactory(
 
   private def createTransactionViewEnvelopes(
       transactionTree: GenTransactionTree,
+      submittingParticipantSignature: Signature,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      signingTimestampOverrides: Option[SigningTimestampOverrides],
       sessionKeyStore: SessionKeyStore,
       protocolVersion: ProtocolVersion,
   )(implicit
@@ -399,8 +399,8 @@ class TransactionConfirmationRequestFactory(
             .encryptGroupedViews(TransactionViewType)(
               lightTrees,
               viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
+              submittingParticipantSignature,
               cryptoSnapshot,
-              signingTimestampOverrides,
               protocolVersion,
             )
             .leftMap[TransactionConfirmationRequestCreationError](
@@ -533,8 +533,8 @@ class TransactionConfirmationRequestFactory(
               .encryptGroupedViews(TransactionViewType)(
                 lightTrees,
                 viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
+                submittingParticipantSignature,
                 cryptoSnapshot,
-                signingTimestampOverrides,
                 protocolVersion,
               )
               .leftMap[TransactionConfirmationRequestCreationError](
@@ -577,8 +577,8 @@ class TransactionConfirmationRequestFactory(
             .encryptNonGroupedViews(TransactionViewType)(
               lightTreeWithRecipients,
               viewKeyDataMap,
+              submittingParticipantSignature,
               cryptoSnapshot,
-              signingTimestampOverrides,
               protocolVersion,
               parallel,
             )

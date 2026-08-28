@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.apiserver.services.metrics
 
 import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.{Gauge, Meter, Timer}
-import com.daml.metrics.api.MetricQualification.{Errors, Latency, Traffic}
+import com.daml.metrics.api.MetricQualification.{Latency, Traffic}
 import com.daml.metrics.api.{
   HistogramInventory,
   MetricHandle,
@@ -13,6 +13,7 @@ import com.daml.metrics.api.{
   MetricName,
   MetricsContext,
 }
+import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementOutcome
 
 class TrafficEnforcementMetrics(
     inventory: TrafficEnforcementInventory,
@@ -20,33 +21,21 @@ class TrafficEnforcementMetrics(
 )(implicit val metricsContext: MetricsContext) {
   val prefix: MetricName = inventory.prefix
 
-  val balanceLookups: Meter = metricsFactory.meter(
+  /** One mark per enforcement decision, labeled with the same outcome/reason vocabulary as the
+    * enforcement decision span, so the two can't drift apart.
+    */
+  val decisions: Meter = metricsFactory.meter(
     MetricInfo(
-      name = prefix :+ "balance-lookups",
-      summary = "Number of balance lookups performed",
-      description = "The number of times the system has looked up an account balance.",
-      qualification = Traffic,
-    )
-  )
-
-  val insufficientBalanceRejections: Meter = metricsFactory.meter(
-    MetricInfo(
-      name = prefix :+ "insufficient-balance-rejections",
-      summary = "Number of times an account did not have enough traffic to perform an action",
+      name = prefix :+ "decisions",
+      summary = "Number of enforcement decisions made",
       description =
-        "The number of times the system has rejected an action due to insufficient traffic balance.",
+        "The number of enforcement decisions the system has made, labeled by outcome and, where" +
+          " applicable, reason.",
       qualification = Traffic,
-    )
-  )
-
-  val allowedSubmissionOnLookupFailures: Meter = metricsFactory.meter(
-    MetricInfo(
-      name = prefix :+ "allowed-submission-on-lookup-failures",
-      summary =
-        "Number of times a submission was allowed, but traffic information couldn't be fetched",
-      description =
-        "The number of times the system has allowed a submission to proceed despite a failure to fetch traffic information.",
-      qualification = Errors,
+      labelsWithDescription = Map(
+        TrafficEnforcementOutcome.OutcomeAttribute -> "The outcome of the enforcement decision.",
+        TrafficEnforcementOutcome.ReasonAttribute -> "Why the decision was reached, present only for outcomes that have a reason.",
+      ),
     )
   )
 
@@ -72,6 +61,15 @@ class TrafficEnforcementMetrics(
     ),
     0L,
   )
+
+  def markDecision(outcome: String, reason: Option[String]): Unit = {
+    val withOutcome =
+      metricsContext.withExtraLabels(TrafficEnforcementOutcome.OutcomeAttribute -> outcome)
+    val labeled = reason.fold(withOutcome)(r =>
+      withOutcome.withExtraLabels(TrafficEnforcementOutcome.ReasonAttribute -> r)
+    )
+    decisions.mark()(labeled)
+  }
 }
 
 class TrafficEnforcementInventory(parent: MetricName)(implicit inventory: HistogramInventory) {

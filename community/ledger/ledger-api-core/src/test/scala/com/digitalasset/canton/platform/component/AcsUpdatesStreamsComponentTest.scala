@@ -374,10 +374,6 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
     }
 
     "emit an effective topology update carrying both party authorizations and synchronizer parameters" in {
-      // TODO(#34124) remove the spare create once the off-by-one in the topology transactions stream range handling is fixed.
-      val (spacerCreate, spacerContract) = createTx(Set(dsoParty, alice))
-      ingestUpdates(spacerCreate -> Vector(spacerContract))
-
       val rangeStart = index.currentLedgerEnd().map(_.lastOffset)
 
       ingestTopologyEvents(

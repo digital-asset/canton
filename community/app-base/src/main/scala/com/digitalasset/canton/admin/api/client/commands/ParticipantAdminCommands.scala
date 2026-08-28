@@ -46,6 +46,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.participant.admin.data.{
   ContractImportMode,
+  PartyReplicationStatus,
   RepresentativePackageIdOverride,
 }
 import com.digitalasset.canton.participant.admin.party.PartyParticipantPermission
@@ -612,6 +613,34 @@ object ParticipantAdminCommands {
       override protected def handleResponse(
           response: v30.AddPartyWithAcsAsyncResponse
       ): Either[String, String] = Right(response.addPartyRequestId)
+    }
+
+    final case class GetAddPartyStatus(requestId: String)
+        extends GrpcAdminCommand[
+          v30.GetAddPartyStatusRequest,
+          v30.GetAddPartyStatusResponse,
+          PartyReplicationStatus,
+        ] {
+      override type Svc = PartyManagementServiceStub
+
+      override def createService(channel: ManagedChannel): PartyManagementServiceStub =
+        v30.PartyManagementServiceGrpc.stub(channel)
+
+      override protected def createRequest(): Either[String, v30.GetAddPartyStatusRequest] =
+        Right(v30.GetAddPartyStatusRequest(requestId))
+
+      override protected def submitRequest(
+          service: PartyManagementServiceStub,
+          request: v30.GetAddPartyStatusRequest,
+      ): Future[v30.GetAddPartyStatusResponse] = service.getAddPartyStatus(request)
+
+      override protected def handleResponse(
+          response: v30.GetAddPartyStatusResponse
+      ): Either[String, PartyReplicationStatus] =
+        ProtoConverter
+          .required("status", response.status)
+          .flatMap(PartyReplicationStatus.fromProtoV30)
+          .leftMap(_.toString)
     }
 
     final case class GetHighestOffsetByTimestamp(

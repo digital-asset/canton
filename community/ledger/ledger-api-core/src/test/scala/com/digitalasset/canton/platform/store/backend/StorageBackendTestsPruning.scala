@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import anorm.SqlParser.{long, scalar}
 import com.daml.scalautil.Statement
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.PruningDto.*
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
@@ -71,8 +72,7 @@ private[backend] trait StorageBackendTestsPruning
     executeSql(
       backend.event.addActivationsToAchs(
         AchsAddActivationsParams(
-          startExclusive = 0L,
-          endInclusive = endInclusive,
+          range = EventSeqIdRange(startInclusive = 1L, endInclusive = endInclusive),
           activeAt = activeAt,
         )
       )

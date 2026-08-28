@@ -5,6 +5,8 @@ syntax = "proto3";
 
 package com.digitalasset.canton.tea.v1;
 
+import "google/protobuf/timestamp.proto";
+
 // Service used for book-keeping and managing of traffic accounts for Ledger API users.
 service TrafficService {
   // Get account state for a given account ID.
@@ -14,6 +16,11 @@ service TrafficService {
   // Update account state for a given account ID.
   // Permissioned only to Ledger API admin users.
   rpc UpdateAccount(UpdateAccountRequest) returns (UpdateAccountResponse);
+
+  // Prune events from the event log that are older than a given timestamp.
+  // Permissioned only to Ledger API admin users.
+  // WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
+  rpc PruneEvents(PruneEventsRequest) returns (PruneEventsResponse);
 }
 
 message GetAccountRequest {
@@ -61,4 +68,19 @@ message UpdateAccountResponse {
   //
   // Required
   GetAccountResponse response = 1;
+}
+
+message PruneEventsRequest {
+  // The timestamp before which events should be pruned.
+  // Events with a timestamp less than or equal to this value will be pruned.
+  //
+  // Required
+  google.protobuf.Timestamp before_or_at = 1;
+}
+
+message PruneEventsResponse {
+  // The number of events that were pruned.
+  //
+  // Required
+  int32 pruned_event_count = 1;
 }

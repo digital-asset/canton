@@ -248,8 +248,8 @@ private[reassignment] class AssignmentProcessingSteps(
         .encryptView(AssignmentViewType)(
           fullTree,
           viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
+          submittingParticipantSignature,
           recentSnapshot,
-          Some(signingTimestampOverrides),
           protocolVersion.unwrap,
         )
         .leftMap[ReassignmentProcessorError](
