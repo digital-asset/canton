@@ -11,6 +11,7 @@ import com.digitalasset.canton.tracing.Spanning.{SpanEndingExecutionContext, Spa
 import com.digitalasset.canton.util.{Checked, CheckedT}
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.{Span, StatusCode, Tracer}
+import slick.dbio.{DBIO, DBIOAction, Effect, NoStream}
 
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NonFatal
@@ -60,26 +61,48 @@ trait Spanning {
         case Success(x) =>
           closeSpan(x)
         case Failure(exception) =>
-          recordException(exception).discard
+          recordException(currentSpan, exception)
           currentSpan.end()
       }(SpanEndingExecutionContext)
 
-    def recordException(exception: Throwable) = {
-      currentSpan.recordException(exception)
-      currentSpan.setStatus(StatusCode.ERROR, "Operation ended with error")
-    }
-
-    val result: A =
-      try {
-        f(childContext)(new SpanWrapper(currentSpan))
-      } catch {
-        case NonFatal(exception) =>
-          recordException(exception).discard
-          currentSpan.end()
-          throw exception
-      }
+    val result = evaluateWithinSpan(currentSpan, childContext)(f)
     closeSpan(result)
     result
+  }
+
+  /** Creates a span when Slick executes the action and closes it when the action completes. */
+  protected def withSpanDBIO[R, S <: NoStream, E <: Effect](description: String)(
+      f: TraceContext => SpanWrapper => DBIOAction[R, S, E]
+  )(implicit
+      traceContext: TraceContext,
+      tracer: Tracer,
+      executionContext: ExecutionContext,
+  ): DBIOAction[R, S, E with Effect] =
+    DBIO.successful(()).flatMap { _ =>
+      val (currentSpan, childContext) = startSpan(description)
+      val action = evaluateWithinSpan(currentSpan, childContext)(f)
+
+      action.cleanUp { maybeFailure =>
+        maybeFailure.foreach(recordException(currentSpan, _))
+        currentSpan.end()
+        DBIO.successful(())
+      }
+    }
+
+  private def evaluateWithinSpan[A](currentSpan: Span, childContext: TraceContext)(
+      f: TraceContext => SpanWrapper => A
+  ): A =
+    try f(childContext)(new SpanWrapper(currentSpan))
+    catch {
+      case NonFatal(exception) =>
+        recordException(currentSpan, exception)
+        currentSpan.end()
+        throw exception
+    }
+
+  private def recordException(currentSpan: Span, exception: Throwable): Unit = {
+    currentSpan.recordException(exception).discard
+    currentSpan.setStatus(StatusCode.ERROR, "Operation ended with error").discard
   }
 
   protected def startSpan(

@@ -12,7 +12,7 @@ jobs:
     name: Build ScalaDoc
     runs-on: ${{ inputs.runner }}
     env:
-      EXECUTOR_JVM_HEAP_SIZE: 4500M
+      EXECUTOR_JVM_HEAP_SIZE: 6000M
     steps:
       - name: Checkout
         uses: actions/checkout@v5

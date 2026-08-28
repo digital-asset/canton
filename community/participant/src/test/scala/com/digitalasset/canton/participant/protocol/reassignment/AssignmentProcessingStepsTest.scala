@@ -1267,12 +1267,21 @@ final class AssignmentProcessingStepsTest
           sessionKeyStore,
         )
         .valueOrFailShutdown("cannot generate encryption key for transfer-in request")
+
+      submittingParticipantSignature <- cryptoSnapshot
+        .sign(
+          tree.rootHash.unwrap,
+          SigningKeyUsage.ProtocolOnly,
+          None, // not needed for unit tests; session signing keys disabled
+        )
+        .valueOrFailShutdown("cannot sign assignment request")
+
       encryptedTree <- EncryptedViewMessageFactory
         .encryptView(AssignmentViewType)(
           tree,
           viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
+          submittingParticipantSignature,
           cryptoSnapshot,
-          None,
           testedProtocolVersion,
         )
         .valueOrFailShutdown("cannot encrypt assignment request")

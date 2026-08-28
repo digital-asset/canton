@@ -7,6 +7,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BftNodeId,
   BlockNumber,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 
 import EpochState.Segment
 
@@ -27,6 +28,19 @@ class BlockedProgressDetector(
   def isProgressBlocked(nextRelativeBlockIndexToFill: Int): Boolean = isEpochProgressBlocked(
     nextRelativeBlockIndexToFill
   )
+
+  // Note that up to f nodes can be blacklisted. (this is also configurable via topology transactions, but expected not to change)
+  // Here, we consider only the active leaders as the total set size
+  // Then, we consider most segments are complete if a sufficient number of peers' segments are already complete:
+  //  - the minimum acceptable set size is f+1 -- (we can't allow only the bad nodes to force all other peers to rush complete their segment)
+  //  - the maximum acceptable set size is total - 1 -- (this is the case were only the local segment is still outstanding)
+  // In the code below, we are using a strong quorum of the active leaders' set, which is considered a happy medium between the above min and max
+  def areMostSegmentsComplete: Boolean = {
+    val numberOfSegments = otherLeadersToSegmentState.size + 1
+    val numberOfOtherSegmentsComplete =
+      otherLeadersToSegmentState.values.count(_.slotNumbers.forall(isBlockComplete))
+    OrderingTopology.isStrongQuorumReached(numberOfSegments, numberOfOtherSegmentsComplete)
+  }
 
   // The heuristic we use asks the following question:
   // As a leader, for the next relative block index I must fill, are there leaders in other

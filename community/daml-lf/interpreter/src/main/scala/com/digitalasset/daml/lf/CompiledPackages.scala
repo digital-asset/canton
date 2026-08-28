@@ -18,6 +18,12 @@ private[lf] abstract class CompiledPackages(
 ) {
   def signatures: collection.Map[PackageId, PackageSignature]
   def getDefinition(ref: SDefinitionRef): Option[SDefinition]
+
+  /** Get the transitive dependencies of the given package. Returns 'None' should this function call
+    * fail or error.
+    */
+  def getPackageDependencies(pkgId: PackageId): Option[Set[PackageId]]
+
   final def compiler: Compiler = new Compiler(pkgInterface, compilerConfig)
   final def pkgInterface = new PackageInterface(signatures)
   final def contains(pkgId: PackageId): Boolean = signatures.contains(pkgId)
@@ -68,7 +74,15 @@ private[lf] final class PureCompiledPackages(
     val definitions: Map[SDefinitionRef, SDefinition],
     override val compilerConfig: Compiler.Config,
 ) extends CompiledPackages(compilerConfig) {
+  private[this] val transitiveDeps: Map[PackageId, Set[PackageId]] = {
+    val directDeps = signatures.transform { case (_, pkg) => pkg.directDeps }
+    language.Graphs.transitiveClosure(directDeps)
+  }
+
   override def getDefinition(ref: SDefinitionRef): Option[SDefinition] = definitions.get(ref)
+
+  override def getPackageDependencies(pkgId: PackageId): Option[Set[PackageId]] =
+    transitiveDeps.get(pkgId)
 }
 
 private[lf] object PureCompiledPackages {

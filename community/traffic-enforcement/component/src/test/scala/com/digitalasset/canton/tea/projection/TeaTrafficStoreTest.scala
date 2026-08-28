@@ -76,6 +76,12 @@ trait TeaTrafficStoreTest
         case Right(state) => state
         case Left(err) => fail(s"expected the lookup to succeed, but it failed: $err")
       }
+
+    def prune(beforeInclusive: CantonTimestamp): FutureUnlessShutdown[Int] =
+      store.pruneEvents(beforeInclusive).value.map {
+        case Right(count) => count
+        case Left(err) => fail(s"expected the prune to succeed, but it failed: $err")
+      }
   }
 
   private def deltaEvent(
@@ -413,6 +419,44 @@ trait TeaTrafficStoreTest
           dedup shouldBe empty
           getBalanceButternut shouldBe empty
           eventsButternut shouldBe empty
+        }
+      }
+
+      "prune events" in {
+        val store = mk()
+        val ts1 = clock.now
+        val ts2 = ts1.immediateSuccessor
+        val ts3 = ts2.immediateSuccessor
+        val ts4 = ts3.immediateSuccessor
+        val delta1 = creditBalanceDelta(10)
+        val delta2 = debitBalanceDelta(5)
+        val delta3 = creditBalanceDelta(20)
+        val delta4 = debitBalanceDelta(15)
+
+        for {
+          _ <- store.persistOk(alice, delta1, ts1)
+          _ <- store.persistOk(butternut, delta2, ts2)
+          _ <- store.persistOk(alice, delta3, ts3)
+          _ <- store.persistOk(butternut, delta4, ts4)
+          aliceEventsBeforePrune <- store.getEvents(alice, CantonTimestamp.MinValue)
+          butternutEventsBeforePrune <- store.getEvents(butternut, CantonTimestamp.MinValue)
+          prunedCount <- store.prune(ts3)
+          aliceEventsAfterPrune <- store.getEvents(alice, CantonTimestamp.MinValue)
+          butternutEventsAfterPrune <- store.getEvents(butternut, CantonTimestamp.MinValue)
+        } yield {
+          aliceEventsBeforePrune should contain theSameElementsInOrderAs Seq(
+            deltaEvent(delta1, ts1),
+            deltaEvent(delta3, ts3),
+          )
+          butternutEventsBeforePrune should contain theSameElementsInOrderAs Seq(
+            deltaEvent(delta2, ts2),
+            deltaEvent(delta4, ts4),
+          )
+          prunedCount shouldBe 3
+          aliceEventsAfterPrune shouldBe empty
+          butternutEventsAfterPrune should contain theSameElementsInOrderAs Seq(
+            deltaEvent(delta4, ts4)
+          )
         }
       }
     }

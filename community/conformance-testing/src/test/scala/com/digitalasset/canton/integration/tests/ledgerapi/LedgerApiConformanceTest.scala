@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledgerapi
 
 import com.daml.ledger.api.testtool.runner.AvailableTests
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -284,11 +285,17 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
   }
 }
 
+@UnstableTest // TODO(i33462): remove this once the test is no longer flaky
 class LedgerApiShard0ConformanceTestPostgres extends LedgerApiShardedConformanceBase(0)
+@UnstableTest // TODO(i33462): remove this once the test is no longer flaky
 class LedgerApiShard1ConformanceTestPostgres extends LedgerApiShardedConformanceBase(1)
+@UnstableTest // TODO(i33462): remove this once the test is no longer flaky
 class LedgerApiShard2ConformanceTestPostgres extends LedgerApiShardedConformanceBase(2)
+@UnstableTest // TODO(i33462): remove this once the test is no longer flaky
 class LedgerApiShard3ConformanceTestPostgres extends LedgerApiShardedConformanceBase(3)
+@UnstableTest // TODO(i33462): remove this once the test is no longer flaky
 class LedgerApiShard4ConformanceTestPostgres extends LedgerApiShardedConformanceBase(4)
+@UnstableTest // TODO(i33462): remove this once the test is no longer flaky
 class LedgerApiShard5ConformanceTestPostgres extends LedgerApiShardedConformanceBase(5)
 
 // Conformance test that need a suppressing rule on canton side

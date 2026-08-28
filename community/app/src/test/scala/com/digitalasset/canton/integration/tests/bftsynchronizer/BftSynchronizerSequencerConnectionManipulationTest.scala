@@ -124,31 +124,32 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
       )
     }
 
-    // stop both mediators to ensure that they don't attempt to reach the sequencer and emit warnings
+    // stop the mediator to ensure that it doesn't attempt to reach the sequencer and emit warnings
     mediator1.stop()
-    sequencer2.stop()
-    clue("restarting mediator after turning off sequencer2") {
-      mediator1.start()
-    }
-
-    clue("reconnecting participants while sequencer2 is offline") {
-      participant1.synchronizers.reconnect(daName)
-      participant2.synchronizers.reconnect(daName)
-    }
-
-    val pingTimeout = config.NonNegativeDuration.ofSeconds(40)
-
-    clue("pinging works nicely again despite sequencer2 being offline") {
-      participant1.health.maybe_ping(participant2.id, timeout = pingTimeout) shouldBe defined
-    }
-
-    // STEP 5: expect sequencer working after disconnect
-    mediator1.stop()
-    participant1.synchronizers.disconnect(daName)
-    participant2.synchronizers.disconnect(daName)
 
     loggerFactory.assertLogsUnorderedOptional(
       {
+        sequencer2.stop()
+        clue("restarting mediator after turning off sequencer2") {
+          mediator1.start()
+        }
+
+        clue("reconnecting participants while sequencer2 is offline") {
+          participant1.synchronizers.reconnect(daName)
+          participant2.synchronizers.reconnect(daName)
+        }
+
+        val pingTimeout = config.NonNegativeDuration.ofSeconds(40)
+
+        clue("pinging works nicely again despite sequencer2 being offline") {
+          participant1.health.maybe_ping(participant2.id, timeout = pingTimeout) shouldBe defined
+        }
+
+        // STEP 5: expect sequencer working after disconnect
+        mediator1.stop()
+        participant1.synchronizers.disconnect(daName)
+        participant2.synchronizers.disconnect(daName)
+
         sequencer1.stop()
         sequencer2.start()
 

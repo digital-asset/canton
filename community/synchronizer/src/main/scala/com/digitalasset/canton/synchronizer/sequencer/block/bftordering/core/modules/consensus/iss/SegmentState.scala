@@ -134,6 +134,9 @@ class SegmentState(
       )
     }
 
+  private val ppStoreCoordinator =
+    PrePrepareStoreCoordinator(segment, membership, completedBlocks, abort)
+
   private def highestNewViewWeKnow: Option[SignedMessage[NewView]] =
     viewChangeState.toIndexedSeq
       .sortBy(_._1)
@@ -178,17 +181,25 @@ class SegmentState(
         processCommitCertificate(msg)
     }
 
-  private def processMessagesStored(pbftMessagesStored: PbftMessagesStored): Seq[ProcessResult] =
+  private def processMessagesStored(pbftMessagesStored: PbftMessagesStored): Seq[ProcessResult] = {
+    def blockMessageStored(msgStored: PbftMessagesStored) = {
+      val blockIndex = segment.relativeBlockIndex(msgStored.blockMetadata.blockNumber)
+      val block = segmentBlocks(blockIndex)
+      block.processMessagesStored(msgStored)
+    }
     pbftMessagesStored match {
-      case _: PrePrepareStored | _: PreparesStored =>
-        val blockIndex = segment.relativeBlockIndex(pbftMessagesStored.blockMetadata.blockNumber)
-        val block = segmentBlocks(blockIndex)
-        block.processMessagesStored(pbftMessagesStored)
+      case ppStored: PrePrepareStored =>
+        ppStoreCoordinator.onPrePrepareStored(ppStored).toList ++ blockMessageStored(
+          pbftMessagesStored
+        )
+      case _: PreparesStored =>
+        blockMessageStored(pbftMessagesStored)
       case _: NewViewStored =>
         segmentBlocks.forgetNE.flatMap { block =>
           block.processMessagesStored(pbftMessagesStored)
         }
     }
+  }
 
   def confirmCompleteBlockStored(blockNumber: BlockNumber): Unit =
     segmentBlocks(segment.relativeBlockIndex(blockNumber)).confirmCompleteBlockStored()
@@ -443,7 +454,14 @@ class SegmentState(
       }
     } else
       result = processPbftNormalCaseMessage(msg, msg.message.blockMetadata.blockNumber)
-    result
+
+    result.filter {
+      case pbftMsg @ SendPbftMessage(SignedMessage(pp: PrePrepare, sig), _, _) =>
+        ppStoreCoordinator.canStoreAndSendPrePrepare(
+          pbftMsg.copy(pbftMessage = SignedMessage(pp, sig))
+        )
+      case _ => true
+    }
   }
 
   /** process some kind of message, which will either be a network message or an internal event

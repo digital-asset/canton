@@ -150,12 +150,6 @@ class MaliciousParticipantNode(
 
     val now = sequencerClient.clock.now
     val maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
-    val signingTimestampOverrides = Some(
-      SigningTimestampOverrides(
-        approximateTimestamp = now,
-        validityPeriodEnd = Some(maxSequencingTime),
-      )
-    )
 
     ResourceUtil.withResourceM(
       new SessionKeyStoreWithInMemoryCache(
@@ -169,7 +163,12 @@ class MaliciousParticipantNode(
           .sign(
             rootHash.unwrap,
             SigningKeyUsage.ProtocolOnly,
-            signingTimestampOverrides,
+            Some(
+              SigningTimestampOverrides(
+                approximateTimestamp = now,
+                validityPeriodEnd = Some(maxSequencingTime),
+              )
+            ),
           )
           .leftMap(_.toString)
         mediatorMessage = fullTree.mediatorMessage(
@@ -204,8 +203,8 @@ class MaliciousParticipantNode(
           .encryptView(UnassignmentViewType)(
             fullTree,
             viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
+            submittingParticipantSignature,
             cryptoSnapshot,
-            signingTimestampOverrides,
             sourceProtocolVersion.unwrap,
           )
           .leftMap(_.toString)
@@ -312,18 +311,17 @@ class MaliciousParticipantNode(
         rootHash = fullTree.rootHash
         now = sequencerClient.clock.now
         maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
-        signingTimestampOverrides = Some(
-          SigningTimestampOverrides(
-            approximateTimestamp = now,
-            validityPeriodEnd = Some(maxSequencingTime),
-          )
-        )
 
         submittingParticipantSignature <- cryptoSnapshot
           .sign(
             rootHash.unwrap,
             SigningKeyUsage.ProtocolOnly,
-            signingTimestampOverrides,
+            Some(
+              SigningTimestampOverrides(
+                approximateTimestamp = now,
+                validityPeriodEnd = Some(maxSequencingTime),
+              )
+            ),
           )
           .leftMap(_.toString)
         mediatorMessage = fullTree.mediatorMessage(
@@ -358,8 +356,8 @@ class MaliciousParticipantNode(
           .encryptView(AssignmentViewType)(
             fullTree,
             viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
+            submittingParticipantSignature,
             cryptoSnapshot,
-            signingTimestampOverrides,
             targetProtocolVersion.unwrap,
           )
           .leftMap(_.toString)

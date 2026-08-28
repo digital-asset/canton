@@ -15,6 +15,7 @@ import com.digitalasset.canton.platform.store.backend.DbDto.{
   EventDeactivate,
   EventVariousWitnessed,
 }
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.topology.SynchronizerId
@@ -81,13 +82,19 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0, endInclusive = 10, activeAt = 10)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1, endInclusive = 10),
+            activeAt = 10,
+          )
         )
     )
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0, endInclusive = 10, activeAt = 10)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1, endInclusive = 10),
+            activeAt = 10,
+          )
         )
     )
     executeSql(updateLedgerEnd(offset(10), 10L))
@@ -949,7 +956,10 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
     // Populate ACHS: both seq ids 1 and 2 are added (activeAt=2 means deactivation at seq id 3 is not yet visible)
     executeSql(
       backend.event.addActivationsToAchs(
-        AchsAddActivationsParams(startExclusive = 0, endInclusive = 2, activeAt = 2)
+        AchsAddActivationsParams(
+          range = EventSeqIdRange(startInclusive = 1, endInclusive = 2),
+          activeAt = 2,
+        )
       )
     )
     // Simulate pruning: remove the activation and deactivation events that would have been pruned,

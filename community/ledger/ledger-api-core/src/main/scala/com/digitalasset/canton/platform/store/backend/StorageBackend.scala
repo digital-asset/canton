@@ -19,7 +19,6 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Sequen
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsAddActivationsParams,
   AchsLastPointers,
-  AchsRemoveDeactivatedParams,
   AchsState,
   PruneUptoInclusiveAndLedgerEnd,
 }
@@ -246,32 +245,16 @@ object ParameterStorageBackend {
     )
   }
 
-  /** The parameters for removing activations from the Active Contracts Head Snapshot (ACHS) that
-    * have been deactivated at a specified range of event sequential IDs.
-    *
-    * @param startExclusive
-    *   The starting event sequential ID (exclusive).
-    * @param endInclusive
-    *   The ending event sequential ID (inclusive).
-    */
-  final case class AchsRemoveDeactivatedParams(
-      startExclusive: Long,
-      endInclusive: Long,
-  )
-
   /** The parameters for adding activations to the Active Contracts Head Snapshot (ACHS) for a
     * specified range of event sequential IDs that are still active at a given event sequential ID.
     *
-    * @param startExclusive
-    *   The starting event sequential ID (exclusive).
-    * @param endInclusive
-    *   The ending event sequential ID (inclusive).
+    * @param range
+    *   The event sequential ID range at which the contracts were activated.
     * @param activeAt
     *   The event sequential ID at which the contracts are still active.
     */
   final case class AchsAddActivationsParams(
-      startExclusive: Long,
-      endInclusive: Long,
+      range: EventSeqIdRange,
       activeAt: Long,
   )
 }
@@ -544,9 +527,8 @@ trait EventStorageBackend {
     * sequential IDs that are still active at a given event sequential ID.
     *
     * @param params
-    *   The parameters for adding activations to the ACHS. It includes::
-    *   - startExclusive: The starting event sequential ID (exclusive).
-    *   - endInclusive: The ending event sequential ID (inclusive).
+    *   The parameters for adding activations to the ACHS. It includes:
+    *   - range: The event sequential ID range.
     *   - activeAt: The event sequential ID at which the contracts are still active.
     * @param connection
     *   The database connection to be used for the operation.
@@ -558,15 +540,13 @@ trait EventStorageBackend {
   /** Removes activations from the Active Contracts Head Snapshot (ACHS) looking at a specified
     * range of event sequential IDs in the deactivations table.
     *
-    * @param params
-    *   The parameters for removing activations from the ACHS. It includes:
-    *   - startExclusive: The starting event sequential ID (exclusive).
-    *   - endInclusive: The ending event sequential ID (inclusive).
+    * @param range
+    *   The event sequential ID range to look for deactivations.
     * @param connection
     *   The database connection to be used for the operation.
     */
   def removeDeactivatedFromAchs(
-      params: AchsRemoveDeactivatedParams
+      range: EventSeqIdRange
   )(connection: Connection): Unit
 
   /** Removes entries from Active Contracts Head Snapshot above the specified event sequential ID

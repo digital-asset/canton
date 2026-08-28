@@ -8,10 +8,10 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.*
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
   AchsAddActivationsParams,
   AchsLastPointers,
-  AchsRemoveDeactivatedParams,
   AchsState,
 }
 import com.digitalasset.canton.platform.store.cache.AchsStateCache
@@ -32,8 +32,8 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       remEnd: Long,
   ): AchsWorkRange =
     AchsWorkRange(
-      activationsPopulation = EventSeqIdRange(startExclusive = popStart, endInclusive = popEnd),
-      deactivatedRemoval = EventSeqIdRange(startExclusive = remStart, endInclusive = remEnd),
+      activationsPopulation = EventSeqIdRange(startInclusive = popStart, endInclusive = popEnd),
+      deactivatedRemoval = EventSeqIdRange(startInclusive = remStart, endInclusive = remEnd),
     )
 
   behavior of "AchsWorkDistance.+"
@@ -115,7 +115,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       acc = Vector.empty,
       fullDrain = false,
     )
-    ranges shouldBe Vector(workRange(popStart = 60L, popEnd = 70L, remStart = 80L, remEnd = 90L))
+    ranges shouldBe Vector(workRange(popStart = 61L, popEnd = 70L, remStart = 81L, remEnd = 90L))
     newState shouldBe AchsState(
       validAt = 100L,
       lastPointers = AchsLastPointers(lastRemoved = 90L, lastPopulated = 70L),
@@ -136,7 +136,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       acc = Vector.empty,
       fullDrain = false,
     )
-    ranges shouldBe Vector(workRange(popStart = 60L, popEnd = 60L, remStart = 80L, remEnd = 90L))
+    ranges shouldBe Vector(workRange(popStart = 61L, popEnd = 60L, remStart = 81L, remEnd = 90L))
     newState shouldBe AchsState(
       validAt = 100L,
       lastPointers = AchsLastPointers(lastRemoved = 90L, lastPopulated = 60L),
@@ -158,8 +158,8 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       fullDrain = false,
     )
     ranges shouldBe Vector(
-      workRange(popStart = 0L, popEnd = 10L, remStart = 0L, remEnd = 10L),
-      workRange(popStart = 10L, popEnd = 20L, remStart = 10L, remEnd = 20L),
+      workRange(popStart = 1L, popEnd = 10L, remStart = 1L, remEnd = 10L),
+      workRange(popStart = 11L, popEnd = 20L, remStart = 11L, remEnd = 20L),
     )
     newState shouldBe AchsState(
       validAt = 100L,
@@ -182,9 +182,9 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       fullDrain = false,
     )
     ranges shouldBe Vector(
-      workRange(popStart = 5L, popEnd = 15L, remStart = 42L, remEnd = 52L),
-      workRange(popStart = 15L, popEnd = 25L, remStart = 52L, remEnd = 52L),
-      workRange(popStart = 25L, popEnd = 35L, remStart = 52L, remEnd = 52L),
+      workRange(popStart = 6L, popEnd = 15L, remStart = 43L, remEnd = 52L),
+      workRange(popStart = 16L, popEnd = 25L, remStart = 53L, remEnd = 52L),
+      workRange(popStart = 26L, popEnd = 35L, remStart = 53L, remEnd = 52L),
     )
     newState shouldBe AchsState(
       validAt = 100L,
@@ -207,9 +207,9 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       fullDrain = false,
     )
     ranges shouldBe Vector(
-      workRange(popStart = 0L, popEnd = 0L, remStart = 0L, remEnd = 10L),
-      workRange(popStart = 0L, popEnd = 0L, remStart = 10L, remEnd = 20L),
-      workRange(popStart = 0L, popEnd = 0L, remStart = 20L, remEnd = 30L),
+      workRange(popStart = 1L, popEnd = 0L, remStart = 1L, remEnd = 10L),
+      workRange(popStart = 1L, popEnd = 0L, remStart = 11L, remEnd = 20L),
+      workRange(popStart = 1L, popEnd = 0L, remStart = 21L, remEnd = 30L),
     )
     // all populationEnd values should be zero
     ranges.foreach { wr =>
@@ -236,9 +236,9 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       fullDrain = true,
     )
     ranges shouldBe Vector(
-      workRange(popStart = 0L, popEnd = 10L, remStart = 0L, remEnd = 10L),
-      workRange(popStart = 10L, popEnd = 20L, remStart = 10L, remEnd = 20L),
-      workRange(popStart = 20L, popEnd = 25L, remStart = 20L, remEnd = 25L),
+      workRange(popStart = 1L, popEnd = 10L, remStart = 1L, remEnd = 10L),
+      workRange(popStart = 11L, popEnd = 20L, remStart = 11L, remEnd = 20L),
+      workRange(popStart = 21L, popEnd = 25L, remStart = 21L, remEnd = 25L),
     )
     newState shouldBe AchsState(
       validAt = 100L,
@@ -261,10 +261,10 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       fullDrain = true,
     )
     ranges shouldBe Vector(
-      workRange(popStart = 5L, popEnd = 15L, remStart = 42L, remEnd = 42L),
-      workRange(popStart = 15L, popEnd = 25L, remStart = 42L, remEnd = 42L),
-      workRange(popStart = 25L, popEnd = 35L, remStart = 42L, remEnd = 42L),
-      workRange(popStart = 35L, popEnd = 40L, remStart = 42L, remEnd = 42L),
+      workRange(popStart = 6L, popEnd = 15L, remStart = 43L, remEnd = 42L),
+      workRange(popStart = 16L, popEnd = 25L, remStart = 43L, remEnd = 42L),
+      workRange(popStart = 26L, popEnd = 35L, remStart = 43L, remEnd = 42L),
+      workRange(popStart = 36L, popEnd = 40L, remStart = 43L, remEnd = 42L),
     )
     newState shouldBe AchsState(
       validAt = 100L,
@@ -335,7 +335,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     val inputWorkRange = workRange(
       popStart = 0L,
       popEnd = 0L,
-      remStart = 10L,
+      remStart = 11L,
       remEnd = 60L,
     )
 
@@ -370,7 +370,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     val inputWorkRange = workRange(
       popStart = 0L,
       popEnd = 0L,
-      remStart = 10L,
+      remStart = 11L,
       remEnd = 50L,
     )
 
@@ -404,9 +404,9 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     )
 
     val inputWorkRange = workRange(
-      popStart = 65L,
+      popStart = 66L,
       popEnd = 70L,
-      remStart = 75L,
+      remStart = 76L,
       remEnd = 80L,
     )
 
@@ -479,7 +479,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     val inputWorkRange = workRange(
       popStart = 0L,
       popEnd = 0L,
-      remStart = 0L,
+      remStart = 1L,
       remEnd = 5L,
     )
 
@@ -504,15 +504,15 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
   behavior of "populateAchsActivations"
 
   private val zeroAddParams =
-    AchsAddActivationsParams(startExclusive = 0L, endInclusive = 0L, activeAt = 0L)
+    AchsAddActivationsParams(EventSeqIdRange(startInclusive = 0L, endInclusive = 0L), activeAt = 0L)
 
   it should "populate activations in the correct range" in {
     val dbRef = new AtomicReference[AchsAddActivationsParams](zeroAddParams)
 
     val inputWorkRange = workRange(
-      popStart = 20L,
+      popStart = 21L,
       popEnd = 70L,
-      remStart = 30L,
+      remStart = 31L,
       remEnd = 80L,
     )
 
@@ -525,8 +525,7 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       .futureValue shouldBe inputWorkRange
 
     dbRef.get() shouldBe AchsAddActivationsParams(
-      startExclusive = 20L,
-      endInclusive = 70L,
+      EventSeqIdRange(startInclusive = 21L, endInclusive = 70L),
       activeAt = 80L,
     )
   }
@@ -535,9 +534,9 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
     val dbRef = new AtomicReference[AchsAddActivationsParams](zeroAddParams)
 
     val inputWorkRange = workRange(
-      popStart = 70L,
+      popStart = 71L,
       popEnd = 70L,
-      remStart = 80L,
+      remStart = 81L,
       remEnd = 90L,
     )
 
@@ -554,15 +553,15 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
 
   behavior of "removeDeactivatedFromAchsStage"
 
-  private val zeroRemoveParams = AchsRemoveDeactivatedParams(startExclusive = 0L, endInclusive = 0L)
+  private val zeroRemoveParams = EventSeqIdRange(startInclusive = 0L, endInclusive = 0L)
 
   it should "remove deactivated entries in the correct range" in {
-    val dbRef = new AtomicReference[AchsRemoveDeactivatedParams](zeroRemoveParams)
+    val dbRef = new AtomicReference[EventSeqIdRange](zeroRemoveParams)
 
     val inputWorkRange = workRange(
-      popStart = 20L,
+      popStart = 21L,
       popEnd = 70L,
-      remStart = 30L,
+      remStart = 31L,
       remEnd = 80L,
     )
 
@@ -575,19 +574,19 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
       )(inputWorkRange)
       .futureValue shouldBe inputWorkRange
 
-    dbRef.get() shouldBe AchsRemoveDeactivatedParams(
-      startExclusive = 30L,
+    dbRef.get() shouldBe EventSeqIdRange(
+      startInclusive = 31L,
       endInclusive = 80L,
     )
   }
 
   it should "skip removal when no sequenced events are in the batch" in {
-    val dbRef = new AtomicReference[AchsRemoveDeactivatedParams](zeroRemoveParams)
+    val dbRef = new AtomicReference[EventSeqIdRange](zeroRemoveParams)
 
     val inputWorkRange = workRange(
-      popStart = 50L,
+      popStart = 51L,
       popEnd = 70L,
-      remStart = 80L,
+      remStart = 81L,
       remEnd = 80L,
     )
 
@@ -604,12 +603,12 @@ class AchsMaintenancePipeSpec extends AnyFlatSpec with BaseTest with HasExecutio
   }
 
   it should "skip removal when nothing has been populated into ACHS (populationEnd <= 0)" in {
-    val dbRef = new AtomicReference[AchsRemoveDeactivatedParams](zeroRemoveParams)
+    val dbRef = new AtomicReference[EventSeqIdRange](zeroRemoveParams)
 
     val inputWorkRange = workRange(
-      popStart = 0L,
+      popStart = 1L,
       popEnd = 0L,
-      remStart = 0L,
+      remStart = 1L,
       remEnd = 10L,
     )
 

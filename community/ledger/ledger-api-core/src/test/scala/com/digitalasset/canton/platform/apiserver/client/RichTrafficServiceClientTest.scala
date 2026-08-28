@@ -4,18 +4,93 @@
 package com.digitalasset.canton.platform.apiserver.client
 
 import com.digitalasset.base.error.utils.DecodedCantonError
+import com.digitalasset.canton.config.PositiveFiniteDuration
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.generator.ErrorCodeDocumentationGenerator
 import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.networking.grpc.GrpcError
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
-import com.digitalasset.canton.{BaseTest, ProtoDeserializationError}
+import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficService
+import com.digitalasset.canton.tea.v1.{
+  GetAccountRequest,
+  GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
+  TrafficServiceGrpc,
+  UpdateAccountRequest,
+  UpdateAccountResponse,
+}
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtoDeserializationError}
+import io.grpc.inprocess.InProcessServerBuilder
 import io.grpc.{Status, StatusRuntimeException}
 import org.scalatest.wordspec.AnyWordSpec
 
-class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest {
+import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.Future
+
+class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
   private def grpcError(status: Status, requestDescription: String = "get-account"): GrpcError =
     GrpcError(requestDescription, "traffic-service", status.asRuntimeException())
+
+  private class RecordingTrafficService extends TrafficService {
+    val getAccountTraceContext = new AtomicReference[TraceContext]()
+
+    override def getAccount(request: GetAccountRequest): Future[GetAccountResponse] = {
+      getAccountTraceContext.set(TraceContextGrpc.fromGrpcContext)
+      Future.successful(GetAccountResponse(request.accountId, 0L))
+    }
+
+    override def updateAccount(request: UpdateAccountRequest): Future[UpdateAccountResponse] =
+      Future.successful(
+        UpdateAccountResponse(Some(GetAccountResponse(request.accountId, 0L)))
+      )
+
+    override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] =
+      Future.successful(PruneEventsResponse(0))
+  }
+
+  private def withTrafficService(
+      body: (RichTrafficServiceClient, RecordingTrafficService) => Unit
+  ): Unit = {
+    val service = new RecordingTrafficService
+    val serverName = InProcessServerBuilder.generateName()
+    val server = InProcessServerBuilder
+      .forName(serverName)
+      .intercept(TraceContextGrpc.serverInterceptor)
+      .addService(TrafficServiceGrpc.bindService(service, parallelExecutionContext))
+      .build()
+      .start()
+    val client = RichTrafficServiceClient.toInternalServer(
+      serverName,
+      timeouts,
+      PositiveFiniteDuration.ofSeconds(10),
+      loggerFactory,
+    )
+
+    try body(client, service)
+    finally {
+      client.close()
+      server.shutdown().awaitTermination().discard
+    }
+  }
+
+  "toInternalServer" should {
+    "carry the caller's trace context to the traffic service" in withTrafficService {
+      (client, service) =>
+        val callerTraceContext = TraceContext.withNewTraceContext("caller")(identity)
+        val callerTraceId = callerTraceContext.traceId.valueOrFail("caller trace id")
+
+        client
+          .getAccount(GetAccountRequest("alice"))(callerTraceContext, parallelExecutionContext)
+          .futureValueUS
+          .valueOrFail("get-account")
+          .discard
+
+        Option(service.getAccountTraceContext.get()).flatMap(_.traceId) shouldBe Some(callerTraceId)
+    }
+  }
 
   "retryUnlessClientGaveUp" should {
 

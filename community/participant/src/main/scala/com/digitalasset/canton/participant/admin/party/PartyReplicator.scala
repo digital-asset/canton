@@ -288,6 +288,18 @@ final class PartyReplicator(
       addPartyRequestId: AddPartyRequestId
   ): Option[PartyReplicationStatus] = partyReplicationStateManager.get(addPartyRequestId)
 
+  private[admin] def getAddPartyStatus(
+      partyId: PartyId,
+      synchronizerId: SynchronizerId,
+      targetParticipantId: ParticipantId,
+  ): Option[PartyReplicationStatus] = partyReplicationStateManager.collectFirst {
+    case (_, status)
+        if status.params.partyId == partyId &&
+          status.params.synchronizerId == synchronizerId &&
+          status.params.targetParticipantId == targetParticipantId =>
+      status
+  }
+
   /** Adds a party to the local target participant using the ACS snapshot provided by a file via an
     * ACS stream by importing the ACS synchronously, i.e. when the returned EitherT succeeds, but
     * only fully completing party replication asynchronously (e.g. clearing the onboarding flag).

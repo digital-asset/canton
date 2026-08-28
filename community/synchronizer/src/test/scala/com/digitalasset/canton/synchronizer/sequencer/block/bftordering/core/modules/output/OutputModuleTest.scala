@@ -53,6 +53,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   FakePipeToSelfCellUnitTestEnv,
   IgnoringUnitTestContext,
   IgnoringUnitTestEnv,
+  PeanoQueue,
   ProgrammableUnitTestContext,
   ProgrammableUnitTestEnv,
 }

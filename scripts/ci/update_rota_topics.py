@@ -29,9 +29,6 @@ import datetime as dt
 import json
 import os
 import sys
-import urllib.error
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
@@ -40,9 +37,7 @@ import select_rota
 Resolver = Callable[[str], list[str]]
 
 SLACK_SET_TOPIC_URL = "https://slack.com/api/conversations.setTopic"
-SLACK_OPEN_DM_URL = "https://slack.com/api/conversations.open"
-SLACK_POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
-SLACK_TOKEN_ENV = "SLACK_BOT_QA_NOTIFICATIONS"
+SLACK_TOKEN_ENV = select_rota.SLACK_TOKEN_ENV
 FIX_ME_SLACK_ID_ENV = "ROTA_TOPICS_ADMIN_SLACK_ID"
 
 # rotation name -> expected sheet column count. None means "1 or 2 both fine" (flaky-canton
@@ -56,11 +51,6 @@ EXPECTED_COLUMNS: dict[str, int | None] = {
     "flaky-canton": None,
     "flaky-sdk": 1,
 }
-
-
-def format_week_date(monday: dt.date) -> str:
-    """Render the week's Monday like 'July 27' (full month, no leading zero)."""
-    return f"{monday.strftime('%B')} {monday.day}"
 
 
 def _mentions(slack_ids: list[str]) -> str:
@@ -130,37 +120,6 @@ def make_resolver(
     return resolve, failures
 
 
-def fetch_week_values(monday: dt.date, sheet_id: str) -> list[list[Any]]:
-    """Fetch the half-year tab holding the given week, reusing select_rota's helpers."""
-    sa_key = os.environ.get("GCLOUD_SHEETS_SA_KEY")
-    if not sa_key:
-        raise RuntimeError("GCLOUD_SHEETS_SA_KEY is not set")
-    token = select_rota.get_access_token(json.loads(sa_key))
-    return select_rota.fetch_tab_values(token, sheet_id, select_rota.half_year_tab(monday))
-
-
-def _slack_post(url: str, token: str, fields: dict) -> dict:
-    """POST form-encoded fields to a Slack Web API method, returning the parsed ok response."""
-    req = urllib.request.Request(
-        url,
-        data=urllib.parse.urlencode(fields).encode(),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            payload = json.load(resp)
-    except urllib.error.HTTPError as err:
-        body = err.read().decode(errors="replace")
-        raise RuntimeError(f"{url} failed: HTTP {err.code} {body}") from err
-    if not payload.get("ok"):
-        raise RuntimeError(f"{url} failed: {payload.get('error')}")
-    return payload
-
-
 def build_fix_me_message(
     failed_rotations: set[str], date_str: str, sheet_url: str, sheet_read_failed: bool = False
 ) -> str:
@@ -207,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
         dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(dt.timezone.utc).date()
     )
     monday = select_rota.current_monday(today)
-    date_str = format_week_date(monday)
+    date_str = select_rota.format_week_date(monday)
     sheet_id = os.environ.get("ROTA_SHEET_ID", select_rota.DEFAULT_SHEET_ID)
 
     exit_code = 0
@@ -216,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
         values = json.loads(Path(args.values_file).read_text(encoding="utf-8"))
     else:
         try:
-            values = fetch_week_values(monday, sheet_id)
+            values = select_rota.fetch_week_values(monday, sheet_id)
         except Exception as exc:
             # A per-slot gap degrades to a placeholder and still gets written, but a whole-sheet
             # read failure is a transient outage, not a rota gap. We compose the (all-placeholder)
@@ -248,7 +207,9 @@ def main(argv: list[str] | None = None) -> int:
             exit_code = 1
         else:
             try:
-                _slack_post(SLACK_SET_TOPIC_URL, token, {"channel": channel_id, "topic": topic})
+                select_rota.slack_post(
+                    SLACK_SET_TOPIC_URL, token, {"channel": channel_id, "topic": topic}
+                )
                 select_rota.log("    done")
             except Exception as exc:
                 select_rota.log(f"    ERROR: {exc!r}")
@@ -278,17 +239,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         select_rota.log(f"    {message}")
         if args.apply and token and admin_ids:
-            # Open a 1:1 DM per maintainer and post to that conversation id: chat.postMessage
-            # needs a conversation id, not a user id. conversations.open is covered by the
-            # channels:manage/groups:write scope the topic writes already need, so no extra one.
             for admin_id in admin_ids:
                 try:
-                    dm = _slack_post(SLACK_OPEN_DM_URL, token, {"users": admin_id})
-                    _slack_post(
-                        SLACK_POST_MESSAGE_URL,
-                        token,
-                        {"channel": dm["channel"]["id"], "text": message},
-                    )
+                    select_rota.send_dm(token, admin_id, message)
                     select_rota.log(f"    done: {admin_id}")
                 except Exception as exc:
                     select_rota.log(f"    ERROR ({admin_id}): {exc!r}")
@@ -300,8 +253,6 @@ def main(argv: list[str] | None = None) -> int:
 
 def self_test() -> None:
     """In-memory checks of the pure helpers. No network, clock, or roster file."""
-    assert format_week_date(dt.date(2025, 7, 27)) == "July 27"
-    assert format_week_date(dt.date(2025, 1, 5)) == "January 5"
     assert _mentions([]) == "(nobody on rota)"
     assert _mentions(["U1", "U2"]) == "<@U1>, <@U2>"
 

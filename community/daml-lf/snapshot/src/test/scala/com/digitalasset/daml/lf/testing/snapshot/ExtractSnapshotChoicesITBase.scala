@@ -12,7 +12,6 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
-  SharedEnvironment,
 }
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref
@@ -25,7 +24,7 @@ import java.nio.file.{FileSystems, Files, Path}
 // make the test base an abstract class
 abstract class ExtractSnapshotChoicesITBase
     extends CommunityIntegrationTest
-    with SharedEnvironment
+    with SharedEnvironmentWithStaticTime
     with EntitySyntax
     with BeforeAndAfterEach {
 
@@ -42,9 +41,10 @@ abstract class ExtractSnapshotChoicesITBase
   private val ReplayBenchmarkPkgId: LfPackageId = getPkgId(darPath)
   private val AddChoiceName = s"$ReplayBenchmarkPkgId:ReplayBenchmark:T:Add"
   private val SubChoiceName = s"$ReplayBenchmarkPkgId:ReplayBenchmark:T:Sub"
+  private val GetAndSetTimeChoiceName = s"$ReplayBenchmarkPkgId:GetAndSetTime:T:Add"
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    super.environmentDefinition
       .addConfigTransforms(
         ConfigTransforms.enableNonStandardConfig,
         ConfigTransforms.updateAllParticipantConfigs_(
@@ -76,24 +76,24 @@ abstract class ExtractSnapshotChoicesITBase
       val snapshotFile = snapshotFiles.get(0)
 
       TransactionSnapshot.getAllTopLevelChoiceNames(snapshotFile) should equal(
-        Set(AddChoiceName, SubChoiceName)
+        Set(AddChoiceName, SubChoiceName, GetAndSetTimeChoiceName)
       )
 
       TransactionSnapshot.getAllTopLevelChoiceNames(
         snapshotFile,
         stepCountFilter = Some(190),
-      ) should equal(Set(AddChoiceName, SubChoiceName))
+      ) should equal(Set(AddChoiceName, SubChoiceName, GetAndSetTimeChoiceName))
 
       TransactionSnapshot.getAllTopLevelChoiceNames(
         snapshotFile,
         txNodeCountFilter = Some(3),
-      ) should equal(Set(AddChoiceName))
+      ) should equal(Set(AddChoiceName, GetAndSetTimeChoiceName))
 
       TransactionSnapshot.getAllTopLevelChoiceNames(
         snapshotFile,
         stepCountFilter = Some(193),
         txNodeCountFilter = Some(3),
-      ) should equal(Set(AddChoiceName))
+      ) should equal(Set(AddChoiceName, GetAndSetTimeChoiceName))
   }
 
   private def getPkgId(darPath: Path): LfPackageId =

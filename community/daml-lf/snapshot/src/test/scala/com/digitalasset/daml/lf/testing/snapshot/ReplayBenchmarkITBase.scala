@@ -14,7 +14,6 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
-  SharedEnvironment,
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
@@ -34,7 +33,7 @@ import java.nio.file.{FileSystems, Files, Path}
 abstract class ReplayBenchmarkITBase(
     contractIdVersion: ContractIdVersion
 ) extends CommunityIntegrationTest
-    with SharedEnvironment
+    with SharedEnvironmentWithStaticTime
     with EntitySyntax
     with BeforeAndAfterEach {
 
@@ -54,7 +53,7 @@ abstract class ReplayBenchmarkITBase(
   private var alice: PartyId = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    super.environmentDefinition
       .addConfigTransforms(
         ConfigTransforms.enableNonStandardConfig,
         ConfigTransforms.updateAllParticipantConfigs_(

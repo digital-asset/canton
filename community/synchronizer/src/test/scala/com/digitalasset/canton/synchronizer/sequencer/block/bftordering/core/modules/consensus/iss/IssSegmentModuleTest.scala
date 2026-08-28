@@ -2409,6 +2409,7 @@ class IssSegmentModuleTest
       availabilityModuleRef,
       p2pNetworkOutModuleRef,
       config.consensusEmptyBlockCreationTimeout,
+      config.consensusEnableFlushingSegment,
       config.viewChangeTimeoutOverride,
       metrics,
       timeouts,

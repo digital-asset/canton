@@ -1321,12 +1321,20 @@ final class UnassignmentProcessingStepsTest
         )
         .valueOrFailShutdown("cannot generate encryption key for unassignment request")
 
+      submittingParticipantSignature <- cryptoSnapshot
+        .sign(
+          tree.rootHash.unwrap,
+          SigningKeyUsage.ProtocolOnly,
+          None, // not needed for unit tests; session signing keys disabled
+        )
+        .valueOrFailShutdown("cannot sign unassignment request")
+
       encryptedTree <- EncryptedViewMessageFactory
         .encryptView(UnassignmentViewType)(
           tree,
           viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipients),
+          submittingParticipantSignature,
           cryptoSnapshot,
-          None,
           testedProtocolVersion,
         )(
           implicitly[TraceContext],

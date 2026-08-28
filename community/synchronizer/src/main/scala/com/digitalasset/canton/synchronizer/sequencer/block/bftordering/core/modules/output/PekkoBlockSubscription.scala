@@ -26,6 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultSequencerCoreSubscriptionConfig,
   SequencerCoreSubscriptionConfig,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.PeanoQueue
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.PekkoBlockSubscription.{
   RetryPolicy,
   State,

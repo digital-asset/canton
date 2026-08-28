@@ -9,6 +9,7 @@
   - **Red-main alert** (`slack_red_main_with_volunteer`), when a **build or infrastructure** job fails on `main`: it pings the rota mapped to that job, so a red **blackduck** job pings the **Release & Blackduck** rota and everything else pings the **CI rota**. Test-job failures are deliberately excluded here, since they are covered by the flaky/nightly alert above. Which jobs count as tests is set in [`notify_job_classification.yml`](notify_job_classification.yml), kept in sync with the workflow by `check_canton_build_required_gate.py`.
 - **Fallback when the lookup fails.** If the sheet cannot be read (`GCLOUD_SHEETS_SA_KEY` unset, the service account is not a Viewer), nobody is on rota that week, or the name has no Slack ID in `roster_people.json`, the alert @-mentions `fallback_pool` from `roster_people.json` instead of pinging no one.
 - **Weekly Slack topics.** A separate scheduled workflow, `update_rota_topics.yml`, runs every Monday and rewrites the team channel topics from the same rota sheet, so each channel topic always names the current on-duty person.
+- **Upcoming-shift reminders.** Another scheduled workflow, `remind_upcoming_rota.yml`, runs every Monday and privately DMs the people who start a rota shift about a month (28 days) out, so they get a heads-up in time to arrange a swap.
 
 ## Flaky test notification system
 
@@ -139,3 +140,20 @@ To trigger a run off-schedule, for example to apply topics right after fixing th
 | `SLACK_CHANNEL_ID_TEAM_CANTON_CI` | variable | Target channel id |
 | `SLACK_CHANNEL_ID_TEAM_CANTON_FLAKY_TESTS` | variable | Target channel id |
 | `ROTA_TOPICS_ADMIN_SLACK_ID` | variable | Optional comma-separated Slack ids to DM when a rotation cannot be resolved (defaults to the roster's `fallback_pool`, the usual suspects) |
+
+## Rota upcoming-shift reminders
+
+`remind_upcoming_rota.py` privately Slack-DMs the people who start a rota shift about a month (28 days) from now, reading the same [rota Google Sheet](https://docs.google.com/spreadsheets/d/1PEmLKqoB2DpokVhao5PNxznMI5ufZZbXgUju7Npn0BU) and roster (`roster_people.json`) as `select_rota.py`. It covers all eight rotations.
+
+For each rotation it looks at the week 28 days ahead and DMs whoever is **newly on duty** that week, meaning present in the target week but not in the week before it, so someone in the middle of a multi-week shift is not re-pinged. Because the target week is always exactly 28 days ahead and the job runs once a week, every future shift-start Monday is the target on exactly one run, so each newly-starting person is reminded once with no persistent state to dedupe against.
+
+Unlike the topics script, the reminder always sends. A missing `SLACK_BOT_QA_NOTIFICATIONS` token is a hard config error and the run fails fast before reading the sheet. A run that cannot read the sheet, or that hits a target-week name with no Slack ID, exits non-zero. On a total sheet-read failure it DMs the usual suspects (the roster's `fallback_pool`) so the sheet access gets fixed.
+
+It runs weekly via the `Remind upcoming rota` GitHub Actions workflow (`.github/workflows/remind_upcoming_rota.yml`), scheduled every Monday at 04:00 UTC (06:00 CEST), and can also be triggered off-schedule with `gh workflow run "Remind upcoming rota" --ref main` or **Run workflow** in the GitHub UI. The tool keeps no state, so a manual dispatch in a week whose scheduled run already fired re-sends that week's reminders.
+
+### Required secrets
+
+| Secret | Used for |
+|---|---|
+| `GCLOUD_SHEETS_SA_KEY` | Reading the rota sheet (SA must be a Viewer on it) |
+| `SLACK_BOT_QA_NOTIFICATIONS` | Sending the DMs (bot needs `im:write` for `conversations.open` and `chat:write` for `chat.postMessage`) |

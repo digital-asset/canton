@@ -32,8 +32,6 @@ import scala.concurrent.ExecutionContext
 import scala.util.control.NoStackTrace
 import scala.util.{Failure, Success}
 
-import AccountState.*
-
 /** Store for DB operations on traffic persistence.
   */
 class TeaDbTrafficStore(
@@ -257,6 +255,20 @@ class TeaDbTrafficStore(
     sql"select account_id, total_debits, total_credits, updated_at from par_traffic_enforcement_balance where account_id = $accountId"
       .as[(AccountId, Long, Long, CantonTimestamp)]
       .map(_.headOption)
+
+  override def pruneEvents(beforeInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Int] = {
+    val prune =
+      sqlu"delete from par_traffic_enforcement_event where timestamp <= $beforeInclusive"
+
+    EitherT(
+      storage.update(prune.transactionally, "prune_events", 0).transformWithHandledAborted {
+        case Success(state) => FutureUnlessShutdown.pure(Right(state))
+        case Failure(ex) => FutureUnlessShutdown.pure(Left(TeaDbTrafficStore.classifyFailure(ex)))
+      }
+    )
+  }
 
   override def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext

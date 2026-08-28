@@ -3,23 +3,22 @@
 
 package com.digitalasset.canton.integration.tests.security
 
-import cats.syntax.alternative.*
 import cats.syntax.compose.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.v2.completion.Completion
+import com.daml.ledger.api.v2.event.ArchivedEvent
+import com.daml.ledger.api.v2.event.Event.Event.{Archived, Created, Exercised}
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction.Transaction.toJavaProto
-import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
+  TRANSACTION_SHAPE_ACS_DELTA,
+  TRANSACTION_SHAPE_LEDGER_EFFECTS,
+}
 import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
-import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.{
-  AssignedWrapper,
-  ReassignmentWrapper,
-  TransactionWrapper,
-  UnassignedWrapper,
-  UpdateWrapper,
-}
+import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.*
 import com.digitalasset.canton.console.{
   LocalInstanceReference,
   LocalMediatorReference,
@@ -569,8 +568,8 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
 
     val trackedParties = extraTrackedParties ++ participants.map(_.id.adminParty)
 
-    // Subscribe to transaction trees & completions for all participants
-    val (completionsF, updatesF) = (for (participant <- participants) yield {
+    // Subscribe to completions for all participants
+    val completionsF = for (participant <- participants) yield {
       val completionObserver =
         new CollectUntilObserver[Completion](_.commandId == finishCommandId)
       val completionCloseable = participant.ledger_api.completions
@@ -582,33 +581,53 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       completionObserver.result.onComplete(_ => completionCloseable.close())
       submissionFailedP.future.onComplete(_ => completionCloseable.close())
 
-      val transactionObserver =
-        new CollectUntilObserver[UpdateWrapper]({
-          case TransactionWrapper(tt) => tt.commandId == finishCommandId
-          case rw: ReassignmentWrapper => rw.reassignment.commandId == finishCommandId
-          case _ => false
-        })
-      val updateFormat = getUpdateFormat(
-        partyIds = trackedParties.toSet,
-        filterTemplates = Seq.empty,
-        transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
-        includeReassignments = true,
-      )
-      val ledgerEnd = participant.ledger_api.state.end()
-      val transactionCloseable = participant.ledger_api.updates
-        .subscribe_updates(
-          transactionObserver,
-          updateFormat,
-          beginOffsetExclusive = ledgerEnd,
-        )
-      transactionObserver.result.onComplete(_ => transactionCloseable.close())
-      submissionFailedP.future.onComplete(_ => transactionCloseable.close())
+      participant -> completionObserver.result
+    }
 
-      (
-        participant -> completionObserver.result,
-        participant -> transactionObserver.result,
-      )
-    }).separate
+    // Subscribe to transaction trees & ACS deltas for all participants
+    def recordTransactions(
+        transactionShape: TransactionShape
+    ): Seq[(ParticipantReference, Future[Seq[UpdateWrapper]])] =
+      for (participant <- participants)
+        yield {
+          val completionObserver =
+            new CollectUntilObserver[Completion](_.commandId == finishCommandId)
+          val completionCloseable = participant.ledger_api.completions
+            .subscribe(
+              completionObserver,
+              trackedParties,
+              beginOffsetExclusive = participant.ledger_api.state.end(),
+            )
+          completionObserver.result.onComplete(_ => completionCloseable.close())
+          submissionFailedP.future.onComplete(_ => completionCloseable.close())
+
+          val transactionObserver =
+            new CollectUntilObserver[UpdateWrapper]({
+              case TransactionWrapper(tt) => tt.commandId == finishCommandId
+              case rw: ReassignmentWrapper => rw.reassignment.commandId == finishCommandId
+              case _ => false
+            })
+          val updateFormat = getUpdateFormat(
+            partyIds = trackedParties.toSet,
+            filterTemplates = Seq.empty,
+            transactionShape = transactionShape,
+            includeReassignments = true,
+          )
+          val ledgerEnd = participant.ledger_api.state.end()
+          val transactionCloseable = participant.ledger_api.updates
+            .subscribe_updates(
+              transactionObserver,
+              updateFormat,
+              beginOffsetExclusive = ledgerEnd,
+            )
+          transactionObserver.result.onComplete(_ => transactionCloseable.close())
+          submissionFailedP.future.onComplete(_ => transactionCloseable.close())
+
+          participant -> transactionObserver.result
+        }
+
+    val updatesF = recordTransactions(TRANSACTION_SHAPE_LEDGER_EFFECTS)
+    val acsDeltasF = recordTransactions(TRANSACTION_SHAPE_ACS_DELTA)
 
     // Run body and abort the tracking on exceptions
     try {
@@ -627,7 +646,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
         )
         .futureValue
 
-      (result, new TrackingResult(completionsF.toMap, updatesF.toMap))
+      (result, new TrackingResult(completionsF.toMap, updatesF.toMap, acsDeltasF.toMap))
     } catch {
       case NonFatal(ex) =>
         submissionFailedP.trySuccess(())
@@ -652,18 +671,25 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
   }
 
   class TrackingResult(
-      completions: Map[ParticipantReference, Future[Seq[Completion]]],
-      updates: Map[ParticipantReference, Future[Seq[UpdateWrapper]]],
+      completionsByParticipant: Map[ParticipantReference, Future[Seq[Completion]]],
+      updatesByParticipant: Map[ParticipantReference, Future[Seq[UpdateWrapper]]],
+      acsDeltasByParticipant: Map[ParticipantReference, Future[Seq[UpdateWrapper]]],
   )(implicit executionContext: ExecutionContext) {
 
     def transactions: Map[ParticipantReference, Future[Seq[Transaction]]] =
-      updates.map { case (p, uf) => p -> uf.map(_.collect { case TransactionWrapper(tt) => tt }) }
+      updatesByParticipant.map { case (p, uf) =>
+        p -> uf.map(_.collect { case TransactionWrapper(tt) => tt })
+      }
 
     def unassignments: Map[ParticipantReference, Future[Seq[UnassignedWrapper]]] =
-      updates.map { case (p, uf) => p -> uf.map(_.collect { case uw: UnassignedWrapper => uw }) }
+      updatesByParticipant.map { case (p, uf) =>
+        p -> uf.map(_.collect { case uw: UnassignedWrapper => uw })
+      }
 
     def assignments: Map[ParticipantReference, Future[Seq[AssignedWrapper]]] =
-      updates.map { case (p, uf) => p -> uf.map(_.collect { case aw: AssignedWrapper => aw }) }
+      updatesByParticipant.map { case (p, uf) =>
+        p -> uf.map(_.collect { case aw: AssignedWrapper => aw })
+      }
 
     def assertStatusOk(participant: ParticipantReference): Assertion =
       assertExactlyOneCompletion(participant).status.value.code shouldBe Code.OK.value()
@@ -691,15 +717,67 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
           }
       }
 
-    lazy val awaitCompletions: Map[ParticipantReference, Seq[Completion]] = completions.map {
-      case (participant, completionsF) =>
+    lazy val awaitCompletions: Map[ParticipantReference, Seq[Completion]] =
+      completionsByParticipant.map { case (participant, completionsF) =>
         withClue(s"for $participant")(participant -> completionsF.futureValue)
+      }
+
+    /** Check if acs deltas correspond to ledger effects after applying the following modifications:
+      * <ul> <li>Remove Created/Exercises events with `!acsDelta`.</li> <li>Remove empty
+      * transactions.</li> <li>Replace remaining exercise events by Archived.</li> </ul>
+      */
+    private def assertAcsDeltasMatchLedgerEffects(): Assertion = {
+      forEvery(updatesByParticipant) { case (participant, updatesF) =>
+        val updates = updatesF.futureValue
+        val acsDeltas = acsDeltasByParticipant.get(participant).value.futureValue
+
+        val expectedAcsDeltas = updates.mapFilter {
+          case t: TransactionWrapper =>
+            val acsDeltaEvents = t.transaction.events.mapFilter { e =>
+              e.event match {
+                case Exercised(ex) => // replace consuming Exercised by Archived
+                  Option.when(ex.acsDelta)(
+                    e.copy(event =
+                      Archived(
+                        ArchivedEvent(
+                          ex.offset,
+                          ex.nodeId,
+                          ex.contractId,
+                          ex.templateId,
+                          ex.witnessParties,
+                          ex.packageName,
+                          ex.implementedInterfaces,
+                        )
+                      )
+                    )
+                  )
+
+                case Created(c) => Option.when(c.acsDelta)(e)
+
+                case unexpected => fail(s"Unexpected event: $unexpected")
+              }
+            }
+
+            // Keep transaction only if they have non-empty events
+            Option.when(acsDeltaEvents.nonEmpty)(
+              t.focus(_.transaction.events).replace(acsDeltaEvents)
+            )
+          case uw: UpdateWrapper => Some(uw)
+        }
+
+        acsDeltas shouldBe expectedAcsDeltas
+      }
+
+      updatesByParticipant.keySet shouldBe acsDeltasByParticipant.keySet
     }
 
-    lazy val awaitTransactions: Map[ParticipantReference, Seq[Transaction]] =
+    lazy val awaitTransactions: Map[ParticipantReference, Seq[Transaction]] = {
+      assertAcsDeltasMatchLedgerEffects()
+
       transactions.map { case (participant, transactionsF) =>
         participant -> withClue(s"for $participant")(transactionsF.futureValue)
       }
+    }
 
     def assertNoTransactions(): Assertion = forEvery(awaitTransactions) {
       case (participant, transactions) =>

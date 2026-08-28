@@ -244,6 +244,7 @@ object PekkoP2PGrpcNetworking {
               // Do not count sends delayed for latency testing in the actor queue size metrics
               if (
                 supposedSendInstantForLatencyTestingO.isEmpty || config.standalone
+                  .flatMap(_.testSlowdown)
                   .flatMap(_.sendDelay)
                   .isEmpty
               )
@@ -432,7 +433,7 @@ object PekkoP2PGrpcNetworking {
               scheduleMessageIfNotConnectedBehavior(sendMsg) { peerSender =>
                 (
                   sendMsg.supposedSendInstantForLatencyTestingO,
-                  config.standalone.flatMap(_.sendDelay),
+                  config.standalone.flatMap(_.testSlowdown).flatMap(_.sendDelay),
                 ) match {
                   case (None, Some(delayConf)) =>
                     val recipientBftNodeId = sendMsg.recipientBftNodeId

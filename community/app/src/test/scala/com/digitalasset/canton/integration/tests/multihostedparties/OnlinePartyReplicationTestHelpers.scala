@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties
 
+import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.daml.ledger.javaapi.data.DisclosedContract
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters
 import com.digitalasset.canton.concurrent.Threading
@@ -124,7 +125,7 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
 
     // Expect both batches owned by the replicated party.
     val expectedNumContracts = numContractsInCreateBatch * 2
-    val amounts = (1 to numContractsInCreateBatch.unwrap)
+    val amounts = 1 to numContractsInCreateBatch.unwrap
     clue(s"create ${expectedNumContracts.unwrap} IOUs") {
       IouSyntax.createIous(sourceParticipant, partyToReplicate, fellowContractStakeholder, amounts)
       IouSyntax.createIous(sourceParticipant, fellowContractStakeholder, partyToReplicate, amounts)
@@ -335,8 +336,8 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
     ) {
       // The try handles the optional `CommandFailure`, so that we don't give up while the SP is stopped.
       val spStatusO =
-        Try(sourceParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)).toOption
-      val tpStatus = targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId)
+        Try(sourceParticipant.parties.get_add_party_status(addPartyRequestId)).toOption
+      val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
 
       (spStatusO, tpStatus) match {
         case (Some(spStatus), tp)
@@ -347,6 +348,25 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
           logger.info(
             s"SP and TP completed party replication with status $spStatus and $tpStatus"
           )
+
+          val partyId = tp.parameters.partyId
+          val synchronizerId = tp.parameters.synchronizerId
+          val targetParticipantId = tp.parameters.targetParticipantId
+
+          val lapiTpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
+            partyId,
+            synchronizerId,
+            targetParticipantId,
+          )
+          val lapiSpStatus = sourceParticipant.ledger_api.parties.get_add_party_status(
+            partyId,
+            synchronizerId,
+            targetParticipantId,
+          )
+
+          lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
+          lapiSpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
+
         case (Some(spStatus), tp) if finished(spStatus) && finished(tp) =>
           logger.warn(
             s"SP and TP completed party replication but had unexpected number of contracts: $spStatus and $tpStatus, expected $expectedNumContractsO"
@@ -370,9 +390,17 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
       retryOnTestFailuresOnly = false,
       maxPollInterval = 1.second,
     ) {
-      targetParticipant.ledger_api.parties.get_add_party_status(addPartyRequestId) match {
+      targetParticipant.parties.get_add_party_status(addPartyRequestId) match {
         case tpStatus if countsMatch(tpStatus, expectedNumContractsO) =>
           logger.info(s"TP completed party replication with status $tpStatus")
+
+          val lapiTpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
+            tpStatus.parameters.partyId,
+            tpStatus.parameters.synchronizerId,
+            tpStatus.parameters.targetParticipantId,
+          )
+          lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
+
         case tpStatus if finished(tpStatus) =>
           logger.warn(
             s"TP completed party replication but had unexpected number of contracts: $tpStatus, expected $expectedNumContractsO"
@@ -389,12 +417,14 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
 
   private def finished(status: PartyReplicationStatus) =
     status.hasCompleted && status.errorO.isEmpty
+
   private def acsImportDone(
       status: PartyReplicationStatus,
       expectedNumContractsO: Option[NonNegativeInt],
   ) = status.replicationO.exists(progress =>
     progress.fullyProcessedAcs && expectedNumContractsO.forall(progress.processedContractCount == _)
   )
+
   private def countsMatch(
       status: PartyReplicationStatus,
       expectedNumContractsO: Option[NonNegativeInt],

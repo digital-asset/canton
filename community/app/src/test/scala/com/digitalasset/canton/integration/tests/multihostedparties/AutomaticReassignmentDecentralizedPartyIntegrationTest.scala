@@ -27,7 +27,7 @@ import scala.jdk.CollectionConverters.*
   The goal is to check that decentralized parties can submit/trigger
   explicit as well as automatic reassignments.
  */
-class AutomaticReassignmentDecentralizedPartyIntegrationTest
+final class AutomaticReassignmentDecentralizedPartyIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax {

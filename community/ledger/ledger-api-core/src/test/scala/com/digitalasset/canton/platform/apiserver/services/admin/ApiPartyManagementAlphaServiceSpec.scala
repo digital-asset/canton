@@ -7,6 +7,9 @@ import com.daml.ledger.api.v2.admin.party_management_alpha_service.{
   AuthorizePartyUpdateRequest,
   GeneratePartyTopologyUpdateRequest,
   GeneratePartyTopologyUpdateResponse,
+  GetAddPartyStatusRequest,
+  GetAddPartyStatusResponse,
+  PartyReplicationStatus as LapiPartyReplicationStatus,
 }
 import com.daml.ledger.api.v2.state_service.ParticipantPermission as ProtoParticipantPermission
 import com.digitalasset.base.error.ErrorsAssertions
@@ -94,6 +97,60 @@ class ApiPartyManagementAlphaServiceSpec
   )
 
   "ApiPartyManagementAlphaService" should {
+
+    "validate GetAddPartyStatus request" when {
+      "delegating valid requests to endpoints" in {
+        val (mockEndpoints, mockStore, mockIdpExists) = mockedServices()
+
+        val expectedResponse = GetAddPartyStatusResponse(
+          Some(LapiPartyReplicationStatus(LapiPartyReplicationStatus.State.STATE_IN_PROGRESS, None))
+        )
+
+        when(mockEndpoints.getAddPartyStatus(any[GetAddPartyStatusRequest]))
+          .thenReturn(Future.successful(expectedResponse))
+
+        val service = createService(mockEndpoints, mockStore, mockIdpExists)
+        val request = GetAddPartyStatusRequest(
+          partyId = "alice::1220abcd",
+          synchronizerId = "da::1220abcd",
+          targetParticipantUid = "PAR::target::1220abcd",
+        )
+
+        withUserClaims {
+          service.getAddPartyStatus(request).map { response =>
+            response shouldBe expectedResponse
+          }
+        }
+      }
+
+      "propagating backend NOT_FOUND errors" in {
+        val (mockEndpoints, mockStore, mockIdpExists) = mockedServices()
+
+        when(mockEndpoints.getAddPartyStatus(any[GetAddPartyStatusRequest]))
+          .thenReturn(
+            Future.failed(
+              new StatusRuntimeException(
+                Status.NOT_FOUND.withDescription("Party replication status not found")
+              )
+            )
+          )
+
+        val service = createService(mockEndpoints, mockStore, mockIdpExists)
+        val request =
+          GetAddPartyStatusRequest("alice::1220abcd", "da::1220abcd", "PAR::target::1220abcd")
+
+        withUserClaims {
+          service.getAddPartyStatus(request).transform {
+            case Failure(ex: StatusRuntimeException) =>
+              ex.getStatus.getCode shouldBe Status.NOT_FOUND.getCode
+              ex.getStatus.getDescription should include("Party replication status not found")
+              Success(succeed)
+            case other =>
+              fail(s"Expected StatusRuntimeException, but got $other")
+          }
+        }
+      }
+    }
 
     "validate GeneratePartyTopologyUpdate request" when {
       "rejecting Submission permission" in {
@@ -428,6 +485,9 @@ class ApiPartyManagementAlphaServiceSpec
       IdentityProviderExists,
   ) = {
     val mockEndpoints = mock[PartyReplicationEndpoints]
+
+    when(mockEndpoints.getAddPartyStatus(any[GetAddPartyStatusRequest]))
+      .thenReturn(Future.failed(new RuntimeException("Not mocked for success")))
 
     // Generically stub the backend endpoints to return errors by default.
     // This prevents SmartNullPointerExceptions if validation fails to short-circuit,

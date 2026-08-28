@@ -194,6 +194,10 @@ sealed trait SequencerConnectionServiceIntegrationTest
             OptionalMany,
             _.warningMessage should include regex raw"Response message for request.*timed out at",
           ),
+          (
+            OptionalMany,
+            _.warningMessage should include("Connection has failed validation"),
+          ),
         )
       }
     }

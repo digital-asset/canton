@@ -24,10 +24,7 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   ThinCreatedEventProperties,
   TransactionProperties,
 }
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
-  AchsAddActivationsParams,
-  AchsRemoveDeactivatedParams,
-}
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.StorageBackendTestsEvents.PaginationFromToOps
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
@@ -2978,7 +2975,10 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 1L, endInclusive = 3L, activeAt = 1000L)
+          AchsAddActivationsParams(
+            EventSeqIdRange(startInclusive = 2L, endInclusive = 3L),
+            activeAt = 1000L,
+          )
         )
     )
 
@@ -3036,7 +3036,10 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 2L, activeAt = 2L)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1L, endInclusive = 2L),
+            activeAt = 2L,
+          )
         )
     )
     executeSql(
@@ -3067,7 +3070,10 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 3L, activeAt = 3L)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1L, endInclusive = 3L),
+            activeAt = 3L,
+          )
         )
     )
 
@@ -3094,7 +3100,10 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 3L, activeAt = 4L)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1L, endInclusive = 3L),
+            activeAt = 4L,
+          )
         )
     )
     executeSql(
@@ -3148,7 +3157,10 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 4L, activeAt = 4L)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1L, endInclusive = 4L),
+            activeAt = 4L,
+          )
         )
     )
     executeSql(
@@ -3173,7 +3185,7 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .removeDeactivatedFromAchs(
-          AchsRemoveDeactivatedParams(startExclusive = 4L, endInclusive = 8L)
+          EventSeqIdRange(startInclusive = 5L, endInclusive = 8L)
         )
     )
     val achsAfter = executeSql(
@@ -3201,7 +3213,10 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 2L, activeAt = 2L)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1L, endInclusive = 2L),
+            activeAt = 2L,
+          )
         )
     )
     executeSql(
@@ -3252,7 +3267,10 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(
       backend.event
         .addActivationsToAchs(
-          AchsAddActivationsParams(startExclusive = 0L, endInclusive = 5L, activeAt = 1000L)
+          AchsAddActivationsParams(
+            range = EventSeqIdRange(startInclusive = 1L, endInclusive = 5L),
+            activeAt = 1000L,
+          )
         )
     )
     test

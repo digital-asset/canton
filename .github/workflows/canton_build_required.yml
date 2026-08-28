@@ -111,6 +111,7 @@ jobs:
       include_only_requires_external_kms_tests: false
       override_java_version_for_tests: ""
       protocol_version: ""
+      job_name: test
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_requires_external_kms:
@@ -126,6 +127,7 @@ jobs:
       include_only_requires_external_kms_tests: true
       override_java_version_for_tests: ""
       protocol_version: ""
+      job_name: test_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   build_docs:
@@ -316,6 +318,7 @@ jobs:
     secrets: inherit
     with:
       protocol_version: '36'
+      job_name: test_protocol_version_36
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_protocol_version_36_requires_external_kms:
@@ -331,6 +334,7 @@ jobs:
     with:
       include_only_requires_external_kms_tests: true
       protocol_version: '36'
+      job_name: test_protocol_version_36_requires_external_kms
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   test_protocol_version_dev:
@@ -341,6 +345,7 @@ jobs:
     secrets: inherit
     with:
       protocol_version: 'DEV'
+      job_name: test_protocol_version_dev
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   toxiproxy_test_fast:

@@ -66,7 +66,7 @@ class TransactionCoder(allowNullCharacters: Boolean) {
     * @return
     *   protobuf encoded transaction
     */
-  private[engine] def encodeTransaction(
+  private[lf] def encodeTransaction(
       tx: VersionedTransaction
   ): Either[EncodeError, proto.Transaction] =
     internal.encodeTransaction(tx)

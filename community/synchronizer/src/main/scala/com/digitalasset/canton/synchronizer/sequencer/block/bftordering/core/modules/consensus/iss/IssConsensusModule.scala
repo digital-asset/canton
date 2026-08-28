@@ -168,7 +168,6 @@ final class IssConsensusModule[E <: Env[E]](
   @VisibleForTesting
   private[iss] def getActiveTopologyInfo: OrderingTopologyInfo[E] = activeTopologyInfo
 
-  // TODO(#16761) resend locally-led ordered blocks (PrePrepare) in activeEpoch in case my node crashed
   override def ready(self: ModuleRef[Consensus.Message[E]])(implicit
       traceContext: TraceContext
   ): Unit = ()

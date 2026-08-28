@@ -162,6 +162,22 @@ class TeaMemoryTrafficStore(override val loggerFactory: NamedLoggerFactory)(impl
     }
   }
 
+  override def pruneEvents(beforeInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementError, Int] =
+    EitherT {
+      val prunedCount = lock.exclusive {
+        events.foldLeft(0) { case (count, (accountId, accountEvents)) =>
+          val (toPrune, toKeep) = accountEvents.partition { case (_, event) =>
+            event.timestamp <= beforeInclusive
+          }
+          events.update(accountId, toKeep)
+          count + toPrune.size
+        }
+      }
+      FutureUnlessShutdown.pure[Either[TrafficEnforcementError, Int]](Right(prunedCount))
+    }
+
   override def getEvents(accountId: AccountId, fromInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[DeltaEvent]] = FutureUnlessShutdown.pure {

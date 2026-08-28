@@ -1,0 +1,32 @@
+name: Remind upcoming rota
+
+# Privately DM the people who start a rota shift about a month (28 days) from now, so they get
+# a heads-up in time to arrange a swap. Runs weekly and also on manual dispatch.
+on:
+  schedule:
+    # 04:00 UTC is 06:00 CEST (summer). Cron has no DST awareness, so this lands at 05:00 CET in
+    # winter, which is fine for a weekly reminder. Evaluated weekly, so each shift-start Monday
+    # is the 28-days-ahead target on exactly one run and every person is reminded once.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+jobs:
+  remind-upcoming-rota:
+    name: Remind the people starting a rota shift in about a month
+    runs-on: dach-ny-canton
+    # Internal-only: reads the private rota sheet and DMs via DA Slack. Skip on the OSS mirror.
+    if: github.repository == 'DACH-NY/canton'
+    # Hard cap so a hung nix build or script cannot pin the self-hosted runner.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GCLOUD_SHEETS_SA_KEY: ${{ secrets.GCLOUD_SHEETS_SA_KEY }}
+      SLACK_BOT_QA_NOTIFICATIONS: ${{ secrets.SLACK_BOT_QA_NOTIFICATIONS }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Remind upcoming rota
+        uses: ./.github/actions/nix/nix_run
+        with:
+          command: python3 scripts/ci/remind_upcoming_rota.py

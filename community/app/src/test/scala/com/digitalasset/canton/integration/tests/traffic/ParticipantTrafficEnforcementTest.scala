@@ -13,6 +13,7 @@ import com.digitalasset.canton.console.{
   ExternalLedgerApiClient,
   LocalParticipantReference,
 }
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.http.json.v2.JsTrafficServiceCodecs.*
 import com.digitalasset.canton.integration.*
@@ -37,6 +38,8 @@ import com.digitalasset.canton.tea.TrafficEnforcementErrors.{
 }
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
   UpdateAccountRequest,
   UpdateAccountResponse,
 }
@@ -56,6 +59,7 @@ import java.time.Duration
 import java.util.UUID
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.CollectionHasAsScala
+import scala.jdk.DurationConverters.*
 
 sealed trait ParticipantTrafficEnforcementTest
     extends CommunityIntegrationTest
@@ -158,6 +162,11 @@ final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTraffic
           ),
           assertUnimplemented,
         )
+
+        assertThrowsAndLogsCommandFailures(
+          participant1.ledger_api.traffic.prune_events(wallClock.now),
+          assertUnimplemented,
+        )
       }
     }
 
@@ -192,6 +201,9 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
       "serve traffic service operations" in { implicit env =>
         import env.*
 
+        val clock = env.environment.simClock.value
+        val startTime = clock.now
+
         val alice = aliceE.partyId.toProtoPrimitive
 
         // Initially Alice has no balance
@@ -205,6 +217,8 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         // Check correct balance for Alice
         participant1.ledger_api.traffic.get_account(alice).balance shouldBe aliceBalance
 
+        clock.advance(1.microseconds.toJava)
+
         // Now deduct some traffic from Alice's account
         val deductAmount = 100_000L
         participant1.ledger_api.traffic.update_account(alice, balanceDelta = Some(-deductAmount))
@@ -213,6 +227,17 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         participant1.ledger_api.traffic
           .get_account(alice)
           .balance shouldBe (aliceBalance - deductAmount)
+
+        // Prune the first event
+        val rsp = participant1.ledger_api.traffic
+          .prune_events(startTime)
+
+        rsp.prunedEventCount shouldBe 1
+
+        val rsp2 = participant1.ledger_api.traffic
+          .prune_events(startTime)
+
+        rsp2.prunedEventCount shouldBe 0
       }
 
       "reject an update_account with a delta that would take the balance out of bound, with its own error code" in {
@@ -223,10 +248,19 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           val initialBalance = participant1.ledger_api.traffic.get_account(charlieId).balance
           initialBalance shouldBe 0L
 
-          loggerFactory.assertThrowsAndLogs[CommandFailure](
+          loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
             participant1.ledger_api.traffic.update_account(charlieId, balanceDelta = Some(-1L)),
-            entry => entry.warningMessage should include(TrafficUpdateOutOfBound.id),
-            entry => entry.shouldBeCantonErrorCode(TrafficUpdateOutOfBound),
+            entries =>
+              inside(entries) { case Seq(clientEntry, consoleEntry) =>
+                clientEntry.warningMessage should include(TrafficUpdateOutOfBound.id)
+                consoleEntry.shouldBeCantonErrorCode(TrafficUpdateOutOfBound)
+
+                clientEntry.mdc.get("trace-id") should not be empty
+                clientEntry.mdc.get("span-parent-id") should not be empty
+                clientEntry.mdc.get("span-name") shouldBe Some(
+                  "com.digitalasset.canton.tea.v1.TrafficService/UpdateAccount"
+                )
+              },
           )
 
           // The rejected update must not have mutated the balance
@@ -287,6 +321,40 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
             entry.message should include regex raw".*Insufficient balance \(1\) for actual traffic cost \([1-9][0-9]*\) for account ${eveE.partyId.toProtoPrimitive}"
           },
         )
+
+        // Now let's assert that the submission also fails during 'execute' specifically
+        // Give Eve some traffic
+        participant1.ledger_api.traffic.update_account(
+          eveE.partyId.toProtoPrimitive,
+          balanceDelta = Some(100000L),
+        )
+
+        // Prepare should pass
+        val prepared =
+          participant1.ledger_api.javaapi.interactive_submission
+            .prepare(Seq(eveE), iouCreateCmds, hashingSchemeVersion = testedApiHashingSchemeVersion)
+
+        // Take the traffic away
+        participant1.ledger_api.traffic.update_account(
+          eveE.partyId.toProtoPrimitive,
+          balanceDelta = Some(-100000L),
+        )
+
+        // execute_and_wait should fail
+        // Note: the async 'execute' method does NOT fail because the balance check is performed in the async
+        // part of the processing. Which means the clien only gets notified of the failure when receiving the completion
+        assertThrowsAndLogsCommandFailures(
+          participant1.ledger_api.interactive_submission.execute_and_wait(
+            prepared.getPreparedTransaction,
+            Map(eveE.partyId -> global_secret.sign(prepared.preparedTransactionHash, eveE)),
+            UUID.randomUUID().toString,
+            testedApiHashingSchemeVersion,
+          ),
+          entry => {
+            entry.shouldBeCantonErrorCode(InsufficientBalance)
+            entry.message should include regex raw".*Insufficient balance \(1\) for actual traffic cost \([1-9][0-9]*\) for account ${eveE.partyId.toProtoPrimitive}"
+          },
+        )
       }
 
       // TODO(#33681): Test the gRPC/JSON API variations in Ledger API conformance tests
@@ -321,6 +389,7 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         val encodedAccount = URLEncoder.encode(accountId, StandardCharsets.UTF_8)
         val accountUrl = s"http://localhost:$port/v2/traffic/accounts/$encodedAccount"
         val accountsUrl = s"http://localhost:$port/v2/traffic/accounts"
+        val pruneUrl = s"http://localhost:$port/v2/traffic/events/prune"
 
         def balance(): Long =
           decode[GetAccountResponse](httpGet(accountUrl)).value.balance
@@ -336,6 +405,20 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           ).value.response.value.balance
         }
 
+        def prune(beforeOrAt: CantonTimestamp): Int = {
+          val requestBody = PruneEventsRequest(
+            beforeOrAt = Some(beforeOrAt.toProtoTimestamp)
+          ).asJson.noSpaces
+          decode[PruneEventsResponse](
+            httpPost(pruneUrl, requestBody)
+          ).value.prunedEventCount
+        }
+
+        val clock = env.environment.simClock.value
+
+        // Empty the events table, these tests do not seem to be independent
+        prune(clock.now)
+
         // Initially the account has no balance
         balance() shouldBe 0L
 
@@ -346,6 +429,8 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
         val deductAmount = 100_000L
         update(-deductAmount) shouldBe (credit - deductAmount)
         balance() shouldBe (credit - deductAmount)
+
+        prune(clock.now) shouldBe 2
       }
 
       "traffic enforcement does not apply for multi-act-as submissions" in { implicit env =>
@@ -439,6 +524,11 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
               aliceE.partyId.toProtoPrimitive,
               None,
             ),
+            assertEntriesTeaUnavailable,
+          )
+
+          loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
+            participant1.ledger_api.traffic.prune_events(wallClock.now),
             assertEntriesTeaUnavailable,
           )
 

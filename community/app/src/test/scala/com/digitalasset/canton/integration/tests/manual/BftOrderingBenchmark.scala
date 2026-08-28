@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.manual
 
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.CantonConfig.{ConfigReaders, ConfigWriters}
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   Port,
@@ -18,7 +19,7 @@ import com.digitalasset.canton.config.{
   ReplicationConfig,
   ServerConfig,
 }
-import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
@@ -33,10 +34,7 @@ import com.digitalasset.canton.integration.plugins.toxiproxy.{
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
-import com.digitalasset.canton.integration.tests.manual.BftOrderingBenchmark.{
-  BftBlockOrderingP2PSendDelayConfigEntry,
-  BftOrderingBenchmarkConfig,
-}
+import com.digitalasset.canton.integration.tests.manual.BftOrderingBenchmark.BftOrderingBenchmarkConfig
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -46,7 +44,6 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.metrics.MetricsConfig
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
-  BftBlockOrderingP2PSendDelayConfig,
   DefaultAvailabilityMinProposalCreationDelay,
   DefaultConsensusEmptyBlockCreationTimeout,
   DefaultDelayedInitQueueMaxSize,
@@ -83,10 +80,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performa
   BftBenchmarkConfig,
   BftBenchmarkTool,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
-  FiniteDurationDistribution,
-  Probability,
-}
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.util.BytesUnit
 import eu.rekawek.toxiproxy
@@ -100,12 +93,11 @@ import pureconfig.error.{
   ConfigReaderFailures,
 }
 import pureconfig.generic.ProductHint
-import pureconfig.generic.auto.*
-import pureconfig.generic.semiauto.deriveWriter
-import pureconfig.{ConfigObjectSource, ConfigSource}
+import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
+import pureconfig.{ConfigObjectSource, ConfigReader, ConfigSource, ConfigWriter}
 
 import java.net.URI
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.*
 
 /** Configured by passing a typesafe config URL, which may start with "classpath:///", to the system
   * property `bft-ordering-benchmark.config`. If not provided, the default configuration file
@@ -113,21 +105,41 @@ import scala.concurrent.duration.DurationInt
   *
   * #!/usr/bin/env bash
   *
-  * export LOG_LEVEL_CANTON=WARN
+  * set -euo pipefail
   *
-  * export SBT_OPTS="-Xmx60G \
-  * -Dscala.concurrent.context.numThreads=30 \
-  * -Dbft-ordering-benchmark.config=file:///bftbench.conf"
+  * if [ $# -ne 1 ]; then echo "Usage: $0 <config-file>"; exit 1; fi
   *
-  * export CI=1 # When this defined, it ensures no dockerized Postgres is being used
+  * CONFIG_FILE="$1"
   *
-  * export POSTGRES_HOST=db-testing.da-int.net
+  * if [ ! -f "$CONFIG_FILE" ]; then echo "Error: file not found: $CONFIG_FILE"; exit 1; fi
   *
-  * export POSTGRES_USER=*
+  * # Convert to an absolute path so that the file:// URI is valid regardless of the working #
+  * directory.
   *
-  * export POSTGRES_PASSWORD=*
+  * CONFIG_FILE="$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")"
   *
-  * export POSTGRES_DB=postgres
+  * export LOG_LEVEL_CANTON=INFO
+  *
+  * export POSTGRES_USER="*"
+  *
+  * export POSTGRES_PASSWORD="*"
+  *
+  * export POSTGRES_DB=test-user
+  *
+  * export POSTGRES_PORT=5432
+  *
+  * export POSTGRES_HOST="localhost"
+  *
+  * # When CI is defined, it ensures no dockerized Postgres is being used.
+  *
+  * # export CI=1
+  *
+  * # Warning: setting `-Dscala.concurrent.context.numThreads=N` with N lower than the number of ...
+  * # cores available to the JVM may severely affect performance. The default is to use the number .
+  * # of cores available to the JVM.
+  *
+  * export SBT_OPTS="-Xmx90G \
+  * -Dbft-ordering-benchmark.config=file://$CONFIG_FILE"
   *
   * sbt "dumpClassPath; testOnly \
   * com.digitalasset.canton.integration.tests.manual.BftOrderingBenchmark"
@@ -138,7 +150,83 @@ class BftOrderingBenchmark
     with SharedEnvironment
     with AwaitsBftSequencerAuthenticationDisseminationQuorum {
 
-  implicit def preventAllUnknownKeys[T]: ProductHint[T] = ProductHint[T](allowUnknownKeys = false)
+  private implicit def preventAllUnknownKeys[T]: ProductHint[T] =
+    ProductHint[T](allowUnknownKeys = false)
+
+  // Semi-auto ConfigReader derivations for all nested types. Not using fully automatic derivation at all,
+  //  not even just for nested types driving from a semi-auto top-level derivation, even though this approach
+  //  would support hints, in order to avoid stack overflow errors in the Scala compiler (probably due to
+  //  recursive PureConfig macro generation logic in combination with deep config structures).
+
+  // Canton and CantonBFT config types
+
+  private val configReaders: ConfigReaders = new ConfigReaders()
+  import configReaders.*
+
+  private val configWriters: ConfigWriters = new ConfigWriters(confidential = true)
+  import configWriters.*
+
+  // UseBftSequencer.TestSlowdownConfig subtypes
+  private implicit lazy val postOrderingDelayConfigReader
+      : ConfigReader[UseBftSequencer.PostOrderingDelayConfig] =
+    deriveReader[UseBftSequencer.PostOrderingDelayConfig]
+  private implicit lazy val postOrderingDelayConfigWriter
+      : ConfigWriter[UseBftSequencer.PostOrderingDelayConfig] =
+    deriveWriter[UseBftSequencer.PostOrderingDelayConfig]
+
+  private implicit lazy val p2pSendDelayConfigEntryReader
+      : ConfigReader[UseBftSequencer.P2PSendDelayConfigEntry] =
+    deriveReader[UseBftSequencer.P2PSendDelayConfigEntry]
+  private implicit lazy val p2pSendDelayConfigEntryWriter
+      : ConfigWriter[UseBftSequencer.P2PSendDelayConfigEntry] =
+    deriveWriter[UseBftSequencer.P2PSendDelayConfigEntry]
+
+  private implicit lazy val p2pSendDelayConfigReader
+      : ConfigReader[UseBftSequencer.P2PSendDelayConfig] =
+    deriveReader[UseBftSequencer.P2PSendDelayConfig]
+  private implicit lazy val p2pSendDelayConfigWriter
+      : ConfigWriter[UseBftSequencer.P2PSendDelayConfig] =
+    deriveWriter[UseBftSequencer.P2PSendDelayConfig]
+
+  private implicit lazy val topologyDelayConfigReader
+      : ConfigReader[UseBftSequencer.TopologyDelayConfig] =
+    deriveReader[UseBftSequencer.TopologyDelayConfig]
+  private implicit lazy val topologyDelayConfigWriter
+      : ConfigWriter[UseBftSequencer.TopologyDelayConfig] =
+    deriveWriter[UseBftSequencer.TopologyDelayConfig]
+
+  private implicit lazy val testSlowdownConfigReader
+      : ConfigReader[UseBftSequencer.TestSlowdownConfig] =
+    deriveReader[UseBftSequencer.TestSlowdownConfig]
+  private implicit lazy val testSlowdownConfigWriter
+      : ConfigWriter[UseBftSequencer.TestSlowdownConfig] =
+    deriveWriter[UseBftSequencer.TestSlowdownConfig]
+
+  // BftBenchmarkConfig types
+  private implicit lazy val transactionSizeAndWeightReader
+      : ConfigReader[BftBenchmarkConfig.TransactionSizeAndWeight] =
+    deriveReader[BftBenchmarkConfig.TransactionSizeAndWeight]
+  private implicit lazy val transactionSizeAndWeightWriter
+      : ConfigWriter[BftBenchmarkConfig.TransactionSizeAndWeight] =
+    deriveWriter[BftBenchmarkConfig.TransactionSizeAndWeight]
+
+  private implicit lazy val transactionSizesAndWeightsReader
+      : ConfigReader[BftBenchmarkConfig.TransactionSizesAndWeights] =
+    deriveReader[BftBenchmarkConfig.TransactionSizesAndWeights]
+  private implicit lazy val transactionSizesAndWeightsWriter
+      : ConfigWriter[BftBenchmarkConfig.TransactionSizesAndWeights] =
+    deriveWriter[BftBenchmarkConfig.TransactionSizesAndWeights]
+
+  private implicit lazy val testCatchupReader: ConfigReader[BftBenchmarkConfig.TestCatchup] =
+    deriveReader[BftBenchmarkConfig.TestCatchup]
+  private implicit lazy val testCatchupWriter: ConfigWriter[BftBenchmarkConfig.TestCatchup] =
+    deriveWriter[BftBenchmarkConfig.TestCatchup]
+
+  // Top-level config
+  private implicit lazy val bftOrderingBenchmarkConfigReader
+      : ConfigReader[BftOrderingBenchmarkConfig] =
+    deriveReader[BftOrderingBenchmarkConfig]
+  deriveWriter[BftOrderingBenchmarkConfig]
 
   private val BFTOrderingBenchmarkPrefix = "bft-ordering-benchmark"
   private val PostgresProxyNameSuffix = "postgres"
@@ -207,22 +295,9 @@ class BftOrderingBenchmark
             bftOrderingBenchmarkConfig.blacklistLeaderSelectionPolicyConfig,
           maxRequestsInBatch = bftOrderingBenchmarkConfig.maxRequestsInBatch,
           maxBatchesPerBlockProposal = bftOrderingBenchmarkConfig.maxBatchesPerBlockProposal,
-          postOrderingDelayConfig = bftOrderingBenchmarkConfig.postOrderingDelayConfig,
-          topologyBroadcastProbability =
-            bftOrderingBenchmarkConfig.topologyBroadcastProbability.map(Probability.apply),
-          pendingTopologyChangesProbability =
-            bftOrderingBenchmarkConfig.pendingTopologyChangesProbability.map(Probability.apply),
-          getOrderingTopologyDelay = bftOrderingBenchmarkConfig.getOrderingTopologyDelay,
+          testSlowdown = bftOrderingBenchmarkConfig.testSlowdown,
         )
       ),
-      p2pSendDelays = bftOrderingBenchmarkConfig.p2pSendDelays
-        .map(_.entries)
-        .getOrElse(Seq.empty)
-        .view
-        .flatMap { case BftBlockOrderingP2PSendDelayConfigEntry(sources, config) =>
-          sources.map(_ -> config)
-        }
-        .toMap,
       consensusEmptyBlockCreationTimeout =
         bftOrderingBenchmarkConfig.consensusEmptyBlockCreationTimeout.underlying,
       sequencingParameters = Some(
@@ -465,13 +540,6 @@ class BftOrderingBenchmark
 
 private object BftOrderingBenchmark {
 
-  private final case class BftBlockOrderingP2PSendDelayConfigEntry(
-      sources: Seq[String],
-      config: BftBlockOrderingP2PSendDelayConfig,
-  )
-
-  private final case class DelaysConfig(entries: Seq[BftBlockOrderingP2PSendDelayConfigEntry])
-
   /** Configuration for the BFT ordering benchmark test.
     *
     * Loaded via Typesafe Config (pureconfig). See `bft-ordering-benchmark.conf` for a ready-to-use
@@ -525,16 +593,8 @@ private object BftOrderingBenchmark {
     *   Buffer threshold at which the orderer is paused to apply backpressure.
     * @param resumeOrdererThresholdBufferSize
     *   Buffer threshold at which the orderer is resumed after backpressure.
-    * @param postOrderingDelayConfig
-    *   Optional artificial delay applied after ordering on specified nodes.
-    * @param p2pSendDelays
-    *   Optional per-source P2P send delay configuration.
-    * @param topologyBroadcastProbability
-    *   Optional probability of broadcasting topology changes (for simulation).
-    * @param pendingTopologyChangesProbability
-    *   Optional probability of injecting pending topology changes (for simulation).
-    * @param getOrderingTopologyDelay
-    *   Optional delay distribution applied when fetching the ordering topology (for simulation).
+    * @param testSlowdown
+    *   Optional configuration to introduce artificial slowdowns in the benchmark run.
     */
   private final case class BftOrderingBenchmarkConfig(
       numberOfNodes: PositiveInt = PositiveInt.tryCreate(4),
@@ -606,8 +666,6 @@ private object BftOrderingBenchmark {
             weight = PositiveInt.tryCreate(1),
           ) :: Nil
         ),
-      sequencerToSequencerLatencyMillis: Option[PositiveLong] = None,
-      sequencerDbLatencyMillis: Option[PositiveLong] = None,
       dbReplicationEnabled: Option[Boolean] = Some(true),
       testCatchupConfig: BftBenchmarkConfig.TestCatchup =
         BftBenchmarkConfig.TestCatchup.NoTestCatchup,
@@ -620,11 +678,10 @@ private object BftOrderingBenchmark {
       resumeOrdererThresholdBufferSize: PositiveInt = PositiveInt.tryCreate(
         DefaultSequencerCoreSubscriptionConfig.resumeOrdererThresholdBufferSize
       ),
-      postOrderingDelayConfig: Option[UseBftSequencer.PostOrderingDelayConfig] = None,
-      p2pSendDelays: Option[DelaysConfig] = None,
-      topologyBroadcastProbability: Option[Double] = None,
-      pendingTopologyChangesProbability: Option[Double] = None,
-      getOrderingTopologyDelay: Option[FiniteDurationDistribution] = None,
+      testSlowdown: Option[UseBftSequencer.TestSlowdownConfig] = None,
+      // Toxics
+      sequencerToSequencerLatencyMillis: Option[PositiveLong] = None,
+      sequencerDbLatencyMillis: Option[PositiveLong] = None,
   ) {
     require(
       tracingSamplerRatio >= 0.0 && tracingSamplerRatio <= 1.0,
@@ -637,14 +694,6 @@ private object BftOrderingBenchmark {
     require(
       maxBatchesPerBlockProposal > 0,
       "maxBatchesPerBlockProposal must be greater than 0",
-    )
-    require(
-      topologyBroadcastProbability.forall(p => p >= 0.0 && p <= 1.0),
-      "topologyBroadcastProbability must be between 0.0 and 1.0",
-    )
-    require(
-      pendingTopologyChangesProbability.forall(p => p >= 0.0 && p <= 1.0),
-      "pendingTopologyChangesProbability must be between 0.0 and 1.0",
     )
   }
 }

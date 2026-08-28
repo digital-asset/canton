@@ -278,8 +278,8 @@ private[reassignment] class UnassignmentProcessingSteps(
         .encryptView(UnassignmentViewType)(
           fullTree,
           viewsToKeyMap.keyAndEncryptedRandomnessByRecipients(recipientsT),
+          submittingParticipantSignature,
           sourceRecentSnapshot,
-          Some(signingTimestampOverrides),
           protocolVersion.unwrap,
         )
         .leftMap[ReassignmentProcessorError](EncryptionError(contracts.contractIds.toSeq, _))
@@ -721,22 +721,29 @@ private[reassignment] class UnassignmentProcessingSteps(
     import com.digitalasset.canton.ReassignmentCounter
     val activenessResult = validationResult.commonValidationResult.activenessResult
 
-    def counterIsCorrect(
+    def verifyCounter(
         contractId: LfContractId,
         declaredReassignmentCounter: ReassignmentCounter,
-    ): Boolean = {
-      val expectedStatus = Option(ActiveContractStore.Active(declaredReassignmentCounter - 1))
-      activenessResult.contracts.priorStates.get(contractId).contains(expectedStatus)
+    ): Option[String] = {
+      val actualStatus = Some(Some(ActiveContractStore.Active(declaredReassignmentCounter - 1)))
+      val expectedStatus = activenessResult.contracts.priorStates.get(contractId)
+      Option.when(expectedStatus != actualStatus)(
+        s"Expected: $expectedStatus, actual: $actualStatus"
+      )
     }
 
-    val incorrectCounter = validationResult.contracts.contractIdCounters.find {
-      case (contractId, reassignmentCounter) => !counterIsCorrect(contractId, reassignmentCounter)
-    }
+    val incorrectCounter = validationResult.contracts.contractIdCounters.view
+      .map { case (contractId, reassignmentCounter) =>
+        (contractId, verifyCounter(contractId, reassignmentCounter))
+      }
+      .collectFirst { case (contractId, Some(err)) =>
+        (contractId, err)
+      }
 
     if (incorrectCounter.isDefined)
-      incorrectCounter.map { case (contractId, reassignmentCounter) =>
+      incorrectCounter.map { case (contractId, err) =>
         LocalRejectError.UnassignmentRejects.ActivenessCheckFailed.Reject(
-          s"reassignment counter for contract id $contractId is not correct: $reassignmentCounter"
+          s"reassignment counter for contract id $contractId is not correct. $err"
         )
       }
     else if (activenessResult.contracts.notActive.nonEmpty) {

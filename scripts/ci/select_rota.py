@@ -75,6 +75,12 @@ JOB_ROTATION: dict[str, str] = {
 }
 DEFAULT_JOB_ROTATION = "ci"
 
+# Slack Web API plumbing shared by the rota tools that write to Slack (topic updates,
+# upcoming-shift reminders). The bot token lives in SLACK_TOKEN_ENV.
+SLACK_OPEN_DM_URL = "https://slack.com/api/conversations.open"
+SLACK_POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
+SLACK_TOKEN_ENV = "SLACK_BOT_QA_NOTIFICATIONS"
+
 
 def rotation_for_job(job: str) -> str:
     """Map a CircleCI job name to the rotation that should be pinged when it fails."""
@@ -98,6 +104,11 @@ def current_monday(today: dt.date) -> dt.date:
 
 def half_year_tab(monday: dt.date) -> str:
     return f"{monday.year}H{1 if monday.month <= 6 else 2}"
+
+
+def format_week_date(monday: dt.date) -> str:
+    """Human-friendly week label, e.g. 'August 31' (no leading zero on the day)."""
+    return f"{monday.strftime('%B')} {monday.day}"
 
 
 def _b64url(data: bytes) -> bytes:
@@ -156,6 +167,15 @@ def fetch_tab_values(token: str, sheet_id: str, tab: str) -> list[list[Any]]:
     except urllib.error.HTTPError as err:  # surface the API reason for CI debugging
         body = err.read().decode("utf-8", "replace")[:500]
         raise RuntimeError(f"Sheets API HTTP {err.code}: {body}") from err
+
+
+def fetch_week_values(monday: dt.date, sheet_id: str) -> list[list[Any]]:
+    """Fetch the sheet rows for the half-year tab holding ``monday`` (from GCLOUD_SHEETS_SA_KEY)."""
+    sa_key = os.environ.get("GCLOUD_SHEETS_SA_KEY")
+    if not sa_key:
+        raise RuntimeError("GCLOUD_SHEETS_SA_KEY is not set")
+    token = get_access_token(json.loads(sa_key))
+    return fetch_tab_values(token, sheet_id, half_year_tab(monday))
 
 
 def find_header_columns(
@@ -219,6 +239,39 @@ def fallback_pick(roster: dict[str, Any]) -> str:
         log("warning: no CIRCLE_WORKFLOW_ID/GITHUB_RUN_ID set; fallback pick will not vary per run")
     seed = int(hashlib.sha256(workflow_id.encode()).hexdigest(), 16)
     return slack_ids[seed % len(slack_ids)]
+
+
+def slack_post(url: str, token: str, fields: dict[str, str]) -> dict[str, Any]:
+    """POST form-encoded fields to a Slack Web API method, returning the parsed ok response."""
+    req = urllib.request.Request(
+        url,
+        data=urllib.parse.urlencode(fields).encode(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.load(resp)
+    except urllib.error.HTTPError as err:
+        body = err.read().decode(errors="replace")
+        raise RuntimeError(f"{url} failed: HTTP {err.code} {body}") from err
+    if not payload.get("ok"):
+        raise RuntimeError(f"{url} failed: {payload.get('error')}")
+    return payload
+
+
+def send_dm(token: str, user_id: str, text: str) -> None:
+    """Send a private Slack DM to a user: open the 1:1 conversation, then post to it.
+
+    chat.postMessage needs a conversation id, not a user id, so conversations.open is
+    called first. The bot token needs both im:write (for conversations.open) and
+    chat:write (for chat.postMessage)."""
+    opened = slack_post(SLACK_OPEN_DM_URL, token, {"users": user_id})
+    channel = opened["channel"]["id"]
+    slack_post(SLACK_POST_MESSAGE_URL, token, {"channel": channel, "text": text})
 
 
 def main() -> int:
@@ -384,6 +437,30 @@ def self_test() -> None:
         raise AssertionError("expected RuntimeError for an empty fallback pool")
     except RuntimeError:
         pass
+
+    # format_week_date: month name plus un-padded day
+    assert format_week_date(dt.date(2025, 8, 31)) == "August 31"
+    assert format_week_date(dt.date(2025, 1, 6)) == "January 6"
+
+    # send_dm: opens the 1:1 first, then posts to the returned conversation id (never the
+    # user id). Fake slack_post so the two-call contract is checked without any network.
+    global slack_post
+    real_slack_post = slack_post
+    calls: list[tuple[str, dict[str, str]]] = []
+
+    def fake_slack_post(url: str, token: str, fields: dict[str, str]) -> dict[str, Any]:
+        calls.append((url, fields))
+        return {"ok": True, "channel": {"id": "D123"}}
+
+    try:
+        slack_post = fake_slack_post
+        send_dm("xoxb-test", "U999", "hi there")
+    finally:
+        slack_post = real_slack_post
+    assert calls == [
+        (SLACK_OPEN_DM_URL, {"users": "U999"}),
+        (SLACK_POST_MESSAGE_URL, {"channel": "D123", "text": "hi there"}),
+    ], calls
 
     print("select_rota self-checks passed")
 
