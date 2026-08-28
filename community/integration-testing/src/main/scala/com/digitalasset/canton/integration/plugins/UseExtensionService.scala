@@ -23,15 +23,21 @@ import scala.jdk.CollectionConverters.*
   * end-to-end. The mock serves the external-call endpoint and the version endpoint of the
   * extension-service API, records every external call it receives, and answers with
   * [[UseExtensionService.defaultResponseHex]] unless a test installs its own responder via
-  * [[respondWith]].
+  * [[respondWith]]. A second extension [[unreachableExtensionId]] is configured at an address where
+  * nothing listens, so that tests can exercise transport-level connection failures.
   */
 class UseExtensionService(
     protected val loggerFactory: NamedLoggerFactory,
     val extensionId: String = "test-extension",
+    val unreachableExtensionId: String = "unreachable-extension",
 ) extends EnvironmentSetupPlugin {
   import UseExtensionService.*
 
   private val port = UniquePortGenerator.next
+  // Allocated like every Canton test port so that concurrently running Canton tests stay off
+  // it, but never bound by this plugin: calls to the unreachable extension fail with a
+  // connection refusal. (The generator cannot guard against foreign processes on the host.)
+  private val unreachablePort = UniquePortGenerator.next
 
   private val calls = new CopyOnWriteArrayList[RecordedCall]
 
@@ -66,12 +72,19 @@ class UseExtensionService(
     ConfigTransforms.updateAllParticipantConfigs_(
       _.focus(_.parameters.engine.extensions)
         .modify(
-          _ + (extensionId -> ExtensionServiceConfig(
-            address = "127.0.0.1",
-            port = port,
-            // No retries, so that failure scenarios observe a deterministic number of calls.
-            maxRetries = NonNegativeInt.zero,
-          ))
+          _ ++ Map(
+            extensionId -> ExtensionServiceConfig(
+              address = "127.0.0.1",
+              port = port,
+              // No retries, so that failure scenarios observe a deterministic number of calls.
+              maxRetries = NonNegativeInt.zero,
+            ),
+            unreachableExtensionId -> ExtensionServiceConfig(
+              address = "127.0.0.1",
+              port = unreachablePort,
+              maxRetries = NonNegativeInt.zero,
+            ),
+          )
         )
     )(config)
 
