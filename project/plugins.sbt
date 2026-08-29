@@ -6,7 +6,7 @@ addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.4.5")
 addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage
-addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.2.2")
+addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.4.4")
 
 // documentation site creation
 addSbtPlugin("com.github.sbt" % "sbt-site-sphinx" % "1.7.0")
