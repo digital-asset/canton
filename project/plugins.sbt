@@ -63,7 +63,7 @@ libraryDependencies += "org.apache.commons" % "commons-compress" % "1.27.1"
 addSbtPlugin("org.openapitools" % "sbt-openapi-generator" % "7.22.0")
 
 // To publish JARs to Google Artifact Registry
-addSbtPlugin("org.latestbit" % "sbt-gcs-plugin" % "1.16.1")
+addSbtPlugin("org.latestbit" % "sbt-gcs-plugin" % "2.0.0")
 
 // To sign artifacts
 addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.3.1")
