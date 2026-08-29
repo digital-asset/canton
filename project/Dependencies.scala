@@ -235,7 +235,7 @@ object Dependencies {
   // As an alternative to `mockito-scala`, available on Scala 3
   lazy val smockito = "com.bdmendes" %% "smockito" % "2.2.1"
 
-  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.9.0"
+  lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.11.1"
   lazy val junit_interface = "com.github.sbt" % "junit-interface" % "0.13.3"
 
   lazy val checkerFramework = "org.checkerframework" % "checker-qual" % checkerFramework_version
