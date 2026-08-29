@@ -58,7 +58,7 @@ object Dependencies {
   // https://docs.cloud.google.com/java/docs/bom
   lazy val gcp_kms_version = "2.97.0"
   lazy val gcp_storage_version = "2.70.0"
-  lazy val zstd_version = "1.5.7-12"
+  lazy val zstd_version = "1.5.7-13"
   lazy val gson_version = "2.14.0"
   lazy val gson_fire_version = "1.9.0"
   lazy val h2_version = "2.2.224"
