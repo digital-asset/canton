@@ -104,6 +104,16 @@ The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, 
 
 The `external_call` feature is released and enabled from 2.4(-staging) onwards.
 
+Daml choices can now make external calls: deterministic calls to extension services that the
+participant operator configures under `canton.participants.<participant>.parameters.engine.extensions`
+(see `ExtensionServiceConfig`). The submitting participant executes each call and records the
+result in the transaction; confirming participants re-validate the recorded results against
+their own extension service before approving, and disagreements are rejected and alarmed.
+The feature is early access: it requires the Daml package to use LF 2.4 or later and the
+synchronizer to run protocol version 36 or later. For externally signed transactions the
+recorded results are part of the prepared transaction and covered by the signed transaction
+hash (hashing scheme version 4, available from protocol version 36).
+
 ### Minor Improvements
 - Interactive submissions can use hashing scheme version `HASHING_SCHEME_VERSION_V4` on synchronizers running protocol version 36 or later (previously only on development-protocol synchronizers). V4 additionally covers recorded external-call results in the prepared transaction hash.
 - Security. The HTTP server now rejects too deeply nested json structures. The check uses the same values as the already existing gRPC check for nested daml records. This means
