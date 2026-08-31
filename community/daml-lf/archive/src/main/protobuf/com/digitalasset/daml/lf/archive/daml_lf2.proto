@@ -370,8 +370,9 @@ enum BuiltinFunction {
   SHA256_HEX = 71;
   SECP256K1_WITH_ECDSA_BOOL = 72;
   SECP256K1_VALIDATE_KEY = 73; // *Available in versions >= 2.3
+  EXTERNAL_CALL = 74; // *Available in versions >= 2.4*
 
-  // Next id is 74.
+  // Next id is 75.
 
   /* Dev Builtins */
   // We use fields above 1000 for dev features
@@ -391,7 +392,9 @@ enum BuiltinFunction {
 
   //SECP256K1_VALIDATE_KEY = 4001; // REMAINS HERE TEMPORARELY TO PARSE CHECKED IN DARS
 
-  EXTERNAL_CALL = 5001; // *Available in versions >= 2.dev*
+  // REMAINS HERE TEMPORARILY TO PARSE DARS FROM A damlc THAT STILL ENCODES THE OLD DEV ID;
+  // remove once the re-pinned damlc emits EXTERNAL_CALL = 74.
+  EXTERNAL_CALL_LEGACY_DEV = 5001;
 }
 
 // Builtin literals

@@ -124,7 +124,7 @@ object DamlLfFeature {
   val featureExternalCall = DamlLfFeature(
     name = "External Call",
     cppFlag = "DAML_ExternalCall",
-    versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
+    versionRange = VersionRange.From(v2_4_1),
   )
 
   val featureUnsafeFromInterface = DamlLfFeature(
