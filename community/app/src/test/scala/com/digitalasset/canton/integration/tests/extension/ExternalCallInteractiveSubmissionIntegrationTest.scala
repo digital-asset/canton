@@ -31,9 +31,10 @@ import java.util.UUID
 /** End-to-end coverage for Daml external calls on the interactive-submission surface: an external
   * party prepares a transaction exercising an external-call choice, so the recorded results travel
   * in the prepared transaction and are covered by the signed hash. External-call results only exist
-  * at LF serialization version dev, which requires hashing scheme V4, so preparing or executing
-  * with an older scheme is refused. The tests are dev-gated and run in the dev-protocol-version CI
-  * job.
+  * at LF serialization version V3 or higher, which requires hashing scheme V4, so preparing or
+  * executing with an older scheme is refused. The tests are gated on protocol version 36; the test
+  * package still targets LF 2.dev (the pinned damlc cannot compile external calls at 2.4 yet), so
+  * dev version support is enabled on the participant.
   */
 class ExternalCallInteractiveSubmissionIntegrationTest
     extends CommunityIntegrationTest
@@ -50,10 +51,11 @@ class ExternalCallInteractiveSubmissionIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
       .addConfigTransform(ConfigTransforms.enableInteractiveSubmissionTransforms)
+      .addConfigTransforms(ConfigTransforms.setDevVersionSupport(true)*)
       .withSetup { implicit env =>
         import env.*
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
-        if (testedProtocolVersion >= ProtocolVersion.dev) {
+        if (testedProtocolVersion >= ProtocolVersion.v36) {
           participant1.dars.upload(BaseTest.ExternalCallTestPath)
           aliceE = participant1.parties.testing.external.enable("Alice")
           // An externally-signed submission must be a single view, so the tests cannot use
@@ -87,7 +89,7 @@ class ExternalCallInteractiveSubmissionIntegrationTest
   private def hexBytes(hex: String): ByteString = HexString.parseToByteString(hex).value
 
   "an external call in an interactive submission" should {
-    "record the results in the V4-prepared transaction and execute it" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "record the results in the V4-prepared transaction and execute it" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()
@@ -133,7 +135,7 @@ class ExternalCallInteractiveSubmissionIntegrationTest
         extensionService.observedCalls.map(_.mode) shouldBe Seq("submission", "validation")
     }
 
-    "refuse to prepare with hashing scheme V2" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "refuse to prepare with hashing scheme V2" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()
@@ -146,7 +148,7 @@ class ExternalCallInteractiveSubmissionIntegrationTest
               hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
             ),
           _.errorMessage should include(
-            "Cannot hash node with LF serialization version VDev using hashing scheme V2. Please use hashing scheme V4 or higher."
+            "Cannot hash node with LF serialization version V3 using hashing scheme V2. Please use hashing scheme V4 or higher."
           ),
         )
 
@@ -155,7 +157,7 @@ class ExternalCallInteractiveSubmissionIntegrationTest
         extensionService.observedCalls.map(_.mode) shouldBe Seq("submission")
     }
 
-    "refuse to execute a V4-prepared transaction presented as V2" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "refuse to execute a V4-prepared transaction presented as V2" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()
@@ -174,7 +176,7 @@ class ExternalCallInteractiveSubmissionIntegrationTest
             hashingSchemeVersion = HASHING_SCHEME_VERSION_V2,
           ),
           _.errorMessage should include(
-            "Cannot hash node with LF serialization version VDev using hashing scheme V2. Please use hashing scheme V4 or higher."
+            "Cannot hash node with LF serialization version V3 using hashing scheme V2. Please use hashing scheme V4 or higher."
           ),
         )
 

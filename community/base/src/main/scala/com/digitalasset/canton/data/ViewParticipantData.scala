@@ -102,7 +102,7 @@ final case class ViewParticipantData private (
 
   def supportsExternalCallResults: Boolean =
     representativeProtocolVersion >= ViewParticipantData.protocolVersionRepresentativeFor(
-      ProtocolVersion.dev
+      ProtocolVersion.v36
     )
 
   def validated(protocolVersion: ProtocolVersion): Either[String, this.type] =
@@ -167,7 +167,7 @@ final case class ViewParticipantData private (
         _ <- Either.cond(
           supportsExternalCallResults,
           (),
-          s"External call results are supported only from protocol version ${ProtocolVersion.dev} onwards",
+          s"External call results are supported only from protocol version ${ProtocolVersion.v36} onwards",
         )
         _ <- actionDescription match {
           case _: ExerciseActionDescription => Right(())
@@ -504,17 +504,7 @@ object ViewParticipantData
       supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV31)),
       _.toProtoV31,
     ),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
-      v32.ViewParticipantData
-    )(
-      supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV32)),
-      _.toProtoV32,
-    ),
-    // Temporary proto version, not backed by protobuf message used to allow
-    // constructor validation for external call to switch on representative protocol version.
-    ProtoVersion(33) -> VersionedProtoCodec(ProtocolVersion.dev)(
-      v32.ViewParticipantData
-    )(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.ViewParticipantData)(
       supportedProtoVersionMemoizedPVV(_)(ic(fromProtoV32)),
       _.toProtoV32,
     ),

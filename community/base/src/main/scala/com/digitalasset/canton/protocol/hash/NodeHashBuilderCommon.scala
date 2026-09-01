@@ -104,10 +104,14 @@ private[hash] abstract class NodeHashBuilderCommon(
           externalCallResults,
           version,
         ) =>
-      // External-call results are only valid on dev nodes (mirrors the prepared-transaction
-      // decoder). HashingSchemeVersion.V4 adds them in its override; V2/V3 only ever hash pre-dev
-      // nodes (where the field is empty), so fail here rather than silently omitting them.
-      if (externalCallResults.nonEmpty && version != SerializationVersion.VDev)
+      // External-call results are only valid on nodes with serialization version 3 or later
+      // (mirrors the prepared-transaction decoder). HashingSchemeVersion.V4 adds them in its
+      // override; V2/V3 only ever hash older nodes (where the field is empty), so fail here
+      // rather than silently omitting them.
+      if (
+        externalCallResults.nonEmpty &&
+        Ordering[SerializationVersion].lt(version, SerializationVersion.V3)
+      )
         notSupported("external call results in Exercise node", version)
       if (choiceAuthorizers.nonEmpty)
         notSupported("choiceAuthorizers in Exercise node", version) // 2.dev feature

@@ -16,7 +16,12 @@ import scala.util.Try
 class LfSerializationVersionToProtocolVersionsTest extends AnyWordSpec with Matchers {
 
   val supportedSerializationVersions =
-    List(LfSerializationVersion.V1, LfSerializationVersion.VDev)
+    List(
+      LfSerializationVersion.V1,
+      LfSerializationVersion.V2,
+      LfSerializationVersion.V3,
+      LfSerializationVersion.VDev,
+    )
 
   "DamlLFVersionToProtocolVersions" should {
     supportedSerializationVersions.foreach { version =>
@@ -36,6 +41,9 @@ class LfSerializationVersionToProtocolVersionsTest extends AnyWordSpec with Matc
       maxSerializationVersionForProtocolVersion(
         ProtocolVersion.v35
       ) shouldBe LfSerializationVersion.V2
+      maxSerializationVersionForProtocolVersion(
+        ProtocolVersion.v36
+      ) shouldBe LfSerializationVersion.V3
       maxSerializationVersionForProtocolVersion(
         ProtocolVersion.dev
       ) shouldBe LfSerializationVersion.VDev

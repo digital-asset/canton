@@ -181,7 +181,7 @@ class PreparedTransactionCodecV1Spec
       }
     }
 
-    "reject exercise nodes with external call results before LF dev" in {
+    "reject exercise nodes with external call results before LF V3" in {
       val exerciseNode = normalizeNode(
         ValueGenerators
           .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V2)
@@ -206,7 +206,7 @@ class PreparedTransactionCodecV1Spec
       }
     }
 
-    "reject encoding exercise nodes with external call results before LF dev" in {
+    "reject encoding exercise nodes with external call results before LF V3" in {
       val exerciseNode = normalizeNode(
         ValueGenerators
           .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V2)
@@ -232,14 +232,14 @@ class PreparedTransactionCodecV1Spec
     "reject external call result ids that are invalid Daml Text" in {
       val exerciseNode = normalizeNode(
         ValueGenerators
-          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.VDev)
+          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V3)
           .sample
           .value
       ).copy(children = ImmArray.Empty)
 
       val encoded =
         encoder.v1
-          .exerciseTransformer(LfSerializationVersion.VDev)
+          .exerciseTransformer(LfSerializationVersion.V3)
           .transform(exerciseNode)
           .asEither
           .value
@@ -260,20 +260,20 @@ class PreparedTransactionCodecV1Spec
       }
     }
 
-    "preserve external call results when round tripping VDev transactions" in {
+    "preserve external call results when round tripping V3 transactions" in {
       val nodeId = NodeId(0)
       val exerciseNode = normalizeNode(
         ValueGenerators
-          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.VDev)
+          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V3)
           .sample
           .value
       ).copy(
         children = ImmArray.Empty,
         externalCallResults = ImmArray(externalCallResult),
-        version = LfSerializationVersion.VDev,
+        version = LfSerializationVersion.V3,
       )
       val transaction = VersionedTransaction(
-        LfSerializationVersion.VDev,
+        LfSerializationVersion.V3,
         Map(nodeId -> exerciseNode),
         ImmArray(nodeId),
       )
@@ -300,31 +300,31 @@ class PreparedTransactionCodecV1Spec
         decodedExerciseNodes.head.externalCallResults shouldBe ImmArray(externalCallResult)
       }
 
-      timeouts.default.await_("Round trip VDev external-call transaction")(result)
+      timeouts.default.await_("Round trip V3 external-call transaction")(result)
     }
 
-    "reject VDev prepared hashes on stable protocol versions" in {
+    "reject V3 prepared hashes on hashing schemes below V4" in {
       val nodeId = NodeId(0)
       val exerciseNode = normalizeNode(
         ValueGenerators
-          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.VDev)
+          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V3)
           .sample
           .value
       ).copy(
         children = ImmArray.Empty,
         choiceAuthorizers = None,
         externalCallResults = ImmArray(externalCallResult),
-        version = LfSerializationVersion.VDev,
+        version = LfSerializationVersion.V3,
       )
       val transaction = VersionedTransaction(
-        LfSerializationVersion.VDev,
+        LfSerializationVersion.V3,
         Map(nodeId -> exerciseNode),
         ImmArray(nodeId),
       )
       val prepareTransactionData = mkPrepareTransactionData(
         transaction = transaction,
-        submissionSeed = Hash.hashPrivateKey("prepared-vdev-test"),
-        nodeSeeds = ImmArray(nodeId -> Hash.hashPrivateKey("prepared-vdev-node")),
+        submissionSeed = Hash.hashPrivateKey("prepared-v3-test"),
+        nodeSeeds = ImmArray(nodeId -> Hash.hashPrivateKey("prepared-v3-node")),
       )
 
       prepareTransactionData
@@ -333,22 +333,22 @@ class PreparedTransactionCodecV1Spec
         .value
         .message should include("Hashing scheme version V4 is not supported on protocol version")
 
-      val vdevNodeStableV3Error = prepareTransactionData
+      val v3NodeStableSchemeV3Error = prepareTransactionData
         .computeHash(HashingSchemeVersion.V3, ProtocolVersion.v35)
         .left
         .value
         .message
-      vdevNodeStableV3Error should (include("LF serialization version VDev") and include(
+      v3NodeStableSchemeV3Error should (include("LF serialization version V3") and include(
         "Please use hashing scheme V4 or higher"
       ))
 
-      val vdevNodeV3Error = prepareTransactionData
-        .computeHash(HashingSchemeVersion.V3, ProtocolVersion.dev)
+      val v3NodeSchemeV3Error = prepareTransactionData
+        .computeHash(HashingSchemeVersion.V3, ProtocolVersion.v36)
         .left
         .value
         .message
-      vdevNodeV3Error should include("LF serialization version VDev")
-      vdevNodeV3Error should include("Please use hashing scheme V4 or higher")
+      v3NodeSchemeV3Error should include("LF serialization version V3")
+      v3NodeSchemeV3Error should include("Please use hashing scheme V4 or higher")
 
       val v2NodeId = NodeId(1)
       val v2ExerciseNode = normalizeNode(
@@ -362,23 +362,23 @@ class PreparedTransactionCodecV1Spec
         externalCallResults = ImmArray.Empty,
         version = LfSerializationVersion.V2,
       )
-      val topLevelVDevPrepareTransactionData = mkPrepareTransactionData(
+      val topLevelV3PrepareTransactionData = mkPrepareTransactionData(
         transaction = VersionedTransaction(
-          LfSerializationVersion.VDev,
+          LfSerializationVersion.V3,
           Map(v2NodeId -> v2ExerciseNode),
           ImmArray(v2NodeId),
         ),
-        submissionSeed = Hash.hashPrivateKey("prepared-vdev-wrapper-test"),
-        nodeSeeds = ImmArray(v2NodeId -> Hash.hashPrivateKey("prepared-vdev-wrapper-node")),
+        submissionSeed = Hash.hashPrivateKey("prepared-v3-wrapper-test"),
+        nodeSeeds = ImmArray(v2NodeId -> Hash.hashPrivateKey("prepared-v3-wrapper-node")),
       )
 
-      val topLevelVDevV3Error = topLevelVDevPrepareTransactionData
-        .computeHash(HashingSchemeVersion.V3, ProtocolVersion.dev)
+      val topLevelV3SchemeV3Error = topLevelV3PrepareTransactionData
+        .computeHash(HashingSchemeVersion.V3, ProtocolVersion.v36)
         .left
         .value
         .message
-      topLevelVDevV3Error should include("LF serialization version VDev")
-      topLevelVDevV3Error should include("Please use hashing scheme V4 or higher")
+      topLevelV3SchemeV3Error should include("LF serialization version V3")
+      topLevelV3SchemeV3Error should include("Please use hashing scheme V4 or higher")
 
       prepareTransactionData.computeHash(HashingSchemeVersion.V4, ProtocolVersion.dev).value
     }
@@ -393,10 +393,10 @@ class PreparedTransactionCodecV1Spec
       ).copy(
         children = ImmArray.Empty,
         externalCallResults = ImmArray(externalCallResult),
-        version = LfSerializationVersion.VDev,
+        version = LfSerializationVersion.V3,
       )
       val transaction = VersionedTransaction(
-        LfSerializationVersion.VDev,
+        LfSerializationVersion.V3,
         Map(nodeId -> exerciseNode),
         ImmArray(nodeId),
       )
@@ -410,7 +410,7 @@ class PreparedTransactionCodecV1Spec
         decoder.transactionTransformer.transform(tampered).asEither match {
           case Left(errors) =>
             errors.toString should include(
-              "A transaction of version V2 cannot contain node of newer version (version VDev)"
+              "A transaction of version V2 cannot contain node of newer version (version V3)"
             )
           case Right(decoded) => fail(s"Decoded malformed prepared transaction: $decoded")
         }
@@ -426,14 +426,14 @@ class PreparedTransactionCodecV1Spec
       val nodeId = NodeId(0)
       val exerciseNode = normalizeNode(
         ValueGenerators
-          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.VDev)
+          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V3)
           .sample
           .value
       ).copy(
         children = ImmArray.Empty,
         choiceAuthorizers = None,
         externalCallResults = ImmArray(externalCallResult),
-        version = LfSerializationVersion.VDev,
+        version = LfSerializationVersion.V3,
       )
       val changedExerciseNode = exerciseNode.copy(
         externalCallResults = ImmArray(
@@ -443,7 +443,7 @@ class PreparedTransactionCodecV1Spec
       val inputContract = FatContractInstance.fromCreateNode(
         normalizeNode(
           ValueGenerators
-            .malformedCreateNodeGenWithVersion(LfSerializationVersion.VDev)
+            .malformedCreateNodeGenWithVersion(LfSerializationVersion.V3)
             .sample
             .value
         ).copy(coid = exerciseNode.targetCoid, keyOpt = None),
@@ -454,7 +454,7 @@ class PreparedTransactionCodecV1Spec
       def prepareData(node: Node.Exercise): PrepareTransactionData =
         mkPrepareTransactionData(
           transaction = VersionedTransaction(
-            LfSerializationVersion.VDev,
+            LfSerializationVersion.V3,
             Map(nodeId -> node),
             ImmArray(nodeId),
           ),
@@ -485,24 +485,24 @@ class PreparedTransactionCodecV1Spec
       val nodeId = NodeId(0)
       val exerciseNode = normalizeNode(
         ValueGenerators
-          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.VDev)
+          .danglingRefExerciseNodeGenWithVersion(LfSerializationVersion.V3)
           .sample
           .value
       ).copy(
         children = ImmArray.Empty,
         choiceAuthorizers = None,
         externalCallResults = ImmArray(externalCallResult),
-        version = LfSerializationVersion.VDev,
+        version = LfSerializationVersion.V3,
       )
       val transaction = VersionedTransaction(
-        LfSerializationVersion.VDev,
+        LfSerializationVersion.V3,
         Map(nodeId -> exerciseNode),
         ImmArray(nodeId),
       )
       val inputContract = FatContractInstance.fromCreateNode(
         normalizeNode(
           ValueGenerators
-            .malformedCreateNodeGenWithVersion(LfSerializationVersion.VDev)
+            .malformedCreateNodeGenWithVersion(LfSerializationVersion.V3)
             .sample
             .value
         ).copy(coid = exerciseNode.targetCoid, keyOpt = None),

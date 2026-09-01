@@ -184,7 +184,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe empty
     }
 
-    "pass when the recorded results agree and re-validation matches" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "pass when the recorded results agree and re-validation matches" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(Map.empty)
       val result = runCheck(
         validator,
@@ -202,7 +202,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe Seq(externalCallKey)
     }
 
-    "reject and alarm when recorded results disagree across the request" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject and alarm when recorded results disagree across the request" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(Map.empty)
       val expectedInconsistency = Inconsistency(
         externalCallKey,
@@ -231,7 +231,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe empty
     }
 
-    "reject and alarm when re-validation returns a different output" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject and alarm when re-validation returns a different output" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.Mismatched(
@@ -259,7 +259,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe Seq(externalCallKey)
     }
 
-    "report a recorded result that cannot be re-validated" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "report a recorded result that cannot be re-validated" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.UnableToValidate(
@@ -279,7 +279,7 @@ final class ExternalCallProtocolIntegrationTest
       )
     }
 
-    "skip re-validation of consistent results when instructed" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "skip re-validation of consistent results when instructed" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(Map.empty)
       val result = runCheck(
         validator,
@@ -297,7 +297,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe empty
     }
 
-    "reject every view recording a mismatched call" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject every view recording a mismatched call" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.Mismatched(
@@ -333,7 +333,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe Seq(externalCallKey)
     }
 
-    "isolate re-validation failures to the views recording the call" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "isolate re-validation failures to the views recording the call" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val independentCall = externalCallResult.copy(functionId = "other-function")
       val validator = new RecordingExternalCallValidator(
         Map(
@@ -368,7 +368,7 @@ final class ExternalCallProtocolIntegrationTest
         Seq(externalCallKey, ExternalCallKey.fromResult(independentCall))
     }
 
-    "re-validate calls unaffected by a disagreement" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "re-validate calls unaffected by a disagreement" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val independentCall = externalCallResult.copy(functionId = "other-function")
       val independentKey = ExternalCallKey.fromResult(independentCall)
       val validator = new RecordingExternalCallValidator(
@@ -426,7 +426,7 @@ final class ExternalCallProtocolIntegrationTest
       )
     }
 
-    "skip re-validation when no checking party is hosted" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "skip re-validation when no checking party is hosted" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(Map.empty)
       val result = runCheck(
         validator,
@@ -440,7 +440,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe empty
     }
 
-    "skip re-validation when the checking parties are not confirmers of the recording view" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "skip re-validation when the checking parties are not confirmers of the recording view" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(Map.empty)
       val result = runCheck(
         validator,
@@ -461,7 +461,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe empty
     }
 
-    "attach a mismatch to every view recording the key when the gate passes on one" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "attach a mismatch to every view recording the key when the gate passes on one" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(
         Map(
           externalCallKey -> ExternalCallValidator.Mismatched(
@@ -505,7 +505,7 @@ final class ExternalCallProtocolIntegrationTest
       )
     }
 
-    "reject disagreements regardless of hosting" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "reject disagreements regardless of hosting" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val validator = new RecordingExternalCallValidator(Map.empty)
       val expectedInconsistency = Inconsistency(
         externalCallKey,
@@ -536,7 +536,7 @@ final class ExternalCallProtocolIntegrationTest
       validator.observed shouldBe empty
     }
 
-    "describe each view's rejection by a call recorded in that view" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "describe each view's rejection by a call recorded in that view" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val leftCall = externalCallResult.copy(functionId = "left-function")
       val rightCall = externalCallResult.copy(functionId = "right-function")
       val leftKey = ExternalCallKey.fromResult(leftCall)
@@ -586,7 +586,7 @@ final class ExternalCallProtocolIntegrationTest
       )
     }
 
-    "prefer a mismatch over an unvalidatable result within a view" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "prefer a mismatch over an unvalidatable result within a view" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val mismatchedCall = externalCallResult.copy(functionId = "mismatched-function")
       val unvalidatableCall = externalCallResult.copy(functionId = "unvalidatable-function")
       val mismatchedKey = ExternalCallKey.fromResult(mismatchedCall)

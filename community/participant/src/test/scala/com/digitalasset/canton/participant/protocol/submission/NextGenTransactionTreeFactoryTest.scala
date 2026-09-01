@@ -97,7 +97,7 @@ final class NextGenTransactionTreeFactoryTest
             nodeId,
             exercise.copy(
               externalCallResults = results,
-              version = LfSerializationVersion.VDev,
+              version = LfSerializationVersion.V3,
             ),
           )
       }
@@ -123,7 +123,7 @@ final class NextGenTransactionTreeFactoryTest
     val exercise = updateExercise(transaction.nodes(nodeId).asInstanceOf[LfNodeExercises])
     val updatedExercise = exercise.copy(
       externalCallResults = results,
-      version = LfSerializationVersion.VDev,
+      version = LfSerializationVersion.V3,
     )
     val updatedTransaction = CantonOnly.lfVersionedTransaction(
       nodes = transaction.nodes.updated(nodeId, updatedExercise),
@@ -196,7 +196,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "record external call results from same-view exercise nodes with view-local occurrence indexes" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          "record external call results from same-view exercise nodes with view-local occurrence indexes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.MultipleRootsAndSimpleViewNesting
             val rootExerciseNodeId = LfNodeId(1)
@@ -245,7 +245,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "record repeated identical external call results on one exercise node with increasing call indexes" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          "record repeated identical external call results on one exercise node with increasing call indexes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.MultipleRootsAndSimpleViewNesting
             val nodeId = LfNodeId(5)
@@ -276,7 +276,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "record external call results from child views only once" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          "record external call results from child views only once" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.ViewInterleavings
             val externalCallNodeId = LfNodeId(2)
@@ -302,7 +302,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "preserve distinct same-result external call occurrences across parent and child views" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          "preserve distinct same-result external call occurrences across parent and child views" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.TransientContracts
             val childExternalCallNodeId = LfNodeId(3)
@@ -343,7 +343,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "reject a transaction recording conflicting outputs for the same external call" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          "reject a transaction recording conflicting outputs for the same external call" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.TransientContracts
             val childExternalCallNodeId = LfNodeId(3)
@@ -372,7 +372,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "record external call checking parties from signatories and actors" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          "record external call checking parties from signatories and actors" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
             val treeFactory = createTransactionTreeFactory()
             val example = factory.SingleExerciseWithNonstakeholderActor(factory.deriveNodeSeed(0))
 
@@ -393,7 +393,7 @@ final class NextGenTransactionTreeFactoryTest
             }
           }
 
-          "reconstruct non-root same-view external call records with view-local exercise indexes" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+          "reconstruct non-root same-view external call records with view-local exercise indexes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
             val submittingTreeFactory = createTransactionTreeFactory()
             val validatingTreeFactory = createTransactionTreeFactory()
             val example = factory.MultipleRootsAndSimpleViewNesting

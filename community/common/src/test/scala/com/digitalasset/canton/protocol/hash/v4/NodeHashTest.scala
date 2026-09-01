@@ -27,7 +27,10 @@ class NodeHashTest extends BaseTest with AnyWordSpecLike with Matchers with Hash
   )
   private val externalCallResult2 = externalCallResult1.copy(output = Bytes.assertFromString("03"))
 
-  private def exerciseNode(results: ImmArray[ExternalCallResult]): Node.Exercise =
+  private def exerciseNode(
+      results: ImmArray[ExternalCallResult],
+      version: SerializationVersion = SerializationVersion.VDev,
+  ): Node.Exercise =
     Node.Exercise(
       targetCoid = cid("target"),
       packageName = packageName0,
@@ -46,7 +49,7 @@ class NodeHashTest extends BaseTest with AnyWordSpecLike with Matchers with Hash
       keyOpt = None,
       byKey = false,
       externalCallResults = results,
-      version = SerializationVersion.VDev,
+      version = version,
     )
 
   private def hashExerciseNode(
@@ -62,6 +65,16 @@ class NodeHashTest extends BaseTest with AnyWordSpecLike with Matchers with Hash
     )
 
   "V4 NodeHashBuilder" should {
+    "hash V3 exercise nodes carrying external-call results (the production shape)" in {
+      val hash = hashExerciseNode(
+        exerciseNode(
+          ImmArray(externalCallResult1, externalCallResult2),
+          version = SerializationVersion.V3,
+        )
+      )
+      hash.toHexString shouldBe "1220bdf9077509dc8e3cbd2db839b557483ecdb3ba90cbb49b152d164c4d139fd88c"
+    }
+
     "explain exercise external-call result encoding" in {
       val hashTracer = HashTracer.StringHashTracer()
       val hash = hashExerciseNode(

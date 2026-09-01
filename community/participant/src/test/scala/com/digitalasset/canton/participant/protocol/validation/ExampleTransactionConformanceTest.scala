@@ -201,7 +201,7 @@ class ExampleTransactionConformanceTest
           nodeId,
           exercise.copy(
             externalCallResults = results,
-            version = LfSerializationVersion.VDev,
+            version = LfSerializationVersion.V3,
           ),
         ),
         roots = transaction.roots,
@@ -386,7 +386,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "reject views with tampered external-call metadata during reconstruction" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "reject views with tampered external-call metadata during reconstruction" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         val externalCallResult = ExternalCallResult(
           extensionId = "extension",
           functionId = "function",
@@ -456,7 +456,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "aggregate visible external-call results for replay" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+      "aggregate visible external-call results for replay" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
         val externalCallResult = ExternalCallResult(
           extensionId = "extension",
           functionId = "function",
@@ -590,7 +590,7 @@ class ExampleTransactionConformanceTest
         }
       }
 
-      "observe empty external-call replay data" onlyRunWhen (testedProtocolVersion < ProtocolVersion.dev) in {
+      "observe empty external-call replay data" onlyRunWithOrLessThan ProtocolVersion.v35 in {
         val example = factory.SingleExercise(factory.deriveNodeSeed(0))
         val observed = new AtomicReference[Option[ExternalCallReplayData]](None)
         val recordingReinterpreter = new HasReinterpret {

@@ -24,6 +24,7 @@ import com.digitalasset.canton.integration.util.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -48,8 +49,10 @@ import scala.concurrent.duration.DurationInt
 
 /** End-to-end coverage for a malicious participant that tampers with the recorded external-call
   * results before sending the confirmation request. Honest participants recompute or replay the
-  * results during validation and reject the request. External-call wire data exists only at
-  * protocol version dev, so the tests are dev-gated and run in the dev-protocol-version CI job.
+  * results during validation and reject the request. External-call wire data exists from protocol
+  * version 36 onwards, so the tests are gated on v36. The test package still targets LF 2.dev (the
+  * pinned damlc cannot compile external calls at 2.4 yet), so dev version support is enabled on the
+  * participants.
   */
 class ExternalCallTamperingIntegrationTest
     extends CommunityIntegrationTest
@@ -89,58 +92,60 @@ class ExternalCallTamperingIntegrationTest
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1.withSetup { implicit env =>
-      import env.*
+    EnvironmentDefinition.P2_S1M1
+      .addConfigTransforms(ConfigTransforms.setDevVersionSupport(true)*)
+      .withSetup { implicit env =>
+        import env.*
 
-      participants.all.foreach(_.synchronizers.connect_local(sequencer1, alias = daName))
-      pureCryptoRef.set(sequencer1.crypto.pureCrypto)
+        participants.all.foreach(_.synchronizers.connect_local(sequencer1, alias = daName))
+        pureCryptoRef.set(sequencer1.crypto.pureCrypto)
 
-      if (testedProtocolVersion >= ProtocolVersion.dev) {
-        participants.all.dars.upload(BaseTest.ExternalCallTestPath)
+        if (testedProtocolVersion >= ProtocolVersion.v36) {
+          participants.all.dars.upload(BaseTest.ExternalCallTestPath)
 
-        PartiesAllocator(Set(participant1, participant2))(
-          newParties = Seq("owner" -> participant1),
-          targetTopology = Map(
-            "owner" -> Map(
-              daId -> (PositiveInt.one, Set(
-                participant1.id -> ParticipantPermission.Submission,
-                participant2.id -> ParticipantPermission.Confirmation,
-              ))
-            )
-          ),
-        )
-        owner = "owner".toPartyId(participant1)
-
-        tester = JavaDecodeUtil
-          .decodeAllCreated(M.externalcalltest.ExternalCallTester.COMPANION)(
-            participant1.ledger_api.javaapi.commands.submit(
-              Seq(owner),
-              Seq(
-                new M.externalcalltest.ExternalCallTester(
-                  owner.toProtoPrimitive
-                ).create.commands.loneElement
-              ),
-            )
+          PartiesAllocator(Set(participant1, participant2))(
+            newParties = Seq("owner" -> participant1),
+            targetTopology = Map(
+              "owner" -> Map(
+                daId -> (PositiveInt.one, Set(
+                  participant1.id -> ParticipantPermission.Submission,
+                  participant2.id -> ParticipantPermission.Confirmation,
+                ))
+              )
+            ),
           )
-          .loneElement
+          owner = "owner".toPartyId(participant1)
 
-        maliciousP1 = MaliciousParticipantNode(
-          participant1,
-          daId,
-          testedProtocolVersion,
-          timeouts,
-          loggerFactory,
-          testSubmissionServiceOverrideO = Some(
-            TestSubmissionService(
-              participant1,
-              checkAuthorization = false,
-              enableLfDev = true,
-              externalCallHandler = recordingHandler,
+          tester = JavaDecodeUtil
+            .decodeAllCreated(M.externalcalltest.ExternalCallTester.COMPANION)(
+              participant1.ledger_api.javaapi.commands.submit(
+                Seq(owner),
+                Seq(
+                  new M.externalcalltest.ExternalCallTester(
+                    owner.toProtoPrimitive
+                  ).create.commands.loneElement
+                ),
+              )
             )
-          ),
-        )
+            .loneElement
+
+          maliciousP1 = MaliciousParticipantNode(
+            participant1,
+            daId,
+            testedProtocolVersion,
+            timeouts,
+            loggerFactory,
+            testSubmissionServiceOverrideO = Some(
+              TestSubmissionService(
+                participant1,
+                checkAuthorization = false,
+                enableLfDev = true,
+                externalCallHandler = recordingHandler,
+              )
+            ),
+          )
+        }
       }
-    }
 
   private def callExtensionCommand: Command =
     Command.fromJavaProto(
@@ -173,7 +178,7 @@ class ExternalCallTamperingIntegrationTest
       .andThen(ViewParticipantData.Optics.externalCallResultsUnsafe)
 
   "a malicious participant that drops the recorded external-call results" should {
-    "be rejected by a failed model conformance check" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "be rejected by a failed model conformance check" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()
@@ -217,7 +222,7 @@ class ExternalCallTamperingIntegrationTest
   }
 
   "a malicious participant that records disagreeing external-call results" should {
-    "be rejected with a disagreement alarm on every confirming participant" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
+    "be rejected with a disagreement alarm on every confirming participant" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       implicit env =>
         import env.*
         extensionService.reset()

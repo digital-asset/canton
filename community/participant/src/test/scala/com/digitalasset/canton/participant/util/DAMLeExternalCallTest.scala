@@ -97,7 +97,7 @@ final class DAMLeExternalCallTest
       signatories = Set(alice),
       stakeholders = Set(alice),
       keyOpt = None,
-      version = SerializationVersion.VDev,
+      version = SerializationVersion.V3,
     )
     ExampleContractFactory.fromCreate(
       create,
