@@ -319,7 +319,7 @@ trait PartyReplicationIndexingStoreTest
 
       "properly retain unindexed status for remaining events after a mid-stream deleteSince" onlyRunWithOrGreaterThan ProtocolVersion.dev in {
         val store = mk()
-        val batchSize = PositiveInt.tryCreate(sizeImport1.increment.unwrap.toInt)
+        val batchSize = PositiveInt.tryCreate(sizeImport1.increment.value.unwrap.toInt)
 
         val changesAtTs3 = onprAcsImports2.map { case ContractReassignment(contract, _, _, ctr) =>
           contract.contractId -> (ActiveContractStore.ChangeType.Activation, ctr)

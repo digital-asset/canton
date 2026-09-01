@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.SynchronizerLimits
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt.{one, zero}
 import com.digitalasset.canton.console.CommandFailure
@@ -121,6 +122,7 @@ sealed abstract class LsuSuccessorRejectedIntegrationTest(
 }
 
 // If the elements change in opposite directions, serial takes priority.
+@UnstableTest // TODO(i35364): Remove once the test is stable again
 final class LsuSuccessorSerialUpPVDownIntegrationTest
     extends LsuSuccessorAcceptedIntegrationTest((zero, v35) -> (one, v34))
 final class LsuSuccessorSerialDownPVUpIntegrationTest

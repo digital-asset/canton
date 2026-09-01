@@ -130,6 +130,8 @@ object ConfigTransforms {
       _.focus(_.monitoring.logging.api.warnBeyondLoad).replace(Some(10000)),
       // disable exit on fatal error in tests
       ConfigTransforms.setExitOnFatalFailures(false),
+      // tests must be able to observe security alarms without the participant crashing
+      ConfigTransforms.setCrashAfterFailedValidation(false),
       ConfigTransforms.useNewAggregator(true),
     )
 
@@ -158,11 +160,16 @@ object ConfigTransforms {
       _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(false)
     )
 
+  /** Disable the old acs commitment processor if the testedProtocolVersion meets or exceeds
+    * ProtocolVersion.acsCommitmentRedesign.
+    */
   lazy val disableOldAcsCommitmentProcessor: ConfigTransform =
-    updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-        .replace(true)
-    )
+    if (BaseTest.testedProtocolVersion >= ProtocolVersion.acsCommitmentRedesign) {
+      updateAllParticipantConfigs_(
+        _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
+          .replace(true)
+      )
+    } else identity
 
   // TODO(#35107) remove after all tests work without this config transformation
   lazy val enableOldAcsCommitmentProcessor: ConfigTransform =
@@ -212,6 +219,11 @@ object ConfigTransforms {
 
   def setExitOnFatalFailures(enable: Boolean): ConfigTransform =
     _.focus(_.parameters.exitOnFatalFailures).replace(enable)
+
+  def setCrashAfterFailedValidation(enable: Boolean): ConfigTransform =
+    updateAllParticipantConfigs_(
+      _.focus(_.parameters.crashAfterFailedValidation).replace(enable)
+    )
 
   def setDevVersionSupport(enable: Boolean): Seq[ConfigTransform] = Seq(
     setNonStandardConfig(enable),
@@ -290,9 +302,9 @@ object ConfigTransforms {
     */
   lazy val enableTrafficAccounting: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.trafficEnforcement.enabled)
+      _.focus(_.trafficAccounting.enabled)
         .replace(true)
-        .focus(_.trafficEnforcement.enforceCostOnSubmissions)
+        .focus(_.trafficAccounting.enforceCostOnSubmissions)
         .replace(false)
     )
 
@@ -301,15 +313,8 @@ object ConfigTransforms {
     */
   lazy val disableTrafficAccounting: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.trafficEnforcement.enabled).replace(false)
+      _.focus(_.trafficAccounting.enabled).replace(false)
     )
-
-  /** Enables traffic accounting for integration tests when CANTON_TEST_EXTERNAL_PARTIES is set. We
-    * turn on TEA only for external parties tests for now while we stabilize it, since TEA is most
-    * relevant for external party submissions.
-    */
-  lazy val enableTrafficAccountingForExternalPartiesTests: Seq[ConfigTransform] =
-    if (BaseTest.cantonTestExternalParties) List(enableTrafficAccounting) else Nil
 
   /** Default transforms to apply to tests using a [[EnvironmentDefinition]]. Covers the primary
     * ways that distinct concurrent environments may unintentionally collide.
@@ -354,8 +359,8 @@ object ConfigTransforms {
         ConfigTransforms.setAcsCommitmentSendDelay(0.0d, 0.0d),
         enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev,
         disableOldAcsCommitmentProcessor,
-      ) ++
-      enableTrafficAccountingForExternalPartiesTests
+        enableTrafficAccounting,
+      )
 
   lazy val clearMinimumProtocolVersion: Seq[ConfigTransform] =
     Seq(

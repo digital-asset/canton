@@ -584,11 +584,12 @@ class InvalidTopologyBroadcastIntegrationTest
         sequencer1.topology.synchronizer_parameters.get_dynamic_synchronizer_parameters(daId)
       sequencer1.topology.synchronizer_parameters.propose_update(
         daId,
-        params => params.update(maxRequestSize = params.maxRequestSize.increment.toNonNegative),
+        params =>
+          params.update(maxRequestSize = params.maxRequestSize.increment.value.toNonNegative),
       )
       sequencer1.topology.synchronizer_parameters
         .get_dynamic_synchronizer_parameters(daId)
-        .maxRequestSize shouldBe beforeUpdate.maxRequestSize.increment.toNonNegative
+        .maxRequestSize shouldBe beforeUpdate.maxRequestSize.increment.value.toNonNegative
     }
   }
 

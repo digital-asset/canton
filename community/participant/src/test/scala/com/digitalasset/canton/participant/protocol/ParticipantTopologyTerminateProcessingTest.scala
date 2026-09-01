@@ -84,7 +84,7 @@ final class ParticipantTopologyTerminateProcessingTest
     )
 
   private lazy val psid1 = DefaultTestIdentities.physicalSynchronizerId
-  private lazy val psid2 = psid1.incrementSerial
+  private lazy val psid2 = psid1.incrementSerial.value
   private def synchronizerPredecessor(upgradeTime: CantonTimestamp) =
     SynchronizerPredecessor(psid1, upgradeTime, isLateUpgrade = false)
 
@@ -137,7 +137,7 @@ final class ParticipantTopologyTerminateProcessingTest
       synchronizerConnectionConfigStore = mock[SynchronizerConnectionConfigStore],
       pendingOnboardingClearanceStore = pendingOnboardingClearanceStoreMock,
       onboardingClearanceScheduler = mock[OnboardingClearanceScheduler],
-      partyReplicatorO = None,
+      partyReplicationTriggersO = None,
       metrics,
       loggerFactory,
     )

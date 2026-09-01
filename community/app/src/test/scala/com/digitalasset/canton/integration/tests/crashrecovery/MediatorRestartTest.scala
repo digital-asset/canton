@@ -39,12 +39,14 @@ final class MediatorRestartTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
-      .addConfigTransform(ConfigTransforms.useStaticTime)
-      .addConfigTransform(
+      .addConfigTransforms(
+        ConfigTransforms.useStaticTime,
         ConfigTransforms.updateAllSequencerClientConfigs_(
           // Set a very small maximumInFlightEventBatches to make sure the mediator does not deadlock
           _.focus(_.maximumInFlightEventBatches).replace(PositiveInt.two)
-        )
+        ),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .withSetup { implicit env =>
         import env.*

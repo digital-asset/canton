@@ -63,8 +63,8 @@ import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyMapping.MappingHash
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{BinaryFileUtil, ErrorUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation, ReleaseVersion}
 import com.digitalasset.canton.{config, networking}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -1762,9 +1762,7 @@ class TopologyAdministrationGroup(
       }
 
       val serial = serialE.getOrElse(
-        ErrorUtil.invalidState("OwnerToKeyMapping max serial reached")(
-          errorLoggingContext(TraceContext.empty)
-        )
+        consoleEnvironment.raiseError("OwnerToKeyMapping max serial reached")
       )
 
       runAdminCommand(
@@ -1954,9 +1952,7 @@ class TopologyAdministrationGroup(
         else
           nextSerial.map(
             _.getOrElse(
-              ErrorUtil.invalidState("PartyToParticipant max serial reached")(
-                errorLoggingContext(TraceContext.empty)
-              )
+              consoleEnvironment.raiseError("PartyToParticipant max serial reached")
             )
           )
 
@@ -2637,8 +2633,8 @@ class TopologyAdministrationGroup(
             store = store,
             serial = Some(
               result.context.serial.increment.getOrElse(
-                ErrorUtil.invalidState("ParticipantSynchronizerPermissions max serial reached")(
-                  errorLoggingContext(TraceContext.empty)
+                consoleEnvironment.raiseError(
+                  "ParticipantSynchronizerPermissions max serial reached"
                 )
               )
             ),
@@ -2877,9 +2873,7 @@ class TopologyAdministrationGroup(
               synchronize,
               Some(
                 newSerial.getOrElse(
-                  ErrorUtil.invalidState("VettedPackages max serial reached")(
-                    errorLoggingContext(TraceContext.empty)
-                  )
+                  consoleEnvironment.raiseError("VettedPackages max serial reached")
                 )
               ),
               signedBy,
@@ -3119,9 +3113,7 @@ class TopologyAdministrationGroup(
         signedBy = signedBy,
         serial = Some(
           serial.getOrElse(
-            ErrorUtil.invalidState("Mediator synchronizer state max serial reached")(
-              errorLoggingContext(TraceContext.empty)
-            )
+            consoleEnvironment.raiseError("Mediator synchronizer state max serial reached")
           )
         ),
       ).discard
@@ -3234,9 +3226,7 @@ class TopologyAdministrationGroup(
         signedBy = Seq.empty,
         serial = Some(
           mediatorStateResult.context.serial.increment.getOrElse(
-            ErrorUtil.invalidState("Mediator synchronizer state max serial reached")(
-              errorLoggingContext(TraceContext.empty)
-            )
+            consoleEnvironment.raiseError("Mediator synchronizer state max serial reached")
           )
         ),
         change = TopologyChangeOp.Remove,
@@ -3548,9 +3538,7 @@ class TopologyAdministrationGroup(
           signedBy,
           Some(
             previousParameters.context.serial.increment.getOrElse(
-              ErrorUtil.invalidState("SynchronizerParameters max serial reached")(
-                errorLoggingContext(TraceContext.empty)
-              )
+              consoleEnvironment.raiseError("SynchronizerParameters max serial reached")
             )
           ),
           synchronize,

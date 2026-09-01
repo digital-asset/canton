@@ -81,6 +81,10 @@ class ParticipantFailoverIntegrationTestBase
   override lazy val environmentDefinition: EnvironmentDefinition =
     baseEnvironmentDefinition
       .addConfigTransforms(ConfigTransforms.addMonitoringEndpointAllNodes*)
+      .addConfigTransforms(
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true)
+      )
       .withSetup { implicit env =>
         import env.*
 

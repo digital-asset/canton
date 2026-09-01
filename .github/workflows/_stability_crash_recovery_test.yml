@@ -1,0 +1,109 @@
+name: Stability Crash Recovery Test
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+      succeed_on_error:
+        description: Whether to succeed the job even if some tests fail.
+        default: true
+        type: boolean
+    secrets:
+      DATADOG_API_KEY:
+        required: false
+      GCLOUD_SERVICE_KEY:
+        required: false
+      AWS_ACCESS_KEY_ID:
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        required: false
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  stability_crash_recovery_test:
+    name: Stability Crash Recovery Test (bucket ${{ matrix.bucket }}, replica ${{ matrix.replica }})
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        bucket: [0, 1, 2, 3]
+        replica: [0, 1, 2, 3]
+    timeout-minutes: 240
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Compute physical shard index
+        id: shard
+        shell: bash
+        run: |
+          bucket_count=4 # the number of logical buckets, keep this in sync with matrix.bucket and num_test_buckets
+          physical=$(( ${{ matrix.replica }} * bucket_count + ${{ matrix.bucket }} ))
+          echo "physical=$physical" >> "$GITHUB_OUTPUT"
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ steps.shard.outputs.physical }}
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+
+      - name: Run Crash Recovery Tests
+        uses: ./.github/actions/test/run_crash_recovery_tests
+        with:
+          exclude_unstable_tests: 'false'
+          include_patterns: |
+            ^com\.digitalasset\.canton\.integration\.tests\.crashrecovery
+          execution_context_size: '8'
+          num_test_buckets: '4'
+          selection_shard_index: ${{ matrix.bucket }}
+          shard_index: ${{ steps.shard.outputs.physical }}
+          succeed_on_error: ${{ inputs.succeed_on_error }}
+          test_file: test-full-class-names.log
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: stability_crash_recovery_test
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: stability_crash_recovery_test
+      runner: ${{ inputs.runner }}
+      protocol_version: ""
+    secrets: inherit

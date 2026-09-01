@@ -67,10 +67,12 @@ class ParticipantReplicaManager(
         for {
           _ <- participantServices.persistentStateContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: PersistentState started")
+
           _ <- participantServices.mutablePackageMetadataView.refreshState
           _ = logger.info(
             "Participant replica is becoming active: MutablePackageMetadataView refreshed"
           )
+
           _ <- participantServices.ledgerApiIndexerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Indexer started")
 
@@ -78,12 +80,20 @@ class ParticipantReplicaManager(
           _ = logger.info(
             "Participant replica is becoming active: CantonSyncService caches refreshed"
           )
+
+          _ <- participantServices.ledgerApiIndexServiceContainer.initializeNext()
+          _ = logger.info(
+            "Participant replica is becoming active: Ledger API Index Service started"
+          )
+
+          _ <- participantServices.partyReplicatorContainerO.traverse(_.initializeNext())
+          _ = logger.info("Participant replica is becoming active: Party Replicator started")
           // Start up the Ledger API server
           _ <- participantServices.ledgerApiServerContainer.initializeNext()
           _ = logger.info("Participant replica is becoming active: Ledger API Server started")
 
-          _ <- participantServices.acsDigestProcessorManagerO.traverse(_.initializeNext())
-          _ = participantServices.acsDigestProcessorManagerO.foreach(_ =>
+          _ <- participantServices.acsCommitmentProcessorManagerO.traverse(_.initializeNext())
+          _ = participantServices.acsCommitmentProcessorManagerO.foreach(_ =>
             logger.info("Participant replica is becoming active: ACS digest processing started")
           )
 
@@ -164,12 +174,20 @@ class ParticipantReplicaManager(
           )
         }
 
-        participantServices.acsDigestProcessorManagerO.foreach(_.closeCurrent())
+        participantServices.acsCommitmentProcessorManagerO.foreach(_.closeCurrent())
         logger.info("Participant replica is becoming passive: ACS digest processing stopped")
 
         // Stop the Ledger API server
         participantServices.ledgerApiServerContainer.closeCurrent()
         logger.info("Participant replica is becoming passive: Ledger API Server stopped")
+
+        participantServices.partyReplicatorContainerO.foreach { partyReplicatorContainer =>
+          partyReplicatorContainer.closeCurrent()
+          logger.info("Participant replica is becoming passive: Party Replicator is stopped")
+        }
+
+        participantServices.ledgerApiIndexServiceContainer.closeCurrent()
+        logger.info("Participant replica is becoming passive: Ledger API Index Service is stopped")
         for {
           // Explicitly disconnect from synchronizers
           _ <- EitherTUtil

@@ -35,12 +35,14 @@ class RestartMediatorReliabilityIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     baseEnvironmentDefinition
-      .addConfigTransform(
+      .addConfigTransforms(
         // Disable warnings about consistency checks as this test creates a lot of contracts
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.activationFrequencyForWarnAboutConsistencyChecks)
             .replace(Long.MaxValue)
-        )
+        ),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .withSetup { implicit env =>
         performanceTestSetup

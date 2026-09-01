@@ -32,12 +32,20 @@ IGNORE_PATTERNS=$(remove_comment_and_blank_lines < "$FILE_WITH_IGNORE_PATTERNS")
 MATCH_PREFIX="^[0-9\\-]{10} [0-9:,]+ \\[[A-Za-z0-9\\-_]+\\]"
 MIN_LOG_LEVEL_WARNING="${MATCH_PREFIX} WARN|${MATCH_PREFIX} ERROR"
 
-# rg returns 1 if there were not matches
+# Pre-process the log while pipefail is still on so a crash in either step is
+# loud (exit 1) rather than silently swallowed by the rg pipeline below.
+JOINED_LOG=$(mktemp)
+trap 'rm -f "$JOINED_LOG"' EXIT
+cat "$LOGFILE" |
+  join_daml_error_lines |
+  python3 "${ABSDIR}/join_multiline_log_records.py" > "$JOINED_LOG"
+
+# rg returns 1 if there were no matches, so disable pipefail for the filter
+# pipeline only.
 set +o pipefail
 
 # Check for errors and warnings
-cat "$LOGFILE" |
-  join_daml_error_lines |
+cat "$JOINED_LOG" |
   rg -U -a -v -f <(echo "$IGNORE_PATTERNS") |
   rg -a -e "$MIN_LOG_LEVEL_WARNING" |
   sed "s/ \\[[^ ]*\\] / [⋮] /" |  # replaces non-whitespace [canton-env-execution-context-123] with [⋮]

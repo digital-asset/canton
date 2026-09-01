@@ -249,7 +249,7 @@ private[lsu] trait LsuBase
       oldSynchronizerOwners = env.synchronizerOwners1,
       newPV = newPVOverride.getOrElse(DefaultNewPV),
       // increasing the serial as well, so that the test also works when running with PV=dev
-      newSerial = newSerialOverride.getOrElse(currentPsid.serial.increment.toNonNegative),
+      newSerial = newSerialOverride.getOrElse(currentPsid.serial.increment.value.toNonNegative),
       topologyChangeDelay = topologyChangeDelay,
     )
   }

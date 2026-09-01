@@ -459,7 +459,7 @@ class LedgerApiSingleTest extends SingleVersionLedgerApiConformanceBase {
   "Ledger Api Test Tool" can {
     "run a single test" in { implicit env =>
       ledgerApiTestToolPlugin.runSuites(
-        suites = "CommandDeduplicationIT:DeduplicateUsingDurations",
+        suites = "PartyManagementServiceIT:PMPagedListKnownPartiesZeroPageSize",
         exclude = Nil,
         concurrency = 1,
       )

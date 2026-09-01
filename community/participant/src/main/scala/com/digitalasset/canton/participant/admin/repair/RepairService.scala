@@ -535,7 +535,7 @@ final class RepairService(
         ledgerApiIndexer.value
           .ensureNoProcessingForSynchronizer(psid.logical)
       )
-      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
+      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore
         .cleanSynchronizerIndex(psid.logical)
 
       startingPoints <- EitherT.right(
@@ -758,7 +758,7 @@ final class RepairService(
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     def check(): Either[String, Unit] = {
       val lastSequencerTimestamp = SyncEphemeralStateFactory.lastSequencerTimestamp(
-        ledgerApiIndexer.value.ledgerApiStore.value
+        ledgerApiIndexer.value.ledgerApiStore
           .cleanSynchronizerIndex(synchronizerId)
       )
       if (lastSequencerTimestamp >= timestamp) {

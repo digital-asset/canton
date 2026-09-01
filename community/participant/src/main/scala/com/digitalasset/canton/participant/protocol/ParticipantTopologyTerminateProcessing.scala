@@ -27,7 +27,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.{
   OnboardingClearanceScheduler,
-  PartyReplicator,
+  PartyReplicationTriggers,
 }
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -88,7 +88,7 @@ class ParticipantTopologyTerminateProcessing(
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     pendingOnboardingClearanceStore: PendingOnboardingClearanceStore,
     onboardingClearanceScheduler: OnboardingClearanceScheduler,
-    partyReplicatorO: Option[PartyReplicator],
+    partyReplicationTriggersO: Option[PartyReplicationTriggers],
     metrics: ParticipantMetrics,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends topology.processing.TerminateProcessing
@@ -328,8 +328,8 @@ class ParticipantTopologyTerminateProcessing(
       eventInfo: EventInfo,
   )(implicit traceContext: TraceContext): UnlessShutdown[Unit] = {
     val flushPartyReplicationPublications =
-      partyReplicatorO match {
-        case Some(partyReplicator)
+      partyReplicationTriggersO match {
+        case Some(partyReplicationTriggers)
             if eventInfo.clearingOnboardingLocallyHostedParty && !pauseSynchronizerIndexingDuringPartyReplication =>
           val onboardingParties = NonEmpty
             .from(eventInfo.event.events.collect[LfPartyId] {
@@ -339,7 +339,7 @@ class ParticipantTopologyTerminateProcessing(
           logger.info(
             s"Flushing activation changes before clearing onboarding flag at $sequencedTime with $effectiveTime on behalf of $onboardingParties with $eventInfo"
           )
-          partyReplicator.flushContractActivationChangesToIndexer(
+          partyReplicationTriggers.flushContractActivationChangesToIndexer(
             onboardingParties,
             store.storeId.psid.logical,
             effectiveTime,

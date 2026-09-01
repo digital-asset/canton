@@ -25,16 +25,21 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
 }
 import com.daml.ledger.javaapi.data.Party as ApiParty
 import com.daml.ledger.test.java.model.test.Dummy
+import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.error.groups.{AdminServiceErrors, RequestValidationErrors}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.daml.lf.data.Ref
+import org.scalatest.matchers.should.Matchers
 
 import java.util.UUID
 import java.util.regex.Pattern
 import scala.concurrent.Future
 import scala.util.Random
 
-final class PartyManagementServiceIT(testDars: TestDars) extends PartyManagementITBase {
+final class PartyManagementServiceIT(testDars: TestDars)
+    extends PartyManagementITBase
+    with Matchers
+    with TestEssentials {
   import testDars.companionImplicits.*
 
   val namePicker: NamePicker = NamePicker(
@@ -1017,43 +1022,33 @@ final class PartyManagementServiceIT(testDars: TestDars) extends PartyManagement
     allocate(NoParties),
     enabled = _.partyManagement.maxPartiesPageSize > 0,
   )(implicit ec => { case p @ Participants(Participant(ledger, Seq())) =>
-    val partyId1 = ledger.nextPartyId()
-    val partyId2 = ledger.nextPartyId()
+    val partyHint = "PMPZero" + Random.alphanumeric.take(10).mkString
+
+    // Use filter for the queries to isolate from concurrent party allocations from other tests
+    def listParties(pageSize: Int): Future[ListKnownPartiesResponse] =
+      ledger.listKnownParties(
+        ListKnownPartiesRequest(
+          pageToken = "",
+          pageSize = pageSize,
+          identityProviderId = "",
+          filterParty = partyHint,
+        )
+      )
+
     for {
-      // Ensure we have at least two parties
       _ <- ledger.allocateParty(
-        AllocatePartyRequest(partyId1, None, "", "", ""),
+        AllocatePartyRequest(partyHint, None, "", "", ""),
         p.minSynchronizers,
       )
-      _ <- ledger.allocateParty(
-        AllocatePartyRequest(partyId2, None, "", "", ""),
-        p.minSynchronizers,
-      )
-      pageSizeZero <- ledger.listKnownParties(
-        ListKnownPartiesRequest(
-          pageToken = "",
-          pageSize = 0,
-          identityProviderId = "",
-          filterParty = "",
-        )
-      )
-      pageSizeOne <- ledger.listKnownParties(
-        ListKnownPartiesRequest(
-          pageToken = "",
-          pageSize = 1,
-          identityProviderId = "",
-          filterParty = "",
-        )
-      )
+      pageSizeZero <- listParties(pageSize = 0)
+      pageSizeOne <- listParties(pageSize = 1)
     } yield {
-      assert(
-        pageSizeOne.partyDetails.nonEmpty,
-        "First page with requested pageSize zero should return some parties",
-      )
-      assertEquals(
-        pageSizeZero.partyDetails.headOption.value,
-        pageSizeOne.partyDetails.headOption.value,
-      )
+      // First page with requested pageSize zero should return some parties
+      pageSizeZero.partyDetails should not be empty
+      // Match same party returned
+      pageSizeOne.partyDetails.headOption.value shouldBe pageSizeZero.partyDetails.headOption.value
+      // Match the expected party hint
+      pageSizeOne.partyDetails.headOption.value.party should startWith(partyHint)
     }
   })
 

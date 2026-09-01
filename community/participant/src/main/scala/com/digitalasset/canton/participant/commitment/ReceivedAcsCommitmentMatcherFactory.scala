@@ -18,19 +18,23 @@ import com.digitalasset.canton.participant.store.{AcsCommitmentPeriodStore, AcsD
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import org.apache.pekko.Done
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 trait ReceivedAcsCommitmentMatcherFactory {
   def startMatcherPipeline(
       synchronizerAlias: SynchronizerAlias,
       synchronizerId: SynchronizerId,
       tickSignaller: TickSignaller,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[(KillSwitch, Future[Done])]
+  )(implicit
+      traceContext: TraceContext
+  ): (AcsCommitmentComponentHealthReporter, FutureUnlessShutdown[(KillSwitch, Future[Done])])
 }
 
 class ReceivedAcsCommitmentMatcherFactoryImpl(
@@ -49,17 +53,28 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
       synchronizerAlias: SynchronizerAlias,
       synchronizerId: SynchronizerId,
       tickSignaller: TickSignaller,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[(KillSwitch, Future[Done])] = {
+  )(implicit
+      traceContext: TraceContext
+  ): (AcsCommitmentComponentHealthReporter, FutureUnlessShutdown[(KillSwitch, Future[Done])]) = {
+    val metricsForSynchronizer = metrics(synchronizerAlias)
+
+    val loggerFactoryWithSynchronizer =
+      loggerFactory.append("synchronizer", synchronizerId.toString)
+
+    val healthComponent = AcsCommitmentComponentHealthReporter(
+      s"matcher-$synchronizerId",
+      metricsForSynchronizer.matcherHealth,
+      loggerFactoryWithSynchronizer,
+    )
+
     val periodStore = periodStoreLookup(synchronizerId).getOrElse(
       ErrorUtil.invalidState("AcsCommitmentPeriodStore not initialized")
     )
     val digestStore = digestStoreLookup(synchronizerId).getOrElse(
       ErrorUtil.invalidState("AcsDigestStore not initialized")
     )
-    val loggerFactoryWithSynchronizer =
-      loggerFactory.append("synchronizer", synchronizerId.toString)
 
-    for {
+    val result = for {
       watermark <- periodStore.watermark()
       checkpoint <- digestStore.latestCheckpointUpTo(
         Offset.MaxValue,
@@ -70,7 +85,7 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
       val matcher = new ReceivedAcsCommitmentMatcher(
         periodStore,
         stringInterning,
-        metrics(synchronizerAlias),
+        metricsForSynchronizer,
         loggerFactoryWithSynchronizer,
         parallelProcessingLimit,
       )
@@ -88,7 +103,7 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
               offset
             }
         )
-      val graph = RunningDigestProcessor
+      val graph = DigestProcessor
         .acsUpdatesWithRetries(internalIndexService, synchronizerId, startingOffset)
         .via(ReceivedAcsCommitmentMatcher.synchronizationFlow(signalSource))
         // The kill switch must sit behind the synchronization flow so that the kill switch's completion signal
@@ -98,8 +113,24 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
         .toMat(Sink.ignore)(Keep.both)
       val (killSwitch, doneF) =
         PekkoUtil.runSupervised(graph, s"ReceivedAcsCommitmentMatcher-$synchronizerId")
-      (killSwitch, doneF)
+      metricsForSynchronizer.matcherHealth.updateValue(CommitmentMetrics.HealthValues.Started)
+      (
+        killSwitch,
+        doneF.thereafter { result =>
+          healthComponent.reportHealth(AcsCommitmentHealthState.stoppedFromTry(result))
+        },
+      )
     }
+    (
+      healthComponent,
+      result.thereafter { startingResult =>
+        val health = startingResult match {
+          case Failure(t) => AcsCommitmentHealthState.failed(t)
+          case Success(_) => AcsCommitmentHealthState.Started
+        }
+        healthComponent.reportHealth(health)
+      },
+    )
   }
 
 }

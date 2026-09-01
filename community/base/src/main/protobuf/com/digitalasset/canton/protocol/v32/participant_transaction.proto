@@ -6,6 +6,7 @@ syntax = "proto3";
 package com.digitalasset.canton.protocol.v32;
 
 import "com/digitalasset/canton/crypto/v30/crypto.proto";
+import "com/digitalasset/canton/protocol/v30/common.proto";
 import "com/digitalasset/canton/protocol/v30/participant_transaction.proto";
 import "com/digitalasset/canton/protocol/v31/participant_transaction.proto";
 import "scalapb/scalapb.proto";
@@ -84,4 +85,30 @@ message ViewParticipantData {
   v31.ActionDescription action_description = 6;
   repeated ViewExternalCallResult external_call_results = 7;
   bool rolled_back = 8;
+}
+
+// Semantically identical to v31, with one difference: the bytes in compressed_view_trees
+// are produced using a different compression algorithm. The v31 version uses gzip, while
+// this v32 version uses Zstandard (zstd) for improved compression ratio and speed.
+message EncryptedMultipleViewsMessage {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+
+  // A wrapper for a collection of view trees (serialized, uncompressed)
+  message UncompressedViewTrees {
+    repeated bytes view_trees = 1;
+  }
+
+  // Bytes containing the result of compressing the UncompressedViewTrees instance
+  bytes compressed_view_trees = 1;
+
+  repeated bytes view_hashes = 2;
+
+  // The symmetric encryption scheme used to encrypt the view tree and the session key
+  com.digitalasset.canton.crypto.v30.SymmetricKeyScheme encryption_scheme = 3;
+
+  com.digitalasset.canton.crypto.v30.Signature submitting_participant_signature = 4; // optional
+
+  repeated com.digitalasset.canton.crypto.v30.AsymmetricEncrypted session_key_lookup = 5;
+  string physical_synchronizer_id = 6;
+  v30.ViewType view_type = 7;
 }

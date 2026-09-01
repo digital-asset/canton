@@ -908,7 +908,7 @@ final class SequencerClientTest
       "acknowledgeSigned should take upgrade time into account" in {
         def test(usePredecessor: Boolean) = {
           val psid = DefaultTestIdentities.physicalSynchronizerId
-          val nextPSid = psid.incrementSerial
+          val nextPSid = psid.incrementSerial.value
 
           val upgradeTime = CantonTimestamp.now()
           val synchronizerPredecessor =

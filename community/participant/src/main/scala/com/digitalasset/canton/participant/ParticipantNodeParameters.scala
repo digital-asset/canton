@@ -43,7 +43,7 @@ final case class ParticipantNodeParameters(
     commitmentUseDbSnapshotForParticipantLookup: Boolean,
     autoSyncProtocolFeatureFlags: Boolean,
     enableAllLedgerApiReassignments: Boolean,
-    commitAfterFailedActivenessCheck: Boolean,
+    crashAfterFailedValidation: Boolean,
     validateLegacyContractsV11: Boolean,
     acsCommitments: AcsCommitmentConfig,
 ) extends CantonNodeParameters
@@ -58,8 +58,8 @@ final case class ParticipantNodeParameters(
   def deferPartyOnboardingIndexing: Boolean =
     alphaOnlinePartyReplicationSupport.exists(!_.pauseSynchronizerIndexingDuringPartyReplication)
 
-  def isOldCommitmentProcessorEnabled(protocolVersion: ProtocolVersion): Boolean =
-    protocolVersion < ProtocolVersion.acsCommitmentRedesign || !acsCommitments.disableOldAcsCommitmentProcessor
+  def isOldCommitmentProcessorEnabled: Boolean =
+    !acsCommitments.disableOldAcsCommitmentProcessor
 }
 
 object ParticipantNodeParameters {
@@ -121,7 +121,7 @@ object ParticipantNodeParameters {
     commitmentUseDbSnapshotForParticipantLookup = false,
     autoSyncProtocolFeatureFlags = true,
     enableAllLedgerApiReassignments = false,
-    commitAfterFailedActivenessCheck = false,
+    crashAfterFailedValidation = false,
     validateLegacyContractsV11 = true,
     acsCommitments = AcsCommitmentConfig(),
   )

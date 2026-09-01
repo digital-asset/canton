@@ -33,6 +33,10 @@ inputs:
     description: Index of test shard, required when num_test_buckets is not 0
     required: false
     default: "0"
+  selection_shard_index:
+    description: Optional logical shard index used for test selection/splitting.
+    required: false
+    default: ""
   skip_cleanup:
     description: Skip cleanup/reporting step
     required: false
@@ -96,6 +100,7 @@ runs:
         num_test_buckets: ${{ inputs.num_test_buckets }}
         setup_gcp_kms: ${{ inputs.setup_gcp_kms }}
         shard_index: ${{ inputs.shard_index }}
+        selection_shard_index: ${{ inputs.selection_shard_index }}
         skip_cleanup: true
         succeed_on_error: ${{ inputs.succeed_on_error }}
         test_file: ${{ inputs.test_file }}

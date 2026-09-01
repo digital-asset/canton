@@ -51,6 +51,8 @@ final class RecordReplayIntegrationTest
   private val SequencerReplayIdleDuration = 5.seconds
   // how many send requests should we permit sending in parallel when replaying
   private val SendReplayParallelism = 10
+  // max time a database restore should take
+  private val DatabaseRestoreTimeout = PatienceConfiguration.Timeout(1.minute)
 
   override def environmentDefinition: EnvironmentDefinition = EnvironmentDefinition.P1_S1M1
 
@@ -124,13 +126,13 @@ final class RecordReplayIntegrationTest
     withClue("Restore the db dump") {
       postgresDumpRestore
         .restoreDump(sequencer1, (tempDirectory.directory / sequencerDumpFilename).path)
-        .futureValue
+        .futureValue(DatabaseRestoreTimeout)
       postgresDumpRestore
         .restoreDump(mediator1, (tempDirectory.directory / mediatorDumpFilename).path)
-        .futureValue
+        .futureValue(DatabaseRestoreTimeout)
       postgresDumpRestore
         .restoreDump(participant1, (tempDirectory.directory / participantDumpFilename).path)
-        .futureValue
+        .futureValue(DatabaseRestoreTimeout)
     }
 
     withClue("Replay participant events") {
@@ -165,13 +167,13 @@ final class RecordReplayIntegrationTest
     withClue("Restore the db dump again") {
       postgresDumpRestore
         .restoreDump(sequencer1, (tempDirectory.directory / sequencerDumpFilename).path)
-        .futureValue
+        .futureValue(DatabaseRestoreTimeout)
       postgresDumpRestore
         .restoreDump(mediator1, (tempDirectory.directory / mediatorDumpFilename).path)
-        .futureValue
+        .futureValue(DatabaseRestoreTimeout)
       postgresDumpRestore
         .restoreDump(participant1, (tempDirectory.directory / participantDumpFilename).path)
-        .futureValue
+        .futureValue(DatabaseRestoreTimeout)
     }
 
     withClue("Replay the sequencer submissions from the participant and mediator") {

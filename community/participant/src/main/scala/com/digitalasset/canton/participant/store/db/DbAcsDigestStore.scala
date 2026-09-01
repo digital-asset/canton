@@ -282,4 +282,14 @@ class DbAcsDigestStore(
       sqlu"delete from par_acs_running_digests_checkpoint where synchronizer_idx = $synchronizerIdx"
     storage.update_(query, functionFullName)
   }
+
+  override protected def truncateCheckpoints()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    // `truncate` is much more efficient than `delete from`, but it acquires an exclusive table lock
+    // that conflicts with DB backups. As a result, this query may take a long time or fail if a DB backup
+    // is in progress. We tolerate this chance given that truncation should only happen after a configuration change.
+    val query = sqlu"""truncate table par_acs_running_digests_checkpoint"""
+    storage.update_(query, functionFullName)
+  }
 }

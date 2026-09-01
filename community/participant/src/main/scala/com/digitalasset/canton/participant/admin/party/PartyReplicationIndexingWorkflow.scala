@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.party
 
 import cats.implicits.toTraverseOps
+import cats.syntax.either.*
 import cats.{Eval, Monad}
 import com.digitalasset.canton.config.BatchingConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
@@ -117,7 +118,14 @@ class PartyReplicationIndexingWorkflow(
           indexedContractActivationChangeCount =
             indexingProgress.indexedContractActivationChangeCount +
               checked(NonNegativeLong.tryCreate(numChangesIndexed.unwrap.toLong)),
-          nextIndexingCounter = onprBatchCounter.increment.toNonNegative,
+          nextIndexingCounter = onprBatchCounter.increment
+            .valueOr(err =>
+              // Party replication indexing batches are never expected to get anywhere near Long.MaxValue.
+              ErrorUtil.invalidState(
+                s"Next indexing counter reached long max value: ${err.message}"
+              )
+            )
+            .toNonNegative,
         )
       )
 

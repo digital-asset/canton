@@ -202,8 +202,11 @@ class ReceivedAcsCommitmentMatcher(
       TraceContext.ofBatch("persist-watermark-matching")(timepoint.traceContexts)(logger)
     val offset = timepoint.value.offset
     store.increaseWatermark(offset).map { _ =>
-      metrics.matchingWatermark.updateValue(timepoint.value.recordTime.toMicros)
-      logger.debug(s"Increased the ACS commitment matching watermark to offset $offset")
+      val recordTime = timepoint.value.recordTime
+      metrics.matchingWatermark.updateValue(recordTime.toMicros)
+      logger.debug(
+        s"Increased the ACS commitment matching watermark to offset $offset with record time $recordTime"
+      )
     }
   }
 }

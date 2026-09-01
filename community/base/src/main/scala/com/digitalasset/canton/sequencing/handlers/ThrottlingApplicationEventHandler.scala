@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.sequencing.handlers
 
+import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric.SubtractionResult
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -41,9 +42,18 @@ class ThrottlingApplicationEventHandler(
     def acquirePermit(s: ThrottlingState)(implicit traceContext: TraceContext) =
       s match {
         case BelowCapacity(alreadyRunning) =>
-          if (alreadyRunning < maximumInFlightEventBatches)
-            BelowCapacity(alreadyRunning.increment.toNonNegative)
-          else AtLimit(PromiseUnlessShutdown.unsupervised[Unit]())
+          if (alreadyRunning < maximumInFlightEventBatches) {
+            alreadyRunning.increment
+              .map { newRunning =>
+                BelowCapacity(newRunning.toNonNegative)
+              }
+              .valueOr { err =>
+                // If somehow we reached Int.MaxValue concurrent runs, throw as something went very wrong
+                ErrorUtil.invalidState(
+                  s"Reached Int.MaxValue concurrent in flight event bathes: $err"
+                )
+              }
+          } else AtLimit(PromiseUnlessShutdown.unsupervised[Unit]())
         case AtLimit(_) =>
           // This method will run inside an atomic update operation. Normally one shouldn't log in this case,
           // but since reaching this state is

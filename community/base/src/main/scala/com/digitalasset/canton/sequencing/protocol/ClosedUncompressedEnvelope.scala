@@ -144,12 +144,14 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     */
   def uncompressedByteSize: Int = toEnvelopeWithoutRecipientsProto.serializedSize
 
-  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope = {
+  override def toClosedCompressedEnvelope(
+      algo: com.digitalasset.canton.util.CompressionAlgo
+  ): ClosedCompressedEnvelope = {
     val uncompressed = checkedToByteString(toEnvelopeWithoutRecipientsProto)
     ClosedCompressedEnvelope.create(
-      bytes = ByteStringUtil.compressGzip(uncompressed),
+      bytes = ByteStringUtil.compress(uncompressed, algo),
       recipients = recipients,
-      algorithm = CompressionAlgorithm.GZIP,
+      algorithm = CompressionAlgorithm(algo),
     )(
       DecompressionBudget(
         MaxBytesToDecompress(NonNegativeInt.tryCreate(uncompressed.size))

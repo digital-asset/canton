@@ -69,8 +69,8 @@ class TestSubmissionService(
     engine: Engine,
     contractResolver: LfContractId => TraceContext => Future[Option[FatContractInstance]],
     keyResolver: TestKeyResolver,
-    packageResolver: PackageResolver,
-    syncService: SyncService,
+    packageResolver: () => PackageResolver,
+    syncService: () => SyncService,
     mkPackageMap: TraceContext => Future[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
     externalCallHandler: ExternalCallHandler,
     interpretationConfig: InterpretationConfig,
@@ -229,9 +229,9 @@ class TestSubmissionService(
       transaction: SubmittedTransaction,
   )(implicit traceContext: TraceContext): Future[SubmissionResult] =
     for {
-      routingSynchronizerState <- syncService.getRoutingSynchronizerState
+      routingSynchronizerState <- syncService().getRoutingSynchronizerState
         .failOnShutdownToAbortException("test submit transaction")
-      synchronizerRank <- syncService
+      synchronizerRank <- syncService()
         .selectRoutingSynchronizer(
           submitterInfo = submitterInfo,
           transaction = transaction,
@@ -244,7 +244,7 @@ class TestSubmissionService(
         .leftSemiflatMap(err => FutureUnlessShutdown.failed(err.toGrpcError))
         .merge
         .failOnShutdownToAbortException("test submit transaction")
-      submissionResult <- syncService
+      submissionResult <- syncService()
         .submitTransaction(
           synchronizerRank = synchronizerRank,
           routingSynchronizerState = routingSynchronizerState,
@@ -373,7 +373,7 @@ class TestSubmissionService(
 
             case Result.Need.Package(packageId) =>
               for {
-                pckgO <- packageResolver
+                pckgO <- packageResolver()
                   .resolve(packageId, PackageResolver.ignoreMissingPackage)
                   .failOnShutdownToAbortException(
                     "TestSubmissionService"
@@ -481,7 +481,7 @@ object TestSubmissionService {
       if (enableLfDev) InterpretationConfig.Dev else InterpretationConfig.Default
     )
 
-    val participantNode = participant.underlying.value
+    def participantNode: ParticipantNode = participant.underlying.value
     val loggerFactory = participantNode.loggerFactory
 
     val engine = new Engine(
@@ -506,7 +506,7 @@ object TestSubmissionService {
 
     val keyResolver = customKeyResolver.getOrElse(ActiveKeyResolver(participant))
 
-    val packageResolver: PackageResolver = participantNode.sync.packageService.packageResolver
+    def packageResolver: PackageResolver = participantNode.sync.packageService.packageResolver
 
     new TestSubmissionService(
       participant.id,
@@ -514,9 +514,9 @@ object TestSubmissionService {
       engine,
       resolveContract,
       keyResolver,
-      packageResolver,
-      participantNode.sync,
-      mkPackageMap(participantNode)(_),
+      () => packageResolver,
+      () => participantNode.sync,
+      mkPackageMap(() => participantNode)(_),
       externalCallHandler,
       effectiveInterpretationConfig,
       loggerFactory,
@@ -524,10 +524,10 @@ object TestSubmissionService {
   }
 
   private def mkPackageMap(
-      participantNode: ParticipantNode
+      participantNode: () => ParticipantNode
   )(traceContext: TraceContext)(implicit executionContext: ExecutionContext): Future[
     Map[LfPackageId, (Ref.PackageName, Ref.PackageVersion)]
-  ] = participantNode.sync.packageService
+  ] = participantNode().sync.packageService
     .listPackages()(traceContext)
     .map(
       _.map(description =>

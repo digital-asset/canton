@@ -232,7 +232,7 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
         newOldNodesResolution = Map("sequencer3" -> "sequencer2", "mediator3" -> "mediator2"),
         oldSynchronizerOwners = Set[InstanceReference](sequencer2, mediator2),
         newPV = ProtocolVersion.dev,
-        newSerial = currentPsid.serial.increment.toNonNegative,
+        newSerial = currentPsid.serial.increment.value.toNonNegative,
         overridePsid = Some(currentPsid.copy(serial = NonNegativeInt.tryCreate(3))),
       )
 

@@ -1053,6 +1053,7 @@ object BuildCommon {
           scalapb_json4s,
           slick_hikaricp,
           scalatest % "test",
+          zstd,
         ),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"

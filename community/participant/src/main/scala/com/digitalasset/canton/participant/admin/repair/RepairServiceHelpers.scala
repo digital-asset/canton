@@ -102,7 +102,7 @@ private[repair] final class RepairServiceHelpers(
       persistentState <- EitherT.fromEither[FutureUnlessShutdown](
         lookUpSynchronizerPersistence(psid)
       )
-      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
+      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore
         .cleanSynchronizerIndex(synchronizerId)
       topologyFactory <- syncPersistentStateLookup
         .topologyFactoryFor(psid)

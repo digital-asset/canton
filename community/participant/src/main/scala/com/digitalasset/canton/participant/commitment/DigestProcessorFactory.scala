@@ -5,17 +5,21 @@ package com.digitalasset.canton.participant.commitment
 
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
+import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter
 import com.digitalasset.canton.participant.store.{AcsCommitmentPeriodStore, AcsDigestStore}
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.ExecutionContext
@@ -33,6 +37,13 @@ trait DigestProcessorFactory {
       synchronizerAlias: SynchronizerAlias,
       synchronizerId: SynchronizerId,
   )(implicit traceContext: TraceContext): ReinitializingDigestProcessor
+
+  /** Returns whether the running digest store of the given synchronizer contains any checkpoint.
+    * Returns `false` if there is no running digest store for the given synchronizer.
+    */
+  def needsReinitialization(
+      synchronizerId: SynchronizerId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
 }
 
 class DigestProcessorFactoryImpl(
@@ -135,6 +146,9 @@ class DigestProcessorFactoryImpl(
     val digestAccumulator =
       createDigestAccumulator(acsDigestStore, metrics, loggerFactoryWithSynchronizer)
 
+    val reinitializingTimepoint =
+      DigestProcessorFactoryImpl.reinitializationTimepoint(ledgerApiStore, synchronizerId)
+
     new ReinitializingDigestProcessorImpl(
       participantId,
       synchronizerId,
@@ -143,7 +157,7 @@ class DigestProcessorFactoryImpl(
       acsDigestStore,
       indexService = internalIndexService,
       digestProcessorTopologyLookup,
-      ledgerApiStore,
+      reinitializingTimepoint,
       enableAdditionalConsistencyChecks = enableAdditionalConsistencyChecks,
       metrics,
       timeouts,
@@ -151,4 +165,34 @@ class DigestProcessorFactoryImpl(
     )
   }
 
+  override def needsReinitialization(
+      synchronizerId: SynchronizerId
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] =
+    acsDigestStoreLookup(synchronizerId) match {
+      case None => FutureUnlessShutdown.pure(false)
+      case Some(store) =>
+        store.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter).map(_.isEmpty)
+    }
+
+}
+
+object DigestProcessorFactoryImpl {
+  @VisibleForTesting
+  private[commitment] def reinitializationTimepoint(
+      ledgerApiStore: LedgerApiStore,
+      synchronizerId: SynchronizerId,
+  )(implicit errorLoggingContext: ErrorLoggingContext): Timepoint = {
+    // TODO(#33422) - Once the Github issue 27992 is solved, switch to new method
+    val timepointO = for {
+      end <- ledgerApiStore.ledgerEnd
+      index <- end.synchronizerIndices.get(synchronizerId)
+    } yield Timepoint(end.lastOffset)(index.recordTime)
+    timepointO.getOrElse(
+      ErrorUtil.invalidState(
+        s"There is no suitable last offset for synchronizer $synchronizerId in the Ledger"
+      )
+    )
+  }
 }

@@ -151,7 +151,7 @@ final class ParticipantPurgeStoresAfterLsuSchedulerTest
       val alias = SynchronizerAlias.tryCreate("da")
 
       val oldPsid = DefaultTestIdentities.physicalSynchronizerId
-      val newPsid = oldPsid.incrementSerial
+      val newPsid = oldPsid.incrementSerial.value
 
       val configStore = {
         val synchronizers = new InMemoryRegisteredSynchronizersStore(loggerFactory)

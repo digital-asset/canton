@@ -1356,16 +1356,13 @@ object ConnectedSynchronizer {
         participantNodePersistentState.map(_.inFlightSubmissionStore),
         synchronizerHandle.psid,
         parameters.journalGarbageCollectionDelay,
-        !parameters.isOldCommitmentProcessorEnabled(synchronizerHandle.psid.protocolVersion),
+        !parameters.isOldCommitmentProcessorEnabled,
         parameters.processingTimeouts,
         loggerFactory,
       )
-      val isOldProcessorEnabled = parameters.isOldCommitmentProcessorEnabled(
-        synchronizerHandle.staticParameters.protocolVersion
-      )
       for {
         acsCommitmentProcessorO <-
-          if (isOldProcessorEnabled)
+          if (parameters.isOldCommitmentProcessorEnabled)
             AcsCommitmentProcessor(
               participantId,
               synchronizerHandle.sequencerClient,

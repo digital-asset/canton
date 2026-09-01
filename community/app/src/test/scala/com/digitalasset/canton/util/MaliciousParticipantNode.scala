@@ -31,18 +31,24 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.ParticipantNode
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.ViewHashAndRecipients
-import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.ContractLookupError
+import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.{
+  ContractInstanceOfId,
+  ContractLookupError,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   EncryptedViewMessageFactory,
   SeedGenerator,
   TransactionConfirmationRequestFactory,
   TransactionTreeFactory,
 }
+import com.digitalasset.canton.participant.store.ContractStore
+import com.digitalasset.canton.participant.sync.{CantonSyncService, ConnectedSynchronizer}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
-import com.digitalasset.canton.sequencing.client.{SendResult, SequencerClient}
+import com.digitalasset.canton.sequencing.client.{RichSequencerClient, SendResult, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.SessionKeyStoreWithInMemoryCache
 import com.digitalasset.canton.topology.*
@@ -80,8 +86,8 @@ class MaliciousParticipantNode(
     testSubmissionService: TestSubmissionService,
     seedGenerator: SeedGenerator,
     contractOfId: TransactionTreeFactory.ContractInstanceOfId,
-    confirmationRequestFactory: TransactionConfirmationRequestFactory,
-    sequencerClient: SequencerClient,
+    confirmationRequestFactory: () => TransactionConfirmationRequestFactory,
+    sequencerClient: () => SequencerClient,
     defaultPsid: PhysicalSynchronizerId,
     defaultMediatorGroup: MediatorGroupRecipient,
     pureCrypto: CryptoPureApi,
@@ -96,8 +102,8 @@ class MaliciousParticipantNode(
 
   val futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
 
-  private val transactionTreeFactory: TransactionTreeFactory =
-    confirmationRequestFactory.transactionTreeFactory
+  private def transactionTreeFactory: TransactionTreeFactory =
+    confirmationRequestFactory().transactionTreeFactory
 
   private def sendRequestBatchToSequencer(
       batch: Batch[DefaultOpenEnvelope],
@@ -110,7 +116,7 @@ class MaliciousParticipantNode(
     val promise = PromiseUnlessShutdown.unsupervised[Either[String, SendResult.Success]]()
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
     for {
-      _ <- sequencerClient
+      _ <- sequencerClient()
         .send(
           batch,
           timestamps = SendRequestTimestamps(
@@ -148,8 +154,8 @@ class MaliciousParticipantNode(
     val rootHash = fullTree.rootHash
     val stakeholders = fullTree.stakeholders
 
-    val now = sequencerClient.clock.now
-    val maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
+    val now = sequencerClient().clock.now
+    val maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
 
     ResourceUtil.withResourceM(
       new SessionKeyStoreWithInMemoryCache(
@@ -309,8 +315,8 @@ class MaliciousParticipantNode(
         )
 
         rootHash = fullTree.rootHash
-        now = sequencerClient.clock.now
-        maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
+        now = sequencerClient().clock.now
+        maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
 
         submittingParticipantSignature <- cryptoSnapshot
           .sign(
@@ -410,8 +416,8 @@ class MaliciousParticipantNode(
 
     // It's safe to use these timestamps for signing the request because batch signatures are either empty
     // or generated with the long-term key, and no specific max sequencing time is defined, so the default can be used.
-    val now = sequencerClient.clock.now
-    val maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
+    val now = sequencerClient().clock.now
+    val maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
 
     sendRequestBatchToSequencer(
       Batch.of(protocolVersion, broadcast -> recipients),
@@ -436,8 +442,8 @@ class MaliciousParticipantNode(
     )
     // It's safe to use these timestamps for signing the batch of `TopologyTransactionsBroadcast`
     // because they match the timestamps and max sequencing typically applied in production.
-    val now = sequencerClient.clock.now
-    val maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
+    val now = sequencerClient().clock.now
+    val maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
     sendRequestBatchToSequencer(
       Batch.of(protocolVersion, topologyBroadcasts.map(_ -> recipients)*),
       approximateTimestampForSigning = now,
@@ -495,8 +501,8 @@ class MaliciousParticipantNode(
         transactionMetadata,
       )
 
-      now = sequencerClient.clock.now
-      maxSequencingTime = sequencerClient.generateMaxSequencingTime(now)
+      now = sequencerClient().clock.now
+      maxSequencingTime = sequencerClient().generateMaxSequencingTime(now)
 
       contractOfIdWithDisclosure = (cid: LfContractId) =>
         command.disclosedContracts.get(cid) match {
@@ -536,7 +542,7 @@ class MaliciousParticipantNode(
       confirmationRequestInterceptor: TransactionConfirmationRequest => TransactionConfirmationRequest =
         identity,
       envelopeInterceptor: DefaultOpenEnvelope => DefaultOpenEnvelope = identity,
-      now: CantonTimestamp = sequencerClient.clock.now,
+      now: CantonTimestamp = sequencerClient().clock.now,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi = defaultCryptoSnapshot(),
       protocolVersion: ProtocolVersion = defaultProtocolVersion,
   )(implicit
@@ -558,7 +564,7 @@ class MaliciousParticipantNode(
     )
 
     for {
-      confirmationRequest <- confirmationRequestFactory
+      confirmationRequest <- confirmationRequestFactory()
         .createConfirmationRequest(
           transactionTree,
           cryptoSnapshot,
@@ -594,11 +600,12 @@ object MaliciousParticipantNode extends FutureHelpers {
   ): MaliciousParticipantNode = {
     import env.*
 
-    val participantNode = participant.underlying.value
-    val sync = participantNode.sync
-    val connectedSynchronizer = sync.readyConnectedSynchronizerById(synchronizerId.logical).value
+    def participantNode: ParticipantNode = participant.underlying.value
+    def sync: CantonSyncService = participantNode.sync
+    def connectedSynchronizer: ConnectedSynchronizer =
+      sync.readyConnectedSynchronizerById(synchronizerId.logical).value
 
-    val contractStore = sync.participantNodePersistentState.value.contractStore
+    def contractStore: ContractStore = sync.participantNodePersistentState.value.contractStore
 
     val testSubmissionService = testSubmissionServiceOverrideO.getOrElse(
       TestSubmissionService(
@@ -609,9 +616,11 @@ object MaliciousParticipantNode extends FutureHelpers {
       )
     )
     val seedGenerator = new SeedGenerator(participantNode.cryptoPureApi)
-    val contractOfId = TransactionTreeFactory.contractInstanceLookup(contractStore)
-    val confirmationRequestFactory = connectedSynchronizer.requestGenerator
-    val sequencerClient = connectedSynchronizer.sequencerClient
+    val contractOfId: ContractInstanceOfId = (id: LfContractId) =>
+      TransactionTreeFactory.contractInstanceLookup(contractStore)(implicitly, implicitly)(id)
+    def confirmationRequestFactory: TransactionConfirmationRequestFactory =
+      connectedSynchronizer.requestGenerator
+    def sequencerClient: RichSequencerClient = connectedSynchronizer.sequencerClient
 
     def currentCryptoSnapshot(): SynchronizerSnapshotSyncCryptoApi = sync.syncCrypto
       .tryForSynchronizer(synchronizerId, BaseTest.defaultStaticSynchronizerParameters)
@@ -623,8 +632,8 @@ object MaliciousParticipantNode extends FutureHelpers {
       testSubmissionService,
       seedGenerator,
       contractOfId,
-      confirmationRequestFactory,
-      sequencerClient,
+      () => confirmationRequestFactory,
+      () => sequencerClient,
       synchronizerId,
       defaultMediatorGroup,
       participantNode.cryptoPureApi,

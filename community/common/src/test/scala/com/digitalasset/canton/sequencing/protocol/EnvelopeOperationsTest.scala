@@ -7,7 +7,7 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.protocol.v31
-import com.digitalasset.canton.util.MaxBytesToDecompress
+import com.digitalasset.canton.util.{CompressionAlgo, MaxBytesToDecompress}
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{CommonGenerators, ProtocolVersion}
 import com.digitalasset.canton.{BaseTestWordSpec, ProtoDeserializationError}
@@ -22,42 +22,49 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
 
   private val generators = new CommonGenerators(testedProtocolVersion)
 
-  "ClosedUncompressedEnvelope" should {
-    "compress and then decompress to the same value" in {
-      import generators.generatorsProtocolSeq.closedUncompressedEnvelopeArb
+  Seq(ProtocolVersion.v35, ProtocolVersion.v36).foreach { pv =>
+    val pvGenerators = new CommonGenerators(pv)
+    val algo = CompressionAlgo(pv)
 
-      forAll { (uncompressed: ClosedUncompressedEnvelope) =>
-        val compressed = uncompressed.toClosedCompressedEnvelope
-        val decompressed = compressed.toClosedUncompressedEnvelopeUnsafe
+    s"ClosedUncompressedEnvelope (pv=$pv, algo=$algo)" should {
+      "compress and then decompress to the same value" in {
+        import pvGenerators.generatorsProtocolSeq.closedUncompressedEnvelopeArb
 
-        uncompressed shouldBe decompressed
+        forAll { (uncompressed: ClosedUncompressedEnvelope) =>
+          val compressed = uncompressed.toClosedCompressedEnvelope(algo)
+          val decompressed = compressed.toClosedUncompressedEnvelopeUnsafe
+
+          uncompressed shouldBe decompressed
+        }
+      }
+
+      "predict the receiver's budget draw via uncompressedByteSize" in {
+        import pvGenerators.generatorsProtocolSeq.closedUncompressedEnvelopeArb
+
+        forAll { (uncompressed: ClosedUncompressedEnvelope) =>
+          val compressed = uncompressed.toClosedCompressedEnvelope(algo)
+          val budget = DecompressionBudget(MaxBytesToDecompress.MaxValueUnsafe)
+          val decompressed = (algo match {
+            case CompressionAlgo.Gzip => budget.decompressGzip(compressed.bytes)
+            case CompressionAlgo.Zstd => budget.decompressZstd(compressed.bytes)
+          }).value
+
+          decompressed.size shouldBe uncompressed.uncompressedByteSize
+        }
       }
     }
 
-    "predict the receiver's budget draw via uncompressedByteSize" in {
-      import generators.generatorsProtocolSeq.closedUncompressedEnvelopeArb
+    s"CloseCompressedEnvelope (pv=$pv, algo=$algo)" should {
+      "decompress and compress to the same value" in {
+        implicit val arb: Arbitrary[ClosedCompressedEnvelope] =
+          pvGenerators.generatorsProtocolSeq.closedCompressedEnvelopeArb
 
-      forAll { (uncompressed: ClosedUncompressedEnvelope) =>
-        val compressed = uncompressed.toClosedCompressedEnvelope
-        val decompressed = DecompressionBudget(MaxBytesToDecompress.MaxValueUnsafe)
-          .decompressGzip(compressed.bytes)
-          .value
+        forAll { (compressed: ClosedCompressedEnvelope) =>
+          val decompressed = compressed.toClosedUncompressedEnvelopeUnsafe
+          val recompressed = decompressed.toClosedCompressedEnvelope(algo)
 
-        decompressed.size shouldBe uncompressed.uncompressedByteSize
-      }
-    }
-  }
-
-  "CloseCompressedEnvelope" should {
-    "decompress and compress to the same value" in {
-      implicit val arb: Arbitrary[ClosedCompressedEnvelope] =
-        generators.generatorsProtocolSeq.closedCompressedEnvelopeArb
-
-      forAll { (compressed: ClosedCompressedEnvelope) =>
-        val decompressed = compressed.toClosedUncompressedEnvelopeUnsafe
-        val recompressed = decompressed.toClosedCompressedEnvelope
-
-        compressed shouldBe recompressed
+          compressed shouldBe recompressed
+        }
       }
     }
   }

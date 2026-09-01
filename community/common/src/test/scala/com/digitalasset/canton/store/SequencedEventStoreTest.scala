@@ -72,7 +72,9 @@ trait SequencedEventStoreTest extends PrunableByTimeTest with CloseableTest with
 
   private lazy val closedEnvelope: ClosedEnvelope =
     if (testedProtocolVersion >= ProtocolVersion.v35) {
-      closedUncompressedEnvelope.toClosedCompressedEnvelope
+      closedUncompressedEnvelope.toClosedCompressedEnvelope(
+        com.digitalasset.canton.util.CompressionAlgo(testedProtocolVersion)
+      )
     } else {
       closedUncompressedEnvelope
     }

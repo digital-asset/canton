@@ -149,6 +149,7 @@ class UseLedgerApiTestTool(
       exclude: Seq[String],
       concurrentTestRuns: Int = 4,
       useJson: Boolean,
+      onlyMultiParticipantTests: Boolean = false,
   )(implicit
       env: TestConsoleEnvironment
   ): Unit = {
@@ -161,7 +162,9 @@ class UseLedgerApiTestTool(
           .map(_.trim)
       case LedgerTestTool.Local(tests) => ConfiguredTests(tests, Config.default).allTestNames
     }
-    val filteredTests = allTests
+    val selectedTests =
+      if (onlyMultiParticipantTests) retainMultiParticipantTests(allTests) else allTests
+    val filteredTests = selectedTests
       .filter(line => exclude.forall(not => !line.contains(not)))
       .zipWithIndex
       .collect { case (test, idx) if idx % numShards == shard => test }
@@ -174,6 +177,22 @@ class UseLedgerApiTestTool(
       testParticipants = testParticipants(useJson),
       useJson = useJson,
     )
+  }
+
+  private def retainMultiParticipantTests(allTests: Seq[String]): Seq[String] = {
+    val multiParticipantTests =
+      ConfiguredTests(AvailableTests(lfVersion), Config.default).multiParticipantTestNames.toSet
+    val (retained, dropped) = allTests.partition(multiParticipantTests.contains)
+    logger.info(
+      s"Restricting the run to multi-participant test cases: retaining ${retained.size} of ${allTests.size} test cases."
+    )
+    logger.info(s"Test cases skipped as single-participant ones: ${dropped.mkString(", ")}")
+    if (retained.isEmpty)
+      // Fine to use the scalatest cancel here as this method is expected to be invoked from a ScalaTest case.
+      Assertions.cancel(
+        "After restricting the run to multi-participant test cases no tests remain to be run."
+      )
+    retained
   }
 
   @SuppressWarnings(Array("com.digitalasset.canton.RequireBlocking"))

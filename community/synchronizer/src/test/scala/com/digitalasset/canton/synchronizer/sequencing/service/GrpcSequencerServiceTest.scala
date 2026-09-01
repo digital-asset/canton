@@ -336,7 +336,10 @@ class GrpcSequencerServiceTest
         .modify(_.map {
           case closedEnvelope: ClosedEnvelope =>
             if (testedProtocolVersion >= ProtocolVersion.v35) {
-              val compressed = closedEnvelope.toClosedCompressedEnvelope
+              val compressed = closedEnvelope
+                .toClosedCompressedEnvelope(
+                  com.digitalasset.canton.util.CompressionAlgo(testedProtocolVersion)
+                )
               ClosedCompressedEnvelope.create(
                 ByteString.empty,
                 compressed.recipients,

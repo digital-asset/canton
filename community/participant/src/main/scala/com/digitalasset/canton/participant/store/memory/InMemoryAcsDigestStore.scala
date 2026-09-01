@@ -95,6 +95,13 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
     FutureUnlessShutdown.unit
   }
 
+  override protected def truncateCheckpoints()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    checkpointJournal.clear()
+    FutureUnlessShutdown.unit
+  }
+
   override def close(): Unit = ()
 }
 

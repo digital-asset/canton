@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.util
 
+import com.digitalasset.canton.lifecycle.UnlessShutdown
+
 import java.util.concurrent.CompletionException
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionException
@@ -12,6 +14,8 @@ import scala.util.{Failure, Success, Try}
 object TryUtil {
 
   val unit: Try[Unit] = Success(())
+
+  val unitUS: Try[UnlessShutdown[Unit]] = Success(UnlessShutdown.unit)
 
   /** Constructs a `Try` using the by-name parameter. This method will ensure any non-fatal
     * exception and [[java.lang.InterruptedException]] is caught and a `Failure` object is returned.

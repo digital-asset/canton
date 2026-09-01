@@ -18,6 +18,7 @@ import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
+  HasSimClockUtils,
   SharedEnvironment,
 }
 import com.digitalasset.canton.sequencing.protocol.TimeProof
@@ -27,36 +28,24 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendDecision,
   SendPolicy,
 }
-import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
+import scala.concurrent.blocking
 import scala.concurrent.duration.*
-import scala.concurrent.{ExecutionContext, Future, blocking}
-import scala.jdk.DurationConverters.*
 
 class TopologyTicksIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasProgrammableSequencer
-    with OnboardsNewSequencerNode {
+    with OnboardsNewSequencerNode
+    with HasSimClockUtils {
 
   // using 1 second, instead of the default value because this gives us enough milliseconds so that
   // the passage of time of 1 milli per empty block does not cause transactions to become effective
   // before the test intends them to.
-  val epsilon = NonNegativeFiniteDuration.tryCreate(1.seconds.toJava)
-
-  def runAsyncAndAdvanceClockUntilFinished(f: () => Unit, clock: SimClock)(implicit
-      ec: ExecutionContext
-  ): Unit = {
-    val future = Future(f())
-    eventually(maxPollInterval = 10.millis) {
-      clock.advance(epsilon.duration)
-      future.isCompleted shouldBe true
-    }
-    // important to call this so that we don't swallow the exception in case of a failed future
-    future.futureValue
-  }
+  private val epsilon = NonNegativeFiniteDuration.tryOfSeconds(1)
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M1_Config
@@ -118,8 +107,9 @@ class TopologyTicksIntegrationTest
             // we need to have this command run while advancing the clock, so that topology transactions
             // (such as SynchronizerTrustCertificate) created during the participant connecting to the sequencer
             // become effective and the process can complete
-            () => participant1.synchronizers.connect_local(sequencer1, alias = daName),
+            participant1.synchronizers.connect_local(sequencer1, alias = daName),
             simClock,
+            deltaTime = epsilon,
           )
 
           val sequencer = getProgrammableSequencer(sequencer1.name)
@@ -191,10 +181,10 @@ class TopologyTicksIntegrationTest
         sequencer2.health.initialized() shouldBe false
 
         runAsyncAndAdvanceClockUntilFinished(
-          () =>
-            bootstrap
-              .upload_new_sequencer_identity_transactions(daId.logical, sequencer2, sequencer1),
+          bootstrap
+            .upload_new_sequencer_identity_transactions(daId.logical, sequencer2, sequencer1),
           simClock,
+          deltaTime = epsilon,
         )
         // doing a ping first to make create some events to make sure sequencer time is caught up to sim clock time
         participant1.health.ping(participant1)
@@ -265,8 +255,9 @@ class TopologyTicksIntegrationTest
           _.copy(sequencerConnections = SequencerConnections.single(sequencer2.sequencerConnection)),
         )
         runAsyncAndAdvanceClockUntilFinished(
-          () => participant1.synchronizers.reconnect(daName),
+          participant1.synchronizers.reconnect(daName),
           simClock,
+          deltaTime = epsilon,
         )
         participant1.health.ping(participant1)
       }

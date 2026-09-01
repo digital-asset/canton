@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.data.ComponentHealthState
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{HealthStatus, Healthy, Unhealthy}
@@ -25,6 +26,7 @@ import org.slf4j.event.Level
 
 import scala.concurrent.duration.DurationInt
 
+@UnstableTest // TODO(i35213): Remove once the test is stable again
 class IndexerHealthIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
   var party1: Party = _

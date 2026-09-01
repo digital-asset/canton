@@ -26,7 +26,6 @@ import com.digitalasset.canton.ledger.api.{
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{
-  InternalIndexService,
   PruningResult,
   ReassignmentCommand,
   RoutingSynchronizerState,
@@ -158,15 +157,6 @@ object ApiPackageManagementServiceSpec {
         traceContext: TraceContext
     ): Future[SubmissionResult] =
       Future.successful(state.SubmissionResult.Acknowledged)
-
-    override def internalIndexService: Option[InternalIndexService] =
-      throw new UnsupportedOperationException()
-
-    override def registerInternalIndexService(internalIndexService: InternalIndexService): Unit =
-      throw new UnsupportedOperationException()
-
-    override def unregisterInternalIndexService(): Unit =
-      throw new UnsupportedOperationException()
 
     override def currentHealth(): HealthStatus =
       throw new UnsupportedOperationException()

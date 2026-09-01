@@ -106,7 +106,7 @@ final class CommitmentsService(
 
     val resultPerSynchronizer = synchronizers.map { synchronizer =>
       val synchronizerId = synchronizer.psid.logical
-      val synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
+      val synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore
         .cleanSynchronizerIndex(
           synchronizerId
         )

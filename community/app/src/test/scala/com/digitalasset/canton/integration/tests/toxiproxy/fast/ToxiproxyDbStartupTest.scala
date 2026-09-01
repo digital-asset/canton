@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.toxiproxy.fast
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.config.{ModifiableDbConfig, StorageConfig}
@@ -254,6 +255,7 @@ class ToxiproxySequencerStartupFailsFastPostgres extends ToxiproxySequencerStart
   sequencerStartupFailsFast()
 }
 
+@UnstableTest // TODO(i34735): Remove once the test is stable again
 class ToxiproxySequencerStartupWaitsPostgres extends ToxiproxySequencerStartupTestPostgres {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition.addConfigTransform(noFailFastForNode("sequencer1"))

@@ -46,6 +46,8 @@ class ClockResetIntegrationTest extends ParticipantRestartTest with HasCycleUtil
         ConfigTransforms.setPingRetries(true),
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
         ConfigTransforms.updateMaxDeduplicationDurations(java.time.Duration.ofMinutes(1)),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
 
   "clock may be reset during a crash" in { implicit env =>

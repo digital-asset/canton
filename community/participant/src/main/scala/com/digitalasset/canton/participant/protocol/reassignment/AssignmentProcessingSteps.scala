@@ -355,6 +355,7 @@ private[reassignment] class AssignmentProcessingSteps(
         sessionKeyStore,
         message,
         participantId,
+        protocolVersion.value,
       )(deserializeTree)
       .flatMap { multiView =>
         EitherT.cond(

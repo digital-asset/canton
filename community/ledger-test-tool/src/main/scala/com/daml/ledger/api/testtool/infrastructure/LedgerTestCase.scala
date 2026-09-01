@@ -44,6 +44,9 @@ sealed class LedgerTestCase(
   private val logger = LoggerFactory.getLogger(getClass)
   val name: String = s"${suite.name}:$shortIdentifier"
 
+  val isMultiParticipant: Boolean =
+    math.max(partyAllocation.partyCounts.size, partyAllocation.minimumParticipantCount) > 1
+
   private def allocatePartiesAndRun(
       context: LedgerTestContext
   )(implicit ec: ExecutionContext): Future[Unit] =

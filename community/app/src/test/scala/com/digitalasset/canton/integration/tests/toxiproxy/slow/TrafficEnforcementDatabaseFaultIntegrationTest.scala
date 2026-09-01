@@ -14,7 +14,7 @@ import com.digitalasset.canton.integration.tests.toxiproxy.ToxiproxyHelpers
 import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
 import com.digitalasset.canton.platform.config.{
-  TrafficEnforcementConfig,
+  TrafficAccountingConfig,
   TrafficEnforcementServerConfig,
 }
 import com.digitalasset.canton.topology.PartyId
@@ -72,8 +72,8 @@ final class TrafficEnforcementDatabaseFaultIntegrationTest extends TeaDatabaseFa
     ToxiproxyHelpers.environmentDefinitionDefault
       .addConfigTransform(
         ConfigTransforms.updateParticipantConfig("participant1")(
-          _.focus(_.trafficEnforcement).replace(
-            TrafficEnforcementConfig(
+          _.focus(_.trafficAccounting).replace(
+            TrafficAccountingConfig(
               enabled = true,
               enforceCostOnSubmissions = false,
               trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(
@@ -180,8 +180,8 @@ final class TrafficEnforcementDatabaseFaultCatchUpIntegrationTest extends TeaDat
       val backlogCost = submitAndSumCost(alice, count = 4)
 
       val enableTeaFromBaseline = ConfigTransforms.updateParticipantConfig("participant1")(
-        _.focus(_.trafficEnforcement).replace(
-          TrafficEnforcementConfig(
+        _.focus(_.trafficAccounting).replace(
+          TrafficAccountingConfig(
             enabled = true,
             enforceCostOnSubmissions = false,
             trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(

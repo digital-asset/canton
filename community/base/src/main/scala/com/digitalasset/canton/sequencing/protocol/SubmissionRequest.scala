@@ -8,7 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.InvariantViolation
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   DeterministicEncoding,
@@ -87,6 +87,17 @@ final case class SubmissionRequest private (
       sender = sender.toProtoPrimitive,
       messageId = messageId.toProtoPrimitive,
       batch = Some(batch.toProtoV31),
+      maxSequencingTime = maxSequencingTime.toProtoPrimitive,
+      topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
+      aggregationRule = aggregationRule.map(_.toProtoV30),
+      submissionCost = submissionCost.map(_.toProtoV30),
+    )
+
+  lazy val toProtoV32: v32.SubmissionRequest =
+    v32.SubmissionRequest(
+      sender = sender.toProtoPrimitive,
+      messageId = messageId.toProtoPrimitive,
+      batch = Some(batch.toProtoV32),
       maxSequencingTime = maxSequencingTime.toProtoPrimitive,
       topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
       aggregationRule = aggregationRule.map(_.toProtoV30),
@@ -230,6 +241,13 @@ object SubmissionRequest
       _.toProtoV31, // Serialization of SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
     ),
+    ProtoVersion(32) -> VersionedProtoCodec.withDependency(
+      ProtocolVersion.v36
+    )(v32.SubmissionRequest)(
+      supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
+      _.toProtoV32, // Serialization of SubmissionRequest
+      _.toProtoV30, // Serialization of Recipients
+    ),
   )
 
   override def name: String = "submission request"
@@ -290,6 +308,10 @@ object SubmissionRequest
       extends ProtoSubmissionRequest {
     def batch: Option[ProtoBatchV31] = wrapped.batch.map(ProtoBatchV31.apply)
   }
+  private final case class ProtoSubmissionRequestV32(wrapped: v32.SubmissionRequest)
+      extends ProtoSubmissionRequest {
+    def batch: Option[ProtoBatchV32] = wrapped.batch.map(ProtoBatchV32.apply)
+  }
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
@@ -313,9 +335,18 @@ object SubmissionRequest
       pvv,
       decompressionPolicy,
       ProtoSubmissionRequestV31(requestP),
-    )(
-      bytes
-    )
+    )(bytes)
+
+  def fromProtoV32(
+      pvv: ProtocolVersionValidation,
+      decompressionPolicy: DecompressionPolicy,
+      requestP: v32.SubmissionRequest,
+  )(bytes: ByteString): ParsingResult[SubmissionRequest] =
+    fromProtoGeneric(
+      pvv,
+      decompressionPolicy,
+      ProtoSubmissionRequestV32(requestP),
+    )(bytes)
 
   private def fromProtoGeneric(
       pvv: ProtocolVersionValidation,
@@ -332,6 +363,12 @@ object SubmissionRequest
       case ProtoSubmissionRequestV31(wrapped) =>
         ProtoConverter.parseRequired(
           Batch.fromProtoV31(pvv, decompressionPolicy, _),
+          "SubmissionRequest.batch",
+          wrapped.batch,
+        )
+      case ProtoSubmissionRequestV32(wrapped) =>
+        ProtoConverter.parseRequired(
+          Batch.fromProtoV32(pvv, decompressionPolicy, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
@@ -371,11 +408,25 @@ object SubmissionRequest
             ),
           wrapped.submissionCost,
         )
+      case ProtoSubmissionRequestV32(wrapped) =>
+        (
+          wrapped.sender,
+          wrapped.messageId,
+          wrapped.maxSequencingTime,
+          wrapped.topologyTimestamp,
+          (useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers) =>
+            wrapped.aggregationRule.traverse(
+              AggregationRule
+                .fromProtoV30(pvv, useMemberIdsAsEligibleMembers, _)
+            ),
+          wrapped.submissionCost,
+        )
     }
 
     val protoVersion = protoSubmissionRequest match {
       case ProtoSubmissionRequestV30(_) => ProtoVersion(30)
       case ProtoSubmissionRequestV31(_) => ProtoVersion(31)
+      case ProtoSubmissionRequestV32(_) => ProtoVersion(32)
     }
 
     for {

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import com.digitalasset.canton.LfPartyId
@@ -26,6 +27,31 @@ import io.opentelemetry.api.trace.Tracer
 
 import scala.concurrent.ExecutionContext
 
+trait TrafficEnforcementBackend {
+
+  /** Validates that the account associated with the given actAs parties has sufficient balance to
+    * cover the specified traffic cost.
+    *
+    * @param actAs
+    *   The command's actAs parties, which should contain exactly one party for traffic enforcement.
+    *   If it does not, the traffic validation for the request is either skipped (with an
+    *   informational message logged) or the submission is rejected, depending on
+    *   `rejectMultiPartySubmissions`.
+    * @param trafficCost
+    *   The expected traffic cost of the submission request
+    * @return
+    *   Success if validation is successful
+    */
+  def validateTraffic(
+      actAs: Seq[LfPartyId],
+      trafficCost: Long,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit]
+
+  def trafficServiceClient: RichTrafficServiceClient
+}
+
 /** Service used for enforcing user-level traffic limits on the participant node, as part of
   * submission requests in the Phase 1 of the Canton protocol.
   *
@@ -41,33 +67,21 @@ import scala.concurrent.ExecutionContext
   * @param trafficServiceClient
   *   The traffic service client used to communicate with the traffic enforcement server.
   */
-class TrafficEnforcementBackend(
+class TrafficEnforcementBackendImpl(
     enforceCostOnSubmissions: Boolean,
     rejectMultiPartySubmissions: Boolean,
     allowSubmissionsOnDegradation: Boolean,
-    val trafficServiceClient: RichTrafficServiceClient,
+    override val trafficServiceClient: RichTrafficServiceClient,
     adminParty: LfPartyId,
     metrics: TrafficEnforcementMetrics,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer)
-    extends NamedLogging
+    extends TrafficEnforcementBackend
+    with NamedLogging
     with FlagCloseable
     with Spanning {
 
-  /** Validates that the account associated with the given actAs parties has sufficient balance to
-    * cover the specified traffic cost.
-    *
-    * @param actAs
-    *   The command's actAs parties, which should contain exactly one party for traffic enforcement.
-    *   If it does not, the traffic validation for the request is either skipped (with an
-    *   informational message logged) or the submission is rejected, depending on
-    *   `rejectMultiPartySubmissions`.
-    * @param trafficCost
-    *   The expected traffic cost of the submission request
-    * @return
-    *   Success if validation is successful
-    */
   def validateTraffic(
       actAs: Seq[LfPartyId],
       trafficCost: Long,
@@ -267,7 +281,7 @@ object TrafficEnforcementBackend {
   )(implicit
       ec: ExecutionContextIdlenessExecutorService,
       tracer: Tracer,
-  ): TrafficEnforcementBackend = {
+  ): TrafficEnforcementBackendImpl = {
     val trafficServiceClient = trafficEnforcementServerConfig match {
       case internal: TrafficEnforcementServerConfig.Internal =>
         RichTrafficServiceClient.toInternalServer(
@@ -278,7 +292,7 @@ object TrafficEnforcementBackend {
         )
     }
 
-    new TrafficEnforcementBackend(
+    new TrafficEnforcementBackendImpl(
       enforceCostOnSubmissions,
       rejectMultiPartySubmissions,
       allowSubmissionsOnDegradation,
@@ -288,5 +302,18 @@ object TrafficEnforcementBackend {
       processingTimeout,
       loggerFactory,
     )
+  }
+
+  implicit class DynamicDecorator(val backend: Eval[TrafficEnforcementBackend]) {
+    def dynamic: TrafficEnforcementBackend =
+      new TrafficEnforcementBackend {
+        override def validateTraffic(actAs: Seq[LfPartyId], trafficCost: Long)(implicit
+            traceContext: TraceContext
+        ): EitherT[FutureUnlessShutdown, TrafficEnforcementErrors.TrafficEnforcementError, Unit] =
+          backend.value.validateTraffic(actAs, trafficCost)
+
+        override def trafficServiceClient: RichTrafficServiceClient =
+          backend.value.trafficServiceClient
+      }
   }
 }

@@ -9,7 +9,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.platform.config.TrafficEnforcementConfig
+import com.digitalasset.canton.platform.config.TrafficAccountingConfig
 import com.digitalasset.canton.tea.v1.{TrafficServiceGrpc, UpdateAccountRequest}
 import com.google.protobuf.timestamp.Timestamp
 import monocle.Monocle.toAppliedFocusOps
@@ -24,7 +24,7 @@ abstract class TrafficServiceAdminAuthIT extends AdminServiceCallAuthTests {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition.addConfigTransform(
       ConfigTransforms.updateParticipantConfig("participant1")(
-        _.focus(_.trafficEnforcement).replace(TrafficEnforcementConfig(enabled = true))
+        _.focus(_.trafficAccounting).replace(TrafficAccountingConfig(enabled = true))
       )
     )
 }

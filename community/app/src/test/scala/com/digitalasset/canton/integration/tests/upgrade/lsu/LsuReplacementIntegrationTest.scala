@@ -85,7 +85,7 @@ abstract class LsuReplacementIntegrationTest extends LsuBase {
           newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
           oldSynchronizerOwners = synchronizerOwners1,
           newPV = ProtocolVersion.dev,
-          newSerial = daId.serial.increment.toNonNegative,
+          newSerial = daId.serial.increment.value.toNonNegative,
         )
 
         fixture2 = Fixture(
@@ -96,7 +96,7 @@ abstract class LsuReplacementIntegrationTest extends LsuBase {
           newOldNodesResolution = Map("sequencer3" -> "sequencer1", "mediator3" -> "mediator1"),
           oldSynchronizerOwners = synchronizerOwners1,
           newPV = ProtocolVersion.dev,
-          newSerial = fixture1.newSerial.increment.toNonNegative,
+          newSerial = fixture1.newSerial.increment.value.toNonNegative,
         )
 
         daId should not be fixture1.newPsid

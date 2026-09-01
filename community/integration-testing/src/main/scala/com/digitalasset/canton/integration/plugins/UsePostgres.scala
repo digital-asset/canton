@@ -75,7 +75,7 @@ import scala.util.{Random, Success}
   *   Allow nodes to share the DB: if `node1` maps to `node2`, then `node1` will use `node2` DB.
   */
 class UsePostgres(
-    protected val loggerFactory: NamedLoggerFactory,
+    protected[plugins] val loggerFactory: NamedLoggerFactory,
     customDbNames: Option[(String => String, String)] = None,
     nodeDbMapping: String => String = identity,
     customMaxConnectionsByNode: Option[String => Option[PositiveInt]] = None,

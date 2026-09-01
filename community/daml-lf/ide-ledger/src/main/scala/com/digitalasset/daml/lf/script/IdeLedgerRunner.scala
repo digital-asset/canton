@@ -335,9 +335,8 @@ private[lf] object IdeLedgerRunner {
     import enricher.*
     val suffixer = new CidSuffixer(compiledPackages)
 
-    /** If any compiled package lookup fails, then we return None. Otherwise, we return the defined
-      * set of package dependencies for each package in our transaction.
-      */
+    // If any compiled package lookup fails, then we return None. Otherwise, we return the defined
+    // set of package dependencies for each package in our transaction.
     def deps(tx: SubmittedTransaction): Option[Set[PackageId]] = {
       val nodePkgIds =
         tx.nodes.values.collect { case node: Node.Action => node.packageIds }.flatten.toSet

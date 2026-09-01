@@ -107,7 +107,7 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.InformeeMessage(messageP) =>
           InformeeMessage.fromProtoV30(context)(messageP)
         case Content.EncryptedMultipleViewsMessage(messageP) =>
-          EncryptedMultipleViewsMessage.fromProto(
+          EncryptedMultipleViewsMessage.fromProtoV31(
             ProtocolVersionValidation.PV(expectedProtocolVersion),
             messageP,
           )
@@ -147,7 +147,7 @@ object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeC
         case Content.InformeeMessage(messageP) =>
           InformeeMessage.fromProtoV30(context)(messageP)
         case Content.EncryptedMultipleViewsMessage(messageP) =>
-          EncryptedMultipleViewsMessage.fromProto(
+          EncryptedMultipleViewsMessage.fromProtoV32(
             ProtocolVersionValidation.PV(expectedProtocolVersion),
             messageP,
           )

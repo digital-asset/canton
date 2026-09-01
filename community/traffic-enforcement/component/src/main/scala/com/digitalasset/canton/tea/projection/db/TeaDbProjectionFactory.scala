@@ -128,7 +128,7 @@ private[projection] class TeaDbProjectionFactory(
             case Success(_) => DBIO.successful(Done)
             // Both branches fail the action, the difference is only that a rejected delta is reported
             // under its own error code rather than as a raw JDBC failure.
-            // TODO(#34424): decide the failure policy for a rejected delta. Failing stalls the
+            // TODO(#35342): decide the failure policy for a rejected delta. Failing stalls the
             //  projection, skipping the event drops the delta and needs a different transaction shape,
             //  since the event row inserted above has to roll back while the offset bump commits.
             case Failure(ex) if reject.isDefinedAt(ex) => DBIO.failed(reject(ex).asGrpcError)

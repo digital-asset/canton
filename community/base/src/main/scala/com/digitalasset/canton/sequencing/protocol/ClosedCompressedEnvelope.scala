@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.crypto.{HashOps, Signature}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.v31
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
@@ -39,7 +39,15 @@ final case class ClosedCompressedEnvelope(
   override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
     uncompressedEnvelopeResult
 
-  override def toClosedCompressedEnvelope: ClosedCompressedEnvelope = this
+  override def toClosedCompressedEnvelope(
+      algo: com.digitalasset.canton.util.CompressionAlgo
+  ): ClosedCompressedEnvelope = {
+    require(
+      CompressionAlgorithm(algo) == algorithm,
+      s"Cannot re-compress envelope from $algorithm to $algo",
+    )
+    this
+  }
 
   private def prepareUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] = for {
     decompressed <- deferredDecompression.decompressed
@@ -67,7 +75,8 @@ final case class ClosedCompressedEnvelope(
     recipients.forMember(member, groupAddresses).map(withRecipients)
 
   override protected def pretty: Pretty[ClosedCompressedEnvelope] = prettyOfClass(
-    param("recipients", _.recipients)
+    param("recipients", _.recipients),
+    param("algorithm", _.algorithm),
   )
 
   @VisibleForTesting
@@ -79,7 +88,7 @@ final case class ClosedCompressedEnvelope(
       decompressionBudget: DecompressionBudget
   ): ClosedCompressedEnvelope =
     ClosedCompressedEnvelope(bytes, recipients, algorithm)(
-      DeferredDecompression(bytes, decompressionBudget),
+      DeferredDecompression(bytes, decompressionBudget, algorithm),
       pvv,
     )
 }
@@ -96,7 +105,7 @@ object ClosedCompressedEnvelope {
       pvv: ProtocolVersionValidation,
   ): ClosedCompressedEnvelope =
     ClosedCompressedEnvelope(bytes, recipients, algorithm)(
-      DeferredDecompression(bytes, decompressionBudget),
+      DeferredDecompression(bytes, decompressionBudget, algorithm),
       pvv,
     )
 }
@@ -107,16 +116,21 @@ object ClosedCompressedEnvelope {
 private[protocol] final class DeferredDecompression(
     bytes: ByteString,
     budget: DecompressionBudget,
+    algorithm: CompressionAlgorithm,
 ) {
   lazy val decompressed: ParsingResult[ByteString] =
     Batch.decompress(
-      algorithm = v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_GZIP,
+      algorithm = algorithm,
       compressed = bytes,
       decompressionBudget = budget,
     )
 }
 
 private[protocol] object DeferredDecompression {
-  def apply(bytes: ByteString, budget: DecompressionBudget): DeferredDecompression =
-    new DeferredDecompression(bytes, budget)
+  def apply(
+      bytes: ByteString,
+      budget: DecompressionBudget,
+      algorithm: CompressionAlgorithm,
+  ): DeferredDecompression =
+    new DeferredDecompression(bytes, budget, algorithm)
 }

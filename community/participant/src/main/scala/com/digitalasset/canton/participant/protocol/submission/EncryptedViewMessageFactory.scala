@@ -116,7 +116,12 @@ object EncryptedViewMessageFactory {
         maxRequestSize <- getMaxRequestSize(cryptoSnapshot)
         encryptedMultiView <- EitherT.fromEither[FutureUnlessShutdown](
           EncryptedMultipleViews
-            .compressAndEncryptViews[VT](cryptoSnapshot.pureCrypto, sessionKey, viewType)(
+            .compressAndEncryptViews[VT](
+              cryptoSnapshot.pureCrypto,
+              sessionKey,
+              viewType,
+              protocolVersion,
+            )(
               viewTrees,
               MaxBytesToDecompress(maxRequestSize.value),
             )
@@ -266,7 +271,7 @@ object EncryptedViewMessageFactory {
       sessionKeyRandomnessMapNE <- sessionKeyRandomnessMapNEResult
       encryptedView <- EitherT.fromEither[FutureUnlessShutdown](
         EncryptedView
-          .compressed[VT](cryptoSnapshot.pureCrypto, sessionKey, viewType)(
+          .compressed[VT](cryptoSnapshot.pureCrypto, sessionKey, viewType, protocolVersion)(
             viewTree,
             MaxBytesToDecompress(maxRequestSize.value),
           )

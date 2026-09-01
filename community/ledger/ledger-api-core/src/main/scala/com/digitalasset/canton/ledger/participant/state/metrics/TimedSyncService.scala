@@ -159,15 +159,6 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       delegate.incompleteReassignmentOffsets(validAt, stakeholders),
     )
 
-  override def registerInternalIndexService(internalIndexService: InternalIndexService): Unit =
-    delegate.registerInternalIndexService(internalIndexService)
-
-  override def internalIndexService: Option[InternalIndexService] =
-    delegate.internalIndexService
-
-  override def unregisterInternalIndexService(): Unit =
-    delegate.unregisterInternalIndexService()
-
   override def getPackageMetadataSnapshot(implicit
       errorLoggingContext: ErrorLoggingContext
   ): PackageMetadata =

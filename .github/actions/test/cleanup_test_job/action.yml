@@ -55,7 +55,7 @@ runs:
             --output timings.json
 
     - name: Build Test Results Summary (Shard Artifact)
-      if: always()
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/nix/nix_run
       with:
         command: |
@@ -83,7 +83,7 @@ runs:
         fi
 
     - name: Group test reports by subproject
-      if: always()
+      if: ${{ !cancelled() }}
       shell: bash
       run: |
         echo "::group::Group test reports by subproject"
@@ -96,7 +96,7 @@ runs:
         echo "::endgroup::"
 
     - name: Post Stability Result
-      if: always()
+      if: ${{ !cancelled() }}
       uses: ./.github/actions/cache/post_stability_result
       with:
         test_job_success: ${{ inputs.test_job_success }}
@@ -104,7 +104,7 @@ runs:
     - name: Collect Failing Test Data And Send to Datadog
       uses: ./.github/actions/cache/collect_failing_test_data_and_send_to_datadog
       if: |
-        always() &&
+        !cancelled() &&
         inputs.report_to_datadog == 'true' &&
         (
           github.event_name != 'pull_request' ||
@@ -122,7 +122,7 @@ runs:
         fi
 
     - name: Dump Postgres query stats (if any)
-      if: always() && inputs.collect_postgres_query_stats == 'true'
+      if: ${{ !cancelled() && inputs.collect_postgres_query_stats == 'true' }}
       uses: ./.github/actions/nix/nix_run
       with:
         command: scripts/ci/dump-pg-query-stats.sh

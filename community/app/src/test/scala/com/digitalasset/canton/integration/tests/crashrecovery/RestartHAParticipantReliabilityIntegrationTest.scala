@@ -100,7 +100,11 @@ class RestartHAParticipantReliabilityIntegrationTest
   override lazy val baseEnvironmentConfig: EnvironmentDefinition =
     EnvironmentDefinition.P4_S1M1
       .addConfigTransforms(ConfigTransforms.addMonitoringEndpointAllNodes*)
-      .addConfigTransform(addRemoteLoadBalancedParticipant)
+      .addConfigTransforms(
+        addRemoteLoadBalancedParticipant,
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
+      )
 
   var initialActiveParticipant: ParticipantReference = _
 

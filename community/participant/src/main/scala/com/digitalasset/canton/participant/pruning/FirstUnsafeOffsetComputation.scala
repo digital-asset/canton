@@ -337,10 +337,7 @@ class FirstUnsafeOffsetComputation(
         )
 
       safeCommitmentTick <-
-        if (
-          legacyDigestProcessorDisabled &&
-          activeProtocolVersion.exists(_ >= ProtocolVersion.acsCommitmentRedesign)
-        ) {
+        if (legacyDigestProcessorDisabled) {
           EitherT.pure[FutureUnlessShutdown, LedgerPruningError](CantonTimestamp.MaxValue)
         } else {
           EitherT

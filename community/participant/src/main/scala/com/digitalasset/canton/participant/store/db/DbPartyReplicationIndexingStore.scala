@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.db
 
+import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
@@ -22,6 +23,7 @@ import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{ReassignmentCounter, checked}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -115,7 +117,15 @@ class DbPartyReplicationIndexingStore(
       functionFullName + " look up indexing watermark",
     )
     nextTiebreaker = previousWatermarkO.fold(NonNegativeInt.zero) { case (_, prev) =>
-      prev.increment.toNonNegative
+      prev.increment
+        .valueOr(err =>
+          // Ok to throw on behalf of the tiebreaker as OnPR will not support the old AcsCommitmentProcessor.
+          // TODO(#35319): Remove tiebreaker
+          ErrorUtil.invalidState(
+            s"Acs commitment tie breaker reached max value ${err.message}"
+          )
+        )
+        .toNonNegative
     }
     activationChanges <- storage
       .query(

@@ -269,10 +269,8 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
   def getDigestFor(source: LocalParticipantReference, target: ParticipantId)(implicit
       env: TestConsoleEnvironment
   ): Option[AcsDigestStore.AcsDigestUpdate[InternedParticipantId]] = {
-    val si = source.underlying.value.sync.ledgerApiIndexer.asEval
-      .flatMap(_.ledgerApiStore)
-      .value
-      .stringInterningView
+    val si =
+      source.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.stringInterningView
     source.underlying.value.sync.syncPersistentStateManager
       .acsDigestStore(env.daId)
       .value

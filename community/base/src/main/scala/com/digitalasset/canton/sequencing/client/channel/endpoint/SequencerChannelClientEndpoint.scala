@@ -258,7 +258,7 @@ private[channel] final class SequencerChannelClientEndpoint(
         },
       )
       message = new HasToByteString {
-        override def toByteString: ByteString = ByteStringUtil.compressGzip(payload)
+        override def toByteString: ByteString = ByteStringUtil.compressZstd(payload)
       }
       encrypted <- security.encrypt(message).leftMap(_.toString)
       _ <- sendMessage(

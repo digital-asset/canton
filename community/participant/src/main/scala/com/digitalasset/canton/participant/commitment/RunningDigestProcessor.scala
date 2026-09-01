@@ -26,12 +26,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.{
-  ErrorLoggingContext,
-  NamedLoggerFactory,
-  NamedLogging,
-  NamedLoggingContext,
-}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessorImpl.CheckpointingState
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.{
@@ -63,54 +58,16 @@ import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.{Flow, Keep, RestartSource, Sink, Source}
-import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer, RestartSettings}
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
+import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
-
-trait RunningDigestProcessor extends BaseDigestProcessor
-
-object RunningDigestProcessor {
-
-  def acsUpdatesWithRetries(
-      indexService: InternalIndexService,
-      synchronizerId: SynchronizerId,
-      startingOffset: Option[Offset],
-  )(implicit errorLoggingContext: ErrorLoggingContext) = {
-    implicit val traceContext: TraceContext = errorLoggingContext.traceContext
-    import scala.concurrent.duration.DurationInt
-    val restartSettings = RestartSettings(
-      minBackoff = 1.millisecond,
-      maxBackoff = 10.milliseconds,
-      randomFactor = 0.2,
-    ).withRestartOn {
-      case ex: com.digitalasset.base.error.ErrorCode.LoggedApiException
-          if ex.getMessage.contains(
-            com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning.code.id
-          ) && ex.getMessage.contains("Ledger API offset dispatcher") =>
-        errorLoggingContext.info("ACS update sources has failed. Restarting the source.", ex)
-        true
-      case _ => false
-    }
-    val startingOffsetRef = new AtomicReference[Option[Offset]](startingOffset)
-    RestartSource.withBackoff(restartSettings) { () =>
-      indexService
-        .acsUpdates(synchronizerId, startingOffsetRef.get)
-        .map { element =>
-          startingOffsetRef.set(Some(element.offset))
-          element
-        }
-    }
-  }
-}
 
 /** Builds the pipeline for processing events that trigger a change in the ACS commitment, namely
   *   - contract activations/deactivations
   *   - party onboarding to or offboarding from this or a remote participant
   */
-// TODO(#33084): expose health status and metrics
 class RunningDigestProcessorImpl(
     thisParticipant: ParticipantId,
     override val synchronizerId: SynchronizerId,
@@ -474,13 +431,13 @@ class RunningDigestProcessorImpl(
     metrics.runningDigestProcessor.localPartyChangeContractChanges.updateValue(0)
     metrics.runningDigestProcessor.localPartyChangeCounterparties.updateValue(0)
 
-    // TODO(#35072): make configurable in AcsCommitmentConfig
     val configOverrides = ActiveContractsServiceStreamsConfigOverrides(
-      maxParallelActiveIdQueries = 12,
-      maxParallelPayloadCreateQueries = 6,
+      maxParallelActiveIdQueries = acsCommitmentConfig.maxParallelActiveIdQueries.unwrap,
+      maxParallelPayloadCreateQueries = acsCommitmentConfig.maxParallelPayloadCreateQueries.unwrap,
     )
     val acsUpdates = indexService
       // load the ACS of the party to determine the counterparties that need to have their digest updated
+      // TODO(#35251) add retries
       .counterParties(
         synchronizerId = synchronizerId,
         activeAt = offset,
@@ -498,6 +455,7 @@ class RunningDigestProcessorImpl(
         // and emit the corresponding classification
         Future(
           indexService
+            // TODO(#35251) add retries
             .acs(
               synchronizerId,
               offset,
@@ -713,7 +671,7 @@ class RunningDigestProcessorImpl(
       }
     } yield {
       logger.info(s"Starting ACS digest processor from latest checkpoint $latestCheckpointO.")
-      val graph = RunningDigestProcessor
+      val graph = DigestProcessor
         .acsUpdatesWithRetries(indexService, synchronizerId, startingOffsetO)
         // we ignore acs updates at topology initialization time, because the topology snapshot is empty, and we cannot do
         // any meaningful topology inspection.

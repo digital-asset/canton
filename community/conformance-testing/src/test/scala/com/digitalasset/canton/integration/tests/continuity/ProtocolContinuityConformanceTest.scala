@@ -70,6 +70,11 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
 
   ledgerApiTestToolPlugins.values.foreach(registerPlugin)
 
+  // The tests that are limited to a single participant are not relevant for protocol continuity testing,
+  // as they do not test any cross-participant interactions. The versions of the other participants are not relevant.
+  // Likewise single-participant tests are not sensitive to the sequencer/mediator version.
+  protected def onlyMultiParticipantTests: Boolean = true
+
   def runShardedTests(
       version: ReleaseVersion,
       useJsonApi: Boolean,
@@ -83,6 +88,7 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
         numShards,
         exclude = excludedTests(version, ProtocolType.fromUseJson(useJsonApi)) ++ jsonExclusions,
         useJson = useJsonApi,
+        onlyMultiParticipantTests = onlyMultiParticipantTests,
       )(env)
   }
   def excludedTests(version: ReleaseVersion, protocolType: ProtocolType): Seq[String] = {
@@ -96,8 +102,6 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
     val perReleaseExclusions =
       if (version.majorMinor == (3, 4))
         Seq(
-          // 3.4 returns "UNKNOWN_INFORMEES" while the test tool expects "Party not known on ledger".
-          "ClosedWorldIT:ClosedWorldObserver",
           // 3.5 changed the invalid synchronizer-id error message; the 3.4 test tool still expects
           // the old "Invalid unique identifier ... with missing namespace" wording.
           "InteractiveSubmissionServiceIT:ISSExecuteAndWaitForTransactionInvalidSynchronizerId",

@@ -950,9 +950,13 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
                                      |)""".stripMargin
           }
 
-          // 134L or 154L == raw byte size of the signed submission request
+          // Raw byte size of the signed submission request, which depends on the wire format:
+          // v36 uses the zstd-compressed batch format (129 bytes), v35 the gzip-compressed
+          // format (154 bytes), and earlier versions the uncompressed format (134 bytes)
           val expectedWastedSequencing =
-            if (testedProtocolVersion >= ProtocolVersion.v35) 154L else 134L
+            if (testedProtocolVersion >= ProtocolVersion.v36) 129L
+            else if (testedProtocolVersion >= ProtocolVersion.v35) 154L
+            else 134L
 
           eventually() {
             assertLongValue(

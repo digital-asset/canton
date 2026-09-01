@@ -27,7 +27,7 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
 import com.digitalasset.canton.platform.apiserver.services.command.TrafficEnforcementBackend
 import com.digitalasset.canton.platform.config.{
-  TrafficEnforcementConfig,
+  TrafficAccountingConfig,
   TrafficEnforcementServerConfig,
 }
 import com.digitalasset.canton.resource.DbStorage
@@ -81,9 +81,9 @@ sealed trait ParticipantTrafficEnforcementTest
     */
   protected def defaultTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement)
+      _.focus(_.trafficAccounting)
         .replace(
-          TrafficEnforcementConfig(
+          TrafficAccountingConfig(
             enabled = true,
             enforceCostOnSubmissions = true,
             trafficEnforcementServer = TrafficEnforcementServerConfig.Internal(teaServerName),
@@ -141,7 +141,7 @@ sealed trait ParticipantTrafficEnforcementTest
 final class ParticipantTrafficEnforcementDisabledTest extends ParticipantTrafficEnforcementTest {
   override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement.enabled).replace(false)
+      _.focus(_.trafficAccounting.enabled).replace(false)
     )
   )
 
@@ -579,7 +579,7 @@ final class ParticipantTrafficEnforcementSubmissionDisabledTest
 
   override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement.enforceCostOnSubmissions)
+      _.focus(_.trafficAccounting.enforceCostOnSubmissions)
         .replace(false)
         .focus(_.parameters.alphaVersionSupport)
         .replace(true)
@@ -622,7 +622,7 @@ final class ParticipantTrafficEnforcementRejectMultiPartyTest
 
   override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement.rejectMultiPartySubmissions).replace(true)
+      _.focus(_.trafficAccounting.rejectMultiPartySubmissions).replace(true)
     )
   )
 
@@ -753,9 +753,9 @@ final class ParticipantTrafficEnforcementDegradationTest extends ParticipantTraf
   // 1ms can't cover the gRPC call plus the DB transaction, so every lookup times out.
   override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
-      _.focus(_.trafficEnforcement.allowSubmissionsOnDegradation)
+      _.focus(_.trafficAccounting.allowSubmissionsOnDegradation)
         .replace(true)
-        .focus(_.trafficEnforcement.trafficEnforcementServer)
+        .focus(_.trafficAccounting.trafficEnforcementServer)
         .replace(
           TrafficEnforcementServerConfig.Internal(
             teaServerName,

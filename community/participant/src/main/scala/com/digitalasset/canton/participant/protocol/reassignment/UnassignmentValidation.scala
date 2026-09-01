@@ -40,7 +40,10 @@ private[reassignment] class UnassignmentValidation(
   def perform(
       parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree],
       activenessF: FutureUnlessShutdown[ActivenessResult],
-  ): ValidationErrorOr[UnassignmentValidationResult] =
+  ): ValidationErrorOr[UnassignmentValidationResult] = {
+    val isReassigningParticipant =
+      parsedRequest.fullViewTree.isReassigningParticipant(participantId)
+
     for {
       commonValidationResult <- new CommonUnassignmentValidator(activenessF, contractValidator)
         .performValidation(
@@ -51,7 +54,7 @@ private[reassignment] class UnassignmentValidation(
           .canConfirm(participantId, parsedRequest.fullViewTree.confirmingParties)
       )
       reassignmentValidation <-
-        if (parsedRequest.fullViewTree.isReassigningParticipant(participantId))
+        if (isReassigningParticipant)
           new ReassigningParticipantUnassignmentValidator(
             participantId,
             contractValidator,
@@ -74,11 +77,13 @@ private[reassignment] class UnassignmentValidation(
         UnassignmentData(parsedRequest.fullViewTree, parsedRequest.requestTimestamp),
       rootHash = parsedRequest.rootHash,
       hostedConfirmingParties = hostedConfirmingParties,
+      isReassigningParticipant = isReassigningParticipant,
       assignmentExclusivity = reassignmentValidation.assignmentExclusivity,
       commonValidationResult = commonValidationResult,
       reassigningParticipantValidationResult =
         reassignmentValidation.reassigningParticipantValidationResult,
     )
+  }
 }
 
 private[reassignment] object UnassignmentValidation {

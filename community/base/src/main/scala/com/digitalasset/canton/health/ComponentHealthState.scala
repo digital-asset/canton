@@ -78,6 +78,16 @@ object ComponentHealthState extends ShowUtil {
     case unhealthy: HasUnhealthyState => HasUnhealthyState.prettyHasUnhealthyState.treeOf(unhealthy)
   }
 
+  def reduceToWorstStateOrOk(states: Iterable[ComponentHealthState]): ComponentHealthState =
+    states
+      .minByOption {
+        case ComponentHealthState.Fatal(_) => 0
+        case ComponentHealthState.Failed(_) => 1
+        case ComponentHealthState.Degraded(_) => 2
+        case ComponentHealthState.Ok(_) => 3
+      }
+      .getOrElse(ComponentHealthState.Ok())
+
   /** Ok state
     */
   final case class Ok(description: Option[String] = None)(override val logLevel: Level = Level.INFO)

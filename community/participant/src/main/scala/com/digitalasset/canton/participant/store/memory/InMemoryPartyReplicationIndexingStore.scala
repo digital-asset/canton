@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store.memory
 
+import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -19,6 +20,7 @@ import com.digitalasset.canton.participant.store.PartyReplicationIndexingStore.{
 import com.digitalasset.canton.participant.store.memory.InMemoryPartyReplicationIndexingStore.IndexingWatermarkExt
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{ReassignmentCounter, checked}
 import com.digitalasset.nonempty.NonEmpty
 
@@ -136,7 +138,17 @@ class InMemoryPartyReplicationIndexingStore(
                 trimmedChangesNE.last1.watermark,
                 Some(
                   indexingWatermark.acsCommitmentTiebreakerO
-                    .fold(NonNegativeInt.zero)(_.increment.toNonNegative)
+                    .fold(NonNegativeInt.zero)(
+                      _.increment
+                        .valueOr(err =>
+                          // Ok to throw on behalf of the tiebreaker as OnPR will not support the old AcsCommitmentProcessor.
+                          // TODO(#35319): Remove tiebreaker
+                          ErrorUtil.invalidState(
+                            s"Acs commitment tie breaker reached max value ${err.message}"
+                          )
+                        )
+                        .toNonNegative
+                    )
                 ),
               ),
               indexedWatermark,

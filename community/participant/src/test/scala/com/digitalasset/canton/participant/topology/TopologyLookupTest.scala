@@ -31,7 +31,7 @@ final class TopologyLookupTest
   "TopologyLookup" should {
     "allow to create offline topology client from topology store" in {
       val psid = DefaultTestIdentities.physicalSynchronizerId
-      val otherPsid = psid.incrementSerial
+      val otherPsid = psid.incrementSerial.value
 
       val persistentState = mock[SyncPersistentState]
 

@@ -1311,6 +1311,7 @@ object Ast {
         "fcee8dfc1b81c449b421410edd5041c16ab59c45bbea85bcb094d1b17c3e9df7", // daml-prim-GHC-Prim
         "19f0df5fdaf5a96e137b6ea885fdb378f37bd3166bd9a47ee11518e33fa09a20", // daml-prim-GHC-Tuple
         "e7e0adfa881e7dbbb07da065ae54444da7c4bccebcb8872ab0cb5dcf9f3761ce", // daml-prim-GHC-Types
+        "13de6dd6c6acb2c37338b0c9875c700e2ed210a0d3e7baa258e14258a679bb37", // daml-prim-GHC-Stack-Types
         "a1fa18133ae48cbb616c4c148e78e661666778c3087d099067c7fe1868cbb3a1", // daml-stdlib-DA-Action-State-Type
         "fa79192fe1cce03d7d8db36471dde4cf6c96e6d0f07e1c391dd49e355af9b38c", // daml-stdlib-DA-Date-Types
         "6f8e6085f5769861ae7a40dccd618d6f747297d59b37cab89b93e2fa80b0c024", // daml-stdlib-DA-Internal-Any

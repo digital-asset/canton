@@ -113,6 +113,7 @@ class TransactionConfirmationRequestFactoryV2Test
           cryptoPureApi,
           sessionKey,
           TransactionViewType,
+          testedProtocolVersion,
         )(
           NonEmptyUtil.fromUnsafe(lightTreesWithCtIds),
           defaultMaxBytesToDecompress,

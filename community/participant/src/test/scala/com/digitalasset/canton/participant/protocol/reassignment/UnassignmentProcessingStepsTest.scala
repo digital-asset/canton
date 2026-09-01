@@ -1136,6 +1136,7 @@ final class UnassignmentProcessingStepsTest
     val unassignmentValidationResult = UnassignmentValidationResult(
       unassignmentData = UnassignmentData(fullUnassignmentTree, CantonTimestamp.Epoch),
       rootHash = fullUnassignmentTree.rootHash,
+      isReassigningParticipant = true,
       assignmentExclusivity = Some(Target(assignmentExclusivity)),
       hostedConfirmingParties = Set(party1),
       commonValidationResult = CommonValidationResult(

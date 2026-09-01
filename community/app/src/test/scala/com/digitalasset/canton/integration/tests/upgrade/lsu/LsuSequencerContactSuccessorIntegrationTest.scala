@@ -241,8 +241,8 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
 
     "metric is updated in case of replacement and cancellation" in { implicit env =>
       import env.*
-      val psid2 = fixture.newPsid.incrementSerial
-      val psid3 = psid2.incrementSerial
+      val psid2 = fixture.newPsid.incrementSerial.value
+      val psid3 = psid2.incrementSerial.value
       val upgradeTime2 = fixture.upgradeTime.plusSeconds(30)
       val upgradeTime3 = upgradeTime2.plusSeconds(30)
 

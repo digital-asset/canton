@@ -1047,8 +1047,7 @@ class TransactionProcessingSteps(
         replayCheckResult = parallelChecksResult.replayCheckResult,
         validatedExternalTransactionHash =
           parallelChecksResult.authenticationValidatorResult.externalHash,
-        commitAfterFailedActivenessCheck =
-          participantNodeParameters.commitAfterFailedActivenessCheck,
+        crashAfterFailedValidation = participantNodeParameters.crashAfterFailedValidation,
         hostedOnboardingPartiesO = usedAndCreated.hostedOnboardingPartiesO,
       )
     }
@@ -1401,8 +1400,7 @@ class TransactionProcessingSteps(
         consumedInputsOfHostedParties = usedAndCreated.contracts.consumedInputsOfHostedStakeholders,
         transient = usedAndCreated.contracts.transient,
         createdContracts = createdContracts,
-        commitAfterFailedActivenessCheck =
-          participantNodeParameters.commitAfterFailedActivenessCheck,
+        crashAfterFailedValidation = participantNodeParameters.crashAfterFailedValidation,
         hostedOnboardingPartiesO = usedAndCreated.hostedOnboardingPartiesO,
       )
 

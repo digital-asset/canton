@@ -182,6 +182,28 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
         } yield ()
     }
   } yield ()
+
+  /** Truncates all data in the [[AcsDigestStore]] and possibly in all [[AcsDigestStore]]s of the
+    * given node.
+    *
+    * This method is unsafe in that the operation may block until a concurrently running DB backup
+    * has finished. It should therefore be only used in special circumstances.
+    */
+  final def truncateAllBlocking()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    for {
+      _ <- truncateCheckpoints()
+      _ <- party_.truncateAll()
+      _ <- participant_.truncateAll()
+    } yield ()
+
+  protected def truncateCheckpoints()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
+
+  @inline private[store] final def truncateCheckpointsInternal()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    truncateCheckpoints()
 }
 
 object AcsDigestStore {

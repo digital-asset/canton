@@ -681,7 +681,12 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                 val encryptedViewTree = singleViewMessage.encryptedView.viewTree
 
                 EncryptedView
-                  .decrypt[LightTransactionViewTree](pureCrypto, viewKey, encryptedViewTree)(
+                  .decrypt[LightTransactionViewTree](
+                    pureCrypto,
+                    viewKey,
+                    encryptedViewTree,
+                    testedProtocolVersion,
+                  )(
                     deserialize,
                     MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
                   )
@@ -695,6 +700,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                     pureCrypto,
                     viewKey,
                     encryptedViewTrees,
+                    testedProtocolVersion,
                   )(
                     deserialize,
                     MaxBytesToDecompress(synchronizerParameters.maxRequestSize),

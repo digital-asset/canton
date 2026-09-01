@@ -206,7 +206,7 @@ private[endpoint] class ChannelStageSecurelyConnected(data: InternalData)(implic
       decrypted <- decrypt(encryptedPayload)(Right(_))
       decompressed <- EitherT.fromEither[FutureUnlessShutdown](
         ByteStringUtil
-          .decompressGzip(decrypted, data.maxBytesToDecompress)
+          .decompressZstd(decrypted, data.maxBytesToDecompress)
           .leftMap(err => s"Failed to decompress payload: ${err.message}")
       )
       _ <- data.processor.handlePayload(decompressed)(traceContext)

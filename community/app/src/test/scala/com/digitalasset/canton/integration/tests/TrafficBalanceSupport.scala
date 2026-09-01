@@ -13,6 +13,9 @@ import org.scalatest.Assertion
 
 trait TrafficBalanceSupport extends BaseTest {
 
+  // Maximum expected traffic tolerance. For context see #32073 or #32031.
+  protected def maxTrafficDiffTolerance = 150L
+
   protected def getTrafficForMember(
       member: Member
   )(implicit env: TestConsoleEnvironment): Option[TrafficState] =

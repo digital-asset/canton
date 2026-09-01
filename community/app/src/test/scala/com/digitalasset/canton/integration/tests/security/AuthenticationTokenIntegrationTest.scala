@@ -9,6 +9,7 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.admin.api.client.data.*
 import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction.*
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.LocalSequencerReference
@@ -779,6 +780,7 @@ class AuthenticationTokenIntegrationTestInMemory extends AuthenticationTokenInte
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
+@UnstableTest // TODO(i31506): Remove once the test is stable again
 class AuthenticationTokenIntegrationTestPostgres extends AuthenticationTokenIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

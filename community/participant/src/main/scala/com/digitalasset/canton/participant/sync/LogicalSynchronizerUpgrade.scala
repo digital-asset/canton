@@ -449,7 +449,7 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
   ): Either[NegativeResult, Unit] =
     for {
       synchronizerIndex <- Either.fromOption(
-        ledgerApiIndexer.asEval.value.ledgerApiStore.value.cleanSynchronizerIndex(lsid),
+        ledgerApiIndexer.asEval.value.ledgerApiStore.cleanSynchronizerIndex(lsid),
         NegativeResult.retryable(s"Unable to get synchronizer index for $lsid"),
       )
       _ <-
@@ -1045,7 +1045,7 @@ class OfflineManualLogicalSynchronizerUpgrade(
 
         // ... so that the clean synchronizer index will not progress anymore
         upgradeTime <- EitherT.fromEither[FutureUnlessShutdown](
-          ledgerApiIndexer.asEval.value.ledgerApiStore.value
+          ledgerApiIndexer.asEval.value.ledgerApiStore
             .cleanSynchronizerIndex(request.lsid)
             .map(_.recordTime)
             .toRight(

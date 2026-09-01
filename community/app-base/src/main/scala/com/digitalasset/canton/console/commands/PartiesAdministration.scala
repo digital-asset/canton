@@ -46,8 +46,6 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.BaseWriteRequest
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ReleaseVersion
 import com.digitalasset.canton.{LedgerParticipantId, SynchronizerAlias, config}
@@ -415,9 +413,7 @@ class ParticipantPartiesAdministrationGroup(
     val nextSerial = currentTransaction
       .map(
         _.context.serial.increment.getOrElse(
-          ErrorUtil.invalidState("PartyToParticipant max serial reached")(
-            errorLoggingContext(TraceContext.empty)
-          )
+          consoleEnvironment.raiseError("PartyToParticipant max serial reached")
         )
       )
 

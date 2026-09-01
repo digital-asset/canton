@@ -104,7 +104,7 @@ class TrafficEnforcementBackendTelemetryTest
       allowSubmissionsOnDegradation: Boolean = false,
   ): TrafficEnforcementBackend = {
     implicit val tracer: Tracer = testTelemetrySetup.tracer
-    new TrafficEnforcementBackend(
+    new TrafficEnforcementBackendImpl(
       enforceCostOnSubmissions = enforceCostOnSubmissions,
       rejectMultiPartySubmissions = rejectMultiPartySubmissions,
       allowSubmissionsOnDegradation = allowSubmissionsOnDegradation,

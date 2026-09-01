@@ -167,6 +167,8 @@ class LoadBalancedHAParticipantIntegrationTest
           .replace(config.NonNegativeDuration.tryFromDuration(3.minutes))
           .focus(_.parameters.timeouts.processing.unbounded)
           .replace(config.NonNegativeDuration.tryFromDuration(3.minutes)),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .withSetup { implicit env =>
         import env.*

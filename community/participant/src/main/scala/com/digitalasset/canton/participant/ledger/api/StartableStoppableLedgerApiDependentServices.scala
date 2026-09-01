@@ -14,6 +14,7 @@ import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -56,8 +57,9 @@ class StartableStoppableLedgerApiDependentServices(
     clock: Clock,
     registry: CantonMutableHandlerRegistry,
     adminTokenDispenser: CantonAdminTokenDispenser,
-    partyReplicatorO: Option[PartyReplicator],
+    partyReplicatorEvalO: Option[Eval[PartyReplicator]],
     ledgerApiStore: Eval[LedgerApiStore],
+    internalIndexService: Eval[InternalIndexService],
     futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
     tracerProvider: TracerProvider,
@@ -99,6 +101,8 @@ class StartableStoppableLedgerApiDependentServices(
           )
         case None =>
           logger.debug("Starting Ledger API-dependent canton services")
+
+          val partyReplicatorO = partyReplicatorEvalO.map(_.value)
 
           val adminWorkflowServices =
             new AdminWorkflowServices(
@@ -169,6 +173,7 @@ class StartableStoppableLedgerApiDependentServices(
                     participantId,
                     partyReplicatorO,
                     syncService,
+                    internalIndexService,
                     topologyLookup,
                     parameters,
                     loggerFactory,

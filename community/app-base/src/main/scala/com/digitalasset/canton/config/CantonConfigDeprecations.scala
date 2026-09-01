@@ -169,6 +169,11 @@ trait CantonParticipantNodeDeprecations {
           since = "3.5.0",
           to = Seq("parameters.engine"),
         ),
+        DeprecatedConfigUtils.MovedConfigPath(
+          "traffic-enforcement",
+          since = "3.6.0",
+          to = Seq("traffic-accounting"),
+        ),
       )
     }
 

@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.TestConsoleEnvironment
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.{TempDirectory, TempFile}
 
@@ -43,22 +44,27 @@ trait DbDumpRestore {
   def createParent(tempFile: TempFile): Future[Unit]
 
   def restoreDumps(config: CantonConfig, tempDir: TempDirectory)(implicit
-      executionContext: ExecutionContext
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
   ): Future[Unit] =
     restoreDumps(config.nodeNamesInStartupOrder, tempDir)
 
   def restoreDumps(nodes: Seq[InstanceName], tempDir: TempDirectory)(implicit
-      executionContext: ExecutionContext
+      executionContext: ExecutionContext,
+      traceContext: TraceContext,
   ): Future[Unit] =
     nodes.parTraverse_ { node =>
       restoreDump(node.unwrap, tempDir.toTempFile(dumpFileName(databaseName(node.unwrap))).path)
     }
 
   def restoreDump(node: InstanceReference, dumpFileName: Path)(implicit
-      env: TestConsoleEnvironment
+      env: TestConsoleEnvironment,
+      traceContext: TraceContext,
   ): Future[Unit]
 
-  def restoreDump(nodeName: String, dumpFileName: Path): Future[Unit]
+  def restoreDump(nodeName: String, dumpFileName: Path)(implicit
+      traceContext: TraceContext
+  ): Future[Unit]
 
   def dumpFileName(dbName: String): String = s"pg-dump-$dbName.tar"
 

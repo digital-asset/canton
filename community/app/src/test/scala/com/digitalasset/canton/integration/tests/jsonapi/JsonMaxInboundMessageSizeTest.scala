@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.ServerConfig
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
@@ -32,7 +31,6 @@ import java.io.File
   * The 413 is produced by pekko-http while parsing the request entity (from `Content-Length`), i.e.
   * before authentication and routing, so these checks do not require a valid token.
   */
-@UnstableTest // TODO(i34011): remove this once the test is no longer flaky
 class JsonMaxInboundMessageSizeTest
     extends AbstractHttpServiceIntegrationTestFuns
     with HttpServiceUserFixture.UserToken {

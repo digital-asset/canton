@@ -39,7 +39,7 @@ import com.typesafe.config.{Config, ConfigFactory}
   *   The configuration for the connection to the traffic server. Currently, only the internal,
   *   in-process server variant is supported.
   */
-final case class TrafficEnforcementConfig(
+final case class TrafficAccountingConfig(
     enabled: Boolean = false,
     enforceCostOnSubmissions: Boolean = false,
     rejectMultiPartySubmissions: Boolean = false,

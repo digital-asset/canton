@@ -530,6 +530,13 @@ class DbAcsDigestJournal[K](
       case None => () // All is good. No violation found!
     }
   }
+
+  override def truncateAll()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val query = sqlu"""truncate table #$tableName"""
+    storage.update_(query, functionFullName)
+  }
 }
 
 object DbAcsDigestJournal {

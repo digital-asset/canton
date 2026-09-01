@@ -122,6 +122,14 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  stability_crash_recovery_test:
+    name: Stability Crash Recovery Test
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_stability_crash_recovery_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   notify:
     name: Notify on Failure
     needs:
@@ -136,6 +144,7 @@ jobs:
       - test_with_java17
       - test_protocol_version_34
       - ledger_api_compatibility_tests
+      - stability_crash_recovery_test
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

@@ -20,7 +20,7 @@ sealed trait AllProtocolContinuityConformanceTest extends ProtocolContinuityConf
   lazy val testedReleases: List[ReleaseUtils.TestedRelease] =
     ProtocolContinuityConformanceTest.previousSupportedReleases(logger).forgetNE
 
-  protected val numShards: Int = 6
+  protected val numShards: Int = 2
   protected def shard: Int
 }
 
@@ -36,30 +36,6 @@ final class ProtocolContinuityShard1ConformanceTestSynchronizer
   override def shard: Int = 1
 }
 
-final class ProtocolContinuityShard2ConformanceTestSynchronizer
-    extends ProtocolContinuityConformanceTestSynchronizer
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 2
-}
-
-final class ProtocolContinuityShard3ConformanceTestSynchronizer
-    extends ProtocolContinuityConformanceTestSynchronizer
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 3
-}
-
-final class ProtocolContinuityShard4ConformanceTestSynchronizer
-    extends ProtocolContinuityConformanceTestSynchronizer
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 4
-}
-
-final class ProtocolContinuityShard5ConformanceTestSynchronizer
-    extends ProtocolContinuityConformanceTestSynchronizer
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 5
-}
-
 final class ProtocolContinuityShard0ConformanceTestParticipant
     extends ProtocolContinuityConformanceTestParticipant
     with AllProtocolContinuityConformanceTest {
@@ -70,30 +46,6 @@ final class ProtocolContinuityShard1ConformanceTestParticipant
     extends ProtocolContinuityConformanceTestParticipant
     with AllProtocolContinuityConformanceTest {
   override def shard: Int = 1
-}
-
-final class ProtocolContinuityShard2ConformanceTestParticipant
-    extends ProtocolContinuityConformanceTestParticipant
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 2
-}
-
-final class ProtocolContinuityShard3ConformanceTestParticipant
-    extends ProtocolContinuityConformanceTestParticipant
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 3
-}
-
-final class ProtocolContinuityShard4ConformanceTestParticipant
-    extends ProtocolContinuityConformanceTestParticipant
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 4
-}
-
-final class ProtocolContinuityShard5ConformanceTestParticipant
-    extends ProtocolContinuityConformanceTestParticipant
-    with AllProtocolContinuityConformanceTest {
-  override def shard: Int = 5
 }
 
 final class AllProtocolContinuityConformanceTestPing

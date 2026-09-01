@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.variations
 
 import com.daml.tls.{TlsServerConfig, TlsVersion}
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.integration.plugins.*
@@ -56,12 +57,15 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
   }
 }
 
+@UnstableTest // TODO(i34745): remove this once the test is no longer flaky
 class LedgerApiShard0InMemoryFanOutConformanceTestPostgres
     extends LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shard = 0)
 
+@UnstableTest // TODO(i34745): remove this once the test is no longer flaky
 class LedgerApiShard1InMemoryFanOutConformanceTestPostgres
     extends LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shard = 1)
 
+@UnstableTest // TODO(i34745): remove this once the test is no longer flaky
 class LedgerApiShard2InMemoryFanOutConformanceTestPostgres
     extends LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shard = 2)
 
@@ -96,15 +100,19 @@ sealed abstract class LedgerApiTinyBuffersConformanceShardedTestPostgres(shard: 
 
 }
 
+@UnstableTest // TODO(i34030): remove this once the test is no longer flaky
 class LedgerApiShard0TinyBuffersConformanceTestPostgres
     extends LedgerApiTinyBuffersConformanceShardedTestPostgres(shard = 0)
 
+@UnstableTest // TODO(i34030): remove this once the test is no longer flaky
 class LedgerApiShard1TinyBuffersConformanceTestPostgres
     extends LedgerApiTinyBuffersConformanceShardedTestPostgres(shard = 1)
 
+@UnstableTest // TODO(i34030): remove this once the test is no longer flaky
 class LedgerApiShard2TinyBuffersConformanceTestPostgres
     extends LedgerApiTinyBuffersConformanceShardedTestPostgres(shard = 2)
 
+@UnstableTest // TODO(i34030): remove this once the test is no longer flaky
 class LedgerApiShard3TinyBuffersConformanceTestPostgres
     extends LedgerApiTinyBuffersConformanceShardedTestPostgres(shard = 3)
 
@@ -136,12 +144,16 @@ abstract class LedgerApiCachesDisabledConformanceTest(shard: Int)
   }
 }
 
+@UnstableTest // TODO(i19891): remove this once the test is no longer flaky
 class LedgerApiShard0CachesDisabledConformanceTestPostgres
     extends LedgerApiCachesDisabledConformanceTest(shard = 0)
+@UnstableTest // TODO(i19891): remove this once the test is no longer flaky
 class LedgerApiShard1CachesDisabledConformanceTestPostgres
     extends LedgerApiCachesDisabledConformanceTest(shard = 1)
+@UnstableTest // TODO(i19891): remove this once the test is no longer flaky
 class LedgerApiShard2CachesDisabledConformanceTestPostgres
     extends LedgerApiCachesDisabledConformanceTest(shard = 2)
+@UnstableTest // TODO(i19891): remove this once the test is no longer flaky
 class LedgerApiShard3CachesDisabledConformanceTestPostgres
     extends LedgerApiCachesDisabledConformanceTest(shard = 3)
 

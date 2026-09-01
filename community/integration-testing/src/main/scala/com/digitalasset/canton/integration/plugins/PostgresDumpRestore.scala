@@ -7,8 +7,10 @@ import better.files.File
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.util.CommandRunner
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.store.db.PostgresTestContainerSetup
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.{TempDirectory, TempFile}
 
@@ -24,7 +26,7 @@ import scala.sys.process.*
   *   - `listFiles` to list the content of a directory
   *   - `copy` to copy a local file/directory to the target (locally or inside the docker image)
   */
-sealed trait PostgresDumpRestore extends DbDumpRestore {
+sealed trait PostgresDumpRestore extends DbDumpRestore with NamedLogging {
   protected def port: Int
   protected def plugin: UsePostgres
   protected def dbBasicConfig: DbBasicConfig =
@@ -42,21 +44,27 @@ sealed trait PostgresDumpRestore extends DbDumpRestore {
   } yield ()
 
   def restoreDump(node: InstanceReference, dumpFileName: Path)(implicit
-      env: TestConsoleEnvironment
+      env: TestConsoleEnvironment,
+      traceContext: TraceContext,
   ): Future[Unit] = restoreDump(node.name, dumpFileName)
 
-  def restoreDump(nodeName: String, dumpFileName: Path): Future[Unit] = {
+  def restoreDump(nodeName: String, dumpFileName: Path)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] = {
     val dbName = plugin.generateDbName(nodeName)
+    logger.debug(s"Starting to restore dump for node $nodeName")
     for {
       // somehow, pg_restore -c -C doesn't seem to cleanup the database, so doing it separately
       _ <- plugin
         .recreateDatabaseForNodeWithName(nodeName)
         .failOnShutdownToAbortException("restoreDump")
+      _ = logger.debug(s"Successfully recreated database for node $nodeName, now restoring dump")
       _ <- runDumpOrRestoreCommand(
         "pg_restore",
         dbName,
         s"--no-privileges --no-owner --dbname=$dbName $dumpFileName",
       )
+      _ = logger.debug(s"Successfully restored dump for node $nodeName")
     } yield ()
   }
 
@@ -87,7 +95,10 @@ sealed trait PostgresDumpRestore extends DbDumpRestore {
   override def databaseName(nodeName: String): String = plugin.generateDbName(nodeName)
 }
 
-final case class LocalPostgresDumpRestore(plugin: UsePostgres) extends PostgresDumpRestore {
+final case class LocalPostgresDumpRestore(
+    plugin: UsePostgres,
+    loggerFactory: NamedLoggerFactory,
+) extends PostgresDumpRestore {
 
   override protected implicit def executionContext: ExecutionContext =
     plugin.dbSetupExecutionContext
@@ -141,6 +152,7 @@ object LocalPostgresDumpRestore {
 final case class DockerPostgresDumpRestore(
     plugin: UsePostgres,
     containerID: String,
+    loggerFactory: NamedLoggerFactory,
 ) extends PostgresDumpRestore
     with DockerDbDumpRestore {
   protected def port: Int = 5432
@@ -173,8 +185,8 @@ object PostgresDumpRestore {
   def apply(plugin: UsePostgres, forceLocal: Boolean): PostgresDumpRestore =
     plugin.dbSetup match {
       case container: PostgresTestContainerSetup if !forceLocal =>
-        DockerPostgresDumpRestore(plugin, container.getContainerID)
+        DockerPostgresDumpRestore(plugin, container.getContainerID, plugin.loggerFactory)
 
-      case _ => LocalPostgresDumpRestore(plugin)
+      case _ => LocalPostgresDumpRestore(plugin, plugin.loggerFactory)
     }
 }

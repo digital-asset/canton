@@ -22,6 +22,7 @@ import com.digitalasset.canton.integration.tests.*
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   EnvironmentSetupPlugin,
   SharedEnvironment,
@@ -175,5 +176,8 @@ class ReplicatedMediatorFailoverIntegrationTestPostgres
   setupPluginsForMediator(new UsePostgres(loggerFactory))
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    baseEnvironmentDefinition
+    baseEnvironmentDefinition.addConfigTransforms(
+      // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+      ConfigTransforms.setCrashAfterFailedValidation(true)
+    )
 }

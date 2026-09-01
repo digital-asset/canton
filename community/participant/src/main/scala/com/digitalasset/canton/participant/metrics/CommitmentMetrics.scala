@@ -508,4 +508,52 @@ class CommitmentMetrics private[metrics] (
     ),
     0,
   )
+
+  val digestProcessorHealth: Gauge[Int] = metricsFactory.gauge[Int](
+    MetricInfo(
+      prefix :+ "digest-processor-health",
+      summary =
+        "Health of a digest processor (0: not-intialized, 1: starting, 2: started, 3: stopping, 4: stopped, 5: failed)",
+      description = """Health of a digest processor.""".stripMargin,
+      qualification = MetricQualification.Errors,
+    ),
+    CommitmentMetrics.HealthValues.NotInitialized,
+  )
+
+  val matcherHealth: Gauge[Int] = metricsFactory.gauge[Int](
+    MetricInfo(
+      prefix :+ "matcher-health",
+      // the matcher currently doesn't make use of some of the states, but I'd like to keep the health states consistent,
+      // so that we can change the behavior of initialization or shutdown without breaking metric dashboards and alerting.
+      summary =
+        "Health of the commitment matcher (0: not-intialized, 1: starting, 2: started, 3: stopping, 4: stopped, 5: failed)",
+      description = """Health of the commitment matcher.""".stripMargin,
+      qualification = MetricQualification.Errors,
+    ),
+    CommitmentMetrics.HealthValues.NotInitialized,
+  )
+
+  val tickSignallerHealth: Gauge[Int] = metricsFactory.gauge[Int](
+    MetricInfo(
+      prefix :+ "tick-signaller-health",
+      // the tick signaller currently doesn't make use of some of the states, but I'd like to keep the health states consistent,
+      // so that we can change the behavior of initialization or shutdown without breaking metric dashboards and alerting.
+      summary =
+        "Health of the tick signaller (0: not-intialized, 1: starting, 2: started, 3: stopping, 4: stopped, 5: failed)",
+      description = """Health of the tick signaller.""".stripMargin,
+      qualification = MetricQualification.Errors,
+    ),
+    CommitmentMetrics.HealthValues.NotInitialized,
+  )
+}
+
+object CommitmentMetrics {
+  object HealthValues {
+    val NotInitialized = 0
+    val Starting = 1
+    val Started = 2
+    val Stopping = 3
+    val Stopped = 4
+    val Failed = 5
+  }
 }

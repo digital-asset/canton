@@ -56,7 +56,7 @@ class TrafficEnforcementBackendTest
       trafficServiceClient: RichTrafficServiceClient,
       allowSubmissionsOnDegradation: Boolean = false,
   ): TrafficEnforcementBackend =
-    new TrafficEnforcementBackend(
+    new TrafficEnforcementBackendImpl(
       enforceCostOnSubmissions = enforceCostOnSubmissions,
       rejectMultiPartySubmissions = rejectMultiPartySubmissions,
       allowSubmissionsOnDegradation = allowSubmissionsOnDegradation,

@@ -42,8 +42,6 @@ import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
-import java.util.concurrent.atomic.AtomicReference
-
 trait InternalIndexService {
   def activeContracts(
       partyIds: Set[LfPartyId],
@@ -289,24 +287,4 @@ object InternalIndexService {
       stakeholders: Set[Party],
       reassignmentCounter: ReassignmentCounter,
   )
-}
-
-trait InternalIndexServiceProvider {
-  def internalIndexService: Option[InternalIndexService]
-  def registerInternalIndexService(internalIndexService: InternalIndexService): Unit
-  def unregisterInternalIndexService(): Unit
-}
-
-trait InternalIndexServiceProviderImpl extends InternalIndexServiceProvider {
-  private val internalIndexServiceRef: AtomicReference[Option[InternalIndexService]] =
-    new AtomicReference(None)
-
-  override def internalIndexService: Option[InternalIndexService] =
-    internalIndexServiceRef.get()
-
-  override def registerInternalIndexService(internalIndexService: InternalIndexService): Unit =
-    internalIndexServiceRef.set(Some(internalIndexService))
-
-  override def unregisterInternalIndexService(): Unit =
-    internalIndexServiceRef.set(None)
 }

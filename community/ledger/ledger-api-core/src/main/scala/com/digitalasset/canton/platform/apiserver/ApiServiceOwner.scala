@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver
 
-import cats.Eval
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.tls.TlsServerConfig
@@ -120,7 +119,7 @@ object ApiServiceOwner {
       apiLoggingConfig: ApiLoggingConfig,
       apiContractService: ApiContractService,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
-      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
       externalCallHandler: ExternalCallHandler,
       lookupTopologyClient: SynchronizerId => Option[SynchronizerTopologyClient],
       lookupSynchronizerCryptoClient: SynchronizerId => Option[SynchronizerCryptoClient],
@@ -239,25 +238,24 @@ object ApiServiceOwner {
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)
       // for all the top level gRPC servicing apparatus we use the writeApiServicesExecutionContext
       apiService <- LedgerApiService(
-        apiServicesOwner,
-        port,
-        maxInboundMessageSize,
-        maxInboundMetadataSize,
-        maxConcurrentCallsPerConnection,
-        address,
-        tls,
+        apiServices = apiServicesOwner,
+        desiredPort = port,
+        maxInboundMessageSize = maxInboundMessageSize,
+        maxInboundMetadataSize = maxInboundMetadataSize,
+        maxConcurrentCallsPerConnection = maxConcurrentCallsPerConnection,
+        address = address,
+        tlsConfiguration = tls,
         // TODO (i28340) fix order of interceptors
-        new GrpcAuthInterceptor(
+        interceptors = new GrpcAuthInterceptor(
           userAuthInterceptor,
           loggerFactory,
           apiLoggingConfig = apiLoggingConfig,
           commandExecutionContext,
-        )
-          :: otherInterceptors,
-        commandExecutionContext,
-        metrics,
-        keepAlive,
-        loggerFactory,
+        ) :: otherInterceptors,
+        servicesExecutor = commandExecutionContext,
+        metrics = metrics,
+        keepAlive = keepAlive,
+        loggerFactory = loggerFactory,
       ).afterReleased(logger.info(s"LedgerApiService is released"))
     } yield {
       logger.info(

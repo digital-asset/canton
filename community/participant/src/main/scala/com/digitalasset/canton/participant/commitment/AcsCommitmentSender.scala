@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.traverse.*
 import cats.{Eval, Monad}
@@ -27,7 +28,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.config.AcsCommitmentSenderConfig
-import com.digitalasset.canton.participant.metrics.CommitmentSenderMetrics
+import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, CommitmentSenderMetrics}
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
   HashedDigest,
@@ -64,7 +65,7 @@ import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, PositiveS
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
-import com.digitalasset.canton.util.{LoggerUtil, MonadUtil, PekkoUtil}
+import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, MonadUtil, PekkoUtil}
 import com.google.rpc.status.Status
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
@@ -117,6 +118,7 @@ class AcsCommitmentSender(
   def startPipeline(
       tickSource: Source[Offset, NotUsed]
   )(implicit traceContext: TraceContext): Unit = {
+    metrics.senderHealth.updateValue(CommitmentMetrics.HealthValues.Starting)
     // This doesn't use `futureSourceUS`, in case we want to materialize the graph multiple times,
     // which should result in properly computing the crash recovery checkpoint again. `futureSourceUS` would reuse the
     // checkpoint that was found during the first materialization.
@@ -143,12 +145,14 @@ class AcsCommitmentSender(
     synchronizeWithClosingSync("start ACS commitment send-loop") {
       val handle @ (_ks, doneF) =
         PekkoUtil.runSupervised(graph, s"AcsCommitmentSender($synchronizerId)")
+      metrics.senderHealth.updateValue(CommitmentMetrics.HealthValues.Started)
 
       pipelineShutdownHandle.set(Some(handle))
 
       doneF
         .onComplete {
           case Success(_) =>
+            metrics.senderHealth.updateValue(CommitmentMetrics.HealthValues.Stopped)
             if (isClosing) {
               logger.info("The send-loop terminated due to an orderly shutdown.")
             } else {
@@ -157,12 +161,15 @@ class AcsCommitmentSender(
               )
             }
           case Failure(ex) =>
+            metrics.senderHealth.updateValue(CommitmentMetrics.HealthValues.Failed)
             logger.warn(
               "The send-loop has failed with an error.",
               ex,
             )
         }(directExecutionContext)
-    }.onShutdown(())
+    }.onShutdown {
+      metrics.senderHealth.updateValue(CommitmentMetrics.HealthValues.Stopped)
+    }
 
   }
 
@@ -370,7 +377,11 @@ class AcsCommitmentSender(
             nextBatchIndex <- sendResult match {
               case _: SendResult.Success =>
                 EitherT.pure[FutureUnlessShutdown, AcsCommitmentSenderError](
-                  recursionStep.batchIndex.increment.toNonNegative
+                  recursionStep.batchIndex.increment
+                    .valueOr(err =>
+                      ErrorUtil.invalidState(s"Batch index reached max value: ${err.message}")
+                    )
+                    .toNonNegative
                 )
               case timeout: SendResult.Timeout =>
                 EitherT.leftT[FutureUnlessShutdown, NonNegativeInt](
@@ -423,7 +434,11 @@ class AcsCommitmentSender(
           Left(
             recursionStep.copy(
               delay = finalDelay,
-              attemptNumber = recursionStep.attemptNumber.increment.toNonNegative,
+              attemptNumber = recursionStep.attemptNumber.increment
+                .valueOr(err =>
+                  ErrorUtil.invalidState(s"Attempt number reached max value: ${err.message}")
+                )
+                .toNonNegative,
             )
           )
       }

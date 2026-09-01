@@ -34,7 +34,7 @@ final case class UnassignmentValidationResult(
     unassignmentData: UnassignmentData,
     override val rootHash: RootHash,
     hostedConfirmingParties: Set[LfPartyId],
-    // Defined iff the participant is reassigning
+    isReassigningParticipant: Boolean,
     assignmentExclusivity: Option[Target[CantonTimestamp]],
     commonValidationResult: UnassignmentValidationResult.CommonValidationResult,
     reassigningParticipantValidationResult: UnassignmentValidationResult.ReassigningParticipantValidationResult,
@@ -47,8 +47,6 @@ final case class UnassignmentValidationResult(
   val targetTimestamp: Target[CantonTimestamp] = unassignmentData.targetTimestamp
 
   override def reassignmentId: ReassignmentId = unassignmentData.reassignmentId
-
-  def isReassigningParticipant: Boolean = assignmentExclusivity.isDefined
 
   override def activenessResultIsSuccessful: Boolean =
     commonValidationResult.activenessResult.isSuccessful

@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.crashrecovery
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -15,10 +16,15 @@ final class LocalSynchronizerRestartTest extends CommunityIntegrationTest with S
   registerPlugin(new UseBftSequencer(loggerFactory))
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1.withSetup { implicit env =>
-      import env.*
-      participant1.synchronizers.connect_local(sequencer1, alias = daName)
-    }
+    EnvironmentDefinition.P1_S1M1
+      .addConfigTransforms(
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true)
+      )
+      .withSetup { implicit env =>
+        import env.*
+        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      }
 
   "The mediator" when {
     "deleting the clean head" must {

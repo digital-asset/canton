@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.admin.grpc
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
@@ -68,6 +69,7 @@ class GrpcPartyManagementService(
     participantId: ParticipantId,
     partyReplicatorO: Option[PartyReplicator],
     sync: CantonSyncService,
+    internalIndexService: Eval[InternalIndexService],
     topologyLookup: TopologyLookup,
     parameters: ParticipantNodeParameters,
     protected val loggerFactory: NamedLoggerFactory,
@@ -259,11 +261,6 @@ class GrpcPartyManagementService(
         waitForActivationTimeout,
       ) = validRequest
 
-      indexService <- EitherT.fromOption[FutureUnlessShutdown](
-        sync.internalIndexService,
-        PartyManagementServiceError.InvalidState.Error("Unavailable internal index service"),
-      )
-
       targetParticipant <- EitherT.fromEither[FutureUnlessShutdown](
         UniqueIdentifier
           .fromProtoPrimitive(request.targetParticipantUid, "target_participant_uid")
@@ -273,7 +270,7 @@ class GrpcPartyManagementService(
 
       topologyTx <-
         findSinglePartyActivationTopologyTransaction(
-          indexService,
+          internalIndexService.value,
           party,
           beginOffsetExclusive,
           synchronizerId,
@@ -326,7 +323,7 @@ class GrpcPartyManagementService(
 
       _ <- ParticipantCommon
         .writeAcsSnapshot(
-          indexService,
+          internalIndexService.value,
           Set(party),
           atOffset = activationOffset,
           out,
@@ -850,15 +847,8 @@ class GrpcPartyManagementService(
         ): PartyManagementServiceError,
       )
 
-      indexService <- EitherT.fromOption[FutureUnlessShutdown](
-        sync.internalIndexService,
-        PartyManagementServiceError.InvalidState.Error(
-          "Unavailable internal index service"
-        ): PartyManagementServiceError,
-      )
-
       activationTimestamp <- validateTopologyStateForClearance(
-        indexService,
+        internalIndexService.value,
         connectedSynchronizer,
         party,
         synchronizerId,

@@ -48,6 +48,7 @@ compact_thread_info() {
 # Process the output
 read_sbt_output |
 join_daml_error_lines |
+python3 "${ABSDIR}/join_multiline_log_records.py" |
 remove_ignored_patterns |
 filter_errors |
 compact_thread_info |

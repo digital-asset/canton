@@ -140,9 +140,7 @@ def gather_results(paths):
         "total": total,
         "not_passed_classes": unique_not_passed_classes,
         "not_passed_tests": unique_not_passed,
-        # Kept in memory for the markdown only, stripped before the JSON payload so
-        # the persisted shard state (consumed by aggregate_test_summaries.py) keeps
-        # its name-only schema.
+        # Full failure text per test, so the aggregate summary can render traces, not just names.
         "not_passed_details": not_passed_details,
     }
 
@@ -191,6 +189,19 @@ def render_detail(full_name, text, trace_lines, max_bytes=None):
             body_text = encoded[: max(allowed, 0)].decode("utf-8", errors="ignore")
             return "\n".join([header, "", fence, body_text, marker, fence, "", "</details>"])
     return "\n".join([header, "", fence, body_text, fence, "", "</details>"])
+
+
+def cap_detail_text(text, trace_lines):
+    """Line-cap failure text for the persisted JSON, keeping the shard state small. The aggregate applies the byte budget."""
+    if not text:
+        return text
+    output_lines = text.splitlines()
+    if len(output_lines) <= trace_lines:
+        return text
+    hidden = len(output_lines) - trace_lines
+    shown = output_lines[:trace_lines]
+    shown.append(f"... ({hidden} more lines, full trace in the artifact)")
+    return "\n".join(shown)
 
 
 def build_summary(args, files, results, rerun_metadata=None):
@@ -300,19 +311,27 @@ def main():
     if args.json_output:
         json_output_path = Path(args.json_output)
         json_output_path.parent.mkdir(parents=True, exist_ok=True)
-        results_for_json = {
-            key: value for key, value in results.items() if key != "not_passed_details"
-        }
-        payload = {
-            "shard_index": args.shard_index,
-            "total_shards": args.total_shards,
-            "junit_files": len(files),
-            "results": results_for_json,
-        }
-        if rerun_metadata is not None:
-            payload["rerun"] = rerun_metadata
+        payload = build_json_payload(args, files, results, rerun_metadata)
         with open(json_output_path, "w", encoding="utf-8") as out:
             json.dump(payload, out, ensure_ascii=True, indent=2)
+
+
+def build_json_payload(args, files, results, rerun_metadata):
+    # Line-capped details in the JSON let the aggregate render traces, the full traces stay in the test-summary.md artifact.
+    details = results.get("not_passed_details", {})
+    results_for_json = {key: value for key, value in results.items() if key != "not_passed_details"}
+    results_for_json["not_passed_details"] = {
+        name: cap_detail_text(text, args.trace_lines) for name, text in details.items()
+    }
+    payload = {
+        "shard_index": args.shard_index,
+        "total_shards": args.total_shards,
+        "junit_files": len(files),
+        "results": results_for_json,
+    }
+    if rerun_metadata is not None:
+        payload["rerun"] = rerun_metadata
+    return payload
 
 
 def self_test():
@@ -327,6 +346,9 @@ def self_test():
     test_build_summary_limit()
     test_build_summary_respects_budget()
     test_build_summary_truncates_oversized_first_block()
+    test_cap_detail_text_short_passthrough()
+    test_cap_detail_text_line_caps()
+    test_json_output_keeps_capped_details()
     print("All self-checks passed")
 
 
@@ -575,6 +597,40 @@ def test_build_summary_truncates_oversized_first_block():
     assert "truncated, full trace in the artifact" in summary, summary
     assert "and 2 more, full details in the artifact" in summary, summary
     assert encoded_len <= 1000, f"summary is {encoded_len} bytes, over the budget"
+
+
+def test_cap_detail_text_short_passthrough():
+    text = "line one\nline two"
+    assert cap_detail_text(text, 60) == text, "short text should pass through unchanged"
+    assert cap_detail_text("", 60) == "", "empty text should stay empty"
+
+
+def test_cap_detail_text_line_caps():
+    text = "\n".join(f"line {i}" for i in range(10))
+    capped = cap_detail_text(text, 3)
+    capped_lines = capped.splitlines()
+    assert capped_lines[:3] == ["line 0", "line 1", "line 2"], capped
+    assert capped_lines[-1] == "... (7 more lines, full trace in the artifact)", capped
+
+
+def test_json_output_keeps_capped_details():
+    args = argparse.Namespace(shard_index="0", total_shards="1", trace_lines=3)
+    results = {
+        "passed": 0,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 1,
+        "not_passed_tests": ["com.example.Foo.testA"],
+        "not_passed_details": {"com.example.Foo.testA": "\n".join(f"frame {i}" for i in range(10))},
+    }
+    payload = build_json_payload(args, ["a.xml"], results, rerun_metadata=None)
+    details = payload["results"]["not_passed_details"]
+    assert "com.example.Foo.testA" in details, details
+    detail_lines = details["com.example.Foo.testA"].splitlines()
+    assert detail_lines[:3] == ["frame 0", "frame 1", "frame 2"], details
+    assert detail_lines[-1] == "... (7 more lines, full trace in the artifact)", details
 
 
 if __name__ == "__main__":

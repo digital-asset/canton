@@ -73,7 +73,7 @@ import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
-  TrafficEnforcementConfig,
+  TrafficAccountingConfig,
   TrafficEnforcementServerConfig,
   UpdateServiceConfig,
 }
@@ -519,7 +519,7 @@ trait SharedCantonConfig[Self] extends ConfigDefaults[Option[DefaultPorts], Self
           participantParameters.commitmentUseDbSnapshotForParticipantLookup,
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
         enableAllLedgerApiReassignments = participantParameters.enableAllLedgerApiReassignments,
-        commitAfterFailedActivenessCheck = participantParameters.commitAfterFailedActivenessCheck,
+        crashAfterFailedValidation = participantParameters.crashAfterFailedValidation,
         validateLegacyContractsV11 = participantParameters.validateLegacyContractsV11,
         acsCommitments = participantParameters.acsCommitments,
       )
@@ -1623,8 +1623,8 @@ object CantonConfig {
         : ConfigReader[TrafficEnforcementServerConfig] =
       deriveReader[TrafficEnforcementServerConfig]
 
-    lazy implicit val trafficEnforcementConfigReader: ConfigReader[TrafficEnforcementConfig] =
-      deriveReader[TrafficEnforcementConfig]
+    lazy implicit val trafficEnforcementConfigReader: ConfigReader[TrafficAccountingConfig] =
+      deriveReader[TrafficAccountingConfig]
   }
 
   private implicit def cantonConfigReader(implicit
@@ -2420,8 +2420,8 @@ object CantonConfig {
         : ConfigWriter[TrafficEnforcementServerConfig] =
       deriveWriter[TrafficEnforcementServerConfig]
 
-    lazy implicit val trafficEnforcementConfigWriter: ConfigWriter[TrafficEnforcementConfig] =
-      deriveWriter[TrafficEnforcementConfig]
+    lazy implicit val trafficEnforcementConfigWriter: ConfigWriter[TrafficAccountingConfig] =
+      deriveWriter[TrafficAccountingConfig]
   }
 
   private def makeWriter(confidential: Boolean): ConfigWriter[CantonConfig] = {

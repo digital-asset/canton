@@ -7,7 +7,7 @@ import cats.kernel.Order
 import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, ValueConversionError}
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String3, String300}
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{InvariantViolation, NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
@@ -286,7 +286,8 @@ final case class PhysicalSynchronizerId(
         PhysicalSynchronizerId.secondaryDelimiter ++ id.serial.show
     )
 
-  def incrementSerial: PhysicalSynchronizerId = this.copy(serial = serial.increment.toNonNegative)
+  def incrementSerial: Either[InvariantViolation, PhysicalSynchronizerId] =
+    serial.increment.map(next => this.copy(serial = next.toNonNegative))
 }
 
 object PhysicalSynchronizerId {

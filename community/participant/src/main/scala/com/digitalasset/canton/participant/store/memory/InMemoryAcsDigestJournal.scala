@@ -34,7 +34,8 @@ class InMemoryAcsDigestJournal[K](
   override protected val executionContext: ExecutionContext =
     DirectExecutionContext(noTracingLogger)
 
-  private val journal = TrieMap[K, TreeMap[Offset, AcsDigestUpdate[K]]]()
+  private val journal: scala.collection.concurrent.Map[K, TreeMap[Offset, AcsDigestUpdate[K]]] =
+    TrieMap[K, TreeMap[Offset, AcsDigestUpdate[K]]]()
 
   override def upsertDigestUpdates(digests: immutable.Iterable[AcsDigestUpdate[K]])(implicit
       traceContext: TraceContext
@@ -235,6 +236,13 @@ class InMemoryAcsDigestJournal[K](
   }
 
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    journal.clear()
+    FutureUnlessShutdown.unit
+  }
+
+  override def truncateAll()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
     journal.clear()
     FutureUnlessShutdown.unit
   }

@@ -99,4 +99,17 @@ class CommitmentSenderMetrics private[metrics] (
       qualification = MetricQualification.Traffic,
     )
   )
+
+  val senderHealth: Gauge[Int] = metricsFactory.gauge[Int](
+    MetricInfo(
+      prefix :+ "sender-health",
+      // the tick signaller currently doesn't make use of some of the states, but I'd like to keep the health states consistent,
+      // so that we can change the behavior of initialization or shutdown without breaking metric dashboards and alerting.
+      summary =
+        "Health of the commitment sender (0: not-intialized, 1: starting, 2: started, 3: stopping, 4: stopped, 5: failed)",
+      description = """Health of ACS commitment sender.""".stripMargin,
+      qualification = MetricQualification.Errors,
+    ),
+    CommitmentMetrics.HealthValues.NotInitialized,
+  )
 }
