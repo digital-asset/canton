@@ -12,7 +12,7 @@ import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolMessage}
-import com.digitalasset.canton.protocol.{v30, v31, v32}
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30, v31, v32}
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.sequencing.{EnvelopeBox, RawSignedContentEnvelopeBox}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -324,6 +324,7 @@ object SequencedEvent
   def fromByteStringOpen(
       decompressionPolicy: DecompressionPolicy,
       hashOps: HashOps,
+      synchronizerLimits: SynchronizerLimits,
       protocolVersion: ProtocolVersion,
   )(
       bytes: ByteString
@@ -331,7 +332,7 @@ object SequencedEvent
     fromTrustedByteString(decompressionPolicy)(bytes).flatMap {
       case deliver: Deliver[Batch[ClosedEnvelope]] =>
         deliver.traverse[ParsingResult, ClosedEnvelope, DefaultOpenEnvelope](
-          _.toOpenEnvelope(hashOps, protocolVersion)
+          _.toOpenEnvelope(hashOps, synchronizerLimits, protocolVersion)
         )
       case err: DeliverError => Right(err)
     }
@@ -390,12 +391,12 @@ object SequencedEvent
 
   def openEnvelopes(
       event: DecompressedSequencedEvent[ClosedEnvelope]
-  )(protocolVersion: ProtocolVersion, hashOps: HashOps): (
+  )(protocolVersion: ProtocolVersion, hashOps: HashOps, synchronizerLimits: SynchronizerLimits): (
       DecompressedSequencedEvent[OpenEnvelope[ProtocolMessage]],
       Seq[ProtoDeserializationError],
   ) = event match {
     case deliver: Deliver[Batch[ClosedEnvelope]] =>
-      Deliver.openEnvelopes(deliver)(protocolVersion, hashOps)
+      Deliver.openEnvelopes(deliver)(protocolVersion, hashOps, synchronizerLimits)
     case deliver: DeliverError => (deliver, Seq.empty)
   }
 
@@ -721,12 +722,12 @@ object Deliver {
 
   def openEnvelopes(
       deliver: Deliver[Batch[ClosedEnvelope]]
-  )(protocolVersion: ProtocolVersion, hashOps: HashOps): (
+  )(protocolVersion: ProtocolVersion, hashOps: HashOps, synchronizerLimits: SynchronizerLimits): (
       Deliver[Batch[OpenEnvelope[ProtocolMessage]]],
       Seq[ProtoDeserializationError],
   ) = {
     val (openBatch, openingErrors) =
-      Batch.openEnvelopes(deliver.batch)(protocolVersion, hashOps)
+      Batch.openEnvelopes(deliver.batch)(protocolVersion, hashOps, synchronizerLimits)
     val openDeliver = deliver.copy(
       batch = openBatch,
       // Keep the serialized representation only if there were no errors

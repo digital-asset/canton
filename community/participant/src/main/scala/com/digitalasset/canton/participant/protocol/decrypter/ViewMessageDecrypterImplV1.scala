@@ -14,7 +14,12 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{ByCiphertextId, ByViewHash, LightTransactionViewTree}
+import com.digitalasset.canton.data.{
+  ByCiphertextId,
+  ByViewHash,
+  LightTransactionViewTree,
+  LightTransactionViewTreeDeserializationContext,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
@@ -22,12 +27,12 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.DecryptedViews
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionProcessorError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
-import com.digitalasset.canton.protocol.ViewHash
 import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessage,
   EncryptedViewMessageError,
   TransactionViewMessage,
 }
+import com.digitalasset.canton.protocol.{SynchronizerLimits, ViewHash}
 import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, OpenEnvelope, WithRecipients}
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
@@ -70,7 +75,8 @@ private[decrypter] class ViewMessageDecrypterImplV1(
   private val pureCrypto = snapshot.pureCrypto
 
   def decryptViews(
-      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]]
+      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]],
+      synchronizerLimits: SynchronizerLimits,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
@@ -114,7 +120,11 @@ private[decrypter] class ViewMessageDecrypterImplV1(
           batch.toSeq
         ) { encryptedViewMessageEnvelope =>
           // Transform single view to a list for a compatibility with the v35+ multi-view result
-          decryptViewMessageEnvelope(randomnessMap, encryptedViewMessageEnvelope).map {
+          decryptViewMessageEnvelope(
+            randomnessMap,
+            encryptedViewMessageEnvelope,
+            synchronizerLimits,
+          ).map {
             case Left(error) => Seq(Left(error))
             case Right(views) =>
               views.forgetNE.map(view => Right(view))
@@ -151,6 +161,7 @@ private[decrypter] class ViewMessageDecrypterImplV1(
   private def decryptViewMessageEnvelope(
       randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]],
       encryptedViewEnvelope: OpenEnvelope[TransactionViewMessage],
+      synchronizerLimits: SynchronizerLimits,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Either[
     EncryptedViewMessageError,
     NonEmpty[Seq[(WithRecipients[LightTransactionViewTree], Option[Signature])]],
@@ -165,6 +176,7 @@ private[decrypter] class ViewMessageDecrypterImplV1(
         randomnessMap,
         encryptedViewMessage,
         randomness,
+        synchronizerLimits,
       ).value
     } yield decryptionResult.map { case (viewTrees, signature) =>
       viewTrees.map { viewTree =>
@@ -177,6 +189,7 @@ private[decrypter] class ViewMessageDecrypterImplV1(
       randomnessMap: Map[ViewHash, PromiseUnlessShutdown[SecureRandomness]],
       encryptedViewMessage: TransactionViewMessage,
       randomness: SecureRandomness,
+      synchronizerLimits: SynchronizerLimits,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     EncryptedViewMessageError,
@@ -196,7 +209,11 @@ private[decrypter] class ViewMessageDecrypterImplV1(
       )(
         LightTransactionViewTree
           .fromByteString(
-            (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+            LightTransactionViewTreeDeserializationContext(
+              pureCrypto,
+              EncryptedViewMessage.computeRandomnessLength(pureCrypto),
+              synchronizerLimits,
+            ),
             protocolVersion,
           )(_)
           .leftMap(err => DefaultDeserializationError(err.message))

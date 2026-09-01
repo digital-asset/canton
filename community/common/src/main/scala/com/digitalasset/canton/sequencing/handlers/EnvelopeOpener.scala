@@ -16,6 +16,7 @@ import com.digitalasset.canton.sequencing.{
   UnthrottledApplicationHandler,
 }
 import com.digitalasset.canton.store.SequencedEventStore.OrdinarySequencedEvent
+import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.version.ProtocolVersion
 
 object EnvelopeOpener {
@@ -27,6 +28,7 @@ object EnvelopeOpener {
   def apply(
       protocolVersion: ProtocolVersion,
       hashOps: HashOps,
+      topologyClient: SynchronizerTopologyClientWithInit,
   )(
       handler: OrdinaryApplicationHandler[DefaultOpenEnvelope]
   )(implicit
@@ -35,7 +37,12 @@ object EnvelopeOpener {
     tracedEvents =>
       val openedEvents = tracedEvents.map { closedEvents =>
         closedEvents.map { event =>
-          val openedEvent = OrdinarySequencedEvent.openEnvelopes(event)(protocolVersion, hashOps)
+          val openedEvent =
+            OrdinarySequencedEvent.openEnvelopes(event)(
+              protocolVersion,
+              hashOps,
+              topologyClient.getSynchronizerLimits,
+            )
           openedEvent.openingErrors.foreach { error =>
             EnvelopeOpenerError.EnvelopeOpenerDeserializationError
               .Error(error, protocolVersion)

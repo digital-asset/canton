@@ -285,7 +285,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           packageResolution = packageNameMap,
         )
         inside(res) {
-          case Left(SError.SErrorDamlException(IE.TemplatePreconditionViolated(T, _, _))) =>
+          case Left(SError.InterpretationError(IE.TemplatePreconditionViolated(T, _, _))) =>
             msgs shouldBe buildLog("starts test", "precondition")
         }
       }
@@ -303,7 +303,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           packageResolution = packageNameMap,
         )
         inside(res) {
-          case Left(SError.SErrorDamlException(IE.CreateEmptyContractKeyMaintainers(T, _, _))) =>
+          case Left(SError.InterpretationError(IE.CreateEmptyContractKeyMaintainers(T, _, _))) =>
             msgs shouldBe buildLog(
               "starts test",
               "precondition",
@@ -329,7 +329,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           parties = Set(alice),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ContractIdInContractKey(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ContractIdInContractKey(_))) =>
           msgs shouldBe buildLog(
             "starts test",
             "precondition",
@@ -350,7 +350,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           parties = Set(alice),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
           msgs shouldBe buildLog(
             "starts test",
             "precondition",
@@ -374,7 +374,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           parties = Set(alice),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
           msgs shouldBe buildLog(
             "starts test",
             "precondition",
@@ -436,7 +436,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getWronglyTypedContract,
           )
           inside(res) {
-            case Left(SError.SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy))) =>
+            case Left(SError.InterpretationError(IE.WronglyTypedContract(_, T, Dummy))) =>
               msgs shouldBe buildLog("starts test", "queries contract")
           }
         }
@@ -453,7 +453,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getKeys = PartialFunction.empty,
           )
 
-          inside(res) { case Left(SError.SErrorDamlException(IE.InconsistentContractKey(_))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.InconsistentContractKey(_))) =>
             msgs shouldBe buildLog(
               "starts test",
               "queries contract",
@@ -505,7 +505,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = getContract,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -521,7 +521,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getWronglyTypedContract,
           )
           inside(res) {
-            case Left(SError.SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy))) =>
+            case Left(SError.InterpretationError(IE.WronglyTypedContract(_, T, Dummy))) =>
               msgs shouldBe buildLog("starts test")
           }
         }
@@ -536,7 +536,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = getWronglyTypedContract,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -583,7 +583,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = PartialFunction.empty,
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -602,7 +602,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
           )
           inside(res) {
-            case Left(SError.SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy))) =>
+            case Left(SError.InterpretationError(IE.WronglyTypedContract(_, T, Dummy))) =>
               msgs shouldBe buildLog("starts test")
           }
         }
@@ -619,7 +619,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             Set(alice),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -664,7 +664,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           getContract = getContract,
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
           msgs shouldBe buildLog(
             "starts test",
             "queries contract",
@@ -697,7 +697,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           getContract = getContract,
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
           msgs shouldBe buildLog(
             "starts test",
             "queries contract",
@@ -767,7 +767,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorCrash(_, _)) =>
+          inside(res) { case Left(SError.Crash(_, _)) =>
           }
         }
       }
@@ -817,7 +817,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getKeys = mapKeys(getKeys, getContract),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractKeyNotFound(gkey))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractKeyNotFound(gkey))) =>
             gkey.templateId shouldBe T
             msgs shouldBe buildLog("starts test", "maintainers", "queries key")
           }
@@ -837,7 +837,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorCrash(_, _)) =>
+          inside(res) { case Left(SError.Crash(_, _)) =>
           }
         }
       }
@@ -882,7 +882,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             parties = Set(alice),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractKeyNotFound(gKey))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractKeyNotFound(gKey))) =>
             gKey.templateId shouldBe T
             msgs shouldBe buildLog("starts test", "maintainers", "queries key")
           }
@@ -902,7 +902,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           getKeys = PartialFunction.empty,
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ContractKeyNotFound(key))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ContractKeyNotFound(key))) =>
           key.templateId shouldBe T
           msgs shouldBe buildLog("starts test", "maintainers", "queries key")
         }
@@ -921,7 +921,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           getKeys = mapKeys(getKeys, getContract),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
           msgs shouldBe buildLog(
             "starts test",
             "maintainers",
@@ -952,7 +952,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           getKeys = mapKeys(getKeys, getContract),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
           msgs shouldBe buildLog(
             "starts test",
             "maintainers",
@@ -993,7 +993,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           packageResolution = packageNameMap,
         )
         inside(res) {
-          case Left(SError.SErrorDamlException(IE.FetchEmptyContractKeyMaintainers(T, _, _))) =>
+          case Left(SError.InterpretationError(IE.FetchEmptyContractKeyMaintainers(T, _, _))) =>
             msgs shouldBe buildLog("starts test", "maintainers")
         }
       }
@@ -1018,7 +1018,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           parties = Set(alice),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ContractIdInContractKey(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ContractIdInContractKey(_))) =>
           msgs shouldBe buildLog("starts test", "maintainers")
         }
       }
@@ -1079,7 +1079,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
           )
           inside(res) {
-            case Left(SError.SErrorDamlException(IE.ContractDoesNotImplementInterface(_, _, _))) =>
+            case Left(SError.InterpretationError(IE.ContractDoesNotImplementInterface(_, _, _))) =>
               msgs shouldBe buildLog("starts test", "queries contract")
           }
         }
@@ -1135,7 +1135,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = getContract,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1160,7 +1160,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           )
           inside(res) {
             case Left(
-                  SError.SErrorDamlException(IE.ContractDoesNotImplementInterface(I, _, Dummy))
+                  SError.InterpretationError(IE.ContractDoesNotImplementInterface(I, _, Dummy))
                 ) =>
               msgs shouldBe buildLog("starts test")
           }
@@ -1184,7 +1184,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = getWronglyTypedContract,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1228,7 +1228,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             parties = Set(alice),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1247,7 +1247,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           )
           inside(res) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.ContractDoesNotImplementInterface(I, _, Dummy)
                   )
                 ) =>
@@ -1267,7 +1267,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             parties = Set(alice),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1312,7 +1312,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
           )
           inside(res) {
-            case Left(SError.SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy))) =>
+            case Left(SError.InterpretationError(IE.WronglyTypedContract(_, T, Dummy))) =>
               msgs shouldBe buildLog("starts test", "queries contract")
           }
         }
@@ -1329,7 +1329,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
           )
 
-          inside(res) { case Left(SError.SErrorDamlException(IE.InconsistentContractKey(_))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.InconsistentContractKey(_))) =>
             msgs shouldBe buildLog(
               "starts test",
               "queries contract",
@@ -1370,7 +1370,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getContract,
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1386,7 +1386,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
           )
           inside(res) {
-            case Left(SError.SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy))) =>
+            case Left(SError.InterpretationError(IE.WronglyTypedContract(_, T, Dummy))) =>
               msgs shouldBe buildLog("starts test")
           }
         }
@@ -1401,7 +1401,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getWronglyTypedContract,
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1434,7 +1434,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = PartialFunction.empty,
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1450,7 +1450,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
           )
           inside(res) {
-            case Left(SError.SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy))) =>
+            case Left(SError.InterpretationError(IE.WronglyTypedContract(_, T, Dummy))) =>
               msgs shouldBe buildLog("starts test")
           }
         }
@@ -1465,7 +1465,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = PartialFunction.empty,
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1526,7 +1526,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getWronglyTypedContract,
             getKeys = mapKeys(getKeys, getWronglyTypedContract),
           )
-          inside(res) { case Left(SError.SErrorCrash(_, _)) =>
+          inside(res) { case Left(SError.Crash(_, _)) =>
           }
         }
       }
@@ -1566,7 +1566,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = getContract,
             getKeys = mapKeys(getKeys, getContract),
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractKeyNotFound(key))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractKeyNotFound(key))) =>
             key.templateId shouldBe T
             msgs shouldBe buildLog("starts test", "maintainers", "queries key")
           }
@@ -1599,7 +1599,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             parties = Set(alice),
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractKeyNotFound(key))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractKeyNotFound(key))) =>
             key.templateId shouldBe T
             msgs shouldBe buildLog("starts test", "maintainers", "queries key")
           }
@@ -1616,7 +1616,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           getContract = PartialFunction.empty,
           getKeys = PartialFunction.empty,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ContractKeyNotFound(key))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ContractKeyNotFound(key))) =>
           key.templateId shouldBe T
           msgs shouldBe buildLog("starts test", "maintainers", "queries key")
         }
@@ -1634,7 +1634,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           packageResolution = packageNameMap,
         )
         inside(res) {
-          case Left(SError.SErrorDamlException(IE.FetchEmptyContractKeyMaintainers(T, _, _))) =>
+          case Left(SError.InterpretationError(IE.FetchEmptyContractKeyMaintainers(T, _, _))) =>
             msgs shouldBe buildLog("starts test", "maintainers")
         }
       }
@@ -1653,7 +1653,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           parties = Set(alice),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ContractIdInContractKey(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ContractIdInContractKey(_))) =>
           msgs shouldBe buildLog("starts test", "maintainers")
         }
       }
@@ -1667,7 +1667,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           parties = Set(alice),
           packageResolution = packageNameMap,
         )
-        inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+        inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
           msgs shouldBe buildLog("starts test", "maintainers")
         }
       }
@@ -1712,7 +1712,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           )
           inside(res) {
             case Left(
-                  SError.SErrorDamlException(IE.ContractDoesNotImplementInterface(I, _, Dummy))
+                  SError.InterpretationError(IE.ContractDoesNotImplementInterface(I, _, Dummy))
                 ) =>
               msgs shouldBe buildLog("starts test", "queries contract")
           }
@@ -1746,7 +1746,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = getContract,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1763,7 +1763,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           )
           inside(res) {
             case Left(
-                  SError.SErrorDamlException(IE.ContractDoesNotImplementInterface(I, _, Dummy))
+                  SError.InterpretationError(IE.ContractDoesNotImplementInterface(I, _, Dummy))
                 ) =>
               msgs shouldBe buildLog("starts test")
           }
@@ -1779,7 +1779,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = getWronglyTypedContract,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1812,7 +1812,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             getContract = PartialFunction.empty,
             packageResolution = packageNameMap,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, T, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, T, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -1829,7 +1829,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
           )
           inside(res) {
             case Left(
-                  SError.SErrorDamlException(IE.ContractDoesNotImplementInterface(I, _, Dummy))
+                  SError.InterpretationError(IE.ContractDoesNotImplementInterface(I, _, Dummy))
                 ) =>
               msgs shouldBe buildLog("starts test")
           }
@@ -1844,7 +1844,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
             packageResolution = packageNameMap,
             getContract = PartialFunction.empty,
           )
-          inside(res) { case Left(SError.SErrorDamlException(IE.ContractNotActive(_, Dummy, _))) =>
+          inside(res) { case Left(SError.InterpretationError(IE.ContractNotActive(_, Dummy, _))) =>
             msgs shouldBe buildLog("starts test")
           }
         }
@@ -2085,7 +2085,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
               packageResolution = packageNameMap,
             )
             inside(res) {
-              case Left(SError.SErrorDamlException(IE.FetchEmptyContractKeyMaintainers(T, _, _))) =>
+              case Left(SError.InterpretationError(IE.FetchEmptyContractKeyMaintainers(T, _, _))) =>
                 msgs shouldBe buildLog("starts test", "maintainers")
             }
           }
@@ -2109,7 +2109,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
               parties = Set(alice),
               packageResolution = packageNameMap,
             )
-            inside(res) { case Left(SError.SErrorDamlException(IE.ContractIdInContractKey(_))) =>
+            inside(res) { case Left(SError.InterpretationError(IE.ContractIdInContractKey(_))) =>
               msgs shouldBe buildLog("starts test", "maintainers")
             }
           }
@@ -2133,7 +2133,7 @@ abstract class UpdateEvaluationOrderTest(languageVersion: LanguageVersion, withK
               parties = Set(alice),
               packageResolution = packageNameMap,
             )
-            inside(res) { case Left(SError.SErrorDamlException(IE.ValueNesting(_))) =>
+            inside(res) { case Left(SError.InterpretationError(IE.ValueNesting(_))) =>
               msgs shouldBe buildLog("starts test", "maintainers")
             }
           }

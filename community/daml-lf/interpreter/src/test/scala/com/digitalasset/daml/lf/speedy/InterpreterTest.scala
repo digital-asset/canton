@@ -209,7 +209,7 @@ class InterpreterTest
         machine = Speedy.Machine.fromUpdateExpr(pkgs1, seed, EVal(ref), committers),
         getPkg = { case pkgId if pkgId == ref.packageId => pkgs3 },
       )
-      inside(result) { case Left(SError.SErrorCrash(loc, msg)) =>
+      inside(result) { case Left(SError.Crash(loc, msg)) =>
         loc shouldBe "com.digitalasset.daml.lf.speedy.Speedy.Machine.lookupVal"
         msg should include(s"definition ${LfDefRef(ref)} not found")
       }

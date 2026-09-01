@@ -179,7 +179,7 @@ message PartyReplicationStatus {
   // The overall lifecycle state of the replication operation.
   //
   // Required
-  State state = 1;
+  State current = 1;
 
   // Diagnostic details, populated when an error occurs (i.e., when state is STATE_FAILED).
   //

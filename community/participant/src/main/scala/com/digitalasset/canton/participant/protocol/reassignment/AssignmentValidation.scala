@@ -132,11 +132,13 @@ private[reassignment] class AssignmentValidation(
     val topologySnapshot = Target(parsedRequest.snapshot.ipsSnapshot)
     val assignmentRequest: FullAssignmentTree = parsedRequest.fullViewTree
 
-    val contractAuthenticationResultF =
-      ReassignmentValidation.authenticateContractAndStakeholders(
+    val contractAuthenticationResultF = for {
+      _ <- ReassignmentValidation.authenticateContractsAgainstTarget(
         contractValidator,
         assignmentRequest,
       )
+      _ <- EitherT.fromEither(ReassignmentValidation.checkStakeholders(assignmentRequest))
+    } yield ()
 
     for {
       activenessResult <- activenessF

@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOv
 import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApi}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.MerkleTree.VersionedMerkleTree
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
@@ -53,10 +54,11 @@ trait SecurityTestLensUtils {
   def traverseMessages[M <: SignedProtocolMessageContent](
       updateSignatureWith: M => Option[SyncCryptoApi],
       signingTimestampOverrides: Option[SigningTimestampOverrides] = None,
+      synchronizerLimits: SynchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion),
   )(implicit
       executionContext: ExecutionContext
   ): Traversal[SubmissionRequest, M] =
-    traverseSignedProtocolMessages[M]
+    traverseSignedProtocolMessages[M](synchronizerLimits)
       .andThen(
         Lens[SignedProtocolMessage[M], M](
           _.typedMessage.content
@@ -83,11 +85,12 @@ trait SecurityTestLensUtils {
     * not of type `M`, the traversal may still succeed due to erasure; however, downstream code will
     * likely fail with a [[java.lang.ClassCastException]] in that case.
     */
-  def traverseSignedProtocolMessages[M <: SignedProtocolMessageContent]
-      : Traversal[SubmissionRequest, SignedProtocolMessage[M]] =
+  def traverseSignedProtocolMessages[M <: SignedProtocolMessageContent](
+      synchronizerLimits: SynchronizerLimits
+  ): Traversal[SubmissionRequest, SignedProtocolMessage[M]] =
     GenLens[SubmissionRequest](_.batch.envelopes)
       .andThen(Traversal.fromTraverse[List, ClosedEnvelope])
-      .andThen(tryDefaultOpenEnvelope(pureCrypto, testedProtocolVersion))
+      .andThen(tryDefaultOpenEnvelope(pureCrypto, testedProtocolVersion, synchronizerLimits))
       .andThen(
         Lens[DefaultOpenEnvelope, SignedProtocolMessage[M]](
           _.protocolMessage.asInstanceOf[SignedProtocolMessage[M]]
@@ -134,9 +137,10 @@ trait SecurityTestLensUtils {
   private def tryDefaultOpenEnvelope(
       hashOps: HashOps,
       protocolVersion: ProtocolVersion,
+      synchronizerLimits: SynchronizerLimits,
   ): Lens[ClosedEnvelope, DefaultOpenEnvelope] =
     Lens[ClosedEnvelope, DefaultOpenEnvelope](
-      _.toOpenEnvelope(hashOps, protocolVersion).valueOr(err =>
+      _.toOpenEnvelope(hashOps, synchronizerLimits, protocolVersion).valueOr(err =>
         throw new IllegalArgumentException(s"Failed to open envelope: $err")
       )
     )(newOpenEnvelope => _ => newOpenEnvelope.toClosedUncompressedEnvelope)

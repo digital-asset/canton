@@ -197,7 +197,7 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
         daId,
         targetParticipant.id,
       )
-      lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
+      lapiTpStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
     }
     val sequencer = getProgrammableSequencer(sequencer1.name)
     sequencer.setPolicy_("hold SP exercise confirmation until OnPR contract replicated") {

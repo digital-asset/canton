@@ -855,6 +855,7 @@ class ConnectedSynchronizer(
                   val openedEvent = PossiblyIgnoredSequencedEvent.openEnvelopes(event)(
                     staticSynchronizerParameters.protocolVersion,
                     synchronizerCrypto.crypto.pureCrypto,
+                    topologyClient.getSynchronizerLimits,
                   )
 
                   // Raise alarms

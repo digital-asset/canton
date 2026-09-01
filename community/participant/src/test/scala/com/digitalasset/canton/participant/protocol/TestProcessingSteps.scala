@@ -38,6 +38,7 @@ import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncC
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParametersWithValidity,
   RootHash,
+  SynchronizerLimits,
   ViewHash,
   v30,
 }
@@ -179,6 +180,7 @@ class TestProcessingSteps(
   override def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TestViewType]]]],
       snapshot: SynchronizerSnapshotSyncCryptoApi,
+      synchronizerLimits: SynchronizerLimits,
       sessionKeyStore: ConfirmationRequestSessionKeyStore,
   )(implicit
       traceContext: TraceContext

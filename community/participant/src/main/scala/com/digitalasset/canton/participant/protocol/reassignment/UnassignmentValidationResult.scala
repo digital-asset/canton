@@ -129,7 +129,12 @@ object UnassignmentValidationResult {
   }
 
   final case class ReassigningParticipantValidationResult(
-      errors: Seq[ReassignmentValidationError]
+      contractAuthenticationResultF: EitherT[
+        FutureUnlessShutdown,
+        ReassignmentValidationError,
+        Unit,
+      ],
+      errors: Seq[ReassignmentValidationError],
   ) extends ReassignmentValidationResult.ReassigningParticipantValidationResult {
     // These validations read the target topology at this participant's localTargetTs, which may not
     // yet reflect recent topology changes, so we abstain on any failure.

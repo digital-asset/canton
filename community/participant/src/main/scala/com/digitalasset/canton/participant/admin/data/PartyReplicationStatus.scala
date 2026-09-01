@@ -52,7 +52,7 @@ final case class PartyReplicationStatus(
       else LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
 
     LapiPartyReplicationStatus(
-      state = state,
+      current = state,
       error = errorO.map(err => LapiPartyReplicationStatus.ErrorDetails(err.message)),
     )
   }

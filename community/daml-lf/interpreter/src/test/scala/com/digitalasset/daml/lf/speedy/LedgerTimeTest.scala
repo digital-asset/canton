@@ -165,7 +165,7 @@ class LedgerTimeTest
             actualTimeBoundaries shouldBe expectedTimeBoundaries
 
           case (
-                Success(Left(SError.SErrorCrash(location, cause))),
+                Success(Left(SError.Crash(location, cause))),
                 actualTimeBoundaries,
                 messages,
               ) =>

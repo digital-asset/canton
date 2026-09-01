@@ -18,7 +18,13 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{ByCiphertextId, ByViewHash, LightTransactionViewTree, ViewTree}
+import com.digitalasset.canton.data.{
+  ByCiphertextId,
+  ByViewHash,
+  LightTransactionViewTree,
+  LightTransactionViewTreeDeserializationContext,
+  ViewTree,
+}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -28,6 +34,7 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionProcessorError
 import com.digitalasset.canton.participant.protocol.decrypter.ViewMessageDecrypterImplV2.DecryptedViewsChained
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
   EncryptedMultipleViewsMessage,
   EncryptedSingleViewMessage,
@@ -113,6 +120,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
       parentCiphertextId: Hash,
       submittingParticipantSignature: Option[Signature],
       recipients: Recipients,
+      synchronizerLimits: SynchronizerLimits,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[DecryptedViewsChained[LightTransactionViewTree]] = {
@@ -159,6 +167,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
             encryptedSubviewsEnvelope.recipients,
             ciphertextId,
             subviewKey,
+            synchronizerLimits,
           )
       }
     }
@@ -205,6 +214,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
       recipients: Recipients,
       ciphertextId: Hash,
       randomness: SecureRandomness,
+      synchronizerLimits: SynchronizerLimits,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[DecryptedViewsChained[LightTransactionViewTree]] = {
@@ -225,7 +235,11 @@ private[decrypter] class ViewMessageDecrypterImplV2(
         )(
           LightTransactionViewTree
             .fromByteString(
-              (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+              LightTransactionViewTreeDeserializationContext(
+                pureCrypto,
+                EncryptedViewMessage.computeRandomnessLength(pureCrypto),
+                synchronizerLimits,
+              ),
               protocolVersion,
             )(_)
             .leftMap(err => DefaultDeserializationError(err.message))
@@ -282,6 +296,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
                   ciphertextId,
                   encryptedViewsMessage.submittingParticipantSignature,
                   recipients,
+                  synchronizerLimits,
                 )
               // skip decryption, already decrypted by another thread
               case Right((_, false)) =>
@@ -303,7 +318,8 @@ private[decrypter] class ViewMessageDecrypterImplV2(
   }
 
   def decryptViews(
-      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]]
+      batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]],
+      synchronizerLimits: SynchronizerLimits,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
@@ -379,27 +395,38 @@ private[decrypter] class ViewMessageDecrypterImplV2(
                   encryptedViewsEnvelope.recipients,
                   ciphertextId,
                   randomness,
+                  synchronizerLimits,
                 )
               } yield decryptedViews
           }
           .map(_.combineAll)
 
+        viewsList = res.views.toList
         // Each decrypted view must have a unique ciphertext ID. Duplicate ciphertext IDs indicate that
         // multiple encrypted views were incorrectly associated with the same ciphertext ID.
         // We assume multiple successful decryptions with different keys should not occur; if they do,
         // this may indicate a protocol violation, implementation error, or an attempted attack.
-        _ = if (
-          res.views.toList
-            .flatMap(_.ciphertextIdO)
-            .distinct
-            .sizeCompare(res.views.toList) != 0
-        )
+        // 1. Check for duplicate Ciphertext IDs among views that have one
+        ciphertextIds = viewsList.flatMap(_.ciphertextIdO)
+        _ = if (ciphertextIds.distinct.sizeCompare(viewsList) != 0) {
           ErrorUtil.internalError(
             new IllegalArgumentException(
-              s"Duplicate ciphertext IDs found in the final decrypted views"
+              "Duplicate ciphertext IDs found in the final decrypted views"
             )
           )
-      } yield DecryptedViews(res.views.toList, res.decryptionErrors.toList)
+        }
+
+        // 2. Check for duplicate Views with different encryption keys.
+        // TODO(#15022): After transparency is implemented, the participant should not break.
+        views = viewsList.map(_.view)
+        _ = if (views.distinct.sizeCompare(viewsList) != 0) {
+          ErrorUtil.internalError(
+            new IllegalArgumentException(s"A view has different encryption keys associated with it")
+          )
+        }
+      } yield {
+        DecryptedViews(res.views.toList, res.decryptionErrors.toList)
+      }
     }
   }
 

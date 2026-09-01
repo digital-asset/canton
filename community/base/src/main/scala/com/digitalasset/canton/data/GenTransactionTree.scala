@@ -257,6 +257,11 @@ final case class GenTransactionTree private (
   )
 }
 
+final case class GenTransactionTreeDeserializationContext(
+    hashOps: HashOps,
+    synchronizerLimits: SynchronizerLimits,
+)
+
 object GenTransactionTree {
 
   /** @throws GenTransactionTree$.InvalidGenTransactionTree
@@ -295,15 +300,21 @@ object GenTransactionTree {
   }
 
   def fromProtoV30(
-      context: (HashOps, ProtocolVersion),
+      context: (GenTransactionTreeDeserializationContext, ProtocolVersion),
       protoTransactionTree: v30.GenTransactionTree,
   ): ParsingResult[GenTransactionTree] = {
-    val (hashOps, expectedProtocolVersion) = context
+    val (
+      GenTransactionTreeDeserializationContext(hashOps, synchronizerLimits),
+      expectedProtocolVersion,
+    ) = context
     for {
       submitterMetadata <- MerkleTree
         .fromProtoOptionV30(
           protoTransactionTree.submitterMetadata,
-          SubmitterMetadata.fromByteString(expectedProtocolVersion, hashOps),
+          SubmitterMetadata.fromByteString(
+            expectedProtocolVersion,
+            SubmitterMetadataDeserializationContext(hashOps, synchronizerLimits),
+          ),
         )
       commonMetadata <- MerkleTree
         .fromProtoOptionV30(

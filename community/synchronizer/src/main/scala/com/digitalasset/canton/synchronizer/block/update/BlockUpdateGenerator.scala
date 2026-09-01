@@ -194,6 +194,7 @@ class BlockUpdateGeneratorImpl(
         val (openEnvelopes, errors) = Batch.openEnvelopes(signedSubmissionRequest.content.batch)(
           protocolVersion,
           synchronizerSyncCryptoApi.pureCrypto,
+          synchronizerSyncCryptoApi.ips.getSynchronizerLimits,
         )
 
         val lsuSequencingTestMessages = openEnvelopes.envelopes.mapFilter(

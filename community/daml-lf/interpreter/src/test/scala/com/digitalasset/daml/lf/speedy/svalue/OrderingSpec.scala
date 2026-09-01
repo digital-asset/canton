@@ -160,16 +160,16 @@ class OrderingSpec
 
       forEvery(positiveLocalTestCases) { (localCid, globalCid) =>
         Try(Ordering.compare(localCid, SContractId(globalCid))) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(globalCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(globalCid)))
         Try(Ordering.compare(SContractId(globalCid), localCid)) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(globalCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(globalCid)))
       }
 
       forEvery(positiveRelativeTestCases) { (relativeCid, otherCid) =>
         Try(Ordering.compare(SContractId(relativeCid), SContractId(otherCid))) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(relativeCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(relativeCid)))
         Try(Ordering.compare(SContractId(otherCid), SContractId(relativeCid))) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(otherCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(otherCid)))
       }
     }
   }

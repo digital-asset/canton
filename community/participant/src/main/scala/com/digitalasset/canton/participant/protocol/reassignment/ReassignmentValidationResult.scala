@@ -37,11 +37,15 @@ private[reassignment] trait ReassignmentValidationResult {
   @VisibleForTesting
   def isSuccessful(implicit ec: ExecutionContext): FutureUnlessShutdown[Boolean] =
     for {
-      contractAuthenticationResult <- commonValidationResult.contractAuthenticationResultF.value
+      commonContractAuthenticationResult <-
+        commonValidationResult.contractAuthenticationResultF.value
+      reassignmentContractAuthenticationResult <-
+        reassigningParticipantValidationResult.contractAuthenticationResultF.value
     } yield activenessResultIsSuccessful &&
       commonValidationResult.participantSignatureVerificationResult.isEmpty &&
       reassigningParticipantValidationResult.errors.isEmpty &&
-      contractAuthenticationResult.isRight &&
+      commonContractAuthenticationResult.isRight &&
+      reassignmentContractAuthenticationResult.isRight &&
       commonValidationResult.submitterCheckResult.isEmpty &&
       commonValidationResult.reassignmentIdResult.isEmpty &&
       commonValidationResult.multiSynchronizerFeatureFlagCheckResult.isEmpty
@@ -69,6 +73,11 @@ private[reassignment] object ReassignmentValidationResult {
   }
 
   private[reassignment] trait ReassigningParticipantValidationResult {
+    def contractAuthenticationResultF: EitherT[
+      FutureUnlessShutdown,
+      ReassignmentValidationError,
+      Unit,
+    ]
     def errors: Seq[ReassignmentValidationError]
 
     /** Whether the [[errors]] lead to an abstain rather than a reject verdict. A reassigning

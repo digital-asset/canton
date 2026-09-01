@@ -16,12 +16,12 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyUtil}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   EnvelopeContent,
   MediatorConfirmationRequest,
   Verdict,
 }
+import com.digitalasset.canton.protocol.{RequestId, SynchronizerLimits}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.synchronizer.mediator.FinalizedResponse
@@ -245,7 +245,12 @@ private[mediator] class DbFinalizedResponseStore(
   implicit val getResultMediatorConfirmationRequest: GetResult[MediatorConfirmationRequest] =
     GetResult(r =>
       EnvelopeContent
-        .messageFromByteArray[MediatorConfirmationRequest](protocolVersion, cryptoApi)(
+        .messageFromByteArray[MediatorConfirmationRequest](
+          protocolVersion,
+          cryptoApi,
+          // Using max limits (i.e. not checking limits) because the store is a trusted source
+          SynchronizerLimits.max,
+        )(
           r.<<[Array[Byte]]
         )
         .valueOr(error =>

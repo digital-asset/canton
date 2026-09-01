@@ -148,7 +148,6 @@ abstract class CostModel {
 
   val KTryCatchV1Handler: CostConstant
   val KPreventException: CostConstant
-  val KConvertingException: CostConstant
 
   // cost to add n cells to the continuation stack
   val KontStackIncrease: CostFunction1[Int]
@@ -334,7 +333,6 @@ object CostModel {
     override val KCloseExercise: CostFunction1[SValue] = CostFunction1.Null
     override val KTryCatchV1Handler: CostConstant = CostConstant.Null
     override val KPreventException: CostConstant = CostConstant.Null
-    override val KConvertingException: CostConstant = CostConstant.Null
   }
 
   /** Represents a first-degree polynomial (linear): `f(n) = A + B*n`.
@@ -732,11 +730,6 @@ object CostModel {
       OBJECT_HEADER_BYTES // Header
     )
 
-    val KCONVERTINGEXCEPTION_SHELL_BYTES = roundTo8(
-      OBJECT_HEADER_BYTES + // Header
-        REFERENCE_BYTES // .exceptionId
-    )
-
     val KONT_SHELL_MAX_SIZE =
       KPURE_SHELL_BYTES max
         KOVERAPP_SHELL_BYTES max
@@ -748,8 +741,7 @@ object CostModel {
         KTRYCATCHV1HANDLER_SHELL_BYTES max
         KLABELCLOSURE_SHELL_BYTES max
         KLEAVECLOSURE_SHELL_BYTES max
-        KPREVENTEXCEPTION_SHELL_BYTES max
-        KCONVERTINGEXCEPTION_SHELL_BYTES
+        KPREVENTEXCEPTION_SHELL_BYTES
 
     override val KontStackIncrease: CostFunction1[Int] =
       KONT_SHELL_MAX_SIZE * _
@@ -956,6 +948,5 @@ object CostModel {
     override val KCloseExercise: CostFunction1[SValue] = CostFunction1.Null // no memory allocation
     override val KTryCatchV1Handler: CostConstant = CostConstant.Null // no memory allocation
     override val KPreventException: CostConstant = CostConstant.Null // no memory allocation
-    override val KConvertingException: CostConstant = CostConstant.Null // no memory allocation
   }
 }

@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import com.digitalasset.canton.crypto.{HashOps, Signature}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.v31
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
@@ -32,9 +32,12 @@ final case class ClosedCompressedEnvelope(
 
   override def toOpenEnvelope(
       hashOps: HashOps,
+      synchronizerLimits: SynchronizerLimits,
       protocolVersion: ProtocolVersion,
   ): ParsingResult[DefaultOpenEnvelope] =
-    uncompressedEnvelopeResult.flatMap(_.toOpenEnvelope(hashOps, protocolVersion))
+    uncompressedEnvelopeResult.flatMap(
+      _.toOpenEnvelope(hashOps, synchronizerLimits, protocolVersion)
+    )
 
   override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
     uncompressedEnvelopeResult

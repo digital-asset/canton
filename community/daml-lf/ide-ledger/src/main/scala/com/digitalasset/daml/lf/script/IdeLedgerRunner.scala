@@ -9,6 +9,8 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{Ref, Time}
+import com.digitalasset.daml.lf.engine.Error.Interpretation
+import com.digitalasset.daml.lf.engine.Result.Need
 import com.digitalasset.daml.lf.engine.refinement.Enricher as LfEnricher
 import com.digitalasset.daml.lf.engine.{Engine, Result, TransactionCoder}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
@@ -16,12 +18,7 @@ import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot
-import com.digitalasset.daml.lf.transaction.*
-import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
-import com.digitalasset.daml.lf.transaction.{ // scalafix:ok OrganizeImports
-  NextGenContractStateMachine as ContractStateMachine,
-  Transaction as Tx,
-}
+import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine as CSMachine, *}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import java.nio.file.{Files, Path, StandardOpenOption}
@@ -84,7 +81,7 @@ private[lf] object IdeLedgerRunner {
         tx: CommittedTransaction,
         locationInfo: Map[NodeId, Location],
     ): Either[Error, R]
-    def csmMode: ContractStateMachine.Mode
+    def csmMode: CSMachine.Mode
   }
 
   private[lf] case class ScriptLedgerApi(ledger: IdeLedger)
@@ -270,8 +267,8 @@ private[lf] object IdeLedgerRunner {
     def suffixCids(tx: VersionedTransaction): VersionedTransaction = {
       val cidMapping = tx
         .foldInExecutionOrder(Map.empty[ContractId, ContractId].withDefault(identity))(
-          exerciseBegin = (mapping, _, _) => (mapping, ChildrenRecursion.DoRecurse),
-          rollbackBegin = (mapping, _, _) => (mapping, ChildrenRecursion.DoRecurse),
+          exerciseBegin = (mapping, _, _) => (mapping, Transaction.ChildrenRecursion.DoRecurse),
+          rollbackBegin = (mapping, _, _) => (mapping, Transaction.ChildrenRecursion.DoRecurse),
           leaf = (mapping, _, leaf) => {
             leaf match {
               case create: Node.Create =>
@@ -353,7 +350,7 @@ private[lf] object IdeLedgerRunner {
       val Speedy.UpdateMachine.Result(tx, _, _, nodeSeeds, globalKeyMapping, contractOrder) = result
 
       deps(tx).flatMap { deps =>
-        val meta = Tx.Metadata(
+        val meta = Transaction.Metadata(
           submissionSeed = None,
           preparationTime = ledgerMachine.preparationTime,
           usedPackages = deps,
@@ -403,6 +400,46 @@ private[lf] object IdeLedgerRunner {
     final case class FatContractInstanceVector(getInstances: Vector[FatContractInstance])
         extends NeedKeyProgression.Token
 
+    def submissionError(err: Error) =
+      SubmissionError(err, enrich(ledgerMachine.incompleteTransaction))
+
+    // Speedy reports an unhandled exception as `UnhandledException`; turn it into a FailureStatus
+    // by running the exception's message function, mirroring the Engine's behaviour.
+    def raiseFailureWithStatus(excp: SValue.SAny): SubmissionResult[R] = {
+      @scala.annotation.nowarn("msg=dead code following this construct")
+      def loop(step: Result.Step[Nothing]): SubmissionResult[Nothing] =
+        step match {
+          case Result.Step.Error(error) =>
+            error match {
+              case engine.Error.Interpretation(Interpretation.DamlException(error), _) =>
+                submissionError(Error.RunnerException(SError.InterpretationError(error)))
+              case otherwise =>
+                submissionError(Error.Internal(s"unexpected Error $otherwise"))
+            }
+          case impure: Result.Step.Impure[x, Nothing] =>
+            impure.fx match {
+              case Need.Interruption(_) =>
+                Interruption(() => loop(impure.resume(())))
+              case otherwise =>
+                submissionError(Error.Internal(s"unexpected question $otherwise"))
+            }
+          case Result.Step.Pure(nothing) =>
+            nothing
+        }
+
+      loop(
+        Engine
+          .raiseFailureWithStatus(
+            excp = excp,
+            compiledPackages = compiledPackages,
+            machineLogger = machineLogger,
+            iterationsBetweenInterruptions = ledgerMachine.iterationsBetweenInterruptions,
+            detailMsg = None,
+          )
+          .start
+      )
+    }
+
     @tailrec
     def go(): SubmissionResult[R] =
       ledgerMachine.run() match {
@@ -437,8 +474,7 @@ private[lf] object IdeLedgerRunner {
                           },
                       ),
                   ) match {
-                    case Left(err) =>
-                      SubmissionError(err, enrich(ledgerMachine.incompleteTransaction))
+                    case Left(err) => submissionError(err)
                     case Right(_) => go()
                   }
               }
@@ -457,7 +493,7 @@ private[lf] object IdeLedgerRunner {
                     globalInsts <- ledger
                       .lookupKey(gkey, committers, readAs)
                       .left
-                      .map(SubmissionError(_, enrich(ledgerMachine.incompleteTransaction)))
+                      .map(submissionError(_))
                   } yield disclosedInsts ++ globalInsts.diff(disclosedInsts)
                 case NeedKeyProgression.InProgress(FatContractInstanceVector(rest)) => Right(rest)
                 case NeedKeyProgression.InProgress(token) =>
@@ -496,16 +532,19 @@ private[lf] object IdeLedgerRunner {
               snapshotDir.foreach(saveTransaction(result, _)) // FIXME:
               val committedTx = CommittedTransaction(enrich(suffixer.suffixCids(tx)))
               ledger.commit(committers, readAs, location, committedTx, locationInfo) match {
-                case Left(err) =>
-                  SubmissionError(err, enrich(ledgerMachine.incompleteTransaction))
-                case Right(r) =>
-                  Commit(r, enrich(ledgerMachine.incompleteTransaction))
+                case Left(err) => submissionError(err)
+                case Right(r) => Commit(r, enrich(ledgerMachine.incompleteTransaction))
               }
             case Left(err) =>
               throw err
           }
         case SResultError(err) =>
-          SubmissionError(Error.RunnerException(err), enrich(ledgerMachine.incompleteTransaction))
+          err match {
+            case SError.UnhandledException(excp) =>
+              raiseFailureWithStatus(excp)
+            case _ =>
+              submissionError(Error.RunnerException(err))
+          }
       }
     go()
   }

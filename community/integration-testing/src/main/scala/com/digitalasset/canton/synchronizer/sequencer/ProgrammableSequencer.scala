@@ -27,12 +27,12 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNode
-import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponses,
   SignedProtocolMessage,
   TypedSignedProtocolMessageContent,
 }
+import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
@@ -586,6 +586,7 @@ object ProgrammableSequencer {
             .flatMap(
               _.toOpenEnvelope(
                 participant.crypto.pureCrypto,
+                SynchronizerLimits.defaultFor(BaseTest.testedProtocolVersion),
                 BaseTest.testedProtocolVersion,
               ).value.protocolMessage match {
                 case SignedProtocolMessage(

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{
@@ -157,6 +158,15 @@ object AssignmentValidationResult {
   final case class ReassigningParticipantValidationResult(
       errors: Seq[ReassignmentValidationError]
   ) extends ReassignmentValidationResult.ReassigningParticipantValidationResult {
+
+    // On assignment, the contract authentication against the target package is a common validation performed by all
+    // participants. We don't authenticate the contract against the source package as vetting may have changed
+    // since the unassignment and we don't want this to block assignment.
+    override def contractAuthenticationResultF: EitherT[
+      FutureUnlessShutdown,
+      ReassignmentValidationError,
+      Unit,
+    ] = EitherT(FutureUnlessShutdown.pure(Either.unit))
 
     // We abstain when the unassignment data is not found, as this participant may
     // simply not have processed the unassignment yet.

@@ -1022,6 +1022,7 @@ abstract class ProtocolProcessor[
             uncheckedDecryptedViews <- steps.decryptViews(
               viewMessages,
               snapshot,
+              crypto.ips.getSynchronizerLimits,
               ephemeral.sessionKeyStore.convertStore,
             )
           } yield Option((snapshot, uncheckedDecryptedViews, synchronizerParameters))

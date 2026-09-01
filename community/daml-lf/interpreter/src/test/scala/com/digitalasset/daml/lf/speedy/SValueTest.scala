@@ -36,7 +36,7 @@ class SValueTest extends AnyWordSpec with Inside with Matchers with TableDrivenP
       // Because Z has a nesting of 1, toNat(Value.MAXIMUM_NESTING) has a nesting of
       // Value.MAXIMUM_NESTING + 1
       val x = Try(toNat(Value.MAXIMUM_NESTING).toUnnormalizedValue)
-      inside(x) { case Failure(SError.SErrorDamlException(IError.ValueNesting(limit))) =>
+      inside(x) { case Failure(SError.InterpretationError(IError.ValueNesting(limit))) =>
         limit shouldBe Value.MAXIMUM_NESTING
       }
     }
@@ -66,7 +66,7 @@ class SValueTest extends AnyWordSpec with Inside with Matchers with TableDrivenP
 
       forEvery(testCases) { v =>
         val result = Try(v.toUnnormalizedValue)
-        inside(result) { case Failure(SError.SErrorDamlException(IError.MalformedText(err))) =>
+        inside(result) { case Failure(SError.InterpretationError(IError.MalformedText(err))) =>
           err should include("null character")
         }
       }
@@ -151,7 +151,7 @@ class SValueTest extends AnyWordSpec with Inside with Matchers with TableDrivenP
     }
 
     val nonComparableFailure =
-      Failure(SError.SErrorDamlException(interpretation.Error.NonComparableValues))
+      Failure(SError.InterpretationError(interpretation.Error.NonComparableValues))
 
     "fail on creation with non-comparable values" in {
       val tyConEither = stablepackages.StablePackagesV2.Either

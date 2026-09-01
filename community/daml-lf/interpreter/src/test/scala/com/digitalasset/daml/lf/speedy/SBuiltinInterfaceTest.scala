@@ -9,7 +9,6 @@ import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
-import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
 import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SValue.{SValue as _, *}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -175,7 +174,7 @@ class SBuiltinInterfaceUpgradeImplementationTest
         exerciseNewInstance(2, 1)
       ) {
         case Success(
-              Left(SErrorDamlException(IE.ContractDoesNotImplementInterface(iface, _, tid)))
+              Left(SError.InterpretationError(IE.ContractDoesNotImplementInterface(iface, _, tid)))
             ) =>
           iface shouldBe Ref.TypeConId.assertFromString(s"$ifacePkgId:Mod:IfaceB")
           tid shouldBe Ref.TypeConId.assertFromString(s"${implemPkgId(1)}:Mod:T")
@@ -203,7 +202,7 @@ class SBuiltinInterfaceUpgradeImplementationTest
         exerciseNewInstance(1, 1)
       ) {
         case Success(
-              Left(SErrorDamlException(IE.ContractDoesNotImplementInterface(iface, _, tid)))
+              Left(SError.InterpretationError(IE.ContractDoesNotImplementInterface(iface, _, tid)))
             ) =>
           iface shouldBe Ref.TypeConId.assertFromString(s"$ifacePkgId:Mod:IfaceB")
           tid shouldBe Ref.TypeConId.assertFromString(s"${implemPkgId(1)}:Mod:T")
@@ -428,7 +427,7 @@ class SBuiltinInterfaceUpgradeViewTest
           compiledPackages = compiledPackages,
           committers = Set(alice),
         )
-      ) { case Success(Left(SErrorDamlException(error))) =>
+      ) { case Success(Left(SError.InterpretationError(error))) =>
         error shouldBe a[interpretation.Error.ValueNesting]
       }
     }

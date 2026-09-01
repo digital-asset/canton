@@ -28,6 +28,7 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessage,
   LsuSequencingTestMessage,
@@ -815,11 +816,12 @@ class BlockSequencer(
     def buildEnvelopeTrafficSummary(
         eventCostDetails: EventCostCalculator.EventCostDetails,
         sequencingTimestamp: CantonTimestamp,
+        synchronizerLimits: SynchronizerLimits,
     ): Seq[EnvelopeTrafficSummary] =
       eventCostDetails.envelopes.toSeq
         .map { case (closedEnvelope, costDetails) =>
           val viewHashes = closedEnvelope
-            .toOpenEnvelope(cryptoApi.pureCrypto, protocolVersion)
+            .toOpenEnvelope(cryptoApi.pureCrypto, synchronizerLimits, protocolVersion)
             .map { openEnvelope =>
               openEnvelope.protocolMessage match {
                 // For encrypted view messages, extract the view hash
@@ -845,13 +847,17 @@ class BlockSequencer(
         batch: Batch[ClosedEnvelope],
         sequencingTimestamp: CantonTimestamp,
     ): EitherT[FutureUnlessShutdown, TrafficControlError, TrafficSummary] =
-      computeDetailedEventCostForBatch(batch, sequencingTimestamp).map { eventCostDetails =>
-        TrafficSummary(
-          sequencingTime = Some(sequencingTimestamp.toProtoTimestamp),
-          totalTrafficCost = eventCostDetails.eventCost.value,
-          envelopes = buildEnvelopeTrafficSummary(eventCostDetails, sequencingTimestamp),
-        )
-      }
+      for {
+        eventCostDetails <- computeDetailedEventCostForBatch(batch, sequencingTimestamp)
+      } yield TrafficSummary(
+        sequencingTime = Some(sequencingTimestamp.toProtoTimestamp),
+        totalTrafficCost = eventCostDetails.eventCost.value,
+        envelopes = buildEnvelopeTrafficSummary(
+          eventCostDetails,
+          sequencingTimestamp,
+          cryptoApi.ips.getSynchronizerLimits,
+        ),
+      )
 
     for {
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](

@@ -19,7 +19,12 @@ import com.digitalasset.canton.damltests.java.explicitdisclosure.PriceQuotation
 import com.digitalasset.canton.damltests.java.universal.UniversalContract
 import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.data.{GenTransactionTree, LightTransactionViewTree, TransactionView}
+import com.digitalasset.canton.data.{
+  GenTransactionTree,
+  LightTransactionViewTree,
+  LightTransactionViewTreeDeserializationContext,
+  TransactionView,
+}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UsePostgres,
@@ -644,6 +649,10 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
 
           val cmd = CommandsWithMetadata(rawCmd, Seq(party1), ledgerTime = environment.now.toLf)
 
+          val cryptoClient = participant1.underlying.value.sync.syncCrypto
+            .tryForSynchronizer(daId, defaultStaticSynchronizerParameters)
+          val crypto = cryptoClient.currentSnapshotApproximation.futureValueUS
+
           def replaceRandomnessForLightTransactionViewTree(
               tcr: TransactionConfirmationRequest
           ): TransactionConfirmationRequest = {
@@ -671,7 +680,11 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
             ): Either[DefaultDeserializationError, LightTransactionViewTree] =
               LightTransactionViewTree
                 .fromByteString(
-                  (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+                  LightTransactionViewTreeDeserializationContext(
+                    pureCrypto,
+                    EncryptedViewMessage.computeRandomnessLength(pureCrypto),
+                    cryptoClient.ips.getSynchronizerLimits,
+                  ),
                   testedProtocolVersion,
                 )(bytes)
                 .leftMap(err => DefaultDeserializationError(err.message))
@@ -730,11 +743,6 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
               ),
               testedProtocolVersion,
             )
-
-            val crypto = participant1.underlying.value.sync.syncCrypto
-              .tryForSynchronizer(daId, defaultStaticSynchronizerParameters)
-              .currentSnapshotApproximation
-              .futureValueUS
 
             val submittingParticipantSignature = crypto
               .sign(

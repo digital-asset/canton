@@ -8,7 +8,6 @@ import com.digitalasset.canton.logging.{NamedLoggingContext, SuppressingLogging}
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.language.Ast.*
-import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.SExpr
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters

@@ -106,10 +106,15 @@ final case class SubmitterMetadata private (
 
 }
 
+final case class SubmitterMetadataDeserializationContext(
+    hashOps: HashOps,
+    synchronizerLimits: SynchronizerLimits,
+)
+
 object SubmitterMetadata
     extends VersioningCompanionContextMemoization[
       SubmitterMetadata,
-      HashOps,
+      SubmitterMetadataDeserializationContext,
     ] {
   override val name: String = "SubmitterMetadata"
 
@@ -183,11 +188,12 @@ object SubmitterMetadata
 
   private def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      hashOps: HashOps,
+      context: SubmitterMetadataDeserializationContext,
       metaDataP: v30.SubmitterMetadata,
   )(
       bytes: ByteString
   ): ParsingResult[SubmitterMetadata] = {
+    val SubmitterMetadataDeserializationContext(hashOps, synchronizerLimits) = context
     val v30.SubmitterMetadata(
       saltOP,
       actAsP,
@@ -205,7 +211,7 @@ object SubmitterMetadata
         ExternalAuthorization.fromProtoV30(pvv, _)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      result <- fromProto(pvv, hashOps, bytes)(
+      result <- fromProto(pvv, hashOps, synchronizerLimits, bytes)(
         saltOP,
         actAsP,
         userIdP,
@@ -224,11 +230,12 @@ object SubmitterMetadata
 
   private def fromProtoV31(
       pvv: ProtocolVersionValidation,
-      hashOps: HashOps,
+      context: SubmitterMetadataDeserializationContext,
       metaDataP: v31.SubmitterMetadata,
   )(
       bytes: ByteString
   ): ParsingResult[SubmitterMetadata] = {
+    val SubmitterMetadataDeserializationContext(hashOps, synchronizerLimits) = context
     val v31.SubmitterMetadata(
       saltOP,
       actAsP,
@@ -246,7 +253,7 @@ object SubmitterMetadata
         ExternalAuthorization.fromProtoV31(pvv, _)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-      result <- fromProto(pvv, hashOps, bytes)(
+      result <- fromProto(pvv, hashOps, synchronizerLimits, bytes)(
         saltOP,
         actAsP,
         userIdP,
@@ -263,11 +270,12 @@ object SubmitterMetadata
 
   private def fromProtoV32(
       pvv: ProtocolVersionValidation,
-      hashOps: HashOps,
+      context: SubmitterMetadataDeserializationContext,
       metaDataP: v32.SubmitterMetadata,
   )(
       bytes: ByteString
   ): ParsingResult[SubmitterMetadata] = {
+    val SubmitterMetadataDeserializationContext(hashOps, synchronizerLimits) = context
     val v32.SubmitterMetadata(
       saltOP,
       actAsP,
@@ -285,7 +293,7 @@ object SubmitterMetadata
         ExternalAuthorization.fromProtoV32(pvv, _)
       )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
-      result <- fromProto(pvv, hashOps, bytes)(
+      result <- fromProto(pvv, hashOps, synchronizerLimits, bytes)(
         saltOP,
         actAsP,
         userIdP,
@@ -303,6 +311,7 @@ object SubmitterMetadata
   private def fromProto(
       pvv: ProtocolVersionValidation,
       hashOps: HashOps,
+      synchronizerLimits: SynchronizerLimits,
       bytes: DataByteString,
   )(
       saltOP: Option[com.digitalasset.canton.crypto.v30.Salt],
@@ -324,8 +333,10 @@ object SubmitterMetadata
           pvv,
         )(UniqueIdentifier.fromProtoPrimitive)
         .map(ParticipantId(_))
+
+      maxActAs = synchronizerLimits.transactionProtocolLimits.maxActAs
       actAs <- ProtoValidation
-        .validateThen(actAsP, "act_as", pvv, ProtoValidation.MaxCollectionSize)(
+        .validateThen(actAsP, "act_as", pvv, maxActAs.value)(
           ProtoConverter.parseLfPartyId
         )
       userId <- ProtoValidation.validateThen(userIdP, "userId", pvv)((s, _) =>

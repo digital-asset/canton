@@ -9,7 +9,7 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage
-import com.digitalasset.canton.protocol.{v30, v31, v32}
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30, v31, v32}
 import com.digitalasset.canton.sequencing.protocol.CompressionAlgorithm.ZSTD
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -421,9 +421,10 @@ object Batch
   def openEnvelopes(batch: Batch[ClosedEnvelope])(
       protocolVersion: ProtocolVersion,
       hashOps: HashOps,
+      synchronizerLimits: SynchronizerLimits,
   ): (Batch[OpenEnvelope[ProtocolMessage]], Seq[ProtoDeserializationError]) = {
     val (openingErrors, openEnvelopes) =
-      batch.envelopes.map(_.toOpenEnvelope(hashOps, protocolVersion)).separate
+      batch.envelopes.map(_.toOpenEnvelope(hashOps, synchronizerLimits, protocolVersion)).separate
 
     (Batch(openEnvelopes)(batch.representativeProtocolVersion), openingErrors)
   }

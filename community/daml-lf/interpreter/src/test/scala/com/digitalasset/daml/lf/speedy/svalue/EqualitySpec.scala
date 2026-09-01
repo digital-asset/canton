@@ -84,16 +84,16 @@ class EqualitySpec extends AnyWordSpec with Inside with Matchers with ScalaCheck
 
       forEvery(positiveLocalTestCases) { (localCid, globalCid) =>
         Try(Equality.areEqual(localCid, SContractId(globalCid))) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(globalCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(globalCid)))
         Try(Equality.areEqual(SContractId(globalCid), localCid)) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(globalCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(globalCid)))
       }
 
       forEvery(positiveRelativeTestCases) { (relativeCid, otherCid) =>
         Try(Equality.areEqual(SContractId(relativeCid), SContractId(otherCid))) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(relativeCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(relativeCid)))
         Try(Equality.areEqual(SContractId(otherCid), SContractId(relativeCid))) shouldBe
-          Failure(SError.SErrorDamlException(ContractIdComparability(otherCid)))
+          Failure(SError.InterpretationError(ContractIdComparability(otherCid)))
       }
     }
   }

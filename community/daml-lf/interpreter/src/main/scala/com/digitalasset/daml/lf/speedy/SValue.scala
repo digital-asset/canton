@@ -67,7 +67,7 @@ sealed abstract class SValue extends AnyRef {
 
     def go(v: SValue, maxNesting: Int = V.MAXIMUM_NESTING): GenValue[X] = {
       if (maxNesting < 0)
-        throw SError.SErrorDamlException(
+        throw SError.InterpretationError(
           interpretation.Error.ValueNesting(V.MAXIMUM_NESTING)
         )
 
@@ -76,7 +76,7 @@ sealed abstract class SValue extends AnyRef {
           case Right(t) =>
             t
           case Left(err) =>
-            throw SError.SErrorDamlException(interpretation.Error.MalformedText(err))
+            throw SError.InterpretationError(interpretation.Error.MalformedText(err))
         }
 
       val nextMaxNesting = maxNesting - 1
@@ -119,7 +119,7 @@ sealed abstract class SValue extends AnyRef {
                   .map {
                     case (SText(t), v) => toText(t) -> go(v, nextMaxNesting)
                     case (_, _) =>
-                      throw SError.SErrorCrash(
+                      throw SError.Crash(
                         NameOf.qualifiedNameOfCurrentFunc,
                         "SValue.toValue: TextMap with non text key",
                       )
@@ -138,7 +138,7 @@ sealed abstract class SValue extends AnyRef {
           V.ValueContractId(coid)
         case handleOther(v) => v
         case _: SStruct | _: SAny | _: SBigNumeric | _: STypeRep | _: SPAP | SToken =>
-          throw SError.SErrorCrash(
+          throw SError.Crash(
             NameOf.qualifiedNameOfCurrentFunc,
             s"SValue.toValue: unexpected ${v.getClass.getSimpleName}",
           )
@@ -170,7 +170,7 @@ object SValue {
     */
   final case class SPAP(prim: Prim, actuals: ArraySeq[SValue], arity: Int) extends SValue {
     if (actuals.size >= arity) {
-      throw SError.SErrorCrash(
+      throw SError.Crash(
         NameOf.qualifiedNameOf(SPAP),
         "SPAP: unexpected actuals.size >= arity",
       )
@@ -249,7 +249,7 @@ object SValue {
   object SMap {
     implicit def `SMap Ordering`: Ordering[SValue] = svalue.Ordering
 
-    @throws[SError.SError]
+    @throws[SError]
     // crashes if `k` contains type abstraction, function, Partially applied built-in or updates
     def comparable(k: SValue): Unit =
       discard[Int](`SMap Ordering`.compare(k, k))
@@ -311,7 +311,7 @@ object SValue {
           // TODO: https://github.com/digital-asset/daml/issues/17082
           // - investigate CompilerTest failures where this is not true...
           /*if (tyCon != record.id) {
-            throw SError.SErrorCrash(
+            throw SError.Crash(
               NameOf.qualifiedNameOfCurrentFunc,
               s"SAnyContract.apply: mismatch tycon, \nA ${tyCon}\nB: ${record.id}",
             )
@@ -319,7 +319,7 @@ object SValue {
           val _ = tyCon
           SAny(TTyCon(record.id), record)
         case v =>
-          throw SError.SErrorCrash(
+          throw SError.Crash(
             NameOf.qualifiedNameOfCurrentFunc,
             s"SAnyContract.apply: expected a record value, got; $v",
           )
@@ -327,16 +327,24 @@ object SValue {
   }
 
   class SArithmeticError(valueArithmeticError: ValueArithmeticError) {
+    val tyCon = valueArithmeticError.tyCon
     val fields: ImmArray[Ref.Name] = ImmArray(valueArithmeticError.fieldName)
 
-    def apply(builtinName: String, args: ImmArray[String]): SAny = {
+    def apply(builtinName: String, args: Seq[SValue]): SAny = {
       val array = ArraySeq(
         SText(
-          s"ArithmeticError while evaluating ($builtinName ${args.iterator.mkString(" ")})."
+          s"ArithmeticError while evaluating ($builtinName ${args.iterator.map(SBuiltinFun.litToText(getClass.getCanonicalName, _)).mkString(" ")})."
         )
       )
       SAny(valueArithmeticError.typ, SRecord(valueArithmeticError.tyCon, fields, array))
     }
+
+    def unapply(svalue: SAny): Option[String] =
+      svalue match {
+        case SAny(TTyCon(`tyCon`), SRecord(_, _, ArraySeq(SText(msg)))) => Some(msg)
+        case _ => None
+      }
+
   }
 
   // NOTE(JM): We are redefining BuiltinLit here so it can be unified

@@ -50,8 +50,8 @@ import com.digitalasset.canton.participant.pruning.{
 }
 import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
-import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.Digest
+import com.digitalasset.canton.protocol.{ReassignmentId, SynchronizerLimits}
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
@@ -176,7 +176,7 @@ trait AcsCommitmentToolingIntegrationTest
               if (countCommitments.getAndIncrement() == 0) {
                 logger.debug(
                   s"Withholding first commitment from participant2 ${submissionRequest.batch.envelopes
-                      .map(_.toOpenEnvelope(participant1.crypto.pureCrypto, testedProtocolVersion))}"
+                      .map(_.toOpenEnvelope(participant1.crypto.pureCrypto, SynchronizerLimits.defaultFor(testedProtocolVersion), testedProtocolVersion))}"
                 )
                 SendDecision.HoldBack(delayP2FirstCmt.future)
               } else SendDecision.Process

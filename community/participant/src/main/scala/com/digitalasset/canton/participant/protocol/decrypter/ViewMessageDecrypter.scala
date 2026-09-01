@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.DecryptedViews
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionProcessorError
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
 import com.digitalasset.canton.sequencing.protocol.OpenEnvelope
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
@@ -43,6 +44,7 @@ final case class ViewMessageDecrypter(
   def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]],
       snapshot: SynchronizerSnapshotSyncCryptoApi,
+      synchronizerLimits: SynchronizerLimits,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
@@ -56,7 +58,7 @@ final case class ViewMessageDecrypter(
         protocolVersion,
         futureSupervisor,
         loggerFactory,
-      ).decryptViews(batch)
+      ).decryptViews(batch, synchronizerLimits)
     else
       new ViewMessageDecrypterImplV2(
         participantId,
@@ -65,6 +67,6 @@ final case class ViewMessageDecrypter(
         protocolVersion,
         futureSupervisor,
         loggerFactory,
-      ).decryptViews(batch)
+      ).decryptViews(batch, synchronizerLimits)
 
 }

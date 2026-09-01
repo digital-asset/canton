@@ -251,7 +251,7 @@ private[lf] class SerializationVersionTestHelpers {
       committers: Set[Party] = Set.empty,
       controllers: Set[Party] = Set.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-  )(implicit loggingContext: NamedLoggingContext): Either[SError.SError, SubmittedTransaction] = {
+  )(implicit loggingContext: NamedLoggingContext): Either[SError, SubmittedTransaction] = {
     val choiceName = Ref.ChoiceName.assertFromString("Destroy")
     val choiceArg = SExpr.SEValue(SValue.SUnit)
     val speedyContractId = SExpr.SEValue(SValue.SContractId(contractId))

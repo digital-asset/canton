@@ -47,7 +47,7 @@ class PartyReplicationStatusTest extends AnyWordSpec with BaseTest {
       val internal = createInternalStatus(hasCompleted = false, errorO = None)
       val lapiStatus = PartyReplicationStatus.fromInternal(internal).toLapiProto
 
-      lapiStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
+      lapiStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
       lapiStatus.error shouldBe empty
     }
 
@@ -55,7 +55,7 @@ class PartyReplicationStatusTest extends AnyWordSpec with BaseTest {
       val internal = createInternalStatus(hasCompleted = true, errorO = None)
       val lapiStatus = PartyReplicationStatus.fromInternal(internal).toLapiProto
 
-      lapiStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
+      lapiStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
       lapiStatus.error shouldBe empty
     }
 
@@ -66,7 +66,7 @@ class PartyReplicationStatusTest extends AnyWordSpec with BaseTest {
       )
       val lapiStatus = PartyReplicationStatus.fromInternal(internal).toLapiProto
 
-      lapiStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_FAILED
+      lapiStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_FAILED
       lapiStatus.error.value.message shouldBe "Network timeout during ACS import"
     }
 
@@ -75,7 +75,7 @@ class PartyReplicationStatusTest extends AnyWordSpec with BaseTest {
         createInternalStatus(hasCompleted = true, errorO = Some("Terminal failure during cleanup"))
       val lapiStatus = PartyReplicationStatus.fromInternal(internal).toLapiProto
 
-      lapiStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_FAILED
+      lapiStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_FAILED
       lapiStatus.error.value.message shouldBe "Terminal failure during cleanup"
     }
   }

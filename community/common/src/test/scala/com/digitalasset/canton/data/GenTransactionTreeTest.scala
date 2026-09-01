@@ -147,8 +147,12 @@ class GenTransactionTreeTest
         }
 
         "be serialized and deserialized" in {
+          val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
           val fullInformeeTree = example.fullInformeeTree
-          FullInformeeTree.fromByteString(factory.cryptoOps, testedProtocolVersion)(
+          FullInformeeTree.fromByteString(
+            GenTransactionTreeDeserializationContext(factory.cryptoOps, synchronizerLimits),
+            testedProtocolVersion,
+          )(
             fullInformeeTree.toByteString
           ) shouldEqual Right(fullInformeeTree)
 
@@ -160,7 +164,14 @@ class GenTransactionTreeTest
             )
           ) { lt =>
             LightTransactionViewTree.fromTrustedByteString(
-              ((example.cryptoOps, randomnessLength), testedProtocolVersion)
+              (
+                LightTransactionViewTreeDeserializationContext(
+                  example.cryptoOps,
+                  randomnessLength,
+                  synchronizerLimits,
+                ),
+                testedProtocolVersion,
+              )
             )(lt.toByteString) shouldBe Right(lt)
           }
         }

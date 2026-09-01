@@ -724,7 +724,7 @@ fileComments:
         message:
           comments: Describes the status of a party replication operation.
           fieldComments:
-            state: |-
+            current: |-
               The overall lifecycle state of the replication operation.
 
               Required

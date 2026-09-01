@@ -7,7 +7,6 @@ package speedy
 import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Struct}
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.value.Value.ContractId

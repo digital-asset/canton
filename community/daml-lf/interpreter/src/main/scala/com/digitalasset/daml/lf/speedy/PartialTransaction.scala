@@ -242,13 +242,13 @@ private[speedy] case class PartialTransaction(
 
   import PartialTransaction.*
 
-  @throws[SError.SErrorDamlException]
+  @throws[SError.InterpretationError]
   private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
     either match {
       case Right(value) =>
         value
       case Left(err) =>
-        throw SError.SErrorDamlException(convTxError(nodes, context, err))
+        throw SError.InterpretationError(convTxError(nodes, context, err))
     }
 
   def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] =
@@ -317,7 +317,7 @@ private[speedy] case class PartialTransaction(
     *   - an error in case the transaction cannot be serialized using the
     *     `outputSerializationVersions`.
     */
-  private[speedy] def finish: Either[SError.SErrorCrash, (SubmittedTx, ImmArray[NodeId])] =
+  private[speedy] def finish: Either[SError.Crash, (SubmittedTx, ImmArray[NodeId])] =
     context.info match {
       case _: RootContextInfo =>
         val roots = context.children.toImmArray
@@ -328,7 +328,7 @@ private[speedy] case class PartialTransaction(
 
       case _ =>
         Left(
-          SError.SErrorCrash(
+          SError.Crash(
             NameOf.qualifiedNameOfCurrentFunc,
             "ptx.finish: expected RootContextInfo",
           )

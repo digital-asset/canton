@@ -104,6 +104,8 @@ final class SerializationDeserializationTest
         implicit val getByteStringId: Id[ByteString] => ByteString = identity
         implicit val getByteStringE: Either[String, ByteString] => ByteString = _.value
 
+        val synchronizerLimits = SynchronizerLimits.defaultFor(version)
+
         testVersioned(SymmetricKey, version)
 
         test(StaticSynchronizerParameters, version)
@@ -133,7 +135,7 @@ final class SerializationDeserializationTest
         test(LocalVerdict, version)
         testContext(
           EnvelopeContent,
-          (TestHash, version),
+          (EnvelopeContentDeserializationContext(TestHash, synchronizerLimits), version),
           version,
         )
         test(ConfirmationResultMessage, version)
@@ -153,7 +155,11 @@ final class SerializationDeserializationTest
         // Merkle tree leaves
         testContext(CommonMetadata, TestHash, version)
         testContext(ParticipantMetadata, TestHash, version)
-        testContext(SubmitterMetadata, TestHash, version)
+        testContext(
+          SubmitterMetadata,
+          SubmitterMetadataDeserializationContext(TestHash, synchronizerLimits),
+          version,
+        )
         testContext(AssignmentCommonData, TestHash, version)
         testContext(AssignmentView, TestHash, version)
         testContext(UnassignmentCommonData, TestHash, version)
@@ -176,7 +182,11 @@ final class SerializationDeserializationTest
         )
         // InformeeMessage become large due to the embedded ExternalAuthorization (quadratic list)
         // on top of transaction view trees, so give this test more time.
-        testContext(InformeeMessage, (TestHash, version), version)(
+        testContext(
+          InformeeMessage,
+          (GenTransactionTreeDeserializationContext(TestHash, synchronizerLimits), version),
+          version,
+        )(
           informeeMessageArb,
           getByteStringId,
         )
@@ -246,14 +256,21 @@ final class SerializationDeserializationTest
         )
         test(SignedContent, version)
         testContext(TransactionView, (TestHash, version), version)
-        testContext(FullInformeeTree, (TestHash, version), version)
+        testContext(
+          FullInformeeTree,
+          (GenTransactionTreeDeserializationContext(TestHash, synchronizerLimits), version),
+          version,
+        )
         // testing MerkleSeq structure with specific VersionedMerkleTree: SubmitterMetadata.
         testContext(
           MerkleSeq,
           (
             (
               TestHash,
-              (bytes: ByteString) => SubmitterMetadata.fromTrustedByteString(TestHash)(bytes),
+              (bytes: ByteString) =>
+                SubmitterMetadata.fromTrustedByteString(
+                  SubmitterMetadataDeserializationContext(TestHash, synchronizerLimits)
+                )(bytes),
             ),
             version,
           ),
@@ -261,7 +278,18 @@ final class SerializationDeserializationTest
         )
         val randomnessLength =
           EncryptedViewMessage.computeRandomnessLength(ExampleTransactionFactory.pureCrypto)
-        testContext(LightTransactionViewTree, ((TestHash, randomnessLength), version), version)
+        testContext(
+          LightTransactionViewTree,
+          (
+            LightTransactionViewTreeDeserializationContext(
+              TestHash,
+              randomnessLength,
+              synchronizerLimits,
+            ),
+            version,
+          ),
+          version,
+        )
         testContextTaggedProtocolVersion(AssignmentViewTree, TestHash, Target(version))
         testContext(
           UnassignmentViewTree,

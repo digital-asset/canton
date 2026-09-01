@@ -289,7 +289,7 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
         daId,
         targetParticipant.id,
       )
-      lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
+      lapiTpStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_IN_PROGRESS
     }
 
     clue(s"Exercise during replication to TP ${targetParticipant.name}")(exerciseContract())

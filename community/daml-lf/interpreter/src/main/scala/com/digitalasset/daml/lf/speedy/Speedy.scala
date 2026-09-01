@@ -16,14 +16,11 @@ import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.PackageInterface
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFound}
 import com.digitalasset.daml.lf.speedy.PartialTransaction.NodeSeeds
-import com.digitalasset.daml.lf.speedy.SError.*
 import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SResult.*
-import com.digitalasset.daml.lf.speedy.SValue.{SAnyException, SArithmeticError, SRecord, SText}
 import com.digitalasset.daml.lf.speedy.metrics.{MetricPlugin, StepCount}
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.transaction.*
-import com.digitalasset.daml.lf.value.Value.ValueArithmeticError
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value as V}
 
 import scala.annotation.{nowarn, tailrec}
@@ -53,6 +50,14 @@ private[lf] object Speedy {
     private[lf] def reset(): Unit =
       registeredPlugins.values.foreach(_.reset())
   }
+
+  /** A constructor/deconstructor of value arithmetic errors. */
+  val ValueArithmeticError: V.ValueArithmeticError =
+    new value.Value.ValueArithmeticError(StablePackages.stablePackages)
+
+  /** A constructor/deconstructor of svalue arithmetic errors. */
+  val SArithmeticError: SValue.SArithmeticError =
+    new SValue.SArithmeticError(ValueArithmeticError)
 
   /** Instrumentation counters. */
   final class Instrumentation() {
@@ -159,20 +164,7 @@ private[lf] object Speedy {
   }
 
   private[speedy] def throwLimitError(location: String, error: IError.Dev.Limit.Error): Nothing =
-    throw SError.SErrorDamlException(interpretation.Error.Dev(location, IError.Dev.Limit(error)))
-
-  // See implementation of UpdateMachine.handleException to see use of UnwindResult
-  sealed trait UnwindResult
-  object UnwindResult {
-    // Handler found for exception, continue with handler expression
-    case class TryCatchHandler(e: KTryCatchV1Handler) extends UnwindResult
-    // Rollback error - abort and error with e
-    case class Rollback(e: IError.EffectfulRollback) extends UnwindResult
-    // No handler found, return unhandledException
-    case object Unhandled extends UnwindResult
-    // Error during conversion, return unhandledException with original exception
-    case class Conversion(e: KConvertingException[Question.Update]) extends UnwindResult
-  }
+    throw SError.InterpretationError(interpretation.Error.Dev(location, IError.Dev.Limit(error)))
 
   final class UpdateMachine(
       override val sexpr: SExpr,
@@ -378,7 +370,7 @@ private[lf] object Speedy {
     private[speedy] override def asCmdMachine(location: String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Control[Question.Update] =
-      throw SErrorCrash(location, "unexpected update machine in cmd context")
+      throw SError.Crash(location, "unexpected update machine in cmd context")
 
     /** unwindToHandler is called when an exception is thrown by the builtin SBThrow or re-thrown by
       * the builtin SBTryHandler. If a rollback of an effectful node is attempted, we error out with
@@ -390,9 +382,9 @@ private[lf] object Speedy {
       @tailrec
       def unwind(
           ptx: PartialTransaction
-      ): UnwindResult =
+      ): Control[Nothing] =
         if (kontDepth() == 0) {
-          UnwindResult.Unhandled
+          unhandledException(excep)
         } else {
           popKont() match {
             case handler: KTryCatchV1Handler =>
@@ -401,38 +393,24 @@ private[lf] object Speedy {
               // Ideally we should embed the trace into the exception directly.
               ptx.rollbackTry match {
                 case Left(rollbackErr) =>
-                  UnwindResult.Rollback(rollbackErr)
-                case Right(newPtx) => {
+                  abort()
+                  Control.Error(rollbackErr)
+                case Right(newPtx) =>
                   this.ptx = newPtx
-                  UnwindResult.TryCatchHandler(handler)
-                }
+                  handler.restore()
+                  popTempStackToBase()
+                  pushEnv(excep) // payload on stack where handler expects it
+                  Control.Expression(handler.handler)
               }
             case KCloseExercise =>
               unwind(ptx.abortExercises)
             case KPreventException() =>
-              UnwindResult.Unhandled
-            case converting: KConvertingException[Question.Update] =>
-              UnwindResult.Conversion(converting)
+              unhandledException(excep)
             case _ =>
               unwind(ptx)
           }
         }
-
-      unwind(ptx) match {
-        case UnwindResult.TryCatchHandler(kh) =>
-          kh.restore()
-          popTempStackToBase()
-          pushEnv(excep) // payload on stack where handler expects it
-          Control.Expression(kh.handler)
-        case UnwindResult.Conversion(KConvertingException(originalExceptionId)) =>
-          unhandledException(excep, Some(originalExceptionId))
-        case UnwindResult.Unhandled =>
-          unhandledException(excep)
-        case UnwindResult.Rollback(rollbackErr) => {
-          abort()
-          Control.Error(rollbackErr)
-        }
-      }
+      unwind(ptx)
     }
 
     /** Tracks the lower and upper bounds on the ledger time for a given Daml interpretation run. At
@@ -510,7 +488,7 @@ private[lf] object Speedy {
       xs.zip(ys)
     }
 
-    def finish: Either[SErrorCrash, UpdateMachine.Result] = ptx.finish.map { case (tx, seeds) =>
+    def finish: Either[SError.Crash, UpdateMachine.Result] = ptx.finish.map { case (tx, seeds) =>
       UpdateMachine.Result(
         tx,
         getContractLookupCache,
@@ -578,7 +556,7 @@ private[lf] object Speedy {
 
     private val iterationsBetweenInterruptions: Long = 10000
 
-    @throws[SErrorDamlException]
+    @throws[SError.InterpretationError]
     def apply(
         compiledPackages: CompiledPackages,
         preparationTime: Time.Timestamp,
@@ -648,7 +626,6 @@ private[lf] object Speedy {
       /* Profile of the run when the packages haven been compiled with profiling enabled. */
       override val profile: Profile,
       override val iterationsBetweenInterruptions: Long,
-      override val convertLegacyExceptions: Boolean,
       metricPlugins: Seq[MetricPlugin],
       logger: MachineLogger,
   ) extends Machine[Nothing](
@@ -663,12 +640,12 @@ private[lf] object Speedy {
     private[speedy] override def asUpdateMachine(location: String)(
         f: UpdateMachine => Control[Question.Update]
     ): Nothing =
-      throw SErrorCrash(location, "unexpected pure machine")
+      throw SError.Crash(location, "unexpected pure machine")
 
     private[speedy] override def asCmdMachine(location: String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Nothing =
-      throw SErrorCrash(location, "unexpected pure machine in cmd context")
+      throw SError.Crash(location, "unexpected pure machine in cmd context")
 
     /** Pure Machine does not handle exceptions */
     private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] =
@@ -713,24 +690,9 @@ private[lf] object Speedy {
       new Speedy.Metrics(metricPlugins)
     }
 
-    /* Should Daml Exceptions be automatically converted to FailureStatus before throwing from the engine
-       Daml-script needs to disable this behaviour in 3.3, thus the flag.
-     */
-    val convertLegacyExceptions: Boolean = true
-
     var gasBudget = initialGasBudget.getOrElse(0L)
 
     private[this] val hasGasBudget = initialGasBudget.isDefined
-
-    private val stablePackages = StablePackages.stablePackages
-
-    /** A constructor/deconstructor of value arithmetic errors. */
-    val valueArithmeticError: ValueArithmeticError =
-      new ValueArithmeticError(stablePackages)
-
-    /** A constructor/deconstructor of svalue arithmetic errors. */
-    val sArithmeticError: SArithmeticError =
-      new SArithmeticError(valueArithmeticError)
 
     private[speedy] def handleException(excep: SValue.SAny): Control[Nothing]
 
@@ -740,56 +702,9 @@ private[lf] object Speedy {
     // Triggers conversion of exception to failure status and throws.
     // if the computation of the exception message also throws an exception, this will be called with
     // originalExceptionId as the original exceptionId, and we won't trigger a conversion
-    protected final def unhandledException(
-        excep: SValue.SAny,
-        originalExceptionId: Option[TypeConId] = None,
-    ): Control[Nothing] = {
+    protected final def unhandledException(excep: SValue.SAny): Control[Nothing] = {
       abort()
-      if (convertLegacyExceptions) {
-        val exceptionId = excep.ty match {
-          case TTyCon(exceptionId) => exceptionId
-          case _ =>
-            throw SErrorCrash(
-              NameOf.qualifiedNameOfCurrentFunc,
-              s"Tried to convert a non-grounded exception type ${excep.ty.pretty} to Failure Status",
-            )
-        }
-
-        def buildFailureStatus(exceptionId: Identifier, message: String) =
-          Control.Error(
-            interpretation.Error.FailureStatus(
-              "UNHANDLED_EXCEPTION/" + exceptionId.qualifiedName.toString,
-              FCInvalidGivenCurrentSystemStateOther.cantonCategoryId,
-              message,
-              Map(),
-            )
-          )
-
-        originalExceptionId match {
-          case None =>
-            (exceptionId, excep) match {
-              // Arithmetic error does not need to be loaded into compiledPackages to be thrown (by arithmetic builtins)
-              // as such, we can't assume the DefRef for calculating its message or converting to failure
-              // status exists. Instead we directly pull out its message field and build a failure status immediately using that.
-              case (
-                    valueArithmeticError.tyCon,
-                    SAnyException(SRecord(_, _, ArraySeq(SText(message)))),
-                  ) =>
-                buildFailureStatus(exceptionId, message)
-              case _ =>
-                pushKont(KConvertingException(exceptionId))
-                Control.Expression(
-                  compiledPackages.compiler
-                    .throwExceptionAsFailureStatusSExpr(exceptionId, excep.value)
-                )
-            }
-          case Some(originalExceptionId) =>
-            buildFailureStatus(
-              originalExceptionId,
-              s"<Failed to calculate message as ${exceptionId.qualifiedName.toString} was thrown during conversion>",
-            )
-        }
-      } else Control.Error(IError.UnhandledException(excep.ty, excep.value.toUnnormalizedValue))
+      throw SError.UnhandledException(excep)
     }
 
     /* The machine control is either an expression or a value. */
@@ -936,7 +851,7 @@ private[lf] object Speedy {
       val oldBase = this.envBase
       val newBase = this.env.size
       if (newBase < oldBase) {
-        throw SErrorCrash(
+        throw SError.Crash(
           NameOf.qualifiedNameOfCurrentFunc,
           s"markBase: $oldBase -> $newBase -- NOT AN INCREASE",
         )
@@ -950,7 +865,7 @@ private[lf] object Speedy {
     @inline
     final def restoreBase(envBase: Int): Unit = {
       if (this.envBase < envBase) {
-        throw SErrorCrash(
+        throw SError.Crash(
           NameOf.qualifiedNameOfCurrentFunc,
           s"restoreBase: ${this.envBase} -> $envBase -- NOT A REDUCTION",
         )
@@ -967,7 +882,7 @@ private[lf] object Speedy {
       val envSizeToBeRestored = this.envBase
       val count = env.size - envSizeToBeRestored
       if (count < 0) {
-        throw SErrorCrash(
+        throw SError.Crash(
           NameOf.qualifiedNameOfCurrentFunc,
           s"popTempStackToBase: ${env.size} --> $envSizeToBeRestored -- WRONG DIRECTION",
         )
@@ -1039,7 +954,7 @@ private[lf] object Speedy {
                 SResultFinal(value)
               case Control.Error(ie) =>
                 abort()
-                SResultError(SErrorDamlException(ie))
+                SResultError(SError.InterpretationError(ie))
               case Control.WeAreUnset =>
                 sys.error("**attempt to run a machine with unset control")
             }
@@ -1050,7 +965,7 @@ private[lf] object Speedy {
         case serr: SError => // TODO: prefer Control over throw for SError
           SResultError(serr)
         case ex: RuntimeException =>
-          SResultError(SErrorCrash(NameOf.qualifiedNameOfCurrentFunc, s"exception: $ex")) // stop
+          SResultError(SError.Crash(NameOf.qualifiedNameOfCurrentFunc, s"exception: $ex")) // stop
       }
 
     final def lookupVal(eval: SEVal): Control[Q] =
@@ -1072,7 +987,7 @@ private[lf] object Speedy {
               }
             case None =>
               if (compiledPackages.contains(ref.packageId))
-                throw SErrorCrash(
+                throw SError.Crash(
                   NameOf.qualifiedNameOfCurrentFunc,
                   s"definition $ref not found even after caller provided new set of packages",
                 )
@@ -1149,7 +1064,7 @@ private[lf] object Speedy {
         if (consumed != 0) {
           gasBudget -= consumed
           if (gasBudget < 0)
-            throw SErrorCrash(
+            throw SError.Crash(
               getClass.getCanonicalName,
               "No more gas",
             )
@@ -1245,7 +1160,6 @@ private[lf] object Speedy {
         logger: MachineLogger,
         iterationsBetweenInterruptions: Long = Long.MaxValue,
         profile: Profile = newProfile,
-        convertLegacyExceptions: Boolean = true,
         metricPlugins: Seq[MetricPlugin] = Seq.empty,
     ): PureMachine =
       new PureMachine(
@@ -1253,7 +1167,6 @@ private[lf] object Speedy {
         compiledPackages = compiledPackages,
         profile = profile,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
-        convertLegacyExceptions = convertLegacyExceptions,
         metricPlugins = metricPlugins,
         logger = logger,
       )
@@ -1318,7 +1231,9 @@ private[lf] object Speedy {
     private[lf] def assertGlobalKey(pkgName: PackageName, templateId: TypeConId, keyValue: SValue) =
       globalKey(pkgName, templateId, keyValue)
         .getOrElse(
-          throw SErrorDamlException(IError.ContractIdInContractKey(keyValue.toUnnormalizedValue))
+          throw SError.InterpretationError(
+            IError.ContractIdInContractKey(keyValue.toUnnormalizedValue)
+          )
         )
 
   }
@@ -1341,20 +1256,15 @@ private[lf] object Speedy {
     private[speedy] override def asUpdateMachine(location: String)(
         f: UpdateMachine => Control[Question.Update]
     ): Control[Question.Cmd] =
-      throw SErrorCrash(location, "unexpected cmd machine in update context")
+      throw SError.Crash(location, "unexpected cmd machine in update context")
 
     private[speedy] override def asCmdMachine(location: String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Control[Question.Cmd] =
       f(this)
 
-    // Exception handling is not supported in the command path. A Daml exception (an uncaught
-    // `throw`) that reaches the CmdMachine crashes instead of being converted to a failure status.
     private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] =
-      throw SErrorCrash(
-        NameOf.qualifiedNameOfCurrentFunc,
-        s"exception handling not available in the command path: $excep",
-      )
+      unhandledException(excep)
   }
 
   // Environment
@@ -1398,7 +1308,7 @@ private[lf] object Speedy {
 
       val vfun = value match {
         case vfun: SValue.SPAP => vfun
-        case _ => throw SErrorCrash("KOverApp", s"Expected SPAP, got $value")
+        case _ => throw SError.Crash("KOverApp", s"Expected SPAP, got $value")
       }
 
       machine.updateGasBudget(_.KOverApp.cost(vfun.actuals.size, newArgs.length))
@@ -1492,13 +1402,13 @@ private[lf] object Speedy {
           SValue.SParty(_) | SValue.SText(_) | SValue.STimestamp(_) | SValue.SStruct(_, _) |
           SValue.SMap(_, _) | SValue.SRecord(_, _, _) | SValue.SAny(_, _) | SValue.STypeRep(_) |
           SValue.SBigNumeric(_) | _: SValue.SPAP | SValue.SToken => {
-        throw SErrorCrash(NameOf.qualifiedNameOfCurrentFunc, "Match on non-matchable value")
+        throw SError.Crash(NameOf.qualifiedNameOfCurrentFunc, "Match on non-matchable value")
       }
     }
 
     val e = altOpt
       .getOrElse(
-        throw SErrorCrash(NameOf.qualifiedNameOfCurrentFunc, s"No match for $v in ${alts.toList}")
+        throw SError.Crash(NameOf.qualifiedNameOfCurrentFunc, s"No match for $v in ${alts.toList}")
       )
       .body
     Control.Expression(e)
@@ -1720,17 +1630,6 @@ private[lf] object Speedy {
   private[speedy] final case class KPreventException[Q]() extends Kont[Q] {
     override def execute(machine: Machine[Q], v: SValue): Control.Value = {
       machine.updateGasBudget(_.KPreventException.cost)
-      Control.Value(v)
-    }
-  }
-
-  // For when converting an exception to a failure status
-  // if an exception is thrown during that conversion, we need to know to not try to convert that too,
-  // but instead give back the original exception with a replacement message
-  // [Remy] cannot we use the continuation above ?
-  private[speedy] final case class KConvertingException[Q](exceptionId: TypeConId) extends Kont[Q] {
-    override def execute(machine: Machine[Q], v: SValue): Control.Value = {
-      machine.updateGasBudget(_.KConvertingException.cost)
       Control.Value(v)
     }
   }

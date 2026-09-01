@@ -39,7 +39,7 @@ private[speedy] object SpeedyTestLib {
 
   final case object UnexpectedSResultScenarioX extends Error("unexpected SResultScenarioX")
 
-  @throws[SError.SErrorCrash]
+  @throws[SError.Crash]
   def run(
       machine: Speedy.Machine[Question.Update],
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
@@ -47,7 +47,7 @@ private[speedy] object SpeedyTestLib {
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
-  ): Either[SError.SError, SValue] = {
+  ): Either[SError, SValue] = {
 
     def onQuestion(question: Question.Update): Unit = question match {
       case Question.Update.NeedTime(callback) =>
@@ -91,39 +91,39 @@ private[speedy] object SpeedyTestLib {
     }
   }
 
-  @throws[SError.SErrorCrash]
+  @throws[SError.Crash]
   def buildTransaction(
       machine: Speedy.UpdateMachine,
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
-  ): Either[SError.SError, SubmittedTransaction] =
+  ): Either[SError, SubmittedTransaction] =
     run(machine, getPkg, getContract, getKeys, getTime) match {
       case Right(_) => machine.finish.map(_.tx)
       case Left(err) => Left(err)
     }
 
-  @throws[SError.SErrorCrash]
+  @throws[SError.Crash]
   def buildTransactionCollectRequests(
       machine: Speedy.UpdateMachine,
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
-  ): Either[SError.SError, SubmittedTransaction] =
+  ): Either[SError, SubmittedTransaction] =
     run(machine, getPkg, getContract, getKeys, getTime) match {
       case Right(_) => machine.finish.map(_.tx)
       case Left(err) => Left(err)
     }
 
-  @throws[SError.SErrorCrash]
+  @throws[SError.Crash]
   def runTxQ[Q](
       onQuestion: Q => Unit,
       machine: Speedy.Machine[Q],
-  ): Either[SError.SError, SValue] = {
+  ): Either[SError, SValue] = {
     @tailrec
-    def loop: Either[SError.SError, SValue] =
+    def loop: Either[SError, SValue] =
       machine.run() match {
         case SResultQuestion(question) =>
           onQuestion(question)

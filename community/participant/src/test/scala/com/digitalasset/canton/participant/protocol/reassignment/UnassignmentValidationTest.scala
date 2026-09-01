@@ -48,6 +48,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.UUID
+import scala.annotation.unused
 
 class UnassignmentValidationTest
     extends AnyWordSpec
@@ -156,7 +157,7 @@ class UnassignmentValidationTest
       validation.isSuccessful.futureValueUS shouldBe true
     }
 
-    def testContractValidationAgainstRepresentativePackage(
+    @unused def testContractValidationAgainstRepresentativePackage(
         invalidRpId: ReassignmentTag[LfPackageId]
     ): Unit = {
 
@@ -186,14 +187,44 @@ class UnassignmentValidationTest
       }
     }
 
-    "fail if contract validation fails with source package" in {
-      val invalidRpId = LfPackageId.assertFromString("invalid-representative-package")
-      testContractValidationAgainstRepresentativePackage(Source(invalidRpId))
+    val invalidPackageId = LfPackageId.assertFromString("invalid-package-id")
+    val invalidContractReason = "invalid-contract"
+    val failingContractValidator =
+      new TestValidator(Map((contract.contractId, invalidPackageId) -> invalidContractReason))
+
+    "create a common validation failure if the contract fails to validate against the source package" in {
+      val result = performValidation(
+        contract,
+        contractValidator = failingContractValidator,
+        sourceValidationPackageId = Some(invalidPackageId),
+      ).futureValueUS.value
+
+      inside(
+        result.commonValidationResult.contractAuthenticationResultF.futureValueUS.left.value
+      ) { case ContractValidationError(ref, contractId, representativePackageId, reason) =>
+        ref shouldBe ReassignmentRef(contract.contractId)
+        contractId shouldBe contract.contractId
+        representativePackageId shouldBe invalidPackageId
+        reason should include(invalidContractReason)
+      }
+      result.reassigningParticipantValidationResult.contractAuthenticationResultF.futureValueUS.value shouldBe ()
     }
 
-    "fail if contract validation fails with target package" in {
-      val invalidRpId = LfPackageId.assertFromString("invalid-representative-package")
-      testContractValidationAgainstRepresentativePackage(Target(invalidRpId))
+    "create a reassigning participant validation failure if the contract fails to validate against the target package" in {
+      val result = performValidation(
+        contract,
+        contractValidator = failingContractValidator,
+        targetValidationPackageId = Some(invalidPackageId),
+      ).futureValueUS.value
+      result.commonValidationResult.contractAuthenticationResultF.futureValueUS.value shouldBe ()
+      inside(
+        result.reassigningParticipantValidationResult.contractAuthenticationResultF.futureValueUS.left.value
+      ) { case ContractValidationError(ref, contractId, representativePackageId, reason) =>
+        ref shouldBe ReassignmentRef(contract.contractId)
+        contractId shouldBe contract.contractId
+        representativePackageId shouldBe invalidPackageId
+        reason should include(invalidContractReason)
+      }
     }
 
     "fail when inconsistent stakeholders are given" in {

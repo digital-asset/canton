@@ -7,7 +7,6 @@ package speedy
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.Time
-import com.digitalasset.daml.lf.speedy.SError.*
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKey, NeedKeyProgression}
 import com.digitalasset.daml.lf.value.Value.ContractId
 

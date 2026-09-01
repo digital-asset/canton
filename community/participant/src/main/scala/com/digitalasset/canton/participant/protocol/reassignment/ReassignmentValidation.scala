@@ -115,40 +115,67 @@ object ReassignmentValidation {
       } yield ()
     else EitherTUtil.unitUS
 
-  def authenticateContractAndStakeholders(
+  def checkStakeholders(
+      reassignmentRequest: FullReassignmentViewTree
+  ): Either[ReassignmentValidationError, Unit] = {
+    val declaredViewStakeholders = reassignmentRequest.stakeholders
+    val declaredContractStakeholders = reassignmentRequest.contracts.stakeholders
+    Either.cond(
+      declaredViewStakeholders == declaredContractStakeholders,
+      (),
+      ReassignmentValidationError.StakeholdersMismatch(
+        reassignmentRequest.reassignmentRef,
+        declaredViewStakeholders = declaredViewStakeholders,
+        expectedStakeholders = declaredContractStakeholders,
+      ),
+    )
+  }
+
+  def authenticateContractsAgainstSource(
       contractValidator: ContractValidator,
       reassignmentRequest: FullReassignmentViewTree,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] = {
-    val declaredViewStakeholders = reassignmentRequest.stakeholders
-    val declaredContractStakeholders = reassignmentRequest.contracts.stakeholders
+  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
+    authenticateContractsAgainst(
+      contractValidator,
+      reassignmentRequest,
+      _.sourceValidationPackageId.unwrap,
+    )
 
-    for {
-      _ <- EitherT.fromEither[FutureUnlessShutdown](
-        Either.cond(
-          declaredViewStakeholders == declaredContractStakeholders,
-          (),
-          ReassignmentValidationError.StakeholdersMismatch(
-            reassignmentRequest.reassignmentRef,
-            declaredViewStakeholders = declaredViewStakeholders,
-            expectedStakeholders = declaredContractStakeholders,
-          ): ReassignmentValidationError,
-        )
-      )
+  def authenticateContractsAgainstTarget(
+      contractValidator: ContractValidator,
+      reassignmentRequest: FullReassignmentViewTree,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
+    authenticateContractsAgainst(
+      contractValidator,
+      reassignmentRequest,
+      _.targetValidationPackageId.unwrap,
+    )
 
-      _ <- authenticateContracts(
-        contractValidator,
-        reassignmentRequest.contracts.contracts.forgetNE,
-        reassignmentRef = Some(reassignmentRequest.reassignmentRef),
-      )
-    } yield ()
-  }
+  private def authenticateContractsAgainst(
+      contractValidator: ContractValidator,
+      reassignmentRequest: FullReassignmentViewTree,
+      validatingPackageId: ContractReassignment => LfPackageId,
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, ReassignmentValidationError, Unit] =
+    authenticateContracts(
+      contractValidator,
+      reassignmentRequest.contracts.contracts.forgetNE,
+      validatingPackageId,
+      reassignmentRef = Some(reassignmentRequest.reassignmentRef),
+    )
 
   def authenticateContracts(
       contractValidator: ContractValidator,
       reassignments: Seq[ContractReassignment],
+      validatingPackageId: ContractReassignment => LfPackageId,
       reassignmentRef: Option[ReassignmentRef] = None,
   )(implicit
       ec: ExecutionContext,
@@ -172,17 +199,7 @@ object ReassignmentValidation {
 
     MonadUtil
       .sequentialTraverse(reassignments) { reassign =>
-        for {
-          _ <- authenticate(reassign.contract, reassign.sourceValidationPackageId.unwrap)
-          _ <-
-            if (
-              reassign.sourceValidationPackageId.unwrap != reassign.targetValidationPackageId.unwrap
-            ) {
-              authenticate(reassign.contract, reassign.targetValidationPackageId.unwrap)
-            } else {
-              EitherTUtil.unitUS[ReassignmentValidationError]
-            }
-        } yield ()
+        authenticate(reassign.contract, validatingPackageId(reassign))
       }
       .map(_ => ())
   }

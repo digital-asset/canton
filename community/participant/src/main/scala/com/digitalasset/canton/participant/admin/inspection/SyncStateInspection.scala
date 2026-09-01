@@ -45,7 +45,12 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.{
   Matched,
   fromIntValidSentPeriodState,
 }
-import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, ReassignmentId}
+import com.digitalasset.canton.protocol.{
+  ContractInstance,
+  LfContractId,
+  ReassignmentId,
+  SynchronizerLimits,
+}
 import com.digitalasset.canton.pruning.{
   ConfigForSlowCounterParticipants,
   ConfigForSynchronizerThresholds,
@@ -355,6 +360,8 @@ final class SyncStateInspection(
       val openWithErrors = PossiblyIgnoredSequencedEvent.openEnvelopes(closedEvent)(
         psid.protocolVersion,
         state.pureCryptoApi,
+        // This method is called only from tests
+        SynchronizerLimits.defaultFor(psid.protocolVersion),
       )
       if (warnOnDiscardedEnvelopes && openWithErrors.openingErrors.nonEmpty) {
         logger.warn(s"Discarding envelopes with errors: ${openWithErrors.openingErrors}")
@@ -382,6 +389,8 @@ final class SyncStateInspection(
             .openEnvelopes(_)(
               psid.protocolVersion,
               state.pureCryptoApi,
+              // This method is called only from tests
+              SynchronizerLimits.defaultFor(psid.protocolVersion),
             )
             .event
         )

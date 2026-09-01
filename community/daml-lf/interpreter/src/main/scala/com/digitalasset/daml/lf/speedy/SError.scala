@@ -6,25 +6,30 @@ package speedy
 
 import scala.util.control.NoStackTrace
 
+/** Errors that can arise during interpretation */
+sealed abstract class SError
+    extends RuntimeException
+    with NoStackTrace
+    with Product
+    with Serializable
+
 object SError {
 
-  /** Errors that can arise during interpretation */
-  sealed abstract class SError
-      extends RuntimeException
-      with NoStackTrace
-      with Product
-      with Serializable
+  /** An uncaught daml exception, to be converted into a failure status by the caller */
+  final case class UnhandledException(excp: SValue.SAny) extends SError
+
+  sealed abstract class NotAnException extends SError
 
   /** A malformed expression was encountered. The assumption is that the expressions are
     * type-checked and the loaded packages have been validated, hence we do not have separate errors
     * for e.g. unknown values.
     */
-  final case class SErrorCrash(location: String, reason: String) extends SError {
+  final case class Crash(location: String, reason: String) extends NotAnException {
     override def getMessage: String = s"SPEEDY CRASH ($location): $reason"
   }
 
-  /** Daml exceptions that should be reported to the user. */
-  final case class SErrorDamlException(error: interpretation.Error) extends SError {
+  /** Errors that should be reported to the user. */
+  final case class InterpretationError(error: interpretation.Error) extends NotAnException {
     override def toString = productIterator.mkString(productPrefix + "(", ",", ")")
   }
 

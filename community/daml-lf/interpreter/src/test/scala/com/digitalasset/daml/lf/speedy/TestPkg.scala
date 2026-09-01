@@ -381,7 +381,7 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
     def loop0[X](y: TransactionConductor.Upd.Step[X]): Either[Throwable, X] =
       y match {
         case Step.Pure(value) => Right(value)
-        case Step.Error(error) => Left(SError.SErrorDamlException(error))
+        case Step.Error(error) => Left(SError.InterpretationError(error))
         case impure: speedy.TransactionConductor.Upd.Step.Impure[x, X] =>
           impure.fx match {
             case Upd.NeedTime =>

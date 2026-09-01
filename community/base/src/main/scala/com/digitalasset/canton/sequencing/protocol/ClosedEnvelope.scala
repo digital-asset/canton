@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.data.EitherT
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
@@ -25,6 +26,7 @@ trait ClosedEnvelope extends Envelope[ByteString] {
 
   def toOpenEnvelope(
       hashOps: HashOps,
+      synchronizerLimits: SynchronizerLimits,
       protocolVersion: ProtocolVersion,
   ): ParsingResult[DefaultOpenEnvelope]
 

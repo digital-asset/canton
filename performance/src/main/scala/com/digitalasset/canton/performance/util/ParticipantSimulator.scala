@@ -644,7 +644,13 @@ class ParticipantSimulator(
   )(implicit traceContext: TraceContext): Unit =
     SequencedEvent
       .envelopesOf(event)
-      .flatMap(_.toOpenEnvelope(crypto.pureCrypto, pv).toOption.toList)
+      .flatMap(
+        _.toOpenEnvelope(
+          crypto.pureCrypto,
+          staticSynchronizerParameters.synchronizerLimits,
+          pv,
+        ).toOption.toList
+      )
       .foreach { envelope =>
         val result = for {
           msgO <- determineMessageToSend(envelope.protocolMessage)

@@ -9,7 +9,6 @@ import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref, Struct}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
-import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.speedy.SpeedyTestLib.typeAndCompile
