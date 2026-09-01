@@ -35,7 +35,6 @@ import org.scalatest.Assertion
 import org.slf4j.event.Level
 
 import java.util.UUID
-import scala.concurrent.ExecutionContext
 
 trait PartyToParticipantAuthIntegrationTest
     extends CommunityIntegrationTest
@@ -1098,8 +1097,7 @@ trait PartyToParticipantAuthIntegrationTest
       serial: PositiveInt = PositiveInt.one,
       topologyChangeOp: TopologyChangeOp = TopologyChangeOp.Replace,
   )(implicit
-      env: FixtureParam,
-      ec: ExecutionContext,
+      env: FixtureParam
   ): SignedTopologyTransaction[TopologyChangeOp, TopologyMapping] = {
     val tx =
       topologyTransaction(topologyMapping, serial = serial, topologyChangeOp = topologyChangeOp)
@@ -1132,13 +1130,13 @@ trait PartyToParticipantAuthIntegrationTest
   private def sign[Op <: TopologyChangeOp, M <: TopologyMapping](
       topologyTransaction: TopologyTransaction[Op, M],
       fingerprint: Fingerprint,
-  )(implicit env: FixtureParam, ec: ExecutionContext): Signature =
+  )(implicit env: FixtureParam): Signature =
     signBytes(topologyTransaction.hash.hash.getCryptographicEvidence, fingerprint)
 
   private def signBytes(
       bytes: ByteString,
       fingerprint: Fingerprint,
-  )(implicit env: FixtureParam, ec: ExecutionContext): Signature =
+  )(implicit env: FixtureParam): Signature =
     env.tryGlobalCrypto.privateCrypto
       .signBytes(
         bytes,
@@ -1152,7 +1150,7 @@ trait PartyToParticipantAuthIntegrationTest
       participant: ParticipantReference,
       partyId: PartyId,
       signingKey: SigningPublicKey,
-  )(implicit env: FixtureParam, ec: ExecutionContext): ExecuteSubmissionAndWaitResponse = {
+  )(implicit env: FixtureParam): ExecuteSubmissionAndWaitResponse = {
     val prepared: PrepareSubmissionResponse =
       participant.ledger_api.javaapi.interactive_submission.prepare(
         Seq(partyId),

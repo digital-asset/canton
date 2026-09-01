@@ -59,7 +59,7 @@ class SymbolicPureCrypto extends CryptoPureApi {
   override def signatureVerificationParallelism: PositiveInt =
     CryptoParallelismConfig.defaultSignatureVerificationParallelism
 
-  override private[crypto] def signBytesInternal(
+  override private[crypto] def signBytes(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -188,7 +188,7 @@ class SymbolicPureCrypto extends CryptoPureApi {
       randomized = false,
     )
 
-  override private[crypto] def decryptWithInternal[M](
+  override def decryptWith[M](
       encrypted: AsymmetricEncrypted[M],
       privateKey: EncryptionPrivateKey,
   )(

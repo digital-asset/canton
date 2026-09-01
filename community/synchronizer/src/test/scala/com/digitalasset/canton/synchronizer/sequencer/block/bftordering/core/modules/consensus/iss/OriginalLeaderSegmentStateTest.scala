@@ -24,10 +24,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.OrderingBlock
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime.CanonicalCommitSet
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.CommitCertificate
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.{
   BlockMetadata,
   EpochInfo,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
+  CommitCertificate,
+  OrderedBlock,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
@@ -323,6 +326,61 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
       }
       succeed
     }
+
+    "assign all empty blocks to rest of segment" in {
+      val slots = NonEmpty.apply(Seq, 0L, 2L, 4L, 6L, 8L, 10L).map(BlockNumber(_))
+      val segmentState = createSegmentState(slots)
+      val leaderSegmentState =
+        new OriginalLeaderSegmentState(
+          segmentState,
+          epoch,
+          Seq.empty,
+          Seq.empty,
+          loggerFactory,
+          traceContext,
+        )
+      val initialCommits = Seq.empty
+
+      // Assign first couple of blocks normally
+      leaderSegmentState.canReceiveProposals shouldBe true
+      val orderedBlock1 = leaderSegmentState.assignToSlot(OrderingBlock.empty, initialCommits)
+      orderedBlock1.metadata.blockNumber shouldBe 0L
+      orderedBlock1.batchRefs shouldBe Seq.empty
+      completeBlock(segmentState, BlockNumber.First)
+
+      leaderSegmentState.canReceiveProposals shouldBe true
+      val orderedBlock2 =
+        leaderSegmentState.assignToSlot(OrderingBlock.empty, initialCommits)
+      orderedBlock2.metadata.blockNumber shouldBe 2L
+      orderedBlock2.batchRefs shouldBe Seq.empty
+      orderedBlock2.canonicalCommitSet.sortedCommits should not be empty
+      completeBlock(segmentState, BlockNumber(2L))
+
+      // Now flush rest of segment by assigning all remaining empty blocks
+      val remainingBlocks = leaderSegmentState.assignAllEmptyBlocksToRestOfSegment()
+
+      // Verify we have blocks for slots 4L, 6L, 8L, 10L
+      remainingBlocks should have size 4
+      remainingBlocks.map(_.metadata.blockNumber) should contain inOrderOnly (
+        BlockNumber(4L),
+        BlockNumber(6L),
+        BlockNumber(8L),
+        BlockNumber(10L),
+      )
+
+      // Verify all remaining blocks are empty
+      remainingBlocks.foreach { block =>
+        block.batchRefs shouldBe Seq.empty
+        block.canonicalCommitSet shouldBe CanonicalCommitSet(Set.empty)
+      }
+
+      // Verify we cannot receive more proposals
+      leaderSegmentState.canReceiveProposals shouldBe false
+
+      // verify we can complete the segment using those empty blocks, even out of order
+      remainingBlocks.reverse.foreach(block => completeBlock(segmentState, block))
+      segmentState.isSegmentComplete shouldBe true
+    }
   }
 
   private def createSegmentState(
@@ -341,13 +399,20 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
 
   private def completeBlock(segmentState: SegmentState, blockNumber: BlockNumber): Unit = {
     val metadata = BlockMetadata.mk(0, blockNumber)
+    val orderedBlock = OrderedBlock(metadata, Seq.empty, CanonicalCommitSet.empty)
+    completeBlock(segmentState, orderedBlock)
+  }
+
+  private def completeBlock(segmentState: SegmentState, orderedBlock: OrderedBlock): Unit = {
+    val metadata = orderedBlock.metadata
+    val blockNumber = metadata.blockNumber
     val prePrepare =
       PrePrepare
         .create(
           metadata,
           ViewNumber.First,
-          OrderingBlock.empty,
-          CanonicalCommitSet.empty,
+          OrderingBlock(orderedBlock.batchRefs),
+          orderedBlock.canonicalCommitSet,
           from = segmentState.segment.originalLeader,
         )
         .fakeSign

@@ -60,10 +60,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
-  FiniteDurationDistribution,
-  Probability,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FiniteDurationDistribution
 import com.digitalasset.canton.util.retry
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
@@ -129,6 +126,14 @@ import scala.util.Random
   *   the timeout is reached, the node will create a warning log to indicate the reason for delay in
   *   progress was the topology activation, but the node will continue to wait for the topology to
   *   be activated.
+  * @param consensusEnableLogEndOfEpochProgress
+  *   If `true`, logs are emitted to track progress at the end of each epoch with the status of
+  *   segments from all leaders.
+  * @param consensusEnableFlushingSegment
+  *   If `true`, when this node detects that a strong quorum of segments are completed while the one
+  *   it leads is in progress, it will flush the segment and complete all slots in parallel to avoid
+  *   making other nodes wait for the epoch to complete. This is a performance optimization that can
+  *   be disabled if issues arise with the flushing logic.
   * @param delayedInitQueueMaxSize
   *   The maximum size of the delayed init queue. This queue is used by modules to save incoming
   *   events in memory while the module is still initializing. Once startup is complete, the module
@@ -234,6 +239,7 @@ final case class BftBlockOrdererConfig(
     consensusNewEpochTopologyWarnTimeout: FiniteDuration =
       DefaultConsensusNewEpochTopologyWarnTimeout,
     consensusEnableLogEndOfEpochProgress: Boolean = false,
+    consensusEnableFlushingSegment: Boolean = true,
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
     epochStateTransferRetryTimeout: FiniteDuration = DefaultEpochStateTransferTimeout,
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
@@ -473,6 +479,31 @@ object BftBlockOrdererConfig {
       tls: Boolean,
   )
 
+  /** Configuration for a standalone BFT block ordering network, which allows the BFT layer to
+    * bypass the sequencer to directly receive requests from and serve reads to clients. This mode
+    * is useful for performance and scale testing of the CantonBFT ordering component in isolation.
+    *
+    * @param thisSequencerId
+    *   The sequencer ID of the local node.
+    * @param signingPrivateKeyProtoFile
+    *   The file containing the private key used to sign outgoing messages.
+    * @param signingPublicKeyProtoFile
+    *   The file containing the public key used to verify incoming messages.
+    * @param segmentLength
+    *   The number of blocks per segment.
+    * @param pbftViewChangeTimeout
+    *   The base duration to use for view change timeouts for ISS segments.
+    * @param blacklistLeaderSelectionPolicyConfig
+    *   The leader selection policy to enforce in the presence of View Changes of segments.
+    * @param maxRequestsInBatch
+    *   The maximum number of requests that can be included in a single batch.
+    * @param maxBatchesPerBlockProposal
+    *   The maximum number of batches that can be included in a single block proposal.
+    * @param peers
+    *   The list of peers in the standalone network, including their sequencer IDs and public keys.
+    * @param testSlowdown
+    *   Optional configuration for simulating delays in the standalone network.
+    */
   final case class BftBlockOrderingStandaloneNetworkConfig(
       thisSequencerId: String,
       signingPrivateKeyProtoFile: File,
@@ -483,13 +514,33 @@ object BftBlockOrdererConfig {
       maxRequestsInBatch: Short,
       maxBatchesPerBlockProposal: Short,
       peers: Seq[BftBlockOrderingStandalonePeerConfig],
-      postOrderingDelay: Option[FiniteDuration] = None,
-      sendDelay: Option[BftBlockOrderingP2PSendDelayConfig] = None,
-      topologyBroadcastProbability: Option[Probability] = None,
-      pendingTopologyChangesProbability: Option[Probability] = None,
-      getOrderingTopologyDelay: Option[FiniteDurationDistribution] = None,
+      testSlowdown: Option[BftBlockOrderingStandaloneTestSlowdownConfig] = None,
   )
 
+  /** Configuration for simulating delays in a standalone BFT block ordering network.
+    *
+    * @param postOrderingDelay
+    *   Optional simulated slowdown applied after ordering a block.
+    * @param sendDelay
+    *   Optional simulated slowdown applied when sending messages to peers.
+    * @param topologyDelay
+    *   Optional simulated slowdown applied when fetching the ordering topology.
+    */
+  final case class BftBlockOrderingStandaloneTestSlowdownConfig(
+      postOrderingDelay: Option[FiniteDurationDistribution] = None,
+      sendDelay: Option[BftBlockOrderingP2PSendDelayConfig] = None,
+      topologyDelay: Option[BftBlockOrderingStandaloneTopologyDelayConfig] = None,
+  )
+
+  /** Configuration for simulating delays in sending messages to peers in a BFT block ordering
+    * network.
+    *
+    * @param defaultDelayDistribution
+    *   Optional default delay distribution applied to all recipients (for simulation).
+    * @param delaysByRecipients
+    *   Optional list of specific delay distributions applied to specific recipients (for
+    *   simulation).
+    */
   final case class BftBlockOrderingP2PSendDelayConfig(
       defaultDelayDistribution: Option[FiniteDurationDistribution] = None,
       delaysByRecipients: Seq[DelayByRecipients] = Seq.empty,
@@ -516,6 +567,43 @@ object BftBlockOrdererConfig {
     )
   }
 
+  /** Configuration for simulating delays in fetching the ordering topology.
+    *
+    * @param broadcastInEpochProbability
+    *   Optional probability of there being a broadcast submission request ordered during the epoch,
+    *   which triggers getting an up-to-date ordering topology via `getOrderingTopology` before
+    *   starting a new epoch.
+    * @param pendingTopologyChangesProbability
+    *   Optional probability of the ordering topology returned by `getOrderingTopology` signalling
+    *   that there are pending topology changes, which triggers getting an up-to-date ordering
+    *   topology again before starting the subsequent epoch, regardless of whether broadcast
+    *   submission requests are going to be ordered before the end of the epoch.
+    * @param getOrderingTopologyDelay
+    *   Optional delay distribution (slowdown) applied when fetching the ordering topology.
+    */
+  final case class BftBlockOrderingStandaloneTopologyDelayConfig(
+      broadcastInEpochProbability: Option[Double] = None,
+      pendingTopologyChangesProbability: Option[Double] = None,
+      getOrderingTopologyDelay: Option[FiniteDurationDistribution] = None,
+  ) {
+    require(
+      broadcastInEpochProbability.forall(p => p >= 0.0 && p <= 1.0),
+      "broadcastInEpochProbability must be between 0.0 and 1.0",
+    )
+    require(
+      pendingTopologyChangesProbability.forall(p => p >= 0.0 && p <= 1.0),
+      "pendingTopologyChangesProbability must be between 0.0 and 1.0",
+    )
+  }
+
+  /** Configuration for a peer in a standalone BFT block ordering network, including its sequencer
+    * ID and public key.
+    *
+    * @param sequencerId
+    *   The sequencer ID of the peer.
+    * @param signingPublicKeyProtoFile
+    *   The file containing the public key used to verify incoming messages from the peer.
+    */
   final case class BftBlockOrderingStandalonePeerConfig(
       sequencerId: String,
       signingPublicKeyProtoFile: File,

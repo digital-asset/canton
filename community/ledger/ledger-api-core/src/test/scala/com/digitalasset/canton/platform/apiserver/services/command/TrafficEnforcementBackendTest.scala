@@ -129,6 +129,23 @@ class TrafficEnforcementBackendTest
       }
     }
 
+    "reject a non-singleton actAs submission when configured to, even when cost enforcement is disabled overall" in {
+      val client = mock[RichTrafficServiceClient]
+      val backend =
+        newBackend(
+          enforceCostOnSubmissions = false,
+          rejectMultiPartySubmissions = true,
+          trafficServiceClient = client,
+        )
+
+      backend.validateTraffic(actAs = Seq(alice, bob), trafficCost = 10L).value.map {
+        case Left(err) =>
+          verifyZeroInteractions(client)
+          err.code.id shouldBe "TRAFFIC_MULTI_PARTY_SUBMISSION_REJECTED"
+        case Right(_) => fail("expected the submission to be rejected")
+      }
+    }
+
     "not look up an account at all when cost enforcement is disabled" in {
       val client = mock[RichTrafficServiceClient]
       val backend =

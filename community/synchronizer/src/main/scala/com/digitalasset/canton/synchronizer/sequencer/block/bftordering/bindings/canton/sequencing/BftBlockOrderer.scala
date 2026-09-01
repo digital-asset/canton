@@ -184,7 +184,8 @@ final class BftBlockOrderer(
   private val standalonePostOrderingDelay: Option[() => Future[Unit]] =
     config.standalone.flatMap { standaloneConfig =>
       implicit val traceContext: TraceContext = initTraceContext
-      standaloneConfig.postOrderingDelay.map { delay =>
+      standaloneConfig.testSlowdown.flatMap(_.postOrderingDelay).map { delayDistribution =>
+        val delay = delayDistribution.generateRandomDuration(ThreadLocalRandom.current())
         logger.info(s"Standalone mode: adding post-ordering delay of $delay")
         () =>
           Future(logger.info("Starting post-ordering delay"))
@@ -506,7 +507,12 @@ final class BftBlockOrderer(
       requestInspector =
         config.standalone.fold[RequestInspector](OutputModule.DefaultRequestInspector)(
           standaloneConfig =>
-            StandaloneRequestInspector(standaloneConfig.topologyBroadcastProbability)
+            StandaloneRequestInspector(
+              standaloneConfig.testSlowdown
+                .flatMap(_.topologyDelay)
+                .flatMap(_.broadcastInEpochProbability)
+                .map(Probability(_))
+            )
         ),
       outputPreviousStoredBlock = outputPreviousStoredBlock,
     )

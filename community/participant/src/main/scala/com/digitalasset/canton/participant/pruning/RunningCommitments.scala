@@ -7,10 +7,8 @@ import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
-  ContractStakeholdersAndReassignmentCounter,
   GenericAcsChange,
   InternalizedAcsChange,
-  InternalizedContractStakeholdersAndReassignmentCounter,
 }
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.logging.pretty.Pretty
@@ -172,25 +170,8 @@ class InternalizedRunningCommitments(
   def update(rt: RecordTime, change: AcsChange)(implicit
       loggingContext: NamedLoggingContext
   ): Unit =
-    update(rt, internalizeAcsChange(change))
+    update(rt, InternalizedAcsChange.internalizeAcsChange(stringInterning, change))
 
-  private def internalizeContractStakeholders(
-      counter: ContractStakeholdersAndReassignmentCounter
-  ): InternalizedContractStakeholdersAndReassignmentCounter =
-    InternalizedContractStakeholdersAndReassignmentCounter(
-      counter.stakeholders.map(stringInterning.party.internalize),
-      counter.reassignmentCounter,
-    )
-
-  private def internalizeAcsChange(change: AcsChange): InternalizedAcsChange =
-    InternalizedAcsChange(
-      activations = change.activations.map { case (contractId, stakeholdersAndCounter) =>
-        contractId -> internalizeContractStakeholders(stakeholdersAndCounter)
-      },
-      deactivations = change.deactivations.map { case (contractId, stakeholdersAndCounter) =>
-        contractId -> internalizeContractStakeholders(stakeholdersAndCounter)
-      },
-    )
 }
 
 class RunningCommitments(

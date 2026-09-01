@@ -24,7 +24,7 @@ import com.digitalasset.canton.networking.grpc.{
 import com.digitalasset.canton.tea.TrafficEnforcementErrors
 import com.digitalasset.canton.tea.v1.*
 import com.digitalasset.canton.tea.v1.TrafficServiceGrpc.TrafficServiceStub
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import io.grpc.inprocess.InProcessChannelBuilder
 import io.grpc.{ManagedChannel, StatusRuntimeException}
 
@@ -155,6 +155,7 @@ object RichTrafficServiceClient {
       InProcessChannelBuilder
         .forName(grpcChannelName)
         .executor(executor)
+        .intercept(TraceContextGrpc.clientInterceptor())
         .build()
 
     new RichTrafficServiceClient(

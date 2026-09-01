@@ -20,7 +20,9 @@ import com.digitalasset.canton.tea.projection.{
   TeaProjectionFactory,
 }
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.tracing.TraceContextGrpc
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
+import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.typed.ActorSystem
 import org.apache.pekko.actor.typed.scaladsl.adapter.{ClassicActorSystemOps, TypedActorSystemOps}
 import org.apache.pekko.projection.ProjectionId
@@ -41,7 +43,7 @@ class TrafficEnforcementApp(
     debitProjection: TeaProjectionFactory,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
-)(implicit system: ActorSystem[?])
+)(implicit system: ActorSystem[?], tracer: Tracer)
     extends NamedLogging
     with FlagCloseable {
 
@@ -59,6 +61,7 @@ class TrafficEnforcementApp(
 
   private val server = InProcessServerBuilder
     .forName(serverName)
+    .intercept(TraceContextGrpc.reportingServerInterceptor(tracer))
     .addService(new TrafficEnforcementServiceGrpc(service, loggerFactory))
     .build()
 
@@ -111,7 +114,8 @@ object TrafficEnforcementApp {
       metrics: TrafficEnforcementMetrics,
       onEventCommitted: () => Unit = () => (),
   )(implicit
-      ec: ExecutionContext
+      ec: ExecutionContext,
+      tracer: Tracer,
   ): TrafficEnforcementApp = {
     val logger = loggerFactory.getTracedLogger(getClass)
 

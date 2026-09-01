@@ -364,6 +364,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       numberOfAttempts = 1,
       jitterStream = jitterStream,
       orderingMode = OrderingMode.Consensus,
+      firstTimeWeMadeRequest = Map.empty,
     )
   protected val AMissingBatchStatusNode1And2Acks =
     MissingBatchStatus(
@@ -372,6 +373,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       numberOfAttempts = 1,
       jitterStream = jitterStream,
       orderingMode = OrderingMode.Consensus,
+      firstTimeWeMadeRequest = Map.empty,
     )
   protected val ANextToBeProvidedToConsensus =
     NextToBeProvidedToConsensus(

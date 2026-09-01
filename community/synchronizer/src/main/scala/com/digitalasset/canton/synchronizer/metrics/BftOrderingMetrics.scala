@@ -100,6 +100,20 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
   private[metrics] val ingress = new IngressHistograms
 
   // Private constructor to avoid being instantiated multiple times by accident
+  private[metrics] final class AvailabilityHistograms private[BftOrderingHistograms] {
+    private[metrics] val prefix = BftOrderingHistograms.this.prefix :+ "availability"
+
+    private[metrics] val outputFetchLatency = Item(
+      prefix :+ "output-fetch-latency",
+      summary = "Output fetch latency",
+      description =
+        "Records the rate and latency it takes for one output fetch request to get an response (requests that timeout are not included)",
+      qualification = MetricQualification.Latency,
+    )
+  }
+  private[metrics] val availability = new AvailabilityHistograms
+
+  // Private constructor to avoid being instantiated multiple times by accident
   private[metrics] final class ConsensusHistograms private[BftOrderingHistograms] {
     private[metrics] val prefix = BftOrderingHistograms.this.prefix :+ "consensus"
 
@@ -642,6 +656,7 @@ class BftOrderingMetrics private[metrics] (
     object outputFetch {
       object labels {
         val Leader = "Leader"
+        val From = "From"
       }
 
       val missingBatchesNeedOutputFetch: Meter = openTelemetryMetricsFactory.meter(
@@ -652,6 +667,19 @@ class BftOrderingMetrics private[metrics] (
             "Measures amount of batches from other nodes that we did not have locally so we need to fetch from network",
           qualification = MetricQualification.Traffic,
         )
+      )
+
+      val timeouts: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "output-fetch-timeouts",
+          summary = "Output fetch timeouts",
+          description = "Measures amount of timeouts during output fetch",
+          qualification = MetricQualification.Errors,
+        )
+      )
+
+      val latency: Timer = openTelemetryMetricsFactory.timer(
+        histograms.availability.outputFetchLatency.info
       )
     }
 
@@ -802,6 +830,15 @@ class BftOrderingMetrics private[metrics] (
           qualification = MetricQualification.Saturation,
         )
       )
+
+    val flushedBlocks: Meter = openTelemetryMetricsFactory.meter(
+      MetricInfo(
+        prefix :+ "flushed-blocks",
+        summary = "Flushed blocks",
+        description = "Total blocks flushed.",
+        qualification = MetricQualification.Debug,
+      )
+    )
 
     val commitLatency: Timer =
       openTelemetryMetricsFactory.timer(histograms.consensus.consensusCommitLatency.info)

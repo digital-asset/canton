@@ -12,8 +12,11 @@ import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.tea.projection.TrafficDelta.{creditBalanceDelta, debitBalanceDelta}
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.tracing.Traced
+import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext, Traced}
 import com.typesafe.config.{Config, ConfigFactory}
+import io.opentelemetry.api.common.AttributeKey
+import io.opentelemetry.api.trace.{StatusCode, Tracer}
+import io.opentelemetry.sdk.trace.data.SpanData
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.testkit.typed.scaladsl.ActorTestKit
 import org.apache.pekko.actor.typed.{ActorRef, ActorSystem}
@@ -48,6 +51,10 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
   }
 
   def additionalPekkoConfig: Config = ConfigFactory.empty()
+
+  protected val testTelemetry: TestTelemetrySetup = new TestTelemetrySetup()
+  // Shadows the non-reporting tracer from BaseTest so the factories under test export their spans.
+  override protected implicit lazy val tracer: Tracer = testTelemetry.tracer
 
   protected val clock = new SimClock(loggerFactory = loggerFactory)
 
@@ -98,10 +105,11 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
     )
 
   private def tracedSource(
-      events: Seq[ProjectionEvent]
+      events: Seq[ProjectionEvent],
+      traceContext: TraceContext,
   ): Source[Traced[ProjectionEvent], NotUsed] =
     Source(events.toList)
-      .map(event => Traced.empty(event))
+      .map(event => Traced(event)(traceContext))
       // Keep the stream open after the (finite) test events so the projection idles in a steady
       // state instead of completing and being restarted in a loop.
       .concat(Source.never[Traced[ProjectionEvent]])
@@ -111,12 +119,23 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
     */
   protected def recordingSourceFactory(
       events: Seq[ProjectionEvent],
-      resumeOffsets: ConcurrentLinkedQueue[Option[Long]] = new ConcurrentLinkedQueue[Option[Long]](),
+      resumeOffsets: ConcurrentLinkedQueue[Option[Long]] =
+        new ConcurrentLinkedQueue[Option[Long]](),
+      traceContext: TraceContext = TraceContext.empty,
   ): Option[Long] => Source[Traced[ProjectionEvent], NotUsed] = { maybeOffset =>
     resumeOffsets.add(maybeOffset)
     val fromExclusive = maybeOffset.getOrElse(Long.MinValue)
-    tracedSource(events.filter(_.event.offset > fromExclusive))
+    tracedSource(events.filter(_.event.offset > fromExclusive), traceContext)
   }
+
+  /** The exporter isn't reset between tests, so each case gives its events its own trace context
+    * and then only looks at the spans under that trace id.
+    */
+  private def spansOn(traceContext: TraceContext): List[SpanData] =
+    testTelemetry.reportedSpans().filter(span => traceContext.traceId.contains(span.getTraceId))
+
+  private def spanAttribute(span: SpanData, key: String): String =
+    span.getAttributes.get(AttributeKey.stringKey(s"canton.$key"))
 
   private def balanceOf(backend: Backend, account: AccountId): Option[AccountState] =
     backend.store
@@ -177,7 +196,11 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
           projectionEvent(alice, debitBalanceDelta(3), offset = 2L, t2),
         )
 
-        val ref = spawnProjection(testKit, backend, recordingSourceFactory(events))
+        val ref = spawnProjection(
+          testKit,
+          backend,
+          recordingSourceFactory(events, traceContext = nonEmptyTraceContext1),
+        )
         try {
           eventually() {
             balanceOf(backend, alice) shouldBe Some(AccountState(alice, 3, 10, t2))
@@ -188,6 +211,29 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
           )
           eventGaugeValue(backend) shouldBe t2.toEpochMilli
           offsetGaugeValue(backend) shouldBe 2L
+          eventually() {
+            val spans = spansOn(nonEmptyTraceContext1)
+            spans should have size 2
+            forEvery(spans) { span =>
+              span.getName shouldBe TeaProjectionFactory.ApplyDeltaSpanName
+              Some(span.getParentSpanId) shouldBe nonEmptyTraceContext1.spanId
+              span.getStatus.getStatusCode should not be StatusCode.ERROR
+              spanAttribute(span, TeaProjectionFactory.AccountIdAttribute) shouldBe alice.unwrap
+              spanAttribute(
+                span,
+                TeaProjectionFactory.EventSourceAttribute,
+              ) shouldBe EventSource.LedgerAPICompletions.toString
+            }
+            spans.map(
+              spanAttribute(_, TeaProjectionFactory.OffsetAttribute)
+            ) should contain theSameElementsAs Seq("1", "2")
+            spans.map(
+              spanAttribute(_, TeaProjectionFactory.DeltaAttribute)
+            ) should contain theSameElementsAs Seq(
+              creditBalanceDelta(10).toString,
+              debitBalanceDelta(3).toString,
+            )
+          }
         } finally stopProjection(testKit, ref)
       }
 
@@ -298,7 +344,11 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
           // Retries and restarts make the exact number of logged WARN entries non-deterministic.
           loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
             {
-              val ref = spawnProjection(testKit, backend, recordingSourceFactory(events))
+              val ref = spawnProjection(
+                testKit,
+                backend,
+                recordingSourceFactory(events, traceContext = nonEmptyTraceContext2),
+              )
               try {
                 val maxCredit = NonNegativeLong.tryCreate(Long.MaxValue)
                 eventually() {
@@ -312,6 +362,29 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
                     AccountState.credits(alice, maxCredit, t1)
                   )
                   eventsOf(backend, alice, t1) should have size 1
+                }
+                // The span is only marked ERROR once Slick actually runs the deferred DB action, so poll for it.
+                eventually() {
+                  val (failed, succeeded) =
+                    spansOn(nonEmptyTraceContext2).partition(
+                      _.getStatus.getStatusCode == StatusCode.ERROR
+                    )
+                  failed should not be empty
+                  forEvery(failed) { span =>
+                    spanAttribute(span, TeaProjectionFactory.OffsetAttribute) shouldBe "2"
+                  }
+                  val recordedExceptions =
+                    failed
+                      .flatMap(_.getEvents.asScala)
+                      .flatMap(event =>
+                        Option(
+                          event.getAttributes.get(AttributeKey.stringKey("exception.message"))
+                        )
+                      )
+                  forAtLeast(1, recordedExceptions)(_ should include("TRAFFIC_UPDATE_OUT_OF_BOUND"))
+                  succeeded.map(
+                    spanAttribute(_, TeaProjectionFactory.OffsetAttribute)
+                  ) should contain("1")
                 }
               } finally stopProjection(testKit, ref)
             },
