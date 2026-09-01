@@ -51,6 +51,7 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   EnvironmentSetupPlugin,
   IsolatedEnvironments,
@@ -92,6 +93,10 @@ abstract class BaseSynchronizerRestartTest
         numMediators = 1,
       )
       .withManualStart
+      .addConfigTransforms(
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true)
+      )
       .withSetup { implicit env =>
         import env.*
 

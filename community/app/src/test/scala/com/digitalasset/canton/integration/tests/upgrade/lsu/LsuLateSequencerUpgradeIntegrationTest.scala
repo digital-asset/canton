@@ -16,7 +16,7 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.DefaultNewP
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
-import com.digitalasset.canton.time.PositiveFiniteDuration
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{admin, config}
 import monocle.macros.syntax.lens.*
@@ -43,7 +43,7 @@ LSU:
 - (s2, m2) upgrade
 - p2 and p3 automatically connect to the new synchronizer
  */
-final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
+final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimClockUtils {
   override protected def testName: String = "lsu-late-sequencer"
 
   // TODO(#35107) Upon disabling the old ACS commitment processor
@@ -236,11 +236,20 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
       // All successors are announced
       newOldSequencers.foreach {
         case (newNodeName, oldNodeName) =>
-          s(oldNodeName).topology.lsu.sequencer_successors.propose_successor(
-            sequencerId = s(oldNodeName).id,
-            endpoints = s(newNodeName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            successorSynchronizerId = fixture.newPsid,
+          runAsyncAndAdvanceClockUntilFinished(
+            // Because we are using a simclock, the BFT rate limiter can make the test flaky by dropping retransmissions with
+            // "Dropped a retransmission request ... due to rate limiting" and prevent `propose_successor` from completing.
+            // To avoid this, we advance the clock in the background while proposing the successor.
+            s(oldNodeName).topology.lsu.sequencer_successors.propose_successor(
+              sequencerId = s(oldNodeName).id,
+              endpoints = s(newNodeName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
+              successorSynchronizerId = fixture.newPsid,
+            ),
+            clock = env.environment.simClock.value,
+            deltaTime = NonNegativeFiniteDuration.tryOfMillis(100),
+            maxPollInterval = 100.millis,
           )
+
         case _ => ()
       }
 

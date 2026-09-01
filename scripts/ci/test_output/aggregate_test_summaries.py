@@ -4,7 +4,19 @@ import glob
 import html
 import json
 import os
+import sys
 import tempfile
+
+# Reuse the per-shard renderer, byte budget and fencing so the global blocks come out byte-for-byte identical.
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from summarize_test_results import (  # noqa: E402
+    SUMMARY_BUDGET_BYTES,
+    SUMMARY_TRAILER_RESERVE_BYTES,
+    render_detail,
+)
+
+# Well above the producer's line cap so render_detail only byte-truncates, never re-trims the already-capped traces.
+DETAIL_TRACE_LINES = 100_000
 
 
 def parse_args():
@@ -113,6 +125,15 @@ def normalize_shard_data(data, path):
         invalid_fields.append(key)
         return default
 
+    def parse_str_dict(source, key):
+        if key not in source:
+            return {}
+        value = source.get(key)
+        if not isinstance(value, dict):
+            invalid_fields.append(key)
+            return {}
+        return {str(k): str(v) for k, v in value.items()}
+
     rerun = data.get("rerun") if isinstance(data.get("rerun"), dict) else data
 
     return {
@@ -127,6 +148,7 @@ def normalize_shard_data(data, path):
         "parse_errors": parse_int(results, "parse_errors"),
         "total": parse_int(results, "total"),
         "not_passed_tests": parse_str_list(results, "not_passed_tests"),
+        "not_passed_details": parse_str_dict(results, "not_passed_details"),
         "rerun_used": parse_optional_bool(rerun, "rerun_used", default=False),
         "rerun_classes": parse_str_list(rerun, "rerun_classes"),
         "first_run_not_passed_tests": parse_str_list(rerun, "first_run_not_passed_tests"),
@@ -228,11 +250,14 @@ def build_summary(files, shards, parse_errors, limit):
 
     all_not_passed = []
     seen_tests = set()
+    global_details = {}
     for shard in shards:
         for name in shard["not_passed_tests"]:
             if name not in seen_tests:
                 seen_tests.add(name)
                 all_not_passed.append(name)
+        for name, text in shard.get("not_passed_details", {}).items():
+            global_details.setdefault(name, text)
 
     all_first_run_not_passed = []
     seen_first_run = set()
@@ -327,20 +352,39 @@ def build_summary(files, shards, parse_errors, limit):
         lines.append("")
 
     lines.append("### Still failing after rerun (global)")
-    if all_not_passed:
-        shown = min(len(all_not_passed), limit)
-        lines.append(
-            f"<details><summary>Show failed and error tests ({len(all_not_passed)}, shown {shown})</summary>"
-        )
-        lines.append("")
-        for test_name in all_not_passed[:limit]:
-            lines.append(f"- {html.escape(test_name)}")
-        if len(all_not_passed) > limit:
-            lines.append(f"- and {len(all_not_passed) - limit} more")
-        lines.append("")
-        lines.append("</details>")
-    else:
+    if not all_not_passed:
         lines.append("- none")
+    else:
+        # One collapsible block per test, emitted until the shared byte budget is hit, then a pointer to the artifact.
+        total = len(all_not_passed)
+        lines.append(f"Failed or errored tests: {total}")
+        lines.append("")
+        running = len(("\n".join(lines) + "\n").encode("utf-8"))
+        shown_count = 0
+        for test_name in all_not_passed[:limit]:
+            block = render_detail(test_name, global_details.get(test_name, ""), DETAIL_TRACE_LINES)
+            block_bytes = len(block.encode("utf-8")) + 1
+            if running + block_bytes > SUMMARY_BUDGET_BYTES:
+                # Byte-truncate the first block if even one does not fit, so a pathological trace never empties the section.
+                if shown_count == 0:
+                    budget = SUMMARY_BUDGET_BYTES - running - SUMMARY_TRAILER_RESERVE_BYTES
+                    lines.append(
+                        render_detail(
+                            test_name,
+                            global_details.get(test_name, ""),
+                            DETAIL_TRACE_LINES,
+                            max_bytes=budget,
+                        )
+                    )
+                    shown_count += 1
+                break
+            lines.append(block)
+            running += block_bytes
+            shown_count += 1
+        remaining = total - shown_count
+        if remaining > 0:
+            lines.append("")
+            lines.append(f"- and {remaining} more, full details in the artifact")
 
     if all_first_run_not_passed:
         lines.append("")
@@ -392,6 +436,10 @@ def self_test():
     test_build_summary_handles_empty_input_glob()
     test_build_summary_reports_missing_shards_and_deduplicates_tests()
     test_build_summary_truncates_not_passed_tests()
+    test_normalize_shard_data_reads_details()
+    test_build_summary_renders_detail_blocks()
+    test_build_summary_details_respect_budget()
+    test_details_survive_state_round_trip()
     test_resolve_summary_path_prefers_arg_and_falls_back_to_env()
     test_write_state_round_trip()
     print("All self-checks passed")
@@ -409,12 +457,15 @@ def _sample_shard(
     total=1,
     junit_files=1,
     not_passed_tests=None,
+    not_passed_details=None,
     rerun_used=False,
     rerun_classes=None,
     first_run_not_passed_tests=None,
 ):
     if not_passed_tests is None:
         not_passed_tests = []
+    if not_passed_details is None:
+        not_passed_details = {}
     if rerun_classes is None:
         rerun_classes = []
     if first_run_not_passed_tests is None:
@@ -431,6 +482,7 @@ def _sample_shard(
         "parse_errors": int(parse_errors),
         "total": int(total),
         "not_passed_tests": [str(x) for x in not_passed_tests],
+        "not_passed_details": {str(k): str(v) for k, v in not_passed_details.items()},
         "rerun_used": bool(rerun_used),
         # Kept for potential future reporting; currently not rendered in markdown summary.
         "rerun_classes": [str(x) for x in rerun_classes],
@@ -552,7 +604,7 @@ def test_build_summary_reports_missing_shards_and_deduplicates_tests():
         f"Missing shard summary not found in: {summary}"
     )
     assert "- Invalid summary files: 1" in summary
-    assert summary.count("- com.example.Bar.testB") == 1, "Expected deduplicated failed tests"
+    assert summary.count("❌ com.example.Bar.testB") == 1, "Expected deduplicated failed tests"
     assert "- Shards reported: 2/3" in summary
     assert "| 0 |" in summary and "| yes |" in summary
     assert "### Not passed tests in first run (global)" in summary
@@ -570,8 +622,12 @@ def test_build_summary_truncates_not_passed_tests():
         )
     ]
     summary = build_summary(["a.json"], shards, [], limit=2)
-    assert "shown 2" in summary, f"Expected shown count in summary, got: {summary}"
-    assert "- and 3 more" in summary, f"Expected truncation suffix in summary, got: {summary}"
+    assert summary.count("<details><summary>❌") == 2, (
+        f"Expected only the limit of detail blocks rendered, got: {summary}"
+    )
+    assert "- and 3 more, full details in the artifact" in summary, (
+        f"Expected truncation suffix in summary, got: {summary}"
+    )
 
 
 def test_resolve_summary_path_prefers_arg_and_falls_back_to_env():
@@ -616,6 +672,97 @@ def test_write_state_round_trip():
         assert loaded_shard["first_run_not_passed_tests"] == ["com.example.Foo.testA"], (
             f"Expected first_run_not_passed_tests to survive round-trip, got {loaded_shard}"
         )
+
+
+def test_normalize_shard_data_reads_details():
+    data = {
+        "shard_index": 0,
+        "total_shards": 1,
+        "junit_files": 1,
+        "results": {
+            "passed": 0,
+            "failures": 1,
+            "errors": 0,
+            "skipped": 0,
+            "parse_errors": 0,
+            "total": 1,
+            "not_passed_tests": ["com.example.Foo.testA"],
+            "not_passed_details": {"com.example.Foo.testA": "boom\nframe 0"},
+        },
+    }
+    shard = normalize_shard_data(data, "/tmp/s.json")
+    assert shard["not_passed_details"] == {"com.example.Foo.testA": "boom\nframe 0"}, shard
+    assert shard["invalid_fields"] == [], shard
+    # A non-dict details field is recorded as invalid, not fatal.
+    bad = dict(data)
+    bad["results"] = dict(data["results"], not_passed_details=["oops"])
+    shard = normalize_shard_data(bad, "/tmp/s.json")
+    assert shard["not_passed_details"] == {}, shard
+    assert "not_passed_details" in shard["invalid_fields"], shard
+
+
+def test_build_summary_renders_detail_blocks():
+    shards = [
+        _sample_shard(
+            shard_index="0",
+            total_shards="1",
+            failures=1,
+            total=1,
+            not_passed_tests=["com.example.Foo.testA"],
+            not_passed_details={"com.example.Foo.testA": "boom\nframe 0\nframe 1"},
+        )
+    ]
+    summary = build_summary(["a.json"], shards, [], limit=10)
+    assert "<details><summary>❌ com.example.Foo.testA</summary>" in summary, summary
+    assert "```" in summary, "Expected a fenced code block with the trace"
+    assert "frame 1" in summary, "Expected the captured trace to be rendered"
+    # No nested details wrapper around the per-test blocks.
+    assert "Show failed and error tests" not in summary, summary
+
+
+def test_build_summary_details_respect_budget():
+    global SUMMARY_BUDGET_BYTES
+    names = [f"com.example.Big{i}.t" for i in range(3)]
+    shards = [
+        _sample_shard(
+            shard_index="0",
+            total_shards="1",
+            failures=3,
+            total=3,
+            not_passed_tests=names,
+            # A single oversized trace must be byte-truncated so it does not blow the summary past GitHub's limit.
+            not_passed_details={names[0]: "x" * 5000, names[1]: "boom", names[2]: "boom"},
+        )
+    ]
+    original = SUMMARY_BUDGET_BYTES
+    try:
+        SUMMARY_BUDGET_BYTES = 1000
+        summary = build_summary(["a.json"], shards, [], limit=10)
+    finally:
+        SUMMARY_BUDGET_BYTES = original
+    encoded_len = len(summary.encode("utf-8"))
+    assert summary.count("<details><summary>❌") == 1, summary
+    assert "truncated, full trace in the artifact" in summary, summary
+    assert "and 2 more, full details in the artifact" in summary, summary
+    assert encoded_len <= 1000, f"summary is {encoded_len} bytes, over the budget"
+
+
+def test_details_survive_state_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "summary-state.json")
+        shards = [
+            _sample_shard(
+                shard_index="0",
+                failures=1,
+                total=1,
+                not_passed_tests=["com.example.Foo.testA"],
+                not_passed_details={"com.example.Foo.testA": "boom\nframe 0"},
+            )
+        ]
+        write_state(path, shards)
+        loaded = load_previous_state(path)
+    assert len(loaded) == 1, loaded
+    assert loaded[0]["not_passed_details"] == {"com.example.Foo.testA": "boom\nframe 0"}, loaded[0]
 
 
 if __name__ == "__main__":

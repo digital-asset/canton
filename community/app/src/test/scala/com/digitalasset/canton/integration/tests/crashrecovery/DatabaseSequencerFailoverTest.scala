@@ -61,6 +61,8 @@ abstract class BaseDatabaseSequencerFailoverTest
       .addConfigTransform(updateSequencerNodes)
       .addConfigTransform(ConfigTransforms.uniqueH2DatabaseNames)
       .addConfigTransforms(ConfigTransforms.defaults*)
+      // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+      .addConfigTransform(ConfigTransforms.setCrashAfterFailedValidation(true))
       .withNetworkBootstrap { implicit env =>
         new NetworkBootstrapper(EnvironmentDefinition.S1M1)
       }

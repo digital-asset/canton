@@ -220,6 +220,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
           sessionKeyStore,
           encryptedViewsMessage,
           participantId,
+          protocolVersion,
           Some(randomness),
         )(
           LightTransactionViewTree

@@ -238,6 +238,7 @@ lazy val root = (project in file("."))
     // guava uses -android and -jre as classifiers, which one cannot easily exclude.
     ScalaUnidoc / unidoc / fullClasspath := (ScalaUnidoc / unidoc / fullClasspath).value
       .filterNot(_.data.name.endsWith("-android.jar")),
+    ScalaUnidoc / unidoc / scalacOptions += "-Wconf:cat=scaladoc:error",
     addArtifact(jsonApiDocsArtifact, packageJsonApiDocsArtifacts),
   )
 

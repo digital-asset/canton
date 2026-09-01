@@ -391,6 +391,7 @@ private[reassignment] class UnassignmentProcessingSteps(
         sessionKeyStore,
         message,
         participantId,
+        protocolVersion.value,
       )(deserializeTree)
       .flatMap { multiView =>
         EitherT.cond[FutureUnlessShutdown](
@@ -797,7 +798,7 @@ object UnassignmentProcessingSteps {
   ) extends PendingReassignment {
 
     def isReassigningParticipant: Boolean =
-      unassignmentValidationResult.assignmentExclusivity.isDefined
+      unassignmentValidationResult.isReassigningParticipant
 
     override def rootHashO: Option[RootHash] = Some(unassignmentValidationResult.rootHash)
 

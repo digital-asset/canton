@@ -52,8 +52,7 @@ trait SyncService
     with PackageSyncService
     with PartySyncService
     with ParticipantPruningSyncService
-    with ReportsHealth
-    with InternalIndexServiceProvider {
+    with ReportsHealth {
 
   // temporary implementation, will be removed as topology events on Ledger API proceed
   def getConnectedSynchronizers(request: ConnectedSynchronizerRequest)(implicit

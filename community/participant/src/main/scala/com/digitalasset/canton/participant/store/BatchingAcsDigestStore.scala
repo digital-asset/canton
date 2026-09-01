@@ -81,6 +81,10 @@ class BatchingAcsDigestStore(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = underlying.purgeCheckpointsInternal()
 
+  override protected def truncateCheckpoints()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = underlying.truncateCheckpointsInternal()
+
   override def onClosed(): Unit =
     LifeCycle.close(party_, participant_, underlying)(logger)
 }
@@ -187,6 +191,9 @@ class BatchingAcsDigestJournal[K](
 
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     underlying.purge()
+
+  override def truncateAll()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    underlying.truncateAll()
 
   override def close(): Unit =
     LifeCycle.close(underlying)(logger)

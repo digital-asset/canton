@@ -107,7 +107,7 @@ private[channel] final class TestRecorder(
               case Right(byteString) =>
                 val decompressed =
                   ByteStringUtil
-                    .decompressGzip(byteString, BaseTest.defaultMaxBytesToDecompress)
+                    .decompressZstd(byteString, BaseTest.defaultMaxBytesToDecompress)
                     .value
                 decompressed.toStringUtf8
               case Left(error) => error.toString

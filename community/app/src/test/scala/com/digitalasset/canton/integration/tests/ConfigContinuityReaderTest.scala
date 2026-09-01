@@ -36,6 +36,12 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
         "canton.participants.participant1.parameters.engine.contract-state-mode"
       )
     ),
+    (3, 6, 0) -> Transforms(
+      Seq(
+        // renamed to crash-after-failed-validation, as agreed in https://github.com/DACH-NY/canton/issues/32515#issuecomment-5436858018
+        "canton.participants.participant1.parameters.commit-after-failed-activeness-check"
+      )
+    ),
   )
 
   /** Make the config parsable by applying some transformations. It basically makes some breaking

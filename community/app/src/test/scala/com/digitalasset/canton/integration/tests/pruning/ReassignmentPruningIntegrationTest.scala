@@ -199,7 +199,7 @@ sealed trait ReassignmentPruningIntegrationTest
         participant2.pruning.find_safe_offset(beforeOrAt = environment.clock.now.toInstant).value
 
       val safeTimestamp =
-        participant2.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value
+        participant2.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore
           .lastSynchronizerOffsetBeforeOrAt(
             env.daId,
             Offset.tryFromLong(computedSafeOffset),

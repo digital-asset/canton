@@ -42,6 +42,8 @@ class AcsCommitmentCrashIntegrationTest
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.commitmentCheckpointInterval).replace(checkpointInterval)
         ),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay)

@@ -149,7 +149,7 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
   private def cleanSynchronizerIndex(
       p: LocalParticipantReference
   )(implicit env: TestConsoleEnvironment): SynchronizerIndex =
-    p.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value
+    p.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore
       .cleanSynchronizerIndex(env.daId.logical)
       .value
 
@@ -168,7 +168,7 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
         ),
         oldSynchronizerOwners = synchronizerOwners1,
         newPV = ProtocolVersion.dev,
-        newSerial = daId.serial.increment.toNonNegative,
+        newSerial = daId.serial.increment.value.toNonNegative,
       )
 
       bank = participant1.parties.enable("Bank")
@@ -207,7 +207,7 @@ final class LsuRollForwardNoActivityIntegrationTest extends LsuBase with HasExec
         ),
         oldSynchronizerOwners = null, // it should not be used
         newPV = testedProtocolVersion, // potentially a downgrade
-        newSerial = fixture1.newPsid.serial.increment.toNonNegative,
+        newSerial = fixture1.newPsid.serial.increment.value.toNonNegative,
       )
 
       fixture2.newSynchronizerNodes.all.start()

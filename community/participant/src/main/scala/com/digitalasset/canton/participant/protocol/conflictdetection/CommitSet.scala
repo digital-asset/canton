@@ -126,7 +126,7 @@ object CommitSet {
       consumedInputsOfHostedParties: Map[LfContractId, Set[LfPartyId]],
       transient: Map[LfContractId, Set[LfPartyId]],
       createdContracts: Map[LfContractId, GenContractInstance],
-      commitAfterFailedActivenessCheck: Boolean,
+      crashAfterFailedValidation: Boolean,
       hostedOnboardingPartiesO: Option[HostedOnboardingParties],
   )(implicit loggingContext: ErrorLoggingContext): CommitSet = {
     if (!activenessResult.isSuccessful) {
@@ -134,7 +134,7 @@ object CommitSet {
         .Warn(s"Request $requestId with failed activeness check is approved.")
         .report()
       loggingContext.info(s"Failed activeness result for request $requestId is $activenessResult")
-      if (!commitAfterFailedActivenessCheck) {
+      if (crashAfterFailedValidation) {
         throw new RuntimeException(s"Request $requestId with failed activeness check is approved.")
       }
     }

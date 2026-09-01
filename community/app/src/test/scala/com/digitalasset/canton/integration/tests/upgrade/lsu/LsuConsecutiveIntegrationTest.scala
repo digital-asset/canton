@@ -105,7 +105,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
         newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
         oldSynchronizerOwners = Set[InstanceReference](sequencer1, mediator1),
         newPV = ProtocolVersion.dev,
-        newSerial = daId.serial.increment.toNonNegative,
+        newSerial = daId.serial.increment.value.toNonNegative,
       )
 
       val fixture2 = Fixture(
@@ -116,7 +116,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
         newOldNodesResolution = Map("sequencer3" -> "sequencer2", "mediator3" -> "mediator2"),
         oldSynchronizerOwners = Set[InstanceReference](sequencer2, mediator2),
         newPV = testedProtocolVersion,
-        newSerial = fixture1.newSerial.increment.toNonNegative,
+        newSerial = fixture1.newSerial.increment.value.toNonNegative,
       )
 
       val alice = participant1.parties.enable("Alice")

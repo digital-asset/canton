@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.ledger.api.v2.commands.Command
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{
@@ -532,7 +533,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
       val consumptionRound2 =
         trafficBeforeRerun.extraTrafficRemainder - trafficAfterRerun.extraTrafficRemainder
 
-      (consumptionRound1 - consumptionRound2) should equal(0L +- 100L)
+      (consumptionRound1 - consumptionRound2) should equal(0L +- maxTrafficDiffTolerance)
     }
 
     "update traffic state of sequencer and participant on top ups (after LSU)" in { implicit env =>
@@ -574,6 +575,7 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
   }
 }
 
+@UnstableTest // TODO(i32031): Remove once the test is stable again
 final class LsuBftOrderingTrafficAccountingIntegrationTest
     extends LsuTrafficAccountingIntegrationTest {
   registerPlugin(

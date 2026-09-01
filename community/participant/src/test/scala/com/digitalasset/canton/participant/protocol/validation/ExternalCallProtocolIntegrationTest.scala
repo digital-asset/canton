@@ -683,7 +683,7 @@ final class ExternalCallProtocolIntegrationTest
       hostedWitnesses = Set.empty,
       replayCheckResult = None,
       validatedExternalTransactionHash = None,
-      commitAfterFailedActivenessCheck = false,
+      crashAfterFailedValidation = false,
       hostedOnboardingPartiesO = None,
     )
 

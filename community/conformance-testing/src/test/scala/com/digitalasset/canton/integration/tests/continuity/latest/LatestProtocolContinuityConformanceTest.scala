@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.continuity.latest
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.tests.continuity.{
   ProtocolContinuityConformanceTest,
   ProtocolContinuityConformanceTestParticipant,
@@ -38,6 +39,7 @@ class LatestProtocolContinuityConformanceTestSynchronizer
     extends ProtocolContinuityConformanceTestSynchronizer
     with LatestProtocolContinuityConformanceTest
 
+@UnstableTest // TODO(i32825): remove this once the test is no longer flaky
 class LatestProtocolContinuityConformanceTestParticipant
     extends ProtocolContinuityConformanceTestParticipant
     with LatestProtocolContinuityConformanceTest {

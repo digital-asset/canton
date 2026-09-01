@@ -24,4 +24,7 @@ final case class ConfiguredTests(availableTests: AvailableTests, config: Config)
 
   def allSuiteNames = allTests.map(_.name).sorted
   def allTestNames = allTests.flatMap(_.tests).map(_.name).sorted
+
+  def multiParticipantTestNames: Seq[String] =
+    allTests.flatMap(_.multiParticipantTests).map(_.name).sorted
 }

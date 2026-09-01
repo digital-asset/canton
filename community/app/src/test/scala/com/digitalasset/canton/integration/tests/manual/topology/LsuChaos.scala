@@ -165,7 +165,7 @@ private[topology] class LsuChaos(
       if (scheduleNextLsu) {
         val nextPsid = PhysicalSynchronizerId(
           currentSynchronizer.psid.logical,
-          currentSynchronizer.psid.serial.increment.toNonNegative,
+          currentSynchronizer.psid.serial.increment.value.toNonNegative,
           ProtocolVersion.dev,
         )
 

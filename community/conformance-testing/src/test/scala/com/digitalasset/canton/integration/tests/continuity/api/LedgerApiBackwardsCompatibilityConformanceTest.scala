@@ -23,6 +23,8 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
 
   override def connectedSynchronizersCount = 2
 
+  override protected def onlyMultiParticipantTests: Boolean = false
+
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
       .withSetup { implicit env =>
@@ -69,7 +71,6 @@ trait LedgerApiBackwardsCompatibilityConformanceTest
     "ExplicitDisclosureIT:EDDuplicates", // unexpected failure
     "CommandServiceIT:CSSubmitAndWaitForTransactionFilterTemplate", // Expected a non empty traffic cost
     "InteractiveSubmissionServiceIT:ISSPrepareSubmissionRequestSynchronizerId", // unexpected synchronizer ID
-    "ClosedWorldIT:ClosedWorldObserver", // Cannot execute a transaction that references unallocated observer parties
     "CommandSubmissionCompletionIT:CSCCompletions", // Empty traffic cost
     "InteractiveSubmissionServiceIT:ISSExecuteAndWaitForTransactionInvalidSynchronizerId", // wrong error message
     "CommandServiceIT:CSsubmitAndWaitBasic", // Expected a non empty traffic cost

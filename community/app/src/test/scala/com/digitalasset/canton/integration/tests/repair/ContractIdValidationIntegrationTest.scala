@@ -140,10 +140,11 @@ final class ContractIdValidationIntegrationTest
 
       val result = File.temporaryFile(suffix = ".gz").map { brokenExportFile =>
         val source =
-          participant1.underlying.value.sync.internalIndexService.value.activeContracts(
-            Set(alice.toLf),
-            Offset.fromLong(aliceAddedOnP2Offset).toOption,
-          )
+          participant1.underlying.value.participantServices.ledgerApiIndexServiceContainer.asEval.value.internalIndexService
+            .activeContracts(
+              Set(alice.toLf),
+              Offset.fromLong(aliceAddedOnP2Offset).toOption,
+            )
         val cleanExport =
           source.runWith(Sink.seq).futureValue.map(resp => resp.getActiveContract).toList
         val brokenExportStream = brokenExportFile.newGzipOutputStream()

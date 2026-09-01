@@ -167,13 +167,7 @@ jobs:
   build_scaladoc:
     name: Build Scaladoc
     needs: [pick_runner, compile]
-    if: |
-      github.event_name == 'push' &&
-      (
-        github.ref == 'refs/heads/main' ||
-        startsWith(github.ref, 'refs/heads/release-line') ||
-        startsWith(github.ref, 'refs/tags/v')
-      )
+    if: github.event_name != 'merge_group'
     uses: ./.github/workflows/_build_scaladoc.yml
     secrets: inherit
     with:
@@ -432,8 +426,11 @@ jobs:
       - variations_test_selected_users
     if: |
       always() &&
-      github.run_attempt >= 2 &&
-      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+      github.run_attempt >= 2  &&
+      (
+        contains(needs.*.result, 'failure') ||
+        contains(needs.*.result, 'cancelled')
+      )
     uses: ./.github/workflows/_notify.yml
     secrets: inherit
     with:

@@ -44,7 +44,7 @@ final case class TransactionValidationResult(
     hostedWitnesses: Set[LfPartyId],
     replayCheckResult: Option[String],
     validatedExternalTransactionHash: Option[Hash],
-    commitAfterFailedActivenessCheck: Boolean,
+    crashAfterFailedValidation: Boolean,
     hostedOnboardingPartiesO: Option[HostedOnboardingParties],
 ) {
 
@@ -57,7 +57,7 @@ final case class TransactionValidationResult(
       consumedInputsOfHostedParties,
       transient,
       createdContracts,
-      commitAfterFailedActivenessCheck,
+      crashAfterFailedValidation,
       hostedOnboardingPartiesO,
     )
 }

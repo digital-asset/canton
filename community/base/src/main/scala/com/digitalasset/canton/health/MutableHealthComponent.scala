@@ -96,6 +96,7 @@ abstract class DelegatingMutableHealthQuasiComponent[Id, H <: HealthQuasiCompone
     reduceState(getDependencies.fmap(_.getState))
 
   def set(id: Id, element: H): Unit = setDependency(id, element)
+  def remove(id: Id): Unit = removeDependency(id)
   def setBatch(add: Map[Id, H]): Unit = alterDependencies(Set.empty, add)
 }
 

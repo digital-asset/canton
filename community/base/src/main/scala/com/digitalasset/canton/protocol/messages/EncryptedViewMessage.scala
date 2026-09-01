@@ -17,7 +17,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{v30, v31, *}
+import com.digitalasset.canton.protocol.{v30, v31, v32, *}
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequiredNonEmpty}
 import com.digitalasset.canton.serialization.{
   DefaultDeserializationError,
@@ -108,6 +108,7 @@ object EncryptedView {
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       aViewType: VT,
+      protocolVersion: ProtocolVersion,
   )(
       aViewTree: aViewType.View,
       maxBytesToDecompress: MaxBytesToDecompress,
@@ -120,7 +121,7 @@ object EncryptedView {
         EncryptionError.MaxViewSizeExceeded(viewSize, maxBytesToDecompress.limit),
       )
       encryptedView <- encryptionOps
-        .encryptSymmetricWith(CompressedView(aViewTree), viewKey)
+        .encryptSymmetricWith(CompressedView(aViewTree)(protocolVersion), viewKey)
         .map(apply(aViewType))
     } yield encryptedView
   }
@@ -129,6 +130,7 @@ object EncryptedView {
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       encryptedViewTree: Encrypted[CompressedView[View]],
+      protocolVersion: ProtocolVersion,
   )(
       deserialize: ByteString => Either[DeserializationError, View],
       maxBytesToDecompress: MaxBytesToDecompress,
@@ -136,7 +138,7 @@ object EncryptedView {
     encryptionOps
       .decryptWith(encryptedViewTree, viewKey)(
         CompressedView
-          .fromByteString[View](deserialize)(_, maxBytesToDecompress)
+          .fromByteString[View](deserialize)(_, maxBytesToDecompress)(protocolVersion)
       )
       .map(_.value)
 }
@@ -166,6 +168,7 @@ object EncryptedMultipleViews {
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       viewType: VT,
+      protocolVersion: ProtocolVersion,
   )(
       viewTrees: NonEmpty[Seq[viewType.View]],
       maxBytesToDecompress: MaxBytesToDecompress,
@@ -179,7 +182,10 @@ object EncryptedMultipleViews {
         (),
         EncryptionError.MaxViewSizeExceeded(size, maxBytesToDecompress.limit),
       )
-      encryptedViews <- encryptionOps.encryptSymmetricWith(CompressedView(multiView), viewKey)
+      encryptedViews <- encryptionOps.encryptSymmetricWith(
+        CompressedView(multiView)(protocolVersion),
+        viewKey,
+      )
     } yield EncryptedMultipleViews(viewType, encryptedViews)
   }
 
@@ -188,6 +194,7 @@ object EncryptedMultipleViews {
       encryptionOps: EncryptionOps,
       viewKey: SymmetricKey,
       encryptedViewTrees: Encrypted[CompressedView[MultipleViewTrees[View]]],
+      protocolVersion: ProtocolVersion,
   )(
       deserialize: ByteString => Either[DeserializationError, View],
       maxBytesToDecompress: MaxBytesToDecompress,
@@ -222,7 +229,9 @@ object EncryptedMultipleViews {
     encryptionOps
       .decryptWith(encryptedViewTrees, viewKey)(
         CompressedView
-          .fromByteString[MultipleViewTrees[View]](deserializeMultiView)(_, maxBytesToDecompress)
+          .fromByteString[MultipleViewTrees[View]](deserializeMultiView)(_, maxBytesToDecompress)(
+            protocolVersion
+          )
       )
       .map(_.value)
   }
@@ -235,25 +244,28 @@ object EncryptedMultipleViews {
   * is ignored by decryption) and we want to avoid that this is applied to
   * [[com.digitalasset.canton.serialization.HasCryptographicEvidence]] instances.
   */
-final case class CompressedView[+V <: HasToByteString] private (value: V) extends HasToByteString {
+final case class CompressedView[+V <: HasToByteString] private (value: V)(pv: ProtocolVersion)
+    extends HasToByteString {
   override def toByteString: ByteString =
-    ByteStringUtil.compressGzip(value.toByteString)
+    ByteStringUtil.compress(value.toByteString, CompressionAlgo(pv))
 }
 
 object CompressedView {
-  private[messages] def apply[V <: HasToByteString](value: V): CompressedView[V] =
-    new CompressedView(value)
+  private[messages] def apply[V <: HasToByteString](value: V)(
+      pv: ProtocolVersion
+  ): CompressedView[V] =
+    new CompressedView(value)(pv)
 
   private[messages] def fromByteString[V <: HasToByteString](
       deserialize: ByteString => Either[DeserializationError, V]
   )(
       bytes: ByteString,
       maxBytesToDecompress: MaxBytesToDecompress,
-  ): Either[DeserializationError, CompressedView[V]] =
+  )(pv: ProtocolVersion): Either[DeserializationError, CompressedView[V]] =
     ByteStringUtil
-      .decompressGzip(bytes, maxBytesLimit = maxBytesToDecompress)
+      .decompress(bytes, CompressionAlgo(pv), maxBytesLimit = maxBytesToDecompress)
       .flatMap(deserialize)
-      .map(CompressedView(_))
+      .map(CompressedView(_)(pv))
 }
 
 /** An encrypted view message. The view message is encrypted with a symmetric key derived from the
@@ -462,6 +474,7 @@ object EncryptedViewMessage {
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       encrypted: EncryptedViewMessage[VT],
       viewRandomness: SecureRandomness,
+      pv: ProtocolVersion,
   )(
       deserialize: ByteString => Either[
         DeserializationError,
@@ -507,6 +520,7 @@ object EncryptedViewMessage {
             singleViewMessage,
             viewKey,
             maxBytesToDecompress,
+            pv,
           )(deserialize).map(view => MultipleViewTrees(NonEmpty.mk(Seq, view)))
         case multipleViewsMessage: EncryptedMultipleViewsMessage[VT] =>
           decryptMultipleViews(
@@ -514,6 +528,7 @@ object EncryptedViewMessage {
             multipleViewsMessage,
             viewKey,
             maxBytesToDecompress,
+            pv,
           )(deserialize)
       }
     } yield result
@@ -524,6 +539,7 @@ object EncryptedViewMessage {
       encrypted: EncryptedSingleViewMessage[VT],
       viewKey: SymmetricKey,
       maxBytesToDecompress: MaxBytesToDecompress,
+      pv: ProtocolVersion,
   )(
       deserialize: ByteString => Either[
         DeserializationError,
@@ -535,7 +551,12 @@ object EncryptedViewMessage {
     for {
       decryptedView <- eitherT(
         EncryptedView
-          .decrypt[VT#View](pureCrypto, viewKey, encrypted.encryptedView.viewTree)(
+          .decrypt[VT#View](
+            pureCrypto,
+            viewKey,
+            encrypted.encryptedView.viewTree,
+            pv,
+          )(
             deserialize,
             maxBytesToDecompress = maxBytesToDecompress,
           )
@@ -558,6 +579,7 @@ object EncryptedViewMessage {
       encrypted: EncryptedMultipleViewsMessage[VT],
       viewKey: SymmetricKey,
       maxBytesToDecompress: MaxBytesToDecompress,
+      pv: ProtocolVersion,
   )(
       deserialize: ByteString => Either[
         DeserializationError,
@@ -574,6 +596,7 @@ object EncryptedViewMessage {
             pureCrypto,
             viewKey,
             encrypted.encryptedViews.viewTrees,
+            pv,
           )(
             deserialize,
             maxBytesToDecompress = maxBytesToDecompress,
@@ -597,6 +620,7 @@ object EncryptedViewMessage {
       sessionKeyStore: ConfirmationRequestSessionKeyStore,
       encrypted: EncryptedViewMessage[VT],
       participantId: ParticipantId,
+      pv: ProtocolVersion,
       optViewRandomness: Option[SecureRandomness] = None,
   )(
       deserialize: ByteString => Either[
@@ -620,6 +644,7 @@ object EncryptedViewMessage {
         snapshot,
         encrypted,
         viewRandomness,
+        pv,
       )(
         deserialize
       )
@@ -813,6 +838,18 @@ final case class EncryptedMultipleViewsMessage[+VT <: ViewType](
       viewType = viewType.toProtoEnum,
     )
 
+  private def toProtoV32: v32.EncryptedMultipleViewsMessage =
+    v32.EncryptedMultipleViewsMessage(
+      compressedViewTrees = encryptedViews.viewTrees.ciphertext,
+      viewHashes = viewHashes.map(_.toProtoPrimitive),
+      encryptionScheme = viewEncryptionScheme.toProtoEnum,
+      submittingParticipantSignature = submittingParticipantSignature.map(_.toProtoV30),
+      sessionKeyLookup =
+        viewEncryptionKeyRandomness.map(EncryptedViewMessage.serializeEncryptedRandomness),
+      physicalSynchronizerId = psid.toProtoPrimitive,
+      viewType = viewType.toProtoEnum,
+    )
+
   // Not implemented on purpose, this type exists for 31+ only
   override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
     throw new UnsupportedOperationException(
@@ -823,7 +860,7 @@ final case class EncryptedMultipleViewsMessage[+VT <: ViewType](
     v31.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
 
   override def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent =
-    v32.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV31)
+    v32.EnvelopeContent.SomeEnvelopeContent.EncryptedMultipleViewsMessage(toProtoV32)
 
   /** Cast the type parameter to the given argument's [[com.digitalasset.canton.data.ViewType]]
     * provided that the argument is the same as [[viewType]]
@@ -872,8 +909,12 @@ object EncryptedMultipleViewsMessage
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> UnsupportedProtoCodec(ProtocolVersion.v34),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.EncryptedMultipleViewsMessage)(
-      supportedProtoVersionPVV(_)(EncryptedMultipleViewsMessage.fromProto),
+      supportedProtoVersionPVV(_)(EncryptedMultipleViewsMessage.fromProtoV31),
       _.toProtoV31,
+    ),
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.EncryptedMultipleViewsMessage)(
+      supportedProtoVersionPVV(_)(EncryptedMultipleViewsMessage.fromProtoV32),
+      _.toProtoV32,
     ),
   )
 
@@ -894,7 +935,7 @@ object EncryptedMultipleViewsMessage
     submittingParticipantSignature,
   )(protocolVersionRepresentativeFor(protocolVersion))
 
-  def fromProto(
+  def fromProtoV31(
       pvv: ProtocolVersionValidation,
       encryptedViewMessageP: v31.EncryptedMultipleViewsMessage,
   ): ParsingResult[EncryptedMultipleViewsMessage[ViewType]] = {
@@ -945,6 +986,67 @@ object EncryptedMultipleViewsMessage
         pvv,
       )(PhysicalSynchronizerId.fromProtoPrimitive)
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
+    } yield new EncryptedMultipleViewsMessage(
+      EncryptedMultipleViews(viewType, Encrypted.fromByteString(compressedViewTreesP)),
+      viewHashes,
+      viewEncryptionKeyRandomness,
+      synchronizerId,
+      viewEncryptionScheme,
+      signature,
+    )(rpv)
+  }
+
+  def fromProtoV32(
+      pvv: ProtocolVersionValidation,
+      encryptedViewMessageP: v32.EncryptedMultipleViewsMessage,
+  ): ParsingResult[EncryptedMultipleViewsMessage[ViewType]] = {
+    val v32.EncryptedMultipleViewsMessage(
+      compressedViewTreesP,
+      viewHashesP,
+      encryptionSchemeP,
+      signatureP,
+      sessionKeyLookupP,
+      synchronizerIdP,
+      viewTypeP,
+    ) =
+      encryptedViewMessageP
+    for {
+      viewType <- ViewType.fromProtoEnum(viewTypeP)
+      viewEncryptionScheme <- SymmetricKeyScheme.fromProtoEnum(
+        encryptionSchemeP,
+        "encryptionScheme",
+      )
+
+      signature <- signatureP.traverse(Signature.fromProtoV30)
+      viewHashesSeqP <- ProtoValidation.validateLength(
+        viewHashesP,
+        "view_hashes",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )
+      viewHashes <- parseRequiredNonEmpty(
+        ViewHash.fromProtoPrimitive,
+        "view_hashes",
+        viewHashesSeqP,
+      )
+
+      sessionKeyLookupSeqP <- ProtoValidation.validateLength(
+        sessionKeyLookupP,
+        "session_key_lookup",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )
+      viewEncryptionKeyRandomness <- parseRequiredNonEmpty(
+        EncryptedViewMessage.deserializeEncryptedRandomness,
+        "session_key_lookup",
+        sessionKeyLookupSeqP,
+      )
+      synchronizerId <- ProtoValidation.validateThen(
+        synchronizerIdP,
+        "physical_synchronizer_id",
+        pvv,
+      )(PhysicalSynchronizerId.fromProtoPrimitive)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(32))
     } yield new EncryptedMultipleViewsMessage(
       EncryptedMultipleViews(viewType, Encrypted.fromByteString(compressedViewTreesP)),
       viewHashes,

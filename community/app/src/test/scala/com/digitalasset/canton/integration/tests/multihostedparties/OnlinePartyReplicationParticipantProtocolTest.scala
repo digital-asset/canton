@@ -243,7 +243,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         requestId,
         partyToSourceParticipantEffectiveAtOffset,
         Set.empty,
-        sourceParticipant.underlying.value.sync.internalIndexService.value,
+        sourceParticipant.underlying.value.participantServices.ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
         inMemoryStateManager(sourceParticipant.id),
         noOpProgressAndCompletionCallback,
         noOpProgressAndCompletionCallback2,

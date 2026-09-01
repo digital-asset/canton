@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.ledger.api
 
-import cats.Eval
 import cats.data.EitherT
 import com.daml.ledger.resources.ResourceOwner
 import com.digitalasset.canton.LedgerParticipantId
@@ -69,8 +68,8 @@ class LedgerApiIndexer(
     val indexerHealth: ReportsHealth,
     val enqueue: Update => FutureUnlessShutdown[Unit],
     val inMemoryState: InMemoryState,
-    val ledgerApiStore: Eval[LedgerApiStore],
-    val contractStore: Eval[LedgerApiContractStore],
+    val ledgerApiStore: LedgerApiStore,
+    val contractStore: LedgerApiContractStore,
     val loggerFactory: NamedLoggerFactory,
     val timeouts: ProcessingTimeout,
     indexerState: IndexerState,
@@ -138,8 +137,8 @@ object LedgerApiIndexer {
       metrics: LedgerApiServerMetrics,
       clock: Clock,
       commandProgressTracker: CommandProgressTracker,
-      ledgerApiStore: Eval[LedgerApiStore],
-      contractStore: Eval[LedgerApiContractStore],
+      ledgerApiStore: LedgerApiStore,
+      contractStore: LedgerApiContractStore,
       ledgerApiIndexerConfig: LedgerApiIndexerConfig,
       reassignmentOffsetPersistence: ReassignmentOffsetPersistence,
       postProcessor: (Seq[PostPublishData], TraceContext) => Future[Unit],
@@ -169,13 +168,13 @@ object LedgerApiIndexer {
             tracer,
             loggerFactory,
           )(
-            ledgerApiStore.value.ledgerEndCache,
-            ledgerApiStore.value.stringInterningView,
+            ledgerApiStore.ledgerEndCache,
+            ledgerApiStore.stringInterningView,
           )
           .afterReleased(initializationLogger.info("Ledger API Indexer stopped."))
       indexerCreateFunction <- new JdbcIndexer.Factory(
         ledgerApiIndexerConfig.ledgerParticipantId,
-        DbSupport.ParticipantDataSourceConfig(ledgerApiStore.value.ledgerApiStorage.jdbcUrl),
+        DbSupport.ParticipantDataSourceConfig(ledgerApiStore.ledgerApiStorage.jdbcUrl),
         ledgerApiIndexerConfig.indexerConfig,
         metrics,
         inMemoryState,
@@ -194,12 +193,12 @@ object LedgerApiIndexer {
           postgres = ledgerApiIndexerConfig.indexerConfig.postgresDataSource,
         ),
         ledgerApiIndexerConfig.indexerHaConfig,
-        Some(ledgerApiStore.value.ledgerApiDbSupport.dbDispatcher),
+        Some(ledgerApiStore.ledgerApiDbSupport.dbDispatcher),
         clock,
         reassignmentOffsetPersistence,
         postProcessor,
         sequentialPostProcessor,
-        contractStore.value,
+        contractStore,
       ).initialized()
       normalIndexerCreateFunction =
         (commit: Commit) =>

@@ -256,7 +256,7 @@ abstract class LsuRollForwardIntegrationTest
   private def cleanSynchronizerIndex(
       p: LocalParticipantReference
   )(implicit env: TestConsoleEnvironment): SynchronizerIndex =
-    p.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value
+    p.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore
       .cleanSynchronizerIndex(env.daId.logical)
       .value
 
@@ -279,7 +279,7 @@ abstract class LsuRollForwardIntegrationTest
         ),
         oldSynchronizerOwners = synchronizerOwners1,
         newPV = ProtocolVersion.dev,
-        newSerial = daId.serial.increment.toNonNegative,
+        newSerial = daId.serial.increment.value.toNonNegative,
       )
 
       bank = participant1.parties.enable("Bank")
@@ -348,7 +348,7 @@ abstract class LsuRollForwardIntegrationTest
         ),
         oldSynchronizerOwners = null, // it should not be used
         newPV = testedProtocolVersion, // potentially a downgrade
-        newSerial = fixture1.newPsid.serial.increment.toNonNegative,
+        newSerial = fixture1.newPsid.serial.increment.value.toNonNegative,
       )
 
       fixture2.newSynchronizerNodes.all.start()
@@ -578,7 +578,7 @@ abstract class LsuRollForwardIntegrationTest
               fixture2.newPsid.copy(protocolVersion =
                 ProtocolVersion.supported.find(_ != fixture2.newPsid.protocolVersion).value
               ),
-              fixture2.newPsid.incrementSerial,
+              fixture2.newPsid.incrementSerial.value,
             )
           )
           .foreach { wrongPsid =>

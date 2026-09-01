@@ -231,7 +231,7 @@ trait PerformanceRunnerRecorder extends CommunityIntegrationTest with SharedEnvi
   protected val referenceBlockSequencerPlugin: Option[UseReferenceBlockSequencer[?]] =
     None
 
-  private lazy val postgresDumpRestore = LocalPostgresDumpRestore(postgresPlugin)
+  private lazy val postgresDumpRestore = LocalPostgresDumpRestore(postgresPlugin, loggerFactory)
 
   override def environmentDefinition: EnvironmentDefinition = {
     val baseEnvDefinition = EnvironmentDefinition

@@ -457,7 +457,7 @@ final class AssignmentProcessingStepsTest
         ).toPhysical
       )
 
-      val upgradedTargetPsid = targetPsid.map(_.incrementSerial)
+      val upgradedTargetPsid = targetPsid.map(_.incrementSerial.value)
 
       originalTargetPsid shouldBe targetPsid
       otherTargetPsid.map(_.logical) should not be targetPsid.map(_.logical)

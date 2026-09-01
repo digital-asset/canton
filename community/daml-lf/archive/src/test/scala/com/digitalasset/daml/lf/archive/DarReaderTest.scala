@@ -157,7 +157,6 @@ class DarReaderTest extends AnyWordSpec with Matchers with Inside with Inspector
           "GHC.Show",
           "GHC.Show.Text",
           "GHC.Num",
-          "GHC.Stack.Types",
           "GHC.Classes",
           "Control.Exception.Base",
           "GHC.Err",

@@ -594,7 +594,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
     *     stakeholder.
     *
     * TODO(#34870): Handle a failed activeness check here: log a warning, or crash if
-    * `commitAfterFailedActivenessCheck` is set. A local activeness failure must not turn into a
+    * `crashAfterFailedValidation` is set. A local activeness failure must not turn into a
     * rejection, as participants do not agree on the activeness result.
     */
   def checkPhase7Validations(

@@ -21,10 +21,25 @@ One of the improvements allows the aggregator to detect sequencers that provide 
 - Add admin endpoint to prune events from the traffic enforcement event table - `PruneEvents`.
   This is used to keep the event table from growing indefinitely. This does not affect the account balance.
   WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
+- The configuration field for the traffic enforcement app has been renamed from `traffic-enforcement` to `traffic-accounting`.
+  The old name is still accepted for backwards compatibility, but will be removed in a future release.
 
 ### Synchronizer Limits
 
 Added `SynchronizerLimits` in the `StaticSynchronizerParameters`, which are size limits on various collections, globally enforced by all synchronizer members. These limits are effective only starting with PV36.
+
+### Renamed participant parameter `commit-after-failed-activeness-check`
+
+*BREAKING:* The participant parameter `commit-after-failed-activeness-check` has been renamed to
+`crash-after-failed-validation`, and its meaning is inverted. The default behavior is unchanged, so
+no action is needed unless the parameter was set explicitly:
+
+| Before | After |
+| --- | --- |
+| `commit-after-failed-activeness-check = true` | `crash-after-failed-validation = false` |
+| `commit-after-failed-activeness-check = false` | `crash-after-failed-validation = true` |
+
+The old name is no longer accepted, so a configuration that still sets it is rejected at startup.
 
 ### Topic A
 Template for a bigger topic
@@ -84,6 +99,10 @@ and announced for removal in Canton 3.5. The following changes have been made:
 
 The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, `JsTransactionTree` and
 `JsSubmitAndWaitForTransactionTreeResponse` schemas have been dropped from the OpenAPI and AsyncAPI definitions.
+
+### `external_call`
+
+The `external_call` feature is released and enabled from 2.4(-staging) onwards.
 
 ### Minor Improvements
 - Interactive submissions can use hashing scheme version `HASHING_SCHEME_VERSION_V4` on synchronizers running protocol version 36 or later (previously only on development-protocol synchronizers). V4 additionally covers recorded external-call results in the prepared transaction hash.
@@ -160,6 +179,7 @@ The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, 
   - Mediators will report `readiness` `NOT_SERVING` when `liveness` is also `NOT_SERVING`, where previously it was possible for a mediator to report `readiness` `SERVING` while `liveness` was `NOT_SERVING`.
   - HTTP health checks now expose the `liveness` and `readiness`, under the URIs `/health/liveness` or `health/live` and `/health/readiness` or `/health/ready` endpoints, respectively. `/health` is still available for backward compatibility, mapping to `readiness`.
 - Improved log trace correlation in the JSON Ledger API: package and health endpoints that previously logged with an empty trace context now propagate the caller's `TraceContext`.
+- Protocol messages now use Zstandard (`zstd`) compression starting with protocol version 36, while earlier protocol versions continue to use gzip. This internal optimization is applied automatically and does not require configuration changes.
 - *BREAKING*: Removed the deprecated `GetPreferredPackageVersion` endpoint of the `InteractiveSubmissionService`. Clients should use `GetPreferredPackages` instead, which resolves the preferred packages for one or more package-name vetting requirements in a single call. This affects both the Ledger API (gRPC `InteractiveSubmissionService.GetPreferredPackageVersion`) and the Ledger JSON API (`GET /v2/interactive-submission/preferred-package-version`). The `GetPreferredPackages` endpoint (gRPC and `POST /v2/interactive-submission/preferred-packages`) is now considered stable.
 - *BREAKING*: Updated the list of default cipher suites according to the current OWASP recommendations.
 - getLedgerEnd endpoint in StateService can now return latest observed record time for the requested synchronizers along with ledger end offset.
@@ -244,6 +264,8 @@ The list of removed suites:
 - **BREAKING**: Public API servers now reject client connections using TLS 1.0 and 1.1. Clients must use
 **TLS 1.2 or higher**. This security enforcement aligns all public APIs with the existing Admin API
 requirement. For details on TLS version deprecations, see [RFC 8996](https://www.rfc-editor.org/info/rfc8996).
+- **Console BREAKING**: The `com.digitalasset.canton.config.NonNegativeNumeric.increment` method now returns an `Either[InvariantViolation, NonNegativeNumeric]` instead of a `NonNegativeNumeric`.
+  This is relevant as this class can be used in the console and scripts. Such usages must be updated to account for this change.
 
 #### Improved Sequencer Logging
 On the sequencer, the log line mentioning all events in a block now also can contain the outcome of the event.

@@ -22,7 +22,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.party.{
   OnboardingClearanceScheduler,
-  PartyReplicator,
+  PartyReplicationTriggers,
 }
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -110,7 +110,7 @@ class TopologyComponentFactory(
       sequencedEventStore: SequencedEventStore,
       synchronizerPredecessor: Option[SynchronizerPredecessor],
       ledgerApiStore: LedgerApiStore,
-      partyReplicatorO: Option[PartyReplicator],
+      partyReplicationTriggersO: Option[PartyReplicationTriggers],
       metrics: ParticipantMetrics,
   ): TopologyTransactionProcessor.Factory = new TopologyTransactionProcessor.Factory {
     override def create(
@@ -133,7 +133,7 @@ class TopologyComponentFactory(
         synchronizerConnectionConfigStore = synchronizerConnectionConfigStore,
         pendingOnboardingClearanceStore = pendingOnboardingClearanceStore,
         onboardingClearanceScheduler = onboardingClearanceScheduler,
-        partyReplicatorO = partyReplicatorO,
+        partyReplicationTriggersO = partyReplicationTriggersO,
         metrics = metrics,
         loggerFactory,
       )

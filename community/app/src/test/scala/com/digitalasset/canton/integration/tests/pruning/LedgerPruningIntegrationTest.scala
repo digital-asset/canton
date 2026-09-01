@@ -796,7 +796,7 @@ abstract class LedgerPruningIntegrationTest
       eventually() {
         contractFor(participant1, daId, cid1).isDefined shouldBe true
         contractFor(participant1, daId, cid2).isDefined shouldBe true
-        participant1.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.value.ledgerApiDbSupport.dbDispatcher
+        participant1.underlying.value.sync.ledgerApiIndexer.asEval.value.ledgerApiStore.ledgerApiDbSupport.dbDispatcher
           .executeSql(DatabaseMetrics.ForTesting("getting-all-activations-with-workflow-id"))(
             SQL"""select count(*) c
                   from lapi_events_activate_contract

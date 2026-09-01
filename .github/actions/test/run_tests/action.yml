@@ -67,6 +67,10 @@ inputs:
     description: Index of test shard, required when num_test_buckets is not 0
     required: false
     default: "0"
+  selection_shard_index:
+    description: Optional logical shard index used for test selection; defaults to shard_index
+    required: false
+    default: ""
   skip_cleanup:
     description: Skip cleanup/reporting step
     required: false
@@ -137,12 +141,20 @@ runs:
       uses: ./.github/actions/test/setup_gcp_kms
 
     - name: Validate sharding inputs
+      id: validate_sharding
       shell: bash
       env:
         NUM_TEST_BUCKETS: ${{ inputs.num_test_buckets }}
         SHARD_INDEX: ${{ inputs.shard_index }}
+        SELECTION_SHARD_INDEX: ${{ inputs.selection_shard_index }}
       run: |
+        effective_selection_shard_index="$SHARD_INDEX"
+        if [[ -n "$SELECTION_SHARD_INDEX" ]]; then
+          effective_selection_shard_index="$SELECTION_SHARD_INDEX"
+        fi
+
         if [[ "$NUM_TEST_BUCKETS" == "0" ]]; then
+          echo "selection_shard_index=$effective_selection_shard_index" >> "$GITHUB_OUTPUT"
           exit 0
         fi
 
@@ -152,14 +164,21 @@ runs:
         fi
 
         if ! [[ "$SHARD_INDEX" =~ ^[0-9]+$ ]]; then
-          echo "shard_index must be a non-negative integer when sharding is enabled, got: $SHARD_INDEX" >&2
+          echo "shard_index must be a non-negative integer, got: $SHARD_INDEX" >&2
           exit 1
         fi
 
-        if [[ "$SHARD_INDEX" -ge "$NUM_TEST_BUCKETS" ]]; then
-          echo "shard_index ($SHARD_INDEX) must be < num_test_buckets ($NUM_TEST_BUCKETS)" >&2
+        if ! [[ "$effective_selection_shard_index" =~ ^[0-9]+$ ]]; then
+          echo "selection_shard_index must be a non-negative integer when sharding is enabled, got: $effective_selection_shard_index" >&2
           exit 1
         fi
+
+        if [[ "$effective_selection_shard_index" -ge "$NUM_TEST_BUCKETS" ]]; then
+          echo "selection_shard_index ($effective_selection_shard_index) must be < num_test_buckets ($NUM_TEST_BUCKETS)" >&2
+          exit 1
+        fi
+
+        echo "selection_shard_index=$effective_selection_shard_index" >> "$GITHUB_OUTPUT"
 
     - name: Restore selected tests from first attempt
       id: restore_selected_tests
@@ -180,7 +199,7 @@ runs:
         !(github.run_attempt > 1 && steps.restore_selected_tests.outcome == 'success')
       uses: ./.github/actions/test/split_tests
       with:
-        shard_index: ${{ inputs.shard_index }}
+        shard_index: ${{ steps.validate_sharding.outputs.selection_shard_index }}
         total_shards: ${{ inputs.num_test_buckets }}
         test_file: ${{ inputs.test_file }}
         timings_file: ${{ inputs.timings_file }}
@@ -357,7 +376,7 @@ runs:
       with:
         command: ${{ inputs.command }}
         test_sub_command: ${{ inputs.test_sub_command }}
-        shard_index: ${{ inputs.shard_index }}
+        shard_index: ${{ steps.validate_sharding.outputs.selection_shard_index }}
         num_test_buckets: ${{ inputs.num_test_buckets }}
         selected_tests_file: ${{ steps.split.outputs.selected_tests_file }}
         testcase_timeout_triggered: ${{ env.TESTCASE_TIMEOUT_TRIGGERED }}

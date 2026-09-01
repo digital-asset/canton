@@ -44,7 +44,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
     "copyFromPredecessorSynchronizerStore" should {
       "reject when source does not match configured predecessor" in {
         val sourcePsid = testData.synchronizer1_p1p2_physicalSynchronizerId
-        val targetPsid = sourcePsid.incrementSerial
+        val targetPsid = sourcePsid.incrementSerial.value
         val unrelatedLsid = testData.da_vp123_physicalSynchronizerId
 
         val sourceStore = mkStore(sourcePsid, "correct predecessor")
@@ -75,7 +75,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
       "correctly work" in {
         val sourcePsid = testData.synchronizer1_p1p2_physicalSynchronizerId
         val sourceStore = mkStore(sourcePsid, "case12")
-        val successor = sourcePsid.incrementSerial
+        val successor = sourcePsid.incrementSerial.value
         val targetStore = mkStoreWithPredecessor(
           successor,
           "case12",
@@ -129,7 +129,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
         val sourcePsid = testData.synchronizer1_p1p2_physicalSynchronizerId
         val sourceStore =
           mkStore(sourcePsid, "dbtestResume")
-        val successor = sourcePsid.incrementSerial
+        val successor = sourcePsid.incrementSerial.value
         val targetStore = mkStoreWithPredecessor(
           successor,
           "dbtestResume",

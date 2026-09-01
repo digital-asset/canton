@@ -4,6 +4,7 @@
 package com.digitalasset.canton.sequencing
 
 import cats.data.EitherT
+import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -416,7 +417,13 @@ object SequencerAggregatorXImpl {
       ordinal: NonNegativeInt,
   ) {
     def next(event: ProcessingSerializedEvent): EventAndOrdinal =
-      EventAndOrdinal(event = event, ordinal = ordinal.increment.toNonNegative)
+      EventAndOrdinal(
+        event = event,
+        ordinal = ordinal.increment
+          // TODO(i34459): See if we can avoid throwing here, possibly be looping back to NonNegativeInt.zero
+          .valueOr(err => throw new IllegalStateException(err.message))
+          .toNonNegative,
+      )
   }
 
   object EventAndOrdinal {

@@ -114,7 +114,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
     newOldNodesResolution = Map("sequencer2" -> "sequencer1", "mediator2" -> "mediator1"),
     oldSynchronizerOwners = Set[InstanceReference](env.sequencer1, env.mediator1),
     newPV = ProtocolVersion.dev,
-    newSerial = env.daId.serial.increment.toNonNegative,
+    newSerial = env.daId.serial.increment.value.toNonNegative,
   )
 
   protected def makeFixture2(fixture1: Fixture)(implicit env: TestEnvironment[?]): Fixture =
@@ -126,7 +126,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
       newOldNodesResolution = Map("sequencer3" -> "sequencer2", "mediator3" -> "mediator2"),
       oldSynchronizerOwners = Set[InstanceReference](env.sequencer2, env.mediator2),
       newPV = testedProtocolVersion,
-      newSerial = fixture1.newSerial.increment.toNonNegative,
+      newSerial = fixture1.newSerial.increment.value.toNonNegative,
     )
 
   protected def eventuallyParticipantHostsParty(

@@ -177,7 +177,7 @@ final class LsuSequencingTestMessageHandlerTest
       mediatorId should not be mediatorId2
       sequencerId should not be sequencerId2
 
-      val wrongPsid = physicalSynchronizerId.incrementSerial
+      val wrongPsid = physicalSynchronizerId.incrementSerial.value
 
       // first message -> value is 1
       createAndHandleMessage().futureValueUS

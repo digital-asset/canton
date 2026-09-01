@@ -31,6 +31,8 @@ abstract class LedgerTestSuite
 
   final lazy val tests: Vector[LedgerTestCase] = testCaseBuffer.toVector
 
+  final lazy val multiParticipantTests: Vector[LedgerTestCase] = tests.filter(_.isMultiParticipant)
+
   protected final def test(
       shortIdentifier: String,
       description: String,

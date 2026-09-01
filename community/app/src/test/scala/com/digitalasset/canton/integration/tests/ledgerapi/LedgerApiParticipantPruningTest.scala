@@ -16,6 +16,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.javaapi.data.Command
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.ParticipantSynchronizerLimits
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -733,6 +734,7 @@ trait LedgerApiParticipantPruningTest
 
 }
 
+@UnstableTest // TODO(i32417): Remove once the test is stable again
 class LedgerApiParticipantPruningTestPostgres extends LedgerApiParticipantPruningTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

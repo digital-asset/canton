@@ -10,7 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.PrettyInstances.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.TopologyManagerError
@@ -23,7 +23,6 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.SetParameter
 
-import scala.annotation.unused
 import scala.reflect.ClassTag
 
 /** Replace or Remove */
@@ -205,15 +204,6 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
       )
     )
 
-  def toProtoV31: Either[String, v31.TopologyTransaction] =
-    mapping.toProtoV31.map(serializedMapping =>
-      v31.TopologyTransaction(
-        operation = operation.toProto,
-        serial = serial.value,
-        mapping = Some(serializedMapping),
-      )
-    )
-
   /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
     * implement this method.
     */
@@ -317,27 +307,4 @@ object TopologyTransaction
     } yield tx
   }
 
-  // TODO(i32231): remove @unused
-  @unused
-  private def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      transactionP: v31.TopologyTransaction,
-  )(
-      bytes: ByteString
-  ): ParsingResult[TopologyTransaction[TopologyChangeOp, TopologyMapping]] = {
-    val v31.TopologyTransaction(opP, serialP, mappingP) = transactionP
-    for {
-      mapping <- ProtoConverter.parseRequired(
-        TopologyMapping.fromProtoV31(pvv, _),
-        "mapping",
-        mappingP,
-      )
-      serial <- ProtoConverter.parsePositiveInt("serial", serialP)
-      op <- ProtoConverter.parseEnum(TopologyChangeOp.fromProtoV30, "operation", opP)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(31))
-    } yield TopologyTransaction(op, serial, mapping)(
-      rpv,
-      Some(bytes),
-    )
-  }
 }

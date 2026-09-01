@@ -16,6 +16,8 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.util.EntitySyntax
+import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.sequencing.protocol.{DeliverError, MemberRecipient, TimeProof}
 import com.digitalasset.canton.store.SequencedEventStore.{LatestUpto, OrdinarySequencedEvent}
@@ -32,9 +34,7 @@ import monocle.macros.syntax.lens.*
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import scala.annotation.nowarn
 import scala.concurrent.Promise
-import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
-import scala.util.Try
 
 /** The RepairSynchronizerRecoveryIntegrationTest verifies more intricate interactions of repair
   * requests and ConnectedSynchronizer recovery that "wedges in" repair requests without a sequencer
@@ -51,8 +51,7 @@ trait RepairSynchronizerRecoveryIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair),
-        ConfigTransforms.setExitOnFatalFailures(false),
+        ConfigTransforms.enableAdvancedCommands(FeatureFlag.Repair)
       )
 
   override val defaultParticipant: String = "participant1"
@@ -366,6 +365,8 @@ trait RepairSynchronizerRecoveryIntegrationTest
           List.empty.asJava,
         ).create.commands.asScala.toSeq
       participant1.ledger_api.javaapi.commands.submit_async(Seq(alice), createCmd)
+      // Wait until the confirmation response of the first request has arrived at the sequencer.
+      // This ensures that the second request really gets processed after the first.
       holdingFirstResponse.future.futureValue
 
       logger.info("Submitting second request")
@@ -376,54 +377,65 @@ trait RepairSynchronizerRecoveryIntegrationTest
           .asScala
           .toSeq
           .map(c => Command.fromJavaProto(c.toProtoCommand))
+      // Submit the second request. It gets approved right away.
+      // It remains dirty, as the first request is still pending.
       participant1.ledger_api.commands.submit_async(Seq(alice), archiveCmd)
 
+      // Wait for the second mediator result message,
+      // namely the result message for the first request, sent after the confirmation response timeout has elapsed.
+      // Block it so that all requests remain dirty.
       secondResultAvailable.future.futureValue
 
       logger.info("Disconnecting participant1 from synchronizer")
+      // Release confirmation response - this is necessary to disconnect without failures.
       releaseFirstConfirmationResponse.success(())
       participant1.synchronizers.disconnect(daName)
       logger.info("Disconnected participant1 from synchronizer")
+
+      // Release result message to unblock all requests.
       releaseSecondMediatorResult.success(())
 
       // 3. We purge the contract that the second request archives
 
       participant1.repair.purge(daName, Seq(contractId.toLf), ignoreAlreadyPurged = false)
 
-      // 4. We reconnect to the synchronizer. This should not be possible any more. There is no way to fix participant!
+      // 4. Reconnect to the synchronizer. As the second request has been dirty when disconnecting,
+      // crash recovery will replay it.
+      // Meanwhile, the purge has removed the archived contract from the participant's ACS.
+      // Therefore, the replayed activeness check will fail and the participant will emit a local reject.
+      // When the participant receives the mediator approval, it emits the following security alerts:
+      // - as a request with failed activeness reject is approved.
+      // - as the mediator approves a request after a local reject.
+      logger.info("Now reconnect participant1 to synchronizer")
 
-      logger.info("Now reconnect participant1 to synchronizer and fail")
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          participant1.synchronizers.reconnect(daName)
 
-      loggerFactory.suppressWarningsAndErrors {
-        // Use a Try, because this may or may not fail depending on whether a sequencer subscription can be
-        // created before asynchronous processing fails.
-        Try(participant1.synchronizers.reconnect(daName))
-
-        // Participant1's sequencer client observes the asynchronous failure in the application handler
-        // only when it receives another event from the sequencer.
-        // Force a time request just to make sure it receives something.
-        // Of course it won't work on this synchronizer if it's already disconnected so the time request may likely fail/timeout.
-        eventually() {
-          Try(
-            participant1.testing.fetch_synchronizer_time(
-              daName,
-              timeout = 5.seconds,
-            )
-          ).isFailure shouldBe true
-        }
-
-        logger.info("Synchronizer should eventually be disconnected")
-        eventuallyForever(timeUntilSuccess = 10.seconds, durationOfSuccess = 10.seconds) {
-          participant1.synchronizers.active(daName) shouldBe false
-        }
-        logger.info("Synchronizer has been disconnected")
-
-        // The inactivity check completes before the ConnectedSynchronizer has actually been closed!
-        // So we explicitly close the participant
-        logger.info("Stopping participant1")
-        participant1.stop()
-        logger.info("Stopped participant1")
-      }
+          // Ping for synchronization
+          assertPingSucceeds(participant1, participant1)
+        },
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              _.shouldBeCantonError(
+                SyncServiceAlarm,
+                _ shouldBe "Mediator approved a request that has been locally rejected.",
+              ),
+              "unexpected mediator approval",
+            ),
+            (
+              _.shouldBeCantonError(
+                SyncServiceAlarm,
+                _ should fullyMatch regex raw"Request RequestId\(\S+\) with failed activeness check is approved\.",
+              ),
+              "approve after failed activeness check",
+            ),
+          ),
+          // Other fallout of the interleaving such as timeouts are expected and not the subject here.
+          mayContain = Seq(_ => succeed),
+        ),
+      )
     }
   }
 }

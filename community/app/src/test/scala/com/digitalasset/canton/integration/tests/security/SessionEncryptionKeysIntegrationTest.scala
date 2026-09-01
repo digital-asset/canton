@@ -296,6 +296,7 @@ trait SessionKeyIntegrationTest
               pureCrypto,
               sessionKeyGroupTx,
               message.encryptedView.viewTree,
+              testedProtocolVersion,
             )(
               deserialize,
               defaultMaxBytesToDecompress,
@@ -311,6 +312,7 @@ trait SessionKeyIntegrationTest
               pureCrypto,
               sessionKeyGroupTx,
               message.encryptedViews.viewTrees,
+              testedProtocolVersion,
             )(
               deserialize,
               defaultMaxBytesToDecompress,

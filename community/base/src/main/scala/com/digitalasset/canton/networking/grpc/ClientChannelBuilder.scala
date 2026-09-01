@@ -70,19 +70,24 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
 
   /** Set implementation specific channel settings */
   private def additionalChannelBuilderSettings(
-      builder: NettyChannelBuilder
+      builder: NettyChannelBuilder,
+      loadBalancingPolicy: Option[String],
+      healthCheck: Boolean,
   ): Unit = {
-    import scala.jdk.CollectionConverters.*
-    builder.defaultLoadBalancingPolicy("round_robin")
-    // enable health checking as a basis for round robin failover
-    builder.defaultServiceConfig(
-      Map(
-        "healthCheckConfig" -> Map(
-          "serviceName" -> CantonGrpcUtil.sequencerHealthCheckServiceName
-        ).asJava
-      ).asJava
-    )
-    ()
+    loadBalancingPolicy.map(builder.defaultLoadBalancingPolicy).discard
+    if (healthCheck) {
+      // enable health checking as a basis for round-robin failover
+      import scala.jdk.CollectionConverters.*
+      builder
+        .defaultServiceConfig(
+          Map(
+            "healthCheckConfig" -> Map(
+              "serviceName" -> CantonGrpcUtil.sequencerHealthCheckServiceName
+            ).asJava
+          ).asJava
+        )
+        .discard
+    }
   }
 
   def create(
@@ -91,13 +96,15 @@ class ClientChannelBuilder private (protected val loggerFactory: NamedLoggerFact
       executor: Executor,
       trustCertificate: Option[ByteString],
       params: ClientChannelParams,
+      loadBalancingPolicy: Option[String] = Some("round_robin"),
+      healthCheck: Boolean = true,
   ): NettyChannelBuilder = {
     // the bulk of this channel builder is the same between community and enterprise
     // we only extract the bits that are different into calls to the protected implementation specific methods
 
     // the builder calls mutate this instance so is fine to assign to a val
     val builder = createNettyChannelBuilder(endpoint)
-    additionalChannelBuilderSettings(builder)
+    additionalChannelBuilderSettings(builder, loadBalancingPolicy, healthCheck)
 
     builder.executor(executor)
     builder.maxInboundMessageSize(params.maxInboundMessageSize.value)

@@ -31,4 +31,9 @@ private[store] trait AcsDigestJournal[K]
   def deleteUpTo(toExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
+
+  /** Deletes all digests in this journal and possibly the journals for all synchronizers of the
+    * given node.
+    */
+  def truncateAll()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 }

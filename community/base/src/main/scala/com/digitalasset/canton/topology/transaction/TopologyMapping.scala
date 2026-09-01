@@ -22,12 +22,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.{Endpoint, UrlValidator}
-import com.digitalasset.canton.protocol.{
-  DynamicSynchronizerParameters,
-  SequencingParameters,
-  v30,
-  v31,
-}
+import com.digitalasset.canton.protocol.{DynamicSynchronizerParameters, SequencingParameters, v30}
 import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -101,7 +96,6 @@ sealed trait TopologyMapping extends Product with Serializable with PrettyPrinti
   def restrictedToSynchronizer: Option[SynchronizerId]
 
   def toProtoV30: Either[String, v30.TopologyMapping]
-  def toProtoV31: Either[String, v31.TopologyMapping]
 
   def uniqueKey: MappingHash
 
@@ -413,46 +407,6 @@ object TopologyMapping {
         LsuSequencerConnectionSuccessor.fromProtoV30(pvv, value)
     }
 
-  @nowarn("cat=deprecation")
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      proto: v31.TopologyMapping,
-  ): ParsingResult[TopologyMapping] =
-    proto.mapping match {
-      case v31.TopologyMapping.Mapping.Empty =>
-        FieldNotSet("mapping").asLeft
-      case v31.TopologyMapping.Mapping.NamespaceDelegation(value) =>
-        NamespaceDelegation.fromProtoV31(pvv, value)
-      case v31.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(value) =>
-        DecentralizedNamespaceDefinition.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.OwnerToKeyMapping(value) =>
-        OwnerToKeyMapping.fromProtoV31(pvv, value)
-      case v31.TopologyMapping.Mapping.PartyToKeyMapping(value) =>
-        PartyToKeyMapping.fromProtoV31(pvv, value)
-      case v31.TopologyMapping.Mapping.SynchronizerTrustCertificate(value) =>
-        SynchronizerTrustCertificate.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.PartyHostingLimits(value) =>
-        PartyHostingLimits.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.ParticipantPermission(value) =>
-        ParticipantSynchronizerPermission.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.VettedPackages(value) =>
-        VettedPackages.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.PartyToParticipant(value) =>
-        PartyToParticipant.fromProtoV31(pvv, value)
-      case v31.TopologyMapping.Mapping.SynchronizerParametersState(value) =>
-        SynchronizerParametersState.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.SequencingDynamicParametersState(value) =>
-        SequencingParametersState.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.MediatorSynchronizerState(value) =>
-        MediatorSynchronizerState.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.SequencerSynchronizerState(value) =>
-        SequencerSynchronizerState.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.SynchronizerUpgradeAnnouncement(value) =>
-        LsuAnnouncement.fromProtoV30(pvv, value)
-      case v31.TopologyMapping.Mapping.SequencerConnectionSuccessor(value) =>
-        LsuSequencerConnectionSuccessor.fromProtoV30(pvv, value)
-    }
-
   /** Determines the appropriate level for the given topology mappings.
     */
   def resolveLogLevel(default: Level, code: Code): Level = {
@@ -485,7 +439,6 @@ sealed trait TopologyMappingCompanion extends Serializable {
 sealed trait DelegationRestriction extends Product with Serializable {
   def canSign(mappingToSign: Code): Boolean
   def toProtoV30: v30.NamespaceDelegation.Restriction
-  def toProtoV31: v31.NamespaceDelegation.Restriction
 }
 object DelegationRestriction {
 
@@ -517,34 +470,6 @@ object DelegationRestriction {
           .map(restrictions => Some(CanSignSpecificMappings(restrictions.toSet)))
     }
 
-  /** If no mapping restrictions are specified, returns None. */
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      restriction: v31.NamespaceDelegation.Restriction,
-  ): ParsingResult[Option[DelegationRestriction]] =
-    restriction match {
-      case v31.NamespaceDelegation.Restriction.Empty => ParsingResult.pure(None)
-      case v31.NamespaceDelegation.Restriction
-            .CanSignAllMappings(v30.NamespaceDelegation.CanSignAllMappings()) =>
-        ParsingResult.pure(Some(CanSignAllMappings))
-      case v31.NamespaceDelegation.Restriction.CanSignAllButNamespaceDelegations(
-            v30.NamespaceDelegation.CanSignAllButNamespaceDelegations()
-          ) =>
-        ParsingResult.pure(Some(CanSignAllButNamespaceDelegations))
-      case v31.NamespaceDelegation.Restriction.CanSignSpecificMapings(
-            v30.NamespaceDelegation.CanSignSpecificMappings(mappings)
-          ) =>
-        ProtoValidation
-          .validateLength(
-            mappings,
-            "mappings",
-            pvv,
-            ProtoValidation.MaxCollectionSize,
-          )
-          .flatMap(ProtoConverter.parseRequiredNonEmpty(Code.fromProtoV30, "mappings", _))
-          .map(restrictions => Some(CanSignSpecificMappings(restrictions.toSet)))
-    }
-
   /** Indicates that there are no mapping restrictions and is represented by no restrictions being
     * specified in the proto message. The target key of the delegation will also be permitted to
     * sign topology mappings that are added in future releases.
@@ -554,10 +479,6 @@ object DelegationRestriction {
 
     override def toProtoV30: v30.NamespaceDelegation.Restriction =
       v30.NamespaceDelegation.Restriction.CanSignAllMappings(
-        v30.NamespaceDelegation.CanSignAllMappings()
-      )
-    override def toProtoV31: v31.NamespaceDelegation.Restriction =
-      v31.NamespaceDelegation.Restriction.CanSignAllMappings(
         v30.NamespaceDelegation.CanSignAllMappings()
       )
   }
@@ -571,10 +492,6 @@ object DelegationRestriction {
 
     override def toProtoV30: v30.NamespaceDelegation.Restriction =
       v30.NamespaceDelegation.Restriction.CanSignAllButNamespaceDelegations(
-        v30.NamespaceDelegation.CanSignAllButNamespaceDelegations()
-      )
-    override def toProtoV31: v31.NamespaceDelegation.Restriction =
-      v31.NamespaceDelegation.Restriction.CanSignAllButNamespaceDelegations(
         v30.NamespaceDelegation.CanSignAllButNamespaceDelegations()
       )
   }
@@ -591,12 +508,6 @@ object DelegationRestriction {
 
     override def toProtoV30: v30.NamespaceDelegation.Restriction =
       v30.NamespaceDelegation.Restriction.CanSignSpecificMapings(
-        v30.NamespaceDelegation.CanSignSpecificMappings(
-          mappings.map(_.toProtoV30).toSeq.sortBy(_.value)
-        )
-      )
-    override def toProtoV31: v31.NamespaceDelegation.Restriction =
-      v31.NamespaceDelegation.Restriction.CanSignSpecificMapings(
         v30.NamespaceDelegation.CanSignSpecificMappings(
           mappings.map(_.toProtoV30).toSeq.sortBy(_.value)
         )
@@ -657,15 +568,6 @@ final case class NamespaceDelegation private (
       )
     }
 
-  def toProtoNamespaceDelegationV31: Either[String, v31.NamespaceDelegation] =
-    target.toProtoV31.map { targetP =>
-      v31.NamespaceDelegation(
-        namespace = namespace.fingerprint.unwrap,
-        targetKey = Some(targetP),
-        restriction = restriction.toProtoV31,
-      )
-    }
-
   override def referencedUids: Set[UniqueIdentifier] = Set.empty
 
   def canSign(mappingCodeToSign: Code): Boolean =
@@ -675,13 +577,6 @@ final case class NamespaceDelegation private (
     toProtoNamespaceDelegationV30.map(mappingP =>
       v30.TopologyMapping(
         v30.TopologyMapping.Mapping.NamespaceDelegation(mappingP)
-      )
-    )
-
-  override def toProtoV31: Either[String, v31.TopologyMapping] =
-    toProtoNamespaceDelegationV31.map(mappingP =>
-      v31.TopologyMapping(
-        v31.TopologyMapping.Mapping.NamespaceDelegation(mappingP)
       )
     )
 
@@ -804,30 +699,6 @@ object NamespaceDelegation extends TopologyMappingCompanion {
 
     } yield namespaceDelegation
 
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      value: v31.NamespaceDelegation,
-  ): ParsingResult[NamespaceDelegation] =
-    for {
-      namespace <- ProtoValidation
-        .validateThen(value.namespace, "namespace", pvv)(Fingerprint.fromProtoPrimitive)
-        .map(Namespace(_))
-      target <- ProtoConverter.parseRequired(
-        SigningPublicKey.fromProtoV31,
-        "target_key",
-        value.targetKey,
-      )
-      explicitRestriction <- DelegationRestriction.fromProtoV31(pvv, value.restriction)
-      finalRestriction = explicitRestriction match {
-        case None => CanSignAllButNamespaceDelegations
-        case Some(restriction) => restriction
-      }
-      namespaceDelegation <- NamespaceDelegation
-        .create(namespace, target, finalRestriction)
-        .leftMap(err => ProtoDeserializationError.InvariantViolation(None, err))
-
-    } yield namespaceDelegation
-
   @VisibleForTesting
   val restrictionUnsafe: Lens[NamespaceDelegation, DelegationRestriction] =
     GenLens[NamespaceDelegation](_.restriction)
@@ -865,13 +736,6 @@ final case class DecentralizedNamespaceDefinition private (
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(toProto)
-      )
-      .asRight
-
-  override def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.DecentralizedNamespaceDefinition(toProto)
       )
       .asRight
 
@@ -1046,27 +910,10 @@ final case class OwnerToKeyMapping private (
       )
     }
 
-  def toProtoOwnerToKeyMappingV31: Either[String, v31.OwnerToKeyMapping] =
-    keys.forgetNE.traverse(_.toProtoPublicKeyV31).map { keysP =>
-      v31.OwnerToKeyMapping(
-        member = member.toProtoPrimitive,
-        publicKeys = keysP,
-      )
-    }
-
   def toProtoV30: Either[String, v30.TopologyMapping] =
     toProtoOwnerToKeyMappingV30.map(mappingP =>
       v30.TopologyMapping(
         v30.TopologyMapping.Mapping.OwnerToKeyMapping(
-          mappingP
-        )
-      )
-    )
-
-  def toProtoV31: Either[String, v31.TopologyMapping] =
-    toProtoOwnerToKeyMappingV31.map(mappingP =>
-      v31.TopologyMapping(
-        v31.TopologyMapping.Mapping.OwnerToKeyMapping(
           mappingP
         )
       )
@@ -1144,23 +991,6 @@ object OwnerToKeyMapping extends TopologyMappingCompanion {
       otk <- create(member, keys).leftMap(ProtoDeserializationError.InvariantViolation(None, _))
     } yield otk
   }
-
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      value: v31.OwnerToKeyMapping,
-  ): ParsingResult[OwnerToKeyMapping] = {
-    val v31.OwnerToKeyMapping(memberP, keysP) = value
-    for {
-      member <- ProtoValidation.validateThen(memberP, "member", pvv)(
-        Member.fromProtoPrimitive
-      )
-      keysSeqP <- ProtoValidation
-        .validateLength(keysP, "public_keys", pvv, ProtoValidation.MaxCollectionSize)
-      keys <- ProtoConverter
-        .parseRequiredNonEmpty(PublicKey.fromProtoPublicKeyV31, "public_keys", keysSeqP)
-      otk <- create(member, keys).leftMap(ProtoDeserializationError.InvariantViolation(None, _))
-    } yield otk
-  }
 }
 
 /** A party to key mapping
@@ -1197,29 +1027,10 @@ final case class PartyToKeyMapping private (
         )
     }
 
-  def toProtoPartyToKeyMappingV31: Either[String, v31.PartyToKeyMapping] =
-    signingKeysWithThreshold.keys.toSeq.sortBy(_.fingerprint).forgetNE.traverse(_.toProtoV31).map {
-      signingKeysP =>
-        v31.PartyToKeyMapping(
-          party = party.toProtoPrimitive,
-          threshold = signingKeysWithThreshold.threshold.unwrap,
-          signingKeys = signingKeysP,
-        )
-    }
-
   def toProtoV30: Either[String, v30.TopologyMapping] =
     toProtoPartyToKeyMappingV30.map(mappingP =>
       v30.TopologyMapping(
         v30.TopologyMapping.Mapping.PartyToKeyMapping(
-          mappingP
-        )
-      )
-    )
-
-  def toProtoV31: Either[String, v31.TopologyMapping] =
-    toProtoPartyToKeyMappingV31.map(mappingP =>
-      v31.TopologyMapping(
-        v31.TopologyMapping.Mapping.PartyToKeyMapping(
           mappingP
         )
       )
@@ -1334,32 +1145,6 @@ object PartyToKeyMapping extends TopologyMappingCompanion {
     } yield ptk
   }
 
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      value: v31.PartyToKeyMapping,
-  ): ParsingResult[PartyToKeyMapping] = {
-    val v31.PartyToKeyMapping(partyP, thresholdP, signingKeysP) = value
-    for {
-      party <- ProtoValidation.validateThen(partyP, "party", pvv)(
-        PartyId.fromProtoPrimitive
-      )
-      signingKeysSeqP <- ProtoValidation
-        .validateLength(signingKeysP, "signing_keys", pvv, ProtoValidation.MaxCollectionSize)
-      signingKeysNE <-
-        ProtoConverter.parseRequiredNonEmpty(
-          SigningPublicKey.fromProtoV31,
-          "signing_keys",
-          signingKeysSeqP,
-        )
-      threshold <- PositiveInt
-        .create(thresholdP)
-        .leftMap(InvariantViolation.toProtoDeserializationError("threshold", _))
-      ptk <- PartyToKeyMapping
-        .create(party, threshold, signingKeysNE)
-        .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
-    } yield ptk
-  }
-
 }
 
 /** Participant synchronizer trust certificate
@@ -1396,15 +1181,6 @@ final case class SynchronizerTrustCertificate(
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.SynchronizerTrustCertificate(
-          toProto
-        )
-      )
-      .asRight
-
-  override def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.SynchronizerTrustCertificate(
           toProto
         )
       )
@@ -1630,15 +1406,6 @@ final case class ParticipantSynchronizerPermission(
       )
       .asRight
 
-  override def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.ParticipantPermission(
-          toProto
-        )
-      )
-      .asRight
-
   override def namespace: Namespace = participantId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
   override def referencedUids: Set[UniqueIdentifier] = Set(participantId.uid, synchronizerId.uid)
@@ -1737,15 +1504,6 @@ final case class PartyHostingLimits(
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.PartyHostingLimits(
-          toProto
-        )
-      )
-      .asRight
-
-  override def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.PartyHostingLimits(
           toProto
         )
       )
@@ -1868,15 +1626,6 @@ final case class VettedPackages private (
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.VettedPackages(
-          toProto
-        )
-      )
-      .asRight
-
-  override def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.VettedPackages(
           toProto
         )
       )
@@ -2057,24 +1806,9 @@ final case class PartyToParticipant private (
       )
     }
 
-  def toProtoPartyToParticipantV31: Either[String, v31.PartyToParticipant] =
-    partySigningKeysWithThreshold.traverse(_.toProtoV31).map { partySigningKeysWithThreshold =>
-      v31.PartyToParticipant(
-        party = partyId.toProtoPrimitive,
-        threshold = threshold.value,
-        participants = participants.map(_.toProto),
-        partySigningKeys = partySigningKeysWithThreshold,
-      )
-    }
-
   override def toProtoV30: Either[String, v30.TopologyMapping] =
     toProtoPartyToParticipantV30.map(mappingP =>
       v30.TopologyMapping(v30.TopologyMapping.Mapping.PartyToParticipant(mappingP))
-    )
-
-  override def toProtoV31: Either[String, v31.TopologyMapping] =
-    toProtoPartyToParticipantV31.map(mappingP =>
-      v31.TopologyMapping(v31.TopologyMapping.Mapping.PartyToParticipant(mappingP))
     )
 
   @VisibleForTesting
@@ -2328,29 +2062,6 @@ object PartyToParticipant extends TopologyMappingCompanion {
         .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
     } yield partyToParticipant
 
-  def fromProtoV31(
-      pvv: ProtocolVersionValidation,
-      value: v31.PartyToParticipant,
-  ): ParsingResult[PartyToParticipant] =
-    for {
-      partyId <- ProtoValidation.validateThen(value.party, "party", pvv)(
-        PartyId.fromProtoPrimitive
-      )
-      threshold <- ProtoConverter.parsePositiveInt("threshold", value.threshold)
-      participants <- ProtoValidation
-        .validateLengthThen(
-          value.participants,
-          "participants",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => HostingParticipant.fromProtoV30(pvv, element))
-      partySigningKeys <- value.partySigningKeys.traverse(protoValue =>
-        SigningKeysWithThreshold.fromProtoV31(pvv, protoValue)
-      )
-      partyToParticipant <- PartyToParticipant
-        .create(partyId, threshold, participants, partySigningKeys)
-        .leftMap(ProtoDeserializationError.InvariantViolation(None, _))
-    } yield partyToParticipant
 }
 
 /** Dynamic synchronizer parameter settings for the synchronizer
@@ -2379,14 +2090,6 @@ final case class SynchronizerParametersState(
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping
-          .SynchronizerParametersState(toProtoSynchronizerParametersStateV30)
-      )
-      .asRight
-
-  def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping
           .SynchronizerParametersState(toProtoSynchronizerParametersStateV30)
       )
       .asRight
@@ -2457,11 +2160,6 @@ final case class SequencingParametersState(
   def toProtoV30: Either[String, v30.TopologyMapping] =
     v30
       .TopologyMapping(v30.TopologyMapping.Mapping.SequencingDynamicParametersState(toProto))
-      .asRight
-
-  def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(v31.TopologyMapping.Mapping.SequencingDynamicParametersState(toProto))
       .asRight
 
   override def namespace: Namespace = synchronizerId.namespace
@@ -2542,15 +2240,6 @@ final case class MediatorSynchronizerState private (
     v30
       .TopologyMapping(
         v30.TopologyMapping.Mapping.MediatorSynchronizerState(
-          toProto
-        )
-      )
-      .asRight
-
-  def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.MediatorSynchronizerState(
           toProto
         )
       )
@@ -2701,15 +2390,6 @@ final case class SequencerSynchronizerState private (
       )
       .asRight
 
-  def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.SequencerSynchronizerState(
-          toProto
-        )
-      )
-      .asRight
-
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
   override def referencedUids: Set[UniqueIdentifier] =
@@ -2841,13 +2521,6 @@ final case class LsuAnnouncement(
       )
       .asRight
 
-  def toProtoV31: Either[String, v31.TopologyMapping] =
-    v31
-      .TopologyMapping(
-        v31.TopologyMapping.Mapping.SynchronizerUpgradeAnnouncement(toProto)
-      )
-      .asRight
-
   override def namespace: Namespace = successorSynchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(successorSynchronizerId.uid)
   override def referencedUids: Set[UniqueIdentifier] = Set(successorSynchronizerId.uid)
@@ -2970,14 +2643,6 @@ final case class LsuSequencerConnectionSuccessor(
   override def toProtoV30: Either[String, v30.TopologyMapping] = v30
     .TopologyMapping(
       v30.TopologyMapping.Mapping.SequencerConnectionSuccessor(
-        toProto
-      )
-    )
-    .asRight
-
-  override def toProtoV31: Either[String, v31.TopologyMapping] = v31
-    .TopologyMapping(
-      v31.TopologyMapping.Mapping.SequencerConnectionSuccessor(
         toProto
       )
     )

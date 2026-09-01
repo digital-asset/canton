@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver.services.traffic
 
-import cats.Eval
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -28,7 +27,8 @@ import scala.concurrent.{ExecutionContext, Future}
   * [[com.digitalasset.canton.platform.apiserver.client.RichTrafficServiceClient]].
   */
 class ApiTrafficService(
-    client: Eval[RichTrafficServiceClient],
+    // TODO(i35199): Streamline participant bootstrapping without dynamic loading: with streamlined instantiation we would be able to get rid of this CBN
+    client: => RichTrafficServiceClient,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends TrafficService
@@ -39,7 +39,7 @@ class ApiTrafficService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
-    client.value
+    client
       .getAccount(request)
       .valueOrF(grpcError =>
         FutureUnlessShutdown.failed(
@@ -53,7 +53,7 @@ class ApiTrafficService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
-    client.value
+    client
       .updateAccount(request)
       .valueOrF(grpcError =>
         FutureUnlessShutdown.failed(
@@ -67,7 +67,7 @@ class ApiTrafficService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.fromTracedLogger(logger)
-    client.value
+    client
       .pruneEvents(request)
       .valueOrF(grpcError =>
         FutureUnlessShutdown.failed(

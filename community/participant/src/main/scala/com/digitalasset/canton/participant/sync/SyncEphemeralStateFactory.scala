@@ -97,7 +97,7 @@ class SyncEphemeralStateFactoryImpl(
         persistentState.synchronizerIdx.synchronizerId
       )
       synchronizerPredecessor = synchronizerConnectionConfig.predecessor
-      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore.value
+      synchronizerIndex = ledgerApiIndexer.value.ledgerApiStore
         .cleanSynchronizerIndex(persistentState.synchronizerIdx.synchronizerId)
       _ = logger.info(
         s"Computing starting points for ${persistentState.psid} with $synchronizerIndex and predecessor $synchronizerPredecessor"
@@ -115,7 +115,7 @@ class SyncEphemeralStateFactoryImpl(
         synchronizerHandle.sequencerClient,
         persistentState.acsCommitmentSenderWatermarkStore,
         clock,
-        ledgerApiIndexer.flatMap(_.ledgerApiStore.map(_.stringInterningView)),
+        ledgerApiIndexer.map(_.ledgerApiStore.stringInterningView),
         metrics.commitments.sender,
         persistentState.psid,
         participantId,

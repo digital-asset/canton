@@ -219,7 +219,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
     "when storing connection configs" should {
 
       "be able to store and retrieve a config successfully" in {
-        val psid2 = psid.incrementSerial
+        val psid2 = psid.incrementSerial.value
 
         val predecessor = SynchronizerPredecessor(
           psid = psid,

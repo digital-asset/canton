@@ -18,6 +18,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.CantonBaseError
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -51,7 +52,12 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil}
+import com.digitalasset.canton.util.{
+  EitherTUtil,
+  FutureUnlessShutdownUtil,
+  GrpcStreamingUtils,
+  OptionUtil,
+}
 import com.digitalasset.canton.{
   LfPartyId,
   ProtoDeserializationError,
@@ -73,9 +79,10 @@ import scala.util.{Success, Try}
 
 final class GrpcParticipantRepairService(
     sync: CantonSyncService,
-    evalAcsDigestProcessorManagerO: Option[Eval[AcsCommitmentProcessorManager]],
+    evalAcsCommitmentProcessorManagerO: Option[Eval[AcsCommitmentProcessorManager]],
+    internalIndexService: Eval[InternalIndexService],
     parameters: ParticipantNodeParameters,
-    override val loggerFactory: NamedLoggerFactory,
+    override protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     ec: ExecutionContextExecutor,
     actorSystem: ActorSystem,
@@ -143,14 +150,10 @@ final class GrpcParticipantRepairService(
       validRequest <- EitherT.fromEither[FutureUnlessShutdown](
         validateExportAcsRequest(request, ledgerEnd, allLogicalSynchronizerIds)
       )
-      indexService <- EitherT.fromOption[FutureUnlessShutdown](
-        sync.internalIndexService,
-        RepairServiceError.InvalidState.Error("Unavailable internal state service"),
-      )
 
       snapshot <- ParticipantCommon
         .writeAcsSnapshot(
-          indexService,
+          internalIndexService.value,
           validRequest.parties,
           validRequest.atOffset,
           out,
@@ -741,33 +744,34 @@ final class GrpcParticipantRepairService(
 
     val result =
       for {
-        evalAcsDigestProcessorManager <- EitherT
-          .fromOption[FutureUnlessShutdown](
-            evalAcsDigestProcessorManagerO,
-            RepairServiceError.InvalidState
-              .Error(
-                "ACS digest processor is disabled. Enable 'enable-running-digest-processor' in configuration."
-              )
-              .toCantonRpcError,
-          )
+        evalAcsCommitmentProcessorManager <- EitherT.fromOption[FutureUnlessShutdown](
+          evalAcsCommitmentProcessorManagerO,
+          RepairServiceError.InvalidState
+            .Error(
+              "ACS digest processor is disabled. Enable 'enable-running-digest-processor' in configuration."
+            )
+            .toCantonRpcError,
+        )
 
         synchronizerId <- wrapErrUS(
-          SynchronizerId.fromProtoPrimitive(
-            request.synchronizerId,
-            "synchronizer_id",
-          )
+          SynchronizerId.fromProtoPrimitive(request.synchronizerId, "synchronizer_id")
         )
 
         response <- EitherT.right[RpcError] {
-          val acsDigestProcessorManager = evalAcsDigestProcessorManager.value
-
-          acsDigestProcessorManager
+          val digestProcessorManager = evalAcsCommitmentProcessorManager.value
             .getOrCreate(synchronizerId)
             .digestProcessorManager
-            .startReinitializationDigestProcessor(request.runningDigestProcessorShouldStartAfter)
-            .map(reinitTimeO =>
-              v30.ReinitializeDigestCommitmentsResponse(reinitTimeO.map(_.toProtoTimestamp))
-            )
+          digestProcessorManager
+            .startReinitializationDigestProcessor()
+            .map { reinitTime =>
+              if (request.runningDigestProcessorShouldStartAfter) {
+                FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+                  digestProcessorManager.startRunningDigestProcessor(),
+                  s"failed to restart running digest processor for $synchronizerId",
+                )
+              }
+              v30.ReinitializeDigestCommitmentsResponse(Some(reinitTime.toProtoTimestamp))
+            }
         }
       } yield response
 

@@ -25,6 +25,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
   ReferenceSequencerDriver,
   ReferenceSequencerDriverFactory,
 }
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.{TempDirectory, TempFile}
@@ -266,14 +267,16 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
   ): Future[Unit] =
     forAllDatabaseDumps(functionFullName, config)(dumpDatabases(_, tempDirectory, forceLocal))
 
-  def restoreDatabases(tempDirectory: TempDirectory, forceLocal: Boolean = false): Future[Unit] =
+  def restoreDatabases(tempDirectory: TempDirectory, forceLocal: Boolean = false)(implicit
+      traceContext: TraceContext
+  ): Future[Unit] =
     restoreDatabases(dbNames, tempDirectory, forceLocal)
 
   private def restoreDatabases(
       names: Seq[String],
       tempDirectory: TempDirectory,
       forceLocal: Boolean,
-  ): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] =
     pgPlugin match {
       case Some(postgresPlugin) =>
         val pgDumpRestore = PostgresDumpRestore(postgresPlugin, forceLocal)
@@ -288,7 +291,7 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
       config: CantonConfig,
       tempDirectory: TempDirectory,
       forceLocal: Boolean = false,
-  ): Future[Unit] =
+  )(implicit traceContext: TraceContext): Future[Unit] =
     forAllDatabaseDumps(functionFullName, config)(restoreDatabases(_, tempDirectory, forceLocal))
 
   private def forAllDatabaseDumps(functionName: String, config: CantonConfig)(

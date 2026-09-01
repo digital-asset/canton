@@ -27,7 +27,7 @@ import com.digitalasset.canton.platform.config.{
   PartyManagementServiceConfig,
   StateServiceConfig,
   TopologyAwarePackageSelectionConfig,
-  TrafficEnforcementConfig,
+  TrafficAccountingConfig,
   UpdateServiceConfig,
   UserManagementServiceConfig,
 }
@@ -97,7 +97,7 @@ final case class ParticipantNodeConfig(
     override val monitoring: NodeMonitoringConfig = NodeMonitoringConfig(),
     override val topology: TopologyConfig = TopologyConfig(),
     alphaDynamic: DeclarativeParticipantConfig = DeclarativeParticipantConfig(),
-    trafficEnforcement: TrafficEnforcementConfig = TrafficEnforcementConfig(),
+    trafficAccounting: TrafficAccountingConfig = TrafficAccountingConfig(),
 ) extends LocalNodeConfig
     with BaseParticipantConfig
     with ConfigDefaults[Option[DefaultPorts], ParticipantNodeConfig] {
@@ -371,8 +371,11 @@ object TestingTimeServiceConfig {
   * Note: If multi-synchronizer is enabled via the EnableMultiSynchronizer flag, then Assigned and
   * Unassigned event will be emitted when processing reassignments messages from the synchronizer
   * regardless of the value of enableAllLedgerApiReassignments.
-  * @param commitAfterFailedActivenessCheck
-  *   For internal testing only. Do not enable this in production.
+  * @param crashAfterFailedValidation
+  *   If true (default), the participant crashes when it detects a protocol violation that a correct
+  *   node cannot cause, such as an approved request whose activeness check failed locally. The
+  *   corresponding `SyncServiceAlarm` is logged either way. Temporary, until availability under
+  *   attack is supported.
   * @param validateLegacyContractsV11
   *   Enables an extra validation for contracts with contract id version V11. Keep this enabled in
   *   production.
@@ -422,7 +425,7 @@ final case class ParticipantNodeParameterConfig(
     commitmentUseDbSnapshotForParticipantLookup: Boolean = false,
     autoSyncProtocolFeatureFlags: Boolean = true,
     enableAllLedgerApiReassignments: Boolean = false,
-    commitAfterFailedActivenessCheck: Boolean = false,
+    crashAfterFailedValidation: Boolean = true,
     lsu: LsuConfig = LsuConfig(),
     validateLegacyContractsV11: Boolean = true,
     connectToSynchronizersOnStartup: Boolean = true,
@@ -434,8 +437,8 @@ final case class ParticipantNodeParameterConfig(
   * @param enableRunningDigestProcessor
   *   whether the new ACS digest processor should be enabled or not. Default is false.
   * @param disableOldAcsCommitmentProcessor
-  *   whether the old ACS commitment processor should be disabled or not for protocol versions >=
-  *   [[com.digitalasset.canton.version.ProtocolVersion.acsCommitmentRedesign]]. Default is false.
+  *   whether the old ACS commitment processor should be disabled. Default is false. Do not disable
+  *   the old ACS commitment processor in production!
   * @param maxNumUpdatesBetweenCheckpoints
   *   the maximum number of acs updates after which a checkpoint should be written. Default is
   *   10000.
@@ -499,6 +502,12 @@ final case class ParticipantNodeParameterConfig(
   *   of establishing an ACS stream for many parties. The ACS stream of the first batch of
   *   counterparties is fully consumed before the pipeline starts to consume the ACS stream of the
   *   second batch of counterparties.
+  * @param maxParallelActiveIdQueries
+  *   the number of parallel queries to fetch the IDs of active contracts. The higher the
+  *   parallelism, the higher the potential load on the DB. Default is 12.
+  * @param maxParallelPayloadCreateQueries
+  *   the number of parallel queries to fetch the contract payload of active contracts. The * higher
+  *   the parallelism, the higher the potential load on the DB. Default is 6.
   */
 final case class AcsCommitmentConfig(
     enableRunningDigestProcessor: Boolean = false,
@@ -522,6 +531,8 @@ final case class AcsCommitmentConfig(
     contractChangeClassificationParallelism: PositiveInt = PositiveInt.tryCreate(8),
     classificationParallelism: PositiveInt = PositiveInt.tryCreate(8),
     acsFetchParallelism: PositiveInt = PositiveInt.tryCreate(16),
+    maxParallelActiveIdQueries: PositiveInt = PositiveInt.tryCreate(12),
+    maxParallelPayloadCreateQueries: PositiveInt = PositiveInt.tryCreate(6),
 )
 
 /** Config for [[com.digitalasset.canton.participant.commitment.AcsCommitmentSender]]

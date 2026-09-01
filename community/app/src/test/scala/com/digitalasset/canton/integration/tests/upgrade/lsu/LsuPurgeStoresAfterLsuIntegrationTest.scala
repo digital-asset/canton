@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.data.CantonTimestamp
@@ -28,6 +29,7 @@ import java.time.Duration
   *   - topology store
   *   - submission tracker store
   */
+@UnstableTest // TODO(i33333): Remove once the test is stable again
 final class LsuPurgeStoresAfterLsuIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-purge-stores"
 

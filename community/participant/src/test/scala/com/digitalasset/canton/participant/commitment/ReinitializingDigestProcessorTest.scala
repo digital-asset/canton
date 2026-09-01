@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.commitment
 import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.ledger.participant.state.{InternalIndexService, SynchronizerIndex}
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   CheckpointFence,
@@ -16,7 +16,6 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   ProcessingContext,
 }
 import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, AcsDigestTracingMode}
-import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.metrics.{
   CommitmentMetrics,
   ParticipantTestMetrics,
@@ -34,7 +33,6 @@ import com.digitalasset.canton.participant.store.{
   AcsDigestTestBase,
   PaginationTokenDone,
 }
-import com.digitalasset.canton.platform.store.backend.LedgerEnd
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.WithValidity
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
@@ -78,37 +76,13 @@ class ReinitializingDigestProcessorTest
           WithValidity(
             CantonTimestamp.MinValue,
             None,
-            DynamicSynchronizerParameters
-              .defaultValues(testedProtocolVersion),
+            DynamicSynchronizerParameters.defaultValues(testedProtocolVersion),
           )
         ),
       ).build(),
-      hasLedgerEnd: Boolean = true,
       metrics: CommitmentMetrics = ParticipantTestMetrics.synchronizer.commitments,
   ): ReinitializingDigestProcessorImpl = {
     val testSynchronizerId = DefaultTestIdentities.synchronizerId
-    val mockLedgerApiStore: LedgerApiStore = {
-      val ledgerEndO = Option.when(hasLedgerEnd)(
-        LedgerEnd(
-          reinitTimepoint.offset,
-          reinitTimepoint.offset.unwrap,
-          reinitTimepoint.offset.unwrap.toInt,
-          reinitTimepoint.recordTime,
-          Map(
-            testSynchronizerId -> SynchronizerIndex(
-              repairIndex = None,
-              sequencerIndex = Some(reinitTimepoint.recordTime),
-              recordTime = reinitTimepoint.recordTime,
-            )
-          ),
-        )
-      )
-      val mockStore = mock[LedgerApiStore]
-      when(
-        mockStore.ledgerEnd
-      ).thenAnswer(ledgerEndO)
-      mockStore
-    }
 
     val digestAccumulator = new SequentialDigestAccumulator(
       acsDigestStore,
@@ -122,7 +96,6 @@ class ReinitializingDigestProcessorTest
       thisParticipantId = participant,
       synchronizerId = testSynchronizerId,
       indexService = indexService,
-      ledgerApiStore = mockLedgerApiStore,
       digestAccumulator = digestAccumulator,
       acsDigestStore = acsDigestStore,
       acsCommitmentConfig = AcsCommitmentConfig(
@@ -147,6 +120,7 @@ class ReinitializingDigestProcessorTest
           testingTopologyFactory.topologySnapshot(timestampOfSnapshot = timestamp)
         )
       },
+      reinitializingTimepoint = reinitTimepoint,
       enableAdditionalConsistencyChecks = true,
       metrics = metrics,
       loggerFactory = loggerFactory,
@@ -204,29 +178,6 @@ class ReinitializingDigestProcessorTest
 
     val partyBobUpdate1_AtOff98 = AcsDigestUpdate(partyBobDigestOff98, None)
     val partyBobUpdate2_AtOff99 = AcsDigestUpdate(partyBobDigestOff99, Some(off(98)))
-
-    "reinitializingTimepointsFUS" should {
-      "give back proper reinit time" in {
-        val rdp = mkReinitializingDigestProcessor(reinitTimepoint = tp100)
-        val reinitTp =
-          rdp
-            .ledgerEndTimepointFUS()
-            .futureValueUS // uses by default off100 = off(100) = Offset(100)
-
-        reinitTp shouldEqual tp(100)
-      }
-
-      s"fail when the ledger end is not set" in {
-        val rdp = mkReinitializingDigestProcessor(reinitTimepoint = tp100, hasLedgerEnd = false)
-
-        loggerFactory
-          .assertInternalErrorAsyncUS[IllegalStateException](
-            within = rdp.ledgerEndTimepointFUS(),
-            assertion = _.getMessage shouldEqual "There is no suitable last offset in the Ledger",
-          )
-          .futureValueUS
-      }
-    }
 
     "writeTombstonesToJournals" should {
       "do nothing when there is no digest update (empty store)" in {
@@ -778,6 +729,9 @@ class ReinitializingDigestProcessorTest
             )
           )
           .futureValueUS
+        testDigestStore
+          .insertCheckpointTime(Checkpoint(tp(98), CheckpointType.MaxEventsWithoutCheckpoint))
+          .futureValueUS
 
         // Run the whole reinitialization process
         rdp.start().futureValueUS
@@ -816,7 +770,7 @@ class ReinitializingDigestProcessorTest
         participantDigests_At98.get(internedP4Id) shouldBe None
         partyDigests_At98.isEmpty shouldBe true
 
-        // At Offset(99) all digests remain the same as before
+        // At Offset(99) all digest updates have been deleted because they were after the previous checkpoint
         val participantDigests_At99 =
           testDigestStore.participant
             .bulkLookup(Seq(internedP1Id, internedP2Id, internedP4Id), off(99))
@@ -833,9 +787,9 @@ class ReinitializingDigestProcessorTest
             )
             .futureValueUS
 
-        participantDigests_At99(internedP1Id) shouldBe p1DigestUpdate2_AtOff99
-        participantDigests_At99(internedP2Id) shouldBe p2DigestUpdate2_AtOff99
-        participantDigests_At99(internedP4Id) shouldBe p4DigestUpdateTombstone_AtOff99
+        participantDigests_At99(internedP1Id) shouldBe p1DigestUpdate1_AtOff98
+        participantDigests_At99(internedP2Id) shouldBe p2DigestUpdate1_AtOff98
+        participantDigests_At99.get(internedP4Id) shouldBe empty
         partyDigestUpdates_At99.isEmpty shouldBe true
 
         // At 100, we have the new calculated digests
@@ -861,9 +815,9 @@ class ReinitializingDigestProcessorTest
         participantDigests_At100(internedP4Id).digestUpdate.digestO.isDefined shouldBe true
 
         // They refer back to the tombstones: Offset(99)
-        participantDigests_At100(internedP1Id).replacesOffset shouldBe Some(off(99))
-        participantDigests_At100(internedP2Id).replacesOffset shouldBe Some(off(99))
-        participantDigests_At100(internedP4Id).replacesOffset shouldBe Some(off(99))
+        participantDigests_At100(internedP1Id).replacesOffset shouldBe Some(off(98))
+        participantDigests_At100(internedP2Id).replacesOffset shouldBe Some(off(98))
+        participantDigests_At100(internedP4Id).replacesOffset shouldBe None
 
         partyDigestUpdates_At100 should not be empty
         partyDigestUpdates_At100.values.foreach(_.digestUpdate.offset shouldBe off(100))

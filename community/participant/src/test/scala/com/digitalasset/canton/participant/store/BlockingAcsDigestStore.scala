@@ -89,6 +89,10 @@ class BlockingAcsDigestStore(
   ): FutureUnlessShutdown[Option[Checkpoint]] =
     blockAndThen(delegate.firstCheckpointAfter(fromExclusive, checkpointTypes))
 
+  override protected def truncateCheckpoints()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.truncateCheckpointsInternal())
+
   override def close(): Unit = delegate.close()
 }
 
@@ -159,6 +163,9 @@ class BlockingAcsDigestJournal[K](
 
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     delegate.purge()
+
+  override def truncateAll()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    blockAndThen(delegate.truncateAll())
 
   override def close(): Unit = delegate.close()
 }

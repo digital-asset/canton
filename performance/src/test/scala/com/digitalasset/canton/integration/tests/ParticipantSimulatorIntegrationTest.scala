@@ -199,8 +199,7 @@ sealed trait ParticipantSimulatorIntegrationTest
         .ephemeral
         .ledgerApiIndexer
         .ledgerApiStore
-        .map(_.stringInterningView)
-        .value
+        .stringInterningView
       val internedPids = pids.map(pid => stringInterning.participantId.internalize(pid.toLf))
       val toLookup = internedPids.map(
         _ -> CommitmentPeriod.create(CantonTimestamp.MinValue, CantonTimestamp.MaxValue).value

@@ -1268,8 +1268,10 @@ trait SequencerApiTestUtils
     override def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope] =
       toClosedUncompressedEnvelope.asRight
 
-    override def toClosedCompressedEnvelope: ClosedCompressedEnvelope =
-      toClosedUncompressedEnvelope.toClosedCompressedEnvelope
+    override def toClosedCompressedEnvelope(
+        algo: com.digitalasset.canton.util.CompressionAlgo
+    ): ClosedCompressedEnvelope =
+      toClosedUncompressedEnvelope.toClosedCompressedEnvelope(algo)
 
     override def forRecipient(
         member: Member,

@@ -63,7 +63,7 @@ import com.digitalasset.canton.participant.admin.data.{
 }
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
-import com.digitalasset.canton.participant.admin.party.PartyReplicator
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTriggers
 import com.digitalasset.canton.participant.admin.repair.{CommitmentsService, RepairService}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
@@ -197,7 +197,6 @@ class CantonSyncService(
     with Spanning
     with NamedLogging
     with HasCloseContext
-    with InternalIndexServiceProviderImpl
     with SyncServiceHandle {
 
   private[canton] val pendingLsuOperationsStore: PendingLsuOperation.Store =
@@ -225,20 +224,16 @@ class CantonSyncService(
       SynchronizerId.fromString,
     )
 
-  private[participant] val partyReplicatorO = parameters.alphaOnlinePartyReplicationSupport.map(
-    new PartyReplicator(
-      participantId,
-      this,
-      clock,
-      _,
-      parameters.batchingConfig,
-      syncPersistentStateManager.storage,
-      futureSupervisor,
-      parameters.exitOnFatalFailures,
-      parameters.processingTimeouts,
-      loggerFactory,
+  private[participant] val partyReplicationTriggersO =
+    parameters.alphaOnlinePartyReplicationSupport.map(
+      new PartyReplicationTriggers(
+        this,
+        _,
+        parameters.batchingConfig,
+        parameters.processingTimeouts,
+        loggerFactory,
+      )
     )
-  )
 
   private val connectionsManager = new SynchronizerConnectionsManager(
     participantId,
@@ -271,7 +266,7 @@ class CantonSyncService(
     ledgerApiIndexer,
     connectedSynchronizersLookupContainer,
     externalCallValidator,
-    partyReplicatorO,
+    partyReplicationTriggersO,
   )
 
   private def connectedSynchronizersLookup: ConnectedSynchronizersLookup =
@@ -1423,8 +1418,8 @@ class CantonSyncService(
       cleanSynchronizerRecordTime = lsid =>
         ledgerApiIndexer
           .asEval(TraceContext.empty)
-          .flatMap(_.ledgerApiStore)
           .value
+          .ledgerApiStore
           .cleanSynchronizerIndex(lsid)
           .map(_.recordTime),
       loggerFactory = loggerFactory,
@@ -1743,7 +1738,7 @@ class CantonSyncService(
       pruningProcessor,
       syncCrypto,
       connectionsManager,
-      LifeCycle.toCloseableOption(partyReplicatorO),
+      LifeCycle.toCloseableOption(partyReplicationTriggersO),
       transactionRoutingProcessor,
       synchronizerRegistry,
       synchronizerConnectionConfigStore,

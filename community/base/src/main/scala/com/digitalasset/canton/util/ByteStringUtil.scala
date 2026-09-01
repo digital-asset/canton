@@ -11,6 +11,7 @@ import com.digitalasset.canton.serialization.{
   DeserializationError,
   MaxByteToDecompressExceeded,
 }
+import com.github.luben.zstd.Zstd
 import com.google.protobuf.ByteString
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
@@ -48,11 +49,36 @@ object ByteStringUtil {
 
   val orderingByteString: Ordering[ByteString] = orderByteString.toOrdering
 
-  def compressGzip(bytes: ByteString): ByteString = {
+  /** Default zstd compression level (5), see analysis and outcomes in
+    * [[https://github.com/DACH-NY/canton/issues/34653]]. Valid levels range from negative "fast"
+    * levels up to 22: higher levels compress better but slower.
+    */
+  val DefaultZstdCompressionLevel: Int = 5
+
+  def compress(
+      bytes: ByteString,
+      algo: CompressionAlgo,
+      zstdLevel: Int = DefaultZstdCompressionLevel,
+  ): ByteString =
+    algo match {
+      case CompressionAlgo.Gzip => compressGzip(bytes)
+      case CompressionAlgo.Zstd => compressZstd(bytes, zstdLevel)
+    }
+
+  def compressGzip(bytes: ByteString): ByteString =
+    compressWith(bytes, new GZIPOutputStream(_))
+
+  def compressZstd(bytes: ByteString, level: Int = DefaultZstdCompressionLevel): ByteString =
+    ByteString.copyFrom(Zstd.compress(bytes.toByteArray, level))
+
+  private def compressWith(
+      bytes: ByteString,
+      compressor: OutputStream => OutputStream,
+  ): ByteString = {
     val rawSize = bytes.size()
     val compressed = new ByteArrayOutputStream(rawSize)
-    ResourceUtil.withResource(new GZIPOutputStream(compressed)) { gzipper =>
-      bytes.writeTo(gzipper)
+    ResourceUtil.withResource(compressor(compressed)) { output =>
+      bytes.writeTo(output)
     }
     ByteString.copyFrom(compressed.toByteArray)
   }
@@ -60,25 +86,66 @@ object ByteStringUtil {
   /** We decompress maximum maxBytesLimit bytes, and if the input is larger we throw
     * MaxBytesToDecompressExceeded error.
     */
+  def decompress(
+      bytes: ByteString,
+      algo: CompressionAlgo,
+      maxBytesLimit: MaxBytesToDecompress,
+  ): Either[DeserializationError, ByteString] =
+    algo match {
+      case CompressionAlgo.Gzip => decompressGzip(bytes, maxBytesLimit)
+      case CompressionAlgo.Zstd => decompressZstd(bytes, maxBytesLimit)
+    }
+
   def decompressGzip(
       bytes: ByteString,
       maxBytesLimit: MaxBytesToDecompress,
   ): Either[DeserializationError, ByteString] =
     // prefer GzipCompressorInputStream over GZIPInputStream, because it doesn't use exceptions for internal
     // control flow, as GZIPInputStream does.
+    decompressCompressed(new GzipCompressorInputStream(bytes.newInput()), maxBytesLimit)
+
+  /** Decompresses a zstd frame produced by [[compressZstd]]. All such frames declare the content
+    * size in the frame header, so the limit is enforced before any allocation and the output buffer
+    * is sized exactly. Frames without a declared content size (e.g. produced by streaming
+    * compressors) are not supported and fail with a deserialization error unless empty.
+    */
+  def decompressZstd(
+      bytes: ByteString,
+      maxBytesLimit: MaxBytesToDecompress,
+  ): Either[DeserializationError, ByteString] = {
+    val limit = maxBytesLimit.limit.value
+    val input = bytes.toByteArray
+    Either
+      .catchNonFatal {
+        // Negative values signal an unknown content size (absent from the frame header); clamp
+        // to 0 so that the decompress call below fails cleanly on non-empty content.
+        val declaredSize = Zstd.getFrameContentSize(input).max(0L)
+        if (declaredSize > limit.toLong)
+          Left(maxBytesExceededError(limit))
+        else
+          Right(ByteString.copyFrom(Zstd.decompress(input, declaredSize.toInt)))
+      }
+      .leftMap(errorMapping)
+      .flatten
+  }
+
+  private def maxBytesExceededError(limit: Int): MaxByteToDecompressExceeded =
+    MaxByteToDecompressExceeded(
+      s"Max bytes to decompress is exceeded. The limit is $limit bytes."
+    )
+
+  private def decompressCompressed(
+      decompressor: => InputStream,
+      maxBytesLimit: MaxBytesToDecompress,
+  ): Either[DeserializationError, ByteString] =
     ResourceUtil
-      .withResourceEither(new GzipCompressorInputStream(bytes.newInput())) { gunzipper =>
-        // Write to the output stream of the ByteString to avoid building an additional array copy.
+      .withResourceEither(decompressor) { decompressorStream =>
         val out = ByteString.newOutput()
         val buf = new Array[Byte](8 * 1024) // 8k is the default used by BufferedInputStream.
-        if (copyNBuffered(maxBytesLimit.limit.value, buf, gunzipper, out)) {
+        if (copyNBuffered(maxBytesLimit.limit.value, buf, decompressorStream, out)) {
           Right(out.toByteString()) // No need to close as data is in-memory.
         } else {
-          Left(
-            MaxByteToDecompressExceeded(
-              s"Max bytes to decompress is exceeded. The limit is ${maxBytesLimit.limit.value} bytes."
-            )
-          )
+          Left(maxBytesExceededError(maxBytesLimit.limit.value))
         }
       }
       .leftMap(errorMapping)

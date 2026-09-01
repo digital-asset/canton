@@ -168,7 +168,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
           ),
           oldSynchronizerOwners = synchronizerOwners1,
           newPV = ProtocolVersion.dev,
-          newSerial = daId.serial.increment.toNonNegative,
+          newSerial = daId.serial.increment.value.toNonNegative,
         )
 
         fixture2 = Fixture(
@@ -185,7 +185,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
           ),
           oldSynchronizerOwners = Set(sequencer3, sequencer4),
           newPV = ProtocolVersion.dev,
-          newSerial = fixture1.newPsid.serial.increment.toNonNegative,
+          newSerial = fixture1.newPsid.serial.increment.value.toNonNegative,
         )
       }
 
@@ -407,7 +407,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
     "Third LSU is announced" in { implicit env =>
       import env.*
 
-      val psid4 = fixture2.newPsid.incrementSerial
+      val psid4 = fixture2.newPsid.incrementSerial.value
       fixture2.newSynchronizerNodes.sequencers.foreach(
         _.topology.lsu.announcement
           .propose(psid4, fixture2.upgradeTime.plusSeconds(86400))
@@ -437,7 +437,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
     "Third LSU is cancelled" in { implicit env =>
       import env.*
 
-      val psid4 = fixture2.newPsid.incrementSerial
+      val psid4 = fixture2.newPsid.incrementSerial.value
       fixture2.newSynchronizerNodes.sequencers.foreach(
         _.topology.lsu.announcement
           .revoke(psid4, fixture2.upgradeTime.plusSeconds(86400))

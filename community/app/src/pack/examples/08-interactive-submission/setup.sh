@@ -102,7 +102,6 @@ generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/package_referen
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/interactive/transaction/v1/interactive_submission_data.proto"
 generate_grpc_code "$LEDGER_API_PROTO_PATH" "$LEDGER_API_V2_PATH/interactive/interactive_submission_common_data.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V30_PATH/topology.proto"
-generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V31_PATH/topology.proto"
 generate_grpc_code "$ADMIN_API_PROTO_PATH" "$ADMIN_API_TOPOLOGY_ADMIN_PROTO_PATH/common.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$PROTOCOL_PROTO_V30_PATH/synchronizer_parameters.proto"
 generate_grpc_code "$COMMUNITY_PROTO_PATH" "$COMMUNITY_CANTON_PROTO_PATH/version/v1/untyped_versioned_message.proto"

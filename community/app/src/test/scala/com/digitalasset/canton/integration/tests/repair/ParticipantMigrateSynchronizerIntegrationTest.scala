@@ -694,10 +694,11 @@ final class ParticipantMigrateSynchronizerCrashRecoveryIntegrationTest
     )
 
     val source =
-      participant1.underlying.value.sync.internalIndexService.value.activeContracts(
-        Set(alice.toLf),
-        Offset.fromLong(aliceAddedOnP3Offset).toOption,
-      )
+      participant1.underlying.value.participantServices.ledgerApiIndexServiceContainer.asEval.value.internalIndexService
+        .activeContracts(
+          Set(alice.toLf),
+          Offset.fromLong(aliceAddedOnP3Offset).toOption,
+        )
     val aliceACS =
       source
         .runWith(Sink.seq)

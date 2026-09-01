@@ -243,6 +243,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
             ledgerApiContractStore = contractStore,
             executionContext = executionContext,
             logger = logger,
+            traceContext = traceContext,
           ),
           ingester = ingester(
             ingestFunction = ingestionStorageBackend.insertBatch,
@@ -566,12 +567,15 @@ object ParallelIndexerSubscription {
       case (_, _) => Nil
     }.toMap
 
+  // `traceContext` is deliberately NOT implicit: `Update` carries its own trace context in a
+  // second, implicit parameter list, and the compiler-generated `copy` does not reproduce it. An
+  // ambient implicit here would silently satisfy that list and replace each update's trace context
+  // with this one (see `fixUpdate` below).
   def reInsertContracts(
       ledgerApiContractStore: LedgerApiContractStore,
       executionContext: ExecutionContext,
       logger: TracedLogger,
-  )(implicit
-      traceContext: TraceContext
+      traceContext: TraceContext,
   ): Iterable[(Offset, Update)] => Future[Iterable[(Offset, Update)]] = { updates =>
     implicit val ec: ExecutionContext = executionContext
     def fixContractInfo(newInternalContractId: Long): ContractInfo => ContractInfo =
@@ -617,23 +621,23 @@ object ParallelIndexerSubscription {
       case u: Update.SequencedTransactionAccepted =>
         u.copy(
           contractInfos = fixContractInfos(overrides)(u.contractInfos)
-        )
+        )(u.traceContext)
       case u: Update.RepairTransactionAccepted =>
         u.copy(
           contractInfos = fixContractInfos(overrides)(u.contractInfos)
-        )
+        )(u.traceContext)
       case u: Update.SequencedReassignmentAccepted =>
         u.copy(
           reassignment = fixReassignments(overrides)(u.reassignment)
-        )
+        )(u.traceContext)
       case u: Update.RepairReassignmentAccepted =>
         u.copy(
           reassignment = fixReassignments(overrides)(u.reassignment)
-        )
+        )(u.traceContext)
       case u: Update.OnPRReassignmentAccepted =>
         u.copy(
           reassignment = fixReassignments(overrides)(u.reassignment)
-        )
+        )(u.traceContext)
 
       case u: Update.CommandRejected => u
       case u: Update.CommitRepair => u
@@ -648,7 +652,7 @@ object ParallelIndexerSubscription {
       contracts <- Future(extractPersistedContracts(updates))
       foundInternalContractIds <- ledgerApiContractStore.lookupBatchedInternalIdsNonReadThrough(
         contracts.keySet
-      )
+      )(traceContext)
       changedInternalContractIds = contracts.keysIterator.flatMap { cid =>
         for {
           foundInternalId <- foundInternalContractIds.get(cid)
@@ -661,13 +665,13 @@ object ParallelIndexerSubscription {
       }
       storedContracts <- ledgerApiContractStore.storeContracts(
         missingContracts.valuesIterator.map(_.asContractInstance).toVector
-      )
+      )(traceContext)
       _ = {
         // sanity check
         if (storedContracts.keySet != missingContracts.keySet) {
           ErrorUtil.invalidState(
             s"Programming error: stored and missing contracts are not the same."
-          )(ErrorLoggingContext.fromTracedLogger(logger))
+          )(ErrorLoggingContext.fromTracedLogger(logger)(traceContext))
         }
       }
       allInternalContractIdOverrides = storedContracts ++ changedInternalContractIds
@@ -676,12 +680,14 @@ object ParallelIndexerSubscription {
         updates
       } else {
         if (storedContracts.nonEmpty) {
-          logger.info(s"Needed to re-insert ${storedContracts.size} contracts during indexing.")
+          logger.info(s"Needed to re-insert ${storedContracts.size} contracts during indexing.")(
+            traceContext
+          )
         }
         if (changedInternalContractIds.nonEmpty) {
           logger.info(
             s"There were ${changedInternalContractIds.size} contracts pruned and reinserted during indexing."
-          )
+          )(traceContext)
         }
         updates.map { case (offset, update) =>
           offset -> fixUpdate(allInternalContractIdOverrides)(update)

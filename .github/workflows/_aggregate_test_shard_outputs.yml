@@ -41,6 +41,7 @@ jobs:
             shell.nix
             nix
             scripts/ci/test_output/aggregate_test_summaries.py
+            scripts/ci/test_output/summarize_test_results.py
             scripts/ci/split-tests/merge_timings.py
 
       - name: Create directories for aggregated outputs
@@ -59,7 +60,7 @@ jobs:
         continue-on-error: true
 
       - name: Download summary state from previous run (reruns only)
-        if: ${{ always() && github.run_attempt > 1 }}
+        if: ${{ !cancelled() && github.run_attempt > 1 }}
         uses: actions/download-artifact@v7
         with:
           name: ${{ env.CALLER_JOB }}-test-summary-state-latest
@@ -67,7 +68,7 @@ jobs:
         continue-on-error: true
 
       - name: Download previous timings (reruns only)
-        if: ${{ always() && github.run_attempt > 1 }}
+        if: ${{ !cancelled() && github.run_attempt > 1 }}
         uses: actions/download-artifact@v7
         with:
           name: ${{ env.CALLER_JOB }}-timings-latest

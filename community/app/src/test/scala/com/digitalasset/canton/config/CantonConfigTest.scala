@@ -675,6 +675,9 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
 
       // verify that `crypto.sessionSigningKeys` is configured with the expected values
       participant.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.enabled
+
+      // verify that `participant.trafficAccounting.enabled` is configured with the expected values
+      participant.trafficAccounting.enabled shouldBe true
     }
 
     // In this test case, both deprecated and new fields are set with opposite values, we make sure the new fields
@@ -691,6 +694,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
           val parsed = CantonConfig
             .parseAndLoad(
               Seq(
+                env,
                 confDir / "storage" / "postgres.conf",
                 deprecatedConfigs / "new-config-fields-take-precedence.conf",
               )
@@ -721,12 +725,19 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
           ),
           "deprecated field 'kms.session-signing-keys'",
         ),
+        (
+          _.message should include(
+            "Config field at traffic-enforcement is deprecated since 3.6.0"
+          ),
+          "deprecated field 'traffic-enforcement'",
+        ),
       )
       loggerFactory.assertLogsSeq(SuppressionRule.Level(org.slf4j.event.Level.INFO))(
         {
           val parsed = CantonConfig
             .parseAndLoad(
               Seq(
+                env,
                 confDir / "storage" / "postgres.conf",
                 deprecatedConfigs / "backwards-compatible.conf",
               ).map(
@@ -754,6 +765,7 @@ class CantonConfigTest extends AnyWordSpec with BaseTest {
         {
           val parsed = CantonConfig.parseAndLoad(
             Seq(
+              env,
               confDir / "storage" / "postgres.conf",
               deprecatedConfigs / "removed-fields.conf",
             ).map(_.toJava),

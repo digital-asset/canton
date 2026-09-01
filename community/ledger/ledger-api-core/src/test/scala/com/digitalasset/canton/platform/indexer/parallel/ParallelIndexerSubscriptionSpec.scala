@@ -61,7 +61,7 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
-import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.{HasExecutionContext, RepairCounter}
 import com.digitalasset.daml.lf.crypto
@@ -2558,7 +2558,8 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-      )(traceContext)(List())
+        traceContext = traceContext,
+      )(List())
       .futureValue shouldBe List()
   }
 
@@ -2623,8 +2624,50 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-      )(traceContext)(updatesFixture)
+        traceContext = traceContext,
+      )(updatesFixture)
       .futureValue shouldBe updatesFixture
+  }
+
+  it should "preserve each update's own trace context when replacing internal contract IDs" in {
+    // Update carries its trace context in a second, implicit parameter list. The generated `copy`
+    // does not reproduce that list, so it is re-resolved from whatever implicit is in scope at the
+    // call site -- and case class equality ignores it, so the `shouldBe` comparisons used by the
+    // other tests here cannot see the difference. Hence the explicit assertion below.
+    val c1 = contract
+    val c2 = contract
+    val updateTraceContext =
+      W3CTraceContext("00-9caf33ee8c95383e5563f3b99a2bf90f-fdd860fe948aa866-01").toTraceContext
+    updateTraceContext should not be TraceContext.empty
+
+    // built under a trace context that differs from the ambient one passed to reInsertContracts
+    val updatesFixture = {
+      implicit val traceContext: TraceContext = updateTraceContext
+      List(
+        offset(1) -> sequencedTransaction(Map(1L -> c1, 2L -> c2)),
+        offset(2) -> repairTransaction(Map(1L -> c1, 2L -> c2)),
+        offset(3) -> sequencedReassignment(Map(1L -> c1, 2L -> c2)),
+        offset(4) -> repairReassignment(Map(1L -> c1, 2L -> c2)),
+        offset(5) -> onPrReassignment(Map(1L -> c1, 2L -> c2)),
+      )
+    }
+    updatesFixture.map(_._2.traceContext) shouldBe List.fill(5)(updateTraceContext)
+
+    ParallelIndexerSubscription
+      .reInsertContracts(
+        ledgerApiContractStore = MockLedgerApiContractStore(
+          expectedLookup = Set(c1.contractId, c2.contractId),
+          // c2 comes back under a different internal contract id, so every update gets copied
+          lookupResult = Map(c1.contractId -> 1L, c2.contractId -> 12L),
+          expectedStore = Set.empty,
+          storeResult = Map.empty,
+        ),
+        executionContext = parallelExecutionContext,
+        logger = logger,
+        traceContext = traceContext,
+      )(updatesFixture)
+      .futureValue
+      .map(_._2.traceContext) shouldBe List.fill(5)(updateTraceContext)
   }
 
   it should "replace internal contract ID if changed" in {
@@ -2658,7 +2701,8 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-      )(traceContext)(
+        traceContext = traceContext,
+      )(
         List(
           offset(1) -> sequencedTransaction(
             Map(
@@ -2766,7 +2810,8 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-      )(traceContext)(
+        traceContext = traceContext,
+      )(
         List(
           offset(1) -> sequencedTransaction(
             Map(
@@ -2892,7 +2937,8 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-      )(traceContext)(
+        traceContext = traceContext,
+      )(
         List(
           offset(1) -> sequencedTransaction(
             Map(
@@ -3018,7 +3064,9 @@ class ParallelIndexerSubscriptionSpec
     Update.TransactionAccepted.TransactionInfo(transaction)
   }
 
-  def sequencedTransaction(contracts: Map[Long, ContractInstance]): Update.TransactionAccepted =
+  def sequencedTransaction(contracts: Map[Long, ContractInstance])(implicit
+      traceContext: TraceContext
+  ): Update.TransactionAccepted =
     state.Update.SequencedTransactionAccepted(
       completionInfoO = None,
       transactionMeta = someTransactionMeta,
@@ -3031,7 +3079,9 @@ class ParallelIndexerSubscriptionSpec
       contractInfos = contractInfos(contracts),
     )
 
-  def repairTransaction(contracts: Map[Long, ContractInstance]): Update.TransactionAccepted =
+  def repairTransaction(contracts: Map[Long, ContractInstance])(implicit
+      traceContext: TraceContext
+  ): Update.TransactionAccepted =
     state.Update.RepairTransactionAccepted(
       transactionMeta = someTransactionMeta,
       transactionInfo = transactionInfo,
@@ -3068,7 +3118,9 @@ class ParallelIndexerSubscriptionSpec
     isReassigningParticipant = true,
   )
 
-  def sequencedReassignment(contracts: Map[Long, ContractInstance]): Update.ReassignmentAccepted =
+  def sequencedReassignment(contracts: Map[Long, ContractInstance])(implicit
+      traceContext: TraceContext
+  ): Update.ReassignmentAccepted =
     Update.SequencedReassignmentAccepted(
       optCompletionInfo = None,
       workflowId = None,
@@ -3080,7 +3132,9 @@ class ParallelIndexerSubscriptionSpec
       acsChangeFactory = TestAcsChangeFactory(),
     )
 
-  def repairReassignment(contracts: Map[Long, ContractInstance]): Update.ReassignmentAccepted =
+  def repairReassignment(contracts: Map[Long, ContractInstance])(implicit
+      traceContext: TraceContext
+  ): Update.ReassignmentAccepted =
     Update.RepairReassignmentAccepted(
       workflowId = None,
       updateId = updateId,
@@ -3091,7 +3145,9 @@ class ParallelIndexerSubscriptionSpec
       repairCounter = RepairCounter.Genesis,
     )
 
-  def onPrReassignment(contracts: Map[Long, ContractInstance]): Update.ReassignmentAccepted =
+  def onPrReassignment(contracts: Map[Long, ContractInstance])(implicit
+      traceContext: TraceContext
+  ): Update.ReassignmentAccepted =
     Update.OnPRReassignmentAccepted(
       workflowId = None,
       updateId = updateId,

@@ -45,7 +45,7 @@ final class LsuReconnectToOldSynchronizerIntegrationTest
     participant1.health.ping(participant1)
 
     // announce the synchronizer upgrade
-    val successorPsid = daId.incrementSerial
+    val successorPsid = daId.incrementSerial.value
     val upgradeTime = environment.clock.now + PositiveFiniteDuration.tryOfSeconds(15)
     synchronizerOwners1.foreach { node =>
       node.topology.lsu.announcement.propose(successorPsid, upgradeTime, daId)

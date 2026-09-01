@@ -8,11 +8,19 @@ import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.health.{
+  ComponentHealthState,
+  CompositeHealthComponent,
+  DelegatingMutableHealthComponent,
+  HealthComponent,
+}
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   FlagCloseable,
   FutureUnlessShutdown,
+  HasRunOnClosing,
   LifeCycle,
+  OnShutdownRunner,
   RunOnClosing,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -20,6 +28,7 @@ import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentStat
   TickListener,
   TickSignaller,
 }
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -38,6 +47,7 @@ class AcsCommitmentProcessorManager(
     digestProcessorFactory: DigestProcessorFactory,
     matcherFactory: ReceivedAcsCommitmentMatcherFactory,
     aliasForSynchronizerId: SynchronizerId => Option[SynchronizerAlias],
+    metricsLookup: SynchronizerAlias => CommitmentMetrics,
     exitOnFatalFailures: Boolean,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
@@ -45,6 +55,16 @@ class AcsCommitmentProcessorManager(
 )(implicit ec: ExecutionContext, mat: Materializer)
     extends NamedLogging
     with FlagCloseable {
+
+  private val healthComponent = new DelegatingMutableHealthComponent[SynchronizerId](
+    loggerFactory,
+    AcsCommitmentProcessorManager.healthName,
+    timeouts,
+    states => ComponentHealthState.reduceToWorstStateOrOk(states.values),
+    AcsCommitmentHealthState.Stopped.componentHealthState,
+  )
+
+  def health: HealthComponent = healthComponent
 
   private val synchronizers =
     mutable.Map[SynchronizerId, SynchronizerCommitmentState]()
@@ -59,13 +79,19 @@ class AcsCommitmentProcessorManager(
         synchronizerId, {
           val synchronizerLoggerFactory =
             loggerFactory.append("synchronizer", synchronizerId.toString)
+          val alias = aliasForSynchronizerId(synchronizerId).getOrElse(
+            ErrorUtil.invalidArgument(s"No alias for synchronizer ID $synchronizerId")
+          )
           val signaller = new LocalEventSignaller[TickListener, Offset](
             "subscriber",
             timeouts,
             synchronizerLoggerFactory,
           )
-          val alias = aliasForSynchronizerId(synchronizerId).getOrElse(
-            ErrorUtil.invalidArgument(s"No alias for synchronizer ID $synchronizerId")
+          val signallerHealth = createSignallerHealth(
+            synchronizerId,
+            signaller,
+            metricsLookup(alias),
+            synchronizerLoggerFactory,
           )
           val digestProcessorManager = new DigestProcessorManager(
             alias,
@@ -77,15 +103,48 @@ class AcsCommitmentProcessorManager(
             timeouts,
             synchronizerLoggerFactory,
           )
-          val matcherF = matcherFactory.startMatcherPipeline(
+          val (matcherHealth, matcherF) = matcherFactory.startMatcherPipeline(
             alias,
             synchronizerId,
             signaller,
           )
-          SynchronizerCommitmentState(digestProcessorManager, signaller, matcherF)
+
+          val state = SynchronizerCommitmentState(
+            synchronizerId = synchronizerId,
+            digestProcessorManager = digestProcessorManager,
+            tickSignaller = signaller,
+            signallerHealth = signallerHealth,
+            matcherF = matcherF,
+            matcherHealth = matcherHealth,
+            loggerFactory = synchronizerLoggerFactory,
+          )
+
+          healthComponent.set(synchronizerId, state)
+          state
         },
       )
     }
+
+  private def createSignallerHealth(
+      synchronizerId: SynchronizerId,
+      signaller: LocalEventSignaller[TickListener, Offset],
+      metrics: CommitmentMetrics,
+      loggerFactory: NamedLoggerFactory,
+  )(implicit traceContext: TraceContext) = {
+    val signallerHealth = AcsCommitmentComponentHealthReporter(
+      s"commitment-tick-signaller-$synchronizerId",
+      metrics.tickSignallerHealth,
+      loggerFactory,
+    )
+    signallerHealth.reportHealth(AcsCommitmentHealthState.Started)
+    signaller.runOnOrAfterClose_(new RunOnClosing {
+      override def name: String = s"update signaller health $synchronizerId"
+      override def done: Boolean = false
+      override def run()(implicit traceContext: TraceContext): Unit =
+        signallerHealth.reportHealth(AcsCommitmentHealthState.Stopped)
+    })
+    signallerHealth
+  }
 
   private def getAllAndClear(): Seq[(SynchronizerId, SynchronizerCommitmentState)] =
     lock.exclusive {
@@ -94,8 +153,10 @@ class AcsCommitmentProcessorManager(
       tmp
     }
 
-  override protected def onClosed(): Unit =
-    LifeCycle.close(getAllAndClear().flatMap(closeSynchronizerCommitmentState))(logger)
+  override protected def onClosed(): Unit = {
+    val closeables = getAllAndClear().flatMap(closeSynchronizerCommitmentState) :+ healthComponent
+    LifeCycle.close(closeables)(logger)
+  }
 
   /** Subscribe to new synchronizer connections.
     */
@@ -146,6 +207,7 @@ class AcsCommitmentProcessorManager(
   ): Seq[AutoCloseable] = {
     import TraceContext.Implicits.Empty.*
     val (synchronizerId, state) = item
+    healthComponent.remove(synchronizerId)
     val matcherClose = AsyncCloseable(
       s"ReceivedAcsCommitmentMatcher($synchronizerId)",
       state.matcherF
@@ -165,6 +227,10 @@ class AcsCommitmentProcessorManager(
   }
 }
 
+object AcsCommitmentProcessorManager {
+  val healthName = "acs-commitment-processor-manager"
+}
+
 /** This class holds various components for processing the ACS commitments for a particular
   * synchronizer.
   * @param digestProcessorManager
@@ -173,17 +239,42 @@ class AcsCommitmentProcessorManager(
   *   for connecting the various components with
   *   [[com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointWritten]]
   *   signals for ticks
+  * @param signallerHealth
+  *   the [[com.digitalasset.canton.participant.commitment.AcsCommitmentComponentHealthReporter]]
+  *   for reporting the health of the tick signaller, whose health is aggregated into the ACS
+  *   commitment processing health for the given synchronizer.
+  * @param matcherF
+  *   the future that completes once the ACS commitment matcher has started up.
+  * @param matcherHealth
+  *   the [[com.digitalasset.canton.participant.commitment.AcsCommitmentComponentHealthReporter]]
+  *   for reporting the health of the commitment matcher, whose health is aggregated into the ACS
+  *   commitment processing health for the given synchronizer.
   */
 final case class SynchronizerCommitmentState(
+    synchronizerId: SynchronizerId,
     digestProcessorManager: DigestProcessorManager,
     tickSignaller: TickSignaller,
+    signallerHealth: AcsCommitmentComponentHealthReporter,
     matcherF: FutureUnlessShutdown[(KillSwitch, Future[Done])],
-)
+    matcherHealth: AcsCommitmentComponentHealthReporter,
+    override protected val loggerFactory: NamedLoggerFactory,
+) extends CompositeHealthComponent[String, HealthComponent]
+    with NamedLogging {
+
+  setDependency(matcherHealth.name, matcherHealth.healthComponent)
+  setDependency(signallerHealth.name, signallerHealth.healthComponent)
+  setDependency(digestProcessorManager.health.name, digestProcessorManager.health)
+
+  override protected def combineDependentStates: ComponentHealthState =
+    ComponentHealthState.reduceToWorstStateOrOk(getDependencies.values.map(_.getState))
+  override def name: String = s"commitment-state-$synchronizerId"
+  override protected def initialHealthState: ComponentHealthState =
+    AcsCommitmentHealthState.NotInitialized.componentHealthState
+  override protected def associatedHasRunOnClosing: HasRunOnClosing =
+    new OnShutdownRunner.PureOnShutdownRunner(logger)
+}
 
 object SynchronizerCommitmentState {
-  // The subscriber key type is Unit, because:
-  // - the event signaller supports multiple subscribers for the same key, and
-  // - the checkpoints aren't really "assigned" to a specific set of subscribers
   type TickSignaller = EventSignaller[TickListener, Offset]
 
   sealed trait TickListener extends Product with Serializable

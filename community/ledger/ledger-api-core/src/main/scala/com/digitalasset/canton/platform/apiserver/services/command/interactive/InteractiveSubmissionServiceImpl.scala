@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
-import cats.Eval
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
@@ -96,7 +95,7 @@ private[apiserver] object InteractiveSubmissionServiceImpl {
       packagePreferenceBackend: PackagePreferenceBackend,
       transactionSubmissionTracker: SubmissionTracker,
       defaultTrackingTimeout: NonNegativeFiniteDuration,
-      trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
+      trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
       loggerFactory: NamedLoggerFactory,
   )(implicit
       executionContext: ExecutionContext,
@@ -131,7 +130,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
     packagePreferenceService: PackagePreferenceBackend,
     transactionSubmissionTracker: SubmissionTracker,
     defaultTrackingTimeout: NonNegativeFiniteDuration,
-    trafficEnforcementBackendO: Option[Eval[TrafficEnforcementBackend]],
+    trafficEnforcementBackendO: Option[TrafficEnforcementBackend],
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
     extends InteractiveSubmissionService
@@ -283,7 +282,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       }
 
       _ <- trafficEnforcementBackendO.traverse(trafficEnforcementBackend =>
-        trafficEnforcementBackend.value
+        trafficEnforcementBackend
           .validateTraffic(
             actAs = commandExecutionResult.commandInterpretationResult.submitterInfo.actAs,
             trafficCost =

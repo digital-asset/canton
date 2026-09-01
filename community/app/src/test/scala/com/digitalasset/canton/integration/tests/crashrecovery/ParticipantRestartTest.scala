@@ -41,6 +41,7 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UpdateWrapper,
 }
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -612,7 +613,9 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P4S2M2_Manual
       .addConfigTransforms(
-        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag
+        ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(EnvironmentDefinition.S1M1_S1M1)
@@ -979,6 +982,8 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
       .addConfigTransforms(
         ConfigTransforms.enableMultiSynchronizerTopologyFeatureFlag,
         ProgrammableSequencer.configOverride(getClass.toString, loggerFactory),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
 
   private def startSynchronizers(synchronizers: Seq[NetworkTopologyDescription])(implicit
@@ -1617,6 +1622,8 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
           _.focus(_.parameters.enableAllLedgerApiReassignments)
             .replace(enableAllLedgerApiReassignments)
         ),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(Seq(EnvironmentDefinition.S1M1)).bootstrap()
@@ -2393,7 +2400,9 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
-        ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory)
+        ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(Seq(EnvironmentDefinition.S1M1)).bootstrap()
@@ -2542,6 +2551,7 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
   }
 }
 
+@UnstableTest // TODO(i21107): remove once the test is stable
 class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
   private val reconciliationInterval = PositiveSeconds.tryOfSeconds(2)
   private val transactionTolerance = reconciliationInterval.unwrap
@@ -2557,6 +2567,8 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
         ConfigTransforms.setPingRetries(true),
         ConfigTransforms.updatePruningBatchSize(internalPruningBatchSize),
         ConfigTransforms.updateMaxDeduplicationDurations(transactionTolerance),
+        // Enable crashes after failed validations, as crash recovery tests do not fail on unexpected security alerts.
+        ConfigTransforms.setCrashAfterFailedValidation(true),
       )
       .withSetup { implicit env =>
         NetworkBootstrapper(

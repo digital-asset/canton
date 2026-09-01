@@ -8,9 +8,14 @@ import cats.{Applicative, Functor}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
+import com.digitalasset.canton.health.HealthComponent
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  FutureUnlessShutdown,
+  PromiseUnlessShutdown,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointToBeWritten
@@ -29,7 +34,7 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
-import com.digitalasset.canton.util.{ErrorUtil, TryUtil}
+import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, TryUtil}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ReassignmentCounter}
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.stream.KillSwitch
@@ -62,9 +67,18 @@ trait BaseDigestProcessor extends NamedLogging {
       metrics.checkpointWatermark.updateValue(checkpointToBeWritten.recordTimeInclusive.toMicros)
     }
 
-  private val state: AtomicReference[DigestProcessorState] = new AtomicReference(
-    Initial
-  )
+  private val state: AtomicReference[DigestProcessorState] =
+    new AtomicReference(Initial)
+
+  // Needs to be lazy because of initialization order of `metrics` in implementations of BaseDigestProcessor.
+  // This is not a problem, as the health of a component doesn't change often.
+  private lazy val healthReporter: AcsCommitmentComponentHealthReporter =
+    AcsCommitmentComponentHealthReporter(toString, metrics.digestProcessorHealth, loggerFactory)
+
+  def health: HealthComponent = healthReporter.healthComponent
+
+  private def reportHealth(state: DigestProcessorState)(implicit traceContext: TraceContext): Unit =
+    healthReporter.reportHealth(state.health)
 
   def isStartingOrStarted: Boolean = state.get() match {
     case _: Starting | _: Started => true
@@ -87,7 +101,7 @@ trait BaseDigestProcessor extends NamedLogging {
     case Starting(startingComplete) => startingComplete.void
     case Started(_, _) => FutureUnlessShutdown.unit
     case Stopping(_) => FutureUnlessShutdown.unit
-    case Stopped(_) => FutureUnlessShutdown.unit
+    case Stopped(_, startOutcome) => FutureUnlessShutdown(Future.fromTry(startOutcome))
   }
 
   /** @return
@@ -104,74 +118,95 @@ trait BaseDigestProcessor extends NamedLogging {
       case Starting(startingComplete) => startingComplete.flatMap(_.completionFuture)
       case Started(_, completionFuture) => completionFuture
       case Stopping(stoppingComplete) => stoppingComplete
-      case Stopped(reason) => FutureUnlessShutdown.fromTry(reason)
+      case Stopped(reason, _) => FutureUnlessShutdown.fromTry(reason)
     }
 
-  final def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    def runPipeline(
-        starting: Starting,
-        startingCompleted: PromiseUnlessShutdown[Started],
-    ): FutureUnlessShutdown[Unit] =
-      startPipelineInternal().thereafter {
-        case Success(Outcome((ks, pipelineCompleted))) =>
-          val completionPromise = PromiseUnlessShutdown.unsupervised[Unit]()
-          val startedState = Started(ks, completionPromise.futureUS)
-
-          if (state.compareAndSet(starting, startedState)) {
-            // If the state was successfully set to `Started`,
-            // try to update the state to `Stopped` upon completion of the pipeline.
-            pipelineCompleted.onComplete { completionResult =>
-              // The CAS is used to only update the state if the processor hasn't been explicitly stopped in the meantime.
-              state.compareAndSet(startedState, Stopped(completionResult)).discard
-            }
-          }
-
-          // `completionPromise` must be completed regardless of whether the state update was successful or not,
-          // because `completionFuture` might have been called between setting the state to `Starting` and a call to `stop`.
-          completionPromise.completeWithUS(FutureUnlessShutdown.outcomeF(pipelineCompleted)).discard
-
-          // Similarly, `startingCompleted` must be completed with the `startedState` regardless of whether the state update was successful or not,
-          // because `startingFuture` might have been called between setting the state to `Starting` and a call to `stop`.
-          startingCompleted.outcome_(startedState)
-
-        case Success(AbortedDueToShutdown) =>
-          // if `startupPipelineInternal` was aborted due to shutdown,
-          // try to set the processor's state to `Stopped`, since it hasn't started up successfully
-          state.compareAndSet(starting, Stopped(TryUtil.unit)).discard
-          startingCompleted.shutdown_()
-
-        case Failure(ex) =>
-          // startup of the processing pipeline failed, try to set the state to stopped
-          state.compareAndSet(starting, Stopped(Failure(ex))).discard
-          startingCompleted.failure(ex)
-      }.void
-
+  final def startAsync()(implicit traceContext: TraceContext): Unit = {
     val startedPromise = PromiseUnlessShutdown.unsupervised[Started]()
     val starting = Starting(startedPromise.futureUS)
     if (state.compareAndSet(Initial, starting)) {
+      reportHealth(starting)
       runPipeline(starting, startedPromise)
-    } else {
-      logger.info("Digest processor has already been started before.")
-      FutureUnlessShutdown.unit
     }
   }
 
-  final def stop(): FutureUnlessShutdown[Unit] = {
+  final def start()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    startAsync()
+    startingFuture
+  }
+
+  private def runPipeline(
+      starting: Starting,
+      startingCompleted: PromiseUnlessShutdown[Started],
+  )(implicit traceContext: TraceContext): Unit = {
+    val startedF = startPipelineInternal().thereafter {
+      case Success(Outcome((ks, pipelineCompleted))) =>
+        val completionPromise = PromiseUnlessShutdown.unsupervised[Unit]()
+        val startedState = Started(ks, completionPromise.futureUS)
+
+        if (state.compareAndSet(starting, startedState)) {
+          reportHealth(startedState)
+          // If the state was successfully set to `Started`,
+          // try to update the state to `Stopped` upon completion of the pipeline.
+          pipelineCompleted.onComplete { completionResult =>
+            // The CAS is used to only update the state if the processor hasn't been explicitly stopped in the meantime.
+            val stoppedState = Stopped(completionResult, TryUtil.unitUS)
+            if (state.compareAndSet(startedState, stoppedState)) {
+              reportHealth(stoppedState)
+            }
+          }
+        }
+
+        // `completionPromise` must be completed regardless of whether the state update was successful or not,
+        // because `completionFuture` might have been called between setting the state to `Starting` and a call to `stop`.
+        completionPromise
+          .completeWithUS(FutureUnlessShutdown.outcomeF(pipelineCompleted))
+          .discard
+
+        // Similarly, `startingCompleted` must be completed with the `startedState` regardless of whether the state update was successful or not,
+        // because `startingFuture` might have been called between setting the state to `Starting` and a call to `stop`.
+        startingCompleted.outcome_(startedState)
+
+      case Success(AbortedDueToShutdown) =>
+        val stoppedState = Stopped(TryUtil.unit, Success(AbortedDueToShutdown))
+        // if `startupPipelineInternal` was aborted due to shutdown,
+        // try to set the processor's state to `Stopped`, since it hasn't started up successfully
+        if (state.compareAndSet(starting, stoppedState)) {
+          reportHealth(stoppedState)
+        }
+        startingCompleted.shutdown_()
+
+      case Failure(ex) =>
+        val failedState = Stopped(Failure(ex), Failure(ex))
+        // startup of the processing pipeline failed, try to set the state to stopped
+        if (state.compareAndSet(starting, failedState)) {
+          reportHealth(failedState)
+        }
+        startingCompleted.failure(ex)
+    }
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      startedF,
+      s"Failed to start digest processor for $synchronizerId",
+    )
+  }
+
+  final def stop()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val stoppingCompletePromise = PromiseUnlessShutdown.unsupervised[Unit]()
-    val successfulStop = Stopped(TryUtil.unit)
     val stoppingState = Stopping(stoppingCompletePromise.futureUS)
 
     val prevState = state.getAndUpdate {
-      case Initial => successfulStop
+      case Initial => Stopped.success
       case Starting(_) | Started(_, _) => stoppingState
-      case stoppingInProgress @ (Stopping(_) | Stopped(_)) => stoppingInProgress
+      case stoppingInProgress @ (Stopping(_) | Stopped(_, _)) => stoppingInProgress
     }
 
     prevState match {
       case Initial =>
         // nothing to do, the digest processor hasn't even been started yet, and it is considered stopped.
+        reportHealth(Stopped.success)
         FutureUnlessShutdown.unit
       case Starting(startingComplete) =>
+        reportHealth(stoppingState)
         stoppingCompletePromise
           .completeWithUS(
             startingComplete
@@ -180,12 +215,18 @@ trait BaseDigestProcessor extends NamedLogging {
                 completionFuture
               }
               .thereafter {
-                case Success(_) => state.set(successfulStop)
-                case Failure(ex) => state.set(Stopped(Failure(ex)))
+                case Success(_) =>
+                  state.set(Stopped.success)
+                  reportHealth(Stopped.success)
+                case Failure(ex) =>
+                  val failedStop = Stopped(Failure(ex), Failure(ex))
+                  state.set(failedStop)
+                  reportHealth(failedStop)
               }
           )
           .futureUS
       case Started(killSwitch, completionFuture) =>
+        reportHealth(stoppingState)
         killSwitch.shutdown()
         stoppingCompletePromise
           .completeWithUS(
@@ -193,8 +234,12 @@ trait BaseDigestProcessor extends NamedLogging {
               case Success(_) =>
                 // a successful completion of the pipeline or AbortedDueToShutdown are both
                 // considered safe states and lead to a successful `Stopped` state.
-                state.set(successfulStop)
-              case Failure(ex) => state.set(Stopped(Failure(ex)))
+                state.set(Stopped.success)
+                reportHealth(Stopped.success)
+              case Failure(ex) =>
+                val failedStop = Stopped(Failure(ex), TryUtil.unitUS)
+                state.set(failedStop)
+                reportHealth(failedStop)
             }
           )
           .futureUS
@@ -202,7 +247,7 @@ trait BaseDigestProcessor extends NamedLogging {
       case Stopping(stoppingComplete) =>
         // nothing to do, the processor is already being stopped
         stoppingComplete
-      case Stopped(reason) =>
+      case Stopped(reason, _) =>
         // nothing to do, the processor was already stopped before
         FutureUnlessShutdown.fromTry(reason)
     }
@@ -238,16 +283,38 @@ trait BaseDigestProcessor extends NamedLogging {
   override def toString: String = s"${getClass.getSimpleName}($synchronizerId)"
 }
 
-sealed trait DigestProcessorState extends Product with Serializable
+sealed trait DigestProcessorState extends Product with Serializable {
+  def health: AcsCommitmentHealthState
+}
 object DigestProcessorState {
-  case object Initial extends DigestProcessorState
+
+  case object Initial extends DigestProcessorState {
+    override def health: AcsCommitmentHealthState =
+      AcsCommitmentHealthState.NotInitialized
+  }
   final case class Starting(startingComplete: FutureUnlessShutdown[Started])
-      extends DigestProcessorState
+      extends DigestProcessorState {
+    override def health: AcsCommitmentHealthState = AcsCommitmentHealthState.Starting
+  }
   final case class Started(killSwitch: KillSwitch, completionFuture: FutureUnlessShutdown[Unit])
-      extends DigestProcessorState
+      extends DigestProcessorState {
+    override def health: AcsCommitmentHealthState = AcsCommitmentHealthState.Started
+  }
   final case class Stopping(stoppingComplete: FutureUnlessShutdown[Unit])
-      extends DigestProcessorState
-  final case class Stopped(reason: Try[Unit]) extends DigestProcessorState
+      extends DigestProcessorState {
+    override def health: AcsCommitmentHealthState = AcsCommitmentHealthState.Stopping
+  }
+  final case class Stopped(reason: Try[Unit], startOutcome: Try[UnlessShutdown[Unit]])
+      extends DigestProcessorState {
+    override def health: AcsCommitmentHealthState = (reason, startOutcome) match {
+      case (Success(_), Success(_)) => AcsCommitmentHealthState.Stopped
+      case (_, Failure(t)) => AcsCommitmentHealthState.failed(t)
+      case (Failure(t), _) => AcsCommitmentHealthState.failed(t)
+    }
+  }
+  object Stopped {
+    val success: Stopped = Stopped(TryUtil.unit, TryUtil.unitUS)
+  }
 }
 
 object BaseDigestProcessor {
@@ -508,5 +575,4 @@ object BaseDigestProcessor {
   object TopologyChangeTracker {
     val empty: TopologyChangeTracker = new TopologyChangeTracker(Map.empty)
   }
-
 }

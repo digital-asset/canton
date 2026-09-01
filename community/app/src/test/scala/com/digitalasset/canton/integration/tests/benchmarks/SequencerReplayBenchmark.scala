@@ -157,7 +157,7 @@ trait SequencerReplayBenchmark extends CommunityIntegrationTest with SharedEnvir
 
   // Use local tools as the dump files are not copied into the container.
   // Otherwise, the tests would fail with "No such file or directory".
-  private lazy val postgresDumpRestore = LocalPostgresDumpRestore(postgresPlugin)
+  private lazy val postgresDumpRestore = LocalPostgresDumpRestore(postgresPlugin, loggerFactory)
 
   private val participantNames = (1 to numberOfParticipants).map(idx => s"participant$idx")
 

@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.commitment
 import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.commitment.DigestProcessorManagerTest.{
   TestReinitializingDigestProcessor,
@@ -18,7 +19,6 @@ import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, Participa
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, SynchronizerAlias}
 import org.apache.pekko.stream.KillSwitch
 import org.scalatest.wordspec.AnyWordSpec
@@ -35,8 +35,8 @@ class DigestProcessorManagerTest
 
   "DigestProcessorManager" should {
 
-    "starting a running processor waits for the currently running processor to stop" in {
-      val fixture = new Fixture()
+    "starting a running processor on top of a running digest processor does nothing" in {
+      val fixture = new Fixture(reinitializingTimepoint = tp(10))
       import fixture.*
 
       get() shouldBe empty
@@ -47,17 +47,15 @@ class DigestProcessorManagerTest
       mgr.startRunningDigestProcessor().futureValueUS
       val proc2 = get().value
 
-      proc1.completionFuture.futureValueUS
-      proc1.stateInternal should matchPattern { case Stopped(Success(())) => }
-
-      proc2 should not be proc1
+      proc2 shouldBe proc1
     }
 
-    "starting a reinitialization processor stops the currently running processor" in {
+    "starting a reinitialization processor stops the current running digest processor" in {
       val reinitTimepoint = tp(10)
+      val donePromise = Promise[Unit]()
       val fixture = new Fixture(
-        reinitializingTimepoint = Some(reinitTimepoint),
-        donePromise = () => Promise[Unit](),
+        reinitializingTimepoint = reinitTimepoint,
+        donePromise = () => donePromise,
       )
       import fixture.*
 
@@ -66,45 +64,33 @@ class DigestProcessorManagerTest
       // Start initial running digest processor
       mgr.startRunningDigestProcessor().futureValueUS
 
-      def startReinitializationAndCheck(): Unit = {
-        val oldProc = get().value
-        eventually() {
-          oldProc.isStartingOrStarted shouldBe true
-          oldProc shouldBe a[RunningDigestProcessor]
-        }
-
-        // Kicks off reinitialization and returns the configured target record time
-        val reinitResult = mgr.startReinitializationDigestProcessor().futureValueUS
-        reinitResult shouldBe Some(reinitTimepoint.recordTime)
-
-        // Verify the old running processor was stopped
-        eventually() {
-          oldProc.stateInternal shouldBe Stopped(TryUtil.unit)
-        }
-
-        // Retrieve the newly created reinitialization processor directly from the manager
-        val reinitProc = eventually() {
-          val proc = get().value
-          proc should not be oldProc
-          proc shouldBe a[ReinitializingDigestProcessor]
-          proc.isStartingOrStarted shouldBe true
-          proc
-        }
-
-        // Complete the reinitialization pipeline
-        reinitProc.asInstanceOf[TestReinitializingDigestProcessor].donePromise.success(())
-
-        // Verify the manager automatically restarted a RunningDigestProcessor
-        eventually() {
-          val proc = get().value
-          proc shouldBe a[RunningDigestProcessor]
-          proc.stateInternal should matchPattern { case Started(_, _) => }
-        }
+      val oldProc = get().value
+      eventually() {
+        oldProc.isStartingOrStarted shouldBe true
+        oldProc shouldBe a[RunningDigestProcessor]
       }
 
-      startReinitializationAndCheck()
-      startReinitializationAndCheck()
-      startReinitializationAndCheck()
+      // Kicks off reinitialization and returns the configured target record time
+      val reinitResult = mgr.startReinitializationDigestProcessor().futureValueUS
+      reinitResult shouldBe reinitTimepoint.recordTime
+
+      // Verify the old running processor was stopped
+      eventually() {
+        oldProc.stateInternal shouldBe Stopped.success
+      }
+
+      // Retrieve the newly created reinitialization processor directly from the manager
+      val reinitProc = eventually() {
+        val proc = get().value
+        proc should not be oldProc
+        proc shouldBe a[ReinitializingDigestProcessor]
+        proc.isStartingOrStarted shouldBe true
+        proc
+      }
+
+      // Complete the reinitialization pipeline
+      donePromise.success(())
+      reinitProc.completionFuture.futureValueUS
     }
 
     "starting a reinitialization processor does not stop the current reinitialization processor" in {
@@ -112,7 +98,7 @@ class DigestProcessorManagerTest
       val reinitTimepoint = tp(10)
 
       val fixture = new Fixture(
-        reinitializingTimepoint = Some(reinitTimepoint),
+        reinitializingTimepoint = reinitTimepoint,
         donePromise = () => reinitDonePromise,
       )
       import fixture.*
@@ -121,7 +107,7 @@ class DigestProcessorManagerTest
 
       // Start first reinitialization (returns target timestamp immediately while pipeline runs in background)
       val firstReinitializationTimestamp = mgr
-        .startReinitializationDigestProcessor(runningDigestProcessorShouldStartAfter = false)
+        .startReinitializationDigestProcessor()
         .futureValueUS
 
       // Verify proc1 is active and in progress
@@ -130,7 +116,7 @@ class DigestProcessorManagerTest
 
       // Start second reinitialization while first is still in progress
       val secondReinitializationTimestamp = mgr
-        .startReinitializationDigestProcessor(runningDigestProcessorShouldStartAfter = false)
+        .startReinitializationDigestProcessor()
         .futureValueUS
 
       // Verify proc1 was NOT replaced or stopped.
@@ -139,21 +125,24 @@ class DigestProcessorManagerTest
       proc1.isStartingOrStarted shouldBe true
 
       // Both returned the exact target timestamp of the active run
-      firstReinitializationTimestamp shouldBe Some(reinitTimepoint.recordTime)
-      secondReinitializationTimestamp shouldBe Some(reinitTimepoint.recordTime)
+      firstReinitializationTimestamp shouldBe reinitTimepoint.recordTime
+      secondReinitializationTimestamp shouldBe reinitTimepoint.recordTime
 
       // Complete the background pipeline and verify clean shutdown
       reinitDonePromise.success(())
 
       eventually() {
         proc1.completionFuture.futureValueUS
-        proc1.stateInternal should matchPattern { case Stopped(Success(())) => }
+        proc1.stateInternal should matchPattern { case Stopped(Success(()), Success(Outcome(()))) =>
+        }
       }
     }
 
-    "once the reinitialization processor completes with default 'runningDigestProcessorShouldStartAfter', a running digest processing should be started" in {
+    "a running digest processor can be queued after the reinitialization processor" in {
       val reinitTimepoint = tp(100)
-      val fixture = new Fixture(reinitializingTimepoint = Some(reinitTimepoint))
+      val donePromise = Promise[Unit]()
+      val fixture =
+        new Fixture(reinitializingTimepoint = reinitTimepoint, donePromise = () => donePromise)
       import fixture.*
 
       get() shouldBe empty
@@ -167,63 +156,43 @@ class DigestProcessorManagerTest
       }
 
       // Start and complete reinitialization (stops active running processor)
-      mgr.startReinitializationDigestProcessor().futureValueUS shouldBe Some(
+      mgr.startReinitializationDigestProcessor().futureValueUS shouldBe
         reinitTimepoint.recordTime
-      )
 
-      // Verify running digest processor automatically restarts
+      val reinitProc = get().value
+      reinitProc shouldBe a[ReinitializingDigestProcessor]
+
+      val queueAnotherRunningDigestProcessor = mgr.startRunningDigestProcessor()
+
+      // the reinitialization is still going on
+      get().value shouldBe reinitProc
+
+      donePromise.success(())
+
+      // Verify that the queued running digest processor starts
       eventually() {
         val proc2 = get().value
         proc2 shouldBe a[RunningDigestProcessor]
       }
-    }
 
-    "not start a new running digest processor after reinitialization, if `runningDigestProcessorShouldStartAfter` is false" in {
-      val reinitDonePromise = Promise[Unit]()
-      val reinitTimepoint = tp(100)
-
-      val fixture = new Fixture(
-        reinitializingTimepoint = Some(reinitTimepoint),
-        donePromise = () => reinitDonePromise,
-      )
-      import fixture.*
-
-      get() shouldBe empty
-
-      // Kick off reinitialization with running digest processor auto-restart disabled
-      mgr
-        .startReinitializationDigestProcessor(runningDigestProcessorShouldStartAfter = false)
-        .futureValueUS shouldBe Some(reinitTimepoint.recordTime)
-
-      // Verify reinitialization processor is active in memory
-      val reinitProc = get().value
-      reinitProc.isStartingOrStarted shouldBe true
-
-      // Complete the reinitialization pipeline
-      reinitDonePromise.success(())
-
-      // Verify pipeline completed, stopped, and no RunningDigestProcessor was started
-      eventually() {
-        reinitProc.completionFuture.futureValueUS
-        reinitProc.stateInternal should matchPattern { case Stopped(Success(())) => }
-        get().value shouldBe reinitProc // Ref remains on testReinitDp, not replaced
-      }
+      queueAnotherRunningDigestProcessor.futureValueUS
     }
 
     "be able to start a processor if the previous processor has terminated" in {
       val fixture = new Fixture(
-        donePromise = () => Promise[Unit]()
+        reinitializingTimepoint = tp(10),
+        donePromise = () => Promise[Unit](),
       )
       import fixture.*
 
       get() shouldBe empty
 
-      def terminatePipeline(processor: BaseDigestProcessor): Unit =
+      def terminatePipeline(processor: DigestProcessor): Unit =
         processor.stateInternal match {
           case Started(ks, completionFuture) =>
             ks.shutdown()
             completionFuture.futureValueUS
-          case Stopped(_) => ()
+          case Stopped(_, _) => ()
           case unexpectedState => fail(s"unexpected processor state $unexpectedState")
         }
 
@@ -238,34 +207,22 @@ class DigestProcessorManagerTest
         terminatePipeline(proc)
 
         eventually() {
-          proc.stateInternal shouldBe Stopped(TryUtil.unit)
+          proc.stateInternal shouldBe Stopped.success
         }
 
         oldProcO.foreach(_ should not be proc)
       }
 
-      startAndTerminate(() =>
-        mgr
-          .startReinitializationDigestProcessor(runningDigestProcessorShouldStartAfter = false)
-          .map(_ => ())
-      )
-      startAndTerminate(() =>
-        mgr
-          .startReinitializationDigestProcessor(runningDigestProcessorShouldStartAfter = false)
-          .map(_ => ())
-      )
+      startAndTerminate(() => mgr.startReinitializationDigestProcessor().map(_ => ()))
+      startAndTerminate(() => mgr.startReinitializationDigestProcessor().map(_ => ()))
       startAndTerminate(() => mgr.startRunningDigestProcessor())
       startAndTerminate(() => mgr.startRunningDigestProcessor())
-      startAndTerminate(() =>
-        mgr
-          .startReinitializationDigestProcessor(runningDigestProcessorShouldStartAfter = false)
-          .map(_ => ())
-      )
+      startAndTerminate(() => mgr.startReinitializationDigestProcessor().map(_ => ()))
     }
   }
 
   class Fixture(
-      reinitializingTimepoint: Option[Timepoint] = None,
+      reinitializingTimepoint: Timepoint,
       donePromise: () => Promise[Unit] = () => Promise.successful(()),
   ) {
     val factory = new TestDigestProcessorFactory(
@@ -276,7 +233,7 @@ class DigestProcessorManagerTest
           DefaultTestIdentities.synchronizerId,
           timeouts,
           loggerFactory,
-          reinitializingTimepoint = reinitializingTimepoint,
+          reinitializingTimepoint,
           donePromise = donePromise(),
         ),
     )
@@ -292,7 +249,7 @@ class DigestProcessorManagerTest
       loggerFactory,
     )
 
-    def get(): Option[BaseDigestProcessor] =
+    def get(): Option[DigestProcessor] =
       mgr.currentProcessor
   }
 
@@ -315,6 +272,12 @@ class DigestProcessorManagerTest
         tickSignaller: TickSignaller,
     )(implicit traceContext: TraceContext): RunningDigestProcessor =
       new TestRunningDigestProcessor(synchronizerId, timeouts, loggerFactory)
+
+    override def needsReinitialization(
+        synchronizerId: SynchronizerId
+    )(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Boolean] = FutureUnlessShutdown.pure(false)
   }
 }
 
@@ -330,7 +293,7 @@ object DigestProcessorManagerTest {
       synchronizerId: SynchronizerId,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
-      override val reinitializingTimepoint: Option[Timepoint] = None,
+      override val reinitializingTimepoint: Timepoint,
       val donePromise: Promise[Unit] = Promise.successful(()),
   )(implicit override protected val executionContext: ExecutionContext)
       extends TestDigestProcessor(synchronizerId, timeouts, loggerFactory)

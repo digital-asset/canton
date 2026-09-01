@@ -6,13 +6,12 @@ package com.digitalasset.canton.participant.admin.party
 import cats.data.EitherT
 import cats.implicits.toTraverseOps
 import cats.syntax.either.*
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{BatchingConfig, PositiveFiniteDuration, ProcessingTimeout}
+import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.participant.state.SynchronizerUpdate
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
@@ -98,9 +97,9 @@ import scala.util.chaining.scalaUtilChainingOps
 final class PartyReplicator(
     participantId: ParticipantId,
     syncService: CantonSyncService,
+    internalIndexService: InternalIndexService,
     clock: Clock,
     config: AlphaOnlinePartyReplicationConfig,
-    batchingConfig: BatchingConfig,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
     exitOnFatalFailures: Boolean,
@@ -130,12 +129,13 @@ final class PartyReplicator(
     )
 
   private val indexingWorkflow =
-    new PartyReplicationIndexingWorkflow(
-      syncService.participantNodePersistentState.map(_.contractStore),
-      config.pauseSynchronizerIndexingDuringPartyReplication,
-      batchingConfig,
-      loggerFactory,
-    )
+    syncService.partyReplicationTriggersO
+      .getOrElse(
+        ErrorUtil.invalidState("PartyReplicator requires OnPR triggers")(
+          errorLoggingContext(TraceContext.empty)
+        )
+      )
+      .indexingWorkflow
 
   private val executionQueue = new SimpleExecutionQueue(
     "party-replicator-queue",
@@ -1096,11 +1096,6 @@ final class PartyReplicator(
                       )
                   )
                 )
-                indexService <- EitherT.fromEither[FutureUnlessShutdown](
-                  syncService.internalIndexService.toRight(
-                    "Internal index service not available for source participant processor due to shutdown or becoming active?"
-                  )
-                )
               } yield {
                 (
                   PartyReplicationSourceParticipantProcessor(
@@ -1109,7 +1104,7 @@ final class PartyReplicator(
                     requestId,
                     effectiveAtLapiOffset,
                     partiesAlreadyHostedByTargetParticipant,
-                    indexService,
+                    internalIndexService,
                     partyReplicationStateManager,
                     recordSequenerChannelError(requestId, traceContext),
                     markDisconnected(requestId),
@@ -1299,41 +1294,6 @@ final class PartyReplicator(
           _ <- partyReplicationStateManager.update_(requestId, _.updateIndexing(progress))
         } yield ()
     }
-
-  private[participant] def flushContractActivationChangesToIndexer(
-      partyIds: NonEmpty[Set[LfPartyId]],
-      synchronizerId: SynchronizerId,
-      publishAt: EffectiveTime,
-  )(publishUpdate: SynchronizerUpdate => FutureUnlessShutdown[Unit])(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = {
-    val connectedSynchronizer =
-      syncService
-        .readyConnectedSynchronizerById(synchronizerId)
-        .getOrElse(
-          ErrorUtil.invalidState(
-            s"Synchronizer $synchronizerId not connected while flushing ${partyIds.mkString(", ")} to indexer"
-          )
-        )
-
-    val indexingStore =
-      connectedSynchronizer.synchronizerHandle.syncPersistentState.partyReplicationIndexingStoreIfOnPREnabled
-        .getOrElse(
-          ErrorUtil.invalidState(
-            s"Synchronizer $synchronizerId not connected while flushing ${partyIds.mkString(", ")} to indexer"
-          )
-        )
-
-    val pureCrypto = connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi
-
-    indexingWorkflow.flushContractActivationChangesToIndexer(
-      partyIds,
-      synchronizerId,
-      publishAt,
-      indexingStore,
-      pureCrypto,
-    )(publishUpdate)
-  }
 
   /** This completes party replication by executing the following final steps if they are found to
     * not have been executed yet:

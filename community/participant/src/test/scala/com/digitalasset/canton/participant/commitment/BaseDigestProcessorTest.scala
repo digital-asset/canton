@@ -6,7 +6,11 @@ package com.digitalasset.canton.participant.commitment
 import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  FutureUnlessShutdown,
+  PromiseUnlessShutdown,
+  UnlessShutdown,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   CheckpointToBeWritten,
@@ -34,7 +38,7 @@ import org.apache.pekko.stream.KillSwitch
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.Failure
+import scala.util.{Failure, Success}
 
 @AcsCommitmentTest
 class BaseDigestProcessorTest
@@ -44,6 +48,32 @@ class BaseDigestProcessorTest
     with HasExecutionContext {
 
   "BaseDigestProcessor" should {
+    def checkHealth(proc: BaseDigestProcessor, expected: AcsCommitmentHealthState) = {
+      proc.health.getState shouldBe expected.componentHealthState
+      proc.metrics.digestProcessorHealth.getValue shouldBe expected.metricValue
+
+    }
+    "report health during successful startup" in {
+      val startupPromise = PromiseUnlessShutdown.unsupervised[(KillSwitch, Future[Unit])]()
+      val proc = new TestDigestProcessor(startupPromise.futureUS)
+      checkHealth(proc, AcsCommitmentHealthState.NotInitialized)
+
+      val startingFuture = proc.start()
+      checkHealth(proc, AcsCommitmentHealthState.Starting)
+
+      val promiseKillSwitch = new PromiseKillSwitch()
+      startupPromise.outcome_((promiseKillSwitch, promiseKillSwitch.promise.future))
+
+      startingFuture.futureValueUS
+      checkHealth(proc, AcsCommitmentHealthState.Started)
+
+      val stoppingFuture = proc.stop()
+      checkHealth(proc, AcsCommitmentHealthState.Stopping)
+
+      stoppingFuture.futureValueUS
+      checkHealth(proc, AcsCommitmentHealthState.Stopped)
+    }
+
     "not allow double start" in {
       // promise to delay the startup of the pipeline
       val startupPromise = PromiseUnlessShutdown.unsupervised[(KillSwitch, Future[Unit])]()
@@ -54,26 +84,46 @@ class BaseDigestProcessorTest
         case Starting(startingComplete) if !startingComplete.isCompleted =>
       }
 
-      // starting again returns immediately, since the actual startup process is in progress
-      proc.start().futureValueUS
+      // starting again joins the current processor
+      val secondStart = proc.start()
+
+      secondStart.isCompleted shouldBe false
 
       val exception = new RuntimeException("failure-on-startup")
-      startupPromise.failure(exception)
 
-      startingFuture.failed.futureValueUS shouldBe exception
+      loggerFactory.assertLogs(
+        {
+          startupPromise.failure(exception)
+          startingFuture.failed.futureValueUS shouldBe exception
+          secondStart.failed.futureValueUS shouldBe exception
+        },
+        _.errorMessage should include("Failed to start digest processor"),
+      )
+
+      checkHealth(proc, AcsCommitmentHealthState.failed(exception))
     }
 
     "propagate failures while starting the pipeline" in {
       val exception = new RuntimeException("fail-on-startup")
       val proc = new TestDigestProcessor(FutureUnlessShutdown.failed(exception))
 
-      proc.start().failed.futureValueUS shouldBe exception
-      proc.completionFuture.failed.futureValueUS shouldBe exception
+      loggerFactory.assertLogs(
+        {
+          proc.start().failed.futureValueUS shouldBe exception
+          proc.completionFuture.failed.futureValueUS shouldBe exception
+        },
+        _.errorMessage should include("Failed to start digest processor"),
+      )
+      // the start runs in the background, so the health only updates eventually
+      eventually() {
+        checkHealth(proc, AcsCommitmentHealthState.failed(exception))
+      }
 
-      proc.stateInternal shouldBe Stopped(Failure(exception))
+      proc.stateInternal shouldBe Stopped(Failure(exception), Failure(exception))
 
       // stopping again should result in the same failure
       proc.stop().failed.futureValueUS shouldBe exception
+      checkHealth(proc, AcsCommitmentHealthState.failed(exception))
     }
 
     "allow stopping when there are no errors while starting" in {
@@ -88,6 +138,8 @@ class BaseDigestProcessorTest
       // stop while the processor is still starting
       val stoppingF = proc.stop() // do not wait for the stopping to complete
       proc.stateInternal should matchPattern { case Stopping(_) => }
+      checkHealth(proc, AcsCommitmentHealthState.Stopping)
+
       val completionFutureAfterStop = proc.completionFuture
 
       // signal a successful startup
@@ -105,7 +157,8 @@ class BaseDigestProcessorTest
       // the killswitch must have been triggered
       promiseKillSwitch.promise.future.futureValue
 
-      proc.stateInternal shouldBe Stopped(TryUtil.unit)
+      proc.stateInternal shouldBe Stopped.success
+      checkHealth(proc, AcsCommitmentHealthState.Stopped)
     }
 
     "allow stopping when there are errors while starting" in {
@@ -124,16 +177,22 @@ class BaseDigestProcessorTest
 
       // signal a failed startup
       val startupException = new RuntimeException("failure-while-starting")
-      startupPromise.failure(startupException)
+      loggerFactory.assertLogs(
+        {
+          startupPromise.failure(startupException)
 
-      // the various futures should be completed
-      startingF.failed.futureValueUS shouldBe startupException
-      completionFutureAfterStart.failed.futureValueUS shouldBe startupException
+          // the various futures should be completed
+          startingF.failed.futureValueUS shouldBe startupException
+          completionFutureAfterStart.failed.futureValueUS shouldBe startupException
 
-      stoppingF.failed.futureValueUS shouldBe startupException
-      completionFutureAfterStop.failed.futureValueUS shouldBe startupException
+          stoppingF.failed.futureValueUS shouldBe startupException
+          completionFutureAfterStop.failed.futureValueUS shouldBe startupException
+        },
+        _.errorMessage should include("Failed to start digest processor"),
+      )
 
-      proc.stateInternal shouldBe Stopped(Failure(startupException))
+      proc.stateInternal shouldBe Stopped(Failure(startupException), Failure(startupException))
+      checkHealth(proc, AcsCommitmentHealthState.failed(startupException))
     }
 
     "propagate failures while running" in {
@@ -157,7 +216,8 @@ class BaseDigestProcessorTest
       completionFutureAfterStarted.failed.futureValueUS shouldBe runningFailure
 
       eventually() {
-        proc.stateInternal shouldBe Stopped(Failure(runningFailure))
+        proc.stateInternal shouldBe Stopped(Failure(runningFailure), Success(UnlessShutdown.unit))
+        checkHealth(proc, AcsCommitmentHealthState.failed(runningFailure))
       }
 
       proc.completionFuture.failed.futureValueUS shouldBe runningFailure
@@ -179,10 +239,12 @@ class BaseDigestProcessorTest
       // killswitch was triggered
       killSwitch.promise.future.futureValue
       proc.stateInternal should matchPattern { case Stopping(_) => }
+      checkHealth(proc, AcsCommitmentHealthState.Stopping)
+
       val completionFutureAfterStop = proc.completionFuture
 
       // signal a successful startup
-      val stoppingException = new RuntimeException("failure-while-starting")
+      val stoppingException = new RuntimeException("failure-while-stopping")
       logger.info(s"completing pipeline with $stoppingException")
       pipelineCompletion.failure(stoppingException)
 
@@ -191,7 +253,8 @@ class BaseDigestProcessorTest
       completionFutureAfterStarted.failed.futureValueUS shouldBe stoppingException
       completionFutureAfterStop.failed.futureValueUS shouldBe stoppingException
 
-      proc.stateInternal shouldBe Stopped(Failure(stoppingException))
+      proc.stateInternal shouldBe Stopped(Failure(stoppingException), TryUtil.unitUS)
+      checkHealth(proc, AcsCommitmentHealthState.failed(stoppingException))
     }
 
     "write checkpoint successfully via writeCheckpointFUS" in {

@@ -550,7 +550,7 @@ class ConfirmationRequestAndResponseProcessorTest
               requestTimestamp.plusSeconds(60),
               requestTimestamp.plusSeconds(120),
               signedResponse,
-              Some(reqId.unwrap),
+              makeTopologyTimestamp(reqId),
               Recipients.cc(mediatorGroupRecipient),
             )
             .failOnShutdown,
@@ -1364,6 +1364,7 @@ class ConfirmationRequestAndResponseProcessorTest
         LocalApprove(testedProtocolVersion),
         identityFactory4,
       )
+
       def reject(participantId: ParticipantId) =
         createConfirmationResponses(
           Some(view0Position),
@@ -1669,6 +1670,84 @@ class ConfirmationRequestAndResponseProcessorTest
       } yield succeed
     }
 
+    // a response that would also fail the signature check, so that the tests below pin down which
+    // validation runs first
+    def unsignedResponses(requestId: RequestId): SignedProtocolMessage[ConfirmationResponses] =
+      SignedProtocolMessage(
+        TypedSignedProtocolMessageContent(
+          ConfirmationResponses.tryCreate(
+            requestId,
+            fullInformeeTree.updateId.toRootHash,
+            factory.psid,
+            participant,
+            NonEmpty.mk(
+              Seq,
+              ConfirmationResponse.tryCreate(
+                Some(view0Position),
+                LocalApprove(testedProtocolVersion),
+                Set(submitter),
+              ),
+            ),
+            testedProtocolVersion,
+          )
+        ),
+        NonEmpty(Seq, Signature.noSignature),
+      )
+
+    "discard a late response before querying the topology snapshot at the request timestamp" in {
+      val sut = new Fixture()
+      val requestTs = CantonTimestamp.Epoch.plusMillis(1)
+      val lateRequestId = RequestId(requestTs)
+      val deadline = requestTs.plus(confirmationResponseTimeout.unwrap)
+      val responseTs = deadline.addMicros(1)
+
+      // the single expected log entry pins that neither the signature check nor the unknown request
+      // id check was reached
+      loggerFactory
+        .assertLogs(
+          sut.processor
+            .processResponses(
+              responseTs,
+              notSignificantCounter,
+              deadline,
+              requestTs.plusSeconds(120),
+              unsignedResponses(lateRequestId),
+              makeTopologyTimestamp(lateRequestId),
+              Recipients.cc(mediatorGroupRecipient),
+            )
+            .failOnShutdown,
+          _.warningMessage shouldBe s"Response $responseTs is too late as request $lateRequestId has already exceeded the participant response deadline [$deadline]",
+        )
+        .map(_ => succeed)
+    }
+
+    "discard a response with an unexpected topology timestamp before querying the topology snapshot at the request timestamp" in {
+      val sut = new Fixture()
+      val ts = CantonTimestamp.Epoch.plusMillis(1)
+      // wrong for either protocol version: non-empty from v35 on, not the request id before that
+      val wrongTopologyTimestamp = Some(requestId.unwrap.immediatePredecessor)
+
+      loggerFactory
+        .assertLogs(
+          sut.processor
+            .processResponses(
+              ts,
+              notSignificantCounter,
+              ts.plusSeconds(60),
+              ts.plusSeconds(120),
+              unsignedResponses(requestId),
+              wrongTopologyTimestamp,
+              Recipients.cc(mediatorGroupRecipient),
+            )
+            .failOnShutdown,
+          _.shouldBeCantonError(
+            MediatorError.MalformedMessage,
+            _ should include("Discarding confirmation response because the topology timestamp"),
+          ),
+        )
+        .map(_ => succeed)
+    }
+
     "ignore responses for future request" in {
       val sut = new Fixture()
       val sequencingTs = requestId.unwrap.minusSeconds(1)
@@ -1696,6 +1775,88 @@ class ConfirmationRequestAndResponseProcessorTest
           ),
         )
       } yield succeed
+    }
+
+    "ignore responses for a request older than the synchronizer" in {
+      // request ids at (or before) the initial topology sequencing time: no topology state, and
+      // hence no dynamic synchronizer parameters, can ever exist at these timestamps
+      val ancientTimestamps = Seq(
+        CantonTimestamp.MinValue,
+        SignedTopologyTransaction.InitialTopologySequencingTime,
+      )
+      val sequencingTs = requestIdTs
+
+      MonadUtil
+        .sequentialTraverse_(ancientTimestamps) { ancientTs =>
+          val sut = new Fixture()
+          val ancientRequestId = RequestId(ancientTs)
+          for {
+            response <- createConfirmationResponses(
+              Some(ViewPosition.root),
+              participant,
+              Set(submitter),
+              LocalApprove(testedProtocolVersion),
+              requestId = ancientRequestId,
+            )
+            // the message must be discarded, not blow up the event handler
+            _ <- loggerFactory.assertLogs(
+              sut.processor
+                .handleMediatorEvent(
+                  MediatorEvent.Response(
+                    notSignificantCounter,
+                    sequencingTs,
+                    response,
+                    topologyTimestamp = makeTopologyTimestamp(ancientRequestId),
+                    recipients = Recipients.cc(mediatorGroupRecipient),
+                  )
+                )
+                .failOnShutdown,
+              _.shouldBeCantonError(
+                MediatorError.MalformedMessage,
+                _ should include("at or before the synchronizer's initial topology sequencing time"),
+              ),
+            )
+          } yield ()
+        }
+        .map(_ => succeed)
+    }
+
+    "ignore confirmation requests older than the synchronizer" in {
+      // request ids at (or before) the initial topology sequencing time: no topology state, and
+      // hence no dynamic synchronizer parameters, can ever exist at these timestamps
+      val ancientTimestamps = Seq(
+        CantonTimestamp.MinValue,
+        SignedTopologyTransaction.InitialTopologySequencingTime,
+      )
+
+      MonadUtil
+        .sequentialTraverse_(ancientTimestamps) { ancientTs =>
+          val sut = new Fixture()
+
+          val informeeMessage =
+            InformeeMessage(fullInformeeTree, sign(fullInformeeTree))(testedProtocolVersion)
+
+          loggerFactory
+            .assertLogs(
+              sut.processor
+                .handleMediatorEvent(
+                  MediatorEvent.Request(
+                    notSignificantCounter,
+                    ancientTs,
+                    addRecipients(informeeMessage),
+                    List.empty,
+                    batchAlsoContainsTopologyTransaction = false,
+                  )
+                )
+                .failOnShutdown,
+              _.shouldBeCantonError(
+                MediatorError.MalformedMessage,
+                _ should include("at or before the synchronizer's initial topology sequencing time"),
+              ),
+            )
+            .map(_ => succeed)
+        }
+        .map(_ => succeed)
     }
 
     "reject requests whose batch contained a topology transaction" in {

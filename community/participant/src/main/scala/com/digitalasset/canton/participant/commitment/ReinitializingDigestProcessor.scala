@@ -7,6 +7,7 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
@@ -19,7 +20,6 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   ProcessingContext,
 }
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
-import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
@@ -27,23 +27,20 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigestUpdate,
   CheckpointType,
   DigestJournal,
+  allCheckpointsFilter,
 }
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 
-import java.util.concurrent.atomic.AtomicReference
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
-
-trait ReinitializingDigestProcessor extends BaseDigestProcessor {
-  def reinitializingTimepoint: Option[Timepoint]
-}
 
 /** Used to reinitialize the ACS commitment checkpoint store, party - and participant digest
   * journals.
@@ -52,10 +49,6 @@ trait ReinitializingDigestProcessor extends BaseDigestProcessor {
   * safe to assume there is no writing into the digest store when we run this process
   *
   * Sequential data flow upon calling the start():
-  *   1. Using the synchronizerId, it gets the ledger End `lastOffset`:
-  *      [[com.digitalasset.canton.data.Offset]] and corresponding `recordTime`:
-  *      [[com.digitalasset.canton.data.CantonTimestamp]] creating the
-  *      [[com.digitalasset.canton.participant.commitment.Timepoint]] for reinitialization.
   *   1. Get a `snapshot` for all digests in both party - and participant ACS Digest journals
   *   1. For each digest's key, It places a tombstone at the
   *      [[com.digitalasset.canton.participant.commitment.Timepoint]] calculated in the first step.
@@ -85,7 +78,7 @@ class ReinitializingDigestProcessorImpl(
     protected override val acsDigestStore: AcsDigestStore,
     indexService: InternalIndexService,
     digestProcessorTopologyLookup: DigestProcessorTopologyLookup,
-    ledgerApiStore: LedgerApiStore,
+    override val reinitializingTimepoint: Timepoint,
     enableAdditionalConsistencyChecks: Boolean,
     private[canton] override val metrics: CommitmentMetrics,
     protected override val timeouts: ProcessingTimeout,
@@ -96,28 +89,20 @@ class ReinitializingDigestProcessorImpl(
 ) extends ReinitializingDigestProcessor {
 
   private val thisLfParticipantId: LedgerParticipantId = thisParticipantId.toLf
-  private val writeJournalTombstonesBatchSize =
+  private val writeJournalTombstonesBatchSize: Int =
     acsCommitmentConfig.reinitializingJournalTombstonesBatchSize.unwrap
-  private val counterpartyBatchSize = acsCommitmentConfig.counterpartyBatchSize.unwrap
-  private val reinitializingTimepointRef = new AtomicReference[Option[Timepoint]](None)
-
-  override def reinitializingTimepoint: Option[Timepoint] = reinitializingTimepointRef.get()
+  private val counterpartyBatchSize: Int = acsCommitmentConfig.counterpartyBatchSize.unwrap
 
   override protected def startPipelineInternal()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] =
+  ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] = {
+    logger.info(s"Start reinitialization of ACS digests at $reinitializingTimepoint")
     for {
-      // reinit - N: Offset, T(N): CantonTimeStamp = Ledger End
-      reinitializingTimepoint <- ledgerEndTimepointFUS()
+      // Delete potential updates after the last checkpoint
+      latestCheckpoint <- acsDigestStore.latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
+      _ <- acsDigestStore.deleteAfter(latestCheckpoint.fold(Offset.firstOffset)(_.offset))
 
-      _ = reinitializingTimepointRef.set(Some(reinitializingTimepoint))
-
-      // Delete potential updates in the future
-      _ <- acsDigestStore.deleteAfter(reinitializingTimepoint.offset)
-
-      _ <- writeTombstonesToJournals(
-        tombstoneTimepoint = reinitializingTimepoint
-      )
+      _ <- writeTombstonesToJournals(tombstoneTimepoint = reinitializingTimepoint)
       topologySnapshotO = digestProcessorTopologyLookup.topologySnapshotForReinitialization(
         synchronizerId,
         reinitializingTimepoint.recordTime,
@@ -128,18 +113,23 @@ class ReinitializingDigestProcessorImpl(
         )
       )
     } yield {
-      val (ks, doneF) = PekkoUtil
-        .runSupervised(
-          reinitializeContractChanges(
-            reinitializingTimepoint = reinitializingTimepoint,
-            topologySnapshot = topologySnapshot,
-          ).via(digestAccumulator.flow())
-            .mapAsyncAndDrainUS(1)(writeCheckpoint)
-            .toMat(Sink.ignore)(Keep.both),
-          errorLogMessagePrefix = "RecomputeAndAppendNewDigestsToJournal",
-        )
-      (ks, doneF.void)
+      val graph = reinitializeContractChanges(
+        reinitializingTimepoint = reinitializingTimepoint,
+        topologySnapshot = topologySnapshot,
+      ).via(digestAccumulator.flow())
+        .mapAsyncAndDrainUS(1)(writeCheckpoint)
+        .toMat(Sink.ignore)(Keep.both)
+
+      val (ks, doneF) = PekkoUtil.runSupervised(
+        graph,
+        errorLogMessagePrefix = "RecomputeAndAppendNewDigestsToJournal",
+      )
+      val finishedF = doneF.thereafter { outcome =>
+        logger.info(s"Reinitialization at $reinitializingTimepoint finished with outcome $outcome")
+      }
+      (ks, finishedF.void)
     }
+  }
 
   private[commitment] def reinitializeContractChanges(
       reinitializingTimepoint: Timepoint,
@@ -151,12 +141,12 @@ class ReinitializingDigestProcessorImpl(
     metrics.bufferDigestPipelineSize.updateValue(bufferSize.toLong)
     metrics.reinitializeParties.updateValue(0)
     metrics.reinitializeContractChanges.updateValue(0)
-    // TODO(#35072): make configurable in AcsCommitmentConfig
     val configOverrides = ActiveContractsServiceStreamsConfigOverrides(
-      maxParallelActiveIdQueries = 12,
-      maxParallelPayloadCreateQueries = 6,
+      maxParallelActiveIdQueries = acsCommitmentConfig.maxParallelActiveIdQueries.unwrap,
+      maxParallelPayloadCreateQueries = acsCommitmentConfig.maxParallelPayloadCreateQueries.unwrap,
     )
     val acsUpdates = indexService
+      // TODO(#35251) add retries
       .counterParties(
         synchronizerId = synchronizerId,
         activeAt = reinitializingTimepoint.offset,
@@ -171,6 +161,7 @@ class ReinitializingDigestProcessorImpl(
 
         Future(
           indexService
+            // TODO(#35251) add retries
             .acs(
               synchronizerId = synchronizerId,
               activeAt = reinitializingTimepoint.offset,
@@ -296,20 +287,5 @@ class ReinitializingDigestProcessorImpl(
       )
     }
 
-  private[commitment] def ledgerEndTimepointFUS()(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Timepoint] =
-    for {
-      // TODO(#33422) - Once the Github issue 27992 is solved, switch to new method
-      ledgerEndO <- FutureUnlessShutdown.pure(ledgerApiStore.ledgerEnd)
-
-      reinitTimepoint = ledgerEndO
-        .flatMap { end =>
-          end.synchronizerIndices
-            .get(synchronizerId)
-            .map(index => Timepoint(end.lastOffset)(index.recordTime))
-        }
-        .getOrElse(ErrorUtil.invalidState("There is no suitable last offset in the Ledger"))
-
-    } yield reinitTimepoint
+  override def toString: String = s"ReinitializingDigestProcessor($synchronizerId)"
 }
