@@ -21,7 +21,7 @@ class HashingSchemeVersionSpec extends AnyWordSpec with Matchers with OptionValu
       ProtocolVersion.v35
     )
     HashingSchemeVersion.minProtocolVersionForHSV(HashingSchemeVersion.V4) shouldBe Some(
-      ProtocolVersion.dev
+      ProtocolVersion.v36
     )
   }
   "return the protocol hashing version" in {
@@ -31,6 +31,12 @@ class HashingSchemeVersionSpec extends AnyWordSpec with Matchers with OptionValu
         ProtocolVersion.v35
       )
       .forgetNE shouldBe SortedSet[HashingSchemeVersion](V2, V3)
+
+    HashingSchemeVersion
+      .getHashingSchemeVersionsForProtocolVersion(
+        ProtocolVersion.v36
+      )
+      .forgetNE shouldBe SortedSet[HashingSchemeVersion](V2, V3, V4)
 
     HashingSchemeVersion
       .getHashingSchemeVersionsForProtocolVersion(

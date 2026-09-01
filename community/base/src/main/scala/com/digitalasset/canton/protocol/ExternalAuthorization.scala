@@ -82,7 +82,7 @@ object ExternalAuthorization
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(protoCompanion =
       v31.ExternalAuthorization
     )(supportedProtoVersionPVV(_)(fromProtoV31), _.toProtoV31),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(protoCompanion =
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(protoCompanion =
       v32.ExternalAuthorization
     )(supportedProtoVersionPVV(_)(fromProtoV32), _.toProtoV32),
   )

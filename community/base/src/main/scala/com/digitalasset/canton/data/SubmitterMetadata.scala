@@ -122,7 +122,7 @@ object SubmitterMetadata
       supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
       _.toProtoV31,
     ),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.dev)(v32.SubmitterMetadata)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(v32.SubmitterMetadata)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV32),
       _.toProtoV32,
     ),

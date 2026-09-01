@@ -5290,8 +5290,8 @@ components:
         hashingSchemeVersion:
           description: |-
             The hashing scheme version used when building the hash.
-            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-            for stable synchronizers.
+            HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+            rejected on synchronizers running older protocol versions.
 
             Required
           type: string
@@ -5376,8 +5376,8 @@ components:
         hashingSchemeVersion:
           description: |-
             The hashing scheme version used when building the hash.
-            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-            for stable synchronizers.
+            HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+            rejected on synchronizers running older protocol versions.
 
             Required
           type: string
@@ -5439,8 +5439,8 @@ components:
         hashingSchemeVersion:
           description: |-
             The hashing scheme version used when building the hash.
-            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-            for stable synchronizers.
+            HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+            rejected on synchronizers running older protocol versions.
 
             Required
           type: string
@@ -5795,8 +5795,8 @@ components:
           description: |-
             The hashing scheme version to be used when building the hash.
             Defaults to HASHING_SCHEME_VERSION_V2.
-            HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-            for stable synchronizers.
+            HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+            rejected on synchronizers running older protocol versions.
 
             Optional
           type: string
@@ -5832,8 +5832,8 @@ components:
         hashingSchemeVersion:
           description: |-
             The hashing scheme version used when building the hash.
-            HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
-            for stable synchronizers.
+            HASHING_SCHEME_VERSION_V4 is only returned for synchronizers running protocol version 36 or
+            later.
 
             Required
           type: string

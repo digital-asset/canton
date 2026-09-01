@@ -204,8 +204,8 @@ message PrepareSubmissionRequest {
 
   // The hashing scheme version to be used when building the hash.
   // Defaults to HASHING_SCHEME_VERSION_V2.
-  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-  // for stable synchronizers.
+  // HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+  // rejected on synchronizers running older protocol versions.
   //
   // Optional
   optional HashingSchemeVersion hashing_scheme_version = 17;
@@ -246,8 +246,8 @@ message PrepareSubmissionResponse {
   bytes prepared_transaction_hash = 2;
 
   // The hashing scheme version used when building the hash.
-  // HASHING_SCHEME_VERSION_V4 is only returned for development-protocol synchronizers and is rejected
-  // for stable synchronizers.
+  // HASHING_SCHEME_VERSION_V4 is only returned for synchronizers running protocol version 36 or
+  // later.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 3;
@@ -330,8 +330,8 @@ message ExecuteSubmissionRequest {
   string user_id = 6;
 
   // The hashing scheme version used when building the hash.
-  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-  // for stable synchronizers.
+  // HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+  // rejected on synchronizers running older protocol versions.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -390,8 +390,8 @@ message ExecuteSubmissionAndWaitRequest {
   string user_id = 6;
 
   // The hashing scheme version used when building the hash.
-  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-  // for stable synchronizers.
+  // HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+  // rejected on synchronizers running older protocol versions.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
@@ -461,8 +461,8 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   string user_id = 6;
 
   // The hashing scheme version used when building the hash.
-  // HASHING_SCHEME_VERSION_V4 is only supported for development-protocol synchronizers and is rejected
-  // for stable synchronizers.
+  // HASHING_SCHEME_VERSION_V4 requires a synchronizer running protocol version 36 or later and is
+  // rejected on synchronizers running older protocol versions.
   //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
