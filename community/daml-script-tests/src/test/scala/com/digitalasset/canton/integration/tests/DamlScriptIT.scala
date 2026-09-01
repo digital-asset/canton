@@ -941,7 +941,14 @@ class DamlScriptExternalCallIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   override def expectedResults = super.expectedResults ++ List(
     "ExternalCallTests:externalCallReturnsServiceOutput" ->
       Success(Json.fromString(UseExtensionService.defaultResponseHex)),
-    "ExternalCallTests:unknownExtensionFailsWithExternalCallError" -> Success(),
+    // The script handles the failure itself, but the participant still warns about the failed
+    // extension call; assert the warning so it is suppressed rather than tripping the CI log check.
+    "ExternalCallTests:unknownExtensionFailsWithExternalCallError" -> Success { (entry: LogEntry) =>
+      entry.warningMessage should include(
+        "External call to extension 'missing-extension' (function 'test-function') failed"
+      )
+      entry.warningMessage should include("status code = 404")
+    },
   )
 
   doRunTests(scriptIdsToTest)
