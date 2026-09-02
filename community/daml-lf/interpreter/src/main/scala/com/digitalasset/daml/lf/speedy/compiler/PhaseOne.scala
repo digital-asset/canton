@@ -113,7 +113,7 @@ private[lf] final class PhaseOne(
   private[this] def handleLookup[X](location: String, x: Either[LookupError, X]) =
     x match {
       case Right(value) => value
-      case Left(err) => throw SError.SErrorCrash(location, err.pretty)
+      case Left(err) => throw SError.Crash(location, err.pretty)
     }
 
   // Stack-trace support is disabled by avoiding the construction of SELocation nodes.

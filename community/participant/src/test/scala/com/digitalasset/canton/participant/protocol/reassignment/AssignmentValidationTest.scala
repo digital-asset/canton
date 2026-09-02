@@ -24,8 +24,10 @@ import com.digitalasset.canton.participant.protocol.reassignment.AssignmentValid
   NonInitiatorSubmitsBeforeExclusivityTimeout,
   TargetTimestampAfterAssignmentRequest,
 }
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers.TestValidator
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ParsedReassignmentRequest
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentValidationError.{
+  ContractValidationError,
   MultiSynchronizerIsNotEnabled,
   ReassigningParticipantsMismatch,
   SubmitterMustBeStakeholder,
@@ -126,8 +128,11 @@ final class AssignmentValidationTest
 
   private val seedGenerator = new SeedGenerator(pureCrypto)
 
-  private def assignmentValidation(participantId: ParticipantId = submittingParticipant) =
-    testInstance(targetSynchronizer, cryptoSnapshot, None, participantId)
+  private def assignmentValidation(
+      participantId: ParticipantId = submittingParticipant,
+      contractValidator: ContractValidator = ContractValidator.AllowAll,
+  ) =
+    testInstance(targetSynchronizer, cryptoSnapshot, None, participantId, contractValidator)
 
   private val activenessF = FutureUnlessShutdown.pure(mkActivenessResult())
 
@@ -413,6 +418,39 @@ final class AssignmentValidationTest
 
     }
 
+    "create a common validation failure if the contract fails to validate against the target package" in {
+
+      val invalidPackageId = LfPackageId.assertFromString("invalid-package-id")
+      val invalidContractReason = "invalid-contract"
+      val failingContractValidator =
+        new TestValidator(Map((contract.contractId, invalidPackageId) -> invalidContractReason))
+
+      val invalidAssignmentRequest = makeFullAssignmentTree(
+        unassignmentData.reassignmentId,
+        contract,
+        targetValidationPackageId = Some(invalidPackageId),
+      )
+
+      val result = assignmentValidation(contractValidator = failingContractValidator)
+        .perform(
+          unassignmentDataE = Right(unassignmentData),
+          activenessF = activenessF,
+        )(mkParsedRequest(invalidAssignmentRequest))
+        .futureValueUS
+        .value
+
+      inside(
+        result.commonValidationResult.contractAuthenticationResultF.futureValueUS.left.value
+      ) { case ContractValidationError(ref, contractId, representativePackageId, reason) =>
+        ref shouldBe ReassignmentIdRef(unassignmentData.reassignmentId)
+        contractId shouldBe contract.contractId
+        representativePackageId shouldBe invalidPackageId
+        reason should include(invalidContractReason)
+      }
+      result.reassigningParticipantValidationResult.contractAuthenticationResultF.futureValueUS.value shouldBe ()
+
+    }
+
     "multi-synchronizer feature flg" should {
       def validateMultiSynchronizerFeatureFlag(
           contract: ContractInstance,
@@ -497,10 +535,8 @@ final class AssignmentValidationTest
       snapshotOverride: SynchronizerSnapshotSyncCryptoApi,
       awaitTimestampOverride: Option[Future[Unit]],
       participantId: ParticipantId,
-  ): AssignmentValidation = {
-
-    val contractValidator = ContractValidator.AllowAll
-
+      contractValidator: ContractValidator = ContractValidator.AllowAll,
+  ): AssignmentValidation =
     new AssignmentValidation(
       synchronizerId,
       Target(defaultStaticSynchronizerParameters),
@@ -515,7 +551,6 @@ final class AssignmentValidationTest
       loggerFactory = loggerFactory,
       contractValidator = contractValidator,
     )
-  }
 
   private def makeFullAssignmentTree(
       reassignmentId: ReassignmentId,
@@ -527,6 +562,7 @@ final class AssignmentValidationTest
       reassignmentCounter: ReassignmentCounter = ReassignmentCounter(1),
       reassigningParticipants: Set[ParticipantId] = reassigningParticipants,
       unassignmentTs: CantonTimestamp = CantonTimestamp.Epoch,
+      targetValidationPackageId: Option[LfPackageId] = None,
   ): FullAssignmentTree = {
     val seed = seedGenerator.generateSaltSeed()
     valueOrFail(
@@ -538,7 +574,7 @@ final class AssignmentValidationTest
         ContractsReassignmentBatch(
           contract,
           Source(contract.templateId.packageId),
-          Target(contract.templateId.packageId),
+          Target(targetValidationPackageId.getOrElse(contract.templateId.packageId)),
           reassignmentCounter,
         ),
         sourceSynchronizer,

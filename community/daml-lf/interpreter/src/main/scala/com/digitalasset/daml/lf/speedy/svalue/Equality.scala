@@ -13,7 +13,7 @@ private[lf] object Equality {
 
   // Equality between two SValues of same type.
   // This follows the equality defined in the daml-lf spec.
-  @throws[SError.SError]
+  @throws[SError]
   def areEqual(x: SValue, y: SValue): Boolean = {
     import SValue.*
 
@@ -47,15 +47,15 @@ private[lf] object Equality {
       if (prefix1 != prefix2) {
         false
       } else if (suffix1.isEmpty) {
-        throw SError.SErrorDamlException(
+        throw SError.InterpretationError(
           interpretation.Error.ContractIdComparability(cid2)
         )
       } else if (suffix2.isEmpty) {
-        throw SError.SErrorDamlException(
+        throw SError.InterpretationError(
           interpretation.Error.ContractIdComparability(cid1)
         )
       } else if (!allowDifferentNonemptySuffixes) {
-        throw SError.SErrorDamlException(
+        throw SError.InterpretationError(
           interpretation.Error.ContractIdComparability(cid1)
         )
       } else false
@@ -122,9 +122,9 @@ private[lf] object Equality {
         case (STypeRep(xType), STypeRep(yType)) =>
           success = xType == yType
         case (_: SPAP, _: SPAP) =>
-          throw SError.SErrorDamlException(interpretation.Error.NonComparableValues)
+          throw SError.InterpretationError(interpretation.Error.NonComparableValues)
         case (x, y) =>
-          throw SError.SErrorCrash(
+          throw SError.Crash(
             NameOf.qualifiedNameOfCurrentFunc,
             s"trying to compare value of different type:\n- $x\n- $y",
           )

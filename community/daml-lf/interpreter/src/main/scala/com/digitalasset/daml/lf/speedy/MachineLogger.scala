@@ -59,4 +59,13 @@ private[lf] object MachineLogger {
       }
     }
   }
+
+  object Dummy extends MachineLogger {
+    override def trace(message: String, location: Option[Location])(implicit
+        ln: LoggerNameFromClass
+    ): Unit = ()
+    override def warn(message: String, location: Option[Location])(implicit
+        ln: LoggerNameFromClass
+    ): Unit = ()
+  }
 }

@@ -10,7 +10,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.{ViewHash, v30, v31}
+import com.digitalasset.canton.protocol.{SynchronizerLimits, ViewHash, v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseNonNegativeInt}
 import com.digitalasset.canton.util.RoseTree
@@ -133,10 +133,16 @@ sealed abstract case class LightTransactionViewTree private[data] (
   override lazy val pretty: Pretty[LightTransactionViewTree] = prettyOfClass(unnamedParam(_.tree))
 }
 
+final case class LightTransactionViewTreeDeserializationContext(
+    hashOps: HashOps,
+    expectedLength: Int,
+    synchronizerLimits: SynchronizerLimits,
+)
+
 object LightTransactionViewTree
     extends VersioningCompanionContextPVValidation2[
       LightTransactionViewTree,
-      (HashOps, Int),
+      LightTransactionViewTreeDeserializationContext,
     ] {
   override val name: String = "LightTransactionViewTree"
 
@@ -184,13 +190,21 @@ object LightTransactionViewTree
       representativeProtocolVersion
     ) {}.validated
 
-  private def fromProtoV30(context: ((HashOps, Int), ProtocolVersion))(
+  private def fromProtoV30(
+      context: (LightTransactionViewTreeDeserializationContext, ProtocolVersion)
+  )(
       protoT: v30.LightTransactionViewTree
   ): ParsingResult[LightTransactionViewTree] =
     for {
       protoTree <- ProtoConverter.required("tree", protoT.tree)
-      ((hashOps, expectedLength), protocolVersion) = context
-      tree <- GenTransactionTree.fromProtoV30((hashOps, protocolVersion), protoTree)
+      (
+        LightTransactionViewTreeDeserializationContext(hashOps, expectedLength, synchronizerLimits),
+        protocolVersion,
+      ) = context
+      tree <- GenTransactionTree.fromProtoV30(
+        (GenTransactionTreeDeserializationContext(hashOps, synchronizerLimits), protocolVersion),
+        protoTree,
+      )
       subviewReferencesAndKeys <- ProtoValidation
         .validateLengthThen(
           protoT.subviewHashesAndKeys,
@@ -217,13 +231,21 @@ object LightTransactionViewTree
     } yield result
 
   @unused
-  private def fromProtoV31(context: ((HashOps, Int), ProtocolVersion))(
+  private def fromProtoV31(
+      context: (LightTransactionViewTreeDeserializationContext, ProtocolVersion)
+  )(
       protoT: v31.LightTransactionViewTree
   ): ParsingResult[LightTransactionViewTree] =
     for {
       protoTree <- ProtoConverter.required("tree", protoT.tree)
-      ((hashOps, expectedLength), protocolVersion) = context
-      tree <- GenTransactionTree.fromProtoV30((hashOps, protocolVersion), protoTree)
+      (
+        LightTransactionViewTreeDeserializationContext(hashOps, expectedLength, synchronizerLimits),
+        protocolVersion,
+      ) = context
+      tree <- GenTransactionTree.fromProtoV30(
+        (GenTransactionTreeDeserializationContext(hashOps, synchronizerLimits), protocolVersion),
+        protoTree,
+      )
       subviewReferencesAndKeys <- ProtoValidation
         .validateLengthThen(
           protoT.subviewKeysByCiphertextId,

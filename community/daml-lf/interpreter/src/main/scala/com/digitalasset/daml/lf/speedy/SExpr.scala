@@ -51,7 +51,7 @@ private[lf] object SExpr {
   private[speedy] final case class SEDelayedCrash(location: String, reason: String)
       extends SExprAtomic {
     override def lookupValue(machine: Machine[?]): SValue =
-      throw SError.SErrorCrash(location, reason)
+      throw SError.Crash(location, reason)
   }
 
   /** Reference to a value. On first lookup the evaluated expression is stored in 'cached'.
@@ -112,7 +112,7 @@ private[lf] object SExpr {
           machine.updateGasBudget(_.EApp.cost(vfun.actuals.size, args.size))
           machine.enterApplication(vfun, args)
         case other =>
-          throw SError.SErrorCrash("SEAppAtomicGeneral", s"except SPAP, but got $other")
+          throw SError.Crash("SEAppAtomicGeneral", s"except SPAP, but got $other")
       }
   }
 
@@ -217,7 +217,7 @@ private[lf] object SExpr {
           machine.pushEnv(value)
           Control.Expression(body)
         case None =>
-          machine.handleException(builtin.buildException(machine, actuals))
+          machine.handleException(Speedy.SArithmeticError(builtin.name, actuals))
       }
     }
   }

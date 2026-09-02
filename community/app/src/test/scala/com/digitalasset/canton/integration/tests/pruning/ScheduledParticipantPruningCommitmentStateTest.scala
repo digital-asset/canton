@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.BackgroundWorkloadRunner
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
   LegacyAcsCommitment,
   LegacyCommitmentPeriod,
@@ -159,7 +160,11 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
       val period = req.batch.envelopes.headOption
         .map { envelope =>
           val openEnvelope = envelope
-            .toOpenEnvelope(src.crypto.pureCrypto, testedProtocolVersion)
+            .toOpenEnvelope(
+              src.crypto.pureCrypto,
+              SynchronizerLimits.defaultFor(testedProtocolVersion),
+              testedProtocolVersion,
+            )
             .valueOrFail("open envelopes")
             .protocolMessage
           openEnvelope match {

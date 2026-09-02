@@ -5,8 +5,10 @@ package com.digitalasset.canton.participant.protocol.decrypter
 
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.crypto.SecureRandomness
-import com.digitalasset.canton.data.FullTransactionViewTree
+import com.digitalasset.canton.data.ViewType.TransactionViewType
+import com.digitalasset.canton.protocol.messages.EncryptedMultipleViewsMessage
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.nonempty.NonEmptyUtil
 
 class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecrypterTest {
 
@@ -17,7 +19,10 @@ class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecryp
     import env.*
 
     val decryptedViews =
-      decrypter.decryptViews(allEnvelopes, snapshot).futureValueUS.valueOrFail("failed transaction")
+      decrypter
+        .decryptViews(allEnvelopes, snapshot, defaultSynchronizerLimits)
+        .futureValueUS
+        .valueOrFail("failed transaction")
 
     // We are able to decrypt the parent view, but the child view referenced by the parent cannot be decrypted because
     // the randomness provided by the parent fails to decrypt the child view. Since the child view cannot be decrypted,
@@ -40,44 +45,63 @@ class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecryp
         ".*Failed to decrypt parent view ViewHash\\(SHA-256:.*\\) because a subview failed to decrypt.*"
       )
     ) shouldBe true
-
   }
 
   "A ViewMessageDecrypter version 2 (using ciphertext ID)" must {
     if (testedProtocolVersion >= ProtocolVersion.transparency) {
       behave like viewMessageDecrypterTest()
 
-      "successfully decrypt even if different encrypted view messages contain the same view with different randomnesses" in {
-        // Unlike V1, we now preserve duplicate encrypted view messages.
-        var ftt = Seq.empty[FullTransactionViewTree]
+      // Multiple encrypted view messages can theoretically share the same ciphertext ID
+      // but have different encryption randomnesses. The decrypter must attempt each message.
+      "handle multiple encrypted view messages with the same ciphertext ID" in {
         val env = new Env(
-          // We override the interceptFullTree method to capture the full tree and return a duplicate
-          // of the same view (child view). Within `Env`, we use two different randomness values (i.e. keys)
-          // for each index in the full view tree list.
-          interceptFullTree = trees => {
-            ftt = Seq(trees(1), trees(1))
-            Seq(trees(1), trees(1))
-          },
-          // Make sure the two views have no children.
-          interceptSubviewKeyRandomness = _ => Seq(Seq.empty, Seq.empty),
+          interceptEncryptedViewMessages = { encryptedViewMessages =>
+            val parentView = encryptedViewMessages(0)
+              .asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType.type]]
+            val childView = encryptedViewMessages(1)
+              .asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType.type]]
+            encryptedViewMessages :+
+              parentView.copy(
+                viewEncryptionKeyRandomness = childView.viewEncryptionKeyRandomness
+              )
+          }
         )
-        import env.*
 
-        // We are able to decrypt both views because, although they represent the same view, they were
-        // encrypted with different randomness. While the view hashes are identical, the ciphertext IDs
-        // are different, allowing the two encrypted views to be uniquely identified and decrypted.
-        // Since reconstruction of the full tree is done using the unique ciphertext IDs, we can successfully
-        // reconstruct the full tree and discard the duplicate view.
-        val decryptedViews = decrypter
-          .decryptViews(allEnvelopes, snapshot)
+        val decryptedViews = env.decrypter
+          .decryptViews(env.allEnvelopes, env.snapshot, env.defaultSynchronizerLimits)
           .futureValueUS
-          .valueOrFail("failed transaction")
+          .value
 
-        decryptedViews.views.map(_.view.unwrap.tree) should contain theSameElementsAs ftt.map(
-          _.tree
+        decryptedViews.decryptionErrors.loneElement.show should include(
+          "SymmetricDecryptError(FailedToDecrypt(\"javax.crypto.AEADBadTagException: mac check in GCM failed\"))"
         )
+        env.checkDecryptedViews(decryptedViews.copy(decryptionErrors = Seq.empty))
+      }
+
+      // In V1, we used the listed view hashes to identify the view to decrypt and assumed that each
+      // view hash was unique. In V2, we use the ciphertext ID to identify the view to decrypt,
+      // which can be computed from the ciphertext itself. This allows us to successfully decrypt
+      // even if different view messages list the same or incorrect view hashes.
+      "successfully decrypt even if different view messages list the same view hash" in {
+        val env = new Env(
+          interceptEncryptedViewMessages = { encryptedViewMessages =>
+            val sharedViewHash = encryptedViewMessages.head.viewHashes.head1
+            // Force all encrypted view messages to use the same view hash
+            // to verify that decryption does not rely on view-hash uniqueness.
+            encryptedViewMessages.map {
+              _.asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType.type]]
+                .copy(viewHashes = NonEmptyUtil.fromUnsafe(Seq(sharedViewHash)))
+            }
+          }
+        )
+
+        val decryptedViews = env.decrypter
+          .decryptViews(env.allEnvelopes, env.snapshot, env.defaultSynchronizerLimits)
+          .futureValueUS
+          .value
+
+        env.checkDecryptedViews(decryptedViews)
       }
     }
   }
-
 }

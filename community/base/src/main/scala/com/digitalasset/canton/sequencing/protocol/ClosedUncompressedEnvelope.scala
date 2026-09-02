@@ -14,6 +14,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   EnvelopeContent,
+  EnvelopeContentDeserializationContext,
   LegacyAcsCommitment,
   LegacyAcsCommitmentProtocolMessage,
   ProtocolMessage,
@@ -21,7 +22,7 @@ import com.digitalasset.canton.protocol.messages.{
   TypedSignedProtocolMessageContent,
   UnsignedProtocolMessage,
 }
-import com.digitalasset.canton.protocol.{v30, v31}
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
@@ -71,6 +72,7 @@ final case class ClosedUncompressedEnvelope private[protocol] (
 
   override def toOpenEnvelope(
       hashOps: HashOps,
+      synchronizerLimits: SynchronizerLimits,
       protocolVersion: ProtocolVersion,
   ): ParsingResult[DefaultOpenEnvelope] =
     NonEmpty.from(signatures) match {
@@ -85,7 +87,10 @@ final case class ClosedUncompressedEnvelope private[protocol] (
           }
       case None =>
         EnvelopeContent
-          .fromByteString(hashOps, protocolVersion)(bytes)
+          .fromByteString(
+            EnvelopeContentDeserializationContext(hashOps, synchronizerLimits),
+            protocolVersion,
+          )(bytes)
           .flatMap { envelopeContent =>
             envelopeContent.message match {
               case LegacyAcsCommitmentProtocolMessage(acsCommitment, signatures)

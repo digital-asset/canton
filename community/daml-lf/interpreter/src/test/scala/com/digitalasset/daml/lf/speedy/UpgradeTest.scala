@@ -11,7 +11,6 @@ import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.testing.parser.Implicits.*
@@ -666,7 +665,7 @@ class UpgradeTest
         )
       ) {
         case Left(
-              SError.SErrorDamlException(
+              SError.InterpretationError(
                 IE.Upgrade(
                   IE.Upgrade.TranslationFailed(
                     Some(coid),
@@ -754,7 +753,7 @@ class UpgradeTest
               globalContractKeyWithMaintainers = Some(key(tyCon)),
               hashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
             )
-          ) { case Left(SError.SErrorDamlException(error)) =>
+          ) { case Left(SError.InterpretationError(error)) =>
             error shouldBe a[IE.WronglyTypedContract]
           }
         }
@@ -783,7 +782,7 @@ class UpgradeTest
         )
       ) {
         case Left(
-              SError.SErrorDamlException(
+              SError.InterpretationError(
                 IE.Upgrade(
                   IE.Upgrade.AuthenticationFailed(_, srcTemplateId, dstTemplateId, createArg, _)
                 )
@@ -832,7 +831,7 @@ class UpgradeTest
           )
         ) {
           case Left(
-                SError.SErrorDamlException(
+                SError.InterpretationError(
                   IE.Upgrade(
                     IE.Upgrade.ValidationFailed(
                       coid,
@@ -941,7 +940,7 @@ class UpgradeTest
 
       inside(res) {
         case Left(
-              SError.SErrorDamlException(
+              SError.InterpretationError(
                 IE.Upgrade(
                   IE.Upgrade.TranslationFailed(
                     Some(coid),
@@ -1014,7 +1013,7 @@ class UpgradeTest
 
         inside(res) {
           case Left(
-                SError.SErrorDamlException(
+                SError.InterpretationError(
                   IE.Upgrade(
                     IE.Upgrade.TranslationFailed(
                       Some(coid),
@@ -1150,7 +1149,7 @@ class UpgradeTest
 
           inside(res) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Upgrade(
                       IE.Upgrade.TranslationFailed(
                         Some(coid),
@@ -1210,7 +1209,7 @@ class UpgradeTest
           )
         ) {
           case Left(
-                SError.SErrorDamlException(
+                SError.InterpretationError(
                   IE.Upgrade(
                     IE.Upgrade.TranslationFailed(
                       Some(coid),
@@ -1269,7 +1268,7 @@ class UpgradeTest
           )
         ) {
           case Left(
-                SError.SErrorDamlException(
+                SError.InterpretationError(
                   IE.Upgrade(
                     IE.Upgrade.TranslationFailed(
                       Some(coid),
@@ -1569,7 +1568,7 @@ class UpgradeTest
       )
       loggerFactory.assertLogs(
         inside(go(machine)) {
-          case Left(SErrorDamlException(IE.WronglyTypedContract(_, expected, actual))) =>
+          case Left(SError.InterpretationError(IE.WronglyTypedContract(_, expected, actual))) =>
             expected shouldBe TypeConId.assertFromString("-pkg2-:M:T")
             actual shouldBe TypeConId.assertFromString("-pkg1-:M:T")
         },

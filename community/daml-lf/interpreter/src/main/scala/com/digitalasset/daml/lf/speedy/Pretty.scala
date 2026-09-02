@@ -10,7 +10,6 @@ import com.digitalasset.daml.lf.ledger.*
 import com.digitalasset.daml.lf.script.*
 import com.digitalasset.daml.lf.script.IdeLedger.{Disclosure, TransactionId}
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
-import com.digitalasset.daml.lf.speedy.SError.*
 import com.digitalasset.daml.lf.speedy.SValue.*
 import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
@@ -33,9 +32,11 @@ private[lf] object Pretty {
 
   def prettyError(err: SError): Doc =
     text("Error:") & (err match {
-      case ex: SErrorDamlException =>
+      case ex: SError.InterpretationError =>
         prettyDamlException(ex.error)
-      case SErrorCrash(where, reason) =>
+      case SError.UnhandledException(SAny(_, value)) =>
+        text(s"Unhandled Daml exception:") & prettyValue(true)(value.toUnnormalizedValue)
+      case SError.Crash(where, reason) =>
         text(s"CRASH in $where: $reason")
     })
 
@@ -65,8 +66,6 @@ private[lf] object Pretty {
           text(", ") + Doc.line,
           nodes.map(prettyEffectfulRollbackNode(_)),
         )
-      case UnhandledException(_, value) =>
-        text(s"Unhandled Daml exception:") & prettyValue(true)(value)
       case UserError(message) =>
         text(s"User abort: $message")
       case TemplatePreconditionViolated(templateId, loc @ _, arg) =>

@@ -122,7 +122,7 @@ abstract class AuthorizationTest(languageVersion: LanguageVersion, withKey: Bool
   // ---------------------------------------------------------------------------
 
   private def failedAuthorization(result: Either[Throwable, SValue]): FailedAuthorization =
-    inside(result) { case Left(SError.SErrorDamlException(IE.FailedAuthorization(_, failure))) =>
+    inside(result) { case Left(SError.InterpretationError(IE.FailedAuthorization(_, failure))) =>
       failure
     }
 

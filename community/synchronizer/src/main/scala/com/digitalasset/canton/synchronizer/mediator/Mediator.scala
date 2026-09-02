@@ -383,6 +383,7 @@ private[mediator] class Mediator(
             val (openEvent, openingErrors) = SequencedEvent.openEnvelopes(closedEvent)(
               protocolVersion,
               syncCrypto.crypto.pureCrypto,
+              topologyClient.getSynchronizerLimits,
             )
 
             val rejectionsF =

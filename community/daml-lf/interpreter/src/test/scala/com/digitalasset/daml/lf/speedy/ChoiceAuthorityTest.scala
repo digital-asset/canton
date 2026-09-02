@@ -8,7 +8,6 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.{FrontStack, Ref}
 import com.digitalasset.daml.lf.interpretation.Error.FailedAuthorization
 import com.digitalasset.daml.lf.ledger.FailedAuthorization.*
-import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.SEApp
 import com.digitalasset.daml.lf.speedy.SValue.{SList, SParty}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
@@ -122,7 +121,7 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLoggin
 
     "restrict authority {A,B}-->{} (empty!)" in {
       inside(runExample(theAut = Set(), theGoal = alice)) { case Left(err) =>
-        inside(err) { case SError.SErrorDamlException(FailedAuthorization(_, why)) =>
+        inside(err) { case SError.InterpretationError(FailedAuthorization(_, why)) =>
           inside(why) { case _: NoAuthorizers =>
           }
         }
@@ -131,7 +130,7 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLoggin
 
     "restrict authority {A,B}-->A (need B)" in {
       inside(runExample(theAut = Set(alice), theGoal = bob)) { case Left(err) =>
-        inside(err) { case SError.SErrorDamlException(FailedAuthorization(_, why)) =>
+        inside(err) { case SError.InterpretationError(FailedAuthorization(_, why)) =>
           inside(why) { case cma: CreateMissingAuthorization =>
             cma.authorizingParties shouldBe Set(alice)
             cma.requiredParties shouldBe Set(bob)
@@ -142,7 +141,7 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLoggin
 
     "restrict authority {A,B}-->B (need A)" in {
       inside(runExample(theAut = Set(bob), theGoal = alice)) { case Left(err) =>
-        inside(err) { case SError.SErrorDamlException(FailedAuthorization(_, why)) =>
+        inside(err) { case SError.InterpretationError(FailedAuthorization(_, why)) =>
           inside(why) { case cma: CreateMissingAuthorization =>
             cma.authorizingParties shouldBe Set(bob)
             cma.requiredParties shouldBe Set(alice)
@@ -153,7 +152,7 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLoggin
 
     "restrict authority: {A,B}-->{A,B} (need C)" in {
       inside(runExample(theAut = Set(alice, bob), theGoal = charlie)) { case Left(err) =>
-        inside(err) { case SError.SErrorDamlException(FailedAuthorization(_, why)) =>
+        inside(err) { case SError.InterpretationError(FailedAuthorization(_, why)) =>
           inside(why) { case cma: CreateMissingAuthorization =>
             cma.authorizingParties shouldBe Set(alice, bob)
             cma.requiredParties shouldBe Set(charlie)
@@ -164,7 +163,7 @@ class ChoiceAuthorityTest extends AnyFreeSpec with Inside with SuppressingLoggin
 
     "try to gain authority {A,B} --> {C}" in {
       runExample(theAut = Set(charlie), theGoal = alice) shouldBe Left(
-        SError.SErrorDamlException(
+        SError.InterpretationError(
           FailedAuthorization(
             NodeId(1),
             ExerciseMissingAuthorization(

@@ -36,7 +36,8 @@ final case class TransactionProtocolLimits(maxActAs: PositiveInt) extends Pretty
     param("max actAs", _.maxActAs)
   )
 
-  def toInternal: TransactionProtocolLimits = this.transformInto[TransactionProtocolLimits]
+  def toInternal: TransactionProtocolLimitsInternal =
+    this.transformInto[TransactionProtocolLimitsInternal]
 }
 
 object TransactionProtocolLimits {

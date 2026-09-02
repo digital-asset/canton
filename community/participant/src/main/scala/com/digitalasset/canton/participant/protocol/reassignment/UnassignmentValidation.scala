@@ -67,8 +67,8 @@ private[reassignment] class UnassignmentValidation(
             FutureUnlessShutdown.pure(
               ReassigningParticipantValidation(
                 assignmentExclusivity = None,
-                reassigningParticipantValidationResult =
-                  UnassignmentValidationResult.ReassigningParticipantValidationResult(Nil),
+                reassigningParticipantValidationResult = UnassignmentValidationResult
+                  .ReassigningParticipantValidationResult(EitherT.pure(()), Nil),
               )
             )
           )
@@ -126,10 +126,15 @@ private[reassignment] object UnassignmentValidation {
       participantSignatureVerificationResult <- EitherT.right(
         AuthenticationValidator.verifyViewSignature(parsedRequest)
       )
-      contractAuthenticationResultF = ReassignmentValidation.authenticateContractAndStakeholders(
-        contractValidator,
-        parsedRequest.fullViewTree,
-      )
+      contractAuthenticationResultF = for {
+        _ <- ReassignmentValidation.authenticateContractsAgainstSource(
+          contractValidator,
+          parsedRequest.fullViewTree,
+        )
+        _ <- EitherT.fromEither(
+          ReassignmentValidation.checkStakeholders(parsedRequest.fullViewTree)
+        )
+      } yield ()
       submitterCheckResult <- checkSubmitterCheckResult(parsedRequest)
       // check multi-synchronizer flag is enabled on the source synchronizer
       multiSynchronizerCheckResult <- EitherT.right(
@@ -254,9 +259,17 @@ private[reassignment] object UnassignmentValidation {
             .value
             .map(_.swap.toOption)
         )
-      } yield ReassigningParticipantValidationResult(
-        participantsErrors.toList ++ vettingErrors.toList ++ multiSynchronizerCheckResult.toList
-      )
+      } yield {
+        val contractAuthenticationResultF =
+          ReassignmentValidation.authenticateContractsAgainstTarget(
+            contractValidator,
+            parsedRequest.fullViewTree,
+          )
+        ReassigningParticipantValidationResult(
+          contractAuthenticationResultF,
+          participantsErrors.toList ++ vettingErrors.toList ++ multiSynchronizerCheckResult.toList,
+        )
+      }
 
     def performValidations(
         parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree]

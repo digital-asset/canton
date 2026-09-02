@@ -52,6 +52,7 @@ import com.digitalasset.canton.participant.protocol.{ProcessingSteps, ProtocolPr
 import com.digitalasset.canton.participant.store.ReassignmentStore.ReassignmentStoreError
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.ModelConformance
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.InvalidContractIdInView
 import com.digitalasset.canton.protocol.messages.Verdict.{
@@ -204,6 +205,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
   override def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[RequestViewType]]]],
       snapshot: SynchronizerSnapshotSyncCryptoApi,
+      synchronizerLimits: SynchronizerLimits,
       sessionKeyStore: ConfirmationRequestSessionKeyStore,
   )(implicit
       traceContext: TraceContext
@@ -444,14 +446,14 @@ private[reassignment] trait ReassignmentProcessingSteps[
         )
       )
     } else {
-      responsesForWellformedPayloads(
+      responsesForWellFormedPayloads(
         requestId,
         protocolVersion,
         validationResult,
       )
     }
 
-  private def responsesForWellformedPayloads(
+  private def responsesForWellFormedPayloads(
       requestId: RequestId,
       protocolVersion: ProtocolVersion,
       validationResult: ReassignmentValidationResult,
@@ -474,8 +476,10 @@ private[reassignment] trait ReassignmentProcessingSteps[
         )
       } else
         for {
-          contractAuthenticationResult <-
+          commonContractAuthenticationResult <-
             validationResult.commonValidationResult.contractAuthenticationResultF.value
+          reassignmentContractAuthenticationResult <-
+            validationResult.reassigningParticipantValidationResult.contractAuthenticationResultF.value
         } yield {
           val authenticationErrorO =
             validationResult.commonValidationResult.participantSignatureVerificationResult
@@ -484,9 +488,10 @@ private[reassignment] trait ReassignmentProcessingSteps[
             LocalRejectError.MalformedRejects.MalformedRequest
               .Reject(err.message)
           )
-
-          val modelConformanceRejection = contractAuthenticationResult.swap.toSeq
-            .map(err => LocalRejectError.MalformedRejects.ModelConformance.Reject(err.toString))
+          val modelConformanceRejection: Seq[ModelConformance.Reject] =
+            Seq(commonContractAuthenticationResult, reassignmentContractAuthenticationResult)
+              .flatMap(_.swap.toOption)
+              .map(err => LocalRejectError.MalformedRejects.ModelConformance.Reject(err.toString))
 
           val submitterCheckRejection = validationResult.commonValidationResult.submitterCheckResult
             .map(err => LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message))

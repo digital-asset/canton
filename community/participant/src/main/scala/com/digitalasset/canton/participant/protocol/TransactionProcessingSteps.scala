@@ -619,6 +619,7 @@ class TransactionProcessingSteps(
   override def decryptViews(
       batch: NonEmpty[Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]]],
       snapshot: SynchronizerSnapshotSyncCryptoApi,
+      synchronizerLimits: SynchronizerLimits,
       sessionKeyStore: ConfirmationRequestSessionKeyStore,
   )(implicit
       traceContext: TraceContext
@@ -630,7 +631,7 @@ class TransactionProcessingSteps(
         protocolVersion,
         futureSupervisor,
         loggerFactory,
-      ).decryptViews(batch, snapshot)
+      ).decryptViews(batch, snapshot, synchronizerLimits)
     }
 
   override def absolutizeLedgerEffects(

@@ -7,7 +7,7 @@ package script
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, Party}
 import com.digitalasset.daml.lf.data.Time
 import com.digitalasset.daml.lf.language.Ast.PackageMetadata
-import com.digitalasset.daml.lf.speedy.SError.SError
+import com.digitalasset.daml.lf.speedy.SError
 import com.digitalasset.daml.lf.transaction.VersionedTransaction
 import com.digitalasset.daml.lf.value.Value.ContractId
 

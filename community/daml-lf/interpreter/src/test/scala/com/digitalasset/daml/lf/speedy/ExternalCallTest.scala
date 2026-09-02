@@ -168,11 +168,11 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
     assertPreparationFailed(result)
   }
 
-  private def assertPreparationFailed(result: Either[SError.SError, SValue]): Unit =
+  private def assertPreparationFailed(result: Either[SError, SValue]): Unit =
     discard(
       inside(result) {
         case Left(
-              SError.SErrorDamlException(
+              SError.InterpretationError(
                 IE.ExternalCall(IE.ExternalCall.PreparationFailed("ext", "fun", message))
               )
             ) =>
@@ -181,11 +181,11 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       }
     )
 
-  private def assertInvalidOutput(result: Either[SError.SError, SValue]): Unit =
+  private def assertInvalidOutput(result: Either[SError, SValue]): Unit =
     discard(
       inside(result) {
         case Left(
-              SError.SErrorDamlException(
+              SError.InterpretationError(
                 IE.ExternalCall(
                   IE.ExternalCall.ExecutionFailed(
                     "ext",
@@ -200,11 +200,11 @@ class ExternalCallTest extends AnyWordSpec with Matchers with Inside with Suppre
       }
     )
 
-  private def assertCallFailed(result: Either[SError.SError, SValue]): Unit =
+  private def assertCallFailed(result: Either[SError, SValue]): Unit =
     discard(
       inside(result) {
         case Left(
-              SError.SErrorDamlException(
+              SError.InterpretationError(
                 IE.ExternalCall(
                   IE.ExternalCall.ExecutionFailed(
                     "ext",

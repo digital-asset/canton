@@ -81,7 +81,7 @@ class LimitsSpec
       committers: Set[Ref.Party],
       e: Ast.Expr,
       agrs: SValue*
-  ): Either[SError.SError, SubmittedTransaction] =
+  ): Either[SError, SubmittedTransaction] =
     SpeedyTestLib.buildTransaction(
       machine = Speedy.Machine.fromUpdateSExpr(
         compiledPackages = pkgs,
@@ -126,7 +126,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -167,7 +167,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -211,7 +211,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -257,7 +257,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -294,7 +294,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -333,7 +333,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -378,7 +378,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -431,7 +431,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -484,7 +484,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(
@@ -530,7 +530,7 @@ class LimitsSpec
         else
           inside(result) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Dev(
                       _,
                       IE.Dev.Limit(IE.Dev.Limit.TransactionInputContracts(reportedlimit)),

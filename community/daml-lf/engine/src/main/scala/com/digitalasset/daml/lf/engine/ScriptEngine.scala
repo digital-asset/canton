@@ -9,7 +9,6 @@ import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.speedy.*
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFound}
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.SBViewInterface
-import com.digitalasset.daml.lf.speedy.SError.SError
 import com.digitalasset.daml.lf.speedy.SExpr.{
   ExceptionMessageDefRef,
   LfDefRef,
@@ -135,7 +134,6 @@ object ScriptEngine {
       compiledPackages: CompiledPackages,
       logger: MachineLogger,
       iterationsBetweenInterruptions: Long = Long.MaxValue,
-      convertLegacyExceptions: Boolean = true,
   ): Either[Either[RuntimeException, SError], ExtendedValue] = {
     val translator = new ExtendedValueTranslator(compiledPackages.pkgInterface)
     @nowarn("msg=dead code following this construct")
@@ -159,7 +157,6 @@ object ScriptEngine {
         logger,
         iterationsBetweenInterruptions,
         Machine.newProfile,
-        convertLegacyExceptions,
       )
       sRes <- runMachine(machine)
     } yield sRes.toUnnormalizedExtendedValue

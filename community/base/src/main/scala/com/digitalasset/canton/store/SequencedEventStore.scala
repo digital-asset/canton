@@ -21,7 +21,7 @@ import com.digitalasset.canton.lifecycle.{
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, ProtocolMessage}
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
 import com.digitalasset.canton.pruning.PruningStatus
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
 import com.digitalasset.canton.sequencing.protocol.*
@@ -506,11 +506,12 @@ object SequencedEventStore {
     )(
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
+        synchronizerLimits: SynchronizerLimits,
     ): WithOpeningErrors[IgnoredSequencedEvent[Batch[DefaultOpenEnvelope]]] =
       event.underlying match {
         case Some(signedEvent) =>
           SignedContent
-            .openEnvelopes(signedEvent)(protocolVersion, hashOps)
+            .openEnvelopes(signedEvent)(protocolVersion, hashOps, synchronizerLimits)
             .map(evt =>
               IgnoredSequencedEvent(
                 event.timestamp,
@@ -562,9 +563,10 @@ object SequencedEventStore {
     def openEnvelopes(event: OrdinarySequencedEvent[Batch[ClosedEnvelope]])(
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
+        synchronizerLimits: SynchronizerLimits,
     ): WithOpeningErrors[OrdinarySequencedEvent[Batch[DefaultOpenEnvelope]]] =
       SignedContent
-        .openEnvelopes(event.signedEvent)(protocolVersion, hashOps)
+        .openEnvelopes(event.signedEvent)(protocolVersion, hashOps, synchronizerLimits)
         .map(evt => OrdinarySequencedEvent(event.counter, evt)(event.traceContext))
   }
 
@@ -580,6 +582,7 @@ object SequencedEventStore {
         decompressionPolicy: DecompressionPolicy,
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
+        synchronizerLimits: SynchronizerLimits,
     )(
         possiblyIgnoredSequencedEventP: v30.PossiblyIgnoredSequencedEvent
     ): ParsingResult[PossiblyIgnoredProtocolEvent] = {
@@ -599,7 +602,13 @@ object SequencedEventStore {
             .fromByteString(protocolVersion, _)
             .flatMap(
               _.deserializeContent(
-                SequencedEvent.fromByteStringOpen(decompressionPolicy, hashOps, protocolVersion)
+                SequencedEvent
+                  .fromByteStringOpen(
+                    decompressionPolicy,
+                    hashOps,
+                    synchronizerLimits,
+                    protocolVersion,
+                  )
               )
             )
         )
@@ -628,12 +637,13 @@ object SequencedEventStore {
     def openEnvelopes(event: PossiblyIgnoredSequencedEvent[Batch[ClosedEnvelope]])(
         protocolVersion: ProtocolVersion,
         hashOps: HashOps,
+        synchronizerLimits: SynchronizerLimits,
     ): WithOpeningErrors[PossiblyIgnoredSequencedEvent[Batch[OpenEnvelope[ProtocolMessage]]]] =
       event match {
         case evt: OrdinarySequencedEvent[Batch[ClosedEnvelope]] =>
-          OrdinarySequencedEvent.openEnvelopes(evt)(protocolVersion, hashOps)
+          OrdinarySequencedEvent.openEnvelopes(evt)(protocolVersion, hashOps, synchronizerLimits)
         case evt: IgnoredSequencedEvent[Batch[ClosedEnvelope]] =>
-          IgnoredSequencedEvent.openEnvelopes(evt)(protocolVersion, hashOps)
+          IgnoredSequencedEvent.openEnvelopes(evt)(protocolVersion, hashOps, synchronizerLimits)
       }
   }
 }

@@ -10,7 +10,6 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.SError.{SError, SErrorDamlException}
 import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SValue.{SValue as _, *}
 import com.digitalasset.daml.lf.speedy.Speedy.Machine
@@ -587,7 +586,7 @@ class SBuiltinTest
         forEvery(testCases) { input =>
           inside(eval(e"""SHA256_HEX "$input"""")) {
             case Left(
-                  SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(
                       IE.Crypto.MalformedByteEncoding(`input`, "can not parse hex string")
                     )
@@ -1015,10 +1014,10 @@ class SBuiltinTest
         val expr1 = e"""$builtin @($eitherT) @Int64 ($leftV) 0 ($emptyMapV)"""
         val expr2 = e"""$builtin @($eitherT) @Int64 ($leftV) 1 ($nonEmptyMapV)"""
         eval(expr1) shouldBe Left(
-          SError.SErrorDamlException(IE.NonComparableValues)
+          SError.InterpretationError(IE.NonComparableValues)
         )
         eval(expr2) shouldBe Left(
-          SError.SErrorDamlException(IE.NonComparableValues)
+          SError.InterpretationError(IE.NonComparableValues)
         )
       }
     }
@@ -1041,10 +1040,10 @@ class SBuiltinTest
         val expr1 = e"""$builtin @($eitherT) @Int64 ($leftV) ($emptyMapV)"""
         val expr2 = e"""$builtin @($eitherT) @Int64 ($leftV) ($nonEmptyMapV)"""
         eval(expr1) shouldBe Left(
-          SError.SErrorDamlException(IE.NonComparableValues)
+          SError.InterpretationError(IE.NonComparableValues)
         )
         eval(expr2) shouldBe Left(
-          SError.SErrorDamlException(IE.NonComparableValues)
+          SError.InterpretationError(IE.NonComparableValues)
         )
       }
     }
@@ -1079,10 +1078,10 @@ class SBuiltinTest
         val expr1 = e"""$builtin @($eitherT) @Int64 ($leftV) ($emptyMapV)"""
         val expr2 = e"""$builtin @($eitherT) @Int64 ($leftV) ($nonEmptyMapV)"""
         eval(expr1) shouldBe Left(
-          SError.SErrorDamlException(IE.NonComparableValues)
+          SError.InterpretationError(IE.NonComparableValues)
         )
         eval(expr2) shouldBe Left(
-          SError.SErrorDamlException(IE.NonComparableValues)
+          SError.InterpretationError(IE.NonComparableValues)
         )
       }
     }
@@ -1561,20 +1560,21 @@ class SBuiltinTest
         ),
       )
 
+      new Value.ValueArithmeticError(stablePackages)
+
       forAll(cases) { (builtin, args, name) =>
         inside(eval(SEAppAtomicSaturatedBuiltin(builtin, args.map(SEValue(_)).to(ArraySeq)))) {
           case Left(
-                SError.SErrorDamlException(
-                  IE.FailureStatus(
-                    errorId,
-                    _,
-                    msg,
-                    _,
-                  )
-                )
+                SError.UnhandledException(x)
               ) =>
-            msg shouldBe s"ArithmeticError while evaluating ($name ${args.iterator.map(lit2string).mkString(" ")})."
-            errorId shouldBe "UNHANDLED_EXCEPTION/DA.Exception.ArithmeticError:ArithmeticError"
+            x match {
+              case Speedy.SArithmeticError(msg) =>
+                msg shouldBe s"ArithmeticError while evaluating ($name ${args.iterator.map(lit2string).mkString(" ")})."
+              case _ =>
+                throw null
+            }
+          case x =>
+            throw new Error(x.toString)
         }
       }
     }
@@ -1683,9 +1683,7 @@ class SBuiltinTest
         )
       } {
         case Left(
-              SError.SErrorDamlException(
-                IE.FailureStatus(_, _, msg, _)
-              )
+              SError.UnhandledException(SAny(_, SRecord(_, _, ArraySeq(SText(msg)))))
             ) =>
           msg shouldBe "failed precondition"
       }
@@ -1732,7 +1730,7 @@ class SBuiltinTest
         forEvery(testCases) { input =>
           inside(eval(e"""KECCAK256_TEXT "$input"""")) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                   )
                 ) =>
@@ -1786,7 +1784,7 @@ class SBuiltinTest
             eval(e"""SECP256K1_WITH_ECDSA_BOOL "$signature" "$invalidMessage" "$publicKey"""")
           ) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                   )
                 ) =>
@@ -1797,7 +1795,7 @@ class SBuiltinTest
           }
           inside(eval(e"""SECP256K1_BOOL "$signatureDigest" "$invalidMessage" "$publicKey"""")) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                   )
                 ) =>
@@ -1841,7 +1839,7 @@ class SBuiltinTest
             eval(e"""SECP256K1_WITH_ECDSA_BOOL "$signature" "$message" "$invalidPublicKey"""")
           ) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedKey(`invalidPublicKey`, reason))
                   )
                 ) =>
@@ -1849,7 +1847,7 @@ class SBuiltinTest
           }
           inside(eval(e"""SECP256K1_BOOL "$signatureDigest" "$message" "$invalidPublicKey"""")) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedKey(`invalidPublicKey`, reason))
                   )
                 ) =>
@@ -1864,7 +1862,7 @@ class SBuiltinTest
             eval(e"""SECP256K1_WITH_ECDSA_BOOL "$signature" "$message" "$invalidPublicKey"""")
           ) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                   )
                 ) =>
@@ -1873,7 +1871,7 @@ class SBuiltinTest
           }
           inside(eval(e"""SECP256K1_BOOL "$signatureDigest" "$message" "$invalidPublicKey"""")) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                   )
                 ) =>
@@ -1900,7 +1898,7 @@ class SBuiltinTest
             eval(e"""SECP256K1_WITH_ECDSA_BOOL "$invalidSignature" "$message" "$publicKey"""")
           ) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedSignature(`invalidSignature`, reason))
                   )
                 ) =>
@@ -1908,7 +1906,7 @@ class SBuiltinTest
           }
           inside(eval(e"""SECP256K1_BOOL "$invalidSignature" "$message" "$publicKey"""")) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedSignature(`invalidSignature`, reason))
                   )
                 ) =>
@@ -1922,7 +1920,7 @@ class SBuiltinTest
               eval(e"""SECP256K1_WITH_ECDSA_BOOL "$invalidSignature" "$message" "$publicKey"""")
             ) {
               case Left(
-                    SError.SErrorDamlException(
+                    SError.InterpretationError(
                       IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                     )
                   ) =>
@@ -1931,7 +1929,7 @@ class SBuiltinTest
             }
             inside(eval(e"""SECP256K1_BOOL "$invalidSignature" "$message" "$publicKey"""")) {
               case Left(
-                    SError.SErrorDamlException(
+                    SError.InterpretationError(
                       IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                     )
                   ) =>
@@ -1990,7 +1988,7 @@ class SBuiltinTest
         forEvery(testCases) { input =>
           inside(eval(e"""HEX_TO_TEXT "$input"""")) {
             case Left(
-                  SError.SErrorDamlException(
+                  SError.InterpretationError(
                     IE.Crypto(IE.Crypto.MalformedByteEncoding(value, reason))
                   )
                 ) =>

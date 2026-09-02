@@ -479,7 +479,11 @@ class SequencerRuntime(
           client.subscribeTracking(
             topologyManagerSequencerCounterTrackerStore,
             DiscardIgnoredEvents(loggerFactory) {
-              EnvelopeOpener(staticSynchronizerParameters.protocolVersion, syncCrypto.pureCrypto)(
+              EnvelopeOpener(
+                staticSynchronizerParameters.protocolVersion,
+                syncCrypto.pureCrypto,
+                topologyClient,
+              )(
                 eventHandler
               )
             },

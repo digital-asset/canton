@@ -17,11 +17,11 @@ import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiErrorGroup.CommandExecutionErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId}
+import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.engine.Error as LfError
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
 import com.digitalasset.daml.lf.language
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Reference}
+import com.digitalasset.daml.lf.language.{LanguageVersion, Reference}
 import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   GlobalKeyWithMaintainers,
@@ -507,12 +507,6 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
       }
     }
 
-    private def getTypeIdentifier(t: Ast.Type): Option[Identifier] =
-      t match {
-        case Ast.TTyCon(ty) => Some(ty)
-        case _ => None
-      }
-
     @Explanation(
       """This error occurs when a user throws an error and does not catch it with try-catch."""
     )
@@ -523,29 +517,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
         extends ErrorCode(
           id = "UNHANDLED_EXCEPTION",
           ErrorCategory.InvalidGivenCurrentSystemStateOther,
-        ) {
-
-      final case class Reject(
-          override val cause: String,
-          err: LfInterpretationError.UnhandledException,
-      )(implicit
-          loggingContext: ErrorLoggingContext
-      ) extends DamlErrorWithDefiniteAnswer(
-            cause = cause
-          ) {
-        override def resources: Seq[(ErrorResource, String)] =
-          withEncodedValue(err.value) { encodedValue =>
-            getTypeIdentifier(err.exceptionType)
-              .map(ty =>
-                Seq(
-                  (ErrorResource.ExceptionType, ty.toString),
-                  (ErrorResource.ExceptionValue, encodedValue),
-                )
-              )
-              .getOrElse(Nil)
-          }
-      }
-    }
+        )
 
     @Explanation(
       """This error occurs when a user calls abort or error on an LF version before native exceptions were introduced."""

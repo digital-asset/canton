@@ -14,7 +14,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.DefaultOpenEnvelope
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   BytestringWithCryptographicEvidence,
@@ -307,9 +307,10 @@ object SignedContent
   def openEnvelopes(event: SignedContent[DecompressedSequencedEvent[ClosedEnvelope]])(
       protocolVersion: ProtocolVersion,
       hashOps: HashOps,
+      synchronizerLimits: SynchronizerLimits,
   ): WithOpeningErrors[SignedContent[DecompressedSequencedEvent[DefaultOpenEnvelope]]] = {
     val (openSequencedEvent, openingErrors) =
-      SequencedEvent.openEnvelopes(event.content)(protocolVersion, hashOps)
+      SequencedEvent.openEnvelopes(event.content)(protocolVersion, hashOps, synchronizerLimits)
     WithOpeningErrors(
       // The signature is still valid
       event.copy(content = openSequencedEvent),

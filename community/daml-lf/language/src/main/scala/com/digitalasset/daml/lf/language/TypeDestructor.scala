@@ -111,7 +111,7 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
   ): Either[TypeDestructor.Error, SerializableTypeF[Ast.Type]] = {
     def prettyType = args.foldLeft(typ0)(Ast.TApp.apply).pretty
 
-    def unserializableType = TypeDestructor.Error.TypeError(s"unserializableType type $prettyType")
+    def unserializableType = TypeDestructor.Error.TypeError(s"unserializable type $prettyType")
 
     def wrongType = TypeDestructor.Error.TypeError(s"wrong type $prettyType")
 

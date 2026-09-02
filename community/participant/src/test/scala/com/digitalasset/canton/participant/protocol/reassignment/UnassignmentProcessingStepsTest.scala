@@ -885,7 +885,12 @@ final class UnassignmentProcessingStepsTest
             )
           decrypted <-
             unassignmentProcessingSteps
-              .decryptViews(envelopes, cryptoSnapshot, sessionKeyStore)
+              .decryptViews(
+                envelopes,
+                cryptoSnapshot,
+                SynchronizerLimits.defaultFor(testedProtocolVersion),
+                sessionKeyStore,
+              )
               .valueOrFailShutdown(
                 "decrypt request failed"
               )
@@ -1144,13 +1149,13 @@ final class UnassignmentProcessingStepsTest
           prior = Map(contract.contractId -> Some(Active(initialReassignmentCounter - 1)))
         ),
         participantSignatureVerificationResult = None,
-        contractAuthenticationResultF = EitherT.right(FutureUnlessShutdown.unit),
+        contractAuthenticationResultF = EitherT.rightT(()),
         submitterCheckResult = None,
         multiSynchronizerFeatureFlagCheckResult = None,
       ),
-      reassigningParticipantValidationResult = ReassigningParticipantValidationResult(errors = Nil),
+      reassigningParticipantValidationResult =
+        ReassigningParticipantValidationResult(EitherT.pure(()), errors = Nil),
     )
-
     val pendingUnassignment = PendingUnassignment(
       RequestId(CantonTimestamp.Epoch),
       RequestCounter(1),

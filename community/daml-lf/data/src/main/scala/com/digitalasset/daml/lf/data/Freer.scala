@@ -169,7 +169,7 @@ object Freer {
       type Error = Freer.Step.Error[F, E]
       val Error: Freer.Step.Error.type = Freer.Step.Error
       type Impure[X, A] = Freer.Step.Impure[F, E, X, A]
-      val Impure = Freer.Step.Impure
+      val Impure: Freer.Step.Impure.type = Freer.Step.Impure
     }
     def pure[A](a: A): T[A] = Freer.pure(a)
     def raise(e: E): T[Nothing] = Freer.raise(e)

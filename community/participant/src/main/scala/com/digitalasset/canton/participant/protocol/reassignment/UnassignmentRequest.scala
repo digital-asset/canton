@@ -167,6 +167,13 @@ object UnassignmentRequest {
       _ <- ReassignmentValidation.authenticateContracts(
         contractValidator,
         contracts.contracts,
+        _.sourceValidationPackageId.unwrap,
+      )
+
+      _ <- ReassignmentValidation.authenticateContracts(
+        contractValidator,
+        contracts.contracts,
+        _.targetValidationPackageId.unwrap,
       )
 
     } yield {

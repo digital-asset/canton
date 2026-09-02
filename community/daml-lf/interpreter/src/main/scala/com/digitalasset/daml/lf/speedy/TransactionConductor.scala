@@ -76,7 +76,7 @@ private[lf] final class TransactionConductor(
         driveCmdMachine(cmdMachine)
       case SResult.SResultError(err) =>
         err match {
-          case SError.SErrorDamlException(error) => Upd.raise(error)
+          case SError.InterpretationError(error) => Upd.raise(error)
           case crash => throw crash
         }
       case SResult.SResultQuestion(cmd) =>
@@ -118,7 +118,7 @@ private[lf] final class TransactionConductor(
     handleCmd(create).flatMap {
       case SValue.SContractId(cid) => handleCmd(exerciseOn(cid))
       case other =>
-        throw SError.SErrorCrash(
+        throw SError.Crash(
           NameOf.qualifiedNameOfCurrentFunc,
           s"expected a contract id from create, got $other",
         )
@@ -228,14 +228,14 @@ private[lf] final class TransactionConductor(
       .fromPureSExpr(compiledPackages, SExpr.SEApp(SExpr.SEVal(defRef), args), logger)
       .runPure() match {
       case Right(value) => Right(value)
-      case Left(SError.SErrorDamlException(error)) => Left(error)
+      case Left(SError.InterpretationError(error)) => Left(error)
       case Left(crash) => throw crash
     }
 
   private def runSafely[X](x: => X): Either[IError, X] =
     try Right(x)
     catch {
-      case SError.SErrorDamlException(error) => Left(error)
+      case SError.InterpretationError(error) => Left(error)
     }
 
   private def computeContractSignatories(
@@ -291,7 +291,7 @@ private[lf] final class TransactionConductor(
       case SValue.SBool(false) =>
         Left(IError.TemplatePreconditionViolated(tmplId, None, createArg.toUnnormalizedValue))
       case other =>
-        throw SError.SErrorCrash(
+        throw SError.Crash(
           NameOf.qualifiedNameOfCurrentFunc,
           s"template precondition returned a non-boolean value: $other",
         )
@@ -602,7 +602,7 @@ private[lf] final class TransactionConductor(
               case Some(contract) =>
                 Upd.pure((srcSArg, contract))
               case None =>
-                throw SError.SErrorCrash(
+                throw SError.Crash(
                   NameOf.qualifiedNameOfCurrentFunc,
                   s"Contract info for local contract $coid with template ID $srcTmplId",
                 )
@@ -740,7 +740,7 @@ private[lf] final class TransactionConductor(
           contract
       }
       .foreach { contract =>
-        throw SError.SErrorCrash(
+        throw SError.Crash(
           NameOf.qualifiedNameOfCurrentFunc,
           s"Contract key mismatch: the ledger returned a contract whose key does not " +
             s"match the requested key. Requested key: $globalKey, returned " +
@@ -944,7 +944,7 @@ private[lf] final class TransactionConductor(
   ): Upd.T[SValue] = {
     val choice = compiledPackages.pkgInterface.lookupChoice(tmplId, interfaceId, choiceName) match {
       case Left(lookupError) =>
-        throw SError.SErrorCrash(NameOf.qualifiedNameOfCurrentFunc, lookupError.pretty)
+        throw SError.Crash(NameOf.qualifiedNameOfCurrentFunc, lookupError.pretty)
       case Right(choice) => choice
     }
     for {
@@ -1062,7 +1062,7 @@ private[lf] final class TransactionConductor(
       val tmplId = sAny match {
         case SValue.SAny(Ast.TTyCon(id), _) => id
         case other =>
-          throw SError.SErrorCrash(
+          throw SError.Crash(
             NameOf.qualifiedNameOfCurrentFunc,
             s"fetchAndValidateContractByInterface returned an unexpected value: $other",
           )
@@ -1106,7 +1106,7 @@ private[lf] final class TransactionConductor(
                       ptx = updatedPtx
                       Upd.pure(SValue.SText(responseBodyRaw))
                     case None =>
-                      throw SError.SErrorCrash(
+                      throw SError.Crash(
                         NameOf.qualifiedNameOfCurrentFunc,
                         s"lost enclosing exercise context while resuming external call " +
                           s"(extensionId=$extensionId, functionId=$functionId)",
@@ -1285,12 +1285,12 @@ private[lf] object TransactionConductor {
       case SValue.SList(vs) =>
         TreeSet.empty(Ref.Party.ordering) ++ vs.iterator.map {
           case SValue.SParty(p) => p
-          case x => throw SError.SErrorCrash(where, s"non-party value in list: $x")
+          case x => throw SError.Crash(where, s"non-party value in list: $x")
         }
       case SValue.SParty(p) =>
         TreeSet(p)(Ref.Party.ordering)
       case _ =>
-        throw SError.SErrorCrash(where, s"value not a list of parties or party: $v")
+        throw SError.Crash(where, s"value not a list of parties or party: $v")
     }
 
   private def authenticateIfLegacyContract(

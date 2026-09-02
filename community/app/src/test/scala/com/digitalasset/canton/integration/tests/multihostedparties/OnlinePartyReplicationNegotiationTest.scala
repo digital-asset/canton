@@ -338,11 +338,11 @@ sealed trait OnlinePartyReplicationNegotiationTest
           targetParticipant.id,
         )
         assert(
-          tpLapiStatus.state == LapiPartyReplicationStatus.State.STATE_COMPLETED,
+          tpLapiStatus.current == LapiPartyReplicationStatus.State.STATE_COMPLETED,
           "LAPI TP must be completed",
         )
         assert(
-          spLapiStatus.state == LapiPartyReplicationStatus.State.STATE_COMPLETED,
+          spLapiStatus.current == LapiPartyReplicationStatus.State.STATE_COMPLETED,
           "LAPI SP must be completed",
         )
       }

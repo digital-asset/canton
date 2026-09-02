@@ -8,8 +8,11 @@ import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.crypto.SessionKeyInfo
-import com.digitalasset.canton.data.LightTransactionViewTree
 import com.digitalasset.canton.data.ViewType.TransactionViewType
+import com.digitalasset.canton.data.{
+  LightTransactionViewTree,
+  LightTransactionViewTreeDeserializationContext,
+}
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
@@ -23,6 +26,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
   EncryptedMultipleViews,
   EncryptedMultipleViewsMessage,
@@ -262,10 +266,14 @@ trait SessionKeyIntegrationTest
           sessionKeyInfoGroupTx.sessionKeyAndReference.randomness
         )
         .valueOrFail("failed to create session key from randomness")
+
+      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+
       val messages = Batch
         .openEnvelopes(submissionRequest.batch)(
           testedProtocolVersion,
           pureCrypto,
+          synchronizerLimits,
         )
         ._1
         .envelopes
@@ -276,7 +284,11 @@ trait SessionKeyIntegrationTest
       ): Either[DefaultDeserializationError, LightTransactionViewTree] =
         LightTransactionViewTree
           .fromByteString(
-            (pureCrypto, EncryptedViewMessage.computeRandomnessLength(pureCrypto)),
+            LightTransactionViewTreeDeserializationContext(
+              pureCrypto,
+              EncryptedViewMessage.computeRandomnessLength(pureCrypto),
+              synchronizerLimits,
+            ),
             testedProtocolVersion,
           )(bytes)
           .leftMap(err => DefaultDeserializationError(err.message))

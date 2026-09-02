@@ -75,6 +75,8 @@ class Engine(
     override val loggerFactory: NamedLoggerFactory,
 ) extends NamedLogging {
 
+  import Engine.*
+
   config.profileDir.foreach(Files.createDirectories(_))
   config.snapshotDir.foreach(Files.createDirectories(_))
 
@@ -503,14 +505,6 @@ class Engine(
     Result.done(deps)
   }
 
-  private def handleError(err: SError.SError, detailMsg: Option[String]): Result[Nothing] =
-    err match {
-      case SError.SErrorDamlException(error) =>
-        Result.error(Error.Interpretation.DamlException(error), detailMsg)
-      case err @ SError.SErrorCrash(where, reason) =>
-        Result.error(Error.Interpretation.Internal(where, reason, Some(err)))
-    }
-
   private lazy val enricher = refinement.Enricher(
     compiledPackages,
     loadPackage,
@@ -713,7 +707,13 @@ class Engine(
             }
           }
         case Left(err) =>
-          handleError(err, None)
+          handleError(
+            err = err,
+            compiledPackages = compiledPackages,
+            machineLogger = machine.logger,
+            iterationsBetweenInterruptions = machine.iterationsBetweenInterruptions,
+            detailMsg = None,
+          )
       }
 
     @scala.annotation.tailrec
@@ -869,7 +869,13 @@ class Engine(
           finish
 
         case SResultError(err) =>
-          handleError(err, Some(machine.transactionTrace(config.transactionTraceMaxLength)))
+          handleError(
+            err = err,
+            compiledPackages = compiledPackages,
+            machineLogger = machine.logger,
+            iterationsBetweenInterruptions = machine.iterationsBetweenInterruptions,
+            detailMsg = Some(machine.transactionTrace(config.transactionTraceMaxLength)),
+          )
       }
     }
 
@@ -949,16 +955,24 @@ class Engine(
       argument: Value,
       interfaceId: Identifier,
   )(implicit traceContext: TraceContext): Result[Versioned[Value]] = {
+    val logger = machineLogger(validating = true)
     @scala.annotation.nowarn("msg=dead code following this construct")
     def interpret(machine: PureMachine, abort: () => Option[String]): Result[SValue] =
       machine.run() match {
-        case SResultFinal(v) => Result.done(v)
-        case SResultError(err) => handleError(err, None)
         case SResult.SResultInterruption =>
           for {
             _ <- Result.needInterruption(abort)
             result <- interpret(machine, abort)
           } yield result
+        case SResultFinal(v) => Result.done(v)
+        case SResultError(err) =>
+          handleError(
+            err = err,
+            compiledPackages = compiledPackages,
+            machineLogger = logger,
+            iterationsBetweenInterruptions = config.iterationsBetweenInterruptions,
+            detailMsg = None,
+          )
         case SResultQuestion(nothing) => nothing: Nothing
       }
     for {
@@ -970,7 +984,7 @@ class Engine(
       machine = Machine.fromPureSExpr(
         compiledPackages,
         sexpr,
-        machineLogger(validating = true),
+        logger,
         config.iterationsBetweenInterruptions,
       )
       r <- interpret(machine, () => { machine.abort(); None })
@@ -1132,12 +1146,20 @@ class Engine(
           }
         case SResult.SResultFinal(_) =>
           Result.done(Right(()))
-        case SResult.SResultError(err) =>
-          err match {
-            case SError.SErrorDamlException(error) =>
+        case SResult.SResultError(error) =>
+          error match {
+            case SError.InterpretationError(error) =>
               Result.done(Left(error))
-            case err @ SError.SErrorCrash(where, reason) =>
-              Result.error(Error.Interpretation.Internal(where, reason, Some(err)))
+            case SError.UnhandledException(excp) =>
+              computeFailureStatus(
+                excp,
+                compiledPackages = compiledPackages,
+                machineLogger = machine.logger,
+                iterationsBetweenInterruptions = machine.iterationsBetweenInterruptions,
+                detailMsg = None,
+              ).flatMap(err => Result.done(Left(err)))
+            case crash: SError.Crash =>
+              handleNotExceptionError(crash, None)
           }
         case SResult.SResultInterruption =>
           for {
@@ -1217,4 +1239,134 @@ object Engine {
       def toResult: Result[A] = e.fold(Result.error(_), Result.done(_))
     }
   }
+
+  private def handleNotExceptionError(
+      err: SError.NotAnException,
+      detailMsg: Option[String],
+  ) =
+    err match {
+      case SError.InterpretationError(error) =>
+        Result.error(Error.Interpretation.DamlException(error), detailMsg)
+      case err @ SError.Crash(where, reason) =>
+        Result.error(Error.Interpretation.Internal(where, reason, Some(err)))
+    }
+
+  private def handleError(
+      err: SError,
+      compiledPackages: CompiledPackages,
+      machineLogger: MachineLogger,
+      iterationsBetweenInterruptions: Long,
+      detailMsg: Option[String],
+  ): Result[Nothing] =
+    err match {
+      case err: SError.NotAnException => handleNotExceptionError(err, detailMsg)
+      case SError.UnhandledException(excp) =>
+        raiseFailureWithStatus(
+          excp,
+          compiledPackages = compiledPackages,
+          machineLogger = machineLogger,
+          iterationsBetweenInterruptions = iterationsBetweenInterruptions,
+          detailMsg = detailMsg,
+        )
+    }
+
+  private[engine] def computeFailureStatus(
+      excp: SValue.SAny,
+      compiledPackages: CompiledPackages,
+      machineLogger: MachineLogger,
+      iterationsBetweenInterruptions: Long,
+      detailMsg: Option[String],
+  ): Result[IError.FailureStatus] = {
+
+    def illFormedException =
+      Result.error(
+        Error.Interpretation.Internal(
+          NameOf.qualifiedNameOfCurrentFunc,
+          "ill-formed exception",
+          None,
+        )
+      )
+
+    def makeFailureStatus(
+        name: Ref.TypeConId,
+        message: String,
+    ) =
+      Result.done(
+        IError.FailureStatus(
+          "UNHANDLED_EXCEPTION/" + name.qualifiedName.toString,
+          Ast.FCInvalidGivenCurrentSystemStateOther.cantonCategoryId,
+          message,
+          Map(),
+        )
+      )
+
+    excp match {
+      case Speedy.SArithmeticError(msg) =>
+        makeFailureStatus(Speedy.SArithmeticError.tyCon, msg)
+      case SValue.SAny(Ast.TTyCon(excTyp), svalue) =>
+        val machine = Speedy.Machine.fromPureSExpr(
+          compiledPackages = compiledPackages,
+          expr = SExpr.SEApp(SExpr.SEVal(SExpr.ExceptionMessageDefRef(excTyp)), ArraySeq(svalue)),
+          logger = machineLogger,
+          iterationsBetweenInterruptions = iterationsBetweenInterruptions,
+          profile = new Profile,
+        )
+
+        @scala.annotation.nowarn("msg=dead code following this construct")
+        def loop(): Result[IError.FailureStatus] =
+          machine.run() match {
+            case SResultFinal(result) =>
+              result match {
+                case SValue.SText(msg) =>
+                  makeFailureStatus(excTyp, msg)
+                case otherwise =>
+                  Result.error(
+                    Error.Interpretation.Internal(
+                      NameOf.qualifiedNameOfCurrentFunc,
+                      s"except a Text got ${otherwise.toUnnormalizedValue}",
+                      None,
+                    )
+                  )
+              }
+            case SResultError(err) =>
+              err match {
+                case SError.UnhandledException(sAny) =>
+                  sAny match {
+                    case SValue.SAny(Ast.TTyCon(exceptionId), value) =>
+                      makeFailureStatus(
+                        excTyp,
+                        s"<Failed to calculate message as ${exceptionId.qualifiedName.toString} was thrown during conversion>",
+                      )
+                    case _ =>
+                      illFormedException
+                  }
+                case err: SError.NotAnException =>
+                  handleNotExceptionError(err, detailMsg)
+              }
+            case SResult.SResultInterruption =>
+              Result.needInterruption(() => detailMsg).flatMap(_ => loop())
+            case SResultQuestion(nothing) =>
+              nothing
+          }
+
+        loop()
+      case _ =>
+        illFormedException
+    }
+  }
+
+  private[lf] def raiseFailureWithStatus(
+      excp: SValue.SAny,
+      compiledPackages: CompiledPackages,
+      machineLogger: MachineLogger,
+      iterationsBetweenInterruptions: Long,
+      detailMsg: Option[String],
+  ): Result[Nothing] =
+    computeFailureStatus(
+      excp,
+      compiledPackages,
+      machineLogger,
+      iterationsBetweenInterruptions,
+      detailMsg,
+    ).flatMap(err => Result.error(Error.Interpretation.DamlException(err), detailMsg))
 }

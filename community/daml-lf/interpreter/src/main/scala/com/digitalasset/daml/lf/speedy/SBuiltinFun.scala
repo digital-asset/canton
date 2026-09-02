@@ -13,7 +13,6 @@ import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.data.support.*
 import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.speedy.SError.*
 import com.digitalasset.daml.lf.speedy.SExpr as runTime
 import com.digitalasset.daml.lf.speedy.SExpr.*
 import com.digitalasset.daml.lf.speedy.SValue.{SValue as SV, *}
@@ -157,7 +156,7 @@ private[lf] object SBuiltinFun {
   }
 
   protected def crash(msg: String): Nothing =
-    throw SErrorCrash(getClass.getCanonicalName, msg)
+    throw SError.Crash(getClass.getCanonicalName, msg)
 
   protected def unexpectedType(i: Int, expected: String, found: SValue): Nothing =
     crash(s"type mismatch of argument $i: expect $expected but got $found")
@@ -363,12 +362,6 @@ private[lf] object SBuiltinFun {
       extends SBuiltinFun(arity) {
     private[speedy] def compute(args: ArraySeq[SValue]): Option[SValue]
 
-    private[speedy] def buildException[Q](machine: Machine[Q], args: ArraySeq[SValue]) =
-      machine.sArithmeticError(
-        name,
-        args.view.map(litToText(getClass.getCanonicalName, _)).to(ImmArray),
-      )
-
     override private[speedy] def execute[Q](
         args: ArraySeq[SValue],
         machine: Machine[Q],
@@ -377,7 +370,7 @@ private[lf] object SBuiltinFun {
         case Some(value) =>
           Control.Value(value)
         case None =>
-          machine.handleException(buildException(machine, args))
+          machine.handleException(Speedy.SArithmeticError(name, args))
       }
   }
 
@@ -508,7 +501,7 @@ private[lf] object SBuiltinFun {
     }
   }
 
-  private[this] def litToText(location: String, x: SValue): String =
+  private[speedy] def litToText(location: String, x: SValue): String =
     x match {
       case SBool(b) => b.toString
       case SInt64(i) => i.toString
@@ -521,7 +514,7 @@ private[lf] object SBuiltinFun {
       case SNumeric(x) => Numeric.toUnscaledString(x)
       case _: SContractId | SToken | _: SAny | _: SEnum | _: SList | _: SMap | _: SOptional |
           _: SPAP | _: SRecord | _: SStruct | _: STypeRep | _: SVariant =>
-        throw SErrorCrash(location, s"litToText: unexpected $x")
+        throw SError.Crash(location, s"litToText: unexpected $x")
     }
 
   final case object SBToText extends SBuiltinPure(1) {
@@ -2370,7 +2363,7 @@ private[lf] object SBuiltinFun {
     ): Control[Nothing] = {
       val exception = getSAnyException(args, 0)
       exception.id match {
-        case machine.valueArithmeticError.tyCon =>
+        case ValueArithmeticError.tyCon =>
           Control.Value(exception.values(0))
         case tyCon =>
           val e = SEApp(SEVal(ExceptionMessageDefRef(tyCon)), ArraySeq(exception))
@@ -2680,12 +2673,12 @@ private[lf] object SBuiltinFun {
         TreeSet.empty(Party.ordering) ++ vs.iterator.map {
           case SParty(p) => p
           case x =>
-            throw SErrorCrash(where, s"non-party value in list: $x")
+            throw SError.Crash(where, s"non-party value in list: $x")
         }
       case SParty(p) =>
         TreeSet(p)(Party.ordering)
       case _ =>
-        throw SErrorCrash(where, s"value not a list of parties or party: $v")
+        throw SError.Crash(where, s"value not a list of parties or party: $v")
     }
 
   private[this] val keyWithMaintainersStructFields: Struct[Unit] =
@@ -2708,7 +2701,7 @@ private[lf] object SBuiltinFun {
           gkey,
           extractParties(NameOf.qualifiedNameOfCurrentFunc, vals(maintainerIdx)),
         )
-      case _ => throw SErrorCrash(location, s"Invalid key with maintainers: $v")
+      case _ => throw SError.Crash(location, s"Invalid key with maintainers: $v")
     }
 
   private[this] val contractInfoStructFieldNames =
@@ -2742,7 +2735,7 @@ private[lf] object SBuiltinFun {
         val templateId = vals(contractInfoStructTypeFieldIdx) match {
           case STypeRep(Ast.TTyCon(tycon)) => tycon
           case v =>
-            throw SErrorCrash(
+            throw SError.Crash(
               NameOf.qualifiedNameOfCurrentFunc,
               s"Invalid contract info struct: $v",
             )
@@ -2754,7 +2747,7 @@ private[lf] object SBuiltinFun {
               extractKey(NameOf.qualifiedNameOfCurrentFunc, pkgName, templateId, _)
             )
           case v =>
-            throw SErrorCrash(
+            throw SError.Crash(
               NameOf.qualifiedNameOfCurrentFunc,
               s"Expected optional key with maintainers, got: $v",
             )
@@ -2778,7 +2771,7 @@ private[lf] object SBuiltinFun {
           keyOpt = mbKey,
         )
       case v =>
-        throw SErrorCrash(NameOf.qualifiedNameOfCurrentFunc, s"Invalid contract info struct: $v")
+        throw SError.Crash(NameOf.qualifiedNameOfCurrentFunc, s"Invalid contract info struct: $v")
     }
 
   /** Fetches the requested contract ID and:

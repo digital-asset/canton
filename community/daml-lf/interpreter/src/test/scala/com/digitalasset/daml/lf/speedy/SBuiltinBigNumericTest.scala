@@ -387,6 +387,6 @@ object SBuiltinBigNumericTestHelpers {
       Compiler.Config.Default,
     )
 
-  def eval(e: Expr)(implicit loggingContext: NamedLoggingContext): Either[SError.SError, SValue] =
+  def eval(e: Expr)(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     Speedy.Machine.runPureExpr(e, compiledPackages)
 }

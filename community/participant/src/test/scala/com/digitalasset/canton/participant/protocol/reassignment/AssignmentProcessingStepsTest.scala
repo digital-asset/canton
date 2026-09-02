@@ -518,7 +518,12 @@ final class AssignmentProcessingStepsTest
           )
           decrypted <-
             assignmentProcessingSteps
-              .decryptViews(envelopes, cryptoSnapshot, sessionKeyStore)
+              .decryptViews(
+                envelopes,
+                cryptoSnapshot,
+                SynchronizerLimits.defaultFor(testedProtocolVersion),
+                sessionKeyStore,
+              )
               .valueOrFailShutdown(
                 "decrypt request failed"
               )
@@ -807,11 +812,6 @@ final class AssignmentProcessingStepsTest
         }).futureValue,
         modelConformanceError,
       )
-    }
-
-    "fail when an invalid source validation package is given" in {
-      val invalidRepresentativePackageId = LfPackageId.assertFromString("invalid-upgrade-package")
-      shouldFailWithInvalidPackage(Source(invalidRepresentativePackageId))
     }
 
     "fail when an invalid target validation package is given" in {

@@ -364,8 +364,8 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
             targetParticipantId,
           )
 
-          lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
-          lapiSpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
+          lapiTpStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
+          lapiSpStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
 
         case (Some(spStatus), tp) if finished(spStatus) && finished(tp) =>
           logger.warn(
@@ -399,7 +399,7 @@ private[tests] trait OnlinePartyReplicationTestHelpers {
             tpStatus.parameters.synchronizerId,
             tpStatus.parameters.targetParticipantId,
           )
-          lapiTpStatus.state shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
+          lapiTpStatus.current shouldBe LapiPartyReplicationStatus.State.STATE_COMPLETED
 
         case tpStatus if finished(tpStatus) =>
           logger.warn(

@@ -130,11 +130,6 @@ object RejectionGenerators {
         case LfInterpretationError.InconsistentContractKey(key) =>
           ConsistencyErrors.InconsistentContractKey
             .RejectWithContractKeyArg(renderedMessage, key)
-        case e: LfInterpretationError.UnhandledException =>
-          CommandExecutionErrors.Interpreter.UnhandledException.Reject(
-            renderedMessage + transactionTrace.fold("")("\n" + _) + ".",
-            e,
-          )
         case e: LfInterpretationError.UserError =>
           CommandExecutionErrors.Interpreter.InterpretationUserError
             .Reject(renderedMessage, e)

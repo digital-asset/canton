@@ -6,7 +6,6 @@ package com.digitalasset.canton.data
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.*
-import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
   PrettyPrintingCompanion,
@@ -68,7 +67,10 @@ final case class FullInformeeTree private (tree: GenTransactionTree)(
 }
 
 object FullInformeeTree
-    extends VersioningCompanionContextPVValidation2[FullInformeeTree, HashOps]
+    extends VersioningCompanionContextPVValidation2[
+      FullInformeeTree,
+      GenTransactionTreeDeserializationContext,
+    ]
     with PrettyPrintingCompanion[FullInformeeTree] {
   override val name: String = "FullInformeeTree"
 
@@ -178,7 +180,7 @@ object FullInformeeTree
   }
 
   def fromProtoV30(
-      context: (HashOps, ProtocolVersion),
+      context: (GenTransactionTreeDeserializationContext, ProtocolVersion),
       protoInformeeTree: v30.FullInformeeTree,
   ): ParsingResult[FullInformeeTree] =
     for {

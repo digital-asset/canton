@@ -54,7 +54,8 @@ final case class TransactionProtocolLimits(maxActAs: PositiveInt) extends Pretty
 }
 
 object TransactionProtocolLimits {
-  lazy val DefaultMaxActAs: PositiveInt = PositiveInt.tryCreate(50)
+  // TODO(i35127): determine proper default value
+  lazy val DefaultMaxActAs: PositiveInt = PositiveInt.tryCreate(1000)
 
   lazy val default: TransactionProtocolLimits =
     TransactionProtocolLimits(maxActAs = DefaultMaxActAs)
