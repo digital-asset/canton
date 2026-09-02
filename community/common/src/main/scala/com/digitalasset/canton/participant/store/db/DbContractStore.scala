@@ -468,6 +468,11 @@ class DbContractStore(
   override def contractsPruned(
       internalContractIds: Iterable[Long]
   ): Unit =
+    invalidateCachedContracts(internalContractIds)
+
+  override def invalidateCachedContracts(
+      internalContractIds: Iterable[Long]
+  ): Unit =
     internalContractIds.view
       .flatMap(cache.getIfPresentAuxKey)
       .foreach(cache.invalidate)

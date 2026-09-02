@@ -298,6 +298,41 @@ metrics dropped the superfluous leading "SEQ::" string.
 
 #### Recommendation
 
+### The indexer no longer persists deactivation events with an unresolvable activation reference
+
+#### Issue Description
+When the indexer could not resolve the activation reference of a deactivation event, it logged a
+warning and persisted the event with a NULL `deactivated_event_sequential_id`. Ledger API
+activeness queries anti-join on that reference, so the archived contract stayed visible as active
+in the ACS permanently, while ACS commitments (computed from the synchronizer-side stores)
+remained correct.
+
+#### Affected Deployments
+Participant nodes.
+
+#### Impact
+Participants hosting the same party could serve diverging ACS contents; aggregates computed from
+the ACS (e.g. a token registry's total supply) differed per node.
+
+#### Symptom
+A contract remains in `/v2/state/active-contracts` responses although the transaction stream shows
+its archival. The participant log contains "Activation is missing for a deactivation" warnings at
+the time the archival was indexed.
+
+#### Workaround
+Run the index database integrity check to detect affected rows; contact support for repairing the
+affected index database entries.
+
+#### Likeliness
+Very rare; requires a transient contract-resolution failure (e.g. a stale contract cache mapping
+or an indexer restart window) at the moment the archival is indexed.
+
+#### Recommendation
+Upgrade. The indexer now fails the ingestion batch and restarts instead of persisting the
+corruption, exposes the restarts via the new
+`daml.indexer.indexer_restart_due_to_unresolved_deactivation` metric, and the integrity check
+reports deactivation events without an activation reference.
+
 ## Deprecations
 - `StaticSynchronizerParameters.defaultsWithoutKMS` has been deprecated in favor of `StaticSynchronizerParameters.defaults`. Supported cryptographic schemes now have parity between KMS and non-KMS configurations.
 

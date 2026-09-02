@@ -86,6 +86,13 @@ trait ContractStore extends ContractLookup with FlagCloseable {
     */
   def contractsPruned(internalContractIds: Iterable[Long]): Unit
 
+  /** Invalidate any cached lookups for the given internal contract IDs without modifying the
+    * underlying store. In contrast to [[contractsPruned]], this must never remove contract data: it
+    * is used when a cached mapping is suspected to be stale and a fresh read from persistence is
+    * needed. Stores without a cache do nothing.
+    */
+  def invalidateCachedContracts(internalContractIds: Iterable[Long]): Unit
+
   def contractCount()(implicit traceContext: TraceContext): FutureUnlessShutdown[Int]
 
   // TODO(i24535): implement this on db level

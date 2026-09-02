@@ -141,6 +141,10 @@ class InMemoryContractStore(
       .flatMap(internalIds.remove)
       .foreach(contracts.remove(_).discard)
 
+  // The in-memory store has no cache in front of it: it is the authoritative store itself,
+  // so there is nothing stale to invalidate.
+  override def invalidateCachedContracts(internalContractIds: Iterable[Long]): Unit = ()
+
   override def lookupStakeholders(ids: Set[LfContractId])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, UnknownContracts, Map[LfContractId, Set[LfPartyId]]] = {

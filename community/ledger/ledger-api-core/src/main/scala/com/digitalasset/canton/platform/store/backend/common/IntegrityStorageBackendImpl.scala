@@ -589,6 +589,34 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
             .take(10)
             .mkString("[", ", ", "]")}"
       )
+
+    // A deactivation event with a NULL deactivated_event_sequential_id is invisible to all
+    // activeness queries, so the contract it deactivated stays in the Ledger API ACS permanently.
+    // Rows strictly below the pruning point are legitimate pruning leftovers and are reported by
+    // the check above instead.
+    val deactivationsWithoutActivationReference =
+      SQL"""
+        SELECT event_sequential_id, event_offset
+        FROM lapi_events_deactivate_contract dea, lapi_parameters
+        WHERE dea.deactivated_event_sequential_id is null
+        AND dea.event_offset >= $lapi_pruning_started_up_to_inclusive
+        AND lapi_parameters.ledger_end is not null
+        AND dea.event_offset <= lapi_parameters.ledger_end
+        ${QueryStrategy.limitClause(Some(11))}
+      """
+        .asVectorOf(
+          long("event_sequential_id") ~ long("event_offset") map {
+            case event_sequential_id ~ event_offset => (event_sequential_id, event_offset)
+          }
+        )(connection)
+        .sorted
+
+    if (deactivationsWithoutActivationReference.nonEmpty)
+      throw new RuntimeException(
+        s"some deactivation events have no activation reference, so the contracts they deactivated stay visible as active, event_sequential_id-s with offsets (first 10 shown) ${deactivationsWithoutActivationReference
+            .take(10)
+            .mkString("[", ", ", "]")}"
+      )
   } catch {
     case t: Throwable if !failForEmptyDB =>
       val failure = t.getMessage
