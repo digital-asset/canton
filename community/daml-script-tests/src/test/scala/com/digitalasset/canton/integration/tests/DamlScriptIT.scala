@@ -925,8 +925,8 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
 /** Runs the external-call Daml Script tests against a mock extension service. The scripts hardcode
   * the plugin's default extension id and default response, so the plugin is registered with its
   * defaults. The external-call wire data exists from protocol version 36 onwards, hence the v36
-  * gating; the script project still targets LF 2.dev (the pinned damlc cannot compile external
-  * calls at 2.4 yet), so dev version support stays enabled.
+  * gating; the script project targets LF 2.4-staging, which lies outside the participant's default
+  * (stable) LF range, so dev version support stays enabled.
   */
 class DamlScriptExternalCallIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   import DamlScriptIT.ExpectedResult.*
