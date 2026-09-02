@@ -56,7 +56,7 @@ class TopologyStoreTestData(
       .from(
         keysWithUsage.toSeq.map { case (keyId, usage) =>
           factory.syncCryptoClient.crypto.privateCrypto
-            .sign(tx.hash.hash, keyId, usage)(executionContext, TraceContext.empty)
+            .sign(tx.hash.hash, keyId, usage)(TraceContext.empty)
             .value
             .onShutdown(fail("shutdown"))(
               DirectExecutionContext(loggerFactory.getLogger(this.getClass))

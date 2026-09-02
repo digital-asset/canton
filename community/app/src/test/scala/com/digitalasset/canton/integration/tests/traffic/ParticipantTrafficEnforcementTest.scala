@@ -223,10 +223,19 @@ final class ParticipantTrafficEnforcementEnabledTest extends ParticipantTrafficE
           val initialBalance = participant1.ledger_api.traffic.get_account(charlieId).balance
           initialBalance shouldBe 0L
 
-          loggerFactory.assertThrowsAndLogs[CommandFailure](
+          loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
             participant1.ledger_api.traffic.update_account(charlieId, balanceDelta = Some(-1L)),
-            entry => entry.warningMessage should include(TrafficUpdateOutOfBound.id),
-            entry => entry.shouldBeCantonErrorCode(TrafficUpdateOutOfBound),
+            entries =>
+              inside(entries) { case Seq(clientEntry, consoleEntry) =>
+                clientEntry.warningMessage should include(TrafficUpdateOutOfBound.id)
+                consoleEntry.shouldBeCantonErrorCode(TrafficUpdateOutOfBound)
+
+                clientEntry.mdc.get("trace-id") should not be empty
+                clientEntry.mdc.get("span-parent-id") should not be empty
+                clientEntry.mdc.get("span-name") shouldBe Some(
+                  "com.digitalasset.canton.tea.v1.TrafficService/UpdateAccount"
+                )
+              },
           )
 
           // The rejected update must not have mutated the balance

@@ -66,6 +66,8 @@ class OriginalLeaderSegmentState(
   def isProgressBlocked: Boolean =
     canReceiveProposals && blockedProgressDetector.isProgressBlocked(nextRelativeBlockToPropose)
 
+  def areMostSegmentsComplete: Boolean = blockedProgressDetector.areMostSegmentsComplete
+
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var nextRelativeBlockToPropose =
     // TODO(#16761): This assumes that a node's locally-assigned slots complete in order
@@ -179,6 +181,18 @@ class OriginalLeaderSegmentState(
     )
 
     orderedBlock
+  }
+
+  def assignAllEmptyBlocksToRestOfSegment(): Seq[OrderedBlock] = {
+    val remainingSlots = segment.slotNumbers.forgetNE.drop(nextRelativeBlockToPropose)
+    nextRelativeBlockToPropose = segment.slotNumbers.size
+    remainingSlots.map { blockNumber =>
+      OrderedBlock(
+        BlockMetadata(state.epoch.info.number, blockNumber),
+        Seq.empty,
+        CanonicalCommitSet(Set.empty),
+      )
+    }
   }
 
   private def absoluteNextBlockToProposeLogSuffix =

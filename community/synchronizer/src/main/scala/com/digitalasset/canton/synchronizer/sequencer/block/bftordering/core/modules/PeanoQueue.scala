@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output
+package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules
 
 import com.digitalasset.canton.data
 import com.digitalasset.canton.data.{Counter, PeanoTreeQueue}

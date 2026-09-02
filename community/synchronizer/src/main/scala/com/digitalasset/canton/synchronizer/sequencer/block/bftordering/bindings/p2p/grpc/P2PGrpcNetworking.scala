@@ -144,6 +144,10 @@ object P2PGrpcNetworking {
       executor = executionContextExecutor,
       trustCertificate = endpointConfig.tlsConfig.flatMap(_.trustCollectionFile).map(_.pemBytes),
       params = endpointConfig.channel,
+      // We don't support load balancing nor health-checking for P2P connections,
+      //  as the ordering protocol itself provides resilience.
+      loadBalancingPolicy = None,
+      healthCheck = false,
     )
 
   private[grpc] def completeGrpcStreamObserver(

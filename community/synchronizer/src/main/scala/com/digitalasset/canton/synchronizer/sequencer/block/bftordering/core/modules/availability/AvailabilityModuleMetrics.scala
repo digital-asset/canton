@@ -5,7 +5,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
+
+import java.time.{Duration, Instant}
 
 private[availability] object AvailabilityModuleMetrics {
 
@@ -77,4 +80,19 @@ private[availability] object AvailabilityModuleMetrics {
       key -> status.resetRegressions()
     })
   }
+
+  def emitOutputFetchLatency(
+      metrics: BftOrderingMetrics,
+      from: BftNodeId,
+      startInstant: Instant,
+      endInstant: Instant,
+  )(implicit metricsContext: MetricsContext) =
+    MetricsContext.withExtraMetricLabels(
+      metrics.availability.outputFetch.labels.From -> from
+    ) { implicit metricsContext =>
+      updateTimer(
+        metrics.availability.outputFetch.latency,
+        Duration.between(startInstant, endInstant),
+      )
+    }
 }

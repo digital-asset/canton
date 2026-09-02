@@ -5,6 +5,7 @@ package com.digitalasset.canton.ledger.participant.state
 
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
+import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.{InternedPartyId, LfPartyId, ReassignmentCounter}
 
@@ -34,6 +35,30 @@ final case class InternalizedAcsChange(
     activations: Map[LfContractId, InternalizedContractStakeholdersAndReassignmentCounter],
     deactivations: Map[LfContractId, InternalizedContractStakeholdersAndReassignmentCounter],
 ) extends GenericAcsChange[InternedPartyId]
+
+object InternalizedAcsChange {
+  private def internalizeContractStakeholders(
+      stringInterning: StringInterning,
+      counter: ContractStakeholdersAndReassignmentCounter,
+  ): InternalizedContractStakeholdersAndReassignmentCounter =
+    InternalizedContractStakeholdersAndReassignmentCounter(
+      counter.stakeholders.map(stringInterning.party.internalize),
+      counter.reassignmentCounter,
+    )
+
+  def internalizeAcsChange(
+      stringInterning: StringInterning,
+      change: AcsChange,
+  ): InternalizedAcsChange =
+    InternalizedAcsChange(
+      activations = change.activations.map { case (contractId, stakeholdersAndCounter) =>
+        contractId -> internalizeContractStakeholders(stringInterning, stakeholdersAndCounter)
+      },
+      deactivations = change.deactivations.map { case (contractId, stakeholdersAndCounter) =>
+        contractId -> internalizeContractStakeholders(stringInterning, stakeholdersAndCounter)
+      },
+    )
+}
 
 trait GenericContractStakeholdersAndReassignmentCounter[T] {
   def stakeholders: Set[T]

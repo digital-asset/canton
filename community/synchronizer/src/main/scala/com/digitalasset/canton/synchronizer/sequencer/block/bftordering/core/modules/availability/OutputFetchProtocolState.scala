@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Ji
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.Jitter
 
+import java.time.Instant
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
@@ -50,6 +51,7 @@ final case class MissingBatchStatus(
     numberOfAttempts: Int,
     jitterStream: JitterGenerator,
     orderingMode: OrderingMode,
+    firstTimeWeMadeRequest: Map[BftNodeId, Instant],
 ) {
   def calculateTimeout(): FiniteDuration = jitterStream.next(numberOfAttempts)
 }

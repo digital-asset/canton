@@ -550,6 +550,7 @@ class AvailabilityModuleOutputFetchTest
                 numberOfAttempts = 1,
                 jitterStream = jitterStream,
                 orderingMode = OrderingMode.Consensus,
+                firstTimeWeMadeRequest = Map.empty,
               )
             )
             val storage = TrieMap[BatchId, OrderingRequestBatch]()
@@ -640,6 +641,7 @@ class AvailabilityModuleOutputFetchTest
                   numberOfAttempts = 1,
                   jitterStream = jitterStream,
                   orderingMode = OrderingMode.Consensus,
+                  firstTimeWeMadeRequest = Map.empty,
                 )
               )
               implicit val context
@@ -692,6 +694,7 @@ class AvailabilityModuleOutputFetchTest
                   numberOfAttempts = 1,
                   jitterStream = jitterStream,
                   orderingMode = OrderingMode.Consensus,
+                  firstTimeWeMadeRequest = Map.empty,
                 )
               )
               implicit val context

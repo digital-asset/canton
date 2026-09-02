@@ -80,6 +80,7 @@ class IssSegmentModule[E <: Env[E]](
     availability: ModuleRef[Availability.Message[E]],
     p2pNetworkOut: ModuleRef[P2PNetworkOut.Message],
     emptyBlockCreationTimeout: FiniteDuration,
+    consensusEnableFlushingSegment: Boolean,
     viewChangeTimeoutOverride: Option[FiniteDuration] = None,
     metrics: BftOrderingMetrics,
     override val timeouts: ProcessingTimeout,
@@ -543,10 +544,23 @@ class IssSegmentModule[E <: Env[E]](
       traceContext: TraceContext,
   ): Unit = {
     resetWaitingForProposal()
-
-    logger.debug(s"$logPrefix. Starting consensus process.")
     blockStartTimeoutManager.cancelTimeout()
 
+    if (consensusEnableFlushingSegment && myOriginalLeaderSegmentState.areMostSegmentsComplete)
+      flushSegment(orderingBlock, myOriginalLeaderSegmentState, logPrefix)
+    else
+      orderSingleBlock(orderingBlock, myOriginalLeaderSegmentState, logPrefix)
+  }
+
+  private def orderSingleBlock(
+      orderingBlock: OrderingBlock,
+      myOriginalLeaderSegmentState: OriginalLeaderSegmentState,
+      logPrefix: String,
+  )(implicit
+      context: E#ActorContextT[ConsensusSegment.Message],
+      traceContext: TraceContext,
+  ): Unit = {
+    logger.debug(s"$logPrefix. Starting consensus process.")
     val orderedBlock =
       myOriginalLeaderSegmentState.assignToSlot(orderingBlock, latestCompletedEpochLastCommits)
     val prePrepare =
@@ -557,13 +571,44 @@ class IssSegmentModule[E <: Env[E]](
         orderedBlock.canonicalCommitSet,
         from = thisNode,
       )
-
     startTracingBlock(orderedBlock.metadata.blockNumber, orderingBlock)
+    signMessage(prePrepare)(context, traceContext)
+  }
 
-    signMessage(prePrepare)(
-      context,
-      traceContext,
+  // once we consider most other segments are complete but ours, we will flush our segment to stop making other leaders
+  // wait for us to move on to the next epoch. we do that by ordering the block we were already about to order, together
+  // with all empty blocks for the rest the segment in parallel.
+  private def flushSegment(
+      orderingBlock: OrderingBlock,
+      myOriginalLeaderSegmentState: OriginalLeaderSegmentState,
+      logPrefix: String,
+  )(implicit
+      context: E#ActorContextT[ConsensusSegment.Message],
+      traceContext: TraceContext,
+  ): Unit = {
+    val orderedBlock =
+      myOriginalLeaderSegmentState.assignToSlot(orderingBlock, latestCompletedEpochLastCommits)
+    val allEmptyBlocks = myOriginalLeaderSegmentState.assignAllEmptyBlocksToRestOfSegment()
+    val blocks = orderedBlock +: allEmptyBlocks
+
+    logger.info(
+      s"$logPrefix. Starting consensus process on ${blocks.size} blocks to flush segment."
     )
+    metrics.consensus.flushedBlocks.mark(allEmptyBlocks.size.toLong)
+
+    blocks.foreach { block =>
+      val orderingBlock = OrderingBlock(block.batchRefs)
+      val prePrepare =
+        ConsensusSegment.ConsensusMessage.PrePrepare.create(
+          block.metadata,
+          ViewNumber.First,
+          orderingBlock,
+          block.canonicalCommitSet,
+          from = thisNode,
+        )
+      startTracingBlock(block.metadata.blockNumber, orderingBlock)
+      signMessage(prePrepare)(context, traceContext)
+    }
   }
 
   private def startTracingBlock(blockNumber: BlockNumber, orderingBlock: OrderingBlock)(implicit

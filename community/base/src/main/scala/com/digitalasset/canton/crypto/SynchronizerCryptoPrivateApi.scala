@@ -39,7 +39,7 @@ final class SynchronizerCryptoPrivateApi(
   override private[crypto] def getInitialHealthState: ComponentHealthState =
     privateCrypto.getInitialHealthState
 
-  override private[crypto] def decryptInternal[M](
+  override def decrypt[M](
       encrypted: AsymmetricEncrypted[M]
   )(
       deserialize: ByteString => Either[DeserializationError, M]
@@ -70,7 +70,7 @@ final class SynchronizerCryptoPrivateApi(
 
   override def signingSchemes: SigningCryptoSchemes = privateCrypto.signingSchemes
 
-  override private[crypto] def signBytesInternal(
+  override def signBytes(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],

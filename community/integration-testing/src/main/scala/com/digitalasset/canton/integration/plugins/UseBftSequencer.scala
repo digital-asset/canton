@@ -35,6 +35,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingP2PSendDelayConfig,
   BftBlockOrderingStandalonePeerConfig,
+  BftBlockOrderingStandaloneTopologyDelayConfig,
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
   DefaultEpochStateTransferTimeout,
@@ -54,10 +55,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
-  FiniteDurationDistribution,
-  Probability,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FiniteDurationDistribution
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerConfig,
@@ -72,7 +70,13 @@ import monocle.macros.syntax.lens.*
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
-/** @param dynamicallyOnboardedSequencerNames
+/** Plugin that rewrites the configuration to use CantonBFT as sequencer implementation. Parameters
+  * not mentioned below override the corresponding CantonBFT configuration.
+  *
+  * @param sequencerGroups
+  *   Configures whether more than one synchronizer is being used and, in that case, which sequencer
+  *   belongs to which synchronizer.
+  * @param dynamicallyOnboardedSequencerNames
   *   Names of sequencers that are not part of the initial network config, and can be added later as
   *   part of a test.
   * @param shouldGenerateEndpointsOnly
@@ -95,7 +99,6 @@ final class UseBftSequencer(
     shouldUseMemoryStorageForBftOrderer: Boolean = false,
     shouldBenchmarkBftSequencer: Boolean = false,
     useStandaloneConfig: Option[UseStandaloneConfig] = None,
-    p2pSendDelays: Map[String, BftBlockOrderingP2PSendDelayConfig] = Map.empty,
     // Use a shorter empty block creation timeout by default to speed up tests that stop sequencing
     //  and use `GetTime` to await an effective time to be reached on the synchronizer.
     consensusEmptyBlockCreationTimeout: FiniteDuration = 250.millis,
@@ -108,6 +111,7 @@ final class UseBftSequencer(
     dedicatedExecutionContextDivisor: Option[Int] = DefaultDedicatedExecutionContextDivisor,
     sequencerCoreSubscriptionConfig: BftBlockOrdererConfig.SequencerCoreSubscriptionConfig =
       BftBlockOrdererConfig.DefaultSequencerCoreSubscriptionConfig,
+    viewChangeTimeoutOverride: Option[FiniteDuration] = None,
     delayedInitQueueMaxSize: PositiveInt = PositiveInt.tryCreate(DefaultDelayedInitQueueMaxSize),
     epochStateTransferRetryTimeout: PositiveFiniteDuration =
       PositiveFiniteDuration.tryFromDuration(DefaultEpochStateTransferTimeout),
@@ -202,6 +206,7 @@ final class UseBftSequencer(
                     standalone = standaloneOpt,
                     storage = Option.when(shouldUseMemoryStorageForBftOrderer)(Memory()),
                     sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
+                    viewChangeTimeoutOverride = viewChangeTimeoutOverride,
                     delayedInitQueueMaxSize = delayedInitQueueMaxSize.value,
                     epochStateTransferRetryTimeout = epochStateTransferRetryTimeout.underlying,
                     outputFetchTimeout = outputFetchTimeout.underlying,
@@ -362,6 +367,7 @@ final class UseBftSequencer(
               standalone = standaloneOpt,
               storage = Option.when(shouldUseMemoryStorageForBftOrderer)(Memory()),
               sequencerCoreSubscriptionConfig = sequencerCoreSubscriptionConfig,
+              viewChangeTimeoutOverride = viewChangeTimeoutOverride,
               delayedInitQueueMaxSize = delayedInitQueueMaxSize.value,
               epochStateTransferRetryTimeout = epochStateTransferRetryTimeout.underlying,
               outputFetchTimeout = outputFetchTimeout.underlying,
@@ -417,13 +423,40 @@ final class UseBftSequencer(
       val pubKeyFile = tmpDir / s"node-${selfInstanceName}_signing_public_key.bin"
       privKeyFile.writeByteArray(privKey.toProtoV30.toByteArray)
       pubKeyFile.writeByteArray(pubKey.toProtoV30.toByteArray)
-      val postOrderingDelayO =
-        standaloneConfig.postOrderingDelayConfig.flatMap { config =>
-          val suffixDigits = getSuffixDigits(selfInstanceName.unwrap)
+      val suffixDigits = getSuffixDigits(selfInstanceName.unwrap)
+      val postOrderingDelayConfigO =
+        standaloneConfig.testSlowdown.flatMap(_.postOrderingDelay).flatMap { config =>
           Option.when(
-            suffixDigits.nonEmpty && config.nodesToDelay.contains(suffixDigits.toInt)
+            suffixDigits.nonEmpty && config.nodesToDelay
+              .contains(PositiveInt.tryCreate(suffixDigits.toInt))
           )(config.delay)
         }
+      val p2pSendDelayConfigO =
+        standaloneConfig.testSlowdown.flatMap(_.p2pSendDelay).flatMap { config =>
+          config.entries
+            .find(_.sources.contains(PositiveInt.tryCreate(suffixDigits.toInt)))
+            .map(_.config)
+            .map(instanceIndexToName(otherInitialNames.map(_.unwrap), _))
+        }
+      val topologyDelayConfig = standaloneConfig.testSlowdown
+        .flatMap(_.topologyDelay)
+        .flatMap { config =>
+          Option.when(
+            suffixDigits.nonEmpty && config.nodesToDelay
+              .contains(PositiveInt.tryCreate(suffixDigits.toInt))
+          )(config.delay)
+        }
+      val testSlowdownConfigO = if (
+        postOrderingDelayConfigO.isDefined || p2pSendDelayConfigO.isDefined || topologyDelayConfig.isDefined
+      )
+        Some(
+          BftBlockOrdererConfig.BftBlockOrderingStandaloneTestSlowdownConfig(
+            postOrderingDelay = postOrderingDelayConfigO,
+            sendDelay = p2pSendDelayConfigO,
+            topologyDelay = topologyDelayConfig,
+          )
+        )
+      else None
       BftBlockOrdererConfig.BftBlockOrderingStandaloneNetworkConfig(
         thisSequencerId = standaloneSequencerId(selfInstanceName),
         signingPrivateKeyProtoFile = privKeyFile.toJava,
@@ -442,13 +475,7 @@ final class UseBftSequencer(
                 tmpDir / s"node-${otherInitialInstanceName}_signing_public_key.bin" toJava,
             )
           },
-        postOrderingDelay = postOrderingDelayO,
-        topologyBroadcastProbability = standaloneConfig.topologyBroadcastProbability,
-        pendingTopologyChangesProbability = standaloneConfig.pendingTopologyChangesProbability,
-        getOrderingTopologyDelay = standaloneConfig.getOrderingTopologyDelay,
-        sendDelay = p2pSendDelays
-          .get(getSuffixDigits(selfInstanceName.unwrap))
-          .map(instanceIndexToName(otherInitialNames.map(_.unwrap), _)),
+        testSlowdown = testSlowdownConfigO,
       )
     }
 
@@ -484,8 +511,33 @@ final class UseBftSequencer(
 object UseBftSequencer {
 
   final case class PostOrderingDelayConfig(
-      nodesToDelay: Set[Int],
-      delay: FiniteDuration,
+      nodesToDelay: Set[PositiveInt],
+      delay: FiniteDurationDistribution,
+  )
+
+  final case class P2PSendDelayConfigEntry(
+      sources: Seq[PositiveInt],
+      config: BftBlockOrderingP2PSendDelayConfig,
+  )
+
+  final case class P2PSendDelayConfig(entries: Seq[P2PSendDelayConfigEntry])
+
+  final case class TopologyDelayConfig(
+      nodesToDelay: Set[PositiveInt],
+      delay: BftBlockOrderingStandaloneTopologyDelayConfig,
+  )
+
+  /** Configuration to simulate artificial slowdowns in standalone mode for testing purposes.
+    *
+    * @param postOrderingDelay
+    *   Optional artificial delay applied after ordering on specified nodes.
+    * @param p2pSendDelay
+    *   Optional per-source P2P send delay configuration.
+    */
+  final case class TestSlowdownConfig(
+      postOrderingDelay: Option[PostOrderingDelayConfig],
+      p2pSendDelay: Option[P2PSendDelayConfig],
+      topologyDelay: Option[TopologyDelayConfig],
   )
 
   final case class UseStandaloneConfig(
@@ -494,9 +546,6 @@ object UseBftSequencer {
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short,
       maxBatchesPerBlockProposal: Short,
-      postOrderingDelayConfig: Option[PostOrderingDelayConfig],
-      topologyBroadcastProbability: Option[Probability],
-      pendingTopologyChangesProbability: Option[Probability],
-      getOrderingTopologyDelay: Option[FiniteDurationDistribution],
+      testSlowdown: Option[TestSlowdownConfig],
   )
 }

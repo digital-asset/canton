@@ -13,7 +13,9 @@ import com.digitalasset.canton.tea.projection.memory.{
   TeaMemoryProjectionFactory,
   TeaMemoryTrafficStore,
 }
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.Spanning.SpanWrapper
+import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
+import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.typed.{ActorSystem, Behavior}
 import org.apache.pekko.projection.scaladsl.SourceProvider
@@ -32,9 +34,22 @@ import scala.concurrent.{ExecutionContext, Future}
   * Single function that builds a projection from a stream source and handler The trait abstracts
   * over the in-memory and DB implementations
   */
-trait TeaProjectionFactory { this: NamedLogging =>
+trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
+
+  import TeaProjectionFactory.*
 
   protected val metrics: TrafficEnforcementMetrics
+
+  protected def setApplyDeltaSpanAttributes(
+      span: SpanWrapper,
+      projectionEvent: ProjectionEvent,
+      eventSource: EventSource,
+  ): Unit = {
+    span.setAttribute(AccountIdAttribute, projectionEvent.account.unwrap)
+    span.setAttribute(DeltaAttribute, projectionEvent.event.deltaEvent.delta.toString)
+    span.setAttribute(EventSourceAttribute, eventSource.toString)
+    span.setAttribute(OffsetAttribute, projectionEvent.event.offset.toString)
+  }
 
   /** Build a projection behavior for a single ingestion stream, reusing the shared storage. */
   def projection(
@@ -130,6 +145,12 @@ trait TeaProjectionFactory { this: NamedLogging =>
 
 object TeaProjectionFactory {
 
+  private[projection] val ApplyDeltaSpanName = "TeaProjectionHandler.applyDelta"
+  private[projection] val AccountIdAttribute = "account_id"
+  private[projection] val DeltaAttribute = "delta"
+  private[projection] val EventSourceAttribute = "event_source"
+  private[projection] val OffsetAttribute = "offset"
+
   /** Open the shared storage once, based on the configured storage backend. */
   def create(
       storage: Storage,
@@ -140,7 +161,7 @@ object TeaProjectionFactory {
       databaseQueryTimeout: PositiveFiniteDuration,
       metrics: TrafficEnforcementMetrics,
       onEventCommitted: () => Unit = () => (),
-  )(implicit system: ActorSystem[?]): (TeaProjectionFactory, TeaTrafficStore) = {
+  )(implicit system: ActorSystem[?], tracer: Tracer): (TeaProjectionFactory, TeaTrafficStore) = {
     import system.executionContext
 
     storage match {
