@@ -922,19 +922,24 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   doRunTests(scriptIdsToTest)
 }
 
-/** Runs the external-call Daml Script tests against a mock extension service. The scripts hardcode
-  * the plugin's default extension id and default response, so the plugin is registered with its
-  * defaults. The external-call wire data exists from protocol version 36 onwards, hence the v36
-  * gating; the script project targets LF 2.4-staging, which lies outside the participant's default
-  * (stable) LF range, so dev version support stays enabled.
+/** The suite for the protocol version 36 + LF 2.4-staging pair. The corpus currently consists of
+  * the external-call scripts, the feature staged at LF 2.4; further 2.4-staging test cases belong
+  * here as well.
+  *
+  * The scripts run against a mock extension service and hardcode the plugin's default extension id
+  * and default response, so the plugin is registered with its defaults. The external-call wire data
+  * exists from protocol version 36 onwards, hence the v36 gating.
   */
-class DamlScriptExternalCallIT extends DamlScriptIT(LanguageVersion.v2_dev) {
+class DamlScriptPV36LF24StagingIT extends DamlScriptIT(LanguageVersion.v2_4) {
   import DamlScriptIT.ExpectedResult.*
 
   registerPlugin(new UseExtensionService(loggerFactory))
 
-  override lazy val projectName = "ScriptExternalCallTests"
+  override lazy val projectName = "ScriptLF24StagingTests"
   override lazy val protocolVersionForTesting = ProtocolVersion.v36
+
+  // Staging versions lie outside the participant's default (stable) LF range, which caps at 2.3.
+  override protected def enableLfDev: Boolean = true
 
   override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
 
