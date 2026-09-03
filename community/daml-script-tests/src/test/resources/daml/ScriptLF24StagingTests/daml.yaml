@@ -7,8 +7,8 @@ override-components:
   daml-script:
     version: $DAML_VERSION
 build-options:
-  - --target=2.dev
-name: ScriptExternalCallTests
+  - --target=2.4-staging
+name: ScriptLF24StagingTests
 source: daml
 version: 1.0.0
 dependencies:

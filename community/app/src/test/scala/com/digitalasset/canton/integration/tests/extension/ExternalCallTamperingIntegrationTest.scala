@@ -50,9 +50,9 @@ import scala.concurrent.duration.DurationInt
 /** End-to-end coverage for a malicious participant that tampers with the recorded external-call
   * results before sending the confirmation request. Honest participants recompute or replay the
   * results during validation and reject the request. External-call wire data exists from protocol
-  * version 36 onwards, so the tests are gated on v36. The test package still targets LF 2.dev (the
-  * pinned damlc cannot compile external calls at 2.4 yet), so dev version support is enabled on the
-  * participants.
+  * version 36 onwards, so the tests are gated on v36. The test package targets LF 2.4-staging,
+  * which lies outside the participant's default (stable) LF range, so dev version support is
+  * enabled on the participants.
   */
 class ExternalCallTamperingIntegrationTest
     extends CommunityIntegrationTest
