@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.ledger.javaapi.data.Transaction
+import com.digitalasset.canton.config
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -49,18 +50,16 @@ class LsuOffsetByTimestampIntegrationTest extends LsuBase {
   override protected def configTransforms: Seq[ConfigTransform] =
     super.configTransforms ++ Seq(
       ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-      // TODO(#35107) Upon disabling the old ACS commitment processor
-      //  this test fails: (enable the new pipeline) and make the fix
-      ConfigTransforms.enableOldAcsCommitmentProcessor,
+      // Shorten the commitment checkpoint interval so that time progression
+      // triggers ReconciliationIntervalBoundary checkpoints in AcsDigestStore
+      ConfigTransforms.updateCommitmentCheckpointInterval(
+        config.PositiveDurationSeconds.ofSeconds(5)
+      ),
     )
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S2M2_Config
       .withNetworkBootstrap(implicit env => new NetworkBootstrapper(EnvironmentDefinition.S1M1))
-      .addConfigTransforms(
-        // TODO(#34818) Enable the new pipeline
-        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline
-      )
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
         defaultEnvironmentSetup()
@@ -97,8 +96,11 @@ class LsuOffsetByTimestampIntegrationTest extends LsuBase {
 
       val safeOffsetPreLsu = withClue("should be able to get offsets before LSU") {
         environment.simClock.value.advance(pruningTimeout)
-        val safeOffset =
+
+        // Under heavy CI load, we might need to wait to reach the state when the expected safe offset is populated
+        val safeOffset = eventually() {
           participant1.pruning.find_safe_offset(environment.clock.now.toInstant).value
+        }
         safeOffset should be <= txnPreLsu.getOffset.toLong
         safeOffset
       }
@@ -113,6 +115,8 @@ class LsuOffsetByTimestampIntegrationTest extends LsuBase {
         }
         environment.simClock.value.advance(Duration.ofSeconds(1))
         waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
+        // Emits a new contract event on the new physical synchronizer to unlock find_safe_offset post-LSU
+        participant1.health.ping(participant1)
       }
 
       withClue("check we can lookup offsets from before the LSU") {
@@ -125,9 +129,11 @@ class LsuOffsetByTimestampIntegrationTest extends LsuBase {
           txnPreLsu.getOffset
         )
 
-        participant1.pruning
-          .find_safe_offset(environment.clock.now.toInstant)
-          .value should be <= txnPreLsu.getOffset.toLong
+        // Under heavy CI load, we might need to wait to reach the state when the expected safe offset is populated
+        val safeOffset = eventually() {
+          participant1.pruning.find_safe_offset(txnPreLsu.getRecordTime).value
+        }
+        safeOffset should be <= txnPreLsu.getOffset.toLong
       }
 
       val txnPostLsu = createAndArchive(participant1, alice, lsid)
@@ -143,8 +149,10 @@ class LsuOffsetByTimestampIntegrationTest extends LsuBase {
         )
 
         environment.simClock.value.advance(pruningTimeout)
-        val safeOffset =
-          participant1.pruning.find_safe_offset(environment.clock.now.toInstant).value
+        // Under heavy CI load, we might need to wait to reach the state when the expected safe offset is populated
+        val safeOffset = eventually() {
+          participant1.pruning.find_safe_offset(txnPostLsu.getRecordTime).value
+        }
         safeOffset should be >= safeOffsetPreLsu
         safeOffset should be <= txnPostLsu.getOffset.toLong
       }

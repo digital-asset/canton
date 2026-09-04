@@ -6,6 +6,15 @@ on:
         required: true
         description: The name of the job that called this workflow.
         type: string
+      job_name:
+        required: false
+        default: ""
+        description: >-
+          Distinct name of the calling leg, used to keep the run-over-run
+          "latest" aggregate artifacts separate when several legs share one
+          caller_job (as the per-protocol-version _test.yml legs do). Defaults
+          to caller_job.
+        type: string
       runner:
         description: GitHub Actions runner label
         required: true
@@ -29,6 +38,12 @@ jobs:
     if: always()
     env:
       CALLER_JOB: ${{ inputs.caller_job }}
+      # Prefix for the run-over-run "latest" aggregate artifacts. Keyed on the
+      # per-leg job_name when the caller sets one so that legs sharing a
+      # caller_job (the per-protocol-version _test.yml legs) stop overwriting
+      # each other, and falls back to caller_job for every other caller,
+      # keeping their artifact names unchanged.
+      LATEST_ARTIFACT_PREFIX: ${{ inputs.job_name != '' && inputs.job_name || inputs.caller_job }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -63,7 +78,7 @@ jobs:
         if: ${{ !cancelled() && github.run_attempt > 1 }}
         uses: actions/download-artifact@v7
         with:
-          name: ${{ env.CALLER_JOB }}-test-summary-state-latest
+          name: ${{ env.LATEST_ARTIFACT_PREFIX }}-test-summary-state-latest
           path: ${{ env.CALLER_JOB }}/.summary-state/previous
         continue-on-error: true
 
@@ -71,7 +86,7 @@ jobs:
         if: ${{ !cancelled() && github.run_attempt > 1 }}
         uses: actions/download-artifact@v7
         with:
-          name: ${{ env.CALLER_JOB }}-timings-latest
+          name: ${{ env.LATEST_ARTIFACT_PREFIX }}-timings-latest
           path: ${{ env.CALLER_JOB }}/.timings/previous
         continue-on-error: true
 
@@ -88,7 +103,7 @@ jobs:
       - name: Upload summary state
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.CALLER_JOB }}-test-summary-state-latest
+          name: ${{ env.LATEST_ARTIFACT_PREFIX }}-test-summary-state-latest
           path: ${{ env.CALLER_JOB }}/.summary-state/summary-state.json
           retention-days: 90
           overwrite: true
@@ -105,7 +120,7 @@ jobs:
       - name: Upload merged timings
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ env.CALLER_JOB }}-timings-latest
+          name: ${{ env.LATEST_ARTIFACT_PREFIX }}-timings-latest
           path: ${{ env.CALLER_JOB }}/.timings/timings.json
           retention-days: 90
           overwrite: true

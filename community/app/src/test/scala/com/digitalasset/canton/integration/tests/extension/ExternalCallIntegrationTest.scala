@@ -28,7 +28,7 @@ import scala.jdk.OptionConverters.*
 /** End-to-end coverage for Daml external calls against a (mock) extension service: the submitting
   * participant records the service's output in the transaction and re-validates it in the
   * confirmation workflow. The external-call wire data exists from protocol version 36 onwards, so
-  * the tests are gated on v36. The test package targets LF 2.4-staging, which lies outside the
+  * the tests are gated on v36. The test package targets LF 2.4, which lies outside the
   * participant's default (stable) LF range, so dev version support is enabled on the participant.
   */
 class ExternalCallIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {

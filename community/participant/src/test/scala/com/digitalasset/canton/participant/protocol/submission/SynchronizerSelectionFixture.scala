@@ -159,6 +159,25 @@ private[submission] object SynchronizerSelectionFixture extends TestIdFactory {
 
     }
 
+    final case class FourExercises(
+        version: LfSerializationVersion = DefaultLfSerializationVersion
+    ) {
+
+      import SimpleTopology.*
+
+      val inputContract1Id: LfContractId = newCid
+      val inputContract2Id: LfContractId = newCid
+      val inputContract3Id: LfContractId = newCid
+      val inputContract4Id: LfContractId = newCid
+      val inputContractIds: Seq[LfContractId] =
+        Seq(inputContract1Id, inputContract2Id, inputContract3Id, inputContract4Id)
+
+      private val value =
+        inputContractIds.map[NodeWrapper](buildExerciseNode(version, _, signatory, observer))
+      val tx: LfVersionedTransaction = toVersionedTransaction(value*)
+
+    }
+
     object ExerciseByInterface {
       /* To be sure that we have two different package ID (one for the create
       and the other for the interface id).

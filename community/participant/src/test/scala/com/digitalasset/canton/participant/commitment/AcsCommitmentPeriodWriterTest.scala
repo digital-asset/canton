@@ -28,8 +28,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
-import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.canton.{BaseTest, InUS, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
@@ -39,10 +38,9 @@ class AcsCommitmentPeriodWriterTest
     extends AsyncWordSpec
     with BaseTest
     with ProtocolVersionChecksAsyncWordSpec
-    with AcsDigestTestBase {
+    with AcsDigestTestBase
+    with InUS {
   self =>
-
-  private val minimumProtocolVersion: ProtocolVersion = ProtocolVersion.acsCommitmentRedesign
 
   private def mkCommitmentPeriodWriter(
       testAcsDigestStore: AcsDigestStore,
@@ -69,7 +67,7 @@ class AcsCommitmentPeriodWriterTest
     CommitmentPeriod.tryCreate(ts(start), ts(end))
 
   "AcsCommitmentPeriodWriter.writeOutstandingAtTick" should {
-    "not do anything with wrong checkpoint type" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "not do anything with wrong checkpoint type" inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
 
@@ -113,7 +111,7 @@ class AcsCommitmentPeriodWriterTest
       }
     }
 
-    "populate outstanding periods on reconciliation tick" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "populate outstanding periods on reconciliation tick" inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
@@ -174,7 +172,7 @@ class AcsCommitmentPeriodWriterTest
       }
     }
 
-    "skip over past reconciliation ticks" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "skip over past reconciliation ticks" inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
 
@@ -218,7 +216,7 @@ class AcsCommitmentPeriodWriterTest
       }
     }
 
-    "correctly handle pagination and batches full of tombstones across multiple pages" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "correctly handle pagination and batches full of tombstones across multiple pages" inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
@@ -296,7 +294,7 @@ class AcsCommitmentPeriodWriterTest
       }
     }
 
-    "correctly handle pagination, batches full of tombstones, and digests updated before the current tick" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "correctly handle pagination, batches full of tombstones, and digests updated before the current tick" inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
@@ -391,7 +389,7 @@ class AcsCommitmentPeriodWriterTest
       }
     }
 
-    "correctly handle digest updates unaligned with any tick" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "correctly handle digest updates unaligned with any tick" inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)
@@ -491,7 +489,7 @@ class AcsCommitmentPeriodWriterTest
       }
     }
 
-    "correctly handle multiple checkpoints and state transitions across ticks" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+    "correctly handle multiple checkpoints and state transitions across ticks" inUS {
       val acsDigestStore = mkInMemoryDigestStore()
       val periodStore = mkPeriodStore()
       val periodWriter = mkCommitmentPeriodWriter(acsDigestStore, periodStore)

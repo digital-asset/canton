@@ -7,8 +7,10 @@ import better.files.File
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.util.Mutex
+import com.google.common.annotations.VisibleForTesting
 import org.slf4j.{Logger, LoggerFactory}
 
+import java.net.{InetSocketAddress, ServerSocket}
 import java.nio.channels.{FileLock, OverlappingFileLockException}
 import java.nio.charset.StandardCharsets
 import java.nio.file.StandardOpenOption
@@ -17,47 +19,129 @@ import scala.annotation.tailrec
 import scala.concurrent.blocking
 import scala.util.*
 
-/** Generates host-wide unique ports for canton tests that we guarantee won't be used in our tests.
-  * Syncs with other processes' UniquePortGenerators via a file + exclusive file lock. Doesn't check
-  * that the port hasn't been bound by other processes on the host.
+/** Generates host-wide unique network ports for Canton tests, guaranteeing low probability of port
+  * collisions.
+  *
+  * Synchronization across multiple processes is managed via a shared state file and an exclusive
+  * file lock.
+  *
+  * As an additional safety check, each candidate port is probed to skip ports that are actively
+  * bound. This reduces the likelihood of port collisions with non-Canton processes.
+  *
+  * Probing cannot eliminate all race conditions. A candidate port that was returned by a previous
+  * call to `next` but has not yet been bound by its caller will pass probing, as it is not yet
+  * detected as occupied by the OS.
+  *
+  * @param portRangeStart
+  *   first port of range (inclusive)
+  * @param portRangeEnd
+  *   last port of range (inclusive)
+  * @param maxProbeAttempts
+  *   how many counter values to skip at most before giving up on finding a bindable port
+  * @param sharedPortNumFile
+  *   file used for synchronization
   */
-object UniquePortGenerator {
+class UniquePortGenerator(
+    val portRangeStart: Int,
+    val portRangeEnd: Int,
+    val maxProbeAttempts: Int,
+    sharedPortNumFile: File,
+) {
 
   private val logger: Logger = LoggerFactory.getLogger(this.getClass)
 
-  val PortRangeStart: Int = 30000
-  val PortRangeEnd: Int = 65535
-
-  private val SharedPortNumFile: File = File.temp / "canton_tests_unique_port_generator.dat"
-
-  SharedPortNumFile.createFileIfNotExists(createParents = true)
-  logger.trace(s"Initialized port file: ${SharedPortNumFile.path.toString}")
+  sharedPortNumFile.createFileIfNotExists(createParents = true)
+  logger.debug(s"Initialized port file: ${sharedPortNumFile.path.toString}")
 
   private val counter = new UniqueBoundedCounter(
-    dataFile = SharedPortNumFile.path,
-    startValue = PortRangeStart,
-    maxValue = PortRangeEnd,
+    dataFile = sharedPortNumFile.path,
+    startValue = portRangeStart,
+    maxValue = portRangeEnd,
   )(logger)
 
-  /** Finds the next network port for use in canton tests.
-    *
-    * May throw an exception, in particular an instance of
-    * [[java.nio.channels.OverlappingFileLockException]] when failing to get an exclusive file lock
-    * after exhausting retries. (See [[com.digitalasset.canton.UniqueBoundedCounter]].maxRetries)
-    *
-    * @return
-    *   unique port for canton tests, throws otherwise
-    */
   def next: Port = {
     logger.trace("Attempting to find unique port ...")
     val start = System.nanoTime()
-    val port = Port.tryCreate(counter.incrementAndGet().fold(throw _, identity))
-    logger.trace(
+
+    @tailrec def nextBindable(attempt: Int): Port = {
+      val candidate = Port.tryCreate(counter.incrementAndGet().fold(throw _, identity))
+      if (isBindable(candidate)) candidate
+      else if (attempt >= maxProbeAttempts)
+        throw new IllegalStateException(
+          s"Failed to find a bindable port after $maxProbeAttempts attempts in the range " +
+            s"[$portRangeStart, $portRangeEnd]. Every candidate was already bound on this host."
+        )
+      else {
+        // Logged at INFO because a skipped port means the counter has wrapped onto a port that is
+        // still in use, or has walked into the ephemeral range: both are worth seeing in a test log.
+        logger.info(s"Port $candidate is already bound, skipping it.")
+        nextBindable(attempt + 1)
+      }
+    }
+
+    val port = nextBindable(1)
+    logger.debug(
       s"Found unique port $port after ${Duration.ofNanos(System.nanoTime() - start).toMillis} [ms]"
     )
     port
   }
 
+  /** Checks whether `port` can currently be bound on this host.
+    *
+    * Binds the wildcard address, which fails if anything holds the port on any local address. That
+    * is the conservative answer, given that callers bind a mix of the loopback address and the
+    * wildcard address. `SO_REUSEADDR` mirrors what the servers under test do, so that a port merely
+    * lingering in `TIME_WAIT` is not rejected here.
+    */
+  private def isBindable(port: Port): Boolean =
+    Using(new ServerSocket()) { socket =>
+      socket.setReuseAddress(true)
+      socket.bind(new InetSocketAddress(port.unwrap))
+    }.isSuccess
+
+}
+
+object UniquePortGenerator {
+
+  /** Deliberately hard-coded because alternatives such as File.temp can differ from run to run. If
+    * different runs use different folders for storing the state of UniquePortGenerator, the state
+    * will fork and port collisions can occur as a result.
+    */
+  private val TmpDir: File = File("/tmp")
+
+  /** Used for integration tests in general.
+    */
+  lazy val generatorForCantonTests: UniquePortGenerator =
+    new UniquePortGenerator(
+      30000,
+      65500,
+      30000,
+      TmpDir / "canton_tests_unique_port_generator.dat",
+    )
+
+  /** Used for unit testing UniquePortGenerator. Note the port range is disjoint from
+    * generatorForCantonTests.
+    */
+  @VisibleForTesting
+  private[canton] lazy val generatorForUniquePortGeneratorTest: UniquePortGenerator =
+    new UniquePortGenerator(
+      65501,
+      65535,
+      30,
+      TmpDir / "unique_port_generator_test_port_generator.dat",
+    )
+
+  /** Finds the next network port for use in canton tests.
+    *
+    * @return
+    *   unique port for canton tests
+    * @throws java.lang.IllegalStateException
+    *   if the maximum number of probe attempts has been exhausted
+    * @throws java.nio.channels.OverlappingFileLockException
+    *   when failing to get an exclusive file lock after exhausting retries. (See
+    *   [[com.digitalasset.canton.UniqueBoundedCounter]].maxRetries)
+    */
+  def next: Port = generatorForCantonTests.next
 }
 
 /** A counter implementation, reading and writing the integer value to file.
@@ -127,7 +211,7 @@ class UniqueBoundedCounter(
       // Retry only on OverlappingFileLockException which might may occur from lock() due to inter-process contention
       case Failure(e: OverlappingFileLockException) =>
         if (attempt <= maxRetries) {
-          logger.trace(
+          logger.debug(
             s"Retrying operation due to OverlappingFileLockException (Attempt $attempt/$maxRetries), sleeping ${retryDelayMillis}ms ...",
             e,
           )
@@ -195,14 +279,21 @@ class UniqueBoundedCounter(
     */
   private def mutateCounter(updateFn: Int => Int): Try[Int] = Try {
     val currentValue = if (dataFile.isEmpty) {
-      logger.trace(s"Data file empty, using initial value $startValue")
+      logger.info(
+        s"Data file '$dataFile' is empty, starting the counter over at $startValue"
+      )
       startValue
     } else {
       dataFile.contentAsString(StandardCharsets.UTF_8).toInt
     }
 
     val potentialNewValue = updateFn(currentValue)
-    val newValue = if (potentialNewValue > maxValue) startValue else potentialNewValue
+    val newValue = if (potentialNewValue > maxValue) {
+      logger.info(
+        s"Counter in '$dataFile' wrapped around from $currentValue to $startValue (maximum $maxValue)."
+      )
+      startValue
+    } else potentialNewValue
 
     dataFile.overwrite(newValue.toString)(charset = StandardCharsets.UTF_8)
 

@@ -253,7 +253,7 @@ final class StateTransferBehavior[E <: Env[E]](
           setNewEpochState(newEpochInfo, membership, cryptoProvider)
         }
 
-        cleanUpPostponedMessageQueue()
+        cleanUpConsensusPostponedMessageQueue()
 
         stateTransferManager.stateTransferNewEpoch(
           newEpochInfo.number,
@@ -444,7 +444,7 @@ final class StateTransferBehavior[E <: Env[E]](
         abort("Deduplication is disabled")
     }
 
-  private def cleanUpPostponedMessageQueue(): Unit = {
+  private def cleanUpConsensusPostponedMessageQueue(): Unit = {
     val currentEpochNumber = epochState.epoch.info.number
 
     postponedConsensusMessages.dequeueAll {

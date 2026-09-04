@@ -27,7 +27,21 @@ import scala.util.control.NonFatal
 import scala.util.matching.Regex
 
 object LedgerTestCasesRunner {
-  private val DefaultTimeout = 30.seconds
+  private[testtool] val DefaultTimeout = 30.seconds
+
+  /** A failing `Eventually` can use all of its retries before reporting the useful error. The case
+    * timeout needs enough headroom to avoid firing first and only reporting `TimedOut`.
+    *
+    * Allow for two loops because `waitForPartiesOnOtherParticipants` runs them back to back. Add
+    * the headroom after scaling since the `Eventually` schedule itself is not scaled.
+    */
+  private[testtool] val EventuallyHeadroom = Eventually.DefaultMaxDeadline * 2
+
+  private[testtool] def caseTimeout(
+      timeoutScaleFactor: Double,
+      testTimeoutScale: Double,
+  ): Duration =
+    DefaultTimeout * timeoutScaleFactor * testTimeoutScale + EventuallyHeadroom
 
   private val timer = new Timer("ledger-test-suite-runner-timer", true)
 
@@ -77,10 +91,12 @@ final class LedgerTestCasesRunner(
       session: LedgerSession,
   )(implicit executionContext: ExecutionContext): Future[Duration] = {
     val execution = Promise[Duration]()
-    val scaledTimeout = DefaultTimeout * timeoutScaleFactor * test.timeoutScale
+    val timeout = caseTimeout(timeoutScaleFactor, test.timeoutScale)
 
     val testName =
       test.repetition.fold[String](test.shortIdentifier)(r => s"${test.shortIdentifier}_${r._1}")
+    val qualifiedTestName =
+      test.repetition.fold(test.testCase.name)(r => s"${test.testCase.name}_${r._1}")
     val startedTest =
       session
         .createTestContext(testName, identifierSuffix)
@@ -90,23 +106,25 @@ final class LedgerTestCasesRunner(
             .allocatePartiesAndRun(context)
             .map(_ => Duration.fromNanos(System.nanoTime() - start))
           logger.info(
-            s"Started '${test.description}'${test.repetition.fold("")(r => s" (${r._1}/${r._2})")} with a timeout of $scaledTimeout."
+            s"Started '$qualifiedTestName' (${test.description})${test.repetition
+                .fold("")(r => s" (${r._1}/${r._2})")} with a timeout of $timeout."
           )
           result
         }
 
     val testTimeout = new TimerTask {
       override def run(): Unit = {
-        val message = s"Timeout of $scaledTimeout for '${test.description}' hit."
+        val message =
+          s"Timeout of $timeout for '$qualifiedTestName' (${test.description}) hit."
         if (execution.tryFailure(new TimeoutException(message))) {
           logger.error(message)
         }
       }
     }
-    timer.schedule(testTimeout, scaledTimeout.toMillis)
+    timer.schedule(testTimeout, timeout.toMillis)
     startedTest.onComplete { _ =>
       testTimeout.cancel()
-      logger.info(s"Finished '${test.description}'.")
+      logger.info(s"Finished '$qualifiedTestName' (${test.description}).")
     }
     execution.completeWith(startedTest).future
   }
@@ -121,8 +139,8 @@ final class LedgerTestCasesRunner(
           Right(Result.Retired)
         case Result.Excluded(reason) =>
           Right(Result.Excluded(reason))
-        case _: TimeoutException =>
-          Left(Result.TimedOut)
+        case timeout: TimeoutException =>
+          Left(Result.TimedOut(timeout.getMessage))
         case failure: AssertionError =>
           Left(Result.Failed(failure))
         case NonFatal(box: ExecutionException) =>

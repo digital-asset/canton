@@ -816,7 +816,7 @@ object BaseTest extends EitherValues {
 
 }
 
-trait BaseTestWordSpec extends BaseTest with AnyWordSpecLike {
+trait BaseTestWordSpec extends BaseTest with AnyWordSpecLike with ProtocolVersionSuiteChecks {
   def checkAllLaws(name: String, ruleSet: Laws#RuleSet)(implicit position: Position): Unit =
     for ((id, prop) <- ruleSet.all.properties) {
       (name + "." + id) in {

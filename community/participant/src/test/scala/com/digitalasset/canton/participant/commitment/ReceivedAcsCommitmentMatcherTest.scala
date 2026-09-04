@@ -11,6 +11,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
+import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentMatcher.OptionalAcsUpdateContainer
 import com.digitalasset.canton.participant.metrics.{
   CommitmentMetrics,
   ParticipantTestMetrics,
@@ -107,7 +108,7 @@ class ReceivedAcsCommitmentMatcherTest
         digest: String,
         offset: Offset,
         recordTime: CantonTimestamp,
-    )(implicit traceContext: TraceContext): InternalIndexService.AcsUpdateContainer =
+    )(implicit traceContext: TraceContext): OptionalAcsUpdateContainer =
       Fixture.mkAcsUpdateContainer(
         sender,
         participant,
@@ -128,7 +129,7 @@ class ReceivedAcsCommitmentMatcherTest
         digest: String,
         offset: Offset,
         recordTime: CantonTimestamp,
-    )(implicit traceContext: TraceContext): InternalIndexService.AcsUpdateContainer = {
+    )(implicit traceContext: TraceContext): OptionalAcsUpdateContainer = {
       val commitment = AcsCommitment.create(
         psid,
         sender,
@@ -140,8 +141,8 @@ class ReceivedAcsCommitmentMatcherTest
       val message = AcsCommitmentProtocolMessage(commitment, Signature.noSignature)
       val receivedAcsCommitments = ReceivedAcsCommitments(NonEmpty(Seq, message))
       val payload = receivedAcsCommitments.toByteString(testedProtocolVersion)
-      InternalIndexService.AcsUpdateContainer(
-        InternalIndexService.AcsUpdate.AcsCommitment(payload),
+      OptionalAcsUpdateContainer(
+        Some(InternalIndexService.AcsUpdate.AcsCommitment(payload)),
         recordTime,
         offset,
         traceContext,
@@ -263,8 +264,8 @@ class ReceivedAcsCommitmentMatcherTest
       store.markOutstanding(outstanding).futureValueUS
 
       val badPayload = ByteString.copyFromUtf8("this is garbage")
-      val badUpdateContainer = InternalIndexService.AcsUpdateContainer(
-        InternalIndexService.AcsUpdate.AcsCommitment(badPayload),
+      val badUpdateContainer = OptionalAcsUpdateContainer(
+        Some(InternalIndexService.AcsUpdate.AcsCommitment(badPayload)),
         ts(10),
         off(12),
         traceContext,
@@ -331,8 +332,8 @@ class ReceivedAcsCommitmentMatcherTest
       )
       val receivedAcsCommitments = ReceivedAcsCommitments(messages)
       val payload = receivedAcsCommitments.toByteString(testedProtocolVersion)
-      val container = InternalIndexService.AcsUpdateContainer(
-        InternalIndexService.AcsUpdate.AcsCommitment(payload),
+      val container = OptionalAcsUpdateContainer(
+        Some(InternalIndexService.AcsUpdate.AcsCommitment(payload)),
         ts(20),
         off(23),
         traceContext,
@@ -537,8 +538,8 @@ class ReceivedAcsCommitmentMatcherTest
       val fixture = new Fixture(p1)
       import fixture.*
 
-      val updateContainer = InternalIndexService.AcsUpdateContainer(
-        InternalIndexService.AcsUpdate.OffsetCheckpoint,
+      val updateContainer = OptionalAcsUpdateContainer(
+        Some(InternalIndexService.AcsUpdate.OffsetCheckpoint),
         ts(10),
         off(15),
         traceContext,

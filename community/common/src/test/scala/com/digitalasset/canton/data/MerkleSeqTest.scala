@@ -4,17 +4,15 @@
 package com.digitalasset.canton.data
 
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.crypto.HashOps
+import com.digitalasset.canton.ProtoDeserializationError.NestingTooDeep
+import com.digitalasset.canton.crypto.{HashOps, TestHash}
 import com.digitalasset.canton.data.MerkleSeq.{Branch, MerkleSeqElement, Singleton}
-import com.digitalasset.canton.data.MerkleTree.{
-  BlindSubtree,
-  BlindingCommand,
-  RevealIfNeedBe,
-  RevealSubtree,
-}
+import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.MerkleTreeTest.{AbstractLeaf, Leaf1}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
-import com.digitalasset.canton.protocol.RootHash
+import com.digitalasset.canton.protocol.{RootHash, v30}
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.{DepthCounter, VersionedMessage}
 import com.google.protobuf.ByteString
 import org.scalatest.prop.TableFor4
 import org.scalatest.wordspec.AnyWordSpec
@@ -112,6 +110,21 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
       ("seven elements", (0 until 7).map(leaf), SevenElements, SevenElementsRootUnblinded),
     )
 
+  def deserialize(
+      merkleSeqP: ByteString,
+      depthCounter: DepthCounter = DepthCounter.Default,
+  ): ParsingResult[MerkleSeq[VersionedMerkleTree[?]]] =
+    MerkleSeq
+      .fromByteString(
+        (
+          hashOps,
+          (bytes: ByteString, _: DepthCounter) =>
+            AbstractLeaf.fromByteString(testedProtocolVersion, bytes),
+          depthCounter,
+        ),
+        testedProtocolVersion,
+      )(merkleSeqP)
+
   testCases.forEvery { (name, elements, merkleSeq, merkleSeqWithRootUnblinded) =>
     s"A MerkleSeq with $name" can {
       "be constructed" in {
@@ -120,17 +133,7 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
 
       "be serialized" in {
         val merkleSeqP = merkleSeq.toByteString
-        val merkleSeqDeserialized =
-          MerkleSeq
-            .fromByteString(
-              (
-                hashOps,
-                (bytes: ByteString) => AbstractLeaf.fromByteString(testedProtocolVersion, bytes),
-              ),
-              testedProtocolVersion,
-            )(merkleSeqP)
-            .value
-
+        val merkleSeqDeserialized = deserialize(merkleSeqP).value
         merkleSeqDeserialized shouldEqual merkleSeq
       }
 
@@ -198,4 +201,45 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
     )(hashOps)
     SevenElements.mapM(inc.compose(inc)) shouldBe SevenElements.mapM(inc).mapM(inc)
   }
+
+  // The payload is built up from v30 structures to avoid stack overflow during serialization
+  "return parsing failure when nesting is over limit" in {
+
+    val v30single: v30.MerkleSeqElement = singleton(1).toProtoV30
+    val v30BlindedNode: v30.BlindableNode = v30.BlindableNode(
+      v30.BlindableNode.BlindedOrNot.BlindedHash(TestHash.dummyRootHash.toProtoPrimitive)
+    )
+
+    def unblindedNode(bytes: ByteString) =
+      v30.BlindableNode(v30.BlindableNode.BlindedOrNot.Unblinded(bytes))
+    def versionedMessage(gm: scalapb.GeneratedMessage): ByteString =
+      VersionedMessage(gm.toByteString, 1).toByteString
+
+    // Count of singleton and branch elements
+    val actualDepth = 10
+
+    val v30element = (1 until actualDepth).foldLeft(v30single) { (prev, _) =>
+      v30.MerkleSeqElement(
+        first = Some(unblindedNode(versionedMessage(prev))),
+        second = Some(v30BlindedNode),
+        data = None,
+      )
+    }
+
+    val v30merkleSeq: v30.MerkleSeq =
+      v30.MerkleSeq(Some(unblindedNode(versionedMessage(v30element))))
+
+    val deserialized =
+      deserialize(versionedMessage(v30merkleSeq), DepthCounter.withLimit(actualDepth)).value
+    deserialized.parseDepth(_ =>
+      MerkleSeq.empty(testedProtocolVersion, hashOps)
+    ) shouldBe actualDepth
+
+    val expected = actualDepth - 1
+    deserialize(versionedMessage(v30merkleSeq), DepthCounter.withLimit(expected)) shouldBe Left(
+      NestingTooDeep(expected)
+    )
+
+  }
+
 }

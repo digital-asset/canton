@@ -46,13 +46,6 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-faulty-synchronizer-nodes"
 
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
-
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
@@ -188,6 +181,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
               newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
               exportDirectory = exportDirectory,
               oldNodeName = oldSequencerName,
+              synchronizerId = fixture.lsid,
             )
 
             s(oldSequencerName).topology.lsu.sequencer_successors.propose_successor(

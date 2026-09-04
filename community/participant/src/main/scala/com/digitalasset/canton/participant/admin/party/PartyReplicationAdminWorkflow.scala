@@ -127,21 +127,26 @@ class PartyReplicationAdminWorkflow(
       LedgerClient.traceContextFromLedgerApi(tx.traceContext)
 
     tx.events
-      .collect {
-        case Event(Event.Event.Created(event))
-            if event.templateId.exists(isTemplatePartyReplicationRelated) =>
-          event
+      .foreach {
+        case Event(Event.Event.Created(createdEvent))
+            if createdEvent.templateId.exists(isTemplatePartyReplicationRelated) =>
+          createEventHandler(
+            processProposalAtSourceParticipant(tx.synchronizerId, _),
+            processAgreementAtSourceOrTargetParticipant(
+              tx.synchronizerId,
+              _,
+              mightNotRememberAgreement = false,
+            ),
+          )(createdEvent)
+        case Event(Event.Event.Archived(archivedEvent))
+            if archivedEvent.templateId.contains(agreementTemplate) =>
+          archivedEvent.templateId match {
+            case Some(`agreementTemplate`) =>
+              processAgreementArchive(archivedEvent.contractId)
+            case _ => ()
+          }
+        case _ => ()
       }
-      .foreach(
-        createEventHandler(
-          processProposalAtSourceParticipant(tx.synchronizerId, _),
-          processAgreementAtSourceOrTargetParticipant(
-            tx.synchronizerId,
-            _,
-            mightNotRememberAgreement = false,
-          ),
-        )
-      )
   }
 
   private def processProposalAtSourceParticipant(
@@ -207,6 +212,13 @@ class PartyReplicationAdminWorkflow(
         respondToProposal,
       )
     }
+  }
+
+  private def processAgreementArchive(
+      contractId: String
+  )(implicit traceContext: TraceContext): Unit = {
+    logger.info(s"Received archival of party replication agreement $contractId.")
+    partyReplicator.processPartyReplicationAgreementArchival(contractId)
   }
 
   private def processAgreementAtSourceOrTargetParticipant(

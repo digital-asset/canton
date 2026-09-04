@@ -37,7 +37,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
@@ -145,12 +144,6 @@ class FirstUnsafeOffsetComputation(
       unsafeLogicalSynchronizerOffsets <- MonadUtil.sequentialTraverseFilter(
         synchronizerIndexes.toSeq
       ) { case (lsid, synchronizerIndex) =>
-        val activeProtocolVersion = synchronizerConnectionConfigStore
-          .getActive(lsid)
-          .toOption
-          .flatMap(_.configuredPsid.toOption)
-          .map(_.protocolVersion)
-
         for {
           state <- logicalPersistentStates
             .get(lsid)
@@ -168,7 +161,6 @@ class FirstUnsafeOffsetComputation(
             participantNodePersistentState.value.inFlightSubmissionStore,
             pruneUptoInclusive,
             safeToPruneCommitmentState,
-            activeProtocolVersion,
           )
         } yield offset
       }
@@ -316,7 +308,6 @@ class FirstUnsafeOffsetComputation(
       inFlightSubmissionStore: InFlightSubmissionStore,
       pruneUptoInclusive: Offset,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
-      activeProtocolVersion: Option[ProtocolVersion],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] = {
@@ -378,25 +369,24 @@ class FirstUnsafeOffsetComputation(
           EitherT(for {
             acsDigestWatermark <- persistent.acsDigestStore
               .latestCheckpointUpTo(Offset.MaxValue, allCheckpointsFilter)
-            acsPeriodWatermarkO <-
-              // Ignore the matching watermark if the active protocol version does not support the new commitments
-              if (activeProtocolVersion.forall(_ >= ProtocolVersion.acsCommitmentRedesign)) {
-                persistent.acsCommitmentPeriodStore.watermark().map(Some.apply)
-              } else {
-                logger.debug("Skipping first unsafe offset computation for ACS commitment matching")
-                FutureUnlessShutdown.pure(None)
-              }
+            acsPeriodWatermarkO <- persistent.acsCommitmentPeriodStore.watermark().map(Some.apply)
           } yield {
             Either.Right[LedgerPruningError](
               Seq(
                 acsDigestWatermark.fold(Offset.firstOffset -> Option.empty[CantonTimestamp])(cp =>
-                  (cp.offset, Some(cp.recordTime))
+                  // the digest store pruning parameter is treated as exclusive bound, therefore
+                  // we return the successor of the checkpoint's offset as the first unsafe to prune offset.
+                  // the pruning logic will then take the predecessor of this offset (i.e. the checkpoint's offset),
+                  // and trigger pruning on the digest store, which in turn deletes everything up to exclusive this offset.
+                  (cp.offset.increment, None)
                 ) -> "ACS digest ingestion"
               ) ++ acsPeriodWatermarkO.map { acsPeriodWatermark =>
                 acsPeriodWatermark.matching.fold(
                   Offset.firstOffset -> Option.empty[CantonTimestamp]
                 )(
-                  _ -> None
+                  // the matcher watermark is treated as an exclusive bound, therefore we return
+                  // the successor of the watermark's offset as the first unsafe to prune offset.
+                  _.increment -> None
                 ) -> "ACS commitment matching"
               }.toList
             )

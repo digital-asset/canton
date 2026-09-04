@@ -11,9 +11,13 @@ object WithTimeout {
 
   private[this] val timer = new Timer("timeout-timer", true)
 
-  def apply[A](t: Duration)(f: => Future[A]): Future[A] = {
+  /** Prefer the timeouts already built into `ParticipantTestContext` for calls that have them. This
+    * is for waits that need a deadline of their own, in particular the ones asserting that nothing
+    * arrives.
+    */
+  def apply[A](operation: String, t: Duration)(f: => Future[A]): Future[A] = {
     val p = Promise[A]()
-    timer.schedule(new TimeoutTask(p), t.toMillis)
+    timer.schedule(new TimeoutTask(p, TimeoutException(operation, t)), t.toMillis)
     p.completeWith(f).future
   }
 

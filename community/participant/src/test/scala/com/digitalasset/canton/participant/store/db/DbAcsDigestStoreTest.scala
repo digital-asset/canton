@@ -24,6 +24,7 @@ trait BaseDbAcsDigestStoreTest { self: DbTest =>
         sqlu"truncate table par_acs_running_digests_checkpoint",
         sqlu"truncate table par_acs_participant_running_digest",
         sqlu"truncate table par_acs_party_running_digest",
+        sqlu"truncate table par_acs_running_digests_pruning",
       ),
       functionFullName,
     )

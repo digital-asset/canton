@@ -139,17 +139,17 @@ class InMemoryAcsDigestJournal[K](
   }
   override type ChangesBetweenPaginationToken = ChangesBetweenToken[K]
 
-  override def checkReplacesInvariant(upToInclusive: Offset)(implicit
-      traceContext: TraceContext
+  override def checkReplacesInvariant(upToInclusive: Offset, latestPruningOffset: Option[Offset])(
+      implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.fromTry {
     Try {
       journal.values
-        .foreach { recordTimeDigestUpdatesMap =>
-          val timeSeriesTuples = recordTimeDigestUpdatesMap
+        .foreach { offsetDigestUpdatesMap =>
+          val allUpdatesForKey = offsetDigestUpdatesMap
             .rangeTo(upToInclusive)
             .values
             .toList
-            .reverse
+          val timeSeriesTuples = allUpdatesForKey.reverse
             .sliding(2) // pairs of row(rt_i) row(rt_i-1)
             .map {
               _.map(window =>
@@ -189,11 +189,22 @@ class InMemoryAcsDigestJournal[K](
             // eg. when rt_i doesn't have updates in the snapshot journal
             case _ => ()
           }
+
+          latestPruningOffset.foreach { latestPruningOffset =>
+            if (allUpdatesForKey.sizeIs >= 2) {
+              val atRt2 = allUpdatesForKey(1)
+              ErrorUtil.requireState(
+                atRt2.digestUpdate.offset >= latestPruningOffset,
+                s"ReplacesOffset check error for key ${prettyKey(atRt2.digestUpdate.key)} at offset ${atRt2.digestUpdate.offset} below the latest pruning offset $latestPruningOffset references an existing replaces offset ${atRt2.replacesOffset
+                    .getOrElse(throw new NoSuchElementException("replacesOffset is empty"))}",
+              )
+            }
+          }
         }
     }
   }
 
-  def deleteAfter(fromExclusive: Offset)(implicit
+  override def deleteAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
     journal.keys.foreach { key =>
@@ -208,29 +219,27 @@ class InMemoryAcsDigestJournal[K](
     }
   }
 
-  def deleteUpTo(toExclusive: Offset)(implicit
+  override def deleteUpTo(toExclusive: Offset, latestPruningOffset: Option[Offset])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
     journal.keys.foreach { key =>
       journal
-        .updateWith(key) {
-          case Some(history) =>
-            val latestSafeTimeO = history
-              .get(toExclusive)
-              .map(update => toExclusive -> update)
-              .orElse(history.maxBefore(toExclusive))
+        .updateWith(key)(_.flatMap { history =>
+          val latestSafeTimeO = history
+            .get(toExclusive)
+            .map(update => toExclusive -> update)
+            .orElse(history.maxBefore(toExclusive))
 
-            val updatedHistory = latestSafeTimeO.fold(history) {
-              case (latestSafeTime, lastUpdateAtSafeTime) =>
-                val isLatestUpdateNone = lastUpdateAtSafeTime.digestUpdate.digestO.isEmpty
+          val updatedHistory =
+            latestSafeTimeO.fold(history) { case (latestSafeTime, lastUpdateAtSafeTime) =>
+              val isLatestUpdateNone = lastUpdateAtSafeTime.digestUpdate.digestO.isEmpty
 
-                if (isLatestUpdateNone) history.rangeFrom(toExclusive)
-                else history.rangeFrom(latestSafeTime)
+              if (isLatestUpdateNone) history.rangeFrom(toExclusive)
+              else history.rangeFrom(latestSafeTime)
             }
 
-            Option.when(updatedHistory.nonEmpty)(updatedHistory)
-          case None => None
-        }
+          Option.when(updatedHistory.nonEmpty)(updatedHistory)
+        })
         .discard
     }
   }

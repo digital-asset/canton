@@ -15,6 +15,7 @@ import com.digitalasset.canton.console.{
   LocalParticipantReference,
   LocalSequencerReference,
 }
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.{cycle as C, trailingnone as T}
 import com.digitalasset.canton.integration.EnvironmentDefinition.{S1M1, S1M1_S1M1}
 import com.digitalasset.canton.integration.IntegrationTestUtilities.grabCounts
@@ -246,6 +247,45 @@ trait DataContinuityTest
     )
   }
 
+  /** The party whose traffic balance is set before the dumps are taken and asserted on after the
+    * dumps are loaded. It is the first (alphabetically) party hosted on the given participant.
+    */
+  private def trafficTestParty(participant: LocalParticipantReference): String =
+    participant.ledger_api.parties
+      .list()
+      .map(_.party.filterString)
+      .minOption
+      .getOrElse(fail(s"No party is hosted on ${participant.name}"))
+
+  /** Sets the traffic balance of the traffic test party to [[expectedTrafficBalance]] so that it
+    * can be asserted on when the dumps are loaded by a later version.
+    */
+  protected def setTrafficBalance(participant: LocalParticipantReference): Unit =
+    participant.ledger_api.traffic
+      .update_account(trafficTestParty(participant), balanceDelta = Some(expectedTrafficBalance))
+      .discard
+
+  /** Asserts that the traffic balance set before the dumps were taken survived the upgrade. Dumps
+    * created by versions that did not yet set the balance are skipped, based on the release version
+    * that created the dump.
+    */
+  protected def assertTrafficBalanceUnchanged(
+      participant: LocalParticipantReference,
+      dump: ContinuityDumpRef,
+  )(implicit testFolderName: FolderName): Unit =
+    // The traffic balance is set before dumping starting with 3.6.
+    if (dump.dumpReleaseVersion >= ReleaseVersion(3, 6, 0))
+      clue(s"traffic balance restored from ${dump.localDownloadPath} should be unchanged") {
+        participant.ledger_api.traffic
+          .get_account(trafficTestParty(participant))
+          .balance shouldBe expectedTrafficBalance
+      }
+    else
+      logger.info(
+        s"Skipping the traffic balance assertion for ${testFolderName.name}: the dump was " +
+          s"created by version ${dump.dumpReleaseVersion}, which predates setting the balance"
+      )
+
   protected def loadState(
       sequencers: Seq[LocalSequencerReference],
       mediators: Seq[LocalMediatorReference],
@@ -397,6 +437,8 @@ trait BasicDataContinuityTestEnvironment extends CommunityIntegrationTest with S
           )
         )
       )
+      // Enable local traffic accounting on participant nodes
+      .addConfigTransforms(ConfigTransforms.enableTrafficAccounting)
 }
 
 trait BasicDataContinuityTestSetup
@@ -431,6 +473,10 @@ trait BasicDataContinuityTest extends BasicDataContinuityTestSetup {
 
           // Check that the synchronizer is running with the expected protocol version
           sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe protocolVersion
+
+          // The traffic balance must survive the upgrade unchanged
+          assertTrafficBalanceUnchanged(participant1, dumpDirectory)
+
           val alice = participant1.parties.list(filterParty = "Alice").headOption.value.party
           val bob = participant1.parties.list(filterParty = "Bob").headOption.value.party
           actOnCycleData(alice)
@@ -504,6 +550,9 @@ trait BasicDataContinuityTest extends BasicDataContinuityTestSetup {
           )
           // Check that the synchronizer is running with the expected protocol version
           sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe protocolVersion
+
+          // The traffic balance must survive the upgrade unchanged
+          assertTrafficBalanceUnchanged(participant1, dumpDirectory)
 
           // initialize needed state - sadly unable to decouple this from implementation details of the workflow
           val p1_count = grabCounts(daName, participant1)
@@ -724,6 +773,13 @@ object DataContinuityTest {
   def synchronizedOperation(f: => Unit): Unit = lock.exclusive(f)
 
   final case class FolderName(name: String)
+
+  // TODO(i34951): Formally define how this kind of state can be transferred and asserted via data continuity dumps
+  // to avoid unstructured tests and maintenance burden
+  /** Traffic balance set on a party before the dumps are taken and asserted on after the dumps are
+    * loaded by a later version.
+    */
+  val expectedTrafficBalance: Long = 3000L
 
   def logDebugInformation(
       logger: TracedLogger

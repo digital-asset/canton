@@ -78,6 +78,10 @@ trait CreateBasicDataContinuityDumps extends BasicDataContinuityTestSetup {
           createCycleContract(participant1, alice, "creation of cycle")
           createTrailingNoneContract(participant1, bob, "creation of trailing none")
 
+          // Give the traffic account a non-trivial balance so that the state asserted on
+          // when the dumps are loaded by a later version is meaningful
+          setTrafficBalance(participant1)
+
           // Dump both the DB and a disclosure for the TrailingNone contract
           dumpStateOfConfiguredVersion(
             Seq(sequencer1),
@@ -119,6 +123,10 @@ trait CreateBasicDataContinuityDumps extends BasicDataContinuityTestSetup {
           // Check that the synchronizer is running with the expected protocol version
           sequencer1.synchronizer_parameters.static.get().protocolVersion shouldBe pv
           val (p1_count, p2_count) = setupBongTest
+
+          // Set the traffic balance just before the DB dumps are taken
+          setTrafficBalance(participant1)
+
           dumpStateOfConfiguredVersion(
             Seq(sequencer1),
             Seq(mediator1),

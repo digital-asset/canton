@@ -146,6 +146,7 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
           newStaticSynchronizerParameters,
           exportDirectory,
           newNodeToOldNodeName.get(migratedNode.name).value,
+          synchronizerId = synchronizerId,
           ignorePsidCheck = ignorePsidCheck,
         )
 
@@ -178,6 +179,7 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
       newStaticSynchronizerParameters: StaticSynchronizerParameters,
       exportDirectory: File,
       oldNodeName: String,
+      synchronizerId: SynchronizerId,
       ignorePsidCheck: Boolean = false,
   ): Unit = {
     migrateNodeGeneric(migratedSequencer, exportDirectory, oldNodeName)
@@ -187,6 +189,7 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
       migratedSequencer,
       files.genesisStateFile.pathAsString,
       newStaticSynchronizerParameters,
+      synchronizerId = synchronizerId,
       ignorePsidCheck = ignorePsidCheck,
     )
   }
@@ -252,11 +255,13 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
       migrated: SequencerReference,
       genesisStateFile: String,
       staticSynchronizerParameters: StaticSynchronizerParameters,
+      synchronizerId: SynchronizerId,
       ignorePsidCheck: Boolean,
   ): Unit = {
     migrated.health.wait_for_ready_for_initialization()
     migrated.setup.initialize_from_lsu_predecessor(
       inputFile = genesisStateFile,
+      synchronizerId = synchronizerId,
       synchronizerParameters = staticSynchronizerParameters,
       ignorePsidCheck = ignorePsidCheck,
     )

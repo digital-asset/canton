@@ -4,14 +4,13 @@
 package com.daml.ledger.api.testtool.infrastructure.assertions
 
 import com.daml.ledger.api.testtool.infrastructure.Assertions.assertDefined
+import com.daml.ledger.api.testtool.infrastructure.Party
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
-import com.daml.ledger.api.testtool.infrastructure.{Party, WithTimeout}
 import com.daml.ledger.api.v2.completion.Completion
 import com.google.protobuf.duration.Duration as DurationProto
 import io.grpc.Status.Code
 
 import java.time.Duration
-import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
 object CommandDeduplicationAssertions {
@@ -48,21 +47,21 @@ object CommandDeduplicationAssertions {
       submittingParty: Party,
       ledger: ParticipantTestContext,
   )(implicit executionContext: ExecutionContext) =
-    WithTimeout(5.seconds)(
-      ledger.findCompletionAtOffset(
+    ledger
+      .findCompletionAtOffset(
         reportedOffset,
         c => c.commandId == completion.commandId && c.getStatus.code == Code.OK.value,
       )(submittingParty)
-    ).map { optAcceptedCompletion =>
-      val acceptedCompletion = assertDefined(
-        optAcceptedCompletion,
-        s"No accepted completion with the command ID '${completion.commandId}' since the reported offset $reportedOffset has been found",
-      )
-      assert(
-        acceptedCompletion.offset < completion.offset,
-        s"An accepted completion with the command ID '${completion.commandId}' at the offset ${acceptedCompletion.offset} that is not before the completion's offset ${completion.offset} has been found",
-      )
-    }
+      .map { optAcceptedCompletion =>
+        val acceptedCompletion = assertDefined(
+          optAcceptedCompletion,
+          s"No accepted completion with the command ID '${completion.commandId}' since the reported offset $reportedOffset has been found",
+        )
+        assert(
+          acceptedCompletion.offset < completion.offset,
+          s"An accepted completion with the command ID '${completion.commandId}' at the offset ${acceptedCompletion.offset} that is not before the completion's offset ${completion.offset} has been found",
+        )
+      }
 
   private def assertReportedOffsetForAcceptedSubmission(
       reportedOffset: Long,
@@ -70,21 +69,21 @@ object CommandDeduplicationAssertions {
       submittingParty: Party,
       ledger: ParticipantTestContext,
   )(implicit executionContext: ExecutionContext) =
-    WithTimeout(5.seconds)(
-      ledger.findCompletionAtOffset(
+    ledger
+      .findCompletionAtOffset(
         reportedOffset,
         _.commandId == completion.commandId,
       )(submittingParty)
-    ).map { optReportedOffsetCompletion =>
-      val reportedOffsetCompletion = assertDefined(
-        optReportedOffsetCompletion,
-        s"No completion with the command ID '${completion.commandId}' since the reported offset $reportedOffset has been found",
-      )
-      assert(
-        reportedOffsetCompletion.offset == reportedOffset,
-        s"No completion with the reported offset $reportedOffset has been found, the ${reportedOffsetCompletion.offset} offset has been found instead",
-      )
-    }
+      .map { optReportedOffsetCompletion =>
+        val reportedOffsetCompletion = assertDefined(
+          optReportedOffsetCompletion,
+          s"No completion with the command ID '${completion.commandId}' since the reported offset $reportedOffset has been found",
+        )
+        assert(
+          reportedOffsetCompletion.offset == reportedOffset,
+          s"No completion with the reported offset $reportedOffset has been found, the ${reportedOffsetCompletion.offset} offset has been found instead",
+        )
+      }
 
   def assertDeduplicationOffset(
       requestedDeduplicationOffsetCompletion: Completion,

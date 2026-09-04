@@ -84,6 +84,7 @@ trait RangeBoundaryStreamComponentTest
       recordTime = nextRecordTime(),
       payload = payload,
       updateId = TestUpdateId("ReceivedAcsCommitment"),
+      traceContext = implicitly,
     )
 
   private def acsUpdates(fromExclusive: Option[Offset]): Source[AcsUpdate, NotUsed] =

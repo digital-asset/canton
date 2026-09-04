@@ -161,6 +161,15 @@ class InMemoryContractStore(
     EitherT.cond(res.sizeCompare(ids) == 0, res.toMap, UnknownContracts(ids -- res.keySet))
   }
 
+  override def lookupMetadata(ids: Set[LfContractId])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, UnknownContracts, Map[LfContractId, ContractMetadata]] = {
+    val res = contracts.filter { case (cid, _) => ids.contains(cid) }.map { case (cid, persisted) =>
+      (cid, persisted.asContractInstance.metadata)
+    }
+    EitherT.cond(res.sizeCompare(ids) == 0, res.toMap, UnknownContracts(ids -- res.keySet))
+  }
+
   @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def contractCount()(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] =
     FutureUnlessShutdown.pure(contracts.size)

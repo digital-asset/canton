@@ -122,8 +122,8 @@ object Update {
       genericTopologyEvents: Seq[TopologyTransactionEffective.GenericTopologyEvent],
       synchronizerId: SynchronizerId,
       effectiveTime: CantonTimestamp,
-  )(implicit override val traceContext: TraceContext)
-      extends FloatingUpdate {
+      traceContext: TraceContext,
+  ) extends FloatingUpdate {
 
     // Topology transactions emitted to the update stream at effective time
     override def recordTime: CantonTimestamp = effectiveTime
@@ -324,8 +324,8 @@ object Update {
       acsChangeFactory: AcsChangeFactory,
       contractInfos: Map[Value.ContractId, ContractInfo],
       transactionHash: Option[Hash] = None,
-  )(implicit override val traceContext: TraceContext)
-      extends TransactionAccepted
+      traceContext: TraceContext,
+  ) extends TransactionAccepted
       with SequencedEventUpdate
       with AcsChangeSequencedUpdate {
     override def isAcsDelta(contractId: Value.ContractId): Boolean =
@@ -356,8 +356,8 @@ object Update {
       repairCounter: RepairCounter,
       recordTime: CantonTimestamp,
       contractInfos: Map[Value.ContractId, ContractInfo],
-  )(implicit override val traceContext: TraceContext)
-      extends TransactionAccepted
+      traceContext: TraceContext,
+  ) extends TransactionAccepted
       with RepairUpdate {
 
     override def transactionHash: Option[Hash] = None
@@ -426,8 +426,8 @@ object Update {
       recordTime: CantonTimestamp,
       override val synchronizerId: SynchronizerId,
       acsChangeFactory: AcsChangeFactory,
-  )(implicit override val traceContext: TraceContext)
-      extends ReassignmentAccepted
+      traceContext: TraceContext,
+  ) extends ReassignmentAccepted
       with SequencedEventUpdate
       with AcsChangeSequencedUpdate {
 
@@ -456,8 +456,8 @@ object Update {
       repairCounter: RepairCounter,
       recordTime: CantonTimestamp,
       override val synchronizerId: SynchronizerId,
-  )(implicit override val traceContext: TraceContext)
-      extends ReassignmentAccepted
+      traceContext: TraceContext,
+  ) extends ReassignmentAccepted
       with RepairUpdate {
     override def optCompletionInfo: Option[CompletionInfo] = None
 
@@ -488,8 +488,8 @@ object Update {
       watermark: IndexingWatermark,
       override val synchronizerId: SynchronizerId,
       acsChangeFactory: AcsChangeFactory,
-  )(implicit override val traceContext: TraceContext)
-      extends ReassignmentAccepted
+      traceContext: TraceContext,
+  ) extends ReassignmentAccepted
       with AcsChangeSequencedUpdate {
     override def optCompletionInfo: Option[CompletionInfo] = None
 
@@ -563,8 +563,8 @@ object Update {
       recordTime: CantonTimestamp,
       isTransaction: Boolean,
       transactionHash: Option[Hash],
-  )(implicit override val traceContext: TraceContext)
-      extends CommandRejected
+      traceContext: TraceContext,
+  ) extends CommandRejected
       with SequencedEventUpdate
 
   final case class UnSequencedCommandRejected(
@@ -575,8 +575,8 @@ object Update {
       messageUuid: UUID,
       isTransaction: Boolean,
       transactionHash: Option[Hash],
-  )(implicit override val traceContext: TraceContext)
-      extends CommandRejected
+      traceContext: TraceContext,
+  ) extends CommandRejected
       with FloatingUpdate
 
   object CommandRejected extends PrettyUtil with ShowUtil {
@@ -646,8 +646,8 @@ object Update {
   final case class SequencerIndexMoved(
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
-  )(implicit override val traceContext: TraceContext)
-      extends SequencedUpdate {
+      traceContext: TraceContext,
+  ) extends SequencedUpdate {
     override protected def pretty: Pretty[SequencerIndexMoved] =
       prettyOfClass(
         param("synchronizerId", _.synchronizerId.uid),
@@ -673,8 +673,8 @@ object Update {
   final case class LsuTimeReached(
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
-  )(implicit override val traceContext: TraceContext)
-      extends FloatingUpdate {
+      traceContext: TraceContext,
+  ) extends FloatingUpdate {
     override protected def pretty: Pretty[LsuTimeReached] =
       LsuTimeReached.pretty
   }
@@ -697,8 +697,8 @@ object Update {
   final case class EmptyAcsPublicationRequired(
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
-  )(implicit override val traceContext: TraceContext)
-      extends FloatingUpdate {
+      traceContext: TraceContext,
+  ) extends FloatingUpdate {
     override protected def pretty: Pretty[EmptyAcsPublicationRequired] =
       EmptyAcsPublicationRequired.pretty
   }
@@ -730,8 +730,8 @@ object Update {
       recordTime: CantonTimestamp,
       payload: ByteString,
       updateId: UpdateId,
-  )(implicit override val traceContext: TraceContext)
-      extends SequencedEventUpdate {
+      traceContext: TraceContext,
+  ) extends SequencedEventUpdate {
 
     override protected def pretty: Pretty[ReceivedAcsCommitment] = ReceivedAcsCommitment.pretty
   }

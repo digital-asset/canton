@@ -42,13 +42,6 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
 
   override protected def testName: String = "lsu-add-synchronizer-nodes"
 
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
-
   override protected val bftSequencerPlugin: Option[UseBftSequencer] =
     Some(
       new UseBftSequencer(

@@ -450,6 +450,7 @@ private final class ChangeAssignation(
         repairCounter = sourceTor.repairCounter,
         recordTime = sourceTor.timestamp,
         synchronizerId = sourceLsid.unwrap,
+        traceContext = traceContext,
       )
     }
 
@@ -499,6 +500,7 @@ private final class ChangeAssignation(
         repairCounter = targetTor.repairCounter,
         recordTime = targetTor.timestamp,
         synchronizerId = targetLsid.unwrap,
+        traceContext = traceContext,
       )
     }
 

@@ -93,6 +93,26 @@ class BlockingAcsDigestStore(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.truncateCheckpointsInternal())
 
+  override def lookupLatestPruningOffset()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Offset]] =
+    blockAndThen(delegate.lookupLatestPruningOffset())
+
+  override protected def increaseLatestPruneOffset(toExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    blockAndThen(delegate.increaseLatestPruneOffsetInternal(toExclusive))
+
+  override protected def purgeLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    blockAndThen(delegate.purgeLatestPruneInternal())
+
+  override protected def truncateLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    blockAndThen(delegate.truncateLatestPruneInternal())
+
   override def close(): Unit = delegate.close()
 }
 
@@ -153,13 +173,18 @@ class BlockingAcsDigestJournal[K](
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.deleteAfter(fromExclusive))
 
-  override def deleteUpTo(toExclusive: AtInclusive)(implicit
+  override def deleteUpTo(toExclusive: AtInclusive, latestPruneOffsetO: Option[Offset])(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.deleteUpTo(toExclusive))
+  ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.deleteUpTo(toExclusive, latestPruneOffsetO))
 
-  override def checkReplacesInvariant(upToInclusive: AtInclusive)(implicit
+  override def checkReplacesInvariant(
+      upToInclusive: AtInclusive,
+      latestPruneOffsetO: Option[Offset],
+  )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = blockAndThen(delegate.checkReplacesInvariant(upToInclusive))
+  ): FutureUnlessShutdown[Unit] = blockAndThen(
+    delegate.checkReplacesInvariant(upToInclusive, latestPruneOffsetO)
+  )
 
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     delegate.purge()

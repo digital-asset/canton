@@ -453,7 +453,7 @@ class ParticipantTopologyTerminateProcessing(
       ) { case (event, sequencedTime) =>
         traceContextForSequencedEvent(sequencedTime).map {
           case Some(sourceEventTraceContext) =>
-            event.copy()(traceContext = sourceEventTraceContext) -> sequencedTime
+            event.copy(traceContext = sourceEventTraceContext) -> sequencedTime
 
           case None =>
             logger.warn(
@@ -539,6 +539,7 @@ class ParticipantTopologyTerminateProcessing(
             synchronizerId = psid.logical,
             effectiveTime = effectiveStateChange.effectiveTime.value,
             genericTopologyEvents = genericTopologyEvents,
+            traceContext = traceContext,
           ),
           onboardingLocallyHostedParty = onboardingLocalParty,
           clearingOnboardingLocallyHostedParty = clearingOnboardingLocalParty,

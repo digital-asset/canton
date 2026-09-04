@@ -693,6 +693,7 @@ final class RepairService(
       recordTime = repair.timestamp,
       // no need to pass the contract infos since no create nodes are involved
       contractInfos = Map.empty,
+      traceContext = traceContext,
     )
     // not waiting for Update.persisted, since CommitRepair anyway will be waited for at the end
     repairIndexer.offer(update).map(_ => ())
@@ -746,6 +747,7 @@ final class RepairService(
           repairCounter = repair.tryExactlyOneRepairCounter,
           recordTime = repair.timestamp,
           synchronizerId = repair.synchronizer.psid.logical,
+          traceContext = traceContext,
         )
       }
       .fold(Future.unit)(repairIndexer.offer(_).map(_ => ()))

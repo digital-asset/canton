@@ -29,7 +29,7 @@ import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable
-import scala.concurrent.Promise
+import scala.concurrent.{Future, Promise}
 import scala.language.implicitConversions
 
 trait DigestProcessorTestBase extends AnyWordSpec with TestDigestUtils with BaseTest {
@@ -137,6 +137,9 @@ object DigestProcessorTestBase extends TestDigestUtils {
           .flatMap { case (offset, c) => if (offset <= activeAt) c.stakeholders else Set.empty }
           .toSet
       )
+
+      override def indexerPrunedUpTo(implicit traceContext: TraceContext): Future[Option[Offset]] =
+        Future.successful(None)
     }
   }
 

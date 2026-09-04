@@ -220,12 +220,12 @@ class PartyReplicationTopologyWorkflowTest
           _ <- add(topologyStore)(tsSerial, serial, ptpProposal).map(tx =>
             Right(tx): Either[TopologyManagerError, GenericSignedTopologyTransaction]
           )
-          effectiveTsAfterO <- tw
+          effectiveTsAndSerialAfterO <- tw
             .authorizeOnboardingTopology(params, topologyContext)
             .valueOrFail("expect authorization to succeed")
         } yield {
           effectiveTsBeforeO shouldBe None
-          effectiveTsAfterO shouldBe Some(EffectiveTime(tsSerial))
+          effectiveTsAndSerialAfterO shouldBe Some((EffectiveTime(tsSerial), serial))
         }
       }.failOnShutdown
 
@@ -261,12 +261,12 @@ class PartyReplicationTopologyWorkflowTest
           _ <- add(topologyStore)(tsSerial, serial, ptpProposal).map(tx =>
             Right(tx): Either[TopologyManagerError, GenericSignedTopologyTransaction]
           )
-          effectiveTsAfterO <- tw
+          effectiveTsAndSerialAfterO <- tw
             .authorizeOnboardingTopology(params, topologyContext)
             .valueOrFail("expect authorization to succeed")
         } yield {
           effectiveTsBeforeO shouldBe None
-          effectiveTsAfterO shouldBe Some(EffectiveTime(tsSerial))
+          effectiveTsAndSerialAfterO shouldBe Some((EffectiveTime(tsSerial), serial))
         }
       }.failOnShutdown
 

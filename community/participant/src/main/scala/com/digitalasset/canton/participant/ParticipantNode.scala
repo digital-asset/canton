@@ -766,8 +766,7 @@ class ParticipantNodeBootstrap(
         )
 
         // running the new pipeline requires both dev-version-support and the digest processor to be explicitly enabled
-        acsDigestProcessorEnabled =
-          parameters.acsCommitments.enableRunningDigestProcessor && parameters.devVersionSupport
+        acsDigestProcessorEnabled = parameters.acsCommitments.enableRunningDigestProcessor
 
         pruningProcessor = new PruningProcessor(
           persistentState,
@@ -1098,8 +1097,7 @@ class ParticipantNodeBootstrap(
         // If the new pipeline does not run now, it could have run before restart.
         // So we delete all digests to prevent problems later when the pipeline is re-enabled
         // (e.g., the last checkpoint offset having already been pruned).
-        cleanDigestStore =
-          !parameters.acsCommitments.enableRunningDigestProcessor && parameters.devVersionSupport
+        cleanDigestStore = !parameters.acsCommitments.enableRunningDigestProcessor
         _ <- EitherT.right(MonadUtil.when(cleanDigestStore) {
           MonadUtil
             .sequentialTraverse_(syncPersistentStateManager.getAllLogical.values) { state =>

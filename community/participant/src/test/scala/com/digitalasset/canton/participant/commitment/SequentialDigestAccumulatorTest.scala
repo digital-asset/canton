@@ -39,7 +39,6 @@ import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.util.MonadUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -69,8 +68,6 @@ trait SequentialDigestAccumulatorTest
 
   implicit def anyToCheckpointFenceOr(a: Classification): CheckpointFenceOr[Classification] =
     NotCheckpointFence(mock[TopologySnapshot], a)
-
-  protected def minimumVersionToRunTest: ProtocolVersion
 
   protected def createStore(stringInterning: StringInterning): AcsDigestStore
 
@@ -123,7 +120,7 @@ trait SequentialDigestAccumulatorTest
   }
 
   "SequentialInMemoryDigestAccumulator" should {
-    "process a simple ContractChangeBatch" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "process a simple ContractChangeBatch" in {
       val fixture = new Fixture()
       import fixture.*
 
@@ -158,7 +155,7 @@ trait SequentialDigestAccumulatorTest
     // this test checks that the digests are the same in the following two scenarios:
     // 1. p1 hosts only alice, receives cid0, and then onboards bob
     // 2. p1 hosts alice and bob, and then receives cid0
-    "process a party onboarding scenario" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "process a party onboarding scenario" in {
       val fixtureBobOnboarded = new Fixture()
 
       fixtureBobOnboarded
@@ -242,7 +239,7 @@ trait SequentialDigestAccumulatorTest
     // this test checks that the digests are the same in the following two scenarios:
     // 1. p1 hosts alice and bob, receives cid0, and then offboards bob
     // 2. p1 hosts only alice and receives cid0
-    "process a party offboarding scenario" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "process a party offboarding scenario" in {
       val fixtureBobOffboarded = new Fixture()
 
       fixtureBobOffboarded
@@ -322,7 +319,7 @@ trait SequentialDigestAccumulatorTest
         .digestO
     }
 
-    "emit a CheckpointToBeWritten when requested" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "emit a CheckpointToBeWritten when requested" in {
       val fixture = new Fixture()
       import fixture.*
 
@@ -348,7 +345,7 @@ trait SequentialDigestAccumulatorTest
 
     }
 
-    "not store empty initial digests" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "not store empty initial digests" in {
       val fixture = new Fixture()
       import fixture.*
 
@@ -368,7 +365,7 @@ trait SequentialDigestAccumulatorTest
       ).toMicros
     }
 
-    "store empty digests after a non-empty initial digest" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "store empty digests after a non-empty initial digest" in {
       val fixture = new Fixture()
       import fixture.*
 
@@ -432,7 +429,7 @@ trait SequentialDigestAccumulatorTest
       }
     }
 
-    "not create cycles in the replacement chain" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "not create cycles in the replacement chain" in {
       val fixture = new Fixture()
       import fixture.*
 
@@ -513,7 +510,7 @@ trait SequentialDigestAccumulatorTest
       lookupParticipantDigest(p1).value.replacesOffset.value shouldBe off(1)
     }
 
-    "store incremental traces" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "store incremental traces" in {
       val fixture = new Fixture(AcsDigestTracingMode.Incremental)
 
       import fixture.*
@@ -611,7 +608,7 @@ trait SequentialDigestAccumulatorTest
       )
     }
 
-    "store full traces" onlyRunWithOrGreaterThan minimumVersionToRunTest in {
+    "store full traces" in {
       val fixture = new Fixture(AcsDigestTracingMode.Full)
 
       import fixture.*
@@ -745,9 +742,6 @@ trait SequentialDigestAccumulatorTest
 
 @AcsCommitmentTest
 class SequentialDigestAccumulatorTestInMemory extends SequentialDigestAccumulatorTest {
-  // the in-memory test runs with any version, because it doesn't depend on dev-DB migrations
-  override protected def minimumVersionToRunTest: ProtocolVersion = ProtocolVersion.minimum
-
   override protected def createStore(stringInterning: StringInterning): AcsDigestStore =
     InMemoryAcsDigestStore.create(Eval.now(stringInterning), loggerFactory)
 }
@@ -755,10 +749,6 @@ class SequentialDigestAccumulatorTestInMemory extends SequentialDigestAccumulato
 abstract class BaseDbSequentialDigestAccumulatorTest
     extends SequentialDigestAccumulatorTest
     with BaseDbAcsDigestStoreTest { self: DbTest =>
-
-  // the DB test requires the protocol version that also runs the corresponding DB migrations
-  override protected def minimumVersionToRunTest: ProtocolVersion =
-    ProtocolVersion.acsCommitmentRedesign
 
   override protected def createStore(
       stringInterning: StringInterning

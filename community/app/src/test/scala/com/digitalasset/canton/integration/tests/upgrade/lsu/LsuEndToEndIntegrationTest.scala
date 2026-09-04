@@ -210,22 +210,8 @@ private object LsuEndToEndIntegrationTest {
   }
 }
 
-final class LsuEndToEndSimClockIntegrationTest extends LsuEndToEndIntegrationTest {
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
-
-}
+final class LsuEndToEndSimClockIntegrationTest extends LsuEndToEndIntegrationTest
 
 final class LsuEndToEndWallClockIntegrationTest extends LsuEndToEndIntegrationTest {
   override protected val useStaticTime: Boolean = false
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
 }

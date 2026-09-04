@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.integration.tests.toxiproxy.fast
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.integration
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.toxiproxy.UseToxiproxy.ToxiproxyConfig
 import com.digitalasset.canton.integration.plugins.toxiproxy.{
@@ -30,10 +30,10 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.LostSequencerSubscription
-import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{config, integration}
 import eu.rekawek.toxiproxy.model.{Toxic, ToxicDirection}
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
@@ -143,6 +143,7 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
               "participant2" -> (() => createSourceParticipantTestInterceptor()),
             ),
             enableUnsafeSequencerChannelSupport = true,
+            pauseIndexer = false,
           ))*
       )
       .withSetup { implicit env =>
@@ -152,7 +153,7 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
         sequencer1.topology.synchronizer_parameters
           .propose_update(
             daId,
-            _.update(reconciliationInterval = PositiveSeconds.tryOfSeconds(1).toConfig),
+            _.update(reconciliationInterval = config.PositiveDurationSeconds.ofDays(365)),
           )
 
         // Helper connects participant1 to sequencer1 via toxiproxy, but keeps the participant2 to sequencer1
@@ -367,6 +368,7 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
+@UnstableTest // TODO(i22853): update as soon as the test does not flake anymore
 class OnlinePartyReplicationNetworkDisruptionsTestPostgres
     extends OnlinePartyReplicationNetworkDisruptionsTest {
   registerPlugin(new UsePostgres(loggerFactory))

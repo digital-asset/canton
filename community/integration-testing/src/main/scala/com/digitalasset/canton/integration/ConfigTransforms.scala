@@ -133,6 +133,10 @@ object ConfigTransforms {
       // tests must be able to observe security alarms without the participant crashing
       ConfigTransforms.setCrashAfterFailedValidation(false),
       ConfigTransforms.useNewAggregator(true),
+      // Safe-to-prune checks rely on the indexer streams signalling offset advancements even if there is no activity.
+      ConfigTransforms.setIdleStreamOffsetCheckpointTimeout(
+        config.NonNegativeFiniteDuration.ofSeconds(1)
+      ),
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
@@ -147,12 +151,9 @@ object ConfigTransforms {
     ),
   )
 
-  lazy val enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev: ConfigTransform =
+  lazy val enableNewAcsCommitmentProcessorPipeline: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor)
-        .replace(
-          BaseTest.testedProtocolVersion >= ProtocolVersion.acsCommitmentRedesign
-        )
+      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(true)
     )
 
   lazy val disableNewAcsCommitmentProcessorPipeline: ConfigTransform =
@@ -357,7 +358,7 @@ object ConfigTransforms {
           else SessionSigningKeysConfig.disabled
         ),
         ConfigTransforms.setAcsCommitmentSendDelay(0.0d, 0.0d),
-        enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev,
+        enableNewAcsCommitmentProcessorPipeline,
         disableOldAcsCommitmentProcessor,
         enableTrafficAccounting,
       )
@@ -1088,4 +1089,12 @@ object ConfigTransforms {
         .focus(_.ledgerApi.indexService.bufferedStreamsPageSize)
         .replace(1)
     }
+
+  def setIdleStreamOffsetCheckpointTimeout(
+      duration: config.NonNegativeFiniteDuration
+  ): ConfigTransform =
+    ConfigTransforms.updateAllParticipantConfigs_(
+      _.focus(_.ledgerApi.indexService.idleStreamOffsetCheckpointTimeout).replace(duration)
+    )
+
 }

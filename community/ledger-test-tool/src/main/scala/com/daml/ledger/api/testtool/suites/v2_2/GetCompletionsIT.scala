@@ -6,13 +6,15 @@ package com.daml.ledger.api.testtool.suites.v2_2
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
-import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party, WithTimeout}
+import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.test.java.model.test.Dummy
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.util.FutureInstances.parallelFuture
+import com.digitalasset.canton.util.MonadUtil
 
 import scala.concurrent.Future
-import scala.concurrent.duration.DurationInt
 
 final class GetCompletionsIT extends LedgerTestSuite {
   private val within: NonNegativeFiniteDuration = NonNegativeFiniteDuration.tryOfSeconds(2L)
@@ -26,10 +28,8 @@ final class GetCompletionsIT extends LedgerTestSuite {
     for {
       beginExclusive <- ledger.currentEnd()
       _ <- ledger.submit(createRequest)
-      completionO <- WithTimeout(5.seconds)(
-        ledger.findCompletion(ledger.getCompletionsRequest(beginExclusive)(alice))(
-          _.commandId == createRequest.getCommands.commandId
-        )
+      completionO <- ledger.findCompletion(ledger.getCompletionsRequest(beginExclusive)(alice))(
+        _.commandId == createRequest.getCommands.commandId
       )
     } yield {
       val completion = assertDefined(completionO, "Expected a completion for alice")
@@ -60,14 +60,14 @@ final class GetCompletionsIT extends LedgerTestSuite {
       _ <- ledger.submit(aliceRequest)
       _ <- ledger.submit(bobRequest)
       _ <- ledger.submit(aliceBobRequest)
-      aliceCompletionO <- WithTimeout(5.seconds)(
-        ledger.findCompletion(request)(_.commandId == aliceRequest.getCommands.commandId)
+      aliceCompletionO <- ledger.findCompletion(request)(
+        _.commandId == aliceRequest.getCommands.commandId
       )
-      bobCompletionO <- WithTimeout(5.seconds)(
-        ledger.findCompletion(request)(_.commandId == bobRequest.getCommands.commandId)
+      bobCompletionO <- ledger.findCompletion(request)(
+        _.commandId == bobRequest.getCommands.commandId
       )
-      aliceBobCompletionO <- WithTimeout(5.seconds)(
-        ledger.findCompletion(request)(_.commandId == aliceBobRequest.getCommands.commandId)
+      aliceBobCompletionO <- ledger.findCompletion(request)(
+        _.commandId == aliceBobRequest.getCommands.commandId
       )
     } yield {
       val aliceCompletion = assertDefined(aliceCompletionO, "Expected a completion for alice")
@@ -107,10 +107,18 @@ final class GetCompletionsIT extends LedgerTestSuite {
       _ <- ledger.submit(aliceRequest)
       _ <- ledger.submit(bobRequest)
       _ <- ledger.submit(aliceBobRequest)
-      explicitResponses <- ledger.completions(
-        within,
-        ledger.getCompletionsRequest(beginExclusive)(alice, bob),
-      )
+      explicitRequest = ledger.getCompletionsRequest(beginExclusive)(alice, bob)
+      // The two reads below each wait for two seconds, one after the other. If a completion is
+      // still on its way, the first read can miss it while the second one catches it, and the
+      // comparison then fails. Waiting for all three here means both reads see the same set.
+      _ <- MonadUtil.parTraverseWithLimit_(PositiveInt.three)(
+        Seq(
+          aliceRequest.getCommands.commandId,
+          bobRequest.getCommands.commandId,
+          aliceBobRequest.getCommands.commandId,
+        )
+      )(commandId => ledger.findCompletion(explicitRequest)(_.commandId == commandId))
+      explicitResponses <- ledger.completions(within, explicitRequest)
       wildcardResponses <- ledger.completions(
         within,
         ledger.getCompletionsRequest(beginExclusive)(),
@@ -152,18 +160,16 @@ final class GetCompletionsIT extends LedgerTestSuite {
       // rather than to currentEnd() (which may still precede that completion).
       startOffset <- ledger.currentEnd()
       _ <- ledger.submit(firstRequest)
-      firstCompletionO <- WithTimeout(5.seconds)(
-        ledger.findCompletion(ledger.getCompletionsRequest(startOffset)(alice))(
-          _.commandId == firstRequest.getCommands.commandId
-        )
+      firstCompletionO <- ledger.findCompletion(ledger.getCompletionsRequest(startOffset)(alice))(
+        _.commandId == firstRequest.getCommands.commandId
       )
       firstCompletion =
         assertDefined(firstCompletionO, "Expected a completion for the first submission")
       _ <- ledger.submit(secondRequest)
-      secondCompletionO <- WithTimeout(5.seconds)(
-        ledger.findCompletion(ledger.getCompletionsRequest(firstCompletion.offset)(alice))(
-          _.commandId == secondRequest.getCommands.commandId
-        )
+      secondCompletionO <- ledger.findCompletion(
+        ledger.getCompletionsRequest(firstCompletion.offset)(alice)
+      )(
+        _.commandId == secondRequest.getCommands.commandId
       )
       _ = assertDefined(secondCompletionO, "Expected a completion for the second submission")
       responses <- ledger.completions(

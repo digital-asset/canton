@@ -35,6 +35,11 @@ def parse_junit_file(path, timings):
             duration = float(tc.attrib.get("time") or 0.0)
         except ValueError:
             duration = 0.0
+        # sbt's JUnit listener writes -1ms (-0.001s) for test events whose
+        # duration the framework did not report. Left as-is those sentinels
+        # accumulate into a small negative per-class total, so clamp them to
+        # zero instead of summing the noise.
+        duration = max(duration, 0.0)
         timings[key] = timings.get(key, 0.0) + duration
 
 
@@ -84,6 +89,23 @@ def test_parse_junit_file_aggregates_durations():
         os.remove(path)
 
 
+def test_parse_junit_file_drops_negative_durations():
+    xml = """<testsuite>
+      <testcase classname="suite.A" name="a1" time="1.5"/>
+      <testcase classname="suite.A" name="a2" time="-0.001"/>
+      <testcase classname="suite.A" name="a3" time="-0.001"/>
+    </testsuite>"""
+    with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:
+        f.write(xml)
+        path = f.name
+    try:
+        timings = {}
+        parse_junit_file(path, timings)
+        assert timings["suite.A"] == 1.5
+    finally:
+        os.remove(path)
+
+
 def test_parse_junit_file_ignores_invalid_xml():
     with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as f:
         f.write("<testsuite><testcase")
@@ -114,6 +136,7 @@ def test_write_timings_and_ensure_output_dir():
 def self_test():
     test_testcase_key_uses_classname()
     test_parse_junit_file_aggregates_durations()
+    test_parse_junit_file_drops_negative_durations()
     test_parse_junit_file_ignores_invalid_xml()
     test_build_timings_skips_missing_paths()
     test_write_timings_and_ensure_output_dir()

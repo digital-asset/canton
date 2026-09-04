@@ -52,6 +52,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
   AcsChangeFactory,
   ContractStakeholdersAndReassignmentCounter,
+  InternalizedAcsChange,
 }
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -2651,7 +2652,9 @@ class AcsCommitmentProcessor private (
     (InternalizedRunningCommitments, SortedMap[LfContractId, (TimeOfChange, ReassignmentCounter)])
   ] = {
 
-    def withMetadataSeq(cids: Seq[LfContractId]): FutureUnlessShutdown[Seq[ContractInstance]] =
+    def withMetadataSeq(
+        cids: Seq[LfContractId]
+    ): FutureUnlessShutdown[Seq[(LfContractId, Set[LfPartyId])]] =
       contractStore
         .lookupManyExistingUncached(cids)
         .valueOr { missingContractId =>
@@ -2661,27 +2664,34 @@ class AcsCommitmentProcessor private (
             )
           )
         }
+        .map { contracts =>
+          contracts.map { contract =>
+            (contract.contractId, contract.stakeholders)
+          }
+        }
 
     def lookupChangeMetadata(
         activations: Map[LfContractId, ReassignmentCounter]
-    ): FutureUnlessShutdown[AcsChange] =
+    ): FutureUnlessShutdown[InternalizedAcsChange] =
       for {
         storedActivatedContracts <- MonadUtil.batchedSequentialTraverse(
           parallelism = batchingConfig.parallelism,
           chunkSize = batchingConfig.maxItemsInBatch,
         )(activations.keySet.toSeq)(withMetadataSeq)
       } yield {
-        AcsChange(
-          activations = storedActivatedContracts
-            .map(c =>
-              c.contractId ->
+
+        InternalizedAcsChange.internalizeAcsChange(
+          stringInterning,
+          AcsChange(
+            activations = storedActivatedContracts.map { case (contractId, stakeholders) =>
+              contractId ->
                 ContractStakeholdersAndReassignmentCounter(
-                  c.stakeholders,
-                  activations(c.contractId),
+                  stakeholders,
+                  activations(contractId),
                 )
-            )
-            .toMap,
-          deactivations = Map.empty,
+            }.toMap,
+            deactivations = Map.empty,
+          ),
         )
       }
 
@@ -2702,7 +2712,7 @@ class AcsCommitmentProcessor private (
   }
 
   private def internalizedRunningCommitmentFromAcsChange(
-      acsChange: AcsChange,
+      acsChange: InternalizedAcsChange,
       rt: RecordTime,
   )(implicit namedLoggingContext: NamedLoggingContext) = {
     val runningCommitments =

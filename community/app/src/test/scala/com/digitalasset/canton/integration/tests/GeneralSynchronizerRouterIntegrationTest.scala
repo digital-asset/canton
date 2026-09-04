@@ -174,11 +174,14 @@ sealed trait GeneralSynchronizerRouterIntegrationTest
       assertInAcsSync(List(participant1), synchronizer3, aggregateId)
       assertInAcsSync(List(participant2), synchronizer3, singleId.toLf)
     }
-    "pick the synchronizer requiring the fewest reassignments" in { implicit env =>
+
+    "pick the synchronizer requiring the fewest reassignment batches" in { implicit env =>
       import env.*
 
       connectToDefaultSynchronizers()
 
+      // synchronizer2 needs 1 batch, synchronizer3 needs 2 (aggregate and singles have different stakeholders).
+      // Aggregate (signatory = party1), Single (signatory = party2, observer = party1)
       val singleId = createSingle(party2Id, Some(synchronizer2Id), participant2, party1Id).id
       val singleIds =
         (1 to 4).map(_ => createSingle(party2Id, Some(synchronizer3Id), participant2, party1Id).id)
@@ -194,9 +197,9 @@ sealed trait GeneralSynchronizerRouterIntegrationTest
       }
       exerciseCountAll(participant1, party1Id, aggregate)
 
-      assertInAcsSync(List(participant1), synchronizer3, aggregateId)
+      assertInAcsSync(List(participant1), synchronizer2, aggregateId)
       contractIds foreach { c =>
-        assertInAcsSync(List(participant2), synchronizer3, c.toLf)
+        assertInAcsSync(List(participant2), synchronizer2, c.toLf)
       }
     }
     "pick the synchronizer where all informees hosted when exercising" in { implicit env =>

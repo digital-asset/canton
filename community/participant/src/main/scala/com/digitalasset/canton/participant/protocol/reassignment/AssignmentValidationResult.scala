@@ -137,6 +137,7 @@ final case class AssignmentValidationResult private[reassignment] (
           recordTime = recordTime,
           synchronizerId = targetSynchronizer.unwrap,
           acsChangeFactory = acsChangeFactory,
+          traceContext = traceContext,
         )
   }
 }

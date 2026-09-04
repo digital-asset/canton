@@ -102,6 +102,8 @@ class OriginalLeaderSegmentState(
       s"next relative block to propose = $nextRelativeBlockToPropose$absoluteNextBlockToProposeLogSuffix"
   )(initTraceContext)
 
+  def pendingSlotsToPropose: Int = segment.slotNumbers.size - nextRelativeBlockToPropose
+
   def segmentIsInProgress: Boolean = segment.slotNumbers.sizeIs > nextRelativeBlockToPropose
 
   // `canReceiveProposals` determines whether this ordering node should request a proposal

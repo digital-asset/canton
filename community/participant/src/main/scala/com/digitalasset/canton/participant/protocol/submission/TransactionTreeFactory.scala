@@ -138,6 +138,13 @@ object TransactionTreeFactory {
   /** Supertype for all errors than may arise during the conversion. */
   sealed trait TransactionTreeConversionError extends Product with Serializable with PrettyPrinting
 
+  final case class TransactionViewLimitError(message: String)
+      extends TransactionTreeConversionError {
+    override protected def pretty: Pretty[TransactionViewLimitError] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
+    )
+  }
+
   /** Indicates that a contract instance could not be looked up by an instance of
     * [[ContractInstanceOfId]].
     */

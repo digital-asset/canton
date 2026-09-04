@@ -11,16 +11,22 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
+import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.AgreementStatus.{
+  Exists,
+  NotNeeded,
+  NotProposed,
+  Proposed,
+}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   AcsIndexingProgress,
   AcsReplicationProgress,
+  AgreementStatus,
   Disconnected,
   PartyReplicationAuthorization,
   PartyReplicationError,
   PartyReplicationFailed,
   PersistentProgress,
   ReplicationParams,
-  SequencerChannelAgreement,
 }
 import com.digitalasset.canton.participant.protocol.party.{
   OnboardingClearanceOperation,
@@ -176,12 +182,22 @@ final class GeneratorsParticipant(
       )
     )
 
-  implicit val sequencerChannelAgreementArb: Arbitrary[SequencerChannelAgreement] =
+  implicit val existingSequencerChannelAgreementArb: Arbitrary[Exists] =
     Arbitrary(
       for {
         damlAgreementContractId <- Arbitrary.arbitrary[LfContractId]
         sequencerId <- Arbitrary.arbitrary[SequencerId]
-      } yield SequencerChannelAgreement(damlAgreementContractId, sequencerId)
+      } yield Exists(damlAgreementContractId, sequencerId)
+    )
+
+  implicit val sequencerChannelAgreementStatusArb: Arbitrary[AgreementStatus] =
+    Arbitrary(
+      Gen.oneOf[AgreementStatus](
+        Gen.const(NotProposed),
+        Gen.const(Proposed),
+        Gen.const(NotNeeded),
+        existingSequencerChannelAgreementArb.arbitrary,
+      )
     )
 
   implicit val partyReplicationAuthorizationArb: Arbitrary[PartyReplicationAuthorization] =
@@ -237,8 +253,8 @@ final class GeneratorsParticipant(
     Arbitrary(
       for {
         params <- Arbitrary.arbitrary[ReplicationParams]
-        agreementO <- Gen.option(Arbitrary.arbitrary[SequencerChannelAgreement])
         authorizationO <- Gen.option(Arbitrary.arbitrary[PartyReplicationAuthorization])
+        agreementO <- Arbitrary.arbitrary[AgreementStatus]
         replicationO <- Gen.option(Arbitrary.arbitrary[AcsReplicationProgress])
         indexingO <- Gen.option(Arbitrary.arbitrary[AcsIndexingProgress])
         hasCompleted <- Arbitrary.arbitrary[Boolean]
@@ -246,11 +262,11 @@ final class GeneratorsParticipant(
       } yield PartyReplicationStatus.apply(
         params,
         version,
-        agreementO,
+        authorizationO.map(_ => agreementO).getOrElse(AgreementStatus.NotProposed),
         authorizationO,
-        replicationO,
-        // Can only have indexing status if we have replication status
-        replicationO.flatMap(_ => indexingO),
+        authorizationO.flatMap(_ => replicationO),
+        // Can only have indexing status if we have authorization and replication status
+        authorizationO.flatMap(_ => replicationO).flatMap(_ => indexingO),
         hasCompleted,
         errorO,
       )

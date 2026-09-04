@@ -4,8 +4,9 @@
 package com.digitalasset.canton.participant.commitment
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.metrics.CommitmentMetrics
@@ -29,6 +30,7 @@ import org.apache.pekko.stream.scaladsl.{Flow, Keep, Source}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.DurationInt
 
 /** Processes received ACS commitments in
   * [[com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdateContainer]]:
@@ -49,30 +51,31 @@ class ReceivedAcsCommitmentMatcher(
   private val queue: ShardedSequentialProcessingQueue[LedgerParticipantId] =
     new GarbageCollectedShardedSequentialProcessingQueue[LedgerParticipantId]
 
-  def pipeline(implicit traceContext: TraceContext): Flow[
-    InternalIndexService.AcsUpdateContainer,
-    Unit,
-    NotUsed,
-  ] =
-    Flow[InternalIndexService.AcsUpdateContainer]
+  def pipeline(implicit
+      traceContext: TraceContext
+  ): Flow[OptionalAcsUpdateContainer, Unit, NotUsed] =
+    Flow[OptionalAcsUpdateContainer]
       .mapConcat(parse)
       .mapAsyncAndDrainUS(parallelism = parallelProcessingLimit.value)(dispatchToQueue)
       .mapConcat(_.toList)
       .conflateWithSeed(TracedMany.fromTraced)((acc, next) =>
         acc.accumulateTraced(timepoint => next.map(Ordering[Timepoint].max(_, timepoint)))
       )
+      // Limit to persist at most 20 watermark updates per second, i.e., at most one every 50ms on average.
+      // Otherwise we're going to fill the DB with useless dead rows of watermarks.
+      .throttle(20, 1.second)
       .mapAsyncAndDrainUS(parallelism = 1)(persistWatermark)
 
   private def parse(
-      input: InternalIndexService.AcsUpdateContainer
+      input: OptionalAcsUpdateContainer
   ): Seq[Carrier] = {
     implicit val traceContext: TraceContext = input.traceContext
+    val timepoint = Timepoint(input.offset)(input.synchronizerTime)
     input.acsUpdate match {
-      case InternalIndexService.AcsUpdate.AcsCommitment(payload) =>
+      case Some(InternalIndexService.AcsUpdate.AcsCommitment(payload)) =>
         ReceivedAcsCommitments.fromTrustedByteString(payload) match {
           case Right(commitments) =>
             val lastIndex = commitments.messages.size - 1
-            val timepoint = Timepoint(input.offset)(input.synchronizerTime)
             commitments.messages.view.zipWithIndex.map { case (envelope, index) =>
               AcsCommitmentMessageContainer(envelope, timepoint, index == lastIndex)
             }.toSeq
@@ -80,14 +83,14 @@ class ReceivedAcsCommitmentMatcher(
             logger.warn(
               s"Failed to parse received ACS commitment at offset ${input.offset}. Discarding the update. $err"
             )
-            Seq.empty
+            Seq(TimepointContainer(timepoint))
         }
 
-      case _: InternalIndexService.AcsUpdate.AcsChangeUpdate => Seq.empty
-      case _: InternalIndexService.AcsUpdate.EffectiveTopologyUpdate => Seq.empty
-      case InternalIndexService.AcsUpdate.OffsetCheckpoint =>
-        val timepoint = Timepoint(input.offset)(input.synchronizerTime)
-        Seq(OffsetCheckpointCarrier(timepoint))
+      case _ =>
+        // We must not swallow any elements for which we don't have a limit on how many can appear in a row,
+        // because otherwise the watermark will not move and thus block pruning, as no offset checkpoints are
+        // inserted when the source is not completely idle.
+        Seq(TimepointContainer(timepoint))
     }
   }
 
@@ -102,7 +105,7 @@ class ReceivedAcsCommitmentMatcher(
           processMessage(timepoint, container.envelope, container.lastEnvelopeInBatch),
           s"Process envelope at offset ${timepoint.offset}",
         )
-      case offsetCheckpoint: OffsetCheckpointCarrier =>
+      case offsetCheckpoint: TimepointContainer =>
         FutureUnlessShutdown.pure(Some(Traced(offsetCheckpoint.timepoint)))
     }
   }
@@ -213,6 +216,24 @@ class ReceivedAcsCommitmentMatcher(
 
 object ReceivedAcsCommitmentMatcher {
 
+  final case class OptionalAcsUpdateContainer(
+      acsUpdate: Option[AcsUpdate],
+      synchronizerTime: CantonTimestamp,
+      offset: Offset,
+      traceContext: TraceContext,
+  )
+  object OptionalAcsUpdateContainer {
+    def fromAcsUpdateContainer(
+        container: InternalIndexService.AcsUpdateContainer
+    ): OptionalAcsUpdateContainer =
+      new OptionalAcsUpdateContainer(
+        Some(container.acsUpdate),
+        container.synchronizerTime,
+        container.offset,
+        container.traceContext,
+      )
+  }
+
   private sealed trait Carrier extends Product with Serializable {
     def traceContext: TraceContext
   }
@@ -224,14 +245,52 @@ object ReceivedAcsCommitmentMatcher {
   )(implicit override val traceContext: TraceContext)
       extends Carrier
 
-  private final case class OffsetCheckpointCarrier(timepoint: Timepoint)(implicit
+  private final case class TimepointContainer(timepoint: Timepoint)(implicit
       override val traceContext: TraceContext
   ) extends Carrier
 
   def synchronizationFlow[Mat](
       source: Source[Offset, Mat]
-  ): Flow[InternalIndexService.AcsUpdateContainer, InternalIndexService.AcsUpdateContainer, Mat] =
-    Flow[InternalIndexService.AcsUpdateContainer].gateKeeperMat(source.conflate(_ max _))(_.offset)(
-      Keep.right
-    )
+  ): Flow[InternalIndexService.AcsUpdateContainer, OptionalAcsUpdateContainer, Mat] =
+    Flow[InternalIndexService.AcsUpdateContainer]
+      .map(OptionalAcsUpdateContainer.fromAcsUpdateContainer)
+      .gateKeeperMat(
+        source.conflate(_ max _).map(_.unwrap)
+      ) { container =>
+        container.acsUpdate match {
+          case Some(_: AcsUpdate.AcsCommitment) => container.offset.unwrap
+          case _ =>
+            // Let all non-commitment AcsUpdates pass the gate because the matcher doesn't do anything with these updates
+            // This ensures that the matcher offset watermark keeps advancing even if the digest processor does not persist
+            // another checkpoint. This is relevant for safe-to-prune checks: The digest processor sometimes inserts
+            // a checkpoint for the previous offset of what triggered the offset (e.g., for a reconciliation tick),
+            // but there is no guarantee that the previous offset contains an AcsUpdate. In fact, the prior AcsUpdate
+            // may be arbitrarily lower and because of this gap the matcher's watermark may not reach the digest
+            // processor's watermark.
+            Offset.firstOffset.unwrap - 1
+        }
+      }(onStuck =
+        (update, _) =>
+          update.offset.decrement.map(predecessorOffset =>
+            OptionalAcsUpdateContainer(
+              None,
+              update.synchronizerTime.immediatePredecessor,
+              predecessorOffset,
+              update.traceContext,
+            )
+          )
+      )(Keep.right)
+      // filter out redundant stuck signals, i.e., if the stuck signal's offset is the same as the one of the previous emitted update.
+      .statefulMapConcat { () =>
+        @SuppressWarnings(Array("org.wartremover.warts.Var"))
+        var lastOffset: Long = Offset.firstOffset.unwrap - 1L
+        container => {
+          val offset = container.offset.unwrap
+          val out =
+            if (container.acsUpdate.isEmpty && lastOffset == offset) Seq.empty
+            else Seq(container)
+          lastOffset = offset
+          out
+        }
+      }
 }

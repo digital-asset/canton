@@ -9,6 +9,7 @@ import com.daml.ledger.api.v2.event.Event
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse.ContractEntry
 import com.daml.ledger.javaapi.data
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
+import com.digitalasset.canton.annotations.MinProtocolVersion
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
 import com.digitalasset.canton.damltestslf23.java.da.types
@@ -96,6 +97,8 @@ import scala.util.{Failure, Success}
   *
   * TODO(i12904): Update description
   */
+// Enable only for protocol version 35 and higher, as the test uses contract keys.
+@MinProtocolVersion("35")
 abstract sealed class LedgerConsistencyIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -235,8 +238,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
 
   "A participant" when {
     "a contract is non-existent" can {
-      // Disable for protocol version < 35, as it does not support contract keys.
-      "archive the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "archive the contract" in { implicit env =>
         import env.*
 
         val (_, instance) = mkCreateData()
@@ -256,7 +258,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertInactive(instance.contractId)
       }
 
-      "unassign the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "unassign the contract" in { implicit env =>
         import env.*
 
         val (_, instance) = mkCreateData()
@@ -274,170 +276,167 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertInactive(instance.contractId, unassignedCount = 0)
       }
 
-      "not create a contract twice within the same transaction" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "not create a contract twice within the same transaction" in { implicit env =>
+        import env.*
 
-          // Series of failed attempts to commit a transaction creating the same contract twice.
+        // Series of failed attempts to commit a transaction creating the same contract twice.
 
-          val (singleCreateTree, instance) = mkCreateData()
+        val (singleCreateTree, instance) = mkCreateData()
 
-          // Duplicate root view in the transaction tree. The mediator will reject this due to non-unique view hashes.
-          val doubleCreateTree = GenTransactionTree.Optics.rootViewsUnsafe
-            .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
-            .modify(seq => seq ++ seq)(singleCreateTree)
+        // Duplicate root view in the transaction tree. The mediator will reject this due to non-unique view hashes.
+        val doubleCreateTree = GenTransactionTree.Optics.rootViewsUnsafe
+          .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+          .modify(seq => seq ++ seq)(singleCreateTree)
 
-          val (_, events1) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            trackingLedgerEvents(Seq(participant1), Seq.empty)(
-              maliciousP1.submitTransactionTree(doubleCreateTree)
-            ),
-            LogEntry.assertLogSeq(
-              Seq(
-                (
-                  _.warningMessage should include regex raw"Unable to create transaction tree: " +
-                    raw"A transaction tree must contain a hash at most once. Found the hash SHA-256:\S+ twice\.",
-                  "Non-unique root hash",
-                )
-              ),
-              Seq(_.shouldBeCantonErrorCode(InvalidMessage)),
-            ),
-          )
-          events1.assertNoTransactions()
-          assertInactive(instance.contractId)
-
-          // Modify the salt of ViewParticipantData.
-          // This would recover the uniqueness of view hashes, but it will fail the model conformance check.
-          val createTreeModifiedSalt = GenTransactionTree.Optics.rootViewsUnsafe
-            .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
-            .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
-            .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
-            .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
-            .andThen(GenLens[ViewParticipantData](_.salt))
-            .replace(Salt.tryDeriveSalt(SaltSeed.generate()(pureCrypto), 0, pureCrypto))(
-              singleCreateTree
-            )
-
-          val (_, events2) = runMaliciously()(
-            maliciousP1.submitTransactionTree(createTreeModifiedSalt),
-            LogEntry.assertLogSeq(
-              Seq(viewReconstructionFailure, unexpectedMediatorApproval)
-            ),
-          )
-          events2.assertNoTransactions()
-          assertInactive(instance.contractId)
-      }
-
-      "archive a transient contract before its creation" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
-
-          // Overall strategy: execute the command sequence archive; create; dummy by
-          // submitting the command sequence dummy; create; archive and
-          // using an interceptor to reverse the order of commands.
-          // The dummy command is needed so that the transformation does not change the position of create in the tree,
-          // because that would change contract ids as well.
-
-          val dummyCmd =
-            mgmtContract.id.exerciseTouch(new util.ArrayList[String]()).commands.asScala.toSeq
-          val createAndArchive = mkUniversalContract()
-            .createAnd()
-            .exerciseArchive()
-            .commands()
-            .asScala
-
-          val rawCmds = (dummyCmd ++ createAndArchive)
-            .map(c => Command.fromJavaProto(c.toProtoCommand))
-
-          val cmd =
-            CommandsWithMetadata(rawCmds, Seq(defaultMaintainer), ledgerTime = environment.now.toLf)
-
-          val (_, events) = runMaliciously()(
-            maliciousP1
-              .submitCommand(
-                cmd,
-                transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
-                  .andThen(
-                    MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion)
-                  )
-                  .modify(_.reverse)(_),
-              ),
-            LogEntry.assertLogSeq(
-              Seq(
-                (
-                  _.shouldBeCantonError(
-                    ModelConformance,
-                    _ should fullyMatch regex raw"Rejected transaction due to a failed model conformance check: Contract id \S+ created in node NodeId\(1\) is referenced before in NodeId\(0\)",
-                  ),
-                  "model conformance check",
-                ),
-                unexpectedMediatorApproval,
+        val (_, events1) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          trackingLedgerEvents(Seq(participant1), Seq.empty)(
+            maliciousP1.submitTransactionTree(doubleCreateTree)
+          ),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.warningMessage should include regex raw"Unable to create transaction tree: " +
+                  raw"A transaction tree must contain a hash at most once. Found the hash SHA-256:\S+ twice\.",
+                "Non-unique root hash",
               )
             ),
+            Seq(_.shouldBeCantonErrorCode(InvalidMessage)),
+          ),
+        )
+        events1.assertNoTransactions()
+        assertInactive(instance.contractId)
+
+        // Modify the salt of ViewParticipantData.
+        // This would recover the uniqueness of view hashes, but it will fail the model conformance check.
+        val createTreeModifiedSalt = GenTransactionTree.Optics.rootViewsUnsafe
+          .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+          .andThen(MerkleTree.Optics.unblindedSeq[TransactionView])
+          .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
+          .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+          .andThen(GenLens[ViewParticipantData](_.salt))
+          .replace(Salt.tryDeriveSalt(SaltSeed.generate()(pureCrypto), 0, pureCrypto))(
+            singleCreateTree
           )
 
-          events.assertStatusOk(participant1)
-          val cid = inside(events.awaitTransactions(participant1).loneElement.events) {
-            case Seq(ev1, ev2, ev3) =>
-              val exercisedId = exercisedIdOfEvent(ev1, acsDelta = false)
-
-              // FIXME(i29855): creation should appear in the acs delta stream.
-              val createdCid = createdIdOfEvent(ev2, acsDelta = false)
-              exercisedId shouldBe createdCid
-
-              exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
-
-              exercisedId
-          }
-          assertInactive(cid) // FIXME(i29855): should be active, because the create comes last
+        val (_, events2) = runMaliciously()(
+          maliciousP1.submitTransactionTree(createTreeModifiedSalt),
+          LogEntry.assertLogSeq(
+            Seq(viewReconstructionFailure, unexpectedMediatorApproval)
+          ),
+        )
+        events2.assertNoTransactions()
+        assertInactive(instance.contractId)
       }
 
-      "rollback creation and commit archival of a transient contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "archive a transient contract before its creation" in { implicit env =>
+        import env.*
 
-          val createAndArchive = mkUniversalContract()
-            .createAnd()
-            .exerciseArchive()
-            .commands()
-            .asScala
-            .toSeq
-            .map(c => Command.fromJavaProto(c.toProtoCommand))
+        // Overall strategy: execute the command sequence archive; create; dummy by
+        // submitting the command sequence dummy; create; archive and
+        // using an interceptor to reverse the order of commands.
+        // The dummy command is needed so that the transformation does not change the position of create in the tree,
+        // because that would change contract ids as well.
 
-          val createAndArchiveCmd =
-            CommandsWithMetadata(
-              createAndArchive,
-              Seq(defaultMaintainer),
-              ledgerTime = environment.now.toLf,
-            )
+        val dummyCmd =
+          mgmtContract.id.exerciseTouch(new util.ArrayList[String]()).commands.asScala.toSeq
+        val createAndArchive = mkUniversalContract()
+          .createAnd()
+          .exerciseArchive()
+          .commands()
+          .asScala
 
-          val (_, events) = runMaliciously()(
-            maliciousP1
-              .submitCommand(
-                createAndArchiveCmd,
-                // Replace the ViewParticipantData salt of view 0, the view that creates the contract
-                // in order to cause a model conformance error.
-                transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
-                  .andThen(
-                    MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion)
-                  )
-                  .index(0)
-                  .andThen(MerkleTree.Optics.unblinded[TransactionView])
-                  .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
-                  .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
-                  .andThen(GenLens[ViewParticipantData](_.salt))
-                  .replace(Salt.tryDeriveSalt(SaltSeed.generate()(pureCrypto), 0, pureCrypto)),
-              ),
-            LogEntry.assertLogSeq(
-              Seq(viewReconstructionFailure, unexpectedMediatorApproval, indexerWarnings)
+        val rawCmds = (dummyCmd ++ createAndArchive)
+          .map(c => Command.fromJavaProto(c.toProtoCommand))
+
+        val cmd =
+          CommandsWithMetadata(rawCmds, Seq(defaultMaintainer), ledgerTime = environment.now.toLf)
+
+        val (_, events) = runMaliciously()(
+          maliciousP1
+            .submitCommand(
+              cmd,
+              transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
+                .andThen(
+                  MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion)
+                )
+                .modify(_.reverse)(_),
             ),
-          )
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.shouldBeCantonError(
+                  ModelConformance,
+                  _ should fullyMatch regex raw"Rejected transaction due to a failed model conformance check: Contract id \S+ created in node NodeId\(1\) is referenced before in NodeId\(0\)",
+                ),
+                "model conformance check",
+              ),
+              unexpectedMediatorApproval,
+            )
+          ),
+        )
 
-          events.assertStatusOk(participant1)
-          val cid = exercisedIdOf(events)
-          assertInactive(cid)
+        events.assertStatusOk(participant1)
+        val cid = inside(events.awaitTransactions(participant1).loneElement.events) {
+          case Seq(ev1, ev2, ev3) =>
+            val exercisedId = exercisedIdOfEvent(ev1, acsDelta = false)
+
+            // FIXME(i29855): creation should appear in the acs delta stream.
+            val createdCid = createdIdOfEvent(ev2, acsDelta = false)
+            exercisedId shouldBe createdCid
+
+            exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
+
+            exercisedId
+        }
+        assertInactive(cid) // FIXME(i29855): should be active, because the create comes last
       }
 
-      "query the contract by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "rollback creation and commit archival of a transient contract" in { implicit env =>
+        import env.*
+
+        val createAndArchive = mkUniversalContract()
+          .createAnd()
+          .exerciseArchive()
+          .commands()
+          .asScala
+          .toSeq
+          .map(c => Command.fromJavaProto(c.toProtoCommand))
+
+        val createAndArchiveCmd =
+          CommandsWithMetadata(
+            createAndArchive,
+            Seq(defaultMaintainer),
+            ledgerTime = environment.now.toLf,
+          )
+
+        val (_, events) = runMaliciously()(
+          maliciousP1
+            .submitCommand(
+              createAndArchiveCmd,
+              // Replace the ViewParticipantData salt of view 0, the view that creates the contract
+              // in order to cause a model conformance error.
+              transactionTreeInterceptor = GenTransactionTree.Optics.rootViewsUnsafe
+                .andThen(
+                  MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion)
+                )
+                .index(0)
+                .andThen(MerkleTree.Optics.unblinded[TransactionView])
+                .andThen(TransactionView.Optics.viewParticipantDataUnsafe)
+                .andThen(MerkleTree.Optics.unblinded[ViewParticipantData])
+                .andThen(GenLens[ViewParticipantData](_.salt))
+                .replace(Salt.tryDeriveSalt(SaltSeed.generate()(pureCrypto), 0, pureCrypto)),
+            ),
+          LogEntry.assertLogSeq(
+            Seq(viewReconstructionFailure, unexpectedMediatorApproval, indexerWarnings)
+          ),
+        )
+
+        events.assertStatusOk(participant1)
+        val cid = exercisedIdOf(events)
+        assertInactive(cid)
+      }
+
+      "query the contract by key" in { implicit env =>
         import env.*
 
         // Create the data of a non-existent contract to be looked up
@@ -468,7 +467,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
     }
 
     "a contract is archived" can {
-      "create the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "create the contract" in { implicit env =>
         import env.*
 
         val (transactionTree, instance, _) = assignNonExistentContract()
@@ -487,7 +486,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertActive(cid, assignedCount = 1)
       }
 
-      "archive the contract again" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "archive the contract again" in { implicit env =>
         import env.*
 
         // Participant1 submits the duplicate archival and must fail gracefully, because crashAfterFailedValidation == false.
@@ -565,7 +564,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertActive(instance.contractId, assignedCount = 1)
       }
 
-      "assign the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "assign the contract" in { implicit env =>
         import env.*
 
         val instance = create()
@@ -582,7 +581,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertActive(instance.contractId, assignedCount = 1)
       }
 
-      "unassign the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "unassign the contract" in { implicit env =>
         import env.*
 
         val instance = create()
@@ -607,7 +606,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertActive(instance.contractId, unassignedCount = 1, assignedCount = 1)
       }
 
-      "query the contract by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "query the contract by key" in { implicit env =>
         import env.*
 
         val instance = create(keyText = "myKey")
@@ -635,7 +634,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
     }
 
     "a contract has been unassigned" can {
-      "create the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "create the contract" in { implicit env =>
         import env.*
 
         val (transactionTree, instance, _) = unassignNonExistentContract()
@@ -653,7 +652,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertActive(instance.contractId, unassignedCount = 1, assignedCount = 1)
       }
 
-      "archive the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "archive the contract" in { implicit env =>
         import env.*
 
         val (_, instance, counter) = unassignNonExistentContract()
@@ -682,41 +681,40 @@ abstract sealed class LedgerConsistencyIntegrationTest
         assertActive(instance.contractId, unassignedCount = 1, assignedCount = 2)
       }
 
-      "unassign the contract again" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "unassign the contract again" in { implicit env =>
+        import env.*
 
-          val (_, instance, counter) = unassignNonExistentContract()
+        val (_, instance, counter) = unassignNonExistentContract()
 
-          // Unassign the contract again
-          val (_, events) = runMaliciously()(
-            unassignMaliciously(
-              instance,
-              reassignmentCounter = ReassignmentCounter(counter + 1),
-            ),
-            LogEntry.assertLogSeq(
-              Seq(unexpectedMediatorApproval)
-            ),
-          )
+        // Unassign the contract again
+        val (_, events) = runMaliciously()(
+          unassignMaliciously(
+            instance,
+            reassignmentCounter = ReassignmentCounter(counter + 1),
+          ),
+          LogEntry.assertLogSeq(
+            Seq(unexpectedMediatorApproval)
+          ),
+        )
 
-          events.assertStatusOk(participant1)
-          assertUnassigned(events, instance.contractId)
-          assertInactive(
-            instance.contractId,
-            unassignedCount =
-              1, // TODO(i35161): Clarify if this should be two, due to two previous unassignments.
-            assignedCount = 1,
-          )
+        events.assertStatusOk(participant1)
+        assertUnassigned(events, instance.contractId)
+        assertInactive(
+          instance.contractId,
+          unassignedCount =
+            1, // TODO(i35161): Clarify if this should be two, due to two previous unassignments.
+          assignedCount = 1,
+        )
 
-          // Now assign the contract to double-check the state of the indexer
-          val (_, events2) = runMaliciously()(
-            assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 2))
-          )
-          assertAssigned(events2, instance.contractId)
-          assertActive(instance.contractId, unassignedCount = 1, assignedCount = 2)
+        // Now assign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          assignMaliciously(instance, reassignmentCounter = ReassignmentCounter(counter + 2))
+        )
+        assertAssigned(events2, instance.contractId)
+        assertActive(instance.contractId, unassignedCount = 1, assignedCount = 2)
       }
 
-      "query the contract by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "query the contract by key" in { implicit env =>
         import env.*
 
         val (_, instance, _) = unassignNonExistentContract(keyText = "myKey")
@@ -743,40 +741,39 @@ abstract sealed class LedgerConsistencyIntegrationTest
     }
 
     "a contract has been created" can {
-      "not create the contract again" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "not create the contract again" in { implicit env =>
+        import env.*
 
-          val (transactionTree, instance) = mkCreateData()
+        val (transactionTree, instance) = mkCreateData()
 
-          // Create the contract for the first time
-          val (_, events1) = runMaliciously()(
-            maliciousP1.submitTransactionTree(transactionTree)
-          )
-          events1.assertStatusOk(participant1)
+        // Create the contract for the first time
+        val (_, events1) = runMaliciously()(
+          maliciousP1.submitTransactionTree(transactionTree)
+        )
+        events1.assertStatusOk(participant1)
 
-          // Create the contract for the second time
-          val (_, events2) = runMaliciously(suppressionRule = LevelAndAbove(Level.INFO))(
-            maliciousP1.submitTransactionTree(transactionTree),
-            LogEntry.assertLogSeq(
-              Seq(
-                (
-                  _.shouldBeCantonError(
-                    DuplicateConfirmationRequest,
-                    _ should fullyMatch regex raw"The request UUID \(\S+\) is a duplicate of a previous request with an identical UUID\. It cannot be re-used until \S+\.",
-                  ),
-                  "Mediator deduplication",
-                )
-              ),
-              mayContain = Seq(_ => succeed),
+        // Create the contract for the second time
+        val (_, events2) = runMaliciously(suppressionRule = LevelAndAbove(Level.INFO))(
+          maliciousP1.submitTransactionTree(transactionTree),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.shouldBeCantonError(
+                  DuplicateConfirmationRequest,
+                  _ should fullyMatch regex raw"The request UUID \(\S+\) is a duplicate of a previous request with an identical UUID\. It cannot be re-used until \S+\.",
+                ),
+                "Mediator deduplication",
+              )
             ),
-          )
+            mayContain = Seq(_ => succeed),
+          ),
+        )
 
-          events2.assertNoTransactions()
-          assertActive(instance.contractId)
+        events2.assertNoTransactions()
+        assertActive(instance.contractId)
       }
 
-      "assign the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "assign the contract" in { implicit env =>
         import env.*
 
         val instance = create()
@@ -808,111 +805,108 @@ abstract sealed class LedgerConsistencyIntegrationTest
         lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
-      "archive the contract twice within the same transaction" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "archive the contract twice within the same transaction" in { implicit env =>
+        import env.*
 
-          val instance = create()
+        val instance = create()
 
-          val (_, events) = runMaliciously()(
-            maliciousP1.submitCommand(
-              archiveCmdsWithMetadata(instance.contractId),
-              transactionInterceptor = (tx, metadata) => {
-                val (nodeId, node) = tx.nodes.loneElement
-                val nextNodeId = LfNodeId(nodeId.index + 1)
-                val newTx = LfSubmittedTransaction(
-                  LfVersionedTransaction(
-                    tx.version,
-                    Map(nodeId -> node, nextNodeId -> node),
-                    ImmArray(nodeId, nextNodeId),
-                  )
+        val (_, events) = runMaliciously()(
+          maliciousP1.submitCommand(
+            archiveCmdsWithMetadata(instance.contractId),
+            transactionInterceptor = (tx, metadata) => {
+              val (nodeId, node) = tx.nodes.loneElement
+              val nextNodeId = LfNodeId(nodeId.index + 1)
+              val newTx = LfSubmittedTransaction(
+                LfVersionedTransaction(
+                  tx.version,
+                  Map(nodeId -> node, nextNodeId -> node),
+                  ImmArray(nodeId, nextNodeId),
                 )
-                val newMetadata = metadata
-                  .focus(_.nodeSeeds)
-                  .modify(
-                    _.slowAppend(ImmArray(nextNodeId -> Hash.fromString("deadbeef" * 8).value))
-                  )
-                newTx -> newMetadata
-              },
-            ),
+              )
+              val newMetadata = metadata
+                .focus(_.nodeSeeds)
+                .modify(
+                  _.slowAppend(ImmArray(nextNodeId -> Hash.fromString("deadbeef" * 8).value))
+                )
+              newTx -> newMetadata
+            },
+          ),
+          LogEntry.assertLogSeq(Seq(internalConsistencyFailure, unexpectedMediatorApproval)),
+        )
+
+        events.assertStatusOk(participant1)
+
+        val txEvents = events.awaitTransactions(participant1).loneElement.events
+        forEvery(txEvents)(exercisedIdOfEvent(_) shouldBe instance.contractId)
+        txEvents should have size 2
+
+        assertInactive(instance.contractId)
+
+        // Now assign the contract to double-check the state of the indexer
+        val (_, events2) = runMaliciously()(
+          assignMaliciously(instance),
+          LogEntry.assertLogSeq(
+            Seq(
+              unexpectedMediatorApproval // WARN, as the contract is known to be archived
+            )
+          ),
+        )
+        assertAssigned(events2, instance.contractId)
+        assertActive(instance.contractId, assignedCount = 1)
+      }
+
+      "archive and then query the contract by key" in { implicit env =>
+        import env.*
+
+        val instance = create(keyText = "myKey")
+
+        val cmds = CommandsWithMetadata(
+          (archiveCommands(instance.contractId) ++ queryByKeyCommands("myKey"))
+            .map(c => Command.fromJavaProto(c.toProtoCommand)),
+          Seq(defaultMaintainer),
+          ledgerTime = environment.now.toLf,
+        )
+
+        val (_, events) =
+          runMaliciously()(
+            maliciousP1
+              .submitCommand(
+                cmds,
+                // Use interceptor to change the result of QueryByKey to yield the id of instance
+                transactionInterceptor = modifyQueryByKeyResult(_ => Vector(instance.contractId)),
+              ),
             LogEntry.assertLogSeq(Seq(internalConsistencyFailure, unexpectedMediatorApproval)),
           )
 
-          events.assertStatusOk(participant1)
+        events.assertStatusOk(participant1)
+        inside(events.awaitTransactions(participant1).loneElement.events) { case Seq(ev1, ev2) =>
+          exercisedIdOfEvent(ev1) shouldBe instance.contractId
+          exercisedIdOfEvent(ev2, consuming = false).coid shouldBe mgmtContract.id.contractId
+        }
+        assertInactive(instance.contractId)
+      }
 
-          val txEvents = events.awaitTransactions(participant1).loneElement.events
-          forEvery(txEvents)(exercisedIdOfEvent(_) shouldBe instance.contractId)
-          txEvents should have size 2
+      "query by key even when it yields no contract" in { implicit env =>
+        import env.*
 
-          assertInactive(instance.contractId)
+        val instance = create(keyText = "myKey")
 
-          // Now assign the contract to double-check the state of the indexer
-          val (_, events2) = runMaliciously()(
-            assignMaliciously(instance),
-            LogEntry.assertLogSeq(
-              Seq(
-                unexpectedMediatorApproval // WARN, as the contract is known to be archived
+        val (_, events) =
+          // Maintainers do not validate negative key queries. Therefore, the request gets approved despite the incorrect lookup.
+          trackingLedgerEvents(Seq(participant1), Seq.empty)(
+            maliciousP1
+              .submitCommand(
+                queryByKeyCmdsWithMetadata("myKey"),
+                // Use interceptor to change the result of QueryByKey to yield empty resolution
+                transactionInterceptor = modifyQueryByKeyResult(_ => Vector.empty),
               )
-            ),
-          )
-          assertAssigned(events2, instance.contractId)
-          assertActive(instance.contractId, assignedCount = 1)
-      }
-
-      "archive and then query the contract by key" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
-
-          val instance = create(keyText = "myKey")
-
-          val cmds = CommandsWithMetadata(
-            (archiveCommands(instance.contractId) ++ queryByKeyCommands("myKey"))
-              .map(c => Command.fromJavaProto(c.toProtoCommand)),
-            Seq(defaultMaintainer),
-            ledgerTime = environment.now.toLf,
+              .futureValueUS
+              .valueOrFail("Submission failed")
           )
 
-          val (_, events) =
-            runMaliciously()(
-              maliciousP1
-                .submitCommand(
-                  cmds,
-                  // Use interceptor to change the result of QueryByKey to yield the id of instance
-                  transactionInterceptor = modifyQueryByKeyResult(_ => Vector(instance.contractId)),
-                ),
-              LogEntry.assertLogSeq(Seq(internalConsistencyFailure, unexpectedMediatorApproval)),
-            )
-
-          events.assertStatusOk(participant1)
-          inside(events.awaitTransactions(participant1).loneElement.events) { case Seq(ev1, ev2) =>
-            exercisedIdOfEvent(ev1) shouldBe instance.contractId
-            exercisedIdOfEvent(ev2, consuming = false).coid shouldBe mgmtContract.id.contractId
-          }
-          assertInactive(instance.contractId)
-      }
-
-      "query by key even when it yields no contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
-
-          val instance = create(keyText = "myKey")
-
-          val (_, events) =
-            // Maintainers do not validate negative key queries. Therefore, the request gets approved despite the incorrect lookup.
-            trackingLedgerEvents(Seq(participant1), Seq.empty)(
-              maliciousP1
-                .submitCommand(
-                  queryByKeyCmdsWithMetadata("myKey"),
-                  // Use interceptor to change the result of QueryByKey to yield empty resolution
-                  transactionInterceptor = modifyQueryByKeyResult(_ => Vector.empty),
-                )
-                .futureValueUS
-                .valueOrFail("Submission failed")
-            )
-
-          events.assertStatusOk(participant1)
-          exercisedIdOf(events, consuming = false).coid shouldBe mgmtContract.id.contractId
-          assertActive(instance.contractId)
+        events.assertStatusOk(participant1)
+        exercisedIdOf(events, consuming = false).coid shouldBe mgmtContract.id.contractId
+        assertActive(instance.contractId)
       }
 
       "rollback the request when query by key yields a contract with the wrong key" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
@@ -933,81 +927,79 @@ abstract sealed class LedgerConsistencyIntegrationTest
           assertActive(instance.contractId)
       }
 
-      "query contracts by key yielding contracts in the wrong order" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "query contracts by key yielding contracts in the wrong order" in { implicit env =>
+        import env.*
 
-          val instance = create(keyText = "myKey")
+        val instance = create(keyText = "myKey")
 
-          // First create a contract and then query it in the same transaction.
-          val cmds = CommandsWithMetadata(
-            (createCommands(keyText = "myKey") ++ queryByKeyCommands("myKey"))
-              .map(c => Command.fromJavaProto(c.toProtoCommand)),
-            Seq(defaultMaintainer),
-            ledgerTime = environment.now.toLf,
-          )
+        // First create a contract and then query it in the same transaction.
+        val cmds = CommandsWithMetadata(
+          (createCommands(keyText = "myKey") ++ queryByKeyCommands("myKey"))
+            .map(c => Command.fromJavaProto(c.toProtoCommand)),
+          Seq(defaultMaintainer),
+          ledgerTime = environment.now.toLf,
+        )
 
-          val (_, events) = runMaliciously()(
-            maliciousP1.submitCommand(
-              cmds,
-              // Reverse the key resolution, so that the local contract comes last.
-              // This triggers an internal consistency failure, as local contracts must come first.
-              transactionInterceptor = modifyQueryByKeyResult(_.reverse),
-            ),
-            LogEntry.assertLogSeq(Seq(internalConsistencyFailure, unexpectedMediatorApproval)),
-          )
+        val (_, events) = runMaliciously()(
+          maliciousP1.submitCommand(
+            cmds,
+            // Reverse the key resolution, so that the local contract comes last.
+            // This triggers an internal consistency failure, as local contracts must come first.
+            transactionInterceptor = modifyQueryByKeyResult(_.reverse),
+          ),
+          LogEntry.assertLogSeq(Seq(internalConsistencyFailure, unexpectedMediatorApproval)),
+        )
 
-          events.assertStatusOk(participant1)
-          val createdCid = inside(events.awaitTransactions(participant1).loneElement.events) {
-            case Seq(ev1, ev2) =>
-              val createdCid = createdIdOfEvent(ev1)
-              // Recall that created refers to the contract created by cmds, whereas
-              // instance.contractId refers to a contract created previously.
-              createdCid should not be instance.contractId
-              exercisedIdOfEvent(ev2, consuming = false).coid shouldBe mgmtContract.id.contractId
-              createdCid
-          }
-          assertActive(createdCid)
+        events.assertStatusOk(participant1)
+        val createdCid = inside(events.awaitTransactions(participant1).loneElement.events) {
+          case Seq(ev1, ev2) =>
+            val createdCid = createdIdOfEvent(ev1)
+            // Recall that created refers to the contract created by cmds, whereas
+            // instance.contractId refers to a contract created previously.
+            createdCid should not be instance.contractId
+            exercisedIdOfEvent(ev2, consuming = false).coid shouldBe mgmtContract.id.contractId
+            createdCid
+        }
+        assertActive(createdCid)
       }
 
-      "query contracts by key yielding inconsistent results" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "query contracts by key yielding inconsistent results" in { implicit env =>
+        import env.*
 
-          val instance1 = create(keyText = "myKey")
-          val instance2 = create(keyText = "myKey")
+        val instance1 = create(keyText = "myKey")
+        val instance2 = create(keyText = "myKey")
 
-          // Query a key twice
-          val cmds = CommandsWithMetadata(
-            (queryByKeyCommands("myKey") ++ queryByKeyCommands("myKey"))
-              .map(c => Command.fromJavaProto(c.toProtoCommand)),
-            Seq(defaultMaintainer),
-            ledgerTime = environment.now.toLf,
-          )
+        // Query a key twice
+        val cmds = CommandsWithMetadata(
+          (queryByKeyCommands("myKey") ++ queryByKeyCommands("myKey"))
+            .map(c => Command.fromJavaProto(c.toProtoCommand)),
+          Seq(defaultMaintainer),
+          ledgerTime = environment.now.toLf,
+        )
 
-          val reverse = new AtomicBoolean(false)
+        val reverse = new AtomicBoolean(false)
 
-          val (_, events) = runMaliciously()(
-            maliciousP1.submitCommand(
-              cmds,
-              // Reverse the key resolution in some but not all QueryByKey nodes.
-              // This will fail the internal consistency check, as all queries should yield the same result.
-              transactionInterceptor =
-                modifyQueryByKeyResult(cids => if (reverse.getAndSet(true)) cids.reverse else cids),
-            ),
-            LogEntry.assertLogSeq(Seq(internalConsistencyFailure, unexpectedMediatorApproval)),
-          )
+        val (_, events) = runMaliciously()(
+          maliciousP1.submitCommand(
+            cmds,
+            // Reverse the key resolution in some but not all QueryByKey nodes.
+            // This will fail the internal consistency check, as all queries should yield the same result.
+            transactionInterceptor =
+              modifyQueryByKeyResult(cids => if (reverse.getAndSet(true)) cids.reverse else cids),
+          ),
+          LogEntry.assertLogSeq(Seq(internalConsistencyFailure, unexpectedMediatorApproval)),
+        )
 
-          events.assertStatusOk(participant1)
+        events.assertStatusOk(participant1)
 
-          val txEvents = events.awaitTransactions(participant1).loneElement.events
-          forEvery(txEvents)(
-            exercisedIdOfEvent(_, consuming = false).coid shouldBe mgmtContract.id.contractId
-          )
-          txEvents should have size 2
+        val txEvents = events.awaitTransactions(participant1).loneElement.events
+        forEvery(txEvents)(
+          exercisedIdOfEvent(_, consuming = false).coid shouldBe mgmtContract.id.contractId
+        )
+        txEvents should have size 2
 
-          assertActive(instance1.contractId)
-          assertActive(instance2.contractId)
+        assertActive(instance1.contractId)
+        assertActive(instance2.contractId)
       }
 
       "still restart" in { implicit env =>
@@ -1016,7 +1008,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
     }
 
     "a contract has been assigned" can {
-      "create the contract" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "create the contract" in { implicit env =>
         import env.*
 
         val (transactionTree, instance, _) = assignNonExistentContract()
@@ -1071,7 +1063,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
         lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
-      "assign the contract again" onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
+      "assign the contract again" in { implicit env =>
         import env.*
 
         val (_, instance, counter) = assignNonExistentContract()
@@ -1109,114 +1101,112 @@ abstract sealed class LedgerConsistencyIntegrationTest
         lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
-      "archive the contract and create it again" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "archive the contract and create it again" in { implicit env =>
+        import env.*
 
-          // Overall strategy:
-          // Firstly, assign the contract.
-          // Then, execute the command sequence archive; create; dummy by
-          // submitting the command sequence dummy; create; archive and
-          // using an interceptor to reverse the order of commands.
-          // The dummy command is needed so that the transformation does not change the position of create in the tree,
-          // because that would change contract ids as well.
+        // Overall strategy:
+        // Firstly, assign the contract.
+        // Then, execute the command sequence archive; create; dummy by
+        // submitting the command sequence dummy; create; archive and
+        // using an interceptor to reverse the order of commands.
+        // The dummy command is needed so that the transformation does not change the position of create in the tree,
+        // because that would change contract ids as well.
 
-          val dummyCmd =
-            mgmtContract.id.exerciseTouch(new util.ArrayList[String]()).commands.asScala.toSeq
-          val createAndArchive = mkUniversalContract()
-            .createAnd()
-            .exerciseArchive()
-            .commands()
-            .asScala
+        val dummyCmd =
+          mgmtContract.id.exerciseTouch(new util.ArrayList[String]()).commands.asScala.toSeq
+        val createAndArchive = mkUniversalContract()
+          .createAnd()
+          .exerciseArchive()
+          .commands()
+          .asScala
 
-          val (transactionTree, instance, _) =
-            assignNonExistentContract(mkCreateCmds = _ => dummyCmd ++ createAndArchive)
+        val (transactionTree, instance, _) =
+          assignNonExistentContract(mkCreateCmds = _ => dummyCmd ++ createAndArchive)
 
-          val revertedTransactionTree = GenTransactionTree.Optics.rootViewsUnsafe
-            .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
-            .modify(_.reverse)(transactionTree)
+        val revertedTransactionTree = GenTransactionTree.Optics.rootViewsUnsafe
+          .andThen(MerkleSeq.Optics.toSeq[TransactionView](pureCrypto, testedProtocolVersion))
+          .modify(_.reverse)(transactionTree)
 
-          val (_, events) = runMaliciously()(
-            maliciousP1
-              .submitTransactionTree(revertedTransactionTree),
-            LogEntry.assertLogSeq(
-              Seq(
-                (
-                  _.shouldBeCantonError(
-                    ModelConformance,
-                    _ should fullyMatch regex raw"Rejected transaction due to a failed model conformance check: Contract id \S+ created in node NodeId\(1\) is referenced before in NodeId\(0\)",
-                  ),
-                  "model conformance check",
+        val (_, events) = runMaliciously()(
+          maliciousP1
+            .submitTransactionTree(revertedTransactionTree),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.shouldBeCantonError(
+                  ModelConformance,
+                  _ should fullyMatch regex raw"Rejected transaction due to a failed model conformance check: Contract id \S+ created in node NodeId\(1\) is referenced before in NodeId\(0\)",
                 ),
-                duplicateCreate,
-                failedActivenessCheckApproved,
-                unexpectedMediatorApproval,
-              )
-            ),
-          )
+                "model conformance check",
+              ),
+              duplicateCreate,
+              failedActivenessCheckApproved,
+              unexpectedMediatorApproval,
+            )
+          ),
+        )
 
-          events.assertStatusOk(participant1)
-          inside(events.awaitTransactions(participant1).loneElement.events) {
-            case Seq(ev1, ev2, ev3) =>
-              exercisedIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
-              createdIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
-              exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
-          }
+        events.assertStatusOk(participant1)
+        inside(events.awaitTransactions(participant1).loneElement.events) {
+          case Seq(ev1, ev2, ev3) =>
+            exercisedIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
+            createdIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
+            exercisedIdOfEvent(ev3, consuming = false).coid shouldBe mgmtContract.id.contractId
+        }
 
-          assertLedgerAcsEntries(
-            instance.contractId,
-            activeCount = 1,
-            unassignedCount = 0,
-            assignedCount = 1,
-          )
-          // FIXME(i29855): the Canton ACS reorders archive; create to create; archive
-          //  Instead, assertActive(instance.contractId) should succeed
-          lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 1,
+          unassignedCount = 0,
+          assignedCount = 1,
+        )
+        // FIXME(i29855): the Canton ACS reorders archive; create to create; archive
+        //  Instead, assertActive(instance.contractId) should succeed
+        lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
-      "create and archive the contract within the same transaction" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
-        implicit env =>
-          import env.*
+      "create and archive the contract within the same transaction" in { implicit env =>
+        import env.*
 
-          // Overall strategy:
-          // Firstly, assign the contract.
-          // Then, submit the command sequence create; archive.
+        // Overall strategy:
+        // Firstly, assign the contract.
+        // Then, submit the command sequence create; archive.
 
-          val createAndArchive = mkUniversalContract()
-            .createAnd()
-            .exerciseArchive()
-            .commands()
-            .asScala
-            .toSeq
+        val createAndArchive = mkUniversalContract()
+          .createAnd()
+          .exerciseArchive()
+          .commands()
+          .asScala
+          .toSeq
 
-          val (transactionTree, instance, _) =
-            assignNonExistentContract(mkCreateCmds = _ => createAndArchive)
+        val (transactionTree, instance, _) =
+          assignNonExistentContract(mkCreateCmds = _ => createAndArchive)
 
-          val (_, events) = runMaliciously()(
-            maliciousP1.submitTransactionTree(transactionTree),
-            LogEntry.assertLogSeq(
-              Seq(
-                duplicateCreate,
-                failedActivenessCheckApproved,
-                unexpectedMediatorApproval,
-              )
-            ),
-          )
+        val (_, events) = runMaliciously()(
+          maliciousP1.submitTransactionTree(transactionTree),
+          LogEntry.assertLogSeq(
+            Seq(
+              duplicateCreate,
+              failedActivenessCheckApproved,
+              unexpectedMediatorApproval,
+            )
+          ),
+        )
 
-          events.assertStatusOk(participant1)
-          inside(events.awaitTransactions(participant1).loneElement.events) { case Seq(ev1, ev2) =>
-            createdIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
-            exercisedIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
-          }
-          // FIXME(i29855): The ledger acs currently ignores transient archivals
-          //  Instead, assertInactive(instance.contractId, assignedCount = 1) should succeed.
-          assertLedgerAcsEntries(
-            instance.contractId,
-            activeCount = 1,
-            unassignedCount = 0,
-            assignedCount = 1,
-          )
-          lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
+        events.assertStatusOk(participant1)
+        inside(events.awaitTransactions(participant1).loneElement.events) { case Seq(ev1, ev2) =>
+          createdIdOfEvent(ev1, acsDelta = false) shouldBe instance.contractId
+          exercisedIdOfEvent(ev2, acsDelta = false) shouldBe instance.contractId
+        }
+        // FIXME(i29855): The ledger acs currently ignores transient archivals
+        //  Instead, assertInactive(instance.contractId, assignedCount = 1) should succeed.
+        assertLedgerAcsEntries(
+          instance.contractId,
+          activeCount = 1,
+          unassignedCount = 0,
+          assignedCount = 1,
+        )
+        lookupActiveContractInstances(instance.contractId.coid) shouldBe empty
       }
 
       "still restart" in { implicit env =>

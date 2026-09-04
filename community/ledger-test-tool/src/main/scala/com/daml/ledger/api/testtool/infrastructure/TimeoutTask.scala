@@ -6,8 +6,8 @@ package com.daml.ledger.api.testtool.infrastructure
 import java.util.TimerTask
 import scala.concurrent.Promise
 
-final class TimeoutTask[A](p: Promise[A]) extends TimerTask {
+final class TimeoutTask[A](p: Promise[A], failure: Throwable) extends TimerTask {
   override def run(): Unit = {
-    val _ = p.tryFailure(TimeoutException)
+    val _ = p.tryFailure(failure)
   }
 }

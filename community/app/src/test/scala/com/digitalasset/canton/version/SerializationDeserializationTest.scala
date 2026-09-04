@@ -255,7 +255,7 @@ final class SerializationDeserializationTest
               ),
         )
         test(SignedContent, version)
-        testContext(TransactionView, (TestHash, version), version)
+        testContext(TransactionView, (TestHash, DepthCounter.Default, version), version)
         testContext(
           FullInformeeTree,
           (GenTransactionTreeDeserializationContext(TestHash, synchronizerLimits), version),
@@ -267,10 +267,11 @@ final class SerializationDeserializationTest
           (
             (
               TestHash,
-              (bytes: ByteString) =>
+              (bytes: ByteString, _: DepthCounter) =>
                 SubmitterMetadata.fromTrustedByteString(
                   SubmitterMetadataDeserializationContext(TestHash, synchronizerLimits)
                 )(bytes),
+              DepthCounter.Default,
             ),
             version,
           ),

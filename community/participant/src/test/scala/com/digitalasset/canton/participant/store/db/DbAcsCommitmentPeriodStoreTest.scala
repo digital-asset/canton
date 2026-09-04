@@ -13,11 +13,8 @@ import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 
 trait DbAcsCommitmentPeriodStoreTest extends AcsCommitmentPeriodStoreTest with DbTest {
-
-  override def minimumProtocolVersion: ProtocolVersion = ProtocolVersion.acsCommitmentRedesign
 
   override protected def cleanDb(storage: DbStorage)(implicit
       traceContext: TraceContext

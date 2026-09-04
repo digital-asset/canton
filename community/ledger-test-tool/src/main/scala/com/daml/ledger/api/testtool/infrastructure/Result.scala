@@ -18,7 +18,10 @@ private[daml] object Result {
 
   sealed trait Failure
 
-  case object TimedOut extends Failure
+  /** Carries the timeout message so we can tell the per-case cap from a participant operation
+    * guard.
+    */
+  final case class TimedOut(message: String) extends Failure
 
   final case class Failed(cause: AssertionError) extends Failure
 

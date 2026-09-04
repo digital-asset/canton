@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.integration.tests.sequencer.bftordering
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
 import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceDynamicOnboardingIntegrationTestBase
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing.BftSequencerFactory
 
+@UnstableTest // TODO(i22853): update as soon as the test does not flake anymore
 class BftOrderingDynamicOnboardingIntegrationTest
     extends ReferenceDynamicOnboardingIntegrationTestBase(BftSequencerFactory.ShortName) {
 

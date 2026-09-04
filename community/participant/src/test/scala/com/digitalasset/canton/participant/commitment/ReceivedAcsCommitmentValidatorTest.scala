@@ -193,6 +193,7 @@ class ReceivedAcsCommitmentValidatorTest
             synchronizerId = physicalSynchronizerId,
             recordTime = CantonTimestamp.ofEpochSecond(10),
           ),
+          traceContext = implicitly,
         )
       )
 
@@ -262,6 +263,7 @@ class ReceivedAcsCommitmentValidatorTest
             synchronizerId = physicalSynchronizerId,
             recordTime = CantonTimestamp.ofEpochSecond(10),
           ),
+          traceContext = implicitly,
         )
       )
 

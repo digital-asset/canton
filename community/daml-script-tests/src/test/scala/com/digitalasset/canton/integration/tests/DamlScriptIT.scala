@@ -7,7 +7,7 @@ import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.integration.plugins.{UseExtensionService, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
@@ -922,15 +922,19 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
   doRunTests(scriptIdsToTest)
 }
 
-/** The suite for the protocol version 36 + LF 2.4-staging pair. The corpus currently consists of
-  * the external-call scripts, the feature staged at LF 2.4; further 2.4-staging test cases belong
-  * here as well.
+/** The suite for the protocol version 36 + LF 2.4 pair. The corpus currently consists of the
+  * external-call scripts, the feature staged at LF 2.4; further 2.4 test cases belong here as well.
   *
   * The scripts run against a mock extension service and hardcode the plugin's default extension id
   * and default response, so the plugin is registered with its defaults. The external-call wire data
   * exists from protocol version 36 onwards, hence the v36 gating.
   */
-class DamlScriptPV36LF24StagingIT extends DamlScriptIT(LanguageVersion.v2_4) {
+// This suite builds ScriptLF24StagingTests at --target=2.4 (Stable(4)) at test runtime; the
+// snapshot's codegen still only accepts Staging(4,1), so the build step fails. Un-ignore together
+// with the ExternalCallTest codegen entry in BuildCommon.scala.
+// TODO(#35484): uncomment after shuffle
+/*
+class DamlScriptPV36LF24IT extends DamlScriptIT(LanguageVersion.v2_4) {
   import DamlScriptIT.ExpectedResult.*
 
   registerPlugin(new UseExtensionService(loggerFactory))
@@ -958,6 +962,7 @@ class DamlScriptPV36LF24StagingIT extends DamlScriptIT(LanguageVersion.v2_4) {
 
   doRunTests(scriptIdsToTest)
 }
+**/
 
 object DamlScriptIT {
 

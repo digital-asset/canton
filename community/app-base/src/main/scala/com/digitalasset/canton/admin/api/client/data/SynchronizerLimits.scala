@@ -31,9 +31,31 @@ object SynchronizerLimits {
     SynchronizerLimitsInternal.defaultFor(protocolVersion).transformInto[SynchronizerLimits]
 }
 
-final case class TransactionProtocolLimits(maxActAs: PositiveInt) extends PrettyPrinting {
+final case class TransactionProtocolLimits(
+    maxActAs: PositiveInt,
+    maxEnvelopes: PositiveInt,
+    maxRecipientsPerBatch: PositiveInt,
+    maxRecipientsTrees: PositiveInt,
+    maxRecipientsPerRecipientsTreeLevel: PositiveInt,
+    maxChildrenPerRecipientsTreeLevel: PositiveInt,
+    maxRecipientsPerEnvelope: PositiveInt,
+    maxRecipientsTreeDepth: PositiveInt,
+    maxTransactionRootViews: PositiveInt,
+    maxTransactionSubViews: PositiveInt,
+    maxTransactionTreeDepth: PositiveInt,
+) extends PrettyPrinting {
   override protected def pretty: Pretty[TransactionProtocolLimits] = prettyOfClass(
-    param("max actAs", _.maxActAs)
+    param("max actAs", _.maxActAs),
+    param("max envelopes", _.maxEnvelopes),
+    param("max recipients trees", _.maxRecipientsTrees),
+    param("max recipients per batch", _.maxRecipientsPerBatch),
+    param("max recipients per recipients tree level", _.maxRecipientsPerRecipientsTreeLevel),
+    param("max children per recipients tree level", _.maxChildrenPerRecipientsTreeLevel),
+    param("max recipients per envelope", _.maxRecipientsPerEnvelope),
+    param("max recipients tree depth", _.maxRecipientsTreeDepth),
+    param("max transaction root views", _.maxTransactionRootViews),
+    param("max transaction sub views", _.maxTransactionSubViews),
+    param("max transaction tree depth", _.maxTransactionTreeDepth),
   )
 
   def toInternal: TransactionProtocolLimitsInternal =

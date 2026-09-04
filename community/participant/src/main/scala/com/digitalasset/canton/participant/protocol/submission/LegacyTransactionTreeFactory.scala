@@ -53,6 +53,8 @@ import com.digitalasset.daml.lf.transaction.{
   LegacyContractStateMachine as ContractStateMachine,
 }
 import io.scalaland.chimney.dsl.*
+import io.scalaland.chimney.dsl.TransformerConfiguration.UpdateFlag
+import io.scalaland.chimney.internal.runtime.TransformerFlags
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
@@ -79,6 +81,10 @@ class LegacyTransactionTreeFactory(
 )(implicit ec: ExecutionContext)
     extends TransactionTreeFactory
     with NamedLogging {
+
+  private implicit val cfg: UpdateFlag[
+    TransformerFlags.Enable[TransformerFlags.MethodAccessors, TransformerFlags.Default]
+  ] = TransformerConfiguration.default.enableMethodAccessors
 
   private val protocolVersion = psid.protocolVersion
   private val contractIdSuffixer: ContractIdSuffixer =
@@ -122,6 +128,7 @@ class LegacyTransactionTreeFactory(
       protocolVersion,
     )
 
+    // Transaction view limits are applied on submission paths
     val rootViewDecompositionsF =
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
@@ -129,6 +136,7 @@ class LegacyTransactionTreeFactory(
         PathRollbackContext.empty,
         Some(participantId.adminParty.toLf),
         PathRollbackContextFactory,
+        Some(TransactionViewLimitConfig.Default),
       )
 
     val commonMetadata = CommonMetadata
@@ -163,8 +171,9 @@ class LegacyTransactionTreeFactory(
         .leftMap(SubmitterMetadataError.apply)
         .toEitherT[FutureUnlessShutdown]
 
-      rootViewDecompositions <- EitherT
-        .liftF(rootViewDecompositionsF)
+      rootViewDecompositions <- rootViewDecompositionsF.leftMap[TransactionViewLimitError](
+        _.transformInto[TransactionViewLimitError]
+      )
 
       _ = if (logger.underlying.isDebugEnabled) {
         val numRootViews = rootViewDecompositions.length
@@ -888,9 +897,13 @@ class LegacyTransactionTreeFactory(
         rbContext,
         submittingParticipantO.map(_.adminParty.toLf),
         PathRollbackContextFactory,
+        None, // Transaction view limits are not applied on validation paths
       )
+
     for {
-      decompositions <- EitherT.right(decompositionsF)
+      decompositions <- decompositionsF.leftMap[TransactionViewLimitError](
+        _.transformInto[TransactionViewLimitError]
+      )
       decomposition = checked(decompositions.head)
       view <- createView(decomposition, rootPosition, state, contractOfId, topologySnapshot)
       suffixedNodes = state.suffixedNodes() transform {

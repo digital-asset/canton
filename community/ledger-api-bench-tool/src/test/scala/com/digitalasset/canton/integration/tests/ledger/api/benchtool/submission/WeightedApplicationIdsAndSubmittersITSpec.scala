@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submissio
 
 import com.daml.ledger.javaapi.data.Party
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.BenchtoolSandboxFixture
@@ -24,6 +25,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{Duration, DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future}
 
+@UnstableTest // TODO(i31088): remove this once the test is no longer flaky
 class WeightedUserIdsAndSubmittersITSpec
     extends BenchtoolSandboxFixture
     with AppendedClues

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
 import cats.instances.future.catsStdInstancesForFuture
-import cats.syntax.bifunctor.*
 import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.{
   SyncCryptoApiParticipantProvider,
@@ -56,7 +55,7 @@ trait GetTopologyAtTimestamp {
       traceContext: TraceContext
   ): EitherT[
     FutureUnlessShutdown,
-    ReassignmentProcessorError,
+    UnknownPhysicalSynchronizer,
     Target[TopologySnapshot],
   ]
 }
@@ -123,27 +122,27 @@ class ReassignmentCoordination(
     }
 
   /** Returns a future that completes when it is safe to take an identity snapshot for the given
-    * `timestamp` on the given `synchronizerId`. [[scala.None$]] indicates that this point has
-    * already been reached before the call. [[scala.Left$]] if the `synchronizer` is unknown or the
-    * participant is not connected to the synchronizer.
+    * `timestamp` on the given `psid`. [[scala.None$]] indicates that this point has already been
+    * reached before the call. [[scala.Left$]] if the `synchronizer` is unknown or the participant
+    * is not connected to the synchronizer.
     */
   private[reassignment] def awaitTimestamp[T[X] <: ReassignmentTag[X]: SameReassignmentType](
-      synchronizerId: T[PhysicalSynchronizerId],
+      psid: T[PhysicalSynchronizerId],
       staticSynchronizerParameters: T[StaticSynchronizerParameters],
       timestamp: T[CantonTimestamp],
   )(implicit
       traceContext: TraceContext
-  ): Either[ReassignmentProcessorError, Option[FutureUnlessShutdown[Unit]]] =
+  ): Either[UnknownPhysicalSynchronizer, Option[FutureUnlessShutdown[Unit]]] =
     (for {
       cryptoApi <- syncCryptoApi.forSynchronizer(
-        synchronizerId.unwrap,
+        psid.unwrap,
         staticSynchronizerParameters.unwrap,
       )
-      handle <- reassignmentSubmissionFor(synchronizerId.unwrap)
+      handle <- reassignmentSubmissionFor(psid.unwrap)
     } yield {
       handle.timeTracker.requestTick(timestamp.unwrap, immediately = true).discard
       cryptoApi.awaitTimestamp(timestamp.unwrap)
-    }).toRight(UnknownPhysicalSynchronizer(synchronizerId.unwrap, "When waiting for timestamp"))
+    }).toRight(UnknownPhysicalSynchronizer(psid.unwrap, "When waiting for timestamp"))
 
   /** Similar to [[awaitTimestamp]] but lifted into an [[EitherT]]
     *
@@ -151,18 +150,18 @@ class ReassignmentCoordination(
     *   A callback that will be invoked if no wait was actually needed
     */
   private[reassignment] def awaitTimestamp[T[X] <: ReassignmentTag[X]: SameReassignmentType](
-      synchronizerId: T[PhysicalSynchronizerId],
+      psid: T[PhysicalSynchronizerId],
       staticSynchronizerParameters: T[StaticSynchronizerParameters],
       timestamp: T[CantonTimestamp],
       onImmediate: => FutureUnlessShutdown[Unit],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
+  ): EitherT[FutureUnlessShutdown, UnknownPhysicalSynchronizer, Unit] =
     for {
       timeout <- EitherT.fromEither[FutureUnlessShutdown](
-        awaitTimestamp(synchronizerId, staticSynchronizerParameters, timestamp)
+        awaitTimestamp(psid, staticSynchronizerParameters, timestamp)
       )
-      _ <- EitherT.right[ReassignmentProcessorError](timeout.getOrElse(onImmediate))
+      _ <- EitherT.right[UnknownPhysicalSynchronizer](timeout.getOrElse(onImmediate))
     } yield ()
 
   /** Submits an assignment. Used by the [[UnassignmentProcessingSteps]] to automatically trigger
@@ -220,7 +219,7 @@ class ReassignmentCoordination(
       timestamp: T[CantonTimestamp],
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, T[
+  ): EitherT[FutureUnlessShutdown, UnknownPhysicalSynchronizer, T[
     SynchronizerSnapshotSyncCryptoApi
   ]] =
     EitherT
@@ -233,7 +232,7 @@ class ReassignmentCoordination(
               UnknownPhysicalSynchronizer(
                 synchronizerId,
                 "When getting crypto snapshot",
-              ): ReassignmentProcessorError
+              )
             )
         }
       )
@@ -247,18 +246,16 @@ class ReassignmentCoordination(
       traceContext: TraceContext
   ): EitherT[
     FutureUnlessShutdown,
-    ReassignmentProcessorError,
+    UnknownPhysicalSynchronizer,
     Target[TopologySnapshot],
   ] = for {
     staticSynchronizerParameters <- EitherT
       .fromEither[FutureUnlessShutdown](getStaticSynchronizerParameter(targetPsid))
-      .leftWiden[ReassignmentProcessorError]
     topoClient <- EitherT
       .fromEither[FutureUnlessShutdown](getTopologyClient(targetPsid, staticSynchronizerParameters))
-      .leftWiden[ReassignmentProcessorError]
     // TODO(i26479): we could not fail even if the participant is disconnected from the target synchronizer
     timestamp <- topoClient.traverseSingleton { case (_, client) =>
-      EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](
+      EitherT.rightT[FutureUnlessShutdown, UnknownPhysicalSynchronizer](
         client.approximateTimestamp
       )
     }

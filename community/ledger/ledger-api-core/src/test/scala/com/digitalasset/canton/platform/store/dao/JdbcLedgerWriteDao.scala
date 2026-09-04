@@ -167,6 +167,7 @@ private class JdbcLedgerWriteDao(
             genericTopologyEvents = Nil,
             synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
             effectiveTime = CantonTimestamp(recordTime),
+            traceContext = implicitly,
           )
         ),
       )
@@ -196,6 +197,7 @@ private class JdbcLedgerWriteDao(
               synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
               isTransaction = true,
               transactionHash = transactionHash,
+              traceContext = implicitly,
             )
           ),
         )
@@ -310,6 +312,7 @@ private class JdbcLedgerWriteDao(
                   representativePackageId = SameAsContractPackageId,
                 )
               }.toMap,
+              traceContext = implicitly,
             )
           ),
         )
