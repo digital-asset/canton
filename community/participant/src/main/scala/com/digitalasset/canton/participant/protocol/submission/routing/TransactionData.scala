@@ -16,7 +16,6 @@ import com.digitalasset.canton.protocol.{
   LfContractId,
   LfSerializationVersion,
   LfVersionedTransaction,
-  Stakeholders,
 }
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -68,7 +67,7 @@ private[routing] object TransactionData {
       transaction: LfVersionedTransaction,
       ledgerTime: CantonTimestamp,
       synchronizerState: RoutingSynchronizerState,
-      contractsStakeholders: Map[LfContractId, Stakeholders],
+      inputContractIds: Seq[LfContractId],
       disclosedContracts: Seq[LfContractId],
       prescribedSynchronizerIdO: Option[PhysicalSynchronizerId],
   )(implicit
@@ -80,7 +79,7 @@ private[routing] object TransactionData {
         ContractsSynchronizerData
           .create(
             synchronizerState,
-            contractsStakeholders,
+            inputContractIds,
             disclosedContracts = disclosedContracts,
           )
           .leftMap[TransactionRoutingError](contractsError =>
@@ -108,7 +107,7 @@ private[routing] object TransactionData {
       transaction: LfVersionedTransaction,
       ledgerTime: CantonTimestamp,
       synchronizerState: RoutingSynchronizerState,
-      inputContractStakeholders: Map[LfContractId, Stakeholders],
+      inputContractIds: Seq[LfContractId],
       disclosedContracts: Seq[LfContractId],
       prescribedSynchronizerO: Option[PhysicalSynchronizerId],
   )(implicit
@@ -134,7 +133,7 @@ private[routing] object TransactionData {
         transaction,
         ledgerTime,
         synchronizerState,
-        inputContractStakeholders,
+        inputContractIds,
         disclosedContracts,
         prescribedSynchronizerO,
       )

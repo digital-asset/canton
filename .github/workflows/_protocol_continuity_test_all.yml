@@ -1,0 +1,78 @@
+name: Protocol Continuity Test All
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  protocol_continuity_test_all:
+    name: Protocol Continuity Test All (shard ${{ matrix.shard }})
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        # Keep in sync with num_test_buckets in run_tests step below
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    timeout-minutes: 60
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.shard }}
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+
+      - name: Run all protocol continuity tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          execution_context_size: "8"
+          include_patterns: '^com\.digitalasset\.canton\.integration\.tests\.continuity(?!\.latest(?:\.|$))(?:\.|$)'
+          num_parallel_tasks: "1"
+          num_test_buckets: "12"
+          setup_gcp_kms: "false"
+          shard_index: ${{ matrix.shard }}
+          timeout: '40m'
+          test_file: test-full-class-names.log
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.postgres.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: protocol_continuity_test_all
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: protocol_continuity_test_all
+      runner: ${{ inputs.runner }}
+      protocol_version: ''

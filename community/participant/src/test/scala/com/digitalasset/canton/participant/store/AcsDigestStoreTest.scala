@@ -100,7 +100,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       val emptyJournal = mkJournal()
 
       for {
-        _ <- emptyJournal.checkReplacesInvariant(upToInclusive = rangeEnd)
+        _ <- emptyJournal.checkReplacesInvariant(upToInclusive = rangeEnd, None)
       } yield succeed
     }
   }
@@ -151,7 +151,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     def upsertUpdatesIn(journal: DigestJournal[K]) = for {
       _ <- journal.upsertDigestUpdates(List(update1_K1T0, update2_K2T0))
       _ <- journal.upsertDigestUpdates(List(update3_K1T1, tombstone_K2T1))
-      _ <- journal.checkReplacesInvariant(offset2)
+      _ <- journal.checkReplacesInvariant(offset2, None)
     } yield succeed
 
     "allow batch item insertion with upsertDigestUpdates" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
@@ -341,7 +341,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       for {
         _ <- testJournal.upsertDigestUpdates(List(brokenUpdate))
         _ <- loggerFactory.assertInternalErrorAsyncUS[IllegalStateException](
-          within = testJournal.checkReplacesInvariant(offset2),
+          within = testJournal.checkReplacesInvariant(offset2, None),
           assertion = _.getMessage should include(
             s"We cannot have replacesOffset=$offset99 which is gte to change offset $offset2"
           ),
@@ -360,7 +360,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       for {
         _ <- testJournal.upsertDigestUpdates(List(update1_K1T1, update2_K1T2))
         _ <- loggerFactory.assertInternalErrorAsyncUS[IllegalStateException](
-          within = testJournal.checkReplacesInvariant(offset2),
+          within = testJournal.checkReplacesInvariant(offset2, None),
           assertion = _.getMessage should include(
             s"Replaces offset should point to $offset1 but it is empty!"
           ),
@@ -379,7 +379,7 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
       for {
         _ <- testJournal.upsertDigestUpdates(List(update1_K1T0, update2_K1T2))
         _ <- loggerFactory.assertInternalErrorAsyncUS[IllegalStateException](
-          within = testJournal.checkReplacesInvariant(offset2),
+          within = testJournal.checkReplacesInvariant(offset2, None),
           assertion = _.getMessage should include(
             s"which is not pointing to the preceding offset=$offset0"
           ),
@@ -400,6 +400,8 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
     val (offset1, t1) = checkpoint1.timepoint.tupled
     val checkpoint2 = checkpoint(offsetTime(PositiveLong.tryCreate(30)))
     val (offset2, t2) = checkpoint2.timepoint.tupled
+    val checkpoint3 = checkpoint(offsetTime(PositiveLong.tryCreate(40)))
+    val (offset3, t3) = checkpoint3.timepoint.tupled
 
     val rawDigest = genRawDigest(0x2c)
 
@@ -636,6 +638,32 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
         )
       } yield succeed
     }
+
+    "catch unpruned rows with non-dangling references during checkReplacesInvariant invocation" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign inUS {
+      val store = mkStore()
+      val update1_K1T1 = AcsDigestUpdate(
+        AcsDigest(participantId1, offset1, t1, Some(rawDigest), None),
+        replacesOffset = Some(offset0),
+      )
+      val update1_K1T2 = AcsDigestUpdate(
+        AcsDigest(participantId1, offset2, t2, Some(rawDigest), None),
+        replacesOffset = Some(offset1),
+      )
+      for {
+        _ <- store.participant.upsertDigestUpdates(List(update1_K1T1, update1_K1T2))
+        _ <- store.insertCheckpointTime(checkpoint3)
+        _ <- store.deleteUpTo(offset3)
+        // Reinsert the deleted row to create the invariant violation
+        _ <- store.participant.upsertDigestUpdates(List(update1_K1T1))
+        _ <- loggerFactory.assertInternalErrorAsyncUS[IllegalStateException](
+          store.checkReplacesInvariant(),
+          _.getMessage should include(
+            s"ReplacesOffset check error for key ${externalizeParticipantId(participantId1)} at offset $offset2 below the latest pruning offset $offset3 references an existing replaces offset $offset1"
+          ),
+        )
+      } yield succeed
+    }
+
   }
 
   /** Parameterized verification covering high-density updates, concurrent tie-breakers, checkpoint
@@ -851,6 +879,16 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
 
         // After prune, we still need to see that the replaces times are correct
         _ <- testStore.checkReplacesInvariant()
+
+        // perform another pruning operation because now we have some rows with dangling previous references.
+
+        _ <- testStore.deleteUpTo(offset(8))
+
+        retainedKey1AtT10a <- testJournal.lookup(key1, offset(10))
+        preservedKey1AtT7 <- testJournal.lookup(key1, offset(9))
+        retainedKey2AtT10a <- testJournal.lookup(key2, offset(10))
+
+        _ <- testStore.checkReplacesInvariant()
       } yield {
         firstCheckpointAfterDelete shouldBe Some(cpAtT6)
 
@@ -864,6 +902,10 @@ trait AcsDigestStoreTest extends ProtocolVersionChecksAsyncWordSpec with AcsDige
 
         // Data past the boundary must stay intact
         retainedKey1AtT10 shouldBe Some(update9_K1T10)
+
+        retainedKey1AtT10a shouldBe Some(update9_K1T10)
+        preservedKey1AtT7 shouldBe Some(update7_K1T7)
+        retainedKey2AtT10a shouldBe Some(update8_K2T9)
       }
     }
 

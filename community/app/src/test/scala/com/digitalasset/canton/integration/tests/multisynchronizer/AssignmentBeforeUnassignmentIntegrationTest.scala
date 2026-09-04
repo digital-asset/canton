@@ -207,6 +207,8 @@ sealed trait AssignmentBeforeUnassignmentIntegrationTest
       reassignmentEntry.unassignmentData should not be empty
     }
 
+    // drain mediator2 before the environment is torn down
+    participant1.health.ping(participant2, synchronizerId = Some(acmeId))
   }
 
   private def delayMediatorResult(

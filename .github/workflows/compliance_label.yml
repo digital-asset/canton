@@ -22,6 +22,54 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
+            // Labeling is best-effort, so a rate-limit 403 must not red a PR. Wait for the
+            // reset (capped, one retry), else warn and skip. The idempotent label re-applies later.
+            const RATE_LIMIT_WAIT_CAP_MS = 60_000;
+
+            function rateLimitWaitMs(error) {
+              if (error.status !== 403 && error.status !== 429) return null;
+              const headers = error.response?.headers ?? {};
+              const message = error.message ?? '';
+              // A 429 is always rate limiting. A 403 is ambiguous (missing permission vs.
+              // rate limit), so only treat it as rate limited when the budget is exhausted
+              // or the message says so.
+              if (error.status === 403) {
+                const outOfBudget = headers['x-ratelimit-remaining'] === '0';
+                const flagged = /rate limit/i.test(message);
+                if (!outOfBudget && !flagged) return null;
+              }
+              // Secondary limits send retry-after, primary ones the reset epoch.
+              const retryAfter = Number(headers['retry-after']);
+              if (Number.isFinite(retryAfter) && retryAfter > 0) return retryAfter * 1000;
+              const reset = Number(headers['x-ratelimit-reset']);
+              if (Number.isFinite(reset)) return Math.max(0, reset * 1000 - Date.now());
+              return 0;
+            }
+
+            async function withRateLimitGrace(label, call) {
+              try {
+                return await call();
+              } catch (error) {
+                let waitMs = rateLimitWaitMs(error);
+                if (waitMs === null) throw error;
+                // Add a 1s buffer so we wake just after the reset, and cap the total sleep
+                // so a far-off reset never idles the runner past the promised maximum.
+                const sleepMs = waitMs > 0 ? waitMs + 1000 : 0;
+                if (sleepMs > 0 && sleepMs <= RATE_LIMIT_WAIT_CAP_MS) {
+                  core.info(`Rate limited on ${label}, waiting ${Math.ceil(sleepMs / 1000)}s for the reset and retrying once.`);
+                  await new Promise(resolve => setTimeout(resolve, sleepMs));
+                  try {
+                    return await call();
+                  } catch (retryError) {
+                    waitMs = rateLimitWaitMs(retryError);
+                    if (waitMs === null) throw retryError;
+                  }
+                }
+                core.warning(`Skipping the Standard-Change label: GitHub API rate limit hit on ${label}. A later push or rerun will re-attempt it.`);
+                return null;
+              }
+            }
+
             const prefixes = [
               '.ci',
               '.github',
@@ -38,12 +86,15 @@ jobs:
               '.ci/branches_to_be_fully_recompiled_in_ci.txt',
             ]);
 
-            const files = await github.paginate(github.rest.pulls.listFiles, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              per_page: 100,
-            });
+            const files = await withRateLimitGrace('pulls.listFiles', () =>
+              github.paginate(github.rest.pulls.listFiles, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100,
+              })
+            );
+            if (files === null) return;
 
             const matchesCompliance = files
               .filter(({ filename }) => !exceptions.has(filename))
@@ -56,11 +107,14 @@ jobs:
               return;
             }
 
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              labels: ['Standard-Change'],
-            });
+            const labeled = await withRateLimitGrace('issues.addLabels', () =>
+              github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                labels: ['Standard-Change'],
+              })
+            );
+            if (labeled === null) return;
 
             core.info('Added "Standard-Change" label.');

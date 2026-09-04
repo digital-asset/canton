@@ -281,6 +281,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
               dependencies,
               config.consensusEmptyBlockCreationTimeout,
               config.consensusEnableFlushingSegment,
+              config.consensusFlushingMinBlocks,
               config.viewChangeTimeoutOverride,
               loggerFactory,
               timeouts,

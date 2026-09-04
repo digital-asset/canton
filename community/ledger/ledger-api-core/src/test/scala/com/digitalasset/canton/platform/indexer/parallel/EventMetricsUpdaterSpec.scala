@@ -117,6 +117,7 @@ class EventMetricsUpdaterSpec extends AnyWordSpec with MetricValues {
           representativePackageId = SameAsContractPackageId,
         )
       ),
+      traceContext = implicitly,
     )
 
     "extract transaction metering" in {
@@ -190,6 +191,7 @@ class EventMetricsUpdaterSpec extends AnyWordSpec with MetricValues {
             representativePackageId = SameAsContractPackageId,
           )
         ),
+        traceContext = implicitly,
       )
 
       EventMetricsUpdater(meter)(

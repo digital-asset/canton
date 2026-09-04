@@ -42,6 +42,8 @@ import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
+import scala.concurrent.Future
+
 trait InternalIndexService {
   def activeContracts(
       partyIds: Set[LfPartyId],
@@ -91,6 +93,9 @@ trait InternalIndexService {
       party: Option[Party],
       configOverrides: ActiveContractsServiceStreamsConfigOverrides,
   )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed]
+
+  /** Returns the offset up to which the indexer has been pruned (inclusive). */
+  def indexerPrunedUpTo(implicit traceContext: TraceContext): Future[Option[Offset]]
 }
 
 object InternalIndexService {

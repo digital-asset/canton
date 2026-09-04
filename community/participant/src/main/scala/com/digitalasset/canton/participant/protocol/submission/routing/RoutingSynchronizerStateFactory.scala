@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission.routing
 
+import cats.data.EitherT
 import cats.syntax.foldable.*
 import com.digitalasset.canton.crypto.SynchronizerCryptoPureApi
 import com.digitalasset.canton.error.TransactionRoutingError.{
@@ -14,11 +15,17 @@ import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatu
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.protocol.submission.routing.RoutingSynchronizerStateFactory.SyncCryptoPureApiLookup
+import com.digitalasset.canton.participant.store.ContractLookup
 import com.digitalasset.canton.participant.sync.{
   ConnectedSynchronizer,
   ConnectedSynchronizersLookup,
 }
-import com.digitalasset.canton.protocol.{LfContractId, StaticSynchronizerParameters}
+import com.digitalasset.canton.protocol.{
+  ContractMetadata,
+  LfContractId,
+  Stakeholders,
+  StaticSynchronizerParameters,
+}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshotLoader
 import com.digitalasset.canton.tracing.TraceContext
@@ -32,6 +39,7 @@ object RoutingSynchronizerStateFactory {
 
   def create(
       connectedSynchronizers: ConnectedSynchronizersLookup,
+      contractStore: ContractLookup,
       syncCryptoPureApiLookup: SyncCryptoPureApiLookup,
   )(implicit
       ec: ExecutionContext,
@@ -52,6 +60,7 @@ object RoutingSynchronizerStateFactory {
     topologySnapshotsUS.map(topologySnapshots =>
       new RoutingSynchronizerStateImpl(
         connectedSynchronizers = connectedSynchronizersSnapshot,
+        contractStore = contractStore,
         topologySnapshots = topologySnapshots,
         syncCryptoPureApiLookup = syncCryptoPureApiLookup,
       )
@@ -61,6 +70,7 @@ object RoutingSynchronizerStateFactory {
 
 class RoutingSynchronizerStateImpl private[routing] (
     val connectedSynchronizers: Map[PhysicalSynchronizerId, ConnectedSynchronizer],
+    contractStore: ContractLookup,
     val topologySnapshots: Map[PhysicalSynchronizerId, TopologySnapshotLoader],
     syncCryptoPureApiLookup: SyncCryptoPureApiLookup,
 ) extends RoutingSynchronizerState {
@@ -113,6 +123,17 @@ class RoutingSynchronizerStateImpl private[routing] (
       }
       .map(_._2)
   }
+
+  override def getContractsStakeholders(coids: Seq[LfContractId])(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, Set[LfContractId], Map[LfContractId, Stakeholders]] =
+    contractStore
+      .lookupMetadata(coids.toSet)
+      .bimap(
+        _.contractIds,
+        _.view.mapValues((metadata: ContractMetadata) => Stakeholders(metadata)).toMap,
+      )
 
   override def existsReadySynchronizer(): Boolean =
     connectedSynchronizers.view.exists { case (_syncId, sync) =>

@@ -81,6 +81,7 @@ class IssSegmentModule[E <: Env[E]](
     p2pNetworkOut: ModuleRef[P2PNetworkOut.Message],
     emptyBlockCreationTimeout: FiniteDuration,
     consensusEnableFlushingSegment: Boolean,
+    consensusFlushingMinBlocks: Int,
     viewChangeTimeoutOverride: Option[FiniteDuration] = None,
     metrics: BftOrderingMetrics,
     override val timeouts: ProcessingTimeout,
@@ -546,7 +547,11 @@ class IssSegmentModule[E <: Env[E]](
     resetWaitingForProposal()
     blockStartTimeoutManager.cancelTimeout()
 
-    if (consensusEnableFlushingSegment && myOriginalLeaderSegmentState.areMostSegmentsComplete)
+    if (
+      consensusEnableFlushingSegment && myOriginalLeaderSegmentState.areMostSegmentsComplete && (
+        orderingBlock.proofs.isEmpty || consensusFlushingMinBlocks <= myOriginalLeaderSegmentState.pendingSlotsToPropose
+      )
+    )
       flushSegment(orderingBlock, myOriginalLeaderSegmentState, logPrefix)
     else
       orderSingleBlock(orderingBlock, myOriginalLeaderSegmentState, logPrefix)
@@ -941,7 +946,6 @@ class IssSegmentModule[E <: Env[E]](
 }
 
 object IssSegmentModule {
-
   final case class ViewChangeTimeoutCalculator(
       viewChangeTimeoutOverride: Option[FiniteDuration],
       sequencingParameters: SequencingParameters,

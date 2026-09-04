@@ -275,11 +275,63 @@ class DbAcsDigestStore(
       }
   }
 
+  override def lookupLatestPruningOffset()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Offset]] = {
+    val query =
+      sql"""select latest_successful_prune_offset from par_acs_running_digests_pruning where synchronizer_idx = $synchronizerIdx"""
+        .as[Offset]
+        .headOption
+    storage.query(query, functionFullName)
+  }
+
+  override protected def increaseLatestPruneOffset(toExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val query = storage.profile match {
+      case _: DbStorage.Profile.Postgres =>
+        sqlu"""
+          insert into par_acs_running_digests_pruning (synchronizer_idx, latest_successful_prune_offset)
+          values ($synchronizerIdx, $toExclusive)
+          on conflict (synchronizer_idx) do
+            update set latest_successful_prune_offset = excluded.latest_successful_prune_offset
+            where par_acs_running_digests_pruning.latest_successful_prune_offset < excluded.latest_successful_prune_offset
+          """
+      case _: DbStorage.Profile.H2 =>
+        sqlu"""
+           merge into par_acs_running_digests_pruning t
+           using (select cast($synchronizerIdx as integer) synchronizer_idx, cast($toExclusive as bigint) new_offset) s
+             on t.synchronizer_idx = s.synchronizer_idx
+           when matched and t.latest_successful_prune_offset < s.new_offset then
+             update set latest_successful_prune_offset = s.new_offset
+           when not matched then
+             insert (synchronizer_idx, latest_successful_prune_offset)
+             values (s.synchronizer_idx, s.new_offset)
+          """
+    }
+    storage.update_(query, functionFullName)
+  }
+
+  override protected def purgeLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val query =
+      sqlu"""delete from par_acs_running_digests_pruning where synchronizer_idx = $synchronizerIdx"""
+    storage.update_(query, functionFullName)
+  }
+
   override protected def purgeCheckpoints()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val query =
       sqlu"delete from par_acs_running_digests_checkpoint where synchronizer_idx = $synchronizerIdx"
+    storage.update_(query, functionFullName)
+  }
+
+  override protected def truncateLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val query = sqlu"""truncate table par_acs_running_digests_pruning"""
     storage.update_(query, functionFullName)
   }
 

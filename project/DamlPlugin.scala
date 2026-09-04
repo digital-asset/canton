@@ -145,8 +145,12 @@ object DamlPlugin extends AutoPlugin {
       val damlPrimLocation =
         new File(damlcLocation + "/damlc-dist-dpm/resources/stable-packages/lf-v2/daml-prim")
       // IO.copyFile(stablePackagesManifestLocation, targetLocation / "stable-packages-manifest-v2.txt")
-      IO.copyDirectory(damlStdlibLocation, targetLocation / "lf-v2" / "daml-stdlib")
-      IO.copyDirectory(damlPrimLocation, targetLocation / "lf-v2" / "daml-prim")
+      IO.copyDirectory(
+        damlStdlibLocation,
+        targetLocation / "lf-v2" / "daml-stdlib",
+        overwrite = true,
+      )
+      IO.copyDirectory(damlPrimLocation, targetLocation / "lf-v2" / "daml-prim", overwrite = true)
 
       val a1 = IO.listFiles(targetLocation / "lf-v2" / "daml-stdlib").toSeq
       val a2 = IO.listFiles(targetLocation / "lf-v2" / "daml-prim").toSeq

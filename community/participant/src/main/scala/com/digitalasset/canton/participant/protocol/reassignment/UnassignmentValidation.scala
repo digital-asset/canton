@@ -273,24 +273,34 @@ private[reassignment] object UnassignmentValidation {
 
     def performValidations(
         parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree]
-    ): ValidationErrorOr[ReassigningParticipantValidation] =
-      for {
-        targetTopology <- getTopologyAtTs.getTargetApproximateSnapshot(
-          parsedRequest.fullViewTree.targetSynchronizer
-        )
+    ): ValidationErrorOr[ReassigningParticipantValidation] = {
+      val fullViewTree = parsedRequest.fullViewTree
 
-        assignmentExclusivity <- checkAssignmentExclusivity(
-          parsedRequest.fullViewTree,
-          targetTopology,
+      getTopologyAtTs
+        .getTargetApproximateSnapshot(fullViewTree.targetSynchronizer)
+        .biflatMap(
+          unknownTarget =>
+            // Return a validation error rather than a processing error to not halt processing
+            EitherT.pure[FutureUnlessShutdown, ReassignmentProcessorError](
+              ReassigningParticipantValidation(
+                assignmentExclusivity = None,
+                reassigningParticipantValidationResult = ReassigningParticipantValidationResult(
+                  contractAuthenticationResultF = EitherT.pure(()),
+                  errors = Seq(unknownTarget),
+                ),
+              )
+            ),
+          targetTopology =>
+            for {
+              assignmentExclusivity <- checkAssignmentExclusivity(fullViewTree, targetTopology)
+              reassigningParticipantValidationResult <-
+                computeReassigningParticipantValidationResult(parsedRequest, targetTopology)
+            } yield ReassigningParticipantValidation(
+              assignmentExclusivity,
+              reassigningParticipantValidationResult,
+            ),
         )
-        reassigningParticipantValidationResult <- computeReassigningParticipantValidationResult(
-          parsedRequest,
-          targetTopology,
-        )
-      } yield ReassigningParticipantValidation(
-        assignmentExclusivity,
-        reassigningParticipantValidationResult,
-      )
+    }
 
   }
 

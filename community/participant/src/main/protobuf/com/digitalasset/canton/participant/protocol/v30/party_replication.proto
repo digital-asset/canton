@@ -82,8 +82,14 @@ message PartyReplicationStatus {
     com.digitalasset.canton.protocol.v30.Enums.ParticipantPermission participant_permission = 7;
   }
 
+  // Sequencer channel agreement hasn't been proposed by target participant yet.
+  message AgreementNotProposed {}
+
+  // Sequencer channel agreement has been proposed by target participant but not yet accepted by source participant.
+  message AgreementProposed {}
+
   // Agreement among participants to replicate the ACS via sequencer channel.
-  message SequencerChannelAgreement {
+  message AgreementExists {
     // Daml admin workflow party replication contract id.
     // required
     string contract_id = 1;
@@ -91,6 +97,9 @@ message PartyReplicationStatus {
     // Sequencer hosting the channel for ACS replication.
     string sequencer_uid = 2;
   }
+
+  // Sequencer channel agreement is not needed either because the ACS replication has been finished or it's file-based.
+  message AgreementNotNeeded {}
 
   // Authorization by party owners and target participant to onboard the party.
   message PartyReplicationAuthorization {
@@ -164,21 +173,26 @@ message PartyReplicationStatus {
   ReplicationParameters parameters = 1;
   // Sequencer channel agreement.
   // optional, set if there is an agreement to replicate the ACS via sequencer channel.
-  SequencerChannelAgreement agreement = 2;
+  oneof agreement_status {
+    AgreementNotProposed not_proposed = 2;
+    AgreementProposed proposed = 3;
+    AgreementExists exists = 4;
+    AgreementNotNeeded not_needed = 5;
+  }
   // Topology authorization.
   // optional, set once the party onboarding has been authorized via topology.
-  PartyReplicationAuthorization authorization = 3;
+  PartyReplicationAuthorization authorization = 6;
   // ACS replication progress.
   // optional, set once the ACS replication has started.
-  AcsReplicationProgress replication = 4;
+  AcsReplicationProgress replication = 7;
   // Indexing progress.
   // optional, set once indexing of the ACS has started.
-  AcsIndexingProgress indexing = 5;
+  AcsIndexingProgress indexing = 8;
   // Whether the party has been successfully replicated to the target participant,
   // i.e. whether party replication has succeeded and is done.
   // required
-  bool has_completed = 6;
+  bool has_completed = 9;
   // Error details.
   // optional, set when there is a transient or terminal error.
-  PartyReplicationError error_message = 7;
+  PartyReplicationError error_message = 10;
 }

@@ -89,7 +89,6 @@ import java.util.UUID
 // Should you ever consider replacing this suite by something else, make sure all functionality is still covered.
 class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
-  import TraceContext.Implicits.Empty.*
   import TransactionBuilder.Implicits.{defaultPackageId as _, *}
   import UpdateToDbDtoSpec.*
 
@@ -113,6 +112,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         CantonTimestamp.ofEpochMicro(1234567),
         isTransaction = true,
         transactionHash = None,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -153,6 +153,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         messageUuid,
         isTransaction = true,
         transactionHash = None,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -235,6 +236,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               recordTime = someRecordTime,
               repairCounter = RepairCounter(1337),
               contractInfos = Map(contract.contractId -> someContractInfos(contract)),
+              traceContext = TraceContext.empty,
             )
           else
             state.Update.SequencedTransactionAccepted(
@@ -249,6 +251,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               contractInfos = Map(
                 contract.contractId -> someContractInfos(contract, SameAsContractPackageId)
               ),
+              traceContext = TraceContext.empty,
             )
         val dtos = updateToDtos(update)
 
@@ -453,6 +456,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           contractInfos = Map(
             contract.contractId -> someContractInfos(contract, SameAsContractPackageId)
           ),
+          traceContext = TraceContext.empty,
         )
       val dtos = updateToDtos(update)
 
@@ -604,6 +608,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             representativePackageId = SameAsContractPackageId,
           )
         ),
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -739,6 +744,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         transactionHash = Some(externalTransactionHash),
         acsChangeFactory = TestAcsChangeFactory(false),
         contractInfos = Map.empty,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -869,6 +875,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         transactionHash = Some(externalTransactionHash),
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map.empty,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -1016,6 +1023,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             representativePackageId = SameAsContractPackageId,
           )
         ),
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -1262,6 +1270,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             representativePackageId = SameAsContractPackageId,
           )
         ),
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -1497,6 +1506,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         transactionHash = Some(externalTransactionHash),
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map.empty,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -1745,6 +1755,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         recordTime = someRecordTime,
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map.empty,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -1823,6 +1834,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         transactionHash = Some(externalTransactionHash),
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map.empty,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -1971,6 +1983,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             representativePackageId = SameAsContractPackageId,
           )
         ),
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -2151,6 +2164,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         recordTime = someRecordTime,
         acsChangeFactory = TestAcsChangeFactory(),
         contractInfos = Map.empty,
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -2222,6 +2236,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             representativePackageId = SameAsContractPackageId,
           )
         ),
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -2311,6 +2326,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               someRecordTime,
               isTransaction = isTransaction,
               transactionHash = None,
+              traceContext = TraceContext.empty,
             )
             val dtos = updateToDtos(update)
 
@@ -2382,6 +2398,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
                 representativePackageId = SameAsContractPackageId,
               )
             ),
+            traceContext = TraceContext.empty,
           )
           val dtos = updateToDtos(update)
 
@@ -2510,6 +2527,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         recordTime = someRecordTime,
         synchronizerId = targetSynchronizerId.unwrap,
         acsChangeFactory = TestAcsChangeFactory(),
+        traceContext = TraceContext.empty,
       )
 
       val dtos = updateToDtos(update)
@@ -2639,6 +2657,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         recordTime = CantonTimestamp.ofEpochMicro(120),
         synchronizerId = sourceSynchronizerId.unwrap,
         acsChangeFactory = TestAcsChangeFactory(),
+        traceContext = TraceContext.empty,
       )
 
       val dtos = updateToDtos(update)
@@ -2788,6 +2807,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         genericTopologyEvents = Nil,
         synchronizerId = someSynchronizerId1,
         effectiveTime = someRecordTime,
+        traceContext = TraceContext.empty,
       )
 
       def eventPartyToParticipant(
@@ -2882,6 +2902,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         genericTopologyEvents = List(SynchronizerParametersState(payload)),
         synchronizerId = someSynchronizerId1,
         effectiveTime = someRecordTime,
+        traceContext = TraceContext.empty,
       )
 
       val dtos = updateToDtos(update)
@@ -2925,6 +2946,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         genericTopologyEvents = List(SynchronizerParametersState(payload)),
         synchronizerId = someSynchronizerId1,
         effectiveTime = someRecordTime,
+        traceContext = TraceContext.empty,
       )
 
       val dtos = updateToDtos(update)
@@ -2962,6 +2984,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencerIndexMoved(
         synchronizerId = someSynchronizerId1,
         recordTime = CantonTimestamp.ofEpochMicro(2000),
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 
@@ -2979,6 +3002,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         recordTime = recordTime,
         payload = payload,
         updateId = TestUpdateId("ReceivedAcsCommitment"),
+        traceContext = TraceContext.empty,
       )
       val dtos = updateToDtos(update)
 

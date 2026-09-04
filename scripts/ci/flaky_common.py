@@ -217,11 +217,18 @@ def format_test_name(test_name: str):
     return test_name[:200]
 
 
+# Cause bucket recorded alongside each failing test and rendered in the issue
+# table's Cause column. "regular" is a JUnit failure/error, "timeout" a watchdog
+# kill (see generate_watchdog_xml.py), and warn_other/error_other come from the
+# found_problems.txt log-check path. Also the fallback for pre-Cause artifacts.
+DEFAULT_CAUSE: Final[str] = "regular"
+
+
 def create_issue_table_header():
-    return "| Date | Job | Node | Build | Commit |\n|---|---|---|---|---|"
+    return "| Date | Job | Node | Build | Commit | Cause |\n|---|---|---|---|---|---|"
 
 
-def create_issue_table_row():
+def create_issue_table_row(cause: str = DEFAULT_CAUSE):
     date_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     commit_hash = get_ci_commit_hash()
     if is_github_actions_ci():
@@ -240,7 +247,7 @@ def create_issue_table_row():
     job = get_ci_job_name()
     node_index = get_ci_node_index()
     parallel_run_url = get_ci_parallel_run_url(build_url, node_index)
-    return f"| {date_str} | {job} | {node_index} | [{build_number}]({parallel_run_url}) | [{commit_hash[:8]}]({commit_url}) |"
+    return f"| {date_str} | {job} | {node_index} | [{build_number}]({parallel_run_url}) | [{commit_hash[:8]}]({commit_url}) | {cause} |"
 
 
 # --- JSON artifact contracts ---------------------------------------------
@@ -249,7 +256,7 @@ def create_issue_table_row():
 # concern is its own process. Paths default to a CI temp dir and can be
 # overridden per step with --failing-tests-json / --streaks-json.
 
-ARTIFACT_VERSION: Final[int] = 1
+ARTIFACT_VERSION: Final[int] = 2
 
 
 def artifact_dir() -> str:
@@ -268,10 +275,27 @@ def streaks_path() -> str:
     return os.path.join(artifact_dir(), "streaks.json")
 
 
-def write_failing_tests(path: str, tests) -> None:
+def write_failing_tests(path: str, tests, causes=None) -> None:
+    """Writes the failing tests plus their causes to the JSON artifact.
+
+    `tests` may be a plain iterable of names or a {name: cause} mapping. In the
+    latter case the causes are taken from it unless an explicit `causes` map is
+    passed. Names without a cause default to DEFAULT_CAUSE so every failing test
+    always carries one. `failing_tests` stays a sorted name list for the datadog
+    and report_failing_tests readers that only care about names.
+    """
+    if causes is None and isinstance(tests, dict):
+        causes = tests
+    causes = causes or {}
+    names = sorted(set(tests))
+    cause_map = {name: causes.get(name, DEFAULT_CAUSE) for name in names}
     with open(path, "w") as f:
-        json.dump({"version": ARTIFACT_VERSION, "failing_tests": sorted(set(tests))}, f, indent=2)
-    print(f"Wrote {len(set(tests))} failing test(s) to {path}")
+        json.dump(
+            {"version": ARTIFACT_VERSION, "failing_tests": names, "causes": cause_map},
+            f,
+            indent=2,
+        )
+    print(f"Wrote {len(names)} failing test(s) to {path}")
 
 
 def read_failing_tests(path: str) -> list:
@@ -280,6 +304,20 @@ def read_failing_tests(path: str) -> list:
         return []
     with open(path) as f:
         return list(json.load(f).get("failing_tests", []))
+
+
+def read_failing_test_causes(path: str) -> dict:
+    """Returns a {test_name: cause} map from the failing-tests artifact.
+
+    Missing entries and pre-Cause artifacts (version 1) fall back to
+    DEFAULT_CAUSE, so callers always get a cause for every failing test.
+    """
+    if not path or not os.path.exists(path):
+        return {}
+    with open(path) as f:
+        data = json.load(f)
+    stored = data.get("causes", {})
+    return {name: stored.get(name, DEFAULT_CAUSE) for name in data.get("failing_tests", [])}
 
 
 def write_streaks(path: str, streaks) -> None:
@@ -393,8 +431,17 @@ def test_create_issue_table_row():
     }
     with patch.dict(os.environ, env_circleci_dach, clear=False):
         header = create_issue_table_header()
-        assert '| Date | Job | Node | Build | Commit |' in header, f"Missing header in: {header}"
-        line = create_issue_table_row()
+        assert '| Date | Job | Node | Build | Commit | Cause |' in header, (
+            f"Missing Cause column in header: {header}"
+        )
+        assert header.splitlines()[1] == '|---|---|---|---|---|---|', (
+            f"Separator row must match the six-column header: {header}"
+        )
+        line = create_issue_table_row("timeout")
+        assert line.endswith('| timeout |'), f"Missing cause cell in: {line}"
+        assert create_issue_table_row().endswith(f'| {DEFAULT_CAUSE} |'), (
+            "create_issue_table_row() must default the cause cell"
+        )
         assert '| test_with_java17 |' in line, f"Missing job in: {line}"
         assert '| 5 |' in line, f"Missing node_index in: {line}"
         assert (

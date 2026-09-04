@@ -80,8 +80,21 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
         Offset.MaxValue,
         AcsDigestStore.checkpointTickFilter,
       )
+      ledgerBegin <- FutureUnlessShutdown.outcomeF(internalIndexService.indexerPrunedUpTo)
     } yield {
-      val startingOffset = watermark.matching
+      val startingOffset = Ordering[Option[Offset]].max(ledgerBegin, watermark.matching)
+      if (startingOffset > watermark.matching) {
+        // This should only happen when the digest processor pipeline has been disabled for a while
+        // and the pipeline has now been re-enabled.
+        logger.info(
+          s"Matching pipeline skips over offsets ${watermark.matching.map(off => s"from $off ").getOrElse("up ")} to ${startingOffset
+              .getOrElse(throw new NoSuchElementException("startingOffset is None"))}."
+        )
+        // Since the pipeline is now enabled, we do not have to worry about the ledger begin moving ahead
+        // concurrently to creating the subscription at the start offset. Therefore, this construction
+        // ensures that the subscription to the internal index service does not complain about
+        // the starting offset being pruned already.
+      }
       val matcher = new ReceivedAcsCommitmentMatcher(
         periodStore,
         stringInterning,

@@ -3,8 +3,11 @@
 
 package com.daml.ledger.api.testtool.infrastructure
 
+import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
 
-case object TimeoutException extends RuntimeException with NoStackTrace {
-  override val getMessage: String = s"Future could not be completed before timeout"
+final case class TimeoutException(operation: String, timeout: Duration)
+    extends RuntimeException
+    with NoStackTrace {
+  override def getMessage: String = s"'$operation' did not complete within $timeout"
 }

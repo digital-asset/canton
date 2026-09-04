@@ -188,6 +188,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
               newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
               exportDirectory = exportDirectory,
               oldNodeName = oldSequencerName,
+              synchronizerId = fixture.lsid,
             )
 
             s(oldSequencerName).topology.lsu.sequencer_successors.propose_successor(

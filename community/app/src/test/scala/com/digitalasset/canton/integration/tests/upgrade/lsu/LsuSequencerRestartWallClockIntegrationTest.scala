@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -21,6 +22,7 @@ import com.digitalasset.canton.{HasExecutionContext, config}
 import scala.concurrent.duration.DurationInt
 import scala.jdk.DurationConverters.ScalaDurationOps
 
+@UnstableTest // TODO(i35208): remove this once the test is no longer flaky
 class LsuSequencerRestartWallClockIntegrationTest extends LsuBase with HasExecutionContext {
 
   override protected def testName: String = "lsu-sequencer-restart"

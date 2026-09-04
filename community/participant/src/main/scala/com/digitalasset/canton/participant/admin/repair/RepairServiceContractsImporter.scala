@@ -611,6 +611,7 @@ final class RepairServiceContractsImporter(
       repairCounter = repairCounter,
       recordTime = recordTime,
       contractInfos = contractInfos,
+      traceContext = traceContext,
     )
   }
 
@@ -693,6 +694,7 @@ final class RepairServiceContractsImporter(
         repairCounter = repairCounter,
         recordTime = recordTime,
         synchronizerId = synchronizerId,
+        traceContext = traceContext,
       )
     }
   }

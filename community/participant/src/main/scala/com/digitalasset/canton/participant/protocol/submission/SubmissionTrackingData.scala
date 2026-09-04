@@ -130,14 +130,15 @@ final case class TransactionSubmissionTrackingData(
     val reasonTemplate = rejectionCause.asFinalReason
     Update.UnSequencedCommandRejected(
       // notification will be tracked based on this as a non-sequenced in-flight reference
-      completionInfo,
-      reasonTemplate,
-      synchronizerId.logical,
-      recordTime,
-      messageUuid,
+      completionInfo = completionInfo,
+      reasonTemplate = reasonTemplate,
+      synchronizerId = synchronizerId.logical,
+      recordTime = recordTime,
+      messageUuid = messageUuid,
       // TODO(i15875): Submission tracking is only enabled for transactions
       isTransaction = true,
       transactionHash = transactionHash,
+      traceContext = traceContext,
     )
   }
 

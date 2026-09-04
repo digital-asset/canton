@@ -6,9 +6,10 @@ package com.daml.ledger.api.testtool.suites.v2_2
 import com.daml.ledger.api.testtool.TestDars
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
+import com.daml.ledger.api.testtool.infrastructure.Eventually.eventually
 import com.daml.ledger.api.testtool.infrastructure.TransactionHelpers.*
 import com.daml.ledger.api.testtool.infrastructure.TransactionOps.*
-import com.daml.ledger.api.testtool.infrastructure.{Eventually, LedgerTestSuite, Party}
+import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party}
 import com.daml.ledger.api.testtool.suites.v2_2.TransactionServiceVisibilityIT.*
 import com.daml.ledger.api.v2.event.Event
 import com.daml.ledger.api.v2.event.Event.Event.Exercised
@@ -34,7 +35,6 @@ import com.digitalasset.canton.platform.store.utils.EventOps.EventOps
 
 import scala.collection.immutable.Seq
 import scala.collection.mutable
-import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
 class TransactionServiceVisibilityIT(testDars: TestDars) extends LedgerTestSuite {
@@ -53,15 +53,6 @@ class TransactionServiceVisibilityIT(testDars: TestDars) extends LedgerTestSuite
     MultiPartyContract.ContractId,
     MultiPartyContract,
   ] = MultiPartyContract.COMPANION
-
-  def eventually[A](
-      assertionName: String
-  )(runAssertion: => Future[A])(implicit ec: ExecutionContext): Future[A] =
-    Eventually.eventually(
-      assertionName,
-      attempts =
-        12, // compared to the default of 10; 4x comes from exponential 2x backoff on each attempt
-    )(runAssertion)
 
   def privacyHappyCase(asset: String, happyCase: String)(implicit
       lineNo: sourcecode.Line,

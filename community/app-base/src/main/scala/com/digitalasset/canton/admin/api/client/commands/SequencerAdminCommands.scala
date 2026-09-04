@@ -33,7 +33,7 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
 import com.digitalasset.canton.synchronizer.sequencer.{SequencerPruningStatus, SequencerSnapshot}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.{Member, SequencerId}
+import com.digitalasset.canton.topology.{Member, SequencerId, SynchronizerId}
 import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
 import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
 import com.google.protobuf.ByteString
@@ -393,6 +393,7 @@ object SequencerAdminCommands {
       topologySnapshotStream: InputStream,
       synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
       ignorePsidCheck: Boolean,
+      synchronizerId: SynchronizerId,
   ) extends GrpcAdminCommand[
         Unit,
         proto.InitializeSequencerFromLsuPredecessorResponse,
@@ -435,6 +436,7 @@ object SequencerAdminCommands {
               topologySnapshot = ByteString.copyFrom(topologySnapshot),
               parameters = parameters,
               ignorePsidCheck = ignorePsidCheck,
+              synchronizerId = synchronizerId.toProtoPrimitive,
             ),
           inputStream,
         )

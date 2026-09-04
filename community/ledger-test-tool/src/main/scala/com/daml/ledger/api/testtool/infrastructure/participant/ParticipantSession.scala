@@ -106,6 +106,8 @@ object ParticipantSession {
               "GetLedgerFeatures",
               attempts = maxConnectionAttempts,
               firstWaitTime = 100.millis,
+              // a cold participant can take a minute to answer, so keep a wide cap
+              maxWaitTime = 30.seconds,
             ) {
               services.version
                 .getLedgerApiVersion(new GetLedgerApiVersionRequest())

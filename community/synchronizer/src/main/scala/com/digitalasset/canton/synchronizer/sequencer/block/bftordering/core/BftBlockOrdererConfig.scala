@@ -6,7 +6,12 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.{TlsClientConfig, TlsServerConfig}
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  Port,
+  PositiveInt,
+}
 import com.digitalasset.canton.config.{
   ActiveRequestLimitsConfig,
   AdminTokenConfig,
@@ -32,12 +37,15 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultBlockingDbReadTimeout,
   DefaultConsensusBlockCompletionTimeout,
   DefaultConsensusEmptyBlockCreationTimeout,
+  DefaultConsensusFlushingMinBlocks,
   DefaultConsensusNewEpochTopologyWarnTimeout,
   DefaultConsensusQueueMaxSize,
   DefaultConsensusQueuePerNodeQuota,
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
+  DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel,
   DefaultEpochStateTransferTimeout,
+  DefaultEpochStateTransferTimeoutForFutureEpoch,
   DefaultInitQueryTimeout,
   DefaultInitTimeout,
   DefaultMaxBatchCreationInterval,
@@ -134,11 +142,27 @@ import scala.util.Random
   *   it leads is in progress, it will flush the segment and complete all slots in parallel to avoid
   *   making other nodes wait for the epoch to complete. This is a performance optimization that can
   *   be disabled if issues arise with the flushing logic.
+  * @param consensusFlushingMinBlocks
+  *   The minimum number of blocks that must be missing to complete in a segment before the node
+  *   will be able to decide to flush the segment and complete all slots in parallel if it detects
+  *   that a strong quorum of segments are completed while the one it leads is in progress. If fewer
+  *   blocks than this are missing, the node will complete them normally one at a time.
   * @param delayedInitQueueMaxSize
   *   The maximum size of the delayed init queue. This queue is used by modules to save incoming
   *   events in memory while the module is still initializing. Once startup is complete, the module
   *   processes all events from the delayed init queue first before continuing to read newly
   *   received events.
+  * @param epochStateTransferFutureEpochQueueMaxSize
+  *   The maximum size of future epoch queue.
+  * @param epochStateTransferFutureEpochQueuePerNodeQuota
+  *   The maximum number of messages per node stored in future epoch queue
+  * @param epochStateTransferHowManyFutureEpochsToDownloadInParallel
+  *   The amount of epochs to speculatively download in parallel during State Transfer. Can be 0 to
+  *   turn off speculative downloading
+  * @param epochStateTransferTimeoutForFutureEpoch
+  *   A timeout for how long we will wait if we already potentially have all blocks due to
+  *   speculatively downloaded an epoch before we make a new network request. This timeout should be
+  *   quite short since it is only accounting for local processing.
   * @param epochStateTransferRetryTimeout
   *   The state transfer retry timeout covering periods from requesting blocks from a single epoch
   *   up to receiving all the corresponding batches.
@@ -240,7 +264,14 @@ final case class BftBlockOrdererConfig(
       DefaultConsensusNewEpochTopologyWarnTimeout,
     consensusEnableLogEndOfEpochProgress: Boolean = false,
     consensusEnableFlushingSegment: Boolean = true,
+    consensusFlushingMinBlocks: Int = DefaultConsensusFlushingMinBlocks,
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
+    epochStateTransferFutureEpochQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
+    epochStateTransferFutureEpochQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,
+    epochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
+      DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel,
+    epochStateTransferTimeoutForFutureEpoch: FiniteDuration =
+      DefaultEpochStateTransferTimeoutForFutureEpoch,
     epochStateTransferRetryTimeout: FiniteDuration = DefaultEpochStateTransferTimeout,
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
     outputFetchMinimumDelay: FiniteDuration = DefaultOutputFetchMinimumDelay,
@@ -288,9 +319,13 @@ object BftBlockOrdererConfig {
   val DefaultConsensusQueuePerNodeQuota: Int = 1_024
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds
   val DefaultConsensusEmptyBlockCreationTimeout: FiniteDuration = 5.seconds
+  val DefaultConsensusFlushingMinBlocks = 2
   val DefaultDelayedInitQueueMaxSize: Int = 1_024
   val DefaultConsensusNewEpochTopologyWarnTimeout: FiniteDuration = 2.seconds
+  val DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
+    NonNegativeLong.tryCreate(5L)
   val DefaultEpochStateTransferTimeout: FiniteDuration = 4.seconds
+  val DefaultEpochStateTransferTimeoutForFutureEpoch: FiniteDuration = 500.millis
   val DefaultOutputFetchTimeout: FiniteDuration = 1_000.millis
   val DefaultOutputFetchMinimumDelay: FiniteDuration = 1_000.millis
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5_000.millis

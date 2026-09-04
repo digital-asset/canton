@@ -147,6 +147,36 @@ message TransactionProtocolLimits {
 
   // maximum number of `actAs` entries in a transaction
   uint32 max_act_as = 1;
+
+  // maximum number of envelopes in the batch
+  uint32 max_envelopes = 2;
+
+  // maximum number of `Recipients` structures in the batch
+  uint32 max_recipients_per_batch = 3;
+
+  // maximum number of recipients trees in a `Recipients` structure
+  uint32 max_recipients_trees = 4;
+
+  // maximum number of recipients in a level of a recipients tree
+  uint32 max_recipients_per_recipients_tree_level = 5;
+
+  // maximum number of children in a level of a recipients tree
+  uint32 max_children_per_recipients_tree_level = 6;
+
+  // maximum number of distinct recipients of a single envelope
+  uint32 max_recipients_per_envelope = 7;
+
+  // maximum depth of a recipients tree in a single envelope
+  uint32 max_recipients_tree_depth = 8;
+
+  // maximum number of root views in a transaction
+  uint32 max_transaction_root_views = 9;
+
+  // maximum number of sub views in a transaction
+  uint32 max_transaction_sub_views = 10;
+
+  // maximum depth of the view tree in a transaction
+  uint32 max_transaction_tree_depth = 11;
 }
 
 // Differences with v30:

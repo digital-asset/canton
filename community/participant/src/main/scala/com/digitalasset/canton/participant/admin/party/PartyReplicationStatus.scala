@@ -7,17 +7,22 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.{
   AcsIndexingProgress,
   AcsReplicationProgress,
+  AgreementStatus,
   Disconnected,
   EphemeralSequencerChannelProgress,
   PartyReplicationAuthorization,
   PartyReplicationError,
   PartyReplicationFailed,
   ReplicationParams,
-  SequencerChannelAgreement,
 }
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.protocol.party.{
@@ -28,15 +33,9 @@ import com.digitalasset.canton.participant.protocol.v30
 import com.digitalasset.canton.protocol.{LfContractId, v30 as v30Topology}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
-import com.digitalasset.canton.topology.{
-  ParticipantId,
-  PartyId,
-  SequencerId,
-  SynchronizerId,
-  UniqueIdentifier,
-}
 import com.digitalasset.canton.util.HexString
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{ProtoDeserializationError, RepairCounter}
@@ -47,7 +46,7 @@ import io.scalaland.chimney.dsl.*
   */
 final case class PartyReplicationStatus(
     params: ReplicationParams,
-    agreementO: Option[SequencerChannelAgreement],
+    agreementStatus: AgreementStatus,
     authorizationO: Option[PartyReplicationAuthorization],
     replicationO: Option[AcsReplicationProgress],
     indexingO: Option[AcsIndexingProgress],
@@ -80,8 +79,8 @@ final case class PartyReplicationStatus(
       )
   }
 
-  def setAgreementO(newAgreementO: Option[SequencerChannelAgreement]): PartyReplicationStatus =
-    copy(agreementO = newAgreementO)(representativeProtocolVersion)
+  def setAgreementStatus(newAgreementStatus: AgreementStatus): PartyReplicationStatus =
+    copy(agreementStatus = newAgreementStatus)(representativeProtocolVersion)
   def setAuthorization(newAuthorization: PartyReplicationAuthorization): PartyReplicationStatus =
     copy(authorizationO = Some(newAuthorization))(representativeProtocolVersion)
   def modifyReplication(
@@ -105,12 +104,14 @@ final case class PartyReplicationStatus(
   def modifyErrorO(
       modify: Option[PartyReplicationError] => Option[PartyReplicationError]
   ): PartyReplicationStatus = copy(errorO = modify(errorO))(representativeProtocolVersion)
+  def setTopologySerial(serial: PositiveInt): PartyReplicationStatus =
+    copy(params = params.copy(serial = serial))(representativeProtocolVersion)
 
   def ensureCanSetAgreement(paramsReceived: ReplicationParams): Either[String, Unit] = for {
     _ <- Either.cond(
-      agreementO.isEmpty,
+      agreementStatus.isEmpty,
       (),
-      s"Party replication ${params.requestId} already has an agreement $agreementO",
+      s"Party replication ${params.requestId} already has an agreement $agreementStatus",
     )
     _ <- Either.cond(
       paramsReceived == params,
@@ -130,7 +131,7 @@ final case class PartyReplicationStatus(
 
   def toProtoV30: v30.PartyReplicationStatus = v30.PartyReplicationStatus(
     Some(params.toProtoV30),
-    agreementO.map(_.toProtoV30),
+    agreementStatus.toProtoV30,
     authorizationO.map(_.toProtoV30),
     replicationO.map(_.toProtoV30),
     indexingO.map(_.toProtoV30),
@@ -142,7 +143,7 @@ final case class PartyReplicationStatus(
     import com.digitalasset.canton.logging.pretty.PrettyInstances.*
     prettyOfClass(
       param("params", _.params),
-      paramIfDefined("agreement", _.agreementO),
+      param("agreement", _.agreementStatus),
       paramIfDefined("authorization", _.authorizationO),
       paramIfDefined("replication", _.replicationO),
       paramIfDefined("indexing", _.indexingO),
@@ -172,7 +173,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
     rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     parametersP <- ProtoConverter.required("parameters", proto.parameters)
     parameters <- ReplicationParams.fromProtoV30(parametersP)
-    agreementO <- proto.agreement.traverse(SequencerChannelAgreement.fromProtoV30)
+    agreement <- AgreementStatus.fromProtoV30(proto.agreementStatus)
     authorizationO <- proto.authorization.traverse(PartyReplicationAuthorization.fromProtoV30)
     replicationO <- proto.replication.traverse(AcsReplicationProgress.fromProtoV30)
     indexingO <- proto.indexing.traverse(AcsIndexingProgress.fromProtoV30)
@@ -180,7 +181,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
     errorO <- proto.errorMessage.traverse(PartyReplicationError.fromProtoV30)
   } yield PartyReplicationStatus(
     parameters,
-    agreementO,
+    agreement,
     authorizationO,
     replicationO,
     indexingO,
@@ -191,7 +192,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
   def apply(
       params: ReplicationParams,
       pv: ProtocolVersion,
-      agreementO: Option[SequencerChannelAgreement] = None,
+      agreementStatus: AgreementStatus = AgreementStatus.NotProposed,
       authorizationO: Option[PartyReplicationAuthorization] = None,
       replicationO: Option[AcsReplicationProgress] = None,
       indexingO: Option[AcsIndexingProgress] = None,
@@ -199,7 +200,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
       errorO: Option[PartyReplicationError] = None,
   ): PartyReplicationStatus = PartyReplicationStatus(
     params,
-    agreementO,
+    agreementStatus,
     authorizationO,
     replicationO,
     indexingO,
@@ -322,36 +323,112 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
       agreement.transformInto[ReplicationParams]
   }
 
-  final case class SequencerChannelAgreement(
-      // daml agreement contract id to be archived upon completion or disruptions
-      damlAgreementContractId: LfContractId,
-      sequencerId: SequencerId,
-  ) extends PrettyPrinting {
-    def toProtoV30: v30.PartyReplicationStatus.SequencerChannelAgreement =
-      v30.PartyReplicationStatus.SequencerChannelAgreement(
-        damlAgreementContractId.coid,
-        sequencerId.uid.toProtoPrimitive,
-      )
-
-    override protected def pretty: Pretty[SequencerChannelAgreement] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("contract id", _.damlAgreementContractId),
-        param("sequencer", _.sequencerId),
-      )
-    }
+  sealed trait AgreementStatus extends PrettyPrintingFromCompanion with Product with Serializable {
+    def toProtoV30: v30.PartyReplicationStatus.AgreementStatus
+    def isEmpty: Boolean
   }
 
-  object SequencerChannelAgreement {
+  object AgreementStatus {
+    case object NotProposed extends AgreementStatus {
+      override def toProtoV30: v30.PartyReplicationStatus.AgreementStatus.NotProposed =
+        v30.PartyReplicationStatus.AgreementStatus.NotProposed(
+          v30.PartyReplicationStatus.AgreementNotProposed()
+        )
+
+      override val isEmpty: Boolean = true
+
+      override def prettyCompanion: PrettyPrintingCompanion[NotProposed.this.type] =
+        NotProposedPrettyPrintingCompanion
+    }
+
+    private object NotProposedPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[NotProposed.type] {
+      override protected val pretty: Pretty[NotProposed.type] = prettyOfObject[NotProposed.type]
+    }
+
+    case object Proposed extends AgreementStatus {
+      override def toProtoV30: v30.PartyReplicationStatus.AgreementStatus.Proposed =
+        v30.PartyReplicationStatus.AgreementStatus.Proposed(
+          v30.PartyReplicationStatus.AgreementProposed()
+        )
+
+      override val isEmpty: Boolean = true
+
+      override def prettyCompanion: PrettyPrintingCompanion[Proposed.this.type] =
+        ProposedPrettyPrintingCompanion
+    }
+
+    private object ProposedPrettyPrintingCompanion extends PrettyPrintingCompanion[Proposed.type] {
+      override protected val pretty: Pretty[Proposed.type] = prettyOfObject[Proposed.type]
+    }
+
+    final case class Exists(
+        // daml agreement contract id to be archived upon completion or disruptions
+        damlAgreementContractId: LfContractId,
+        sequencerId: SequencerId,
+    ) extends AgreementStatus {
+      override def toProtoV30: v30.PartyReplicationStatus.AgreementStatus.Exists =
+        v30.PartyReplicationStatus.AgreementStatus.Exists(
+          v30.PartyReplicationStatus.AgreementExists(
+            damlAgreementContractId.coid,
+            sequencerId.uid.toProtoPrimitive,
+          )
+        )
+
+      override val isEmpty: Boolean = false
+
+      override def prettyCompanion: PrettyPrintingCompanion[Exists] =
+        Exists
+    }
+
+    object Exists extends PrettyPrintingCompanion[Exists] {
+      override protected val pretty: Pretty[Exists] = {
+        import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+        prettyOfClass(
+          param("contract id", _.damlAgreementContractId),
+          param("sequencer", _.sequencerId),
+        )
+      }
+    }
+
+    case object NotNeeded extends AgreementStatus {
+      override def toProtoV30: v30.PartyReplicationStatus.AgreementStatus.NotNeeded =
+        v30.PartyReplicationStatus.AgreementStatus.NotNeeded(
+          v30.PartyReplicationStatus.AgreementNotNeeded()
+        )
+
+      override val isEmpty: Boolean = true
+
+      override def prettyCompanion: PrettyPrintingCompanion[NotNeeded.this.type] =
+        NotNeededPrettyPrintingCompanion
+    }
+
+    private object NotNeededPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[NotNeeded.type] {
+      override protected val pretty: Pretty[NotNeeded.type] = prettyOfObject[NotNeeded.type]
+    }
+
     def fromProtoV30(
-        proto: v30.PartyReplicationStatus.SequencerChannelAgreement
-    ): ParsingResult[SequencerChannelAgreement] =
-      for {
-        contractId <- ProtoConverter.parseLfContractId(proto.contractId)
-        sequencerId <- UniqueIdentifier
-          .fromProtoPrimitive(proto.sequencerUid, "sequencer_uid")
-          .map(SequencerId(_))
-      } yield SequencerChannelAgreement(contractId, sequencerId)
+        proto: v30.PartyReplicationStatus.AgreementStatus
+    ): ParsingResult[AgreementStatus] =
+      proto match {
+        case v30.PartyReplicationStatus.AgreementStatus.NotProposed(_) =>
+          Right(AgreementStatus.NotProposed)
+        case v30.PartyReplicationStatus.AgreementStatus.Proposed(_) =>
+          Right(AgreementStatus.Proposed)
+        case v30.PartyReplicationStatus.AgreementStatus.Exists(exists) =>
+          for {
+            contractId <- ProtoConverter.parseLfContractId(exists.contractId)
+            sequencerId <- UniqueIdentifier
+              .fromProtoPrimitive(exists.sequencerUid, "sequencer_uid")
+              .map(SequencerId(_))
+          } yield Exists(contractId, sequencerId)
+        case v30.PartyReplicationStatus.AgreementStatus.NotNeeded(_) =>
+          Right(AgreementStatus.NotNeeded)
+        case v30.PartyReplicationStatus.AgreementStatus.Empty =>
+          Left(ProtoDeserializationError.FieldNotSet("agreement_status"))
+      }
+
   }
 
   final case class PartyReplicationAuthorization(

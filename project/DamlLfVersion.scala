@@ -38,19 +38,22 @@ object DamlLfVersion {
   val v2_1: DamlLfVersion = DamlLfVersion(2, Stable(1))
   val v2_2: DamlLfVersion = DamlLfVersion(2, Stable(2))
   val v2_3: DamlLfVersion = DamlLfVersion(2, Stable(3))
-  val v2_4_1: DamlLfVersion = DamlLfVersion(2, Staging(4, 1))
-  val v2_4: DamlLfVersion = v2_4_1
+  val v2_4: DamlLfVersion = DamlLfVersion(2, Stable(4))
+  val v2_5_1: DamlLfVersion = DamlLfVersion(2, Staging(5, 1))
+  val v2_5: DamlLfVersion = v2_5_1
   val v2_dev: DamlLfVersion = DamlLfVersion(2, Dev)
 
   private val v2_3_1: DamlLfVersion = DamlLfVersion(2, Staging(3, 1))
   private val v2_3_2: DamlLfVersion = DamlLfVersion(2, Staging(3, 2))
+  private val v2_4_1: DamlLfVersion = DamlLfVersion(2, Staging(4, 1))
 
   val explicitVersions: Map[String, DamlLfVersion] = Map(
     "v2_1" -> v2_1,
     "v2_2" -> v2_2,
     "v2_3" -> v2_3,
-    "v2_4_1" -> v2_4_1,
     "v2_4" -> v2_4,
+    "v2_5_1" -> v2_5_1,
+    "v2_5" -> v2_5,
     "v2_dev" -> v2_dev,
   )
 
@@ -58,15 +61,15 @@ object DamlLfVersion {
     "defaultLfVersion" -> v2_3,
     "devLfVersion" -> v2_dev,
     "latestStableLfVersion" -> v2_3,
-    "stagingLfVersion" -> v2_4_1,
+    "stagingLfVersion" -> v2_5_1,
   )
   val namedVersionsSDKOnly: Map[String, DamlLfVersion] = Map(
     "stagingLfVersionSDK" -> namedVersions("stagingLfVersion")
   )
 
-  val allLfVersions = List(v2_1, v2_2, v2_3, v2_4, v2_dev)
-  private val discontinuedLfVersions = List(v2_3_1, v2_3_2)
-  private val stableLfVersions = List(v2_1, v2_2, v2_3)
+  val allLfVersions = List(v2_1, v2_2, v2_3, v2_4, v2_5, v2_dev)
+  private val discontinuedLfVersions = List(v2_3_1, v2_3_2, v2_4_1)
+  private val stableLfVersions = List(v2_1, v2_2, v2_3, v2_4)
   private val compilerLfVersions = allLfVersions
   private val earlyAccessLfVersions = stableLfVersions
 

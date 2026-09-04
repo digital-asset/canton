@@ -488,7 +488,8 @@ class BftOrderingBenchmark
 
     waitUntilAllBftSequencersAuthenticateDisseminationQuorum(5.minutes)
 
-    val nodesToStop = env.sequencers.local.zipWithIndex
+    val sortedNodes = env.sequencers.local.sortBy(_.name)
+    val nodesToStop = sortedNodes.zipWithIndex
       .filter(x => bftOrderingBenchmarkConfig.testCatchupConfig.nodesToStop.contains(x._2))
       .map(_._1)
 
@@ -512,7 +513,7 @@ class BftOrderingBenchmark
         runDuration = bftOrderingBenchmarkConfig.runDuration.underlying,
         perNodeWritePeriod = bftOrderingBenchmarkConfig.perNodeWritePeriod.underlying,
         reportingInterval = bftOrderingBenchmarkConfig.reportingInterval.map(_.underlying),
-        nodes = env.sequencers.local.zipWithIndex.map { case (sequencer, idx) =>
+        nodes = sortedNodes.zipWithIndex.map { case (sequencer, idx) =>
           val name = sequencer.name
           val p2pConfig = p2pEndpoints(name)
 

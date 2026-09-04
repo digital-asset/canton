@@ -56,6 +56,16 @@ jobs:
       is_manual: false
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  package_kms_driver:
+    name: Package KMS Driver
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_kms_driver.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: true
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   build_scaladoc:
     name: Build Scaladoc
     needs: [pick_runner, compile]
@@ -122,12 +132,30 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  protocol_continuity_test_all:
+    name: Protocol Continuity Test All
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_protocol_continuity_test_all.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   stability_crash_recovery_test:
     name: Stability Crash Recovery Test
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_stability_crash_recovery_test.yml
     secrets: inherit
     with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_jsonapi:
+    name: Package JSON API
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_jsonapi.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: true
+      is_manual: false
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   notify:
@@ -137,6 +165,7 @@ jobs:
       - compile
       - package_community
       - package_sequencer_driver_api
+      - package_kms_driver
       - build_scaladoc
       - build_docs_snippets
       - build_docs
@@ -144,7 +173,9 @@ jobs:
       - test_with_java17
       - test_protocol_version_34
       - ledger_api_compatibility_tests
+      - protocol_continuity_test_all
       - stability_crash_recovery_test
+      - package_jsonapi
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

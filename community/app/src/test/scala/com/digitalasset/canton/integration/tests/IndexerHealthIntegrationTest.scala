@@ -147,7 +147,13 @@ class IndexerHealthIntegrationTest extends CommunityIntegrationTest with SharedE
       {
         // Enqueue a backdated update
         participant1.underlying.value.sync.ledgerApiIndexer.asEval.value
-          .enqueue(SequencerIndexMoved(daId, CantonTimestamp.Epoch))
+          .enqueue(
+            SequencerIndexMoved(
+              synchronizerId = daId,
+              recordTime = CantonTimestamp.Epoch,
+              traceContext = implicitly,
+            )
+          )
           .discard
 
         // Participant will become unhealthy, and remain unhealthy do to monotonicity violation

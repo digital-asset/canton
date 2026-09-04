@@ -33,7 +33,7 @@ import java.util.UUID
   * in the prepared transaction and are covered by the signed hash. External-call results only exist
   * at LF serialization version V3 or higher, which requires hashing scheme V4, so preparing or
   * executing with an older scheme is refused. The tests are gated on protocol version 36; the test
-  * package targets LF 2.4-staging, which lies outside the participant's default (stable) LF range,
+  * package targets LF 2.4, which lies outside the participant's default (stable) LF range,
   * so dev version support is enabled on the participant.
   */
 class ExternalCallInteractiveSubmissionIntegrationTest

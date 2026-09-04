@@ -6,15 +6,17 @@ package db.migration.canton
 import com.digitalasset.canton.config.{DbConfig, PartitionConfig}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.store.db.DbStorageSetup
-import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.util.{LoggerUtil, ResourceUtil}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.MigrationVersion
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.sql.{Connection, DriverManager}
+import java.sql.{Connection, DriverManager, PreparedStatement}
 import java.util.UUID
+import java.util.concurrent.TimeUnit
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 
 /** Base for tests that drive Flyway migrations directly against a real database.
@@ -30,6 +32,7 @@ trait BaseFlywayTest
   protected def jdbcUrl: String
   protected def dbUser: String
   protected def dbPassword: String
+  protected val insertBatchSize: Int = 5_000
 
   protected def openConnection(): Connection = {
     Class.forName(driverClassName).discard
@@ -54,6 +57,43 @@ trait BaseFlywayTest
       .fold(configuration)(t => configuration.target(MigrationVersion.fromVersion(t)))
       .load()
   }
+
+  protected def insertBatched(connection: Connection, sql: String, rows: Int)(
+      bind: (PreparedStatement, Int) => Unit
+  ): Unit =
+    ResourceUtil.withResource(connection.prepareStatement(sql)) { statement =>
+      (0 until rows).foreach { index =>
+        bind(statement, index)
+        statement.addBatch()
+        if ((index + 1) % insertBatchSize == 0) statement.executeBatch().discard
+      }
+      statement.executeBatch().discard
+      connection.commit()
+    }
+
+  protected def analyze(connection: Connection): Unit =
+    ResourceUtil.withResource(connection.createStatement()) { statement =>
+      statement.execute("analyze lapi_events_party_to_participant").discard
+      statement.execute("analyze lapi_party_entries").discard
+      connection.commit()
+    }
+
+  protected def countOf(connection: Connection, sql: String): Long =
+    ResourceUtil.withResource(connection.createStatement()) { statement =>
+      ResourceUtil.withResource(statement.executeQuery(sql)) { resultSet =>
+        resultSet.next() shouldBe true
+        resultSet.getLong(1)
+      }
+    }
+
+  protected def timed[A](body: => A): (A, FiniteDuration) = {
+    val startNanos = System.nanoTime()
+    val result = body
+    (result, FiniteDuration(System.nanoTime() - startNanos, TimeUnit.NANOSECONDS))
+  }
+
+  protected def humanReadable(duration: FiniteDuration): String =
+    LoggerUtil.roundDurationForHumans(duration)
 }
 
 /** Runs a [[BaseFlywayTest]] against an in-memory H2 database. */

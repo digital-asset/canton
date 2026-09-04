@@ -65,8 +65,9 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
       // Emulate the first epoch behavior
       val initialCommits = Seq.empty
 
-      slots.foreach { blockNumber =>
+      slots.zipWithIndex.foreach { case (blockNumber, slotIndex) =>
         leaderSegmentState.canReceiveProposals shouldBe true
+        leaderSegmentState.pendingSlotsToPropose shouldBe (7 - slotIndex)
         val orderedBlock = leaderSegmentState.assignToSlot(
           OrderingBlock.empty,
           latestCompletedEpochLastCommits = initialCommits,
@@ -83,6 +84,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
 
       leaderSegmentState.canReceiveProposals shouldBe false
       segmentState.isSegmentComplete shouldBe true
+      leaderSegmentState.pendingSlotsToPropose shouldBe 0
     }
 
     "restore state correctly after a restart" when {

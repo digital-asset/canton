@@ -79,6 +79,13 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = deleteCheckpointsAfter(fromExclusive)
 
+  /** Returns the latest ledger offset up to which the digest store has been successfully pruned via
+    * [[deleteUpTo]].
+    */
+  def lookupLatestPruningOffset()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Offset]]
+
   /** Deletes all checkpoints that are lower than `toExclusive`. Then deletes all digest entries in
     * [[party]] and [[participant]] whose offset is lower than `toExclusive` and that satisfies one
     * of the following conditions:
@@ -94,9 +101,11 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
   ): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Pruning the ACS digest store up to offset $toExclusive")
     for {
+      latestPruningOffsetO <- lookupLatestPruningOffset()
       _ <- deleteCheckpointsUpTo(toExclusive)
-      _ <- party_.deleteUpTo(toExclusive)
-      _ <- participant_.deleteUpTo(toExclusive)
+      _ <- party_.deleteUpTo(toExclusive, latestPruningOffsetO)
+      _ <- participant_.deleteUpTo(toExclusive, latestPruningOffsetO)
+      _ <- increaseLatestPruneOffset(toExclusive)
     } yield ()
   }
 
@@ -109,10 +118,19 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = deleteCheckpointsUpTo(toExclusive)
 
+  protected def increaseLatestPruneOffset(toExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
+
+  @inline private[store] final def increaseLatestPruneOffsetInternal(toExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = increaseLatestPruneOffset(toExclusive)
+
   /** Deletes all data in this store */
   override final def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Purging the ACS digest store")
     for {
+      _ <- purgeLatestPrune()
       _ <- purgeCheckpoints()
       _ <- party_.purge()
       _ <- participant_.purge()
@@ -123,6 +141,12 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
   @inline private[store] final def purgeCheckpointsInternal()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = purgeCheckpoints()
+
+  protected def purgeLatestPrune()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  @inline private[store] final def purgeLatestPruneInternal()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    purgeLatestPrune()
 
   /** Returns the most recent checkpoint lower than or equal to `toInclusive`, if any. If
     * `checkpointTypes` is given, only checkpoints of the given types are considered.
@@ -164,12 +188,12 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
 
   /** Checks for each key of [[party]] and [[participant]] that the
     * [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigestUpdate.replacesOffset]]
-    * chaining is correct up to the latest checkpoint (inclusive).
+    * chaining is correct up to the latest checkpoint (inclusive) with respect to the latest pruning
+    * offset.
     *
     * @see
     *   [[com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal.checkReplacesInvariant]]
     */
-  @VisibleForTesting
   final def checkReplacesInvariant()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = for {
@@ -177,8 +201,9 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
     _ <- lastCheckpointO.fold(FutureUnlessShutdown.unit) {
       case Checkpoint(Timepoint(offsetInclusive), _) =>
         for {
-          _ <- party.checkReplacesInvariant(offsetInclusive)
-          _ <- participant.checkReplacesInvariant(offsetInclusive)
+          latestPruningOffsetO <- lookupLatestPruningOffset()
+          _ <- party.checkReplacesInvariant(offsetInclusive, latestPruningOffsetO)
+          _ <- participant.checkReplacesInvariant(offsetInclusive, latestPruningOffsetO)
         } yield ()
     }
   } yield ()
@@ -191,6 +216,7 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
     */
   final def truncateAllBlocking()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
+      _ <- truncateLatestPrune()
       _ <- truncateCheckpoints()
       _ <- party_.truncateAll()
       _ <- participant_.truncateAll()
@@ -204,6 +230,15 @@ trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
     truncateCheckpoints()
+
+  protected def truncateLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit]
+
+  @inline private[store] final def truncateLatestPruneInternal()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    truncateLatestPrune()
 }
 
 object AcsDigestStore {
@@ -324,12 +359,14 @@ object AcsDigestStore {
       *   1. If `i > M`, there are no constraints because all data larger than `upToInclusive` is
       *      considered to be dirty.
       *
+      *   1. `rt_2` is at least the `latestPruningOffset` if defined.
+      *
       * @return
       *   a future failed with [[java.lang.IllegalStateException]] if the chaining is incorrect for
       *   any key.
       */
     @VisibleForTesting
-    def checkReplacesInvariant(upToInclusive: Offset)(implicit
+    def checkReplacesInvariant(upToInclusive: Offset, latestPruningOffset: Option[Offset])(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Unit]
   }

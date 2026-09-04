@@ -65,7 +65,7 @@ class DbAcsDigestJournal[K](
     )
   }
 
-  override def deleteUpTo(toExclusive: Offset)(implicit
+  override def deleteUpTo(toExclusive: Offset, latestPruningOffsetO: Option[Offset])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     val pruneActionForNonNull = storage.profile match {
@@ -80,6 +80,7 @@ class DbAcsDigestJournal[K](
             from #$tableName
             where synchronizer_idx = $synchronizerIdx
               and change_offset <= $toExclusive
+              and change_offset >= ${latestPruningOffsetO.getOrElse(Offset.firstOffset)}
               and replaces_offset is not null
           )
         """
@@ -91,6 +92,7 @@ class DbAcsDigestJournal[K](
           from #$tableName
           where synchronizer_idx = $synchronizerIdx
             and change_offset <= $toExclusive
+            and change_offset >= ${latestPruningOffsetO.getOrElse(Offset.firstOffset)}
             and replaces_offset is not null
         )
         delete from #$tableName
@@ -105,6 +107,7 @@ class DbAcsDigestJournal[K](
       delete from #$tableName
       where synchronizer_idx = $synchronizerIdx
         and change_offset < $toExclusive
+        and change_offset >= ${latestPruningOffsetO.getOrElse(Offset.firstOffset)}
         and digest is null
     """
 
@@ -476,8 +479,8 @@ class DbAcsDigestJournal[K](
       }
   }
 
-  override def checkReplacesInvariant(upToInclusive: Offset)(implicit
-      traceContext: TraceContext
+  override def checkReplacesInvariant(upToInclusive: Offset, latestPruningOffsetO: Option[Offset])(
+      implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
 
     val checkQuery =
@@ -497,38 +500,49 @@ class DbAcsDigestJournal[K](
           (prev_offset is null and replaces_offset is not null and (replaces_offset >= change_offset))
           or
           (prev_offset is not null and (replaces_offset is null or replaces_offset <> prev_offset))
+          or
+          (prev_offset is not null and change_offset < ${latestPruningOffsetO.getOrElse(
+          Offset.firstOffset
+        )} and replaces_offset = prev_offset)
         order by change_offset
       """ ++ storage.limitSql(1))
         .as[(K, Offset, Option[Offset], Option[Offset])]
         .headOption
 
-    storage.query(checkQuery, functionFullName).map {
-      case Some((key, offset, Some(replacesOffset), _)) if replacesOffset >= offset =>
-        ErrorUtil.invalidState(
-          s"ReplacesOffset check error for Key ${prettyKey(key)} - " +
-            s"We cannot have replacesOffset=$replacesOffset which is gte to change offset $offset"
-        )
-      case Some((key, offset, None, Some(precedentOffset))) =>
-        ErrorUtil.invalidState(
-          s"ReplacesOffset check error for key ${prettyKey(key)} at $offset - " +
-            s"Replaces offset should point to $precedentOffset but it is empty!"
-        )
-      case Some(
-            (key, offset, Some(currentReplacesOffset), Some(precedingOffset))
-          ) if currentReplacesOffset != precedingOffset =>
-        ErrorUtil.invalidState(
-          s"ReplacesOffset check error for key ${prettyKey(key)} - " +
-            s"We cannot have an entry with (offset=$offset, replacesOffset=$currentReplacesOffset) " +
-            s"which is not pointing to the preceding offset=$precedingOffset"
-        )
-      case Some((key, offset, replacesOffset, precedentOffset)) =>
-        ErrorUtil.invalidState(
-          s"ReplacesOffset check error for key ${prettyKey(key)} - " +
-            s"found a case which shouldn't exist for offset $offset, replacesOffset: $replacesOffset " +
-            s"and precedentOffset $precedentOffset"
-        )
-      case None => () // All is good. No violation found!
-    }
+    storage
+      .query(checkQuery, functionFullName)
+      .map(_.foreach {
+        case (key, offset, Some(replacesOffset), _) if replacesOffset >= offset =>
+          ErrorUtil.invalidState(
+            s"ReplacesOffset check error for Key ${prettyKey(key)} - " +
+              s"We cannot have replacesOffset=$replacesOffset which is gte to change offset $offset"
+          )
+        case (key, offset, None, Some(precedentOffset)) =>
+          ErrorUtil.invalidState(
+            s"ReplacesOffset check error for key ${prettyKey(key)} at $offset - " +
+              s"Replaces offset should point to $precedentOffset but it is empty!"
+          )
+        case (key, offset, Some(currentReplacesOffset), Some(precedingOffset))
+            if currentReplacesOffset != precedingOffset =>
+          ErrorUtil.invalidState(
+            s"ReplacesOffset check error for key ${prettyKey(key)} - " +
+              s"We cannot have an entry with (offset=$offset, replacesOffset=$currentReplacesOffset) " +
+              s"which is not pointing to the preceding offset=$precedingOffset"
+          )
+        case (key, offset, Some(currentReplacesOffset), Some(precedingOffset))
+            if currentReplacesOffset == precedingOffset && latestPruningOffsetO
+              .exists(_ > offset) =>
+          ErrorUtil.invalidState(
+            s"ReplacesOffset check error for key ${prettyKey(key)} at offset $offset below the latest pruning offset ${latestPruningOffsetO
+                .getOrElse(throw new NoSuchElementException("latestPruningOffsetO is empty"))} references an existing replaces offset $currentReplacesOffset"
+          )
+        case (key, offset, replacesOffset, precedentOffset) =>
+          ErrorUtil.invalidState(
+            s"ReplacesOffset check error for key ${prettyKey(key)} - " +
+              s"found a case which shouldn't exist for offset $offset, replacesOffset: $replacesOffset " +
+              s"and precedentOffset $precedentOffset"
+          )
+      })
   }
 
   override def truncateAll()(implicit

@@ -216,6 +216,7 @@ final class StateTransferMessageValidator[E <: Env[E]](
       from: BftNodeId,
       orderingTopologyInfo: OrderingTopologyInfo[E],
       currentEpochInfo: EpochInfo,
+      isForFutureEpoch: Boolean,
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit =
     context.pipeToSelf(
       signatureVerifier.verifyConsensusCertificate(commitCertificate, orderingTopologyInfo)
@@ -226,17 +227,26 @@ final class StateTransferMessageValidator[E <: Env[E]](
             commitCertificate,
             currentEpochInfo,
             from,
+            isForFutureEpoch,
           )
         )
       case Success(Left(errors)) =>
-        val blockMetadata = commitCertificate.prePrepare.message.blockMetadata
-        logger.warn(
-          s"Commit certificate ($blockMetadata) from '$from' failed signature verification, dropping: $errors"
-        )
-        emitNonCompliance(metrics)(
-          from,
-          metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
-        )
+        if (!isForFutureEpoch) {
+          val blockMetadata = commitCertificate.prePrepare.message.blockMetadata
+          logger.warn(
+            s"Commit certificate ($blockMetadata) from '$from' failed signature verification, dropping: $errors"
+          )
+          emitNonCompliance(metrics)(
+            from,
+            metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
+          )
+        } else {
+          val blockMetadata = commitCertificate.prePrepare.message.blockMetadata
+          logger.info(
+            s"Future Commit certificate ($blockMetadata) from '$from' failed signature verification, potentially due to future topology change."
+              + s"We will not early fetch instead we are dropping: $errors"
+          )
+        }
         None
       case Failure(exception) =>
         logger.warn(s"Commit certificate from '$from' could not be verified, dropping", exception)

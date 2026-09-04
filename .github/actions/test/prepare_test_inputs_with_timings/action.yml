@@ -12,11 +12,24 @@ inputs:
   github-token:
     description: GitHub token used to download artifacts from previous runs
     required: true
+  previous-timings-run-id:
+    description: >
+      Previous run id whose timings to restore, resolved once per workflow. When empty
+      and previous-timings-resolved is false the action resolves it per shard as a fallback.
+    required: false
+    default: ""
+  previous-timings-resolved:
+    description: >
+      Set to true by callers that resolve the run id once per workflow, so an empty
+      previous-timings-run-id means no artifact was found rather than a request to resolve
+      it here. Defaults to false for standalone callers.
+    required: false
+    default: "false"
 
 outputs:
   previous-timings-run-id:
     description: Run id of the previous workflow run that published timings
-    value: ${{ steps.previous_timings.outputs.run-id }}
+    value: ${{ steps.timings_run.outputs.run-id }}
 
 runs:
   using: composite
@@ -27,17 +40,29 @@ runs:
         name: test-full-class-names
         path: .
 
+    # Skip the repo-wide artifact lookup when the caller already resolved it once per
+    # workflow, in which case an empty run id means no artifact was found. A single lookup
+    # per run keeps the shared GITHUB_TOKEN budget intact.
     - name: Resolve previous timings artifact run
       id: previous_timings
+      if: inputs.previous-timings-resolved != 'true'
       uses: ./.github/actions/utils/resolve_previous_artifact_run
       with:
         artifact-name: ${{ inputs.timings-artifact-name }}
 
+    - name: Select timings run id
+      id: timings_run
+      shell: bash
+      env:
+        PROVIDED_RUN_ID: ${{ inputs.previous-timings-run-id }}
+        RESOLVED_RUN_ID: ${{ steps.previous_timings.outputs.run-id }}
+      run: echo "run-id=${PROVIDED_RUN_ID:-$RESOLVED_RUN_ID}" >> "$GITHUB_OUTPUT"
+
     - name: Download timings
-      if: always() && steps.previous_timings.outputs.run-id != ''
+      if: always() && steps.timings_run.outputs.run-id != ''
       uses: actions/download-artifact@v7
       with:
         name: ${{ inputs.timings-artifact-name }}
         path: ${{ inputs.timings-path }}
-        run-id: ${{ steps.previous_timings.outputs.run-id }}
+        run-id: ${{ steps.timings_run.outputs.run-id }}
         github-token: ${{ inputs.github-token }}

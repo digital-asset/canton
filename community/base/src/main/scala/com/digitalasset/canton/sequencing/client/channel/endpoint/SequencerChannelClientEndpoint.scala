@@ -193,7 +193,7 @@ private[channel] final class SequencerChannelClientEndpoint(
     String,
     Unit,
   ] = _.withTraceContext { implicit traceContext => responseP =>
-    val v30.ConnectToSequencerChannelResponse(response, _traceContextO) = responseP
+    val v30.ConnectToSequencerChannelResponse(response, _) = responseP
     val currentStage = stage.get()
     for {
       result <- currentStage.handleMessage(response)
