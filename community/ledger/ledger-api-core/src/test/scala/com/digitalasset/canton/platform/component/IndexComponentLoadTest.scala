@@ -691,6 +691,7 @@ class IndexComponentLoadTest
       recordTime = recordTime,
       synchronizerId = synchronizerId,
       acsChangeFactory = testAcsChangeFactory,
+      traceContext = implicitly,
     )
 
   def updateFormat(transactionShape: TransactionShape) = UpdateFormat(

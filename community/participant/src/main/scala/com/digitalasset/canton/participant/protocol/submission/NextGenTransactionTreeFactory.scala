@@ -35,6 +35,8 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.transaction.CreationTime
 import io.scalaland.chimney.dsl.*
+import io.scalaland.chimney.dsl.TransformerConfiguration.UpdateFlag
+import io.scalaland.chimney.internal.runtime.TransformerFlags
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
@@ -52,6 +54,10 @@ class NextGenTransactionTreeFactory(
 )(implicit ec: ExecutionContext)
     extends TransactionTreeFactory
     with NamedLogging {
+
+  private implicit val cfg: UpdateFlag[
+    TransformerFlags.Enable[TransformerFlags.MethodAccessors, TransformerFlags.Default]
+  ] = TransformerConfiguration.default.enableMethodAccessors
 
   private val protocolVersion = psid.protocolVersion
   private val contractIdSuffixer: ContractIdSuffixer =
@@ -102,6 +108,9 @@ class NextGenTransactionTreeFactory(
         rollbackContextFactory.empty,
         Some(participantId.adminParty.toLf),
         rollbackContextFactory,
+        Some(
+          TransactionViewLimitConfig.Default
+        ), // Transaction view limits are applied on submission paths
       )
 
     val commonMetadata = CommonMetadata
@@ -136,8 +145,9 @@ class NextGenTransactionTreeFactory(
         .leftMap(SubmitterMetadataError.apply)
         .toEitherT[FutureUnlessShutdown]
 
-      rootViewDecompositions <- EitherT
-        .liftF(rootViewDecompositionsF)
+      rootViewDecompositions <- rootViewDecompositionsF.leftMap[TransactionViewLimitError](
+        _.transformInto[TransactionViewLimitError]
+      )
 
       _ = if (logger.underlying.isDebugEnabled) {
         val numRootViews = rootViewDecompositions.length
@@ -759,6 +769,7 @@ class NextGenTransactionTreeFactory(
         rbContext,
         submittingParticipantO.map(_.adminParty.toLf),
         rollbackContextFactory,
+        None, // Transaction view limits are not applied on validation paths
       )
 
     val rolledBackEffect = rbContext.inRollback && transactionEffectful(transaction.unwrap)
@@ -769,7 +780,9 @@ class NextGenTransactionTreeFactory(
         (),
         RolledBackEffect(rootPosition),
       )
-      decompositions <- EitherT.right(decompositionsF)
+      decompositions <- decompositionsF.leftMap[TransactionViewLimitError](
+        _.transformInto[TransactionViewLimitError]
+      )
       decomposition = checked(decompositions.head)
       view <- createTransactionView(
         decomposition,

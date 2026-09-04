@@ -3,11 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
-import com.digitalasset.canton.console.LocalParticipantReference
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -16,6 +14,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.Active
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.*
@@ -37,17 +36,9 @@ import scala.jdk.DurationConverters.*
   *   - Transfer traffic.
   *   - PN should connect to the successor.
   */
-@UnstableTest // TODO(i32564): remove once the test is stable
 final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-pruning-during-lsu"
-
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
 
   registerPlugin(
     new UseBftSequencer(
@@ -89,18 +80,6 @@ final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
         defaultEnvironmentSetup()
       }
 
-  private def noOutstandingCommitments(
-      p: LocalParticipantReference,
-      ts: CantonTimestamp,
-  )(implicit env: TestConsoleEnvironment): CantonTimestamp =
-    p.underlying.value.sync.syncPersistentStateManager
-      .get(env.daId)
-      .value
-      .acsCommitmentStore
-      .noOutstandingCommitments(ts)
-      .futureValueUS
-      .value
-
   "Pruning after a logical synchronizer upgrade" should {
     "work correctly" in { implicit env =>
       import env.*
@@ -115,17 +94,34 @@ final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
       participant1.health.ping(participant1)
 
       val tempIou = IouSyntax.createIou(participant1)(bank, alice, 1.0)
-      IouSyntax.archive(participant1)(tempIou, bank)
 
       // Ensuring that ACS commitments are exchanged so that pruning can happen
       val pruningTs = CantonTimestamp.ofEpochSecond(300)
       environment.simClock.value.advanceTo(pruningTs.immediateSuccessor)
       participant1.health.ping(participant1)
+
+      // The ACS commitment pipeline runs after the indexer, so ensure that the commitment matching has happened
       eventually() {
-        noOutstandingCommitments(participant1, pruningTs) shouldBe pruningTs
+        participant1.underlying.value.sync.syncPersistentStateManager
+          .getLogical(daId)
+          .value
+          .acsCommitmentPeriodStore
+          .watermark()
+          .futureValueUS
+          .matching
+          .value should be > Offset.firstOffset
+      }
+
+      eventually() {
+        if (fixture.currentPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+          noOutstandingCommitments(participant1, pruningTs) shouldBe pruningTs
+        } else {
+          latestMatchedCommitmentBy(participant1, participant1.id) should be >= pruningTs
+        }
       }
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+
       // p1 performs the upgrade but cannot yet connect to the synchronizer because traffic was not transferred
       eventually() {
         participant1.underlying.value.sync.synchronizerConnectionConfigStore
@@ -134,8 +130,11 @@ final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
           .status shouldBe Active
       }
 
-      // Prune p1
-      val offset = participant1.pruning.find_safe_offset(beforeOrAt = pruningTs.toInstant).value
+      // Prune p1 - using eventually block because on CI we might need to wait under heavy load
+      // to reach a state where there is a safe offset
+      val offset = eventually() {
+        participant1.pruning.find_safe_offset(beforeOrAt = pruningTs.toInstant).value
+      }
       participant1.pruning.prune(offset)
 
       // Transfer traffic so that p1 connects to the synchronizer
@@ -148,6 +147,7 @@ final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
       waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
 
       participant1.health.ping(participant1)
+      IouSyntax.archive(participant1)(tempIou, bank)
     }
   }
 }

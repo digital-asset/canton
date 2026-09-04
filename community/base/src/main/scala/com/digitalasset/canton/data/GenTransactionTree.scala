@@ -27,6 +27,7 @@ import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
+import com.google.protobuf.ByteString
 import monocle.Lens
 import monocle.macros.GenLens
 
@@ -335,8 +336,12 @@ object GenTransactionTree {
         (
           (
             hashOps,
-            TransactionView
-              .fromByteString(expectedProtocolVersion, (hashOps, expectedProtocolVersion)),
+            (bytes: ByteString, depthCounter: DepthCounter) =>
+              TransactionView.fromByteString(
+                expectedProtocolVersion,
+                (hashOps, depthCounter, expectedProtocolVersion),
+              )(bytes),
+            DepthCounter.Default,
           ),
           expectedProtocolVersion,
         ),

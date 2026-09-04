@@ -22,7 +22,7 @@ import scala.annotation.unused
   */
 final case class PartyReplicationStatus(
     parameters: ReplicationParameters,
-    agreementO: Option[SequencerChannelAgreement],
+    agreementStatusO: Option[SequencerChannelAgreement],
     authorizationO: Option[PartyReplicationAuthorization],
     replicationO: Option[AcsReplicationProgress],
     indexingO: Option[AcsIndexingProgress.type],
@@ -37,7 +37,7 @@ final case class PartyReplicationStatus(
 
   def toProtoV30: v30.PartyReplicationStatus = v30.PartyReplicationStatus(
     Some(parameters.toProtoV30),
-    agreementO.map(_.toProtoV30),
+    agreementStatusO.map(_.toProtoV30),
     authorizationO.map(_.toProtoV30),
     replicationO.map(_.toProtoV30),
     indexingO.map(_.toProtoV30),
@@ -60,7 +60,7 @@ final case class PartyReplicationStatus(
   override protected def pretty: Pretty[PartyReplicationStatus] =
     prettyOfClass(
       param("parameters", _.parameters),
-      paramIfDefined("agreement", _.agreementO),
+      paramIfDefined("agreementStatus", _.agreementStatusO),
       paramIfDefined("authorization", _.authorizationO),
       paramIfDefined("replication", _.replicationO),
       paramIfDefined("indexing", _.indexingO),
@@ -76,7 +76,7 @@ object PartyReplicationStatus {
     // in a backward compatible way.
     case InternalStatus(
           params,
-          agreementO,
+          agreementStatus,
           authorizationO,
           replicationO,
           indexingO,
@@ -85,7 +85,7 @@ object PartyReplicationStatus {
         ) =>
       PartyReplicationStatus(
         ReplicationParameters.fromInternal(params),
-        agreementO.map(SequencerChannelAgreement.fromInternal),
+        SequencerChannelAgreement.fromInternal(agreementStatus),
         authorizationO.map(PartyReplicationAuthorization.fromInternal),
         replicationO.map(AcsReplicationProgress.fromInternal),
         indexingO.map(AcsIndexingProgress.fromInternal),
@@ -155,7 +155,7 @@ object PartyReplicationStatus {
             sourceParticipantId,
             targetParticipantId,
             serial,
-            _participantPermission,
+            _,
           ) =>
         ReplicationParameters(
           requestId.toHexString,
@@ -212,9 +212,10 @@ object PartyReplicationStatus {
   }
 
   private object SequencerChannelAgreement {
-    def fromInternal: InternalStatus.SequencerChannelAgreement => SequencerChannelAgreement = {
-      case InternalStatus.SequencerChannelAgreement(_contractId, sequencerId) =>
-        SequencerChannelAgreement(sequencerId)
+    val fromInternal: InternalStatus.AgreementStatus => Option[SequencerChannelAgreement] = {
+      case InternalStatus.AgreementStatus.Exists(_, sequencerId) =>
+        Some(SequencerChannelAgreement(sequencerId))
+      case _ => None
     }
 
     def fromProtoV30(

@@ -297,18 +297,18 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     delegate.listKnownParties(),
   )
 
+  // No per-call guard here: this is a composite topology wait with its own `Eventually` loops.
+  // A guard would cut those short and hide their more useful failures.
   override def waitForPartiesOnOtherParticipants(
       otherParticipants: Iterable[ParticipantTestContext],
       expectedParties: Set[Party],
       connectedSynchronizers: Int,
-  ): Future[Unit] = withTimeout(
-    s"Wait for parties $expectedParties on participants ${otherParticipants.map(_.ledgerEndpoint)}",
+  ): Future[Unit] =
     delegate.waitForPartiesOnOtherParticipants(
       otherParticipants,
       expectedParties,
       connectedSynchronizers,
-    ),
-  )
+    )
 
   override def generateExternalPartyTopology(
       req: GenerateExternalPartyTopologyRequest

@@ -7,7 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.ledger.participant.state.RoutingSynchronizerState
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.protocol.{LfContractId, Stakeholders}
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -27,23 +27,23 @@ private[routing] object ContractsSynchronizerData {
    */
   def create(
       synchronizerState: RoutingSynchronizerState,
-      contractsStakeholders: Map[LfContractId, Stakeholders],
+      inputContractIds: Seq[LfContractId],
       disclosedContracts: Seq[LfContractId],
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, ContractsError, ContractsSynchronizerData] = {
     val result = synchronizerState
-      .getSynchronizersOfContracts(contractsStakeholders.keySet.toSeq)
+      .getSynchronizersOfContracts(inputContractIds)
       .map { contractAssignations =>
         // Collect synchronizers of input contracts, ignoring contracts that cannot be found in the ACS.
         // Such contracts need to be ignored, because they could be divulged contracts.
         val (bad: Seq[(LfContractId, Option[PhysicalSynchronizerId])], good) =
-          contractsStakeholders.toSeq
-            .partitionMap { case (coid, stakeholders) =>
+          inputContractIds
+            .partitionMap { coid =>
               contractAssignations.get(coid) match {
                 case Some((synchronizerId, contractState)) if contractState.isActive =>
-                  Right(ContractData(coid, synchronizerId, stakeholders))
+                  Right(ContractData(coid, synchronizerId))
                 case Some((synchronizerId, contractState))
                     if contractState.isArchived.contains(true) =>
                   Left((coid, Some(synchronizerId)))
@@ -75,7 +75,6 @@ private[routing] object ContractsSynchronizerData {
 private[routing] final case class ContractData(
     id: LfContractId,
     synchronizerId: PhysicalSynchronizerId,
-    stakeholders: Stakeholders,
 )
 
 private[routing] final case class ContractsError(

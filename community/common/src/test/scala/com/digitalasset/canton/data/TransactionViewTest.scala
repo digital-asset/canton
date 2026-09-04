@@ -4,15 +4,17 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
+import com.digitalasset.canton.ProtoDeserializationError.NestingTooDeep
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
+import com.digitalasset.canton.crypto.{HashOps, Salt, TestHash, TestSalt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
+import com.digitalasset.canton.protocol.v30.ViewNode
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{DepthCounter, ProtocolVersion, VersionedMessage}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -25,6 +27,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.value.Value.VersionedValue
+import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ListSet
@@ -135,6 +138,18 @@ class TransactionViewTest
             view.flatten should equal(subviews)
           }
         }
+      }
+      "serialize and deserialize" in {
+        example.rootViews.foreach({ expected =>
+          val encoded: ByteString = expected.toByteString
+          val decoded = TransactionView
+            .fromByteString(
+              testedProtocolVersion,
+              (hashOps, DepthCounter.Default, testedProtocolVersion),
+            )(encoded)
+            .value
+          decoded shouldBe expected
+        })
       }
     }
   }
@@ -876,6 +891,137 @@ class TransactionViewTest
           case ProtoDeserializationError.InvariantViolation(Some("call_index"), _) =>
         }
       }
+
+      // Need to work with v30 structures to avoid stack overflow during serialization
+      "return parsing failure when nesting is over limit" in {
+
+        val v30BlindedNode = v30.BlindableNode(
+          v30.BlindableNode.BlindedOrNot.BlindedHash(TestHash.dummyRootHash.toProtoPrimitive)
+        )
+
+        def unblindedNode(bytes: ByteString) =
+          v30.BlindableNode(v30.BlindableNode.BlindedOrNot.Unblinded(bytes))
+        def versionedMessage(gm: scalapb.GeneratedMessage): ByteString =
+          VersionedMessage(gm.toByteString, 1).toByteString
+
+        // Count of singleton and branch elements
+        val actualDepth = 10
+
+        val init = v30.ViewNode(
+          viewCommonData = Some(v30BlindedNode),
+          viewParticipantData = Some(v30BlindedNode),
+          subviews = Some(v30.MerkleSeq(None)),
+        )
+
+        val v30ViewNode = (1 to actualDepth).foldLeft(init) { (prev, _) =>
+          val v30element = v30.MerkleSeqElement(
+            first = None,
+            second = None,
+            data = Some(unblindedNode(versionedMessage(prev))),
+          )
+
+          val v30seq = v30.MerkleSeq(Some(unblindedNode(versionedMessage(v30element))))
+
+          v30.ViewNode(
+            viewCommonData = Some(v30BlindedNode),
+            viewParticipantData = Some(v30BlindedNode),
+            subviews = Some(v30seq),
+          )
+
+        }
+
+        val bytes = versionedMessage(v30ViewNode)
+
+        val deserialized = TransactionView
+          .fromByteString(
+            testedProtocolVersion,
+            (hashOps, DepthCounter.withLimit(actualDepth), testedProtocolVersion),
+          )(bytes)
+          .value
+        deserialized.parseDepth shouldBe actualDepth
+
+        val expected = actualDepth - 1
+
+        TransactionView.fromByteString(
+          testedProtocolVersion,
+          (hashOps, DepthCounter.withLimit(expected), testedProtocolVersion),
+        )(bytes) shouldBe Left(NestingTooDeep(expected))
+
+      }
+
+      "return parsing failure when mixed view/merkle-seq nesting is over limit" in {
+
+        val v30BlindedNode = v30.BlindableNode(
+          v30.BlindableNode.BlindedOrNot.BlindedHash(TestHash.dummyRootHash.toProtoPrimitive)
+        )
+
+        def unblindedNode(bytes: ByteString) =
+          v30.BlindableNode(v30.BlindableNode.BlindedOrNot.Unblinded(bytes))
+        def versionedMessage(gm: scalapb.GeneratedMessage): ByteString =
+          VersionedMessage(gm.toByteString, 1).toByteString
+
+        def viewNode(subviews: v30.MerkleSeq): v30.ViewNode =
+          v30.ViewNode(
+            viewCommonData = Some(v30BlindedNode),
+            viewParticipantData = Some(v30BlindedNode),
+            subviews = Some(subviews),
+          )
+
+        val emptySubviews = v30.MerkleSeq(None)
+
+        // Build a chain of nested child views where each subview entry is a singleton.
+        val nestedViewDepth = 5
+        val deepestView: ViewNode = (1 to nestedViewDepth).foldLeft(viewNode(emptySubviews)) {
+          (prev, _) =>
+            val singletonWithChild = v30.MerkleSeqElement(
+              first = None,
+              second = None,
+              data = Some(unblindedNode(versionedMessage(prev))),
+            )
+            val subviews =
+              v30.MerkleSeq(Some(unblindedNode(versionedMessage(singletonWithChild))))
+            viewNode(subviews)
+        }
+
+        // Wrap the child-view chain in a MerkleSeq branch structure to mix both nesting kinds.
+        val merkleBranchDepth = 5
+        val mixedRootElement = (1 to merkleBranchDepth).foldLeft(
+          v30.MerkleSeqElement(
+            first = None,
+            second = None,
+            data = Some(unblindedNode(versionedMessage(deepestView))),
+          )
+        ) { (prev, _) =>
+          v30.MerkleSeqElement(
+            first = Some(unblindedNode(versionedMessage(prev))),
+            second = Some(v30BlindedNode),
+            data = None,
+          )
+        }
+
+        val mixedSubviews: v30.MerkleSeq =
+          v30.MerkleSeq(Some(unblindedNode(versionedMessage(mixedRootElement))))
+        val mixedView: ViewNode = viewNode(mixedSubviews)
+
+        val bytes = versionedMessage(mixedView)
+
+        val deserialized = TransactionView
+          .fromByteString(
+            testedProtocolVersion,
+            (hashOps, DepthCounter.Default, testedProtocolVersion),
+          )(bytes)
+          .value
+
+        val actualDepth = deserialized.parseDepth
+        actualDepth shouldBe (merkleBranchDepth + nestedViewDepth + 1)
+
+        val expected = actualDepth - 1
+        TransactionView.fromByteString(
+          testedProtocolVersion,
+          (hashOps, DepthCounter.withLimit(expected), testedProtocolVersion),
+        )(bytes) shouldBe Left(NestingTooDeep(expected))
+      }
+
     }
   }
 }

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -43,15 +44,9 @@ LSU:
 - (s2, m2) upgrade
 - p2 and p3 automatically connect to the new synchronizer
  */
+@UnstableTest // TODO(i30850): remove this once the test is no longer flaky
 final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimClockUtils {
   override protected def testName: String = "lsu-late-sequencer"
-
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
 
   private def createSequencingParametersShortViewChangeTimeoutNoBlacklisting(pv: ProtocolVersion) =
     topology.SequencingParameters
@@ -218,6 +213,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
             newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
             exportDirectory = exportDirectory,
             oldNodeName = oldNodeName,
+            synchronizerId = fixture.lsid,
           )
         case _ => ()
       }
@@ -283,6 +279,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
             newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
             exportDirectory = exportDirectory,
             oldNodeName = "sequencer2",
+            synchronizerId = fixture.lsid,
           )
           migrateMediator(
             migratedMediator = mediator6,

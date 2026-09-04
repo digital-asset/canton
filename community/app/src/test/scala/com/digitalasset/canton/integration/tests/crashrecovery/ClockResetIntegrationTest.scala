@@ -18,12 +18,14 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.lifecycle.LifeCycle.toCloseableServer
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
+import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.UnsafeToPrune
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencer
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.admin.v30
+import org.slf4j.event.Level
 
 import scala.concurrent.Future
 
@@ -75,7 +77,18 @@ class ClockResetIntegrationTest extends ParticipantRestartTest with HasCycleUtil
     // Run another cycle to make sure that the participant has observed the time
     runCycle(participant1.adminParty, participant1, participant1)
 
-    pruneParticipant(participant1, pruningOffset)
+    // retry the pruning to give the commitment matcher time to catch up
+    eventually(retryOnTestFailuresOnly = false) {
+      loggerFactory.assertLogsSeq(SuppressionRule.Level(Level.ERROR))(
+        pruneParticipant(participant1, pruningOffset),
+        LogEntry.assertLogSeq(
+          Seq.empty,
+          Seq(
+            _.shouldBeCantonErrorCode(UnsafeToPrune)
+          ),
+        ),
+      )
+    }
 
     restart(
       participant1, {

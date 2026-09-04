@@ -16,6 +16,9 @@ SUMMARY_BUDGET_BYTES = 900_000
 # Headroom kept below the budget for the trailing "and N more" line when the
 # first detail block has to be byte-truncated to fit.
 SUMMARY_TRAILER_RESERVE_BYTES = 256
+# Default heading for the not-passed list. Used by the post-rerun (merged) caller.
+# The pre-rerun caller passes its own so a recovered flaky is not mislabeled.
+DEFAULT_NOT_PASSED_TITLE = "Not passed tests (after rerun)"
 
 
 def parse_args():
@@ -57,6 +60,15 @@ def parse_args():
         type=int,
         default=60,
         help="Maximum number of failure-output lines to show per test before truncating.",
+    )
+    parser.add_argument(
+        "--section-title",
+        default=DEFAULT_NOT_PASSED_TITLE,
+        help=(
+            "Heading for the not-passed list. Defaults to the post-rerun wording. The "
+            "pre-rerun caller overrides it so first-run failures are not mislabeled as "
+            "surviving the rerun."
+        ),
     )
     return parser.parse_args()
 
@@ -246,7 +258,7 @@ def build_summary(args, files, results, rerun_metadata=None):
             lines.append("</details>")
             lines.append("")
 
-    lines.append("### Not passed tests (after rerun)")
+    lines.append(f"### {getattr(args, 'section_title', DEFAULT_NOT_PASSED_TITLE)}")
     not_passed = results["not_passed_tests"]
     if not not_passed:
         lines.append("- none")
@@ -343,6 +355,7 @@ def self_test():
     test_render_detail_truncates_and_fences()
     test_build_summary_no_failures()
     test_build_summary_with_failures()
+    test_build_summary_section_title_defaults_and_overrides()
     test_build_summary_limit()
     test_build_summary_respects_budget()
     test_build_summary_truncates_oversized_first_block()
@@ -513,6 +526,31 @@ def test_build_summary_with_failures():
     assert "assert boom" in summary, "Expected the failure message in the summary"
     assert "\tat Foo.scala:1" in summary, "Expected the stack frame in the summary"
     assert "```" in summary, "Expected a fenced code block"
+
+
+def test_build_summary_section_title_defaults_and_overrides():
+    results = {
+        "passed": 3,
+        "failures": 1,
+        "failures_unique": 1,
+        "errors": 0,
+        "errors_unique": 0,
+        "skipped": 0,
+        "parse_errors": 0,
+        "total": 4,
+        "not_passed_classes": ["com.example.Foo"],
+        "not_passed_tests": ["com.example.Foo.testA"],
+        "not_passed_details": {"com.example.Foo.testA": "boom"},
+    }
+
+    default_summary = build_summary(_make_args(), [], results)
+    assert f"### {DEFAULT_NOT_PASSED_TITLE}" in default_summary, default_summary
+
+    custom = _make_args()
+    custom.section_title = "Not passed tests (first run, before rerun)"
+    custom_summary = build_summary(custom, [], results)
+    assert "### Not passed tests (first run, before rerun)" in custom_summary, custom_summary
+    assert f"### {DEFAULT_NOT_PASSED_TITLE}" not in custom_summary, custom_summary
 
 
 def test_build_summary_limit():

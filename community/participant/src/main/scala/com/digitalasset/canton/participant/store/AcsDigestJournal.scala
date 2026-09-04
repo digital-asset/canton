@@ -24,11 +24,12 @@ private[store] trait AcsDigestJournal[K]
     *
     *   - The entry has been replaced (see
     *     [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigestUpdate.replacesOffset]])
-    *     by an entry with a higher offset, but still lower than or equal `toExclusive`.
+    *     by an entry with a higher offset, but still lower than or equal `toExclusive` and this
+    *     entry's higher offset is at least `latestPruningOffset` (if defined).
     *   - The entry's [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigest.digestO]]
     *     is [[scala.None$]].
     */
-  def deleteUpTo(toExclusive: Offset)(implicit
+  def deleteUpTo(toExclusive: Offset, latestPruningOffset: Option[Offset])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 

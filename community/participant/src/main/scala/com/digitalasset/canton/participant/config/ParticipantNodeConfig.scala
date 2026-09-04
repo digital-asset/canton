@@ -510,18 +510,18 @@ final case class ParticipantNodeParameterConfig(
   *   the parallelism, the higher the potential load on the DB. Default is 6.
   */
 final case class AcsCommitmentConfig(
-    enableRunningDigestProcessor: Boolean = false,
+    enableRunningDigestProcessor: Boolean = true,
     disableOldAcsCommitmentProcessor: Boolean = false,
-    maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(10_000),
+    maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(100_000),
     counterpartyBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
     receivedCommitmentValidationParallelism: PositiveInt = PositiveInt.tryCreate(1),
     reinitializingJournalTombstonesBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     sender: AcsCommitmentSenderConfig = AcsCommitmentSenderConfig(),
     periodStore: AcsCommitmentPeriodConfig = AcsCommitmentPeriodConfig(),
-    useSequentialDigestAccumulator: Boolean = true,
+    useSequentialDigestAccumulator: Boolean = false,
     loadBatching: BatchAggregatorConfig = BatchAggregatorConfig(),
-    maxNumLoadedDigests: PositiveInt = PositiveInt.tryCreate(1000),
+    maxNumLoadedDigests: PositiveInt = PositiveInt.tryCreate(10_000),
     digestUpdatePersistenceBatchFactor: PositiveInt = PositiveInt.two,
     digestLoadParallelism: PositiveInt = PositiveInt.tryCreate(1000),
     digestComputeParallelism: PositiveInt = PositiveInt.tryCreate(8),

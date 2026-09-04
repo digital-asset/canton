@@ -1,0 +1,51 @@
+name: Assembly Ledger API Test Tool
+on:
+  workflow_call:
+    inputs:
+      is_nightly_workflow:
+        description: Whether this is a nightly workflow run
+        required: false
+        type: boolean
+        default: false
+      is_manual:
+        description: Whether this is a manual workflow run
+        required: false
+        type: boolean
+        default: false
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+jobs:
+  assembly_ledger_api_test_tool:
+    name: Assembly Ledger API Test Tool
+    runs-on: ${{ inputs.runner }}
+    env:
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Package ledger-test-tool assembly
+        uses: ./.github/actions/canton/package
+        env:
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          artifact_suffix: .jar
+          cmd: ledger-test-tool/assembly
+          location: community/ledger-test-tool/target/scala-2.13

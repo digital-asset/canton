@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import cats.data.EitherT
 import com.digitalasset.canton.crypto.SynchronizerCryptoPureApi
 import com.digitalasset.canton.error.TransactionRoutingError.{
   UnableToGetStaticParameters,
@@ -10,7 +11,7 @@ import com.digitalasset.canton.error.TransactionRoutingError.{
 }
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{LfContractId, Stakeholders}
 import com.digitalasset.canton.topology.client.TopologySnapshotLoader
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -50,6 +51,18 @@ trait RoutingSynchronizerState {
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Map[LfContractId, (PhysicalSynchronizerId, ContractStateStatus)]]
+
+  /** Reads the stakeholders of the given contracts from the contract store.
+    *
+    * @return
+    *   Left with the contracts unknown to the store, if any.
+    */
+  def getContractsStakeholders(
+      coids: Seq[LfContractId]
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): EitherT[FutureUnlessShutdown, Set[LfContractId], Map[LfContractId, Stakeholders]]
 
   /** SyncCryptoPureApi for this synchronizer.
     */

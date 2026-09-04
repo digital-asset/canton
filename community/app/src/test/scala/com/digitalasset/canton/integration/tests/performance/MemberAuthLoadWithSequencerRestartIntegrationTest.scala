@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.performance
 
 import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeDuration
@@ -152,6 +153,7 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
   }
 }
 
+@UnstableTest // TODO(i30285): remove this once the test is no longer flaky
 class MemberAuthLoadWithSequencerRestartIntegrationTestPostgres
     extends MemberAuthLoadWithSequencerRestartIntegrationTest {
   setupPlugins(new UsePostgres(loggerFactory))

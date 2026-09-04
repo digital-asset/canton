@@ -6,24 +6,34 @@ package com.digitalasset.canton.ledger.client
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.google.rpc.code.Code
 import com.google.rpc.status.Status
+import io.grpc.StatusRuntimeException
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 object LedgerClientUtils {
 
   /** Default retry rules which will retry on retryable known errors and if the ledger api is
-    * unavailable
+    * unavailable or times out
     */
   def defaultRetryRules: Status => Option[FiniteDuration] = status =>
-    DecodedCantonError
-      .fromGrpcStatus(status)
-      .toOption
-      .flatMap(_.retryIn)
-      .orElse {
-        Option.when(
-          status.code == Code.UNAVAILABLE.value || status.code == Code.DEADLINE_EXCEEDED.value
-        )(1.second)
-      }
+    defaultRetryRulesDecoded(DecodedCantonError.fromGrpcStatus(status), status.code)
+
+  /** Default retry rules which will retry on retryable known errors and if the ledger api is
+    * unavailable or times out
+    */
+  def defaultRetryRulesEx: StatusRuntimeException => Option[FiniteDuration] = status =>
+    defaultRetryRulesDecoded(
+      DecodedCantonError.fromStatusRuntimeException(status),
+      status.getStatus.getCode.value,
+    )
+
+  private def defaultRetryRulesDecoded(
+      decoded: Either[String, DecodedCantonError],
+      code: Int,
+  ): Option[FiniteDuration] =
+    decoded.toOption.flatMap(_.retryIn).orElse {
+      Option.when(code == Code.UNAVAILABLE.value || code == Code.DEADLINE_EXCEEDED.value)(1.second)
+    }
 
   /** Convert codegen command to scala proto command */
   def javaCodegenToScalaProto(

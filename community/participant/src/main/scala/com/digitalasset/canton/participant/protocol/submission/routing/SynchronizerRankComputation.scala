@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.submission.routing
 
-import cats.data.{Chain, EitherT}
+import cats.data.EitherT
 import cats.implicits.catsSyntaxAlternativeSeparate
 import cats.syntax.bifunctor.*
 import com.digitalasset.canton.LfPartyId
@@ -47,11 +47,55 @@ private[routing] class SynchronizerRankComputation(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, SynchronizerRank] =
+    for {
+      // The stakeholders do not depend on the candidate, so one lookup serves all of them.
+      stakeholdersOfContractsToReassign <- getStakeholdersOfContracts(
+        synchronizerState,
+        contracts.filter(c => synchronizerIds.exists(_ != c.synchronizerId)),
+      )
+      rank <- computeBestSynchronizerRank(
+        synchronizerState,
+        contracts,
+        stakeholdersOfContractsToReassign,
+        readers,
+        synchronizerIds,
+      )
+    } yield rank
+
+  private def getStakeholdersOfContracts(
+      synchronizerState: RoutingSynchronizerState,
+      contracts: Seq[ContractData],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, Map[LfContractId, Stakeholders]] =
+    synchronizerState
+      .getContractsStakeholders(contracts.map(_.id))
+      .leftMap[TransactionRoutingError](unknownContracts =>
+        AutomaticReassignmentForTransactionFailure.Failed(
+          s"Cannot find contracts ${unknownContracts.mkString(", ")}"
+        )
+      )
+
+  private def computeBestSynchronizerRank(
+      synchronizerState: RoutingSynchronizerState,
+      contracts: Seq[ContractData],
+      stakeholdersOfContractsToReassign: Map[LfContractId, Stakeholders],
+      readers: Set[LfPartyId],
+      synchronizerIds: NonEmpty[Set[PhysicalSynchronizerId]],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, SynchronizerRank] =
     EitherT(
       // Avoid nesting asynchronous computation, `compute` uses a parallel traverse over `contracts`
       MonadUtil
         .sequentialTraverse(synchronizerIds)(targetSynchronizer =>
-          compute(contracts, Target(targetSynchronizer), readers, synchronizerState)
+          compute(
+            contracts,
+            stakeholdersOfContractsToReassign,
+            Target(targetSynchronizer),
+            readers,
+            synchronizerState,
+          )
             .leftMap(targetSynchronizer -> _)
             .value
         )
@@ -80,54 +124,78 @@ private[routing] class SynchronizerRankComputation(
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, SynchronizerRank] = {
-    // (contract id, (reassignment submitter, target synchronizer id))
-    type SingleReassignment = (LfContractId, (LfPartyId, PhysicalSynchronizerId))
+  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, SynchronizerRank] =
+    for {
+      stakeholdersOfContractsToReassign <- getStakeholdersOfContracts(
+        synchronizerState,
+        contracts.filter(_.synchronizerId != targetSynchronizer.unwrap),
+      )
+      rank <- compute(
+        contracts,
+        stakeholdersOfContractsToReassign,
+        targetSynchronizer,
+        readers,
+        synchronizerState,
+      )
+    } yield rank
 
-    val targetSnapshotET =
-      EitherT.fromEither[FutureUnlessShutdown](
+  private def compute(
+      contracts: Seq[ContractData],
+      stakeholdersOfContractsToReassign: Map[LfContractId, Stakeholders],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
+      readers: Set[LfPartyId],
+      synchronizerState: RoutingSynchronizerState,
+  )(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, SynchronizerRank] = {
+    type SingleReassignment = ((LfPartyId, PhysicalSynchronizerId, Stakeholders), LfContractId)
+
+    val contractsToReassign = contracts.filter(_.synchronizerId != targetSynchronizer.unwrap)
+
+    for {
+      targetSnapshot <- EitherT.fromEither[FutureUnlessShutdown](
         synchronizerState.getTopologySnapshotFor(targetSynchronizer)
       )
 
-    val reassignmentsET
-        : EitherT[FutureUnlessShutdown, TransactionRoutingError, Chain[SingleReassignment]] =
-      MonadUtil
-        .parTraverseWithLimit(Threading.detectNumberOfThreads(noTracingLogger))(contracts) { c =>
+      reassignments <- MonadUtil
+        .parTraverseWithLimit(Threading.detectNumberOfThreads(noTracingLogger))(
+          contractsToReassign
+        ) { c =>
           val contractAssignation = c.synchronizerId
 
-          if (contractAssignation == targetSynchronizer.unwrap) {
-            EitherT.pure(Chain.empty[SingleReassignment]): EitherT[
-              FutureUnlessShutdown,
-              TransactionRoutingError,
-              Chain[SingleReassignment],
-            ]
-          } else {
-            for {
-              sourceSnapshot <- EitherT
-                .fromEither[FutureUnlessShutdown](
-                  synchronizerState.getTopologySnapshotFor(contractAssignation)
+          for {
+            stakeholders <- EitherT.fromEither[FutureUnlessShutdown](
+              stakeholdersOfContractsToReassign
+                .get(c.id)
+                .toRight[TransactionRoutingError](
+                  AutomaticReassignmentForTransactionFailure.Failed(s"Cannot find contract ${c.id}")
                 )
-                .map(Source(_))
-              targetSnapshot <- targetSnapshotET
-              submitter <- findReaderThatCanReassignContract(
-                sourceSnapshot = sourceSnapshot,
-                sourceSynchronizerId = Source(contractAssignation),
-                targetSnapshot = targetSnapshot,
-                targetSynchronizerId = targetSynchronizer,
-                contract = c,
-                readers = readers,
-              ).mapK(FutureUnlessShutdown.outcomeK)
-            } yield Chain(c.id -> (submitter, contractAssignation))
-          }
+            )
+            sourceSnapshot <- EitherT
+              .fromEither[FutureUnlessShutdown](
+                synchronizerState.getTopologySnapshotFor(contractAssignation)
+              )
+              .map(Source(_))
+            submitter <- findReaderThatCanReassignContract(
+              sourceSnapshot = sourceSnapshot,
+              sourceSynchronizerId = Source(contractAssignation),
+              targetSnapshot = targetSnapshot,
+              targetSynchronizerId = targetSynchronizer,
+              contract = c,
+              stakeholders = stakeholders,
+              readers = readers,
+            ).mapK(FutureUnlessShutdown.outcomeK)
+          } yield ((submitter, contractAssignation, stakeholders) -> c.id): SingleReassignment
         }
-        .map(chains => chains.foldLeft(Chain.empty[SingleReassignment])(_ ++ _))
-
-    reassignmentsET.map(reassignments =>
-      SynchronizerRank(
-        reassignments.toList.toMap,
-        priorityOfSynchronizer(targetSynchronizer.unwrap),
-        targetSynchronizer.unwrap,
-      )
+    } yield SynchronizerRank(
+      reassignments
+        .groupMap { case (batch, _) => batch } { case (_, contractId) => contractId }
+        .view
+        .mapValues(_.toSet)
+        .toMap,
+      priorityOfSynchronizer(targetSynchronizer.unwrap),
+      targetSynchronizer.unwrap,
     )
   }
 
@@ -137,10 +205,11 @@ private[routing] class SynchronizerRankComputation(
       targetSnapshot: Target[TopologySnapshot],
       targetSynchronizerId: Target[PhysicalSynchronizerId],
       contract: ContractData,
+      stakeholders: Stakeholders,
       readers: Set[LfPartyId],
   )(implicit traceContext: TraceContext): EitherT[Future, TransactionRoutingError, LfPartyId] = {
     logger.debug(
-      s"Computing submitter that can submit reassignment of ${contract.id} with stakeholders ${contract.stakeholders} from $sourceSynchronizerId to $targetSynchronizerId. Candidates are: $readers"
+      s"Computing submitter that can submit reassignment of ${contract.id} with stakeholders $stakeholders from $sourceSynchronizerId to $targetSynchronizerId. Candidates are: $readers"
     )
 
     // Building the unassignment requests lets us check whether contract can be reassigned to target synchronizer
@@ -163,10 +232,10 @@ private[routing] class SynchronizerRankComputation(
                   sourceSnapshot,
                   reader,
                   participantId,
-                  contract.stakeholders.all,
+                  stakeholders.all,
                 )
               _ <- new ReassigningParticipantsComputation(
-                stakeholders = contract.stakeholders,
+                stakeholders = stakeholders,
                 sourceSnapshot,
                 targetSnapshot,
               ).compute.leftWiden[ReassignmentValidationError]
@@ -179,7 +248,7 @@ private[routing] class SynchronizerRankComputation(
             )
       }
 
-    go(readers.intersect(contract.stakeholders.all).toList).leftMap(errors =>
+    go(readers.intersect(stakeholders.all).toList).leftMap(errors =>
       AutomaticReassignmentForTransactionFailure.Failed(errors)
     )
   }

@@ -319,7 +319,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -359,7 +359,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -399,7 +399,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -478,7 +478,7 @@ final class ParticipantTopologyTerminateProcessingTest
         val events = eventCaptor.getAllValues.asScala.flatMap(_(CantonTimestamp.MinValue))
         events.size shouldBe 1
         forAll(events) {
-          case TopologyTransactionEffective(_, events, _, _, _) =>
+          case TopologyTransactionEffective(_, events, _, _, _, _) =>
             forAll(events) {
               case PartyToParticipantAuthorization(
                     party,
@@ -933,7 +933,7 @@ final class ParticipantTopologyTerminateProcessingTest
         events.size shouldBe 2
 
         forAll(events.zip(List(synchronizerParams1, synchronizerParams2))) {
-          case (TopologyTransactionEffective(_, _, genericTopologyEvents, _, _), expected) =>
+          case (TopologyTransactionEffective(_, _, genericTopologyEvents, _, _, _), expected) =>
             genericTopologyEvents.loneElement shouldBe GenericTopologyEvent.SynchronizerParametersState
               .fromTopologyTransaction(expected.transaction)
           case _ => fail("unexpected transaction type")

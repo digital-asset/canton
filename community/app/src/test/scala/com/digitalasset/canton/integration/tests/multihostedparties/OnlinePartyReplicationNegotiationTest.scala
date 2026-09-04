@@ -63,7 +63,6 @@ import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
-import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 
@@ -76,7 +75,6 @@ import scala.jdk.CollectionConverters.*
   *     connectivityMap), and only sequencer1, sequencer2, and sequencer4 support channels (see
   *     selectivelyEnablePartyReplicationOnSequencers).
   */
-@nowarn("msg=match may not be exhaustive")
 sealed trait OnlinePartyReplicationNegotiationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -230,6 +228,11 @@ sealed trait OnlinePartyReplicationNegotiationTest
           )
         )
       }
+
+      // to be used later to query topology events for verification
+      val replicationStartTpOffset = targetParticipant.ledger_api.state.end()
+      val replicationStartSpOffset = sourceParticipant.ledger_api.state.end()
+
       val addPartyRequestId =
         clue("Initiate add party async")(
           targetParticipant.parties.add_party_async(
@@ -241,63 +244,60 @@ sealed trait OnlinePartyReplicationNegotiationTest
           )
         )
 
-      // Remember the offsets to help query subsequent LAPI topology events.
-      val spOffsetAgreement +: tpOffsetAgreement +: Nil = {
-        def partyToReplicate(create: CreatedEvent) = create.createArguments
-          .getOrElse(fail("missing arguments record"))
-          .fields
-          .collect { case RecordField("partyId", Some(Value(Party(partyId)))) =>
-            partyId
-          }
-          .loneElement
+      def partyToReplicate(create: CreatedEvent) = create.createArguments
+        .getOrElse(fail("missing arguments record"))
+        .fields
+        .collect { case RecordField("partyId", Some(Value(Party(partyId)))) =>
+          partyId
+        }
+        .loneElement
 
-        Seq(sourceParticipant, targetParticipant).map { participant =>
-          clue(s"Checking participant ${participant.name}: ") {
-            eventually() {
-              val txs = participant.ledger_api.updates.transactions(
-                Set(sourceParticipant.adminParty),
-                completeAfter = 10,
-                timeout = config.NonNegativeDuration.ofSeconds(1),
-                transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
-              )
+      // Wait for the sequencer channel agreement to be in place
+      Seq(sourceParticipant, targetParticipant).foreach { participant =>
+        clue(s"Checking participant ${participant.name}: ") {
+          eventually() {
+            val txs = participant.ledger_api.updates.transactions(
+              Set(sourceParticipant.adminParty),
+              completeAfter = 10,
+              timeout = config.NonNegativeDuration.ofSeconds(3),
+              transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+            )
 
-              // The TP asks the SP to replicate Alice via proposal
-              val createProposal = txs.flatMap { case TransactionWrapper(tx: Transaction) =>
+            // The TP asks the SP to replicate Alice via proposal
+            val createProposal = txs.flatMap { case TransactionWrapper(tx: Transaction) =>
+              tx.events.collect {
+                case Event(Created(event))
+                    if event.templateId.contains(
+                      PartyReplicationAdminWorkflow.proposalTemplate
+                    ) =>
+                  event
+              }
+            }.loneElement
+            val party = partyToReplicate(createProposal)
+            createProposal.signatories shouldBe Seq(
+              targetParticipant.adminParty.toProtoPrimitive
+            )
+            party shouldBe alice.toProtoPrimitive
+
+            // The SP accepts the party replication proposal
+            val accept = txs
+              .collect { case TransactionWrapper(tx: Transaction) =>
                 tx.events.collect {
-                  case Event(Created(event))
+                  case Event(Exercised(event))
                       if event.templateId.contains(
                         PartyReplicationAdminWorkflow.proposalTemplate
                       ) =>
                     event
                 }
-              }.loneElement
-              val party = partyToReplicate(createProposal)
-              createProposal.signatories shouldBe Seq(
-                targetParticipant.adminParty.toProtoPrimitive
-              )
-              party shouldBe alice.toProtoPrimitive
-
-              // The SP accepts the party replication proposal
-              val accept = txs
-                .collect { case TransactionWrapper(tx: Transaction) =>
-                  tx.events.collect {
-                    case Event(Exercised(event))
-                        if event.templateId.contains(
-                          PartyReplicationAdminWorkflow.proposalTemplate
-                        ) =>
-                      event
-                  }
-                }
-                .flatten
-                .loneElement
-              accept.choice shouldBe "Accept"
-              accept.consuming shouldBe true
-              accept.contractId shouldBe createProposal.contractId
-              accept.actingParties shouldBe Seq(
-                sourceParticipant.adminParty.toProtoPrimitive
-              )
-              accept.offset
-            }
+              }
+              .flatten
+              .loneElement
+            accept.choice shouldBe "Accept"
+            accept.consuming shouldBe true
+            accept.contractId shouldBe createProposal.contractId
+            accept.actingParties shouldBe Seq(
+              sourceParticipant.adminParty.toProtoPrimitive
+            )
           }
         }
       }
@@ -371,12 +371,16 @@ sealed trait OnlinePartyReplicationNegotiationTest
           .topology_transactions(PositiveInt.two, beginOffsetExclusive = offset)
           .flatMap(_.topologyTransaction.events.map(_.event))
 
-      val spLapiTopologyEvents = readLapiTopologyTransactions(sourceParticipant, spOffsetAgreement)
+      val spLapiTopologyEvents =
+        readLapiTopologyTransactions(sourceParticipant, replicationStartSpOffset)
+
       spLapiTopologyEvents should have size 2
       spLapiTopologyEvents.head shouldBe expectedLapiOnboardingEvent
       spLapiTopologyEvents.tail.head shouldBe expectedLapiAddedEvent
 
-      val tpLapiTopologyEvents = readLapiTopologyTransactions(targetParticipant, tpOffsetAgreement)
+      val tpLapiTopologyEvents =
+        readLapiTopologyTransactions(targetParticipant, replicationStartTpOffset)
+
       tpLapiTopologyEvents should have size 2
       tpLapiTopologyEvents.head shouldBe expectedLapiOnboardingEvent
       tpLapiTopologyEvents.tail.head shouldBe expectedLapiAddedEvent
@@ -450,6 +454,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
       val participantWithParty = participant1
       val participantWithParty2 = participant2
       val participantWithoutParty = participant3
+      val synchronizerId = participantWithParty.synchronizers.list_connected().head.synchronizerId
 
       import scala.concurrent.duration.*
       // Test the party replication agreement response by directly creating malformed contracts
@@ -526,6 +531,15 @@ sealed trait OnlinePartyReplicationNegotiationTest
           )
         )
 
+      def findLatestPtpTopologySerial(participant: LocalParticipantReference): Long =
+        participant.topology.party_to_participant_mappings
+          .list(synchronizerId, filterParty = aliceName)
+          .head
+          .context
+          .serial
+          .value
+          .toLong
+
       testAgreementError(
         "bad-party-id-format",
         "Invalid partyId .*Invalid unique identifier .* with missing namespace",
@@ -563,12 +577,14 @@ sealed trait OnlinePartyReplicationNegotiationTest
         "Party .* is not hosted by source participant",
         sourceParticipant = participantWithoutParty,
         targetParticipant = participantWithParty,
+        serial = findLatestPtpTopologySerial(participantWithParty),
       )
 
       testAgreementError(
         "target-participant-already-hosts-party",
-        "Party .* is already hosted by target participant",
+        s"Party .* is not marked as onboarding with permission Confirmation on the target participant ${participantWithParty2.id}",
         targetParticipant = participantWithParty2,
+        serial = findLatestPtpTopologySerial(participantWithParty2),
       )
 
       testAgreementError(
@@ -580,7 +596,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
 
       testAgreementError(
         "unexpected-topology-serial",
-        "Specified serial .* does not match the expected serial",
+        "Specified party .* serial .* does not match the encountered head serial",
         serial = 1000L,
       )
 

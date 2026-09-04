@@ -321,7 +321,7 @@ object ProtocolVersion {
     ProtocolVersion.createAlpha(36)
 
   // TODO(#33849): remove and replace with the target protocol version
-  lazy val acsCommitmentRedesign: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
+  lazy val acsCommitmentRedesign: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = v36
 
   // TODO(#23371): remove and replace with the target protocol version
   lazy val stringValidation: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev

@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.data.ReassignmentSubmitterMetadata
 import com.digitalasset.canton.error.TransactionRoutingError
 import com.digitalasset.canton.error.TransactionRoutingError.AutomaticReassignmentForTransactionFailure
@@ -45,48 +44,18 @@ private[routing] class ContractsReassigner(
         s"Automatic transaction reassignment to synchronizer $targetPsid"
       )
 
-      def getStakeholders(
-          cid: LfContractId,
-          source: PhysicalSynchronizerId,
-      ): EitherT[FutureUnlessShutdown, TransactionRoutingError, Stakeholders] = (
-        for {
-          synchronizerState <- EitherT.fromEither[FutureUnlessShutdown](
-            connectedSynchronizers.get(source).toRight(s"Not connected to synchronizer $source")
-          )
-          contract <- synchronizerState.ephemeral.contractLookup
-            .lookup(cid)
-            .toRight(s"Cannot find contract with id $cid")
-          stakeholders = Stakeholders.tryCreate(
-            stakeholders = contract.stakeholders,
-            signatories = contract.signatories,
-          )
-        } yield stakeholders
-      ).leftMap[TransactionRoutingError](AutomaticReassignmentForTransactionFailure.Failed(_))
-
       for {
-        batches <- synchronizerRankTarget.reassignments.toSeq
-          .parTraverse { case (cid, (submitter, source)) =>
-            getStakeholders(cid, source)
-              .map(stakeholders => (submitter, source, stakeholders, cid))
-          }
-          .map {
-            _.groupBy { case (submitter, source, stakeholders, _cid) =>
-              (submitter, source, stakeholders)
-            }.view
-              .mapValues(_.map { case (_submitter, _source, _stakeholders, cid) => cid })
-              .toSeq
-          }
+        targetTopology <- EitherT.fromEither[FutureUnlessShutdown](
+          synchronizerState.getTopologySnapshotFor(targetPsid)
+        )
 
-        _ <- (batches: Seq[
-          ((LfPartyId, PhysicalSynchronizerId, Stakeholders), Iterable[LfContractId])
-        ])
+        // The source topology is read from a map, not recomputed. Each batch only submits its
+        // reassignment.
+        _ <- synchronizerRankTarget.reassignments.toSeq
           .parTraverse_ { case ((lfParty, sourceSynchronizerId, _), cids) =>
             for {
               sourceTopology <- EitherT.fromEither[FutureUnlessShutdown](
                 synchronizerState.getTopologySnapshotFor(sourceSynchronizerId)
-              )
-              targetTopology <- EitherT.fromEither[FutureUnlessShutdown](
-                synchronizerState.getTopologySnapshotFor(targetPsid)
               )
 
               _ <- perform(

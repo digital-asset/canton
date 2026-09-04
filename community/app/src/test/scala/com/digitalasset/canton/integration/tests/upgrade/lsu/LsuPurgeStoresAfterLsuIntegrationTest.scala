@@ -14,11 +14,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
-import com.digitalasset.canton.integration.{
-  ConfigTransform,
-  ConfigTransforms,
-  EnvironmentDefinition,
-}
+import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
 import com.digitalasset.canton.participant.config.PurgeConfig
 import com.digitalasset.canton.topology.transaction.TopologyMapping
 import monocle.macros.syntax.lens.*
@@ -32,13 +28,6 @@ import java.time.Duration
 @UnstableTest // TODO(i33333): Remove once the test is stable again
 final class LsuPurgeStoresAfterLsuIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-purge-stores"
-
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
 
   registerPlugin(
     new UseBftSequencer(

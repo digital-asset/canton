@@ -239,8 +239,6 @@ final class JsonApiOffsetCheckpointsConformanceTest extends JsonApiConformanceBa
       updateAllParticipantConfigs_(
         _.focus(_.ledgerApi.indexService.offsetCheckpointCacheUpdateInterval)
           .replace(config.NonNegativeFiniteDuration(java.time.Duration.ofMillis(1000)))
-          .focus(_.ledgerApi.indexService.idleStreamOffsetCheckpointTimeout)
-          .replace(config.NonNegativeFiniteDuration(java.time.Duration.ofMillis(1000)))
       )
     )
 

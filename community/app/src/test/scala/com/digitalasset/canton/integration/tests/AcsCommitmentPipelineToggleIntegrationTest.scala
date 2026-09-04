@@ -50,12 +50,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateAllParticipantConfigs_(
           // Initially disable the pipeline.
-          _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor)
-            .replace(false)
-            // Emit checkpoints quickly so that the digest processor increases its checkpoint watermark
-            // so that the matcher processes the incoming commitments quickly.
-            .focus(_.ledgerApi.indexService.idleStreamOffsetCheckpointTimeout)
-            .replace(config.NonNegativeFiniteDuration.ofSeconds(1))
+          _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(false)
         ),
       )
 
@@ -229,7 +224,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
     CommitmentPeriod.tryCreate(checkpoint.recordTime.immediatePredecessor, checkpoint.recordTime)
   }
 
-  protected def checkMatchingCommitment(
+  private def checkMatchingCommitment(
       period: CommitmentPeriod,
       participant: LocalParticipantReference,
       sender: ParticipantId,
@@ -362,7 +357,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
 }
 
 @AcsCommitmentTest
-class AcsCommitmentPipelineIntegrationTestPostgres
+class AcsCommitmentPipelineToggleIntegrationTestPostgres
     extends AcsCommitmentPipelineToggleIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

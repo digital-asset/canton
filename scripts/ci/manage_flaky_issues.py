@@ -43,6 +43,8 @@ from flaky_common import (
     NIGHTLY_BROKEN_LABEL,
     NIGHTLY_CRON_HOUR_UTC,
     read_failing_tests,
+    read_failing_test_causes,
+    DEFAULT_CAUSE,
     write_streaks,
     failing_tests_path,
     streaks_path,
@@ -52,7 +54,7 @@ from flaky_common import (
 )
 
 
-def report_issue(issue: str):
+def report_issue(issue: str, cause: str = DEFAULT_CAUSE):
     title = format_issue_title(issue)
     idx = None
     project_item_id = None
@@ -114,14 +116,14 @@ def report_issue(issue: str):
                 gh_assign_release_line(idx, project_item_id)
 
         # update the description and reopen if needed
-        streak = update_issue(idx, title, body)
+        streak = update_issue(idx, title, body, cause)
         if has_assignee and streak is not None:
             print(f"Issue #{idx} has an assignee; skipping Slack notification.")
             return None
         return streak
 
     else:
-        create_issue(title)
+        create_issue(title, cause)
 
 
 def gh_assign_release_line(idx: str, project_item_id: str):
@@ -181,11 +183,11 @@ def gh_issue_edit_cmd(idx: str, title: str, body: str):
     return result
 
 
-def create_issue(title: str):
+def create_issue(title: str, cause: str = DEFAULT_CAUSE):
     body = f"""This issue was created automatically by the CI system. Please fix the test before closing the issue.
 
 {create_issue_table_header()}
-{create_issue_table_row()}"""
+{create_issue_table_row(cause)}"""
     result = gh_issue_create_cmd(title, body)
     print(f"Created issue: {result.stdout.strip()}")
 
@@ -323,7 +325,32 @@ def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
     return older_hash in result.stdout.splitlines()
 
 
-def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, str]]:
+# Header rows of the pre-Cause (five-column) failure-history table. Existing
+# issues carry these verbatim, so we rewrite them in place when appending a row.
+_OLD_HEADER_LINE = "| Date | Job | Node | Build | Commit |"
+_OLD_SEPARATOR_LINE = "|---|---|---|---|---|"
+_NEW_HEADER_LINE = "| Date | Job | Node | Build | Commit | Cause |"
+_NEW_SEPARATOR_LINE = "|---|---|---|---|---|---|"
+
+
+def migrate_table_header_to_cause(body: str) -> str:
+    """Ensures the issue body has the six-column (Cause) failure-history header.
+
+    New issues get the header appended. Issues still on the old five-column
+    header get it upgraded in place so the appended Cause cells line up. Their
+    existing rows render an empty Cause cell, which GitHub tolerates.
+    """
+    if _NEW_HEADER_LINE in body:
+        return body
+    if _OLD_HEADER_LINE in body:
+        body = body.replace(_OLD_HEADER_LINE, _NEW_HEADER_LINE)
+        return body.replace(_OLD_SEPARATOR_LINE, _NEW_SEPARATOR_LINE)
+    return body + "\n" + create_issue_table_header()
+
+
+def update_issue(
+    idx: str, title: str, body: str, cause: str = DEFAULT_CAUSE
+) -> Optional[tuple[str, str, str]]:
     job = get_ci_job_name()
     threshold = (
         CONSECUTIVE_FAILURES_THRESHOLD
@@ -331,9 +358,7 @@ def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, st
         else CONSECUTIVE_FAILURES_THRESHOLD_UNSTABLE
     )
 
-    header = "| Date | Job | Node | Build | Commit |"
-    if header not in body:
-        body = body + "\n" + create_issue_table_header()
+    body = migrate_table_header_to_cause(body)
     commit_hash = get_ci_commit_hash()
 
     consecutive_streak = False
@@ -356,7 +381,7 @@ def update_issue(idx: str, title: str, body: str) -> Optional[tuple[str, str, st
             ):
                 consecutive_streak = True
 
-    new_body = f"{body}\n{create_issue_table_row()}"
+    new_body = f"{body}\n{create_issue_table_row(cause)}"
     gh_issue_edit_cmd(idx, title, new_body)
     print(f"Updated issue: https://github.com/DACH-NY/canton/issues/{idx}")
     if consecutive_streak:
@@ -383,7 +408,39 @@ def gh_unarchive_issue(idx: str, project_item_id: str):
     print(f"Unarchived issue: https://github.com/DACH-NY/canton/issues/{idx}")
 
 
+def test_most_specific_cause_by_title():
+    # Two variants of one test collapse to a single issue title. The most
+    # specific cause across them (timeout) must win over the alphabetically
+    # earlier regular variant, so the timeout is not silently dropped.
+    failing = ["LedgerApiIntegrationTest/shard=0", "LedgerApiIntegrationTest/shard=1"]
+    causes = {
+        "LedgerApiIntegrationTest/shard=0": "regular",
+        "LedgerApiIntegrationTest/shard=1": "timeout",
+    }
+    resolved = most_specific_cause_by_title(failing, causes)
+    assert len(resolved) == 1, resolved
+    ((_, cause),) = resolved.items()
+    assert cause == "timeout", resolved
+
+    # A log error beats a log warning for the same title, ranking on the bucket
+    # token even with a " [Suite]" suffix.
+    causes2 = {
+        "FooIntegrationTest/a": "warn_other [FooIntegrationTest]",
+        "FooIntegrationTest/b": "error_other [FooIntegrationTest]",
+    }
+    ((_, cause2),) = most_specific_cause_by_title(list(causes2), causes2).items()
+    assert cause2 == "error_other [FooIntegrationTest]", cause2
+
+    # A variant with no recorded cause defaults to regular and does not override
+    # a real timeout on a sibling variant.
+    causes3 = {"BarTest/y": "timeout"}  # BarTest/x absent -> DEFAULT_CAUSE
+    ((_, cause3),) = most_specific_cause_by_title(["BarTest/x", "BarTest/y"], causes3).items()
+    assert cause3 == "timeout", cause3
+
+
 def self_test():
+    test_migrate_table_header_to_cause()
+    test_most_specific_cause_by_title()
     test_update_issue_old_format()
     test_update_issue_new_format()
     test_update_issue_returns_consecutive_streak_info_stable()
@@ -540,6 +597,31 @@ def test_update_issue_nightly_streak_labels_and_returns():
         assert labelled == [], "Expected no label when there is no streak"
 
 
+def test_migrate_table_header_to_cause():
+    # A body with no table at all gets the six-column header appended.
+    plain = "auto-created"
+    migrated = migrate_table_header_to_cause(plain)
+    assert migrated.endswith(create_issue_table_header()), migrated
+    assert migrated.count(_NEW_HEADER_LINE) == 1, migrated
+
+    # An old five-column table is upgraded in place: header and separator both
+    # become six-column, existing data rows are left untouched.
+    old_row = "| 2026-04-14 | test | 1 | [1](url) | [a1b2c3d4](commit/x) |"
+    old_table = f"intro\n\n{_OLD_HEADER_LINE}\n{_OLD_SEPARATOR_LINE}\n{old_row}"
+    migrated = migrate_table_header_to_cause(old_table)
+    # Full-line membership, not substring: the old separator is a tail of the new
+    # one, so `old_sep in new_sep` is spuriously True as a substring.
+    lines = migrated.splitlines()
+    assert _NEW_HEADER_LINE in lines and _NEW_SEPARATOR_LINE in lines, migrated
+    assert _OLD_HEADER_LINE not in lines, "old header line must be replaced"
+    assert _OLD_SEPARATOR_LINE not in lines, "old separator must be replaced"
+    assert old_row in lines, "existing data rows must be preserved"
+
+    # An already-migrated body is returned unchanged (idempotent).
+    already = f"intro\n\n{_NEW_HEADER_LINE}\n{_NEW_SEPARATOR_LINE}\n{old_row}"
+    assert migrate_table_header_to_cause(already) == already
+
+
 def test_update_issue_old_format():
     # Test CircleCI
     old_body = (
@@ -559,12 +641,13 @@ def test_update_issue_old_format():
         patch.dict(os.environ, env_cci, clear=False),
         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
     ):
-        update_issue("42", "Flaky test", old_body)
+        update_issue("42", "Flaky test", old_body, "timeout")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit |"
+        header = "| Date | Job | Node | Build | Commit | Cause |"
         assert header in msg, f"Table header was not injected into old-format body: {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once"
+        assert msg.rstrip().endswith("| timeout |"), f"Cause cell missing from appended row: {msg}"
 
     # Test GitHub Actions
     env_gha = {
@@ -581,12 +664,15 @@ def test_update_issue_old_format():
         patch.dict(os.environ, env_gha, clear=False),
         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
     ):
-        update_issue("42", "Flaky test", old_body)
+        update_issue("42", "Flaky test", old_body, "timeout")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit |"
+        header = "| Date | Job | Node | Build | Commit | Cause |"
         assert header in msg, f"Table header was not injected into old-format body (GHA): {msg}"
         assert msg.count(header) == 1, "Table header must appear exactly once (GHA)"
+        assert msg.rstrip().endswith("| timeout |"), (
+            f"Cause cell missing from appended row (GHA): {msg}"
+        )
 
 
 def test_update_issue_new_format():
@@ -609,12 +695,18 @@ def test_update_issue_new_format():
         patch.dict(os.environ, env_cci, clear=False),
         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
     ):
-        update_issue("42", "Flaky test", new_body)
+        update_issue("42", "Flaky test", new_body, "error_other")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit |"
+        header = "| Date | Job | Node | Build | Commit | Cause |"
         assert msg.count(header) == 1, (
-            f"Table header must appear exactly once in updated body: {msg}"
+            f"Six-column header must appear exactly once in updated body: {msg}"
+        )
+        assert "|---|---|---|---|---|" not in msg.splitlines(), (
+            f"Old five-column separator must be upgraded in place: {msg}"
+        )
+        assert msg.rstrip().endswith("| error_other |"), (
+            f"Cause cell missing from appended row: {msg}"
         )
 
     # Test GitHub Actions
@@ -632,12 +724,18 @@ def test_update_issue_new_format():
         patch.dict(os.environ, env_gha, clear=False),
         patch(f'{__name__}.gh_issue_edit_cmd') as mock_gh,
     ):
-        update_issue("42", "Flaky test", new_body)
+        update_issue("42", "Flaky test", new_body, "error_other")
         mock_gh.assert_called_once()
         msg = mock_gh.call_args[0][2]
-        header = "| Date | Job | Node | Build | Commit |"
+        header = "| Date | Job | Node | Build | Commit | Cause |"
         assert msg.count(header) == 1, (
-            f"Table header must appear exactly once in updated body (GHA): {msg}"
+            f"Six-column header must appear exactly once in updated body (GHA): {msg}"
+        )
+        assert "|---|---|---|---|---|" not in msg.splitlines(), (
+            f"Old five-column separator must be upgraded in place (GHA): {msg}"
+        )
+        assert msg.rstrip().endswith("| error_other |"), (
+            f"Cause cell missing from appended row (GHA): {msg}"
         )
 
 
@@ -922,6 +1020,38 @@ def test_report_issue_skips_slack_if_assignee():
         assert result is not None, "Expected streak result when issue has no assignee (GHA)"
 
 
+# Ordered most specific first. A timeout is more telling than a regular
+# failure, which is more telling than a log error, which beats a log warning.
+_CAUSE_PRECEDENCE = ('timeout', 'regular', 'error_other', 'warn_other')
+
+
+def _cause_rank(cause: str) -> int:
+    # Lower rank wins. Log causes may carry a " [Suite]" suffix, so rank on the
+    # leading bucket token. An unknown cause sorts last so it never overrides one
+    # we recognize.
+    bucket = cause.split(' ', 1)[0]
+    try:
+        return _CAUSE_PRECEDENCE.index(bucket)
+    except ValueError:
+        return len(_CAUSE_PRECEDENCE)
+
+
+def most_specific_cause_by_title(failing_tests, causes) -> dict[str, str]:
+    """Resolves one cause per issue title across the variants that share it.
+
+    Shard and parameter variants of a test collapse to a single issue title, so
+    the cause recorded there must be the most specific across those variants. A
+    timeout must not be lost behind an alphabetically earlier regular variant.
+    """
+    best: dict[str, str] = {}
+    for test_name in failing_tests:
+        title = format_issue_title(test_name)
+        cause = causes.get(test_name, DEFAULT_CAUSE)
+        if title not in best or _cause_rank(cause) < _cause_rank(best[title]):
+            best[title] = cause
+    return best
+
+
 def run(failing_tests_json=None, streaks_json=None):
     out_path = streaks_json or streaks_path()
 
@@ -932,6 +1062,7 @@ def run(failing_tests_json=None, streaks_json=None):
 
     in_path = failing_tests_json or failing_tests_path()
     failing_tests = read_failing_tests(in_path)
+    causes = read_failing_test_causes(in_path)
     if not failing_tests:
         print("No failing tests to report to GitHub.")
         write_streaks(out_path, [])
@@ -950,6 +1081,9 @@ def run(failing_tests_json=None, streaks_json=None):
     # Deduplicate by formatted name to avoid updating the same issue multiple times
     # when variants of the same test fail (e.g. SomeTest/param=a and SomeTest/param=b
     # both map to the same issue title after format_test_name strips the slash suffix).
+    # Resolve the cause per title first so the most specific one across the variants
+    # is recorded, not just the cause of the alphabetically first variant.
+    cause_by_title = most_specific_cause_by_title(failing_tests, causes)
     seen_titles: set = set()
     duplicates = []
     for test_name in failing_tests[:failing_tests_max]:
@@ -958,7 +1092,7 @@ def run(failing_tests_json=None, streaks_json=None):
             print(f"Skipping duplicate issue title: {title}")
             continue
         seen_titles.add(title)
-        result = report_issue(test_name)
+        result = report_issue(test_name, cause_by_title[title])
         if result is not None:
             duplicates.append(result)
 

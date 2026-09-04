@@ -400,6 +400,7 @@ class PartyReplicationIndexingWorkflow(
         watermark = watermark,
         synchronizerId = synchronizerId,
         acsChangeFactory = acsChangeFactory,
+        traceContext = traceContext,
       )
       .tap(update =>
         // TODO(#30121): Move indexer confirmation to indexer post-processing

@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v30}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtocolVersionedWrapper
+import com.digitalasset.canton.version.{DepthCounter, HasProtocolVersionedWrapper}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.{Lens, Prism, Traversal}
@@ -241,6 +241,13 @@ object MerkleTree {
   def fromProtoOptionV30[NodeType](
       protoNode: Option[v30.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
+  ): ParsingResult[MerkleTree[NodeType]] =
+    fromProtoOptionV30WithCounter(protoNode, DepthCounter.Default, (bytes, _) => f(bytes))
+
+  def fromProtoOptionV30WithCounter[NodeType](
+      protoNode: Option[v30.BlindableNode],
+      depthCounter: DepthCounter,
+      f: (ByteString, DepthCounter) => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] = {
     import v30.BlindableNode.BlindedOrNot as BON
     protoNode.map(_.blindedOrNot) match {
@@ -251,7 +258,7 @@ object MerkleTree {
             e => ProtoDeserializationError.OtherError(s"Failed to deserialize root hash: $e"),
             hash => BlindedNode.apply[NodeType](hash),
           )
-      case Some(BON.Unblinded(unblindedNode)) => f(unblindedNode)
+      case Some(BON.Unblinded(unblindedNode)) => f(unblindedNode, depthCounter)
       case Some(BON.Empty) | None =>
         Left(ProtoDeserializationError.OtherError(s"Missing blindedOrNot specification"))
     }

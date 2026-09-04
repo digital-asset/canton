@@ -26,15 +26,22 @@ runs:
           const artifactName = process.env.ARTIFACT_NAME;
           const currentRunId = Number(context.runId);
 
-          const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+          // Only the newest matching artifact is needed, and the API returns them newest
+          // first, so read a single page instead of paginating the whole retention window.
+          // One request per resolve keeps the shared GITHUB_TOKEN budget intact even as
+          // same-named artifacts accumulate.
+          // Expired artifacts are always the oldest, so the newest non-expired match can never be
+          // pushed past this page. 100 is the API max and costs the same as any smaller page, giving
+          // headroom to skip current-run or expired entries at the top. A miss falls back to a default split.
+          const { data } = await github.rest.actions.listArtifactsForRepo({
             owner,
             repo,
             per_page: 100,
             name: artifactName,
           });
 
-          // API ordering is not guaranteed, so enforce newest-first explicitly.
-          const artifactsNewestFirst = [...artifacts].sort((a, b) => {
+          // API ordering within the page is not guaranteed, so enforce newest-first explicitly.
+          const artifactsNewestFirst = [...data.artifacts].sort((a, b) => {
             const aCreatedAt = Date.parse(a.created_at || "");
             const bCreatedAt = Date.parse(b.created_at || "");
             return (Number.isFinite(bCreatedAt) ? bCreatedAt : 0) -

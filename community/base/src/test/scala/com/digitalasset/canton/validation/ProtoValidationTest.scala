@@ -150,6 +150,23 @@ class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
     }
   }
 
+  "ProtoValidation.validateCondition" should {
+    val error = InvariantViolation("my field", "BOOM")
+
+    "return unit when the condition holds" in {
+      ProtoValidation
+        .validateCondition(pvvBounds, 3 > 2, error)
+        .value shouldBe ()
+    }
+
+    "return the provided error when the condition does not hold" in {
+      ProtoValidation
+        .validateCondition(pvvBounds, 2 > 3, error)
+        .left
+        .value shouldBe error
+    }
+  }
+
   "ProtoValidation.validateLengthThen" should {
     "bound the collection, then parse every element" in {
       ProtoValidation

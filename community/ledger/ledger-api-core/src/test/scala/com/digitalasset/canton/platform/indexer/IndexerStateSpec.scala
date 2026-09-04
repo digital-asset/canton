@@ -1683,6 +1683,7 @@ class IndexerStateSpec
     Update.SequencerIndexMoved(
       synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
       recordTime = CantonTimestamp.now(),
+      traceContext = implicitly,
     )
 
   def repairUpdate: RepairUpdate = mock[RepairUpdate]

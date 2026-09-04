@@ -15,6 +15,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressingLogger}
 import com.digitalasset.canton.participant.protocol.submission.SynchronizerSelectionFixture.*
 import com.digitalasset.canton.participant.protocol.submission.SynchronizerSelectionFixture.Transactions.{
   ExerciseByInterface,
+  FourExercises,
   ThreeExercises,
 }
 import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers.{
@@ -83,7 +84,8 @@ class SynchronizerSelectorTest
     val defaultSynchronizerRank = SynchronizerRank(Map.empty, 0, da)
 
     def reassignmentsDaToAcme(contracts: Set[LfContractId]) = SynchronizerRank(
-      reassignments = contracts.map(_ -> (signatory, da)).toMap, // current synchronizer is da
+      reassignments =
+        Map((signatory, da, defaultStakeholders) -> contracts), // current synchronizer is da
       priority = 0,
       synchronizerId = acme, // reassign to acme
     )
@@ -304,7 +306,10 @@ class SynchronizerSelectorTest
         ""
       ) shouldBe InputContractsOnDifferentSynchronizers(Set(da, repair))
       selector.forMultiSynchronizer.futureValueUS.value shouldBe SynchronizerRank(
-        reassignments = Map(treeExercises.inputContract3Id -> (signatory, da)),
+        reassignments = Map(
+          (signatory, da, Stakeholders.withSignatoriesAndObservers(Set(signatory), Set(party3))) ->
+            Set(treeExercises.inputContract3Id)
+        ),
         priority = 0,
         synchronizerId = repair,
       )
@@ -416,7 +421,8 @@ class SynchronizerSelectorTest
         )
 
         val expectedSynchronizerRank = SynchronizerRank(
-          reassignments = Map(threeExercises.inputContract3Id -> (signatory, repair)),
+          reassignments =
+            Map((signatory, repair, defaultStakeholders) -> Set(threeExercises.inputContract3Id)),
           priority = 0,
           synchronizerId = acme, // reassign to acme
         )
@@ -436,7 +442,8 @@ class SynchronizerSelectorTest
         )
 
         val expectedSynchronizerRank = SynchronizerRank(
-          reassignments = Map(threeExercises.inputContract1Id -> (signatory, acme)),
+          reassignments =
+            Map((signatory, acme, defaultStakeholders) -> Set(threeExercises.inputContract1Id)),
           priority = 0,
           synchronizerId = repair, // reassign to repair
         )
@@ -563,7 +570,9 @@ class SynchronizerSelectorTest
       )
 
       // Only c3 is reassigned (da -> acme); not being a stakeholder of c1/c2 is fine.
-      reassignments.value shouldBe Map(threeExercises.inputContract3Id -> (signatory, da))
+      reassignments.value shouldBe Map(
+        (signatory, da, submitterIsStakeholder) -> Set(threeExercises.inputContract3Id)
+      )
 
     }
 
@@ -589,8 +598,8 @@ class SynchronizerSelectorTest
       )
 
       reassignments.value shouldBe Map(
-        threeExercises.inputContract2Id -> (signatory, da),
-        threeExercises.inputContract3Id -> (signatory, repair),
+        (signatory, da, submitterIsStakeholder) -> Set(threeExercises.inputContract2Id),
+        (signatory, repair, submitterIsStakeholder) -> Set(threeExercises.inputContract3Id),
       )
     }
 
@@ -670,6 +679,43 @@ class SynchronizerSelectorTest
       )
     }
   }
+
+  "SynchronizerSelector (transaction with four input contracts)" should {
+    import SynchronizerSelectorTest.*
+    import SynchronizerSelectorTest.ForSimpleTopology.*
+    import SimpleTopology.*
+
+    "prefer fewer reassignment batches over fewer contracts" in {
+      val fourExercises = FourExercises(fixtureSerializationVersion)
+
+      val stakeholdersA = Stakeholders.withSignatoriesAndObservers(Set(signatory), Set(observer))
+      val stakeholdersB =
+        Stakeholders.withSignatoriesAndObservers(Set(signatory), Set.empty[LfPartyId])
+
+      // Both candidates move two contracts, so only the batch count can separate them.
+      val selector = selectorForFourExercises(
+        fourExercises = fourExercises,
+        synchronizerOfContracts = Map(
+          fourExercises.inputContract1Id -> repair,
+          fourExercises.inputContract2Id -> repair,
+          fourExercises.inputContract3Id -> acme,
+          fourExercises.inputContract4Id -> acme,
+        ),
+        inputContractStakeholders = Map(
+          fourExercises.inputContract1Id -> stakeholdersA,
+          fourExercises.inputContract2Id -> stakeholdersB,
+          fourExercises.inputContract3Id -> stakeholdersA,
+          fourExercises.inputContract4Id -> stakeholdersA,
+        ),
+        synchronizers = NonEmpty.mk(Set, acme, repair),
+      )
+
+      val rank = selector.forMultiSynchronizer.futureValueUS.value
+      rank.synchronizerId shouldBe repair
+      rank.reassignments.size shouldBe 1
+      rank.contractCount shouldBe 2
+    }
+  }
 }
 
 private[routing] object SynchronizerSelectorTest {
@@ -685,6 +731,9 @@ private[routing] object SynchronizerSelectorTest {
 
   object ForSimpleTopology {
     import SimpleTopology.*
+
+    val defaultStakeholders: Stakeholders =
+      Stakeholders.withSignatoriesAndObservers(Set(signatory), Set(observer))
 
     private val defaultSynchronizerOfContracts
         : Seq[LfContractId] => Map[LfContractId, (PhysicalSynchronizerId, ContractStateStatus)] =
@@ -784,6 +833,32 @@ private[routing] object SynchronizerSelectorTest {
       )
     }
 
+    def selectorForFourExercises(
+        fourExercises: FourExercises,
+        synchronizerOfContracts: Map[LfContractId, PhysicalSynchronizerId],
+        inputContractStakeholders: Map[LfContractId, Stakeholders],
+        synchronizers: NonEmpty[Set[PhysicalSynchronizerId]],
+    )(implicit
+        ec: ExecutionContext,
+        traceContext: TraceContext,
+        loggerFactory: NamedLoggerFactory,
+    ): Selector =
+      new Selector(loggerFactory)(
+        defaultPriorityOfSynchronizer,
+        _ =>
+          synchronizerOfContracts.map { case (coid, synchronizerId) =>
+            coid -> (synchronizerId, ContractStateStatus.Active)
+          },
+        synchronizers.forgetNE,
+        synchronizers,
+        None,
+        ExerciseByInterface.correctPackages,
+        fourExercises.tx,
+        CantonTimestamp.now(),
+        inputContractStakeholders,
+        correctTopology,
+      )
+
     class Selector(loggerFactory: NamedLoggerFactory)(
         priorityOfSynchronizer: PhysicalSynchronizerId => Int,
         synchronizerOfContracts: Seq[LfContractId] => Map[
@@ -824,6 +899,18 @@ private[routing] object SynchronizerSelectorTest {
         ): FutureUnlessShutdown[Map[LfContractId, (PhysicalSynchronizerId, ContractStateStatus)]] =
           FutureUnlessShutdown.pure(synchronizerOfContracts(coids))
 
+        override def getContractsStakeholders(coids: Seq[LfContractId])(implicit
+            ec: ExecutionContext,
+            traceContext: TraceContext,
+        ): EitherT[FutureUnlessShutdown, Set[LfContractId], Map[LfContractId, Stakeholders]] = {
+          val (known, unknown) = coids.toSet.partition(inputContractStakeholders.contains)
+          EitherT.cond(
+            unknown.isEmpty,
+            known.view.map(coid => coid -> inputContractStakeholders(coid)).toMap,
+            unknown,
+          )
+        }
+
         override def getSyncCryptoPureApi(
             synchronizerId: PhysicalSynchronizerId
         ): Either[UnableToGetStaticParameters.Failed, Option[SynchronizerCryptoPureApi]] =
@@ -850,7 +937,7 @@ private[routing] object SynchronizerSelectorTest {
           ledgerTime = ledgerTime,
           transaction = tx,
           synchronizerState = TestSynchronizerState$,
-          contractsStakeholders = inputContractStakeholders,
+          inputContractIds = inputContractIds.toSeq,
           prescribedSynchronizerIdO = prescribedSubmitterPsid,
           disclosedContracts = Nil,
         )

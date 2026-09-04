@@ -77,7 +77,7 @@ object SerializationVersion {
   private[lf] val minChoiceAuthorizers = SerializationVersion.VDev
 
   // V3 releases external call results out of the dev staging area for protocol version 36
-  // (the LF feature is promoted to 2.4-staging in a companion change), mirroring how contract
+  // (the LF feature is promoted to 2.4 in a companion change), mirroring how contract
   // keys were released as V2.
   private[lf] val minExternalCallResults: SerializationVersion = SerializationVersion.V3
 

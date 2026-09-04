@@ -6,7 +6,7 @@ package com.daml.ledger.api.testtool.suites.v2_2
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.assertDefined
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
-import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party, WithTimeout}
+import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party}
 import com.daml.ledger.api.testtool.suites.v2_2.CompletionDeduplicationInfoIT.*
 import com.daml.ledger.api.v2.command_service.SubmitAndWaitRequest
 import com.daml.ledger.api.v2.command_submission_service.SubmitRequest
@@ -20,7 +20,6 @@ import com.digitalasset.daml.lf.data.Ref.SubmissionId
 import io.grpc.Status
 
 import java.util.List as JList
-import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
 final class CompletionDeduplicationInfoIT[ServiceRequest](
@@ -144,10 +143,7 @@ private[testtool] object CompletionDeduplicationInfoIT {
       party: Party,
       offset: Long,
   ): Future[Option[Completion]] =
-    WithTimeout(5.seconds)(
-      ledger
-        .findCompletion(ledger.completionStreamRequest(offset)(party))(_ => true)
-    )
+    ledger.findCompletion(ledger.completionStreamRequest(offset)(party))(_ => true)
 
   private def assertSubmissionIdIsPreserved(
       optCompletion: Option[Completion],

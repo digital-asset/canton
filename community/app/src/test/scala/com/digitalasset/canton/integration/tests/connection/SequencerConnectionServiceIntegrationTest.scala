@@ -9,6 +9,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SubmissionRequestAmplification,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
@@ -204,6 +205,7 @@ sealed trait SequencerConnectionServiceIntegrationTest
   }
 }
 
+@UnstableTest // TODO(i31810): remove once the test is no longer flaky
 class SequencerConnectionServiceIntegrationTestDefault
     extends SequencerConnectionServiceIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

@@ -97,6 +97,7 @@ class NonUniqueContractKeyIndexComponentTest extends AnyFlatSpec with IndexCompo
         synchronizerId = synchronizerId,
         acsChangeFactory = TestAcsChangeFactory(),
         optCompletionInfo = None,
+        traceContext = implicitly,
       )
 
     def assigns(

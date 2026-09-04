@@ -677,6 +677,7 @@ trait IndexComponentTest
       ),
       synchronizerId = synchronizerId,
       effectiveTime = recordTime,
+      traceContext = implicitly,
     )
     val ledgerEndBeforeTopology = index
       .currentLedgerEnd()
@@ -808,6 +809,7 @@ trait IndexComponentTest
           ),
         )
       }.toMap,
+      traceContext = implicitly,
     )
 
   protected def mkReassignmentAccepted(
@@ -857,6 +859,7 @@ trait IndexComponentTest
         recordTime = CantonTimestamp(recordTime),
         synchronizerId = synchronizer2,
         acsChangeFactory = TestAcsChangeFactory(),
+        traceContext = implicitly,
       )
     else
       Update.RepairReassignmentAccepted(
@@ -894,6 +897,7 @@ trait IndexComponentTest
         repairCounter = RepairCounter.Genesis,
         recordTime = CantonTimestamp(recordTime),
         synchronizerId = synchronizer2,
+        traceContext = implicitly,
       )
   }
 
@@ -924,6 +928,7 @@ trait IndexComponentTest
       recordTime = recordTime,
       synchronizerId = synchronizerId,
       acsChangeFactory = testAcsChangeFactory,
+      traceContext = implicitly,
     )
 
   protected def sequencedAssign(
@@ -995,6 +1000,7 @@ trait IndexComponentTest
       repairCounter = RepairCounter.Genesis,
       recordTime = sequenced.recordTime,
       contractInfos = sequenced.contractInfos,
+      traceContext = implicitly,
     )
 
   protected def activeContractIds(

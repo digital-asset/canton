@@ -389,6 +389,7 @@ class MultiSynchronizerIndexComponentTest extends AnyFlatSpec with IndexComponen
       recordTime = rt,
       synchronizerId = synchronizer2,
       acsChangeFactory = TestAcsChangeFactory(),
+      traceContext = implicitly,
     )
   }
 

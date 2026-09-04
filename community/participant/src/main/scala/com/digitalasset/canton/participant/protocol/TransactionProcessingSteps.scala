@@ -1133,10 +1133,10 @@ class TransactionProcessingSteps(
       trafficCost,
     ).map { completionInfo =>
       Update.SequencedCommandRejected(
-        completionInfo,
-        rejection,
-        psid.logical,
-        ts,
+        completionInfo = completionInfo,
+        reasonTemplate = rejection,
+        synchronizerId = psid.logical,
+        recordTime = ts,
         isTransaction = true,
         // We do not carry the transaction hash for these early sequenced rejections. The hash is
         // recomputed during phase-3 reinterpretation, but this rejection fires before that point
@@ -1148,6 +1148,7 @@ class TransactionProcessingSteps(
         // TODO(#31816): decide whether to move hash computations earlier, or store
         // the phase-1 hash to be used for these rejections.
         transactionHash = None,
+        traceContext = traceContext,
       )
     } -> None // Transaction processing doesn't use pending submissions
   }
@@ -1195,12 +1196,13 @@ class TransactionProcessingSteps(
 
     val updateO = completionInfoO.map(info =>
       Update.SequencedCommandRejected(
-        info,
-        rejection,
-        psid.logical,
-        requestTime,
+        completionInfo = info,
+        reasonTemplate = rejection,
+        synchronizerId = psid.logical,
+        recordTime = requestTime,
         isTransaction = true,
         transactionHash = transactionValidationResult.validatedExternalTransactionHash,
+        traceContext = traceContext,
       )
     )
     Right(updateO)
@@ -1359,6 +1361,7 @@ class TransactionProcessingSteps(
                 representativePackageId = SameAsContractPackageId,
               )
             }.toMap,
+            traceContext = traceContext,
           )
         }
     CommitAndStoreContractsAndPublishEvent(

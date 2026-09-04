@@ -25,6 +25,11 @@ import scala.concurrent.duration.DurationInt
 final class CommandSubmissionCompletionIT(testDars: TestDars) extends LedgerTestSuite {
   import testDars.companionImplicits.*
 
+  private def isTimeout(throwable: Throwable): Boolean = throwable match {
+    case _: TimeoutException => true
+    case _ => false
+  }
+
   test(
     "CSCCompletions",
     "Read completions correctly with a correct user identifier and reading party",
@@ -76,10 +81,12 @@ final class CommandSubmissionCompletionIT(testDars: TestDars) extends LedgerTest
       invalidRequest = ledger
         .completionStreamRequest()(party)
         .update(_.userId := "invalid-user-id")
-      failure <- WithTimeout(5.seconds)(ledger.firstCompletions(invalidRequest))
+      failure <- WithTimeout("Completions for an invalid user ID", 5.seconds)(
+        ledger.firstCompletions(invalidRequest)
+      )
         .mustFail("subscribing to completions with an invalid user ID")
     } yield {
-      assert(failure == TimeoutException, "Timeout expected")
+      assert(isTimeout(failure), s"Timeout expected, got $failure")
     }
   })
 
@@ -115,10 +122,12 @@ final class CommandSubmissionCompletionIT(testDars: TestDars) extends LedgerTest
     val request = ledger.submitRequest(party, new Dummy(party).create.commands)
     for {
       _ <- ledger.submit(request)
-      failure <- WithTimeout(5.seconds)(ledger.firstCompletions(notTheSubmittingParty))
+      failure <- WithTimeout("Completions for the wrong party", 5.seconds)(
+        ledger.firstCompletions(notTheSubmittingParty)
+      )
         .mustFail("subscribing to completions with the wrong party")
     } yield {
-      assert(failure == TimeoutException, "Timeout expected")
+      assert(isTimeout(failure), s"Timeout expected, got $failure")
     }
   })
 
@@ -193,24 +202,25 @@ final class CommandSubmissionCompletionIT(testDars: TestDars) extends LedgerTest
       _ <- ledger.submit(aliceRequest)
       _ <- ledger.submit(bobRequest)
       _ <- ledger.submit(aliceBobRequest)
-      _ <- WithTimeout(5.seconds)(ledger.findCompletion(alice, bob)(_.commandId == aliceCommandId))
-      _ <- WithTimeout(5.seconds)(ledger.findCompletion(alice, bob)(_.commandId == bobCommandId))
-      aliceBobCompletionForAliceBob <- WithTimeout(5.seconds)(
-        ledger.findCompletion(alice, bob)(_.commandId == aliceBobCommandId)
+      _ <- ledger.findCompletion(alice, bob)(_.commandId == aliceCommandId)
+      _ <- ledger.findCompletion(alice, bob)(_.commandId == bobCommandId)
+      aliceBobCompletionForAliceBob <- ledger.findCompletion(alice, bob)(
+        _.commandId == aliceBobCommandId
       )
-      // as all the commands are already visible on the ledger we can go to lower timeouts
-      _ <- WithTimeout(2.seconds)(ledger.findCompletion(alice)(_.commandId == aliceCommandId))
-      _ <- WithTimeout(2.seconds)(ledger.findCompletion(alice)(_.commandId == bobCommandId))
-        .mustFailWith("alice should not be able to look up bob's command")(_ == TimeoutException)
-      aliceBobCompletionForAlice <- WithTimeout(2.seconds)(
-        ledger.findCompletion(alice)(_.commandId == aliceBobCommandId)
+      // The negative lookups below need a deadline of their own: they assert that nothing arrives,
+      // and the commands are already visible, so a short window is enough to establish that.
+      _ <- ledger.findCompletion(alice)(_.commandId == aliceCommandId)
+      _ <- WithTimeout("Alice's completion for bob's command", 2.seconds)(
+        ledger.findCompletion(alice)(_.commandId == bobCommandId)
       )
-      _ <- WithTimeout(2.seconds)(ledger.findCompletion(bob)(_.commandId == aliceCommandId))
-        .mustFailWith("bob should not be able to look up alice's command")(_ == TimeoutException)
-      _ <- WithTimeout(2.seconds)(ledger.findCompletion(bob)(_.commandId == bobCommandId))
-      aliceBobCompletionForBob <- WithTimeout(2.seconds)(
-        ledger.findCompletion(bob)(_.commandId == aliceBobCommandId)
+        .mustFailWith("alice should not be able to look up bob's command")(isTimeout)
+      aliceBobCompletionForAlice <- ledger.findCompletion(alice)(_.commandId == aliceBobCommandId)
+      _ <- WithTimeout("Bob's completion for alice's command", 2.seconds)(
+        ledger.findCompletion(bob)(_.commandId == aliceCommandId)
       )
+        .mustFailWith("bob should not be able to look up alice's command")(isTimeout)
+      _ <- ledger.findCompletion(bob)(_.commandId == bobCommandId)
+      aliceBobCompletionForBob <- ledger.findCompletion(bob)(_.commandId == aliceBobCommandId)
     } yield {
       assertEquals(
         "If filtered with both alice and bob, the multi-party submissions should have both act_as parties.",
@@ -300,13 +310,13 @@ final class CommandSubmissionCompletionIT(testDars: TestDars) extends LedgerTest
           .submitRequest(party, new Dummy(party).create.commands)
           .update(_.commands.synchronizerId := targetSynchronizer)
         _ <- ledger.submit(requestForSynchronizer1)
-        firstSynchronizerCompletion <- WithTimeout(5.seconds)(
-          ledger.findCompletion(party)(_.commandId == requestForSynchronizer1.getCommands.commandId)
-        ).map(
-          _.getOrElse(
-            fail(s"completion not found for ${requestForSynchronizer1.getCommands.commandId}")
+        firstSynchronizerCompletion <- ledger
+          .findCompletion(party)(_.commandId == requestForSynchronizer1.getCommands.commandId)
+          .map(
+            _.getOrElse(
+              fail(s"completion not found for ${requestForSynchronizer1.getCommands.commandId}")
+            )
           )
-        )
         actualSynchronizerId <- ledger
           .transactionById(firstSynchronizerCompletion.updateId, Seq(party), AcsDelta)
           .map(_.synchronizerId)

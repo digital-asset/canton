@@ -47,6 +47,15 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### `lapi_events_party_to_participant` Database Migration
+
+On upgrade, the participant database is migrated as follows:
+
+- A `party` column is added to the `lapi_events_party_to_participant` table. The migration takes roughly
+  30 seconds per 1 million parties.
+- The `external_string` column of the `string_interning` table now enforces a `not null` constraint. This is a
+  no-op for existing data, but prevents future inserts of null values.
+
 ### Reassignment store database migration
 
 On upgrade, a participant database migration updates the reassignment store: it backfills the new
@@ -189,6 +198,9 @@ The `external_call` feature is released and enabled from 2.4(-staging) onwards.
 - CantonBFT: added metrics about how much time batch fetches take and to count batch fetch timeouts,
   in both cases labelled by counterparty node.
 - Removed redundant root-hash signature from informee and encrypted view messages.
+- The JSON Ledger API specs (OpenAPI/AsyncAPI) had their description fields modified to no longer include the
+  3.4 -> 3.5 migration guidance due to optional/required field corrections introduced in a 3.4 patch release.
+  It is assumed all clients have already migrated to use a compatible post-3.4 OpenAPI/AsyncAPI spec.
 
 The list of removed suites:
   - `TLS_DHE_RSA_WITH_AES_256_GCM_SHA384`
@@ -267,6 +279,13 @@ The list of removed suites:
 requirement. For details on TLS version deprecations, see [RFC 8996](https://www.rfc-editor.org/info/rfc8996).
 - **Console BREAKING**: The `com.digitalasset.canton.config.NonNegativeNumeric.increment` method now returns an `Either[InvariantViolation, NonNegativeNumeric]` instead of a `NonNegativeNumeric`.
   This is relevant as this class can be used in the console and scripts. Such usages must be updated to account for this change.
+- Fixed the parsing of the `Sec-WebSocket-Protocol` header in the Ledger JSON API. As specified by RFC 6455, clients
+  send the subprotocol values separated by a comma and a space (for example `daml.ws.auth, jwt.token.<token>`).
+  Canton split the header on the comma only, so the leading space stayed attached to the following value and that value
+  was silently discarded, making the request fail with an `UNAUTHENTICATED` error. The values are now trimmed, so such
+  requests are accepted.
+- **Console BREAKING**: Canton console command `<sequencerReference>.setup.initialize_from_lsu_predecessor`, admin console command class `SequencerAdminCommands.InitializeFromLsuPredecessor` and the respective proto `InitializeSequencerFromLsuPredecessorRequest`
+  now require to specify `synchronizerId` (logical) on the request.
 
 #### Improved Sequencer Logging
 On the sequencer, the log line mentioning all events in a block now also can contain the outcome of the event.
@@ -281,6 +300,8 @@ metrics dropped the superfluous leading "SEQ::" string.
 
 ## Bugfixes
 - Ledger JSON API `/v2/state/active-contracts-page` is now available via POST; the GET variant that expects a request body is deprecated.
+
+### (YY-nnn, Risk): Title
 
 #### Issue Description
 

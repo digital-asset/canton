@@ -58,7 +58,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.daml.lf.value.Value
-import monocle.Monocle.toAppliedFocusOps
+import monocle.macros.syntax.lens.*
 import org.apache.pekko.stream.QueueOfferResult
 import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.Assertions.fail
@@ -106,15 +106,8 @@ abstract class LedgerPruningIntegrationTest
           _.focus(_.parameters.batching.maxAcsImportBatchSize)
             .replace(PositiveInt.one)
         ),
-        ConfigTransforms.updateAllParticipantConfigs_(
-          // Emit checkpoints quickly so that the digest processor increases its checkpoint watermark
-          // so that the matcher processes the incoming commitments and pruning can proceed quickly.
-          _.focus(_.ledgerApi.indexService.idleStreamOffsetCheckpointTimeout)
-            .replace(config.NonNegativeFiniteDuration.ofSeconds(1))
-        ),
         ConfigTransforms.disableOldAcsCommitmentProcessor,
       )
-      .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
       .withSetup { env =>
         import env.*
         sequencer1.topology.synchronizer_parameters.propose_update(

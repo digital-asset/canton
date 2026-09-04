@@ -2920,7 +2920,7 @@ class PekkoUtilTest
   "gateKeeper" should {
     "output elements at or below the gates" in {
       val emitted = Source(1 to 10)
-        .gateKeeper(Source(Seq(2, 5)))(Predef.identity)
+        .gateKeeper(Source(Seq(2, 5)))(Predef.identity)((_, _) => None)
         .runWith(Sink.seq)
         .futureValue
       emitted shouldBe (1 to 5)
@@ -2928,7 +2928,7 @@ class PekkoUtilTest
 
     "pause emitting source elements at the first element that does not fit through the gate" in {
       val emitted = Source((6 to 10) ++ (1 to 5))
-        .gateKeeper(Source.single(7))(Predef.identity)
+        .gateKeeper(Source.single(7))(Predef.identity)((_, _) => None)
         .runWith(Sink.seq)
         .futureValue
       emitted shouldBe (6 to 7)
@@ -2936,7 +2936,7 @@ class PekkoUtilTest
 
     "deal with unordered gates by keeping the maximum" in {
       val emitted = Source(1 to 10)
-        .gateKeeper(Source(Seq(5, 1, 3)))(Predef.identity)
+        .gateKeeper(Source(Seq(5, 1, 3)))(Predef.identity)((_, _) => None)
         .runWith(Sink.seq)
         .futureValue
       emitted shouldBe (1 to 5)
@@ -2944,14 +2944,17 @@ class PekkoUtilTest
 
     "terminate when input terminates and all elements fit through the gate" in {
       val terminateInput =
-        Source(1 to 10).gateKeeper(Source.repeat(11))(Predef.identity).runWith(Sink.seq).futureValue
+        Source(1 to 10)
+          .gateKeeper(Source.repeat(11))(Predef.identity)((_, _) => None)
+          .runWith(Sink.seq)
+          .futureValue
       terminateInput shouldBe (1 to 10)
     }
     "terminate when the gate terminates and a source element does not fit through the gate" in {
       val terminateGate =
         Source
           .fromIterator(() => Iterator.from(0))
-          .gateKeeper(Source(Seq(5)))(Predef.identity)
+          .gateKeeper(Source(Seq(5)))(Predef.identity)((_, _) => None)
           .runWith(Sink.seq)
           .futureValue
       terminateGate shouldBe (0 to 5)
@@ -2960,7 +2963,7 @@ class PekkoUtilTest
     "terminate even when the gate is dry" in {
       Source
         .empty[Int]
-        .gateKeeper(Source.never[Int])(Predef.identity)
+        .gateKeeper(Source.never[Int])(Predef.identity)((_, _) => None)
         .runWith(Sink.seq)
         .futureValue shouldBe empty
     }
@@ -2968,7 +2971,7 @@ class PekkoUtilTest
     "emit correctly and backpressure when gate and source elements are interleaved" in {
       val ((input, gate), sink) = TestSource
         .probe[Int]
-        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)((_, _) => None)(Keep.both)
         .toMat(TestSink.probe[Int])(Keep.both)
         .run()
 
@@ -3019,7 +3022,7 @@ class PekkoUtilTest
       val failure = new RuntimeException("Input failure")
       val ((input, gate), sink) = TestSource
         .probe[Int]
-        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)((_, _) => None)(Keep.both)
         .toMat(TestSink.probe[Int])(Keep.both)
         .run()
       sink.request(5)
@@ -3035,7 +3038,7 @@ class PekkoUtilTest
       val failure = new RuntimeException("Gate failure")
       val ((input, gate), sink) = TestSource
         .probe[Int]
-        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)((_, _) => None)(Keep.both)
         .toMat(TestSink.probe[Int])(Keep.both)
         .run()
       sink.request(5)
@@ -3051,7 +3054,7 @@ class PekkoUtilTest
     "propagate cancellation from the sink" in {
       val emitted = Source
         .repeat(1)
-        .gateKeeper(Source.repeat(2))(Predef.identity)
+        .gateKeeper(Source.repeat(2))(Predef.identity)((_, _) => None)
         .take(5)
         .runWith(Sink.seq)
         .futureValue
@@ -3062,7 +3065,7 @@ class PekkoUtilTest
       val failure = new RuntimeException("Sink failure")
       val ((input, gate), sink) = TestSource
         .probe[Int]
-        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)(Keep.both)
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)((_, _) => None)(Keep.both)
         .toMat(TestSink.probe[Int])(Keep.both)
         .run()
       sink.request(5)
@@ -3072,6 +3075,27 @@ class PekkoUtilTest
       sink.cancel(failure)
       gate.expectCancellationWithCause(failure)
       input.expectCancellationWithCause(failure)
+    }
+
+    "inject signal when input gets stuck" in {
+      val (gate, sink) = Source(1 to 26 by 5)
+        .gateKeeperMat(TestSource.probe[Int])(Predef.identity)((x, g) => Some(-x - g))(Keep.right)
+        .toMat(TestSink.probe[Int])(Keep.both)
+        .run()
+
+      sink.request(100)
+      gate.sendNext(8)
+      sink.expectNext(1)
+      sink.expectNext(6)
+      sink.expectNext(-11 - 8)
+      gate.sendNext(17)
+      sink.expectNext(11)
+      sink.expectNext(16)
+      sink.expectNext(-21 - 17)
+      gate.sendNext(40)
+      sink.expectNext(21)
+      sink.expectNext(26)
+      sink.expectComplete()
     }
   }
 

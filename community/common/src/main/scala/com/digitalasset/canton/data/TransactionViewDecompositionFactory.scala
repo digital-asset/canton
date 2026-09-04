@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.data
 
-import cats.data.Chain
+import cats.data.{Chain, EitherT}
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
 import com.digitalasset.canton.data.TransactionViewDecompositionFactory.RollbackState.firstChild
@@ -23,6 +24,30 @@ import com.digitalasset.daml.lf.transaction.NodeId
 import scala.concurrent.ExecutionContext
 
 case object TransactionViewDecompositionFactory {
+
+  sealed trait TransactionViewLimitExceeded {
+    def message: String
+  }
+
+  /** @param subViewCount
+    *   number of subviews that we generated from a transaction
+    * @param limit
+    *   maximum number of subviews that a transaction may generate
+    */
+  final case class TransactionSubViewLimitExceeded(subViewCount: Int, limit: Int)
+      extends TransactionViewLimitExceeded {
+    val message: String = s"Number of subviews for a transaction exceeded $limit"
+  }
+
+  /** @param rootViewCount
+    *   number of root views that we generated from a transaction
+    * @param limit
+    *   maximum number of root views that a transaction may generate
+    */
+  final case class TransactionRootViewLimitExceeded(rootViewCount: Int, limit: Int)
+      extends TransactionViewLimitExceeded {
+    val message: String = s"Number of root views for a transaction exceeded $limit"
+  }
 
   object RollbackState {
     private val firstChild: PositiveInt = PositiveInt.one
@@ -140,11 +165,9 @@ case object TransactionViewDecompositionFactory {
         info: ActionNodeInfo,
         state: BuildState[V],
     ): BuildState[V] = {
-
       val childState = info.children.foldLeft(state.childState) { (bs, nId) =>
         buildChildView(nId, info.participants, bs)
       }
-
       val newView = NewView(
         LfTransactionUtil.lightWeight(actionNode),
         /* We can use tryCreate here because at this point we only have one quorum
@@ -172,7 +195,6 @@ case object TransactionViewDecompositionFactory {
         currentParticipants: Set[ParticipantId],
         state: BuildState[TransactionViewDecomposition],
     ): BuildState[TransactionViewDecomposition] = {
-
       /* The recipients of a transaction node are all participants that
        * host a witness of the node. So we should look at the participant recipients of
        * a node to decide when a new view is needed. In particular, a change in the informees triggers a new view only if
@@ -205,6 +227,7 @@ case object TransactionViewDecompositionFactory {
               )
           } else
             buildNewView(nodeId, actionNode, info, state)
+
         case rollbackNode: LfNodeRollback =>
           rollbackNode.children
             .foldLeft(state.enterRollback()) { (bs, nId) =>
@@ -215,13 +238,60 @@ case object TransactionViewDecompositionFactory {
     }
   }
 
+  @SuppressWarnings(Array("org.wartremover.warts.SizeIs"))
+  private def checkTransactionViewLimits(
+      views: Seq[NewView],
+      optLimitConfig: Option[TransactionViewLimitConfig],
+  ): Either[TransactionViewLimitExceeded, Seq[NewView]] =
+    optLimitConfig.fold[Either[TransactionViewLimitExceeded, Seq[NewView]]](Right(views)) {
+      limitConfig =>
+        def checkSubViewLimits(view: NewView): Either[TransactionViewLimitExceeded, NewView] =
+          if (view.viewCount > limitConfig.maxSubViews) {
+            Left(TransactionSubViewLimitExceeded(view.viewCount, limitConfig.maxSubViews))
+          } else {
+            Right(view)
+          }
+
+        if (views.length > limitConfig.maxRootViews) {
+          Left(TransactionRootViewLimitExceeded(views.length, limitConfig.maxRootViews))
+        } else {
+          views.traverse(checkSubViewLimits)
+        }
+    }
+
   def fromTransaction(
       topologySnapshot: TopologySnapshot,
       transaction: WellFormedTransaction[WithoutSuffixes],
       viewRbContext: RollbackContext,
       submittingAdminPartyO: Option[LfPartyId],
       factory: RollbackContextFactory,
-  )(implicit ec: ExecutionContext, tc: TraceContext): FutureUnlessShutdown[Seq[NewView]] = {
+      limitConfig: Option[TransactionViewLimitConfig],
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[FutureUnlessShutdown, TransactionViewLimitExceeded, Seq[NewView]] =
+    EitherT(
+      unsafeFromTransaction(
+        topologySnapshot,
+        transaction,
+        viewRbContext,
+        submittingAdminPartyO,
+        factory,
+      )
+        .map(checkTransactionViewLimits(_, limitConfig))
+    )
+
+  // This method is unsafe because it does not check the transaction view limits. Use `fromTransaction` instead.
+  private def unsafeFromTransaction(
+      topologySnapshot: TopologySnapshot,
+      transaction: WellFormedTransaction[WithoutSuffixes],
+      viewRbContext: RollbackContext,
+      submittingAdminPartyO: Option[LfPartyId],
+      factory: RollbackContextFactory,
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): FutureUnlessShutdown[Seq[NewView]] = {
 
     val tx: LfVersionedTransaction = transaction.unwrap
     val rootNodes = tx.roots.toSeq
@@ -250,7 +320,10 @@ case object TransactionViewDecompositionFactory {
 
     FutureUnlessShutdown.sequence(policyMapF).map(_.toMap).map { policyMap =>
       Builder(tx.nodes, policyMap, factory)
-        .builds(rootNodes, BuildState[NewView](rollbackState = rollbackState))
+        .builds(
+          rootNodes,
+          BuildState[NewView](rollbackState = rollbackState),
+        )
         .views
         .toList
     }

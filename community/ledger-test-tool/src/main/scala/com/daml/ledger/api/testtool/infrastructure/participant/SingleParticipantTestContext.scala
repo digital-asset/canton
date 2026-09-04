@@ -549,9 +549,12 @@ final class SingleParticipantTestContext private[participant] (
               participant
                 .listKnownPartiesExpanded()
                 .map { actualParties =>
+                  val actualPartyNames = actualParties.map(_.underlying.getValue)
+                  val missingPartyNames = expectedPartyNames -- actualPartyNames
                   assert(
-                    expectedPartyNames.subsetOf(actualParties.map(_.underlying.getValue)),
-                    s"Parties from $endpointId never appeared on ${participant.endpointId}.",
+                    missingPartyNames.isEmpty,
+                    s"Parties $missingPartyNames from $endpointId never appeared on " +
+                      s"${participant.endpointId}; observed ${actualPartyNames.size} parties",
                   )
                 }
             }

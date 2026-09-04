@@ -376,9 +376,10 @@ object UseToxiproxy {
 
   val numberOfProxies: AtomicInteger = new AtomicInteger(0)
 
-  // Support up to 100 toxiproxy-proxies running locally
+  // Support up to 100 toxiproxy-proxies
   // 100 is an arbitrary choice
+  // Note that this is not used in CI, so bypassing UniquePortGenerator.next is fine.
   val PROXIED_PORTS: List[Int] = (0 until 100).toList.map { index =>
-    UniquePortGenerator.PortRangeStart + index
+    UniquePortGenerator.generatorForCantonTests.portRangeStart + index
   }
 }

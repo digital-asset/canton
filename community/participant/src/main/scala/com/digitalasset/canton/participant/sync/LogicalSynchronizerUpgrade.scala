@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.UnknownPsid
 import com.digitalasset.canton.participant.store.{
   StoredSynchronizerConnectionConfig,
+  SyncPersistentState,
   SynchronizerConnectionConfigStore,
 }
 import com.digitalasset.canton.participant.sync.CheckedLogicalSynchronizerUpgrade.UpgradabilityCheckResult
@@ -585,6 +586,7 @@ class AutomaticLogicalSynchronizerUpgrade(
     override val pendingLsuOperationsStore: PendingLsuOperation.Store,
     override val lsuConfig: LsuConfig,
     override val loggerFactory: NamedLoggerFactory,
+    disableLegacyAcsCommitmentProcessor: Boolean,
 )(override val request: FullAutomaticLsuRequest)(implicit
     override val executionContext: ExecutionContext,
     override val traceContext: TraceContext,
@@ -672,24 +674,30 @@ class AutomaticLogicalSynchronizerUpgrade(
     val upgradeTime = request.upgradeTime
 
     def runningCommitmentWatermarkCheck(
-        runningCommitmentWatermark: CantonTimestamp
+        currentSyncPersistentState: SyncPersistentState
     ): EitherT[FutureUnlessShutdown, NegativeResult, Unit] =
-      if (runningCommitmentWatermark == upgradeTime)
-        EitherTUtil.unitUS
-      else if (runningCommitmentWatermark < upgradeTime)
-        EitherT.leftT(
-          NegativeResult.retryable(
-            s"Running commitment watermark ($runningCommitmentWatermark) did not reach the upgrade time ($upgradeTime) yet"
-          )
-        )
-      else
-        EitherT.leftT(
-          NegativeResult.nonRetryable(
-            LsuError.Internal.Error(
-              s"Running commitment watermark ($runningCommitmentWatermark) is already past the upgrade time ($upgradeTime). Upgrade is impossible."
+      if (disableLegacyAcsCommitmentProcessor) EitherTUtil.unitUS
+      else {
+        val fut = currentSyncPersistentState.acsCommitmentStore.runningCommitments.watermark.map {
+          watermark =>
+            val runningCommitmentWatermark = watermark.timestamp
+            Either.cond(
+              runningCommitmentWatermark == upgradeTime,
+              (),
+              if (runningCommitmentWatermark < upgradeTime)
+                NegativeResult.retryable(
+                  s"Running commitment watermark ($runningCommitmentWatermark) did not reach the upgrade time ($upgradeTime) yet"
+                )
+              else
+                NegativeResult.nonRetryable(
+                  LsuError.Internal.Error(
+                    s"Running commitment watermark ($runningCommitmentWatermark) is already past the upgrade time ($upgradeTime). Upgrade is impossible."
+                  )
+                ),
             )
-          )
-        )
+        }
+        EitherT(fut)
+      }
 
     ifAnythingToBeDone { () =>
       for {
@@ -707,12 +715,7 @@ class AutomaticLogicalSynchronizerUpgrade(
             )
         )
 
-        runningCommitmentWatermark <- EitherT.liftF(
-          currentSyncPersistentState.acsCommitmentStore.runningCommitments.watermark
-            .map(_.timestamp)
-        )
-
-        _ <- runningCommitmentWatermarkCheck(runningCommitmentWatermark)
+        _ <- runningCommitmentWatermarkCheck(currentSyncPersistentState)
 
         topologySnapshot = new StoreBasedTopologySnapshot(
           psid = currentSyncPersistentState.psid, // guaranteed to be same as currentPsid

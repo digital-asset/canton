@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   StaticSynchronizerParameters,
   SubmissionRequestAmplification,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -23,6 +24,7 @@ import org.slf4j.event.Level
 
 import scala.concurrent.duration.DurationInt
 
+@UnstableTest // TODO(i29891): remove this once the test is no longer flaky
 class ParticipantOffboardingIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {

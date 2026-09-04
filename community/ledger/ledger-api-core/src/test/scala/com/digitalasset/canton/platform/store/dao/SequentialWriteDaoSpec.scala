@@ -306,7 +306,8 @@ object SequentialWriteDaoSpec {
       genericTopologyEvents = Nil,
       synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
       effectiveTime = CantonTimestamp.now(),
-    )(TraceContext.empty)
+      traceContext = TraceContext.empty,
+    )
   )
 
   private val someParty = DbDto.PartyEntry(

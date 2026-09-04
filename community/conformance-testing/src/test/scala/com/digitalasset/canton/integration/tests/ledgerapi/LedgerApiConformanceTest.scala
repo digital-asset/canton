@@ -417,8 +417,6 @@ trait LedgerApiOffsetCheckpointsConformanceTest extends SingleVersionLedgerApiCo
         updateAllParticipantConfigs_(
           _.focus(_.ledgerApi.indexService.offsetCheckpointCacheUpdateInterval)
             .replace(config.NonNegativeFiniteDuration(java.time.Duration.ofMillis(3000)))
-            .focus(_.ledgerApi.indexService.idleStreamOffsetCheckpointTimeout)
-            .replace(config.NonNegativeFiniteDuration(java.time.Duration.ofMillis(1000)))
         )
       )
       .withSetup(setupLedgerApiConformanceEnvironment)

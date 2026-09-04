@@ -61,6 +61,7 @@ trait AcsCommitmentProcessorPruningIntegrationTest
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
         // TODO(#35107) Disable the old processor and fix the test
         ConfigTransforms.enableOldAcsCommitmentProcessor,
+        ConfigTransforms.disableNewAcsCommitmentProcessorPipeline,
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay)

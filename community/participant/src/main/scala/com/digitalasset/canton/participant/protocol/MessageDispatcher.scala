@@ -723,7 +723,11 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def sequencerIndexMovedEvent(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): SequencerIndexMoved =
-    SequencerIndexMoved(synchronizerId = synchronizerId.logical, recordTime = timestamp)
+    SequencerIndexMoved(
+      synchronizerId = synchronizerId.logical,
+      recordTime = timestamp,
+      traceContext = traceContext,
+    )
 
   protected def alarm(sc: SequencerCounter, ts: CantonTimestamp, msg: String)(implicit
       traceContext: TraceContext
