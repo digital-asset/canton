@@ -1347,6 +1347,7 @@ object InMemoryStateUpdaterSpec {
       Update.SequencerIndexMoved(
         synchronizerId = synchronizerIdWithoutNum,
         recordTime = CantonTimestamp(recordTime),
+        traceContext = implicitly,
       )
 
   private val metadataChangedUpdate = rawMetadataChangedUpdate(offset(12L), Timestamp.Epoch)
@@ -1361,6 +1362,7 @@ object InMemoryStateUpdaterSpec {
       recordTime = CantonTimestamp.assertFromLong(3L),
       acsChangeFactory = TestAcsChangeFactory(),
       contractInfos = Map.empty,
+      traceContext = implicitly,
     )
 
   private val update4 = offset(14L) ->
@@ -1557,6 +1559,7 @@ object InMemoryStateUpdaterSpec {
           representativePackageId = SameAsContractPackageId,
         )
       }.toMap,
+      traceContext = implicitly,
     )
 
   private def assignmentAccepted(
@@ -1589,6 +1592,7 @@ object InMemoryStateUpdaterSpec {
       recordTime = CantonTimestamp(Timestamp(t)),
       synchronizerId = target,
       acsChangeFactory = TestAcsChangeFactory(),
+      traceContext = implicitly,
     )
 
   private def unassignmentAccepted(
@@ -1623,6 +1627,7 @@ object InMemoryStateUpdaterSpec {
       recordTime = CantonTimestamp(Timestamp(t)),
       synchronizerId = source,
       acsChangeFactory = TestAcsChangeFactory(),
+      traceContext = implicitly,
     )
 
   private def commandRejected(
@@ -1646,6 +1651,7 @@ object InMemoryStateUpdaterSpec {
       recordTime = CantonTimestamp.assertFromLong(t),
       isTransaction = true,
       transactionHash = transactionHash,
+      traceContext = implicitly,
     )
 
   private def sequencerIndexMoved(
@@ -1655,6 +1661,7 @@ object InMemoryStateUpdaterSpec {
     Update.SequencerIndexMoved(
       synchronizerId = synchronizerId,
       recordTime = CantonTimestamp.assertFromLong(t),
+      traceContext = implicitly,
     )
 
   private def topologyTransactionEffective(
@@ -1675,6 +1682,7 @@ object InMemoryStateUpdaterSpec {
       genericTopologyEvents = List(
         SynchronizerParametersState(ByteString.copyFromUtf8("synchronizer-parameters"))
       ),
+      traceContext = implicitly,
     )
 
   private val someLedgerEnd =

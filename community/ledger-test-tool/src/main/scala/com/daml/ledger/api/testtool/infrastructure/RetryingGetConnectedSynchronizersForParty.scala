@@ -21,6 +21,8 @@ object RetryingGetConnectedSynchronizersForParty {
         "RetryingGetConnectedSynchronizersForParty",
         attempts = 20,
         firstWaitTime = 125.millis,
+        // keep a wide cap; party allocation waits for topology across synchronizers
+        maxWaitTime = 30.seconds,
       ) {
         services.state
           .getConnectedSynchronizers(new GetConnectedSynchronizersRequest(party, "", ""))

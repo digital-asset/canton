@@ -229,7 +229,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
     CommitmentPeriod.tryCreate(checkpoint.recordTime.immediatePredecessor, checkpoint.recordTime)
   }
 
-  protected def checkMatchingCommitment(
+  private def checkMatchingCommitment(
       period: CommitmentPeriod,
       participant: LocalParticipantReference,
       sender: ParticipantId,
@@ -362,7 +362,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
 }
 
 @AcsCommitmentTest
-class AcsCommitmentPipelineIntegrationTestPostgres
+class AcsCommitmentPipelineToggleIntegrationTestPostgres
     extends AcsCommitmentPipelineToggleIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

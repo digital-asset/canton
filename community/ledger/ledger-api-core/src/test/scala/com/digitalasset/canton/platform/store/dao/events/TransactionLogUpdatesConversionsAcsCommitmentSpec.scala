@@ -58,8 +58,7 @@ object TransactionLogUpdatesConversionsAcsCommitmentSpec {
 
   private def commitment(
       synchronizerId: SynchronizerId
-  ): TransactionLogUpdate.ReceivedAcsCommitment = {
-    implicit val traceContext: TraceContext = TraceContext.empty
+  ): TransactionLogUpdate.ReceivedAcsCommitment =
     TransactionLogUpdate.ReceivedAcsCommitment(
       offset = Offset.tryFromLong(15L),
       update = Update.ReceivedAcsCommitment(
@@ -67,9 +66,9 @@ object TransactionLogUpdatesConversionsAcsCommitmentSpec {
         recordTime = CantonTimestamp.ofEpochMicro(12345678L),
         payload = ByteString.copyFromUtf8("some-acs-commitment-payload"),
         updateId = TestUpdateId("some-update-id"),
+        traceContext = TraceContext.empty,
       ),
     )
-  }
 
   private def updateFormatFor(
       includeAcsCommitments: Option[SynchronizerId]

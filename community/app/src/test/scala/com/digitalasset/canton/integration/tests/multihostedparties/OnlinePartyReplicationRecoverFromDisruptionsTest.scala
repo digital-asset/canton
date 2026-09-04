@@ -70,6 +70,7 @@ sealed trait OnlinePartyReplicationRecoverFromDisruptionsTest
         ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
           Map("participant1" -> (() => createSourceParticipantTestInterceptor())),
           enableUnsafeSequencerChannelSupport = true,
+          pauseIndexer = false,
         )*
       )
       .withSetup { implicit env =>

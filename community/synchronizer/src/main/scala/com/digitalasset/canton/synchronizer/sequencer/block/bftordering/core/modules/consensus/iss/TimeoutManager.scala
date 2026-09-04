@@ -43,12 +43,14 @@ class TimeoutManager[
     new AtomicReference(None)
 
   def scheduleTimeout(
-      timeoutEvent: TimeoutMessageT
+      timeoutEvent: TimeoutMessageT,
+      overrideTimeout: Option[FiniteDuration] = None,
   )(implicit
       context: E#ActorContextT[ParentModuleMessageT],
       traceContext: TraceContext,
   ): Unit = {
-    val timeout = timeoutCalculator.calculateTimeoutForEvent(timeoutEvent)
+    val timeout =
+      overrideTimeout.getOrElse(timeoutCalculator.calculateTimeoutForEvent(timeoutEvent))
     val cancellableEvent = context.delayedEvent(timeout, timeoutEvent)
     val timeNow = Instant.now()
     timeoutCancellable.getAndSet(Some(timeNow -> cancellableEvent)) match {

@@ -497,10 +497,10 @@ class UnassignmentValidationTest
           traceContext: TraceContext
       ): EitherT[
         FutureUnlessShutdown,
-        ReassignmentProcessorError,
+        UnknownPhysicalSynchronizer,
         Target[TopologySnapshot],
       ] = EitherT.fromEither[FutureUnlessShutdown](
-        targetTopology.toRight[ReassignmentProcessorError](
+        targetTopology.toRight(
           UnknownPhysicalSynchronizer(targetPsid.unwrap, "test: no target topology")
         )
       )

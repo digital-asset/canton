@@ -146,6 +146,7 @@ class ParallelIndexerSubscriptionSpec
     genericTopologyEvents = Nil,
     synchronizerId = deadbeefSynchronizer,
     effectiveTime = CantonTimestamp.assertFromInstant(someTime),
+    traceContext = implicitly,
   )
 
   private val updateId = TestUpdateId("mock_hash")
@@ -1905,11 +1906,13 @@ class ParallelIndexerSubscriptionSpec
           Update.SequencerIndexMoved(
             synchronizerId = someSynchronizerId,
             recordTime = someSequencerIndex1,
+            traceContext = implicitly,
           ),
         offset(10) ->
           Update.SequencerIndexMoved(
             synchronizerId = someSynchronizerId2,
             recordTime = someSequencerIndex1,
+            traceContext = implicitly,
           ),
       ),
       missingDeactivatedActivations = Map.empty,
@@ -1945,11 +1948,13 @@ class ParallelIndexerSubscriptionSpec
           Update.SequencerIndexMoved(
             synchronizerId = someSynchronizerId,
             recordTime = someSequencerIndex2,
+            traceContext = implicitly,
           ),
         offset(20) ->
           Update.SequencerIndexMoved(
             synchronizerId = someSynchronizerId2,
             recordTime = someSequencerIndex2,
+            traceContext = implicitly,
           ),
       ),
       missingDeactivatedActivations = Map.empty,
@@ -2142,14 +2147,17 @@ class ParallelIndexerSubscriptionSpec
           offset(1L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.Epoch,
+            traceContext = implicitly,
           ),
           offset(3L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.ofEpochSecond(1),
+            traceContext = implicitly,
           ),
           offset(2L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.ofEpochSecond(2),
+            traceContext = implicitly,
           ),
         )
 
@@ -2176,6 +2184,7 @@ class ParallelIndexerSubscriptionSpec
           offset(1L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.Epoch,
+            traceContext = implicitly,
           )
         )
 
@@ -2200,10 +2209,12 @@ class ParallelIndexerSubscriptionSpec
           offset(1L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.ofEpochSecond(1),
+            traceContext = implicitly,
           ),
           offset(2L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.Epoch,
+            traceContext = implicitly,
           ),
         )
 
@@ -2230,6 +2241,7 @@ class ParallelIndexerSubscriptionSpec
           offset(2L) -> Update.SequencerIndexMoved(
             synchronizerId = someSynchronizerId,
             recordTime = CantonTimestamp.ofEpochSecond(1),
+            traceContext = implicitly,
           )
         )
 
@@ -2267,10 +2279,12 @@ class ParallelIndexerSubscriptionSpec
           offset(1L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.ofEpochSecond(1),
+            traceContext = implicitly,
           ),
           offset(2L) -> Update.SequencerIndexMoved(
             synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
             recordTime = CantonTimestamp.ofEpochSecond(1),
+            traceContext = implicitly,
           ),
         )
 
@@ -2297,6 +2311,7 @@ class ParallelIndexerSubscriptionSpec
           offset(2L) -> Update.SequencerIndexMoved(
             synchronizerId = someSynchronizerId,
             recordTime = CantonTimestamp.ofEpochSecond(1),
+            traceContext = implicitly,
           )
         )
 
@@ -2511,6 +2526,7 @@ class ParallelIndexerSubscriptionSpec
     Update.SequencerIndexMoved(
       synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
       recordTime = CantonTimestamp.now(),
+      traceContext = implicitly,
     )
 
   def repairUpdate(recordTime: CantonTimestamp, repairCounter: RepairCounter): Update =
@@ -2534,7 +2550,8 @@ class ParallelIndexerSubscriptionSpec
       repairCounter = repairCounter,
       recordTime = recordTime,
       contractInfos = Map.empty,
-    )(TraceContext.empty)
+      traceContext = TraceContext.empty,
+    )
 
   def floatingUpdate(recordTime: CantonTimestamp): Update =
     TopologyTransactionEffective(
@@ -2543,7 +2560,8 @@ class ParallelIndexerSubscriptionSpec
       genericTopologyEvents = Nil,
       synchronizerId = someSynchronizerId,
       effectiveTime = recordTime,
-    )(TraceContext.empty)
+      traceContext = TraceContext.empty,
+    )
 
   behavior of "reInsertContracts"
 
@@ -2558,8 +2576,7 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-        traceContext = traceContext,
-      )(List())
+      )(implicitly)(List())
       .futureValue shouldBe List()
   }
 
@@ -2624,8 +2641,7 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-        traceContext = traceContext,
-      )(updatesFixture)
+      )(traceContext)(updatesFixture)
       .futureValue shouldBe updatesFixture
   }
 
@@ -2664,8 +2680,7 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-        traceContext = traceContext,
-      )(updatesFixture)
+      )(traceContext)(updatesFixture)
       .futureValue
       .map(_._2.traceContext) shouldBe List.fill(5)(updateTraceContext)
   }
@@ -2701,8 +2716,7 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-        traceContext = traceContext,
-      )(
+      )(traceContext)(
         List(
           offset(1) -> sequencedTransaction(
             Map(
@@ -2810,8 +2824,7 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-        traceContext = traceContext,
-      )(
+      )(traceContext)(
         List(
           offset(1) -> sequencedTransaction(
             Map(
@@ -2937,8 +2950,7 @@ class ParallelIndexerSubscriptionSpec
         ),
         executionContext = parallelExecutionContext,
         logger = logger,
-        traceContext = traceContext,
-      )(
+      )(traceContext)(
         List(
           offset(1) -> sequencedTransaction(
             Map(
@@ -3077,6 +3089,7 @@ class ParallelIndexerSubscriptionSpec
       transactionHash = None,
       acsChangeFactory = TestAcsChangeFactory(),
       contractInfos = contractInfos(contracts),
+      traceContext = implicitly,
     )
 
   def repairTransaction(contracts: Map[Long, ContractInstance])(implicit
@@ -3090,6 +3103,7 @@ class ParallelIndexerSubscriptionSpec
       recordTime = someRecordTime1,
       contractInfos = contractInfos(contracts),
       repairCounter = RepairCounter.Genesis,
+      traceContext = implicitly,
     )
 
   def reassignmentBatch(contracts: Map[Long, ContractInstance]): Reassignment.Batch =
@@ -3130,6 +3144,7 @@ class ParallelIndexerSubscriptionSpec
       recordTime = someRecordTime1,
       synchronizerId = someSynchronizerId,
       acsChangeFactory = TestAcsChangeFactory(),
+      traceContext = implicitly,
     )
 
   def repairReassignment(contracts: Map[Long, ContractInstance])(implicit
@@ -3143,6 +3158,7 @@ class ParallelIndexerSubscriptionSpec
       recordTime = someRecordTime1,
       synchronizerId = someSynchronizerId,
       repairCounter = RepairCounter.Genesis,
+      traceContext = implicitly,
     )
 
   def onPrReassignment(contracts: Map[Long, ContractInstance])(implicit
@@ -3157,6 +3173,7 @@ class ParallelIndexerSubscriptionSpec
       synchronizerId = someSynchronizerId,
       watermark = IndexingWatermark.fromTimestamp(someRecordTime1),
       acsChangeFactory = TestAcsChangeFactory(),
+      traceContext = implicitly,
     )
 
   case class MockLedgerApiContractStore(

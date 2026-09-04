@@ -55,9 +55,11 @@ object Synchronize {
   )(implicit ec: ExecutionContext): Future[Unit] =
     eventually("Wait for contract to become active") {
       participant.activeContracts(Some(Seq(party))).map { events =>
+        val activeContractIds = events.map(_.contractId)
         assert(
-          events.exists(_.contractId == contractId.contractId),
-          s"Could not find contract $contractId",
+          activeContractIds.contains(contractId.contractId),
+          s"Contract ${contractId.contractId} for party ${party.underlying.getValue} was not active " +
+            s"on ${participant.endpointId}; observed ${activeContractIds.size} active contracts",
         )
       }
     }

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -37,7 +36,6 @@ import scala.jdk.DurationConverters.*
   *   - Transfer traffic.
   *   - PN should connect to the successor.
   */
-@UnstableTest // TODO(i32564): remove once the test is stable
 final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-pruning-during-lsu"

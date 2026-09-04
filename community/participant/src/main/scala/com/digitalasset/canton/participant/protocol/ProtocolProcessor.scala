@@ -15,7 +15,9 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.TestingConfigInternal
 import com.digitalasset.canton.crypto.{
+  DecryptionError,
   Signature,
+  SyncCryptoError,
   SynchronizerCryptoClient,
   SynchronizerSnapshotSyncCryptoApi,
 }
@@ -1056,7 +1058,27 @@ abstract class ProtocolProcessor[
       logger.warn(s"Request $rc: Decryption error: $decryptionError")
     }
 
-    val decryptionErrors = rawDecryptionErrors.map(ViewMessageError(_))
+    // Hide internal decryption details to prevent leaking sensitive information to callers
+    val decryptionErrors = rawDecryptionErrors.map {
+      case EncryptedViewMessageError.SymmetricDecryptError(DecryptionError.FailedToDecrypt(_)) =>
+        ViewMessageError(
+          EncryptedViewMessageError.SymmetricDecryptError(
+            DecryptionError.FailedToDecrypt("Symmetric decryption failed")
+          )
+        )
+      case EncryptedViewMessageError.SyncCryptoDecryptError(
+            SyncCryptoError.SyncCryptoDecryptionError(DecryptionError.FailedToDecrypt(_))
+          ) =>
+        ViewMessageError(
+          EncryptedViewMessageError.SyncCryptoDecryptError(
+            SyncCryptoError.SyncCryptoDecryptionError(
+              DecryptionError.FailedToDecrypt("Asymmetric decryption failed")
+            )
+          )
+        )
+      case other =>
+        ViewMessageError(other)
+    }
 
     val (viewsWithCorrectRootHash, viewsWithWrongRootHash) =
       decryptedViewsWithSignatures.partition(decryptedView =>

@@ -143,6 +143,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
       recordTime = nextRecordTime(),
       payload = payload,
       updateId = TestUpdateId("ReceivedAcsCommitment"),
+      traceContext = implicitly,
     )
 
   private def topologyTx(
@@ -165,6 +166,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
       ),
       synchronizerId = synchronizerId,
       effectiveTime = nextRecordTime(),
+      traceContext = implicitly,
     )
 
   "acsUpdates" should {

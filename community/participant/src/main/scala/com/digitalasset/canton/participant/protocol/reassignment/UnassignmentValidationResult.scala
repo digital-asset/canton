@@ -106,6 +106,7 @@ final case class UnassignmentValidationResult(
           recordTime = recordTime,
           synchronizerId = sourceSynchronizer.unwrap.logical,
           acsChangeFactory = acsChangeFactory,
+          traceContext = traceContext,
         )
   }
 }

@@ -196,6 +196,10 @@ object S3Synchronization {
   sealed trait ContinuityDumpRef {
     val path: String
     def localDownloadPath: File
+
+    /** The release version that created this dump, inferred from the first path segment. */
+    def dumpReleaseVersion: ReleaseVersion =
+      ReleaseVersion.tryCreate(path.split("/").head)
   }
 
   // aws S3 sync commands don't have any locks so concurrent runs will interfere with each other

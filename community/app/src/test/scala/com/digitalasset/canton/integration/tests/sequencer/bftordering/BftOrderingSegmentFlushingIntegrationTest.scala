@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.sequencer.bftordering
 
 import com.digitalasset.canton.admin.api.client.data.SequencingParameters as ConsoleSequencingParameters
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
@@ -32,6 +33,7 @@ import org.slf4j.event
 import scala.concurrent.duration.*
 import scala.concurrent.{Future, blocking}
 
+@UnstableTest // TODO(i31354): remove once the test is no longer flaky
 @SuppressWarnings(Array("com.digitalasset.canton.DiscardedFuture"))
 class BftOrderingSegmentFlushingIntegrationTest
     extends CommunityIntegrationTest

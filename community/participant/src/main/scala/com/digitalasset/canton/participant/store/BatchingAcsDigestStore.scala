@@ -65,6 +65,25 @@ class BatchingAcsDigestStore(
   ): FutureUnlessShutdown[Unit] =
     underlying.deleteCheckpointsUpToInternal(toExclusive)
 
+  override def lookupLatestPruningOffset()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Offset]] =
+    underlying.lookupLatestPruningOffset()
+
+  override protected def increaseLatestPruneOffset(toExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    underlying.increaseLatestPruneOffsetInternal(toExclusive)
+
+  override protected def purgeLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    underlying.purgeLatestPruneInternal()
+
+  override protected def truncateLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = underlying.truncateLatestPruneInternal()
+
   override def latestCheckpointUpTo(
       toInclusive: Offset,
       checkpointTypes: Option[NonEmpty[Set[AcsDigestStore.CheckpointType]]],
@@ -174,20 +193,20 @@ class BatchingAcsDigestJournal[K](
     )
   ] = underlying.changesBetween(tokenOrStart, limit)
 
-  override def checkReplacesInvariant(upToInclusive: Offset)(implicit
-      traceContext: TraceContext
+  override def checkReplacesInvariant(upToInclusive: Offset, latestPruningOffsetO: Option[Offset])(
+      implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    underlying.checkReplacesInvariant(upToInclusive)
+    underlying.checkReplacesInvariant(upToInclusive, latestPruningOffsetO)
 
   override def deleteAfter(fromExclusive: Offset)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
     underlying.deleteAfter(fromExclusive)
 
-  override def deleteUpTo(toExclusive: Offset)(implicit
+  override def deleteUpTo(toExclusive: Offset, latestPruningOffsetO: Option[Offset])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    underlying.deleteUpTo(toExclusive)
+    underlying.deleteUpTo(toExclusive, latestPruningOffsetO)
 
   override def purge()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     underlying.purge()

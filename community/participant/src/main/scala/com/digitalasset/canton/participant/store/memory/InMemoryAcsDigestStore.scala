@@ -17,6 +17,7 @@ import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.ConcurrentSkipListMap
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
 
 class InMemoryAcsDigestStore @VisibleForTesting private[store] (
@@ -29,6 +30,9 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
 
   private val checkpointJournal: ConcurrentSkipListMap[Offset, Checkpoint] =
     new ConcurrentSkipListMap[Offset, Checkpoint]()
+
+  private val latestPruningOffset: AtomicReference[Option[Offset]] =
+    new AtomicReference[Option[Offset]](None)
 
   override def insertCheckpointTime(
       checkpoint: Checkpoint
@@ -88,10 +92,36 @@ class InMemoryAcsDigestStore @VisibleForTesting private[store] (
         .toScala
     }
 
+  override def lookupLatestPruningOffset()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[Offset]] =
+    FutureUnlessShutdown.pure(latestPruningOffset.get())
+
+  override protected def increaseLatestPruneOffset(toExclusive: Offset)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    latestPruningOffset.updateAndGet(Ordering[Option[Offset]].max(_, Some(toExclusive))).discard
+    FutureUnlessShutdown.unit
+  }
+
+  override protected def purgeLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    latestPruningOffset.set(None)
+    FutureUnlessShutdown.unit
+  }
+
   override protected def purgeCheckpoints()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
     checkpointJournal.clear()
+    FutureUnlessShutdown.unit
+  }
+
+  override protected def truncateLatestPrune()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    latestPruningOffset.set(None)
     FutureUnlessShutdown.unit
   }
 

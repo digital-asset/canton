@@ -208,6 +208,20 @@ final class PartyReplicationStateManager(
   def get(requestId: AddPartyRequestId): Option[PartyReplicationStatus] =
     partyReplications.get(requestId)
 
+  /** Finds replication status by Daml sequencer channel agreement contract id.
+    *
+    * @param agreementContractId
+    *   Daml replication agreement contract id
+    * @return
+    *   party replication status if found, None otherwise
+    */
+  def findByAgreementContractId(agreementContractId: String): Option[PartyReplicationStatus] =
+    partyReplications.values.find(_.agreementStatus match {
+      case PartyReplicationStatus.AgreementStatus.Exists(contractId, _) =>
+        contractId.coid == agreementContractId
+      case _ => false
+    })
+
   def collectFirst[T](
       f: PartialFunction[(AddPartyRequestId, PartyReplicationStatus), T]
   ): Option[T] = partyReplications.iterator.collectFirst(f)

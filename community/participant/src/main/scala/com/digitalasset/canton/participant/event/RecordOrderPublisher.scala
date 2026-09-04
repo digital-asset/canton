@@ -280,7 +280,7 @@ class RecordOrderPublisher private (
       if (sequencerCounter >= initSc) {
         scheduleFloatingEventPublication(
           timestamp = timestamp,
-          eventFactory = EmptyAcsPublicationRequired(psid.logical, _).some,
+          eventFactory = EmptyAcsPublicationRequired(psid.logical, _, traceContext).some,
         ).foreach(
           _.toOption.getOrElse(
             ErrorUtil.invalidState(
@@ -526,8 +526,9 @@ class RecordOrderPublisher private (
             }
 
             val upgradeTimeReached = LsuTimeReached(
-              synchronizerUpdate.synchronizerId,
-              successor.upgradeTime,
+              synchronizerId = synchronizerUpdate.synchronizerId,
+              recordTime = successor.upgradeTime,
+              traceContext = traceContext,
             )
             logger.debug(
               s"Not publishing event whose record time ${event.recordTime} is greater than upgrade time ${successor.upgradeTime} $event but publishing $upgradeTimeReached instead"

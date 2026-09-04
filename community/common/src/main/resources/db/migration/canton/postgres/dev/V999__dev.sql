@@ -84,6 +84,9 @@ create table par_acs_party_running_digest (
     replaces_offset bigint
 );
 
+alter table par_acs_party_running_digest
+  alter column digest set storage plain;
+
 create or replace view debug.par_acs_party_running_digest as
 select
     debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
@@ -102,6 +105,10 @@ create index par_acs_party_running_digest_by_time
     on par_acs_party_running_digest (synchronizer_idx, change_offset, party_id)
     include (replaces_offset);
 
+create index par_acs_party_running_digest_tombstone
+    on par_acs_party_running_digest (synchronizer_idx, change_offset)
+    where digest is null;
+
 create table par_acs_participant_running_digest (
     synchronizer_idx integer not null,
     -- interned participant id
@@ -115,6 +122,9 @@ create table par_acs_participant_running_digest (
     -- link to the last version of the digest that has the same (counter) participant_id
     replaces_offset bigint
 );
+
+alter table par_acs_participant_running_digest
+  alter column digest set storage plain;
 
 create or replace view debug.par_acs_participant_running_digest as
 select
@@ -134,6 +144,9 @@ create index par_acs_participant_running_digest_by_time
     on par_acs_participant_running_digest (synchronizer_idx, change_offset, participant_id)
     include (replaces_offset);
 
+create index par_acs_participant_running_digest_tombstone
+    on par_acs_participant_running_digest (synchronizer_idx, change_offset)
+    where digest is null;
 
 create table par_acs_running_digests_checkpoint (
     synchronizer_idx integer not null,
@@ -157,6 +170,17 @@ select
     checkpoint_type
 from par_acs_running_digests_checkpoint;
 
+create table par_acs_running_digests_pruning (
+  synchronizer_idx integer not null,
+  latest_successful_prune_offset bigint not null,
+  primary key (synchronizer_idx)
+);
+
+create or replace view debug.par_acs_running_digests_pruning as
+select
+    debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
+    latest_successful_prune_offset
+from par_acs_running_digests_pruning;
 
 create table par_acs_commitment_period_outstanding (
   synchronizer_idx integer not null,

@@ -49,6 +49,18 @@ object TransactionViewDecomposition {
 
     override def lfNode: LfActionNode = rootNode
 
+    // This new view plus all new views in our children
+    lazy val viewCount: Int = {
+      @tailrec
+      def go(nodes: List[NewView], acc: Int): Int = nodes match {
+        case Nil =>
+          acc
+        case head :: tail =>
+          go(tail ++: head.tailNodes.collect { case v: NewView => v }.toList, acc + 1)
+      }
+      go(List(this), 0)
+    }
+
     /** All nodes of this view, i.e. core nodes and subviews, in execution order */
     def allNodes: NonEmpty[Seq[TransactionViewDecomposition]] =
       NonEmpty(Seq, SameView(rootNode, nodeId, rbContext), tailNodes*)

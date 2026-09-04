@@ -17,7 +17,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.protocol.ReassignmentSynchronizer
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
-  ReassignmentProcessorError,
+  UnknownPhysicalSynchronizer,
   UnknownSynchronizer,
 }
 import com.digitalasset.canton.participant.store.memory.InMemoryReassignmentStore
@@ -115,7 +115,7 @@ private[reassignment] object TestReassignmentCoordination {
           timestamp: T[CantonTimestamp],
       )(implicit
           traceContext: TraceContext
-      ): Either[ReassignmentProcessorError, Option[FutureUnlessShutdown[Unit]]] =
+      ): Either[UnknownPhysicalSynchronizer, Option[FutureUnlessShutdown[Unit]]] =
         awaitTimestampOverride match {
           case None =>
             super.awaitTimestamp(synchronizerId, staticSynchronizerParameters, timestamp)
@@ -131,13 +131,13 @@ private[reassignment] object TestReassignmentCoordination {
           timestamp: T[CantonTimestamp],
       )(implicit
           traceContext: TraceContext
-      ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, T[
+      ): EitherT[FutureUnlessShutdown, UnknownPhysicalSynchronizer, T[
         SynchronizerSnapshotSyncCryptoApi
       ]] =
         snapshotOverride match {
           case None => super.cryptoSnapshot(synchronizerId, staticSynchronizerParameters, timestamp)
           case Some(cs) =>
-            EitherT.pure[FutureUnlessShutdown, ReassignmentProcessorError](
+            EitherT.pure[FutureUnlessShutdown, UnknownPhysicalSynchronizer](
               synchronizerId.map(_ => cs)
             )
         }

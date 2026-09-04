@@ -446,12 +446,14 @@ object PekkoUtil extends HasLoggerName {
       // TODO(#13789) Should we cancel/pull a kill switch to signal upstream that no more elements are needed?
       .collect { case Outcome(x) => x }
 
-  /** accumulates a value in state and concatenates a continuation Source when the state is ready
+  /** Accumulates a value in state and concatenates a continuation Source when the state is ready.
+    *
+    * This construction must not be materialized multiple times.
     */
-  def foldConcat[Mat, Mat2, T, U >: T, R](graph: FlowOps[T, Mat])(
+  def foldConcatF[Mat, Mat2, T, U >: T, R](graph: FlowOps[T, Mat])(
       init: => R,
       update: (R, T) => R,
-      cont: R => Source[U, Mat2],
+      cont: R => Future[Source[U, Mat2]],
   )(implicit ec: ExecutionContext): graph.Repr[U] = {
     val promise = Promise[R]()
     graph
@@ -462,7 +464,7 @@ object PekkoUtil extends HasLoggerName {
           None
         },
       )
-      .concat(Source.futureSource(promise.future.map(r => cont(r))(ec)))
+      .concat(Source.futureSource(promise.future.flatMap(r => cont(r))(ec)))
   }
 
   /** Combines two kill switches into one */
@@ -1142,7 +1144,16 @@ object PekkoUtil extends HasLoggerName {
       def foldConcat[Mat2, R, B >: A](init: => R)(update: (R, A) => R)(
           cont: R => Source[B, Mat2]
       )(implicit ec: ExecutionContext): U#Repr[B] =
-        PekkoUtil.foldConcat[Mat, Mat2, A, B, R](graph)(init, update, cont)(ec)
+        PekkoUtil.foldConcatF[Mat, Mat2, A, B, R](graph)(
+          init,
+          update,
+          r => Future.successful(cont(r)),
+        )(ec)
+
+      def foldConcatF[Mat2, R, B >: A](init: => R)(update: (R, A) => R)(
+          cont: R => Future[Source[B, Mat2]]
+      )(implicit ec: ExecutionContext): U#Repr[B] =
+        PekkoUtil.foldConcatF[Mat, Mat2, A, B, R](graph)(init, update, cont)(ec)
 
       def aggregate[Agg, B](
           initial: A => Agg

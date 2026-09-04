@@ -195,6 +195,7 @@ class ReceivedAcsCommitmentValidatorImpl(
         synchronizerId = physicalSynchronizerId,
         recordTime = timestamp,
       ),
+      traceContext = traceContext,
     )
   }
 }

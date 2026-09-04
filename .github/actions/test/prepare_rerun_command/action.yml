@@ -55,6 +55,7 @@ runs:
           --shard-index "$SHARD_INDEX"
           --total-shards "$([[ "$NUM_TEST_BUCKETS" == "0" ]] && echo "1" || echo "$NUM_TEST_BUCKETS")"
           --junit-glob ".ci-test-results/first-run/**/TEST-*.xml"
+          --section-title "Not passed tests (first run, before rerun)"
           --json-output "failed-test-summary.json"
 
     - name: Compute failed-only rerun command

@@ -158,7 +158,7 @@ import scala.util.{Failure, Right, Success}
   * @param syncCrypto
   *   Synchronisation crypto utility combining IPS and Crypto operations.
   * @param isActive
-  *   Returns true of the node is the active replica
+  *   Returns true if the node is the active replica
   */
 class CantonSyncService(
     val participantId: ParticipantId,
@@ -1996,6 +1996,7 @@ class CantonSyncService(
     RoutingSynchronizerStateFactory
       .create(
         connectedSynchronizersLookup,
+        participantNodePersistentState.value.contractStore,
         syncCryptoPureApi,
       )
       .map { routingState =>

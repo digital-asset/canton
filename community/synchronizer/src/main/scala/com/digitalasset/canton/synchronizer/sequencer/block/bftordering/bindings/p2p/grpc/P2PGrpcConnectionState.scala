@@ -615,8 +615,8 @@ object P2PGrpcConnectionState {
         }
 
     // Associates a new network ref to the node ID if one does not exist already,
-    //  returning the new state, the state transition with logs
-    //  and a boolean indicating whether a new network ref was associated.
+    //  returning the new state, the state transition and a boolean indicating
+    //  whether a new network ref was associated.
     def addNetworkRefIfMissing(
         p2pAddressId: P2PAddress.Id,
         createNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
@@ -639,7 +639,6 @@ object P2PGrpcConnectionState {
                           new P2PNetworkRefEntry(createNetworkRef, isOutgoingConnection = true),
                         )
                     )
-                  // Associate the network ref with the BFT node ID and all its endpoint IDs
                   updatedState ->
                     (
                       this,
@@ -651,32 +650,61 @@ object P2PGrpcConnectionState {
                     (this, this, false)
                 }
             ) { bftNodeId =>
-              // If an endpoint ID is associated with the BFT node ID, recur to the other case
-              addNetworkRefIfMissing(Right(bftNodeId), createNetworkRef)
+              // If the endpoint ID is associated with a BFT node ID, add the network ref
+              //  for the BFT node ID; this is an outgoing connection because the `Left` case
+              //  is only used for outgoing connections.
+              addNetworkRefForBftNodeIdIfMissing(
+                bftNodeId,
+                createNetworkRef,
+                isOutgoingConnection = true,
+              )
             }
 
         case Right(bftNodeId) =>
-          bftNodeIdToNetworkRef
-            .get(bftNodeId)
-            .fold {
-              // Associate the network ref with the BFT node ID and all its endpoint IDs
-              val updatedState =
-                copy(bftNodeIdToNetworkRef =
-                  bftNodeIdToNetworkRef
-                    .updated(
-                      bftNodeId,
-                      new P2PNetworkRefEntry(createNetworkRef, isOutgoingConnection = false),
-                    )
-                )
-              updatedState -> (
-                this,
-                updatedState,
-                true,
-              )
-            } { _ =>
-              this -> (this, this, false)
-            }
+          addNetworkRefForBftNodeIdIfMissing(
+            bftNodeId,
+            createNetworkRef,
+            isOutgoingConnection = false,
+          )
       }
+
+    // Associates a new network ref to the BFT node ID if one does not exist already,
+    //  returning the new state, the state transition and a boolean indicating
+    //  whether a new network ref was associated.
+    //
+    // Consistently with `consolidateNetworkRefs`, also propagates the entry
+    //  to the associated endpoints; this is necessary (and not already done
+    //  by `consolidateNetworkRefs`) when a new network ref is created for
+    //  a BFT node ID whose endpoints are already associated (e.g., on retry
+    //  after cleanup), because `consolidateNetworkRefs` only runs when
+    //  `associateP2PEndpointIdToBftNodeId` makes changes, which doesn't
+    //  happen when the association already exists.
+    private def addNetworkRefForBftNodeIdIfMissing(
+        bftNodeId: BftNodeId,
+        createNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
+        isOutgoingConnection: Boolean,
+    ): (State, (State, State, Boolean)) =
+      bftNodeIdToNetworkRef
+        .get(bftNodeId)
+        .fold {
+          val networkRefEntry =
+            new P2PNetworkRefEntry(createNetworkRef, isOutgoingConnection)
+          val associatedEndpointIds =
+            p2pEndpointIdToBftNodeId.filter(_._2 == bftNodeId).keys
+          val updatedState =
+            copy(
+              bftNodeIdToNetworkRef = bftNodeIdToNetworkRef.updated(bftNodeId, networkRefEntry),
+              p2pEndpointIdToNetworkRef = p2pEndpointIdToNetworkRef ++
+                associatedEndpointIds.map(_ -> networkRefEntry),
+            )
+          updatedState -> (
+            this,
+            updatedState,
+            true,
+          )
+        } { _ =>
+          this -> (this, this, false)
+        }
 
     // Returns the new state with a single network ref for the node ID and all the endpoints known to be
     //  associated to it, and the network refs to close, if any duplicates were replaced.

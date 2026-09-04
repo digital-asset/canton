@@ -84,7 +84,7 @@ object Reporter {
               reporterPrintln(yellow(s"Skipped (retired test)"))
             case Right(Result.Excluded(reason)) =>
               reporterPrintln(yellow(s"Skipped ($reason)"))
-            case Left(Result.TimedOut) => reporterPrintln(red(s"Timeout"))
+            case Left(Result.TimedOut(message)) => reporterPrintln(red(message))
             case Left(Result.Failed(cause)) =>
               val message =
                 extractRelevantLineNumber(cause).fold("Assertion failed") { lineHint =>

@@ -179,10 +179,7 @@ object LfTransactionUtil {
     nodes.flatMap(_.informeesOfNode)
   }
 
-  /** Yields the light-weight version (i.e. without exercise children and result) of this node.
-    *
-    * @throws java.lang.UnsupportedOperationException
-    *   if `node` is a rollback.
+  /** Yields the light-weight version (i.e. without exercise children) of this node.
     */
   def lightWeight(node: LfActionNode): LfActionNode =
     node match {

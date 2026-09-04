@@ -43,7 +43,7 @@ import scala.jdk.CollectionConverters.*
   * concurrent archiving of replicated contracts.
   *
   * Setup:
-  *   - 3 participants: participant1 hosts a centralized party to replicate to participant2
+  *   - 3 participants: participant1 hosts a decentralized party to replicate to participant2
   *   - the decentralized party's decentralized namespace is owned by separate nodes: sequencer1,
   *     mediator1, and participant3
   *   - 1 mediator/sequencer each
@@ -62,8 +62,8 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
 
   lazy val darPaths: Seq[String] = Seq(CantonLfV21, CantonExamplesPath)
 
-  // false means to block OnPR (temporarily) the moment the SP connects to channel
   private val numContractsInCreateBatch = 100
+  // false means to block OnPR (temporarily) the moment the SP connects to channel
   private var canSourceProceedWithOnPR: Boolean = false
   private val canApproveExercise = Promise[Unit]()
 
@@ -97,6 +97,7 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
         ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
           Map("participant1" -> (() => createSourceParticipantTestInterceptor())),
           enableUnsafeSequencerChannelSupport = true,
+          pauseIndexer = false,
         )*
       )
       .withSetup { implicit env =>
@@ -134,7 +135,7 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
       numContractsInCreateBatch,
     )
 
-    val amounts = (1 to numContractsInCreateBatch)
+    val amounts = 1 to numContractsInCreateBatch
     dpToAlice = IouSyntax.createIous(participant1, decentralizedParty, alice, amounts)
     IouSyntax.createIous(participant1, alice, decentralizedParty, amounts)
 
@@ -191,6 +192,7 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
       val tpStatus = targetParticipant.parties.get_add_party_status(addPartyRequestId)
       logger.info(s"Waiting for $targetParticipant to be authorized: $tpStatus")
       tpStatus.authorizationO.nonEmpty shouldBe true
+      tpStatus.agreementStatusO shouldBe defined
 
       val lapiTpStatus = targetParticipant.ledger_api.parties.get_add_party_status(
         decentralizedParty,

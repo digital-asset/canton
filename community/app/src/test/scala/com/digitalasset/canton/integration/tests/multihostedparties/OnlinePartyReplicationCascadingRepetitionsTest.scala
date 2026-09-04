@@ -101,6 +101,7 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
             "participant4" -> (() => createSourceParticipantTestInterceptor()),
           ),
           enableUnsafeSequencerChannelSupport = true,
+          pauseIndexer = false,
         )*
       )
       .withSetup { implicit env =>

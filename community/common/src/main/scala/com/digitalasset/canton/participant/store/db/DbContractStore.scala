@@ -482,7 +482,7 @@ class DbContractStore(
   ): EitherT[FutureUnlessShutdown, UnknownContracts, Map[LfContractId, Set[LfPartyId]]] =
     lookupMetadata(ids).map(_.view.mapValues(_.signatories).toMap)
 
-  def lookupMetadata(ids: Set[LfContractId])(implicit
+  override def lookupMetadata(ids: Set[LfContractId])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, UnknownContracts, Map[LfContractId, ContractMetadata]] =
     NonEmpty.from(ids) match {

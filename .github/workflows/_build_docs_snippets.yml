@@ -26,8 +26,35 @@ permissions:
   issues: write
 
 jobs:
+  resolve_timings:
+    name: Resolve Timings Artifact Run
+    # One repo-wide artifact lookup for the whole matrix instead of one per shard,
+    # so the shared GITHUB_TOKEN rate-limit budget is not drained at run start.
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run-id: ${{ steps.resolve.outputs.run-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/actions/utils/resolve_previous_artifact_run
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve previous timings artifact run
+        id: resolve
+        # Best-effort. If the lookup is rate limited the shards just fall back to
+        # unbalanced splitting rather than failing the run.
+        continue-on-error: true
+        uses: ./.github/actions/utils/resolve_previous_artifact_run
+        with:
+          artifact-name: build_docs_snippets-timings-latest
+
   build_docs_snippets:
     name: Build Docs Snippets (shard ${{ matrix.shard }})
+    needs: resolve_timings
     runs-on: ${{ inputs.runner }}
     strategy:
       fail-fast: false
@@ -63,6 +90,8 @@ jobs:
           timings-artifact-name: ${{ github.job }}-timings-latest
           timings-path: ${{ github.job }}/.timings
           github-token: ${{ github.token }}
+          previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
+          previous-timings-resolved: "true"
 
       - name: Run Build Docs Snippets
         id: run_build_docs_snippets

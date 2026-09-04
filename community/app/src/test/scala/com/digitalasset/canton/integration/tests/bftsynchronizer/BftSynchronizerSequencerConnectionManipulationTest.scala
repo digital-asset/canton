@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.bftsynchronizer
 
 import com.daml.metrics.api.testing.MetricValues.*
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalSequencerReference
@@ -183,6 +184,7 @@ sealed trait BftSynchronizerSequencerConnectionManipulationTest
   }
 }
 
+@UnstableTest // TODO(i25444): remove once the test is no longer flaky
 final class BftSynchronizerSequencerConnectionManipulationTestPostgres
     extends BftSynchronizerSequencerConnectionManipulationTest {
   registerPlugin(new UsePostgres(loggerFactory))

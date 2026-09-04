@@ -98,6 +98,12 @@ create table par_acs_running_digests_checkpoint (
 create index par_acs_running_digests_checkpoint_by_type
     on par_acs_running_digests_checkpoint (synchronizer_idx, checkpoint_type, change_offset);
 
+create table par_acs_running_digests_pruning (
+  synchronizer_idx integer not null,
+  latest_successful_prune_offset bigint not null,
+  primary key (synchronizer_idx)
+);
+
 create table par_acs_commitment_period_outstanding (
   synchronizer_idx integer not null,
   -- interned participant id

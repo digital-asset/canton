@@ -97,7 +97,8 @@ sealed trait OnlinePartyReplicationFileBasedTest
     EnvironmentDefinition.P3_S1M1
       .addConfigTransforms(
         ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
-          Map("participant2" -> (() => createTargetParticipantTestInterceptor()))
+          Map("participant2" -> (() => createTargetParticipantTestInterceptor())),
+          pauseIndexer = false,
         )*
       )
       .withSetup { implicit env =>

@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{
   BaseTest,
+  ProtocolVersionSuiteChecks,
   RepeatableTestSuiteTest,
   TestPredicateFiltersFixtureAnyWordSpec,
   config,
@@ -60,7 +61,8 @@ trait BaseIntegrationTest[C <: SharedCantonConfig[C], E <: Environment[C]]
     with BaseTest
     with RepeatableTestSuiteTest
     with PartyTopologyUtils
-    with TestPredicateFiltersFixtureAnyWordSpec {
+    with TestPredicateFiltersFixtureAnyWordSpec
+    with ProtocolVersionSuiteChecks {
   self: EnvironmentSetup[C, E] =>
 
   type FixtureParam = BaseTestConsoleEnvironment[C, E]

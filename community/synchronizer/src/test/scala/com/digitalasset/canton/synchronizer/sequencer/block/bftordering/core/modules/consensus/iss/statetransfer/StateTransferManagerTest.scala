@@ -4,6 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -36,7 +38,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   WorkflowId,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.OrderingBlock
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.{
+  BlockMetadata,
+  EpochInfo,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
   OrderedBlock,
   OrderedBlockForOutput,
@@ -49,7 +55,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SequencingParameters,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.VerifiedStateTransferMessage
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.{
+  UnverifiedStateTransferMessage,
+  VerifiedStateTransferMessage,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
@@ -70,8 +79,6 @@ import org.scalatest.wordspec.AnyWordSpec
 class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
   import StateTransferManagerTest.*
-
-  implicit private val config: BftBlockOrdererConfig = BftBlockOrdererConfig()
 
   class P2pNetworkOutRefExpectingSendToRandomAuthenticated
       extends ModuleRef[P2PNetworkOut.Message] {
@@ -373,7 +380,12 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     // Verify the block.
     val blockVerifiedMessage = context.runPipedMessages()
     blockVerifiedMessage should contain only
-      StateTransferMessage.BlockVerified(commitCert, currentEpochInfo, from = otherId)
+      StateTransferMessage.BlockVerified(
+        commitCert,
+        currentEpochInfo,
+        from = otherId,
+        isForFutureEpoch = false,
+      )
     stateTransferManager.handleStateTransferMessage(
       blockVerifiedMessage.headOption
         .getOrElse(fail("There should be just a single block verified message"))
@@ -509,6 +521,211 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     }
   }
 
+  "download multiple epochs when activated" should {
+    "send multiple requests" in {
+      implicit val context
+          : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext()
+
+      val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+      val parallelEpochs = 5
+      val stateTransferManager =
+        createStateTransferManager[ProgrammableUnitTestEnv](
+          p2pNetworkOutModuleRef = p2pNetworkOutRef,
+          epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+            NonNegativeLong.tryCreate(parallelEpochs.toLong),
+        )
+
+      val newEpochNumber = EpochNumber(7)
+      stateTransferManager.stateTransferNewEpoch(
+        newEpochNumber,
+        aMembership,
+        ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+        Seq.empty,
+      )(fail(_))
+
+      context.runPipedMessages()
+
+      verify(
+        p2pNetworkOutRef,
+        times(parallelEpochs + 1),
+      ).asyncSend(
+        any[P2PNetworkOut.Message]
+      )(any[TraceContext], any[MetricsContext])
+    }
+
+    "receiving future commit certificate" when {
+      "within window" should {
+        "early fetch" in {
+          implicit val context
+              : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+            new ProgrammableUnitTestContext()
+
+          val outputRef = mock[ModuleRef[Output.Message[ProgrammableUnitTestEnv]]]
+          val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+          val parallelEpochs = 5
+          val stateTransferManager =
+            createStateTransferManager[ProgrammableUnitTestEnv](
+              outputModuleRef = outputRef,
+              p2pNetworkOutModuleRef = p2pNetworkOutRef,
+              epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+                NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            )
+
+          val latestCompletedEpochLocally = aBootstrapEpoch
+          val currentEpochInfo =
+            EpochInfo(
+              EpochNumber(1),
+              BlockNumber(0),
+              EpochLength(1),
+              TestBootstrapTopologyActivationTime,
+            )
+          stateTransferManager.startCatchUp(
+            aMembership,
+            ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            latestCompletedEpochLocally,
+            startEpoch = EpochNumber.First,
+          )(abort = fail(_))
+          context.runPipedMessages()
+
+          val blockMetadataForFuture = BlockMetadata.mk(1, 10)
+          val commitCert = aCommitCert(blockMetadataForFuture)
+
+          // Handle a block transfer response with a single commit certificate.
+          val blockTransferResponse =
+            StateTransferMessage.BlockTransferResponse
+              .create(Some(commitCert), from = otherId)
+              .fakeSign
+          val topologyInfo = OrderingTopologyInfo(
+            myId,
+            currentTopology = aMembershipBeforeOnboarding.orderingTopology,
+            currentCryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            currentLeaders = aMembershipBeforeOnboarding.leaders,
+            currentBlacklistedNodes = Seq.empty,
+            previousTopology = aMembershipBeforeOnboarding.orderingTopology,
+            previousCryptoProvider = failingCryptoProvider,
+            previousLeaders = aMembershipBeforeOnboarding.leaders,
+            previousBlacklistedNodes = Seq.empty,
+          )
+          stateTransferManager.handleStateTransferMessage(
+            UnverifiedStateTransferMessage(blockTransferResponse),
+            topologyInfo,
+            latestCompletedEpochLocally,
+            currentEpochInfo,
+          )(abort = fail(_)) shouldBe StateTransferMessageResult.Continue
+
+          // Verify the block.
+          val blockVerifiedMessage = context.runPipedMessages()
+          blockVerifiedMessage should contain only
+            StateTransferMessage.BlockVerified(
+              commitCert,
+              currentEpochInfo,
+              from = otherId,
+              isForFutureEpoch = true,
+            )
+          stateTransferManager.handleStateTransferMessage(
+            blockVerifiedMessage.headOption
+              .getOrElse(fail("There should be just a single block verified message"))
+              .asInstanceOf[StateTransferMessage.BlockVerified[ProgrammableUnitTestEnv]],
+            topologyInfo,
+            latestCompletedEpochLocally,
+            currentEpochInfo,
+          )(fail(_))
+
+          // Should have to Output module to early fetch block
+          val prePrepare = commitCert.prePrepare.message
+          verify(outputRef, times(1)).asyncSend(
+            eqTo(
+              Output.BlockConsensusStarted(
+                blockMetadataForFuture.blockNumber,
+                originalLeader = commitCert.prePrepare.from,
+                OrderingBlock(prePrepare.block.proofs),
+              )
+            )
+          )(any[TraceContext], any[MetricsContext])
+          verifyNoMoreInteractions(outputRef)
+        }
+      }
+
+      "outside window" should {
+        "disregard" in {
+          implicit val context
+              : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+            new ProgrammableUnitTestContext()
+
+          val outputRef = mock[ModuleRef[Output.Message[ProgrammableUnitTestEnv]]]
+          val p2pNetworkOutRef = spy(new P2pNetworkOutRefExpectingSendToRandomAuthenticated)
+          val parallelEpochs = 5
+          val stateTransferManager =
+            createStateTransferManager[ProgrammableUnitTestEnv](
+              outputModuleRef = outputRef,
+              p2pNetworkOutModuleRef = p2pNetworkOutRef,
+              epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+                NonNegativeLong.tryCreate(parallelEpochs.toLong),
+            )
+
+          val latestCompletedEpochLocally = aBootstrapEpoch
+          val currentEpochInfo =
+            EpochInfo(
+              EpochNumber(1),
+              BlockNumber(0),
+              EpochLength(1),
+              TestBootstrapTopologyActivationTime,
+            )
+          stateTransferManager.startCatchUp(
+            aMembership,
+            ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            latestCompletedEpochLocally,
+            startEpoch = EpochNumber.First,
+          )(abort = fail(_))
+          context.runPipedMessages()
+
+          val blockMetadataForFuture = BlockMetadata.mk(1 + parallelEpochs.toLong, 10)
+          val commitCert = aCommitCert(blockMetadataForFuture)
+
+          // Handle a block transfer response with a single commit certificate.
+          val blockTransferResponse =
+            StateTransferMessage.BlockTransferResponse
+              .create(Some(commitCert), from = otherId)
+              .fakeSign
+          val topologyInfo = OrderingTopologyInfo(
+            myId,
+            currentTopology = aMembershipBeforeOnboarding.orderingTopology,
+            currentCryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+            currentLeaders = aMembershipBeforeOnboarding.leaders,
+            currentBlacklistedNodes = Seq.empty,
+            previousTopology = aMembershipBeforeOnboarding.orderingTopology,
+            previousCryptoProvider = failingCryptoProvider,
+            previousLeaders = aMembershipBeforeOnboarding.leaders,
+            previousBlacklistedNodes = Seq.empty,
+          )
+          loggerFactory.assertLoggedWarningsAndErrorsSeq(
+            stateTransferManager.handleStateTransferMessage(
+              UnverifiedStateTransferMessage(blockTransferResponse),
+              topologyInfo,
+              latestCompletedEpochLocally,
+              currentEpochInfo,
+            )(abort = fail(_)),
+            LogEntry.assertLogSeq(
+              Seq(
+                (
+                  { entry =>
+                    entry.warningMessage should include(
+                      "received a block transfer response from 'other' containing a pre-prepare with unexpected epoch Some(6), expected 0, dropping..."
+                    )
+                  },
+                  "future block transfer",
+                )
+              )
+            ),
+          ) shouldBe StateTransferMessageResult.Continue
+
+          context.runPipedMessages() shouldBe empty
+        }
+      }
+    }
+  }
+
   private def createStateTransferManager[E <: BaseIgnoringUnitTestEnv[E]](
       outputModuleRef: ModuleRef[Output.Message[E]] = fakeModuleExpectingSilence,
       p2pNetworkOutModuleRef: ModuleRef[P2PNetworkOut.Message],
@@ -516,6 +733,8 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       maybeCustomTimeoutManager: Option[
         TimeoutManager[E, Consensus.Message[E], Consensus.Message[E], String]
       ] = None,
+      epochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
+        NonNegativeLong.tryCreate(0L),
   ): StateTransferManager[E] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
@@ -526,6 +745,10 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
     )
 
     val metrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
+    implicit val config: BftBlockOrdererConfig = BftBlockOrdererConfig(
+      epochStateTransferHowManyFutureEpochsToDownloadInParallel =
+        epochStateTransferHowManyFutureEpochsToDownloadInParallel
+    )
 
     new StateTransferManager(
       myId,

@@ -353,12 +353,13 @@ private[reassignment] trait ReassignmentProcessingSteps[
     )
     val updateO = Option.when(isSubmittingParticipant)(
       Update.SequencedCommandRejected(
-        completionInfo,
-        rejection,
-        psid.unwrap.logical,
-        ts,
+        completionInfo = completionInfo,
+        reasonTemplate = rejection,
+        synchronizerId = psid.unwrap.logical,
+        recordTime = ts,
         isTransaction = false,
         transactionHash = None,
+        traceContext = traceContext,
       )
     )
     (updateO, rootHash.some)
@@ -386,12 +387,13 @@ private[reassignment] trait ReassignmentProcessingSteps[
     val rejection = Update.CommandRejected.FinalReason(errorDetails.reason)
     val updateO = completionInfoO.map(info =>
       Update.SequencedCommandRejected(
-        info,
-        rejection,
-        psid.unwrap.logical,
-        pendingReassignment.requestId.unwrap,
+        completionInfo = info,
+        reasonTemplate = rejection,
+        synchronizerId = psid.unwrap.logical,
+        recordTime = pendingReassignment.requestId.unwrap,
         isTransaction = false,
         transactionHash = None,
+        traceContext = traceContext,
       )
     )
     Right(updateO)
@@ -749,8 +751,11 @@ object ReassignmentProcessingSteps {
   final case class UnknownPhysicalSynchronizer(
       physicalSynchronizerId: PhysicalSynchronizerId,
       context: String,
-  ) extends ReassignmentProcessorError {
+  ) extends ReassignmentProcessorError
+      with ReassignmentValidationError {
     override def message: String = s"Unknown synchronizer $physicalSynchronizerId when $context"
+
+    override protected def pretty: Pretty[UnknownPhysicalSynchronizer] = prettyOfString(_.message)
   }
 
   final case class UnknownSynchronizer(

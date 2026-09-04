@@ -1,0 +1,100 @@
+name: Package KMS Driver
+on:
+  workflow_call:
+    inputs:
+      is_nightly_workflow:
+        description: Whether this is a nightly workflow run
+        required: false
+        type: boolean
+        default: false
+      is_manual:
+        description: Whether this is a manual workflow run
+        required: false
+        type: boolean
+        default: false
+      runner:
+        description: The runner to use for this workflow
+        required: true
+        type: string
+    secrets:
+      MAVEN_USERNAME:
+        required: true
+      MAVEN_PASSWORD:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  package-kms-driver:
+    name: Package KMS Driver
+    runs-on: ${{ inputs.runner }}
+    env:
+      MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+      MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Obtain Release Suffix
+        id: release_suffix
+        uses: ./.github/actions/build/obtain_release_suffix
+        with:
+          is_nightly_workflow: ${{ inputs.is_nightly_workflow }}
+          is_manual: ${{ inputs.is_manual }}
+
+      - name: Restore compile and sbt caches
+        uses: ./.github/actions/build/restore_compile_sbt_caches
+
+      # Intentionally not using ./.github/actions/canton/package here:
+      # this workflow needs to package two module outputs (aws-kms-driver + mock-kms-driver)
+      # into a single artifact, while the shared action handles one location per invocation.
+      - name: Build KMS driver artifacts
+        uses: ./.github/actions/sbt/execute_sbt_command
+        env:
+          RELEASE_SUFFIX: ${{ steps.release_suffix.outputs.release_suffix }}
+        with:
+          cmd: >-
+            aws-kms-driver/assembly aws-kms-driver/packageSrc aws-kms-driver/packageDoc aws-kms-driver/makePom
+            mock-kms-driver/package mock-kms-driver/packageSrc mock-kms-driver/packageDoc mock-kms-driver/makePom
+          report_to_datadog: "false"
+          fail_on_error_in_output: "false"
+
+      - name: Collect KMS driver artifacts
+        shell: bash
+        run: |
+          rm -rf tmp-release
+          mkdir -p tmp-release/community/aws-kms-driver/target/scala-2.13
+          mkdir -p tmp-release/community/mock-kms-driver/target/scala-2.13
+
+          shopt -s nullglob
+
+          aws_jars=(community/aws-kms-driver/target/scala-2.13/*.jar)
+          aws_poms=(community/aws-kms-driver/target/scala-2.13/*.pom)
+          mock_jars=(community/mock-kms-driver/target/scala-2.13/*.jar)
+          mock_poms=(community/mock-kms-driver/target/scala-2.13/*.pom)
+
+          if (( ${#aws_jars[@]} == 0 || ${#aws_poms[@]} == 0 )); then
+            echo "Missing aws-kms-driver artifacts (.jar/.pom) in community/aws-kms-driver/target/scala-2.13" >&2
+            ls -la community/aws-kms-driver/target/scala-2.13 || true
+            exit 1
+          fi
+
+          if (( ${#mock_jars[@]} == 0 || ${#mock_poms[@]} == 0 )); then
+            echo "Missing mock-kms-driver artifacts (.jar/.pom) in community/mock-kms-driver/target/scala-2.13" >&2
+            ls -la community/mock-kms-driver/target/scala-2.13 || true
+            exit 1
+          fi
+
+          cp -v "${aws_jars[@]}" "${aws_poms[@]}" \
+            tmp-release/community/aws-kms-driver/target/scala-2.13
+          cp -v "${mock_jars[@]}" "${mock_poms[@]}" \
+            tmp-release/community/mock-kms-driver/target/scala-2.13
+
+      - name: Upload KMS driver artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: kms-driver-release-jars-poms
+          path: tmp-release
+          retention-days: 7

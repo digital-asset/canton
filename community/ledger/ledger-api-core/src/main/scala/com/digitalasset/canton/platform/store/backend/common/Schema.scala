@@ -318,6 +318,7 @@ private[backend] object AppendOnlySchema {
         "event_sequential_id" -> fieldStrategy.bigint(_ => _.event_sequential_id),
         "event_offset" -> fieldStrategy.bigint(_ => _.event_offset),
         "update_id" -> fieldStrategy.bytea(_ => _.update_id),
+        "party" -> fieldStrategy.string(_ => _.party_id),
         "party_id" -> fieldStrategy.party(_.party_id),
         "participant_id" -> fieldStrategy.int(stringInterning =>
           dto => stringInterning.participantId.unsafe.internalize(dto.participant_id)

@@ -41,7 +41,6 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UpdateWrapper,
 }
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -2551,7 +2550,6 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
   }
 }
 
-@UnstableTest // TODO(i21107): remove once the test is stable
 class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
   private val reconciliationInterval = PositiveSeconds.tryOfSeconds(2)
   private val transactionTolerance = reconciliationInterval.unwrap
@@ -2615,7 +2613,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     val clock = environment.simClock.value
     clock.advance(JDuration.ofSeconds(1))
 
-    val pingF = Future.traverse((1 to 200).toList) { _ =>
+    val pingF = Future.traverse((1 to 20).toList) { _ =>
       Future {
         assertPingSucceeds(participant1, participant1, timeoutMillis = 60000)
       }

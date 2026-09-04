@@ -84,7 +84,8 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       recordTime = cantonTime2,
       acsChangeFactory = TestAcsChangeFactory(),
       contractInfos = Map.empty,
-    )(TraceContext.empty)
+      traceContext = TraceContext.empty,
+    )
 
     PostPublishData.from(
       update = update,
@@ -108,7 +109,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
     )
 
     PostPublishData.from(
-      update = update.copy(completionInfoO = None)(TraceContext.empty),
+      update = update.copy(completionInfoO = None),
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe None
@@ -125,7 +126,8 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
         repairCounter = RepairCounter(65),
         recordTime = cantonTime2,
         contractInfos = Map.empty,
-      )(TraceContext.empty),
+        traceContext = TraceContext.empty,
+      ),
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe None
@@ -146,7 +148,8 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       recordTime = cantonTime2,
       isTransaction = true,
       transactionHash = None,
-    )(TraceContext.empty)
+      traceContext = TraceContext.empty,
+    )
 
     PostPublishData.from(
       update = update,
@@ -170,7 +173,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
     )
 
     PostPublishData.from(
-      update = update.copy(isTransaction = false)(TraceContext.empty),
+      update = update.copy(isTransaction = false),
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe None
@@ -192,7 +195,8 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       messageUuid = messageUuid,
       isTransaction = true,
       transactionHash = None,
-    )(TraceContext.empty)
+      traceContext = TraceContext.empty,
+    )
 
     PostPublishData.from(
       update = update,
@@ -213,7 +217,7 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       )
     )
     PostPublishData.from(
-      update = update.copy(isTransaction = false)(TraceContext.empty),
+      update = update.copy(isTransaction = false),
       offset = offset,
       publicationTime = cantonTime1,
     ) shouldBe None

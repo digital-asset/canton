@@ -27,6 +27,7 @@ import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
 import scala.collection.mutable
+import scala.concurrent.Future
 
 class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndexService {
 
@@ -154,6 +155,9 @@ class InternalIndexServiceImpl(indexService: IndexService) extends InternalIndex
         val seen = mutable.Set.empty[Party]
         elem => Option.when(seen.add(elem))(elem).toList
       }
+
+  override def indexerPrunedUpTo(implicit traceContext: TraceContext): Future[Option[Offset]] =
+    indexService.indexDbPrunedUpto(loggingContext)
 
   private def loggingContext(implicit traceContext: TraceContext): LoggingContextWithTrace =
     new LoggingContextWithTrace(LoggingEntries.empty, traceContext)

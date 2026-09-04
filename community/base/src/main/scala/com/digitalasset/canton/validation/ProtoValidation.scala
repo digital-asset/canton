@@ -4,6 +4,7 @@
 package com.digitalasset.canton.validation
 
 import cats.syntax.traverse.*
+import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
@@ -97,22 +98,56 @@ object ProtoValidation {
       field: String,
       pvv: ProtocolVersionValidation,
       maxLength: Int,
-  ): ParsingResult[Seq[E]] = {
-    def bounded: ParsingResult[Seq[E]] =
-      Either.cond(
-        seq.sizeIs <= maxLength,
-        seq.elements,
-        InvariantViolation(
-          field,
-          s"repeated field has ${seq.size} elements, exceeding the maximum of $maxLength",
-        ),
-      )
+  ): ParsingResult[Seq[E]] =
+    validateInternal(
+      pvv = pvv,
+      condition = seq.sizeIs <= maxLength,
+      mkValidatedValue = seq.elements,
+      mkError = InvariantViolation(
+        field,
+        s"repeated field has ${seq.size} elements, exceeding the maximum of $maxLength",
+      ),
+    )
+
+  /** Validate a generic condition, returning `()` on success. For a repeated field, use
+    * [[validateLength]].
+    *
+    * @param pvv
+    *   `PV` checks the condition from the validating protocol version on (so older peers stay
+    *   compatible), `NoValidation` leaves it unchecked, `AlwaysValidation` checks it
+    *   unconditionally
+    * @param condition
+    *   The condition to validate. It is evaluated lazily, so it will only be evaluated if the
+    *   protocol version requires validation.
+    * @param mkError
+    *   The error to return if the condition does not hold. It is evaluated lazily, so it will only
+    *   be evaluated if the protocol version requires validation and the condition does not hold.
+    */
+  def validateCondition(
+      pvv: ProtocolVersionValidation,
+      condition: => Boolean,
+      mkError: => ProtoDeserializationError,
+  ): ParsingResult[Unit] =
+    validateInternal(
+      pvv = pvv,
+      condition = condition,
+      mkValidatedValue = (),
+      mkError = mkError,
+    )
+
+  private def validateInternal[E](
+      pvv: ProtocolVersionValidation,
+      condition: => Boolean,
+      mkValidatedValue: => E,
+      mkError: => ProtoDeserializationError,
+  ): ParsingResult[E] = {
+    def checkCondition = Either.cond(condition, mkValidatedValue, mkError)
 
     pvv match {
       case ProtocolVersionValidation.PV(pv) =>
-        if (pv >= ProtocolVersion.boundsCheck) bounded else Right(seq.elements)
-      case ProtocolVersionValidation.NoValidation => Right(seq.elements)
-      case ProtocolVersionValidation.AlwaysValidation => bounded
+        if (pv >= ProtocolVersion.boundsCheck) checkCondition else Right(mkValidatedValue)
+      case ProtocolVersionValidation.NoValidation => Right(mkValidatedValue)
+      case ProtocolVersionValidation.AlwaysValidation => checkCondition
     }
   }
 

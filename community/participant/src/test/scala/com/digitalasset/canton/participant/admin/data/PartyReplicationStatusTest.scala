@@ -33,7 +33,7 @@ class PartyReplicationStatusTest extends AnyWordSpec with BaseTest {
     InternalStatus(
       params = dummyParams,
       pv = testedProtocolVersion,
-      agreementO = None,
+      agreementStatus = InternalStatus.AgreementStatus.NotProposed,
       authorizationO = None,
       replicationO = None,
       indexingO = None,

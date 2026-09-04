@@ -57,15 +57,12 @@ sealed abstract class LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shar
   }
 }
 
-@UnstableTest // TODO(i34745): remove this once the test is no longer flaky
 class LedgerApiShard0InMemoryFanOutConformanceTestPostgres
     extends LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shard = 0)
 
-@UnstableTest // TODO(i34745): remove this once the test is no longer flaky
 class LedgerApiShard1InMemoryFanOutConformanceTestPostgres
     extends LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shard = 1)
 
-@UnstableTest // TODO(i34745): remove this once the test is no longer flaky
 class LedgerApiShard2InMemoryFanOutConformanceTestPostgres
     extends LedgerApiInMemoryFanOutConformanceTestShardedPostgres(shard = 2)
 
