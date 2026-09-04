@@ -3017,6 +3017,10 @@ object BuildCommon {
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
+        // `logback-test.xml` lives in `Compile` resources so it's on the classpath of projects
+        // that depend on `testing-utils`, ensuring their tests use the config, but we exclude
+        // it from the published JAR so it doesn't conflict with downstream users' log configs
+        Compile / packageBin / mappings ~= (_.filterNot(_._2 == "logback-test.xml")),
         Compile / packageBin / packageOptions +=
           Package.ManifestAttributes(
             "ScalaPB-Options-Proto" -> "com/daml/platform/hello/package.proto"
