@@ -1575,6 +1575,7 @@ private[sync] class SynchronizerConnectionsManager(
         pendingLsuOperationsStore,
         parameters.lsuConfig,
         loggerFactory.append("lsu", synchronizerSuccessor.psid.suffix),
+        parameters.acsCommitments.disableOldAcsCommitmentProcessor,
       )(FullAutomaticLsuRequest(alias, currentPsid, synchronizerSuccessor))
 
       _ <- upgrader.upgrade()

@@ -4,7 +4,8 @@
 package com.digitalasset.canton.participant.store
 
 import cats.Monad
-import cats.syntax.bifunctor.*
+import cats.syntax.either.*
+import cats.syntax.option.*
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -24,10 +25,12 @@ import com.digitalasset.daml.lf.data.Ref.ParticipantId
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.collection.{immutable, mutable}
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 trait AcsDigestStore extends AutoCloseable with Purgeable { this: NamedLogging =>
 
@@ -390,7 +393,7 @@ object AcsDigestStore {
       *   The async operation returning a [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown]]
       *   to apply to each paginated batch of digest updates.
       * @tparam K
-      *   The key type of the journal (e.g., `PartyAndOrder` or `InternedParticipantId`).
+      *   The key type of the journal (e.g., `InternedPartyId` or `InternedParticipantId`).
       * @tparam V
       *   The value type stored in the journal (e.g., `RawDigest` or `(RawDigest, HashedDigest)`).
       * @tparam E
@@ -424,6 +427,47 @@ object AcsDigestStore {
           }
       }
     }
+
+    /** Creates a Pekko Source based on a given digest journal and a function that transforms acs
+      * updates into the elements of the source.
+      *
+      * @param digestJournal
+      *   The digest journal (party or participant) to read snapshots from.
+      * @param startAtInclusive
+      *   The starting offset from which to begin reading snapshots (inclusive).
+      * @param pageSize
+      *   The maximum number of digest updates to load per paginated database query.
+      * @param function
+      *   A function that takes a collection of updates and returns S
+      * @tparam K
+      *   The key type of the journal (e.g., `InternedPartyId` or `InternedParticipantId`).
+      * @tparam S
+      *   The type of the elements of the returned Source
+      * @return
+      *   A [[org.apache.pekko.stream.scaladsl.Source]] of elements of type S
+      */
+    def sourceFromJournalSnapshot[K, S](
+        digestJournal: AcsDigestStore.DigestJournal[K]
+    )(startAtInclusive: Offset, pageSize: Int)(
+        function: immutable.Iterable[AcsDigestUpdate[K]] => S
+    )(implicit ec: ExecutionContext, traceContext: TraceContext): Source[S, NotUsed] =
+      Source.unfoldAsync[Option[Either[digestJournal.SnapshotPaginationToken, Offset]], S](
+        startAtInclusive.asRight.some
+      ) {
+        case Some(tokenOrStart) =>
+          (for {
+            snapshotResult <- digestJournal.snapshot(tokenOrStart, pageSize)
+            (acsUpdates, pagination) = snapshotResult
+
+            nextTokenOrStart = pagination match {
+              case Left(PaginationTokenDone) => None
+              case Right(token) => token.asLeft[Offset].some
+            }
+
+          } yield (nextTokenOrStart, function(acsUpdates)).some)
+            .onShutdown(None)
+        case None => Future.successful(None)
+      }
   }
 
   /** This range is specifically designed to give an offset range constrain to
@@ -616,8 +660,6 @@ object AcsDigestStore {
   }
 
   /** Describes the trigger of the checkpoint.
-    *
-    * TODO(#33084): resolve int value to human readable strings in the debug view
     */
   final case class CheckpointType private (id: Int)(val isTickCheckpoint: Boolean)
       extends PrettyPrintingFromCompanion
@@ -688,6 +730,9 @@ object AcsDigestStore {
       */
     val ReceivedCommitmentCheckpoint: CheckpointType =
       CheckpointType(6, "ReceivedCommitmentCheckpoint", isTickCheckpoint = false)
+
+    // NOTICE: when adding a new checkpoint type, the debug.checkpoint_type function
+    // needs to be re-created in a new SQL migration file with the added checkpoint.
 
     @VisibleForTesting
     def all: Set[CheckpointType] = ids.values.map { case (tpe, _) => tpe }.toSet

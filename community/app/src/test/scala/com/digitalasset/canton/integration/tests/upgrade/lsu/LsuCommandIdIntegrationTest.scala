@@ -12,12 +12,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
-import com.digitalasset.canton.integration.{
-  ConfigTransform,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  TestEnvironment,
-}
+import com.digitalasset.canton.integration.{EnvironmentDefinition, TestEnvironment}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCommand
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SequencerRequest
@@ -49,13 +44,6 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
   override protected def testName: String = "lsu-command-deduplication"
-
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
 
   override protected lazy val newOldSequencers = Map("sequencer2" -> "sequencer1")
   override protected lazy val newOldMediators = Map("mediator2" -> "mediator1")

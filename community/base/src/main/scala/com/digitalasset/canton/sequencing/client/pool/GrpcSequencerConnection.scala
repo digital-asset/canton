@@ -13,7 +13,6 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.networking.grpc.GrpcError.{
   GrpcClientError,
-  GrpcRequestRefusedAlreadyExists,
   GrpcRequestRefusedByServer,
   GrpcServiceUnavailable,
 }
@@ -46,7 +45,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   TopologyStateForInitResponse,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
 import io.grpc.Status
 
 import scala.concurrent.ExecutionContextExecutor
@@ -137,66 +135,61 @@ class GrpcSequencerConnection(
       case _ =>
     }
 
+  /** Convert the connection error to a send async client response error
+    *
+    * We do have retry strategies and amplification policies in place, and we try to aim for an
+    * at-most once semantics for efficiency (as stricter in older times). Therefore, we generally
+    * still bubble up errors to the caller so that they can decide how to handle them. For some
+    * errors, we cannot decide whether the request was accepted or not, so we generally swallow the
+    * error and assume that a higher level retry strategy will be in place.
+    */
   private def fromConnectionError(error: ConnectionError, messageId: MessageId)(implicit
       traceContext: TraceContext
   ): Either[SendAsyncClientResponseError, Unit] =
-    // Adapted from GrpcSequencerClientTransportCommon
-    Either.cond(
-      !bubbleSendErrorPolicy(error), {
-        error match {
-          // TODO(#12377) Do not trust the sequencer but monitor and stop using the given sequencer if it is denying service
-          case ConnectionError.TransportError(error: GrpcRequestRefusedAlreadyExists) =>
-          // already logged as an info in GrpcConnection
-          case _ =>
+    // TODO(#12377) Do not trust the sequencer but monitor and stop using the given sequencer if it is denying service
+    error match {
+      case ConnectionError.InvalidStateError(_) =>
+        Left(SendAsyncClientError.RequestFailed(s"Failed to make request to the server: $error"))
+      case ConnectionError.TransportError(grpcError) =>
+        grpcError match {
+          // sequencer is overloaded, so let's retry
+          case SequencerErrors.Overloaded(_) =>
+            Left(SendAsyncClientError.RequestRefused(SendAsyncErrorGrpc(grpcError)))
+          // the request was rejected by the server as it wasn't in a state to accept it
+          case _: GrpcRequestRefusedByServer =>
+            Left(SendAsyncClientError.RequestRefused(SendAsyncErrorGrpc(grpcError)))
+          // the request was rejected by the server because it already exists, so we don't need to bubble up
+          case _: GrpcError.GrpcRequestRefusedAlreadyExists =>
+            grpcError.decodedCantonError match {
+              case Some(value) =>
+                // already logged as an info in GrpcConnection
+                logger.debug(s"Dropping send request as it already exists: $value")
+                Left(SendAsyncClientError.RequestAlreadyExists(value.cause))
+              case None =>
+                // this would be an unexpected non canton error
+                logger.warn(
+                  s"Send [$messageId] returned an unexpected already exists error which we ignore",
+                  error,
+                )
+                Left(SendAsyncClientError.RequestAlreadyExists(grpcError.status.getDescription))
+            }
+          // bad request refused by server
+          case _: GrpcClientError =>
+            Left(
+              SendAsyncClientError.RequestFailed(s"Failed to make request to the server: $error")
+            )
+          // an internal error happened at the server, this could have been when constructing or sending the response
+          // after accepting the request so we cannot safely bubble the error
+          case _: GrpcError.GrpcServerError
+              // the service is unavailable, but this could have been returned after a request was received
+              | _: GrpcError.GrpcServiceUnavailable
+              // there was a timeout meaning we don't know what happened with the request
+              | _: GrpcError.GrpcClientGaveUp =>
             // log that we're swallowing the error
             logger.info(
               s"Send [$messageId] returned an error however may still be possibly sequenced so we are ignoring the error: $error"
             )
-        }
-
-        ()
-      },
-      error match {
-        case ConnectionError.InvalidStateError(_) =>
-          SendAsyncClientError.RequestFailed(s"Failed to make request to the server: $error")
-        case ConnectionError.TransportError(grpcError) =>
-          grpcError match {
-            case SequencerErrors.Overloaded(_) =>
-              SendAsyncClientError.RequestRefused(SendAsyncErrorGrpc(grpcError))
-            case _: GrpcRequestRefusedByServer =>
-              SendAsyncClientError.RequestRefused(SendAsyncErrorGrpc(grpcError))
-            case _: GrpcClientError =>
-              SendAsyncClientError.RequestFailed(s"Failed to make request to the server: $error")
-            case _ =>
-              ErrorUtil.invalidState("We should bubble only refused and client errors")
-          }
-      },
-    )
-
-  /** We receive grpc errors for a variety of reasons. The send operation is at-most-once and should
-    * only be bubbled up and potentially retried if we are absolutely certain the request will never
-    * be sequenced.
-    */
-  private def bubbleSendErrorPolicy(error: ConnectionError): Boolean =
-    // Adapted from GrpcSequencerClientTransportCommon
-    error match {
-      // connection not started
-      case ConnectionError.InvalidStateError(_) => true
-      case ConnectionError.TransportError(grpcError) =>
-        grpcError match {
-          // bad request refused by server
-          case _: GrpcError.GrpcClientError => true
-          // the request was rejected by the server as it wasn't in a state to accept it
-          case _: GrpcError.GrpcRequestRefusedByServer => true
-          // the request was rejected by the server because it already exists, so we don't need to bubble up
-          case _: GrpcError.GrpcRequestRefusedAlreadyExists => false
-          // an internal error happened at the server, this could have been when constructing or sending the response
-          // after accepting the request so we cannot safely bubble the error
-          case _: GrpcError.GrpcServerError => false
-          // the service is unavailable, but this could have been returned after a request was received
-          case _: GrpcServiceUnavailable => false
-          // there was a timeout meaning we don't know what happened with the request
-          case _: GrpcError.GrpcClientGaveUp => false
+            Right(())
         }
     }
 

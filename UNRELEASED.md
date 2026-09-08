@@ -26,7 +26,12 @@ One of the improvements allows the aggregator to detect sequencers that provide 
 
 ### Synchronizer Limits
 
-Added `SynchronizerLimits` in the `StaticSynchronizerParameters`, which are size limits on various collections, globally enforced by all synchronizer members. These limits are effective only starting with PV36.
+Added `SynchronizerLimits` in the `StaticSynchronizerParameters`, which are size limits on various collections, globally enforced by all synchronizer members. These [limits](https://github.com/digital-asset/canton/blob/release-line-3.6/community/base/src/main/protobuf/com/digitalasset/canton/protocol/v31/sequencing.proto#L145-L180) are effective only starting with PV36.
+Synchronizer operators are required to choose explicit values for those limits when upgrading to PV36.
+
+Note: when using the console to bootstrap a synchronizer, the console will automatically set the limits to [default values](https://github.com/digital-asset/canton/blob/release-line-3.6/community/base/src/main/scala/com/digitalasset/canton/protocol/SynchronizerLimits.scala#L90-L102).
+However we strongly recommend to explicitly choose those values instead of relying on the defaults.
+When interactive with the gRPC API directly, limits must be explicitly set on the `StaticSynchronizerParameters` protobuf message when bootstrapping a synchronizer on PV36.
 
 ### Renamed participant parameter `commit-after-failed-activeness-check`
 
@@ -112,6 +117,62 @@ The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, 
 ### `external_call`
 
 The `external_call` feature is released and enabled from 2.4(-staging) onwards.
+
+### New ACS commitment pipeline
+
+ACS commitments have been completely reimplemented.
+The new implementation consists of three components:
+- The digest processor aggregates the ACS and the changes to it into per-party and per-counterparticipant digests.
+- The sender turns digests into commitments by signing them and sends them to the counterparticipants.
+- The matcher receives the commitments from counterparticipants and compares them to the local digests to detect mismatches.
+
+The digest processor and matcher are enabled by default on all protocol versions.
+The sender is enabled by default for connected synchronizers with protocol version at least 36.
+The sender cannot be enabled for synchronizers with protocol version 35 or lower.
+The former ACS commitment processor is by default disabled for synchronizers with protocol version at least 36.
+
+The defaults can be changed via the configuration options
+`canton.participants.<participant>.parameters.acs-commitment.enable-new-acs-commitment-processor` (default true)
+and `canton.participants.<participant>.parameters.acs-commitment.disable-old-acs-commitment-processor` (default on-new-protocol-versions).
+
+Each time the new commitment processor is enabled afresh, the digest processor will reinitialize all the new digests from the current ledger end.
+While this happens in the background, the participant and its DB may see increased load.
+Conversely, whenever the new commitment processor is disabled, all the new digests are deleted from the DB to free the space.
+
+When the old commitment processor is reenabled after it has been disabled,
+commitments must be manually reinitialized on all connected synchronizers.
+Otherwise the old commitments are likely inconsistent with the ACS and commitment mismatches are to be expected.
+
+The existing ACS commitment inspection and tooling APIs work only against the old commitment processor.
+So when the old commitment processor is disabled, the APIs may produce outdated information or fail outright.
+In particular, no-wait and pruning configurations have no effect. The new commitment processor always operates
+in the safe-to-prune mode `SAFE_TO_PRUNE_COMMITMENT_STATE_MATCH`, i.e., outstanding commitments from counterparticipants
+never prevent pruning.
+
+The new commitment processor provides an API to trigger reinitialization `<participant reference>.commitments.reinitialize_digest_commitments`
+and query the status of reinitialization `<participant reference>.commitments.digest_commitments_reinitialization_status`.
+Reinitialization now also works when the participant is not connected to the targeted synchronizer.
+
+The new commitment processor exposes among others the following metrics. They are disjoint from the old commitment processor metrics.
+- `daml.participant.sync.commitments.checkpoint-watermark` tracks the progress of the digest processor in record time of the connected synchronizer.
+  It corresponds to the former `daml.participant.sync.commitments.last-locally-checkpointed` metric.
+- `daml.participant.sync.commitments.tick-watermark` tracks the finished reconciliation interval of the digest processor.
+  It corresponds to the former `daml.participant.sync.commitments.last-locally-completed` metric.
+- `daml.participant.sync.commitments.received-watermark` tracks the sequencing time of the latest received new ACS commitment.
+  It corresponds to the former `daml.participant.sync.commitments.last-incoming-received` metric.
+- `daml.participant.sync.commitments.matching-watermark` tracks the record time up to where the matcher has progressed.
+  It replaces the former `daml.participant.sync.commitments.last-incoming-processed`, which measures the end of the period
+  of the received commitment instead of the record time of when the commitment was sequenced.
+- `daml.participant.sync.commitments.sender.watermark-timestamp` tracks the period end record time up to where the node has sent its commitments.
+- `daml.participant.sync.commitments.digest-processor-health`, `daml.participant.sync.commitments.matcher-health`, and `daml.participant.sync.commitments.sender.sender-health`,
+  report on the health of the different components.
+- `daml.participant.sync.commitments.running-digest-processor.loaded-digests` counts the number of loaded digests in memory
+  and gives an indication of the memory usage of the new processor.
+
+With the new pipeline, journal garbage collection can now be controlled independently of the reconciliation interval:
+`canton.participants.<participant>.parameters.journal-garbage-collection-minimum-gap` (default 30 minutes) determines
+how frequently journal garbage collection shall be triggered if there is a continuous stream of ACS changes. Previously,
+this was tied to the reconciliation interval of the connected synchronizer.
 
 ### Minor Improvements
 - Interactive submissions can use hashing scheme version `HASHING_SCHEME_VERSION_V4` on synchronizers running protocol version 36 or later (previously only on development-protocol synchronizers). V4 additionally covers recorded external-call results in the prepared transaction hash.
@@ -297,6 +358,8 @@ metrics dropped the superfluous leading "SEQ::" string.
 
 ## Bugfixes
 - Ledger JSON API `/v2/state/active-contracts-page` is now available via POST; the GET variant that expects a request body is deprecated.
+- Mediator: Cosmetic fix for the mediator verdict sender to correctly stop retrying to send verdicts if the sequencer
+  reports that the verdict has already been successfully aggregated.
 
 ### (YY-nnn, Risk): Title
 

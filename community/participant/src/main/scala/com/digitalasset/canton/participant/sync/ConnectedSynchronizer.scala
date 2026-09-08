@@ -37,6 +37,7 @@ import com.digitalasset.canton.participant.commitment.{
   ReceivedAcsCommitmentValidator,
   ReceivedAcsCommitmentValidatorImpl,
 }
+import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.event.{AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.*
@@ -1345,6 +1346,11 @@ object ConnectedSynchronizer {
         futureSupervisor,
         loggerFactory,
       )
+      val oldCommitmentProcessorEnabled =
+        AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.isOldProcessorEnabled(
+          parameters.acsCommitments.disableOldAcsCommitmentProcessor,
+          synchronizerHandle.psid.protocolVersion,
+        )
       val journalGarbageCollector = new JournalGarbageCollector(
         persistentState.requestJournalStore,
         () =>
@@ -1357,13 +1363,13 @@ object ConnectedSynchronizer {
         participantNodePersistentState.map(_.inFlightSubmissionStore),
         synchronizerHandle.psid,
         parameters.journalGarbageCollectionDelay,
-        !parameters.isOldCommitmentProcessorEnabled,
+        disableLegacyAcsCommitmentProcessor = !oldCommitmentProcessorEnabled,
         parameters.processingTimeouts,
         loggerFactory,
       )
       for {
         acsCommitmentProcessorO <-
-          if (parameters.isOldCommitmentProcessorEnabled)
+          if (oldCommitmentProcessorEnabled)
             AcsCommitmentProcessor(
               participantId,
               synchronizerHandle.sequencerClient,

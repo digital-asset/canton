@@ -15,8 +15,8 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.store.PrunableByTimeTest
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.util.ErrorUtil.internalErrorMessage
-import com.digitalasset.canton.version.{HasNonImplicitTestCloseContext, ProtocolVersion}
-import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.canton.version.HasNonImplicitTestCloseContext
+import com.digitalasset.canton.{BaseTest, InUS, ProtocolVersionChecksAsyncWordSpec}
 import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
@@ -30,9 +30,8 @@ trait AcsCommitmentPeriodStoreTest
     with BaseTest
     with PrunableByTimeTest
     with ProtocolVersionChecksAsyncWordSpec
-    with HasNonImplicitTestCloseContext {
-
-  def minimumProtocolVersion: ProtocolVersion
+    with HasNonImplicitTestCloseContext
+    with InUS {
 
   def acsCommitmentPeriodStore(
       mk: (StringInterning, Boolean, ExecutionContext) => AcsCommitmentPeriodStore
@@ -46,7 +45,7 @@ trait AcsCommitmentPeriodStoreTest
       mk(stringInterning, enableConsistencyChecks, executionContext)
 
     "increaseWatermarks" should {
-      "increase the watermark" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "increase the watermark" inUS {
         val store = newStore()
         for {
           empty <- store.watermark()
@@ -58,7 +57,7 @@ trait AcsCommitmentPeriodStoreTest
         }
       }
 
-      "never decrease" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "never decrease" inUS {
         val store = newStore()
         for {
           empty <- store.watermark()
@@ -75,7 +74,7 @@ trait AcsCommitmentPeriodStoreTest
     }
 
     "markOutstanding" should {
-      "insert periods" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "insert periods" inUS {
         val store = newStore()
         val periods = Seq(
           CommitmentMatchPeriod.outstanding(p1, ts(1), ts(10), "P1:1-10"),
@@ -97,7 +96,7 @@ trait AcsCommitmentPeriodStoreTest
     }
 
     "persistMatchingOutcome" should {
-      "move from outstanding/mismatched to mismatched/matched" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "move from outstanding/mismatched to mismatched/matched" inUS {
         val store = newStore()
         val periods = Seq(
           CommitmentMatchPeriod.outstanding(p1, ts(1), ts(10), "P1:1-10"),
@@ -186,7 +185,7 @@ trait AcsCommitmentPeriodStoreTest
     }
 
     "deleteOutstandingAfter" should {
-      "delete all outstanding periods after the given timestamp" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "delete all outstanding periods after the given timestamp" inUS {
         val store = newStore()
         val periodsToKeep = Seq(
           CommitmentMatchPeriod.outstanding(p1, ts(1), ts(10), "P1:1-10"),
@@ -211,7 +210,7 @@ trait AcsCommitmentPeriodStoreTest
     }
 
     "prune" should {
-      "prune all entries before the given timestamp" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "prune all entries before the given timestamp" inUS {
         val store = newStore()
         val periodsToPrune = Seq(
           CommitmentMatchPeriod.outstanding(p1, ts(1), ts(10), "P1:1-10"),
@@ -236,10 +235,8 @@ trait AcsCommitmentPeriodStoreTest
         }
       }
 
-      if (testedProtocolVersion >= minimumProtocolVersion) {
-        val enableConsistencyChecks = true
-        prunableByTime(mk(stringInterning, enableConsistencyChecks, _))
-      }
+      val enableConsistencyChecks = true
+      prunableByTime(mk(stringInterning, enableConsistencyChecks, _))
     }
 
     "checkInvariant" should {
@@ -270,7 +267,7 @@ trait AcsCommitmentPeriodStoreTest
           s"Invalid period for participant ${stringInterning.participantId.externalize(participantId)}: fromExclusive $fromExclusive must be less than toInclusive $toInclusive"
         )
 
-      "detect an invalid period" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "detect an invalid period" inUS {
         val store = newStore(enableConsistencyChecks = false)
         val invalidPeriodOutstanding =
           CommitmentMatchPeriod.outstanding(p1, ts(10), ts(10), "P1:10-10")
@@ -303,7 +300,7 @@ trait AcsCommitmentPeriodStoreTest
         }
       }
 
-      "detect overlapping periods" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "detect overlapping periods" inUS {
         val store = newStore(enableConsistencyChecks = false)
         val periodUnexpected = CommitmentMatchPeriod.unexpected(p1, ts(2), ts(5), off(23))
         val periodOutstanding1 = CommitmentMatchPeriod.outstanding(p1, ts(1), ts(10), "P1:1-10")
@@ -407,7 +404,7 @@ trait AcsCommitmentPeriodStoreTest
         }
       }
 
-      "detect watermark consistency violation" onlyRunWithOrGreaterThan minimumProtocolVersion inUS {
+      "detect watermark consistency violation" inUS {
         val store = newStore(enableConsistencyChecks = false)
         val periodMismatched =
           CommitmentMatchPeriod.mismatched(p1, ts(10), ts(12), "P1:10-12", off(1))

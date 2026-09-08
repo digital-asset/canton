@@ -46,7 +46,7 @@ trait SubscriptionHandlerTrait {
 }
 
 object SubscriptionHandlerTrait {
-  final case class SubscriptionLivenessStatus(timestampDelta: Duration, ordinalDelta: Int)
+  final case class SubscriptionLivenessStatus(timestampDelta: Duration, ordinalDelta: Long)
 }
 
 class SubscriptionHandler private[sequencing] (
@@ -143,7 +143,6 @@ class SubscriptionHandler private[sequencing] (
   def getLivenessStatus(latest: EventAndOrdinal): Option[SubscriptionLivenessStatus] =
     priorEvent.get.map { prior =>
       val timestampDelta = latest.event.timestamp - prior.event.timestamp
-      // This is safe even in case of Int overrun: e.g. (Int.MaxValue + 7) - (Int.MaxValue - 3) = 10
       val ordinalDelta = latest.ordinal.value - prior.ordinal.value
 
       SubscriptionLivenessStatus(timestampDelta, ordinalDelta)

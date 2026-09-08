@@ -145,7 +145,7 @@ object ProtoValidation {
 
     pvv match {
       case ProtocolVersionValidation.PV(pv) =>
-        if (pv >= ProtocolVersion.boundsCheck) checkCondition else Right(mkValidatedValue)
+        if (pv >= ProtocolVersion.v36) checkCondition else Right(mkValidatedValue)
       case ProtocolVersionValidation.NoValidation => Right(mkValidatedValue)
       case ProtocolVersionValidation.AlwaysValidation => checkCondition
     }

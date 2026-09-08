@@ -10,7 +10,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.crypto.{HashOps, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
@@ -23,6 +23,7 @@ import com.digitalasset.canton.logging.{
   TracedLogger,
 }
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.resource.{Storage, StorageSingleSetup}
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc
@@ -505,6 +506,8 @@ final class BftBlockOrderer(
       metrics,
       loggerFactory,
       timeouts,
+      cryptoApi.pureCrypto,
+      cryptoApi.ips.getSynchronizerLimits,
       requestInspector =
         config.standalone.fold[RequestInspector](OutputModule.DefaultRequestInspector)(
           standaloneConfig =>
@@ -946,13 +949,16 @@ object BftBlockOrderer {
       probabilityOfBroadcast: Option[Probability]
   ) extends RequestInspector {
 
-    override def isRequestToAllMembersOfSynchronizer(
+    override def mayRequestChangeOrderingTopology(
         blockMetadata: BlockMetadata,
         requestNumber: Int,
         request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
+        synchronizerLimits: SynchronizerLimits,
         logger: TracedLogger,
         traceContext: TraceContext,
+        hashOps: HashOps,
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
       probabilityOfBroadcast.fold(false)(_.flipCoin(new Random(ThreadLocalRandom.current())))
   }

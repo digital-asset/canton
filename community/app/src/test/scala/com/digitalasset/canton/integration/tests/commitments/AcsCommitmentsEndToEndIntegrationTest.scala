@@ -49,7 +49,6 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
-      .addConfigTransforms(ConfigTransforms.enableDevVersionSupport*)
       .addConfigTransforms(
         ConfigTransforms.disableOldAcsCommitmentProcessor,
         // Trigger frequent garbage collections so that we can see that they are happening

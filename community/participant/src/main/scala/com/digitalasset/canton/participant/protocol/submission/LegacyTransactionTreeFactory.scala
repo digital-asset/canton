@@ -39,6 +39,7 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.transaction.LegacyContractStateMachine.KeyInactive
 import com.digitalasset.daml.lf.transaction.Transaction.{
@@ -102,6 +103,7 @@ class LegacyTransactionTreeFactory(
       contractOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
+      limitConfig: TransactionViewLimitConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] = {
@@ -128,7 +130,6 @@ class LegacyTransactionTreeFactory(
       protocolVersion,
     )
 
-    // Transaction view limits are applied on submission paths
     val rootViewDecompositionsF =
       transactionViewDecompositionFactory.fromTransaction(
         topologySnapshot,
@@ -136,7 +137,8 @@ class LegacyTransactionTreeFactory(
         PathRollbackContext.empty,
         Some(participantId.adminParty.toLf),
         PathRollbackContextFactory,
-        Some(TransactionViewLimitConfig.Default),
+        // Transaction view limits are applied on submission paths
+        Option.when(protocolVersion >= ProtocolVersion.v36)(limitConfig),
       )
 
     val commonMetadata = CommonMetadata

@@ -6,11 +6,13 @@ package com.digitalasset.canton.synchronizer.block
 import cats.syntax.either.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.HasLoggerName
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
   DecompressionPolicy,
   SignedContent,
   SubmissionRequest,
+  SubmissionRequestDeserializationContext,
 }
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
@@ -55,6 +57,7 @@ object LedgerBlockEvent extends HasLoggerName {
   def fromRawBlockEvent(
       protocolVersion: ProtocolVersion,
       decompressionPolicy: DecompressionPolicy,
+      synchronizerLimits: SynchronizerLimits,
   )(blockEvent: RawBlockEvent): ParsingResult[LedgerBlockEvent] =
     blockEvent match {
       case RawBlockEvent.Send(request, microsecondsSinceEpoch, orderingSequencerId) =>
@@ -67,6 +70,7 @@ object LedgerBlockEvent extends HasLoggerName {
             deserializeSignedSubmissionRequest(
               protocolVersion,
               decompressionPolicy,
+              synchronizerLimits,
             )(request)
           timestamp <-
             LfTimestamp
@@ -95,12 +99,16 @@ object LedgerBlockEvent extends HasLoggerName {
   def deserializeSignedSubmissionRequest(
       protocolVersion: ProtocolVersion,
       decompressionPolicy: DecompressionPolicy,
+      synchronizerLimits: SynchronizerLimits,
   )(submissionRequestBytes: ByteString): ParsingResult[SignedSubmissionRequest] =
     SignedContent
       .fromByteString(protocolVersion, submissionRequestBytes)
       .flatMap(
         _.deserializeContent(
-          SubmissionRequest.fromByteString(protocolVersion, decompressionPolicy)
+          SubmissionRequest.fromByteString(
+            protocolVersion,
+            SubmissionRequestDeserializationContext(decompressionPolicy, synchronizerLimits),
+          )
         )
       )
 

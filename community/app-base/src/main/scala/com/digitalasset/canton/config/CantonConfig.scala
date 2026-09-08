@@ -1507,8 +1507,16 @@ object CantonConfig {
         implicit val senderConfigReader: ConfigReader[AcsCommitmentSenderConfig] =
           deriveReader[AcsCommitmentSenderConfig]
 
+        implicit val consistencyCheckConfigReader
+            : ConfigReader[AcsCommitmentConsistencyCheckConfig] =
+          deriveReader[AcsCommitmentConsistencyCheckConfig]
+
         implicit val periodWriterConfigReader: ConfigReader[AcsCommitmentPeriodConfig] =
           deriveReader[AcsCommitmentPeriodConfig]
+
+        implicit val disableOldAcsCommitmentProcessorReader
+            : ConfigReader[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor] =
+          deriveEnumerationReader[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor]
 
         deriveReader[AcsCommitmentConfig]
       }
@@ -2311,8 +2319,16 @@ object CantonConfig {
         implicit val senderConfigWriter: ConfigWriter[AcsCommitmentSenderConfig] =
           deriveWriter[AcsCommitmentSenderConfig]
 
+        implicit val consistencyCheckConfigWriter
+            : ConfigWriter[AcsCommitmentConsistencyCheckConfig] =
+          deriveWriter[AcsCommitmentConsistencyCheckConfig]
+
         implicit val periodWriterConfigWriter: ConfigWriter[AcsCommitmentPeriodConfig] =
           deriveWriter[AcsCommitmentPeriodConfig]
+
+        implicit val disableOldAcsCommitmentProcessorWriter
+            : ConfigWriter[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor] =
+          deriveEnumerationWriter[AcsCommitmentConfig.DisableOldAcsCommitmentProcessor]
 
         deriveWriter[AcsCommitmentConfig]
       }

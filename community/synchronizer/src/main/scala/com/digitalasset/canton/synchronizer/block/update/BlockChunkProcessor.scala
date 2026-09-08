@@ -102,7 +102,7 @@ final class BlockChunkProcessor(
   private val submissionRequestValidator =
     new SubmissionRequestValidator(
       inFlightAggregationHandler,
-      memberValidator = memberValidator,
+      memberValidator,
       protocolVersion,
       parameters.enablePrevalidation,
       parameters.parallelism,

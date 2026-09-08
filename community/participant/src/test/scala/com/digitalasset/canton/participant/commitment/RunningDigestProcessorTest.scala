@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
 import com.digitalasset.canton.annotations.AcsCommitmentTest
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService.AcsUpdate.EffectiveTopologyUpdate
@@ -124,6 +125,7 @@ class RunningDigestProcessorTest
       new InMemoryAcsCommitmentPeriodStore(
         Eval.now(mockStringInterning),
         loggerFactory,
+        FutureSupervisor.Noop,
         enableConsistencyChecks = true,
       )
     val digestAccumulator = new SequentialDigestAccumulator(
@@ -145,7 +147,7 @@ class RunningDigestProcessorTest
       participant,
       synchronizerId = DefaultTestIdentities.synchronizerId,
       AcsCommitmentConfig(
-        enableRunningDigestProcessor = true,
+        enableNewAcsCommitmentProcessor = true,
         maxNumUpdatesBetweenCheckpoints = maxNumUpdatesBetweenCheckpoints,
         counterpartyBatchSize = PositiveInt.tryCreate(counterpartyBatchSize),
         tracing = AcsDigestTracingMode.Disabled,

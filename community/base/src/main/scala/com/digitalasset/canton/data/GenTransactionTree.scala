@@ -27,6 +27,7 @@ import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.*
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
+import com.google.protobuf.ByteString
 import monocle.Lens
 import monocle.macros.GenLens
 
@@ -309,7 +310,7 @@ object GenTransactionTree {
     ) = context
     for {
       submitterMetadata <- MerkleTree
-        .fromProtoOptionV30(
+        .fromProtoOptionV30NoMerkleSeq(
           protoTransactionTree.submitterMetadata,
           SubmitterMetadata.fromByteString(
             expectedProtocolVersion,
@@ -317,7 +318,7 @@ object GenTransactionTree {
           ),
         )
       commonMetadata <- MerkleTree
-        .fromProtoOptionV30(
+        .fromProtoOptionV30NoMerkleSeq(
           protoTransactionTree.commonMetadata,
           CommonMetadata.fromByteString(expectedProtocolVersion, hashOps),
         )
@@ -325,7 +326,7 @@ object GenTransactionTree {
         InvariantViolation(field = "GenTransactionTree.commonMetadata", error = "is blinded")
       )
       participantMetadata <- MerkleTree
-        .fromProtoOptionV30(
+        .fromProtoOptionV30NoMerkleSeq(
           protoTransactionTree.participantMetadata,
           ParticipantMetadata.fromByteString(expectedProtocolVersion, hashOps),
         )
@@ -335,8 +336,15 @@ object GenTransactionTree {
         (
           (
             hashOps,
-            TransactionView
-              .fromByteString(expectedProtocolVersion, (hashOps, expectedProtocolVersion)),
+            (bytes: ByteString, depthCounter: DepthCounter) =>
+              TransactionView.fromByteString(
+                expectedProtocolVersion,
+                (hashOps, depthCounter, expectedProtocolVersion),
+              )(bytes),
+            DepthCounter.withLimit(
+              expectedProtocolVersion,
+              synchronizerLimits.transactionProtocolLimits.maxTransactionTreeDepth.value,
+            ),
           ),
           expectedProtocolVersion,
         ),

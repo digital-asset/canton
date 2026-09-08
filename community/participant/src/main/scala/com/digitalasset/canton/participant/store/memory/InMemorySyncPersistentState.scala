@@ -51,6 +51,7 @@ class InMemoryLogicalSyncPersistentState(
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
     ledgerApiStore: Eval[LedgerApiStore],
     val loggerFactory: NamedLoggerFactory,
+    futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
     extends LogicalSyncPersistentState {
   override val enableAdditionalConsistencyChecks: Boolean =
@@ -86,6 +87,7 @@ class InMemoryLogicalSyncPersistentState(
     new InMemoryAcsCommitmentPeriodStore(
       ledgerApiStore.map(_.stringInterningView),
       loggerFactory,
+      futureSupervisor,
       enableAdditionalConsistencyChecks,
     )
 

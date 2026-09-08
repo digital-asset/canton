@@ -6,7 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.reducible.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.validation.ProtoValidation
@@ -60,16 +60,19 @@ object Recipients {
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      synchronizerLimits: SynchronizerLimits,
       proto: v30.Recipients,
-  ): ParsingResult[Recipients] =
+  ): ParsingResult[Recipients] = {
+    val maxRecipientsTrees = synchronizerLimits.transactionProtocolLimits.maxRecipientsTrees
+
     for {
       trees <- ProtoValidation
         .validateLengthThen(
           proto.recipientsTree,
           "recipients_tree",
           pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => RecipientsTree.fromProtoV30(pvv, element))
+          maxRecipientsTrees.value,
+        )((element, _) => RecipientsTree.fromProtoV30(pvv, synchronizerLimits, element))
       recipients <- NonEmpty
         .from(trees)
         .toRight(
@@ -79,6 +82,7 @@ object Recipients {
           )
         )
     } yield Recipients(recipients)
+  }
 
   /** Create a [[com.digitalasset.canton.sequencing.protocol.Recipients]] representing a group of
     * members that "see" each other.

@@ -3,23 +3,21 @@
 
 package com.digitalasset.canton.data
 
-import com.digitalasset.canton.BaseTest
+import com.digitalasset.canton.ProtoDeserializationError.NestingTooDeep
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.MerkleSeq.{Branch, MerkleSeqElement, Singleton}
-import com.digitalasset.canton.data.MerkleTree.{
-  BlindSubtree,
-  BlindingCommand,
-  RevealIfNeedBe,
-  RevealSubtree,
-}
+import com.digitalasset.canton.data.MerkleTree.*
 import com.digitalasset.canton.data.MerkleTreeTest.{AbstractLeaf, Leaf1}
 import com.digitalasset.canton.data.ViewPosition.MerklePathElement
 import com.digitalasset.canton.protocol.RootHash
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.version.{DepthCounter, ProtocolVersion}
+import com.digitalasset.canton.{BaseTest, ProtocolVersionChecksAnyWordSpec}
 import com.google.protobuf.ByteString
 import org.scalatest.prop.TableFor4
 import org.scalatest.wordspec.AnyWordSpec
 
-class MerkleSeqTest extends AnyWordSpec with BaseTest {
+class MerkleSeqTest extends AnyWordSpec with BaseTest with ProtocolVersionChecksAnyWordSpec {
 
   import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 
@@ -112,6 +110,21 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
       ("seven elements", (0 until 7).map(leaf), SevenElements, SevenElementsRootUnblinded),
     )
 
+  def deserialize(
+      merkleSeqP: ByteString,
+      depthCounter: DepthCounter = DepthCounter.NoLimit,
+  ): ParsingResult[MerkleSeq[VersionedMerkleTree[?]]] =
+    MerkleSeq
+      .fromByteString(
+        (
+          hashOps,
+          (bytes: ByteString, _: DepthCounter) =>
+            AbstractLeaf.fromByteString(testedProtocolVersion, bytes),
+          depthCounter,
+        ),
+        testedProtocolVersion,
+      )(merkleSeqP)
+
   testCases.forEvery { (name, elements, merkleSeq, merkleSeqWithRootUnblinded) =>
     s"A MerkleSeq with $name" can {
       "be constructed" in {
@@ -120,17 +133,7 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
 
       "be serialized" in {
         val merkleSeqP = merkleSeq.toByteString
-        val merkleSeqDeserialized =
-          MerkleSeq
-            .fromByteString(
-              (
-                hashOps,
-                (bytes: ByteString) => AbstractLeaf.fromByteString(testedProtocolVersion, bytes),
-              ),
-              testedProtocolVersion,
-            )(merkleSeqP)
-            .value
-
+        val merkleSeqDeserialized = deserialize(merkleSeqP).value
         merkleSeqDeserialized shouldEqual merkleSeq
       }
 
@@ -198,4 +201,35 @@ class MerkleSeqTest extends AnyWordSpec with BaseTest {
     )(hashOps)
     SevenElements.mapM(inc.compose(inc)) shouldBe SevenElements.mapM(inc).mapM(inc)
   }
+
+  // The payload is built up from v30 structures to avoid stack overflow during serialization
+  "return parsing failure when nesting is over limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+
+    import TestProtoBuilder.*
+
+    val actualDepth = 10
+
+    val v30merkleSeq = buildDeepMerkleSeq(actualDepth, singleton(1).toProtoV30)
+
+    val deserialized =
+      deserialize(
+        versionedMessage(v30merkleSeq),
+        DepthCounter.withLimit(testedProtocolVersion, actualDepth),
+      ).value
+
+    deserialized.parseDepth(_ =>
+      MerkleSeq.empty(testedProtocolVersion, hashOps)
+    ) shouldBe actualDepth
+
+    val expected = actualDepth - 1
+
+    deserialize(
+      versionedMessage(v30merkleSeq),
+      DepthCounter.withLimit(testedProtocolVersion, expected),
+    ) shouldBe Left(
+      NestingTooDeep(expected)
+    )
+
+  }
+
 }

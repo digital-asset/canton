@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
@@ -14,6 +15,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   DeliverError,
   MessageId,
   SequencedEvent,
+  SequencedEventDeserializationContext,
   SequencerDeliverError,
   SignedContent,
 }
@@ -59,7 +61,10 @@ object SequencerTestUtils extends BaseTest {
         SequencedEvent
           .fromProtoV30(
             testedProtocolVersionValidation,
-            defaultDecompressionPolicy,
+            SequencedEventDeserializationContext(
+              defaultDecompressionPolicy,
+              SynchronizerLimits.defaultFor(testedProtocolVersion),
+            ),
             deliver.toProtoV30,
           )(
             bytes

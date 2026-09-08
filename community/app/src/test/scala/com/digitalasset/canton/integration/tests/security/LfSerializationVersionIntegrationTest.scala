@@ -59,6 +59,7 @@ sealed abstract class LfSerializationVersionIntegrationTest
         participant1,
         daId,
         testedProtocolVersion,
+        defaultProtocolLimits,
         timeouts,
         loggerFactory,
       )

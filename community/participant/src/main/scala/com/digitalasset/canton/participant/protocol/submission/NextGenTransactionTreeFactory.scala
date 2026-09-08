@@ -8,10 +8,11 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.TransactionViewDecomposition.{NewView, SameView}
+import com.digitalasset.canton.data.TransactionViewDecompositionFactory.TransactionTreeDepthLimitExceeded
 import com.digitalasset.canton.data.ViewConfirmationParameters.InvalidViewConfirmationParameters
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -65,6 +66,18 @@ class NextGenTransactionTreeFactory(
   private val transactionViewDecompositionFactory = TransactionViewDecompositionFactory
   private val rollbackContextFactory = RollbackContextFactory(protocolVersion)
 
+  /** Check parse depth on submission, at confirmation request time the parse depth is checked using
+    * the DepthCounter
+    */
+  private def checkRootViewParseDepth(
+      maxTreeDepth: PositiveInt
+  )(view: TransactionView): EitherT[FutureUnlessShutdown, TransactionTreeDepthLimitExceeded, Unit] =
+    EitherT.cond(
+      view.parseDepth <= maxTreeDepth.value,
+      (),
+      TransactionTreeDepthLimitExceeded(view.parseDepth, maxTreeDepth.value),
+    )
+
   override def createTransactionTree(
       transaction: WellFormedTransaction[WithoutSuffixes],
       submitterInfo: SubmitterInfo,
@@ -76,6 +89,7 @@ class NextGenTransactionTreeFactory(
       contractOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
+      limitConfig: TransactionViewLimitConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] = {
@@ -108,9 +122,8 @@ class NextGenTransactionTreeFactory(
         rollbackContextFactory.empty,
         Some(participantId.adminParty.toLf),
         rollbackContextFactory,
-        Some(
-          TransactionViewLimitConfig.Default
-        ), // Transaction view limits are applied on submission paths
+        // Transaction view limits are applied on submission paths
+        Option.when(protocolVersion >= ProtocolVersion.v36)(limitConfig),
       )
 
     val commonMetadata = CommonMetadata
@@ -163,6 +176,12 @@ class NextGenTransactionTreeFactory(
         contractOfId,
         topologySnapshot,
       )
+
+      _ <- MonadUtil
+        .sequentialTraverse(rootViews)(checkRootViewParseDepth(limitConfig.maxTreeDepth))
+        .leftMap[TransactionViewLimitError](
+          _.transformInto[TransactionViewLimitError]
+        )
 
       _ <-
         if (validatePackageVettings) {
@@ -791,6 +810,7 @@ class NextGenTransactionTreeFactory(
         contractOfId,
         topologySnapshot,
       )
+
       suffixedNodes = state.suffixedNodes() transform {
         // Recover the children
         case (nodeId, ne: LfNodeExercises) =>

@@ -24,9 +24,11 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage, ToDbPrimitive}
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
+  BatchDeserializationContext,
   ClosedEnvelope,
   DecompressionPolicy,
   MessageId,
@@ -138,10 +140,14 @@ final case class BytesPayload(id: PayloadId, content: ByteString) extends Payloa
   def decodeBatch(
       protocolVersion: ProtocolVersion
   ): Batch[ClosedEnvelope] = {
-    // No decompression bound needed: the database is trusted.
+    // No decompression nor size bound needed: the database is trusted.
     val noLimitFromStore = DecompressionPolicy.MaxValueUnsafe
     Batch
-      .fromByteString(ProtocolVersionValidation.PV(protocolVersion), noLimitFromStore, content)
+      .fromByteString(
+        ProtocolVersionValidation.PV(protocolVersion),
+        BatchDeserializationContext(noLimitFromStore, SynchronizerLimits.max),
+        content,
+      )
       .valueOr(err => throw new DbDeserializationException(err.toString))
   }
 }

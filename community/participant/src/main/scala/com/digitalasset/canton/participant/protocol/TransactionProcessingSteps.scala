@@ -417,6 +417,8 @@ class TransactionProcessingSteps(
           )
 
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
+        protocolLimits = staticSynchronizerParameters.synchronizerLimits.transactionProtocolLimits
+        limitConfig = TransactionViewLimitConfig(protocolLimits)
         // Perform phase 1 of the protocol that produces a transaction confirmation request
         request <- confirmationRequestTimer.timeEitherFUS(
           confirmationRequestFactory
@@ -432,6 +434,7 @@ class TransactionProcessingSteps(
                 .lookupContractsWithDisclosed(disclosedContracts, contractLookup),
               maxSequencingTime,
               protocolVersion,
+              limitConfig,
             )
             .leftMap[TransactionSubmissionTrackingData.RejectionCause] {
               case TransactionTreeFactoryError(UnknownPackageError(unknownTo)) =>

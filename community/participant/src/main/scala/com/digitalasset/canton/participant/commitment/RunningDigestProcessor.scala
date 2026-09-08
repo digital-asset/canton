@@ -69,7 +69,7 @@ import scala.concurrent.{ExecutionContext, Future}
   *   - party onboarding to or offboarding from this or a remote participant
   */
 class RunningDigestProcessorImpl(
-    thisParticipant: ParticipantId,
+    override val thisParticipantId: ParticipantId,
     override val synchronizerId: SynchronizerId,
     acsCommitmentConfig: AcsCommitmentConfig,
     digestAccumulator: DigestAccumulator,
@@ -88,7 +88,8 @@ class RunningDigestProcessorImpl(
 ) extends NamedLogging
     with RunningDigestProcessor {
 
-  private val thisLfParticipant = thisParticipant.toLf
+  // Val required for pattern matching
+  private val thisLfParticipant = thisLfParticipantId
 
   /** Inserts a checkpointing fence into the processing pipeline in the following scenarios:
     *   - after a topology event with the same time as the event

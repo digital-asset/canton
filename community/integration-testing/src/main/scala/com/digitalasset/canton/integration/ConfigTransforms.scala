@@ -21,6 +21,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.console.FeatureFlag
 import com.digitalasset.canton.http.{JsonApiConfig, WebsocketConfig}
 import com.digitalasset.canton.participant.config.{
+  AcsCommitmentConfig,
   AlphaOnlinePartyReplicationConfig,
   ParticipantNodeConfig,
   RemoteParticipantConfig,
@@ -133,6 +134,10 @@ object ConfigTransforms {
       // tests must be able to observe security alarms without the participant crashing
       ConfigTransforms.setCrashAfterFailedValidation(false),
       ConfigTransforms.useNewAggregator(true),
+      // Safe-to-prune checks rely on the indexer streams signalling offset advancements even if there is no activity.
+      ConfigTransforms.setIdleStreamOffsetCheckpointTimeout(
+        config.NonNegativeFiniteDuration.ofSeconds(1)
+      ),
     )
 
   lazy val dontWarnOnDeprecatedPV: Seq[ConfigTransform] = Seq(
@@ -147,17 +152,14 @@ object ConfigTransforms {
     ),
   )
 
-  lazy val enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev: ConfigTransform =
+  lazy val enableNewAcsCommitmentProcessorPipeline: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor)
-        .replace(
-          BaseTest.testedProtocolVersion >= ProtocolVersion.acsCommitmentRedesign
-        )
+      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(true)
     )
 
   lazy val disableNewAcsCommitmentProcessorPipeline: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(false)
+      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(false)
     )
 
   /** Disable the old acs commitment processor if the testedProtocolVersion meets or exceeds
@@ -167,7 +169,7 @@ object ConfigTransforms {
     if (BaseTest.testedProtocolVersion >= ProtocolVersion.acsCommitmentRedesign) {
       updateAllParticipantConfigs_(
         _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-          .replace(true)
+          .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always)
       )
     } else identity
 
@@ -175,7 +177,7 @@ object ConfigTransforms {
   lazy val enableOldAcsCommitmentProcessor: ConfigTransform =
     updateAllParticipantConfigs_(
       _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-        .replace(false)
+        .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Never)
     )
 
   def setAcsCommitmentSendDelay(min: Double, max: Double): ConfigTransform =
@@ -357,7 +359,7 @@ object ConfigTransforms {
           else SessionSigningKeysConfig.disabled
         ),
         ConfigTransforms.setAcsCommitmentSendDelay(0.0d, 0.0d),
-        enableNewAcsCommitmentProcessorPipelineForProtocolVersionDev,
+        enableNewAcsCommitmentProcessorPipeline,
         disableOldAcsCommitmentProcessor,
         enableTrafficAccounting,
       )
@@ -1088,4 +1090,12 @@ object ConfigTransforms {
         .focus(_.ledgerApi.indexService.bufferedStreamsPageSize)
         .replace(1)
     }
+
+  def setIdleStreamOffsetCheckpointTimeout(
+      duration: config.NonNegativeFiniteDuration
+  ): ConfigTransform =
+    ConfigTransforms.updateAllParticipantConfigs_(
+      _.focus(_.ledgerApi.indexService.idleStreamOffsetCheckpointTimeout).replace(duration)
+    )
+
 }

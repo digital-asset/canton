@@ -33,7 +33,12 @@ import com.digitalasset.canton.crypto.{
   SynchronizerCryptoClient,
   SynchronizerSnapshotSyncCryptoApi,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, RollbackContextFactory, ViewPosition}
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  RollbackContextFactory,
+  TransactionViewLimitConfig,
+  ViewPosition,
+}
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, TransactionMeta}
@@ -269,6 +274,8 @@ class TrafficCostEstimator(
           )
       }
       now = clock.now
+      protocolLimits = topologyClient.getSynchronizerLimits.transactionProtocolLimits
+      limitConfig = TransactionViewLimitConfig(protocolLimits)
       // Generate a confirmation request
       mockedConfirmationRequest <- confirmationRequestFactory
         .createConfirmationRequest(
@@ -289,6 +296,7 @@ class TrafficCostEstimator(
           // when computing the cost.
           now.add(defaultMaxSequencingTimeOffset.asJava),
           psid.protocolVersion,
+          limitConfig,
         )
         .leftMap(_.toString)
       batch <- EitherT.liftF(mockedConfirmationRequest.asBatch(snapshot))

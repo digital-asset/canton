@@ -22,6 +22,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
@@ -92,6 +93,10 @@ abstract class SequencerApiTest
           p17,
           p18,
           p19,
+        )
+        .withDynamicSynchronizerParameters(
+          DynamicSynchronizerParameters.initialValues(testedProtocolVersion),
+          validFrom = CantonTimestamp.MinValue,
         )
         .build(loggerFactory)
 
@@ -1065,7 +1070,6 @@ abstract class SequencerApiTest
             case CreateSubscriptionError.MemberDisabled(member) if member == sender =>
           }
         }
-
       }
     }
   }
@@ -1139,8 +1143,9 @@ trait SequencerApiTestUtils
       sequencingSubmissionCost: Batch[ClosedUncompressedEnvelope] => Option[
         SequencingSubmissionCost
       ] = _ => None,
+      signatures: Seq[Signature] = Seq.empty,
   ): SubmissionRequest = {
-    val envelope1 = TestingEnvelope(messageContent, recipients)
+    val envelope1 = TestingEnvelope(messageContent, recipients, signatures)
     val batch = Batch(List(envelope1.toClosedUncompressedEnvelope), testedProtocolVersion)
     val messageId = MessageId.tryCreate(s"thisisamessage: $messageContent")
     SubmissionRequest.tryCreate(
@@ -1253,15 +1258,18 @@ trait SequencerApiTestUtils
       .valueOrFail(s"Failed to sign $envelope")
   }
 
-  case class TestingEnvelope(content: String, override val recipients: Recipients)
-      extends Envelope[String] {
+  case class TestingEnvelope(
+      content: String,
+      override val recipients: Recipients,
+      signatures: Seq[Signature] = Seq.empty,
+  ) extends Envelope[String] {
 
     /** Closes the envelope by serializing the contents */
     def toClosedUncompressedEnvelope: ClosedUncompressedEnvelope =
       ClosedUncompressedEnvelope.create(
         ByteString.copyFromUtf8(content),
         recipients,
-        Seq.empty,
+        signatures,
         testedProtocolVersion,
       )
 

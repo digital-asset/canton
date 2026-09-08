@@ -8,7 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.config.RequireTypes.InvariantViolation
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.{v30, v31, v32}
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30, v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   DeterministicEncoding,
@@ -220,7 +220,7 @@ final case class SubmissionRequest private (
 object SubmissionRequest
     extends VersioningCompanionContextMemoizationWithDependency[
       SubmissionRequest,
-      DecompressionPolicy,
+      SubmissionRequestDeserializationContext,
       // Recipients is a dependency because its versioning scheme needs to be aligned with this one
       // such that SubmissionRequest and Recipients can be versioned independently
       Recipients,
@@ -315,12 +315,12 @@ object SubmissionRequest
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SubmissionRequestDeserializationContext,
       requestP: v30.SubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] =
     fromProtoGeneric(
       pvv,
-      decompressionPolicy,
+      context,
       ProtoSubmissionRequestV30(requestP),
     )(
       bytes
@@ -328,47 +328,49 @@ object SubmissionRequest
 
   def fromProtoV31(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SubmissionRequestDeserializationContext,
       requestP: v31.SubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] =
     fromProtoGeneric(
       pvv,
-      decompressionPolicy,
+      context,
       ProtoSubmissionRequestV31(requestP),
     )(bytes)
 
   def fromProtoV32(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SubmissionRequestDeserializationContext,
       requestP: v32.SubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] =
     fromProtoGeneric(
       pvv,
-      decompressionPolicy,
+      context,
       ProtoSubmissionRequestV32(requestP),
     )(bytes)
 
   private def fromProtoGeneric(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SubmissionRequestDeserializationContext,
       protoSubmissionRequest: ProtoSubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] = {
+    val SubmissionRequestDeserializationContext(decompressionPolicy, synchronizerLimits) = context
+    val batchContext = BatchDeserializationContext(decompressionPolicy, synchronizerLimits)
     def batchFromProto: ParsingResult[Batch[ClosedEnvelope]] = protoSubmissionRequest match {
       case ProtoSubmissionRequestV30(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV30(pvv, decompressionPolicy, _),
+          Batch.fromProtoV30(pvv, batchContext, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
       case ProtoSubmissionRequestV31(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV31(pvv, decompressionPolicy, _),
+          Batch.fromProtoV31(pvv, batchContext, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
       case ProtoSubmissionRequestV32(wrapped) =>
         ProtoConverter.parseRequired(
-          Batch.fromProtoV32(pvv, decompressionPolicy, _),
+          Batch.fromProtoV32(pvv, batchContext, _),
           "SubmissionRequest.batch",
           wrapped.batch,
         )
@@ -458,3 +460,11 @@ object SubmissionRequest
     )(rpv, Some(bytes))
   }
 }
+
+/** Deserialization context for submission requests, carrying the decompression policy and
+  * synchronizer limits.
+  */
+final case class SubmissionRequestDeserializationContext(
+    decompressionPolicy: DecompressionPolicy,
+    synchronizerLimits: SynchronizerLimits,
+)

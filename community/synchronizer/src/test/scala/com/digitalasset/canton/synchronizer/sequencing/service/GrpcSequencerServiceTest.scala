@@ -15,7 +15,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressionRule.Level
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.{TestSynchronizerParameters, v30 as protocolV30}
+import com.digitalasset.canton.protocol.{
+  SynchronizerLimits,
+  TestSynchronizerParameters,
+  v30 as protocolV30,
+}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.BytestringWithCryptographicEvidence
@@ -110,6 +114,8 @@ class GrpcSequencerServiceTest
     val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
     private val topologyClient = mock[SynchronizerTopologyClient]
     private val mockTopologySnapshot = mock[TopologySnapshot]
+    when(topologyClient.getSynchronizerLimits)
+      .thenReturn(SynchronizerLimits.defaultFor(BaseTest.testedProtocolVersion))
     when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
       .thenReturn(FutureUnlessShutdown.pure(mockTopologySnapshot))
     when(

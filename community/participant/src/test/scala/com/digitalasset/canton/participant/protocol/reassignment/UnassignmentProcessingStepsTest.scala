@@ -189,6 +189,7 @@ final class UnassignmentProcessingStepsTest
       acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
       Eval.now(ledgerApiStore),
       loggerFactory,
+      FutureSupervisor.Noop,
     )
   private lazy val physicalSyncPersistentState = new InMemoryPhysicalSyncPersistentState(
     SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),

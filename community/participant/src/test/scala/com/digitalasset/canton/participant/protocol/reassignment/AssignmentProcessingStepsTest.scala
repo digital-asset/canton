@@ -192,6 +192,7 @@ final class AssignmentProcessingStepsTest
         acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
         ledgerApiStore = Eval.now(ledgerApiStore),
         loggerFactory = loggerFactory,
+        futureSupervisor = FutureSupervisor.Noop,
       )
 
     val physical = new InMemoryPhysicalSyncPersistentState(

@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import com.digitalasset.canton.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{TestHash, TestSalt}
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex.Direction
@@ -13,6 +13,7 @@ import com.digitalasset.canton.data.{
   GenTransactionTree,
   RollbackContextFactory,
   TransactionViewDecompositionFactory,
+  TransactionViewLimitConfig,
   ViewPosition,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -163,8 +164,16 @@ final class NextGenTransactionTreeFactoryTest
           contractInstanceOfId: ContractInstanceOfId,
           actAs: List[LfPartyId] = List(ExampleTransactionFactory.submitter),
           snapshot: TopologySnapshot = factory.topologySnapshot,
+          maxTreeDepth: PositiveInt = defaultProtocolLimits.maxTransactionTreeDepth,
       ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
         val submitterInfo = DefaultParticipantStateValues.submitterInfo(actAs)
+
+        val limitConfig = TransactionViewLimitConfig(
+          maxRootViews = defaultProtocolLimits.maxTransactionRootViews,
+          maxSubViews = defaultProtocolLimits.maxTransactionSubViews,
+          maxTreeDepth = maxTreeDepth,
+        )
+
         treeFactory
           .createTransactionTree(
             transaction = transaction,
@@ -177,6 +186,7 @@ final class NextGenTransactionTreeFactoryTest
             contractOfId = contractInstanceOfId,
             maxSequencingTime = factory.ledgerTime.plusSeconds(100),
             validatePackageVettings = true,
+            limitConfig = limitConfig,
           )
           .failOnShutdown
       }
@@ -187,13 +197,36 @@ final class NextGenTransactionTreeFactoryTest
           forEvery(factory.standardHappyCases) { example =>
             lazy val treeFactory = createTransactionTreeFactory()
 
+            val maxParseDepth = example.rootViews
+              .map(_.parseDepth)
+              .maxOption
+              .filter(_ > 0)
+              .fold(PositiveInt.one)(PositiveInt.tryCreate)
+
             s"create the correct views for: $example" in {
               createTransactionTree(
                 treeFactory,
                 example.wellFormedUnsuffixedTransaction,
                 successfulLookup(example),
+                maxTreeDepth = maxParseDepth,
               ).value.flatMap(_ should equal(Right(example.transactionTree)))
             }
+
+            PositiveInt.create(maxParseDepth.value - 1).foreach { maxDepthMinusOne =>
+              s"reject a transaction with view depth greater than $maxDepthMinusOne for: $example" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+                createTransactionTree(
+                  treeFactory,
+                  example.wellFormedUnsuffixedTransaction,
+                  successfulLookup(example),
+                  maxTreeDepth = maxDepthMinusOne,
+                ).value.flatMap(e =>
+                  inside(e) { case Left(TransactionViewLimitError(message)) =>
+                    message shouldBe s"The parse depth of the transaction view exceeded $maxDepthMinusOne"
+                  }
+                )
+              }
+            }
+
           }
 
           "record external call results from same-view exercise nodes with view-local occurrence indexes" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {

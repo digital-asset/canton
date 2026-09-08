@@ -40,7 +40,7 @@ import com.digitalasset.canton.performance.{
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.SingleUseCell
-import com.digitalasset.canton.{BaseTest, SequencerAlias}
+import com.digitalasset.canton.{BaseTest, SequencerAlias, config}
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
@@ -129,7 +129,16 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
           )
         )
         bootstrapper.bootstrap()
-
+        env.mediators.all.foreach(
+          _.sequencer_connection.modify_connections(
+            _.focus(_.submissionRequestAmplification).replace(
+              SubmissionRequestAmplification(
+                PositiveInt.four,
+                config.NonNegativeFiniteDuration.ofSeconds(1),
+              )
+            )
+          )
+        )
         // connect the participants to all sequencers
         val connections = sequencers.local.map { reference =>
           reference.sequencerConnection.withAlias(SequencerAlias.tryCreate(reference.name))

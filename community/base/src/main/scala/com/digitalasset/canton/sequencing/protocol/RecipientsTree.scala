@@ -6,8 +6,9 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.syntax.reducible.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v30}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
@@ -99,34 +100,50 @@ object RecipientsTree {
 
   def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      synchronizerLimits: SynchronizerLimits,
       treeProto: v30.RecipientsTree,
-  ): ParsingResult[RecipientsTree] =
-    for {
-      members <- ProtoValidation.validateThen(
-        treeProto.recipients,
-        "RecipientsTreeProto.recipients",
-        pvv,
-        ProtoValidation.MaxCollectionSize,
-      )(Recipient.fromProtoPrimitive)
-      recipientsNonEmpty <- NonEmpty
-        .from(members)
-        .toRight(
-          ProtoDeserializationError.ValueConversionError(
-            "RecipientsTree.recipients",
-            s"RecipientsTree.recipients must be non-empty",
-          )
-        )
-      childTrees <- ProtoValidation
-        .validateLength(
-          treeProto.children,
-          "children",
+  ): ParsingResult[RecipientsTree] = {
+    import synchronizerLimits.transactionProtocolLimits.{
+      maxRecipientsTreeDepth,
+      maxRecipientsPerRecipientsTreeLevel,
+      maxChildrenPerRecipientsTreeLevel,
+    }
+
+    def go(treeProto: v30.RecipientsTree, currentDepth: Int): ParsingResult[RecipientsTree] =
+      for {
+        _ <- ProtoValidation.validateCondition(
           pvv,
-          ProtoValidation.MaxCollectionSize,
+          currentDepth <= maxRecipientsTreeDepth.value,
+          InvariantViolation("recipients_tree", s"depth exceeds maximum of $maxRecipientsTreeDepth"),
         )
-        .flatMap(_.toList.traverse(fromProtoV30(pvv, _)))
-    } yield RecipientsTree(
-      recipientsNonEmpty.toSet,
-      childTrees,
-    )
+        members <- ProtoValidation.validateThen(
+          treeProto.recipients,
+          "RecipientsTreeProto.recipients",
+          pvv,
+          maxRecipientsPerRecipientsTreeLevel.value,
+        )(Recipient.fromProtoPrimitive)
+        recipientsNonEmpty <- NonEmpty
+          .from(members)
+          .toRight(
+            ProtoDeserializationError.ValueConversionError(
+              "RecipientsTree.recipients",
+              s"RecipientsTree.recipients must be non-empty",
+            )
+          )
+        childTrees <- ProtoValidation
+          .validateLength(
+            treeProto.children,
+            "children",
+            pvv,
+            maxChildrenPerRecipientsTreeLevel.value,
+          )
+          .flatMap(_.toList.traverse(go(_, currentDepth + 1)))
+      } yield RecipientsTree(
+        recipientsNonEmpty.toSet,
+        childTrees,
+      )
+
+    go(treeProto, currentDepth = 1)
+  }
 
 }

@@ -5,8 +5,7 @@ package com.digitalasset.canton.sequencing.protocol
 
 import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.protocol.v31
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v31}
 import com.digitalasset.canton.util.{CompressionAlgo, MaxBytesToDecompress}
 import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{CommonGenerators, ProtocolVersion}
@@ -88,7 +87,10 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
 
       Batch.fromProtoV31(
         testedProtocolVersionValidation,
-        DecompressionPolicy.HardcodedDefault,
+        BatchDeserializationContext(
+          DecompressionPolicy.HardcodedDefault,
+          SynchronizerLimits.defaultFor(testedProtocolVersion),
+        ),
         invalidProtoBatch,
       ) shouldBe Left(
         InvariantViolation(
@@ -106,7 +108,10 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
         Batch
           .fromProtoV31(
             testedProtocolVersionValidation,
-            DecompressionPolicy.Cumulative(MaxBytesToDecompress(NonNegativeInt.tryCreate(limit))),
+            BatchDeserializationContext(
+              DecompressionPolicy.Cumulative(MaxBytesToDecompress(NonNegativeInt.tryCreate(limit))),
+              SynchronizerLimits.defaultFor(testedProtocolVersion),
+            ),
             protoBatch,
           )
           .flatMap(_.toClosedUncompressedBatchResult)
@@ -127,8 +132,11 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       Batch
         .fromProtoV31(
           testedProtocolVersionValidation,
-          DecompressionPolicy.PerEnvelope(
-            MaxBytesToDecompress(NonNegativeInt.tryCreate(perEnvelopeSize))
+          BatchDeserializationContext(
+            DecompressionPolicy.PerEnvelope(
+              MaxBytesToDecompress(NonNegativeInt.tryCreate(perEnvelopeSize))
+            ),
+            SynchronizerLimits.defaultFor(testedProtocolVersion),
           ),
           protoBatch,
         )
@@ -145,8 +153,11 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       Batch
         .fromProtoV30(
           testedProtocolVersionValidation,
-          DecompressionPolicy.PerEnvelope(
-            MaxBytesToDecompress(NonNegativeInt.tryCreate(perEnvelopeSize))
+          BatchDeserializationContext(
+            DecompressionPolicy.PerEnvelope(
+              MaxBytesToDecompress(NonNegativeInt.tryCreate(perEnvelopeSize))
+            ),
+            SynchronizerLimits.defaultFor(testedProtocolVersion),
           ),
           protoBatch,
         )
@@ -156,7 +167,10 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       Batch
         .fromProtoV30(
           testedProtocolVersionValidation,
-          DecompressionPolicy.MaxValueUnsafe,
+          BatchDeserializationContext(
+            DecompressionPolicy.MaxValueUnsafe,
+            SynchronizerLimits.defaultFor(testedProtocolVersion),
+          ),
           protoBatch,
         )
         .value
@@ -172,7 +186,10 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
         Batch
           .fromProtoV31(
             testedProtocolVersionValidation,
-            DecompressionPolicy.MaxValueUnsafe,
+            BatchDeserializationContext(
+              DecompressionPolicy.MaxValueUnsafe,
+              SynchronizerLimits.defaultFor(testedProtocolVersion),
+            ),
             protoBatch,
           )
           .map(
@@ -196,8 +213,11 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       val parsed = Batch
         .fromProtoV31(
           testedProtocolVersionValidation,
-          DecompressionPolicy.Cumulative(
-            MaxBytesToDecompress(NonNegativeInt.tryCreate(2 * perEnvelopeSize))
+          BatchDeserializationContext(
+            DecompressionPolicy.Cumulative(
+              MaxBytesToDecompress(NonNegativeInt.tryCreate(2 * perEnvelopeSize))
+            ),
+            SynchronizerLimits.defaultFor(testedProtocolVersion),
           ),
           protoBatch,
         )
@@ -206,12 +226,11 @@ class EnvelopeOperationsTest extends BaseTestWordSpec with ScalaCheckPropertyChe
       // Decompressing an envelope and then a copy of it must only draw the budget once,
       // so all envelopes and their copies fit within the cumulative bound.
       parsed.envelopes.foreach { envelope =>
-        envelope.toClosedUncompressedEnvelopeResult.value.discard
+        envelope.toClosedUncompressedEnvelopeResult.value
         envelope
           .withRecipients(envelope.recipients)
           .toClosedUncompressedEnvelopeResult
           .value
-          .discard
       }
     }
 

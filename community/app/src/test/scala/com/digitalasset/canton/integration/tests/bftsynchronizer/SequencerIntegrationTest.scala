@@ -189,6 +189,7 @@ trait SequencerIntegrationTest
       participant3,
       synchronizerId,
       testedProtocolVersion,
+      defaultProtocolLimits,
       timeouts,
       loggerFactory,
     )

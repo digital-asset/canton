@@ -260,7 +260,8 @@ abstract class ProtocolProcessor[
               if (mod < 0) mod + mediatorCount else mod
             }
             val chosen = checked(allActiveMediatorGroups(chosenIndex)).index
-            logger.debug(s"Chose the mediator group $chosen")
+            if (mediatorCount > 1)
+              logger.debug(s"Chose the mediator group $chosen")
             Right(MediatorGroupRecipient(chosen))
           }
       }

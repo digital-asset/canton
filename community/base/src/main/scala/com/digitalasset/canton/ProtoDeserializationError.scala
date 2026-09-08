@@ -20,6 +20,11 @@ sealed trait ProtoDeserializationError extends Product with Serializable {
 }
 
 object ProtoDeserializationError extends ProtoDeserializationErrorGroup {
+
+  final case class NestingTooDeep(limit: Int) extends ProtoDeserializationError {
+    override val message = s"The nesting of the protobuf message exceeds the limit of $limit"
+  }
+
   final case class BufferException(error: InvalidProtocolBufferException)
       extends ProtoDeserializationError {
     override val message = error.getMessage

@@ -116,6 +116,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )

@@ -13,10 +13,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.*
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{
   DecompressionPolicy,
   SequencedEvent,
+  SequencedEventDeserializationContext,
   SignedContent,
 }
 import com.digitalasset.canton.sequencing.{OrdinarySerializedEvent, PossiblyIgnoredSerializedEvent}
@@ -76,8 +78,11 @@ class DbSequencedEventStore(
               _.deserializeContent(
                 SequencedEvent.fromByteString(
                   ProtocolVersionValidation.PV(protocolVersion),
-                  // No decompression bound needed: the database is trusted.
-                  DecompressionPolicy.MaxValueUnsafe,
+                  // No decompression nor size bound needed: the database is trusted.
+                  SequencedEventDeserializationContext(
+                    DecompressionPolicy.MaxValueUnsafe,
+                    SynchronizerLimits.max,
+                  ),
                   _,
                 )
               )

@@ -1033,7 +1033,10 @@ object PekkoUtil extends HasLoggerName {
 
   /** Emits the elements from `flowOps` in order. An element `e` is emitted only when the `gate` has
     * previously produced a value that is at least as large as `by(e)`. Otherwise, `e` is buffered
-    * until such a value is produced by the `gate`.
+    * until such a value is produced by the `gate`. In the latter case, `onStuck` is called with the
+    * stuck element and the current gate size; if `onStuck` returns an `e'`, `e'` is inserted into
+    * the stream. `e'` does not replace `e` in the sense that `e` is still emitted once the gate has
+    * produced a value that is at least as large as `by(e)`.
     *
     * Backpressures when either `flowOps` or `gate` are slow.
     *
@@ -1043,22 +1046,25 @@ object PekkoUtil extends HasLoggerName {
     */
   def gateKeeper[A, B: Ordering, Mat](flowOps: FlowOps[A, Mat], gate: Graph[SourceShape[B], ?])(
       by: A => B
-  ): flowOps.Repr[A] =
-    flowOps.via(gateKeeperGraph(gate, by))
+  )(onStuck: (A, B) => Option[A]): flowOps.Repr[A] =
+    flowOps.via(gateKeeperGraph(gate, by, onStuck))
 
   /** @see com.digitalasset.canton.util.PekkoUtil.gateKeeper */
   def gateKeeperMat[A, B: Ordering, Mat1, Mat2, Mat3](
       flowOps: FlowOpsMat[A, Mat1],
       gate: Graph[SourceShape[B], Mat2],
-  )(by: A => B)(combine: (Mat1, Mat2) => Mat3): flowOps.ReprMat[A, Mat3] =
-    flowOps.viaMat(gateKeeperGraph(gate, by))(combine)
+  )(by: A => B)(onStuck: (A, B) => Option[A])(
+      combine: (Mat1, Mat2) => Mat3
+  ): flowOps.ReprMat[A, Mat3] =
+    flowOps.viaMat(gateKeeperGraph(gate, by, onStuck))(combine)
 
   private def gateKeeperGraph[A, B: Ordering, M](
       gate: Graph[SourceShape[B], M],
       by: A => B,
+      onStuck: (A, B) => Option[A],
   ): Graph[FlowShape[A, A], M] =
     GraphDSL.createGraph(gate) { implicit b => r =>
-      val gated = b.add(new GateKeeper[A, B](by))
+      val gated = b.add(new GateKeeper[A, B](by, onStuck))
       r ~> gated.in1
       FlowShape(gated.in0, gated.out)
     }
@@ -1160,8 +1166,10 @@ object PekkoUtil extends HasLoggerName {
       )(full: Agg => Boolean, aggregate: (Agg, A) => Agg, emit: Agg => B): U#Repr[B] =
         PekkoUtil.aggregate(graph)(initial)(full, aggregate, emit)
 
-      def gateKeeper[B: Ordering](gate: Graph[SourceShape[B], ?])(by: A => B): U#Repr[A] =
-        PekkoUtil.gateKeeper(graph, gate)(by)
+      def gateKeeper[B: Ordering](gate: Graph[SourceShape[B], ?])(by: A => B)(
+          onStuck: (A, B) => Option[A]
+      ): U#Repr[A] =
+        PekkoUtil.gateKeeper(graph, gate)(by)(onStuck)
     }
 
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
@@ -1222,9 +1230,9 @@ object PekkoUtil extends HasLoggerName {
         PekkoUtil.injectKillSwitch(graph)(killSwitch)
 
       def gateKeeperMat[B: Ordering, Mat2, Mat3](gate: Graph[SourceShape[B], Mat2])(by: A => B)(
-          combine: (Mat, Mat2) => Mat3
-      ): U#ReprMat[A, Mat3] =
-        PekkoUtil.gateKeeperMat(graph, gate)(by)(combine)
+          onStuck: (A, B) => Option[A]
+      )(combine: (Mat, Mat2) => Mat3): U#ReprMat[A, Mat3] =
+        PekkoUtil.gateKeeperMat(graph, gate)(by)(onStuck)(combine)
     }
     // Use separate implicit conversions for Sources and Flows to help IntelliJ
     // Otherwise IntelliJ gets very resource hungry.
@@ -2226,7 +2234,7 @@ object PekkoUtil extends HasLoggerName {
     case object StashClosed extends StashCompletionResult
   }
 
-  private final class GateKeeper[A, B: Ordering](by: A => B)
+  private final class GateKeeper[A, B: Ordering](by: A => B, onStuck: (A, B) => Option[A])
       extends GraphStage[FanInShape2[A, B, A]] {
     private val in = Inlet[A]("in")
     private val gate = Inlet[B]("gate")
@@ -2258,13 +2266,18 @@ object PekkoUtil extends HasLoggerName {
 
       val readIn: () => Unit = () =>
         read(in)(
-          a =>
-            if (by(a) <= watermark) {
+          a => {
+            val wm = watermark
+            if (by(a) <= wm) {
               emit(out, a, readIn)
             } else {
               buffered = a
-              readGate()
-            },
+              onStuck(a, wm) match {
+                case None => readGate()
+                case Some(stuck) => emit(out, stuck, readGate)
+              }
+            }
+          },
           () => completeStage(),
         )
 
@@ -2272,8 +2285,9 @@ object PekkoUtil extends HasLoggerName {
       val readGate: () => Unit = () =>
         read(gate)(
           g => {
-            watermark = g max watermark
-            if (by(buffered) <= watermark) {
+            val wm = g max watermark
+            watermark = wm
+            if (by(buffered) <= wm) {
               val next = buffered
               buffered = null.asInstanceOf[A]
               emit(out, next, readIn)
