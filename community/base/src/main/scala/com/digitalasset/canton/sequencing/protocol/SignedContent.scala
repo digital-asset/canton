@@ -133,7 +133,7 @@ object SignedContent
   override def name: String = "SignedContent"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SignedContent)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.SignedContent)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

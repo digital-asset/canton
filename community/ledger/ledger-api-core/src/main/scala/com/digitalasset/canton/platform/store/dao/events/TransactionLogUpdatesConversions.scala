@@ -41,9 +41,9 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
 import com.digitalasset.canton.platform.{
   InternalTransactionFormat,
   InternalUpdateFormat,
-  PackageId as LfPackageId,
   TemplatePartiesFilter,
   Value,
+  PackageId as LfPackageId,
 }
 import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension

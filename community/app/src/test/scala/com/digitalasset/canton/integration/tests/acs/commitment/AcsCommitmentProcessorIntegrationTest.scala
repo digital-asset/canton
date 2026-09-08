@@ -57,7 +57,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.Promise
 import scala.concurrent.duration.DurationInt

@@ -8,9 +8,9 @@ import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.interpretation.Error as IError
 import com.digitalasset.daml.lf.speedy.Speedy.ContractInfo
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine as ContractStateMachine,
   Node,
   SerializationVersion,
+  NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.*

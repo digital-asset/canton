@@ -56,13 +56,11 @@ final class CommitmentsService(
   ): FutureUnlessShutdown[Either[String, Option[CantonTimestamp]]] =
     // retry until timeout, namely retry every second for maximum `timeout.duration.getSeconds` times
     retry
-      .Backoff(
+      .Pause(
         logger,
         this,
-        // we retry every second
         maxRetries = timeout.duration.getSeconds.intValue,
-        1.second,
-        1.second,
+        delay = 1.second,
         "retrieving status of commitment reinitialization",
       )
       .unlessShutdown(

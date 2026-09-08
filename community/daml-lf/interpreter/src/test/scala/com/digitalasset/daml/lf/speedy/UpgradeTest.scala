@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{Identifier, TypeConId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
+import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IE}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}

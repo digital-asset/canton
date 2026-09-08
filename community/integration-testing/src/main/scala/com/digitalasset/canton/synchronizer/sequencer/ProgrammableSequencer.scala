@@ -215,6 +215,9 @@ class ProgrammableSequencer(
       }
     )
 
+  override def applyPostProcessingLockForTesting(continueAfter: Future[Unit]): Unit =
+    baseSequencer.applyPostProcessingLockForTesting(continueAfter)
+
   override def isRegistered(member: Member)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =

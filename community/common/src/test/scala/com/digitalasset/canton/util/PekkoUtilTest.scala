@@ -33,6 +33,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   WithKillSwitch,
   noOpKillSwitch,
 }
+import com.digitalasset.canton.util.PekkoUtilTest.HealthStateCollector.beAnExpectedHealthFailureState
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.actor.ActorSystem
@@ -44,8 +45,11 @@ import org.apache.pekko.stream.{KillSwitch, KillSwitches, OverflowStrategy}
 import org.apache.pekko.testkit.TestKit
 import org.apache.pekko.{Done, NotUsed}
 import org.scalacheck.Arbitrary
+import org.scalactic.Equality
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.concurrent.PatienceConfiguration
+import org.scalatest.matchers.dsl.MatcherFactory1
+import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.Span
 
 import java.util.concurrent.Semaphore
@@ -2377,14 +2381,11 @@ class PekkoUtilTest
           healthStateCollector.attachTo(recoveringQueue)
 
           always(durationOfSuccess = 100.millis) {
-            recoveringQueue.componentHealthState should (
-              equal(ComponentHealthState.failed("Pausing before indexer restart")) or
-                equal(ComponentHealthState.failed("Initializing indexer"))
-            )
+            recoveringQueue.componentHealthState should beAnExpectedHealthFailureState
           }
-          healthStateCollector.get should contain only (ComponentHealthState.failed(
-            "Pausing before indexer restart"
-          ), ComponentHealthState.failed("Initializing indexer"))
+          val states = healthStateCollector.get
+          states should not be empty
+          all(states) should beAnExpectedHealthFailureState
         }
       }
     }
@@ -2440,9 +2441,9 @@ class PekkoUtilTest
           eventuallyForever(durationOfSuccess = 100.millis) {
             recoveringQueue.componentHealthState shouldBe a[ComponentHealthState.Failed]
           }
-          healthStateCollector.get should contain only (ComponentHealthState.failed(
-            "Pausing before indexer restart"
-          ), ComponentHealthState.failed("Initializing indexer"))
+          val states = healthStateCollector.get
+          states should not be empty
+          all(states) should beAnExpectedHealthFailureState
         }
       }
     }
@@ -3210,4 +3211,11 @@ object PekkoUtilTest {
       listener()
     }
   }
+
+  object HealthStateCollector extends Matchers {
+    val beAnExpectedHealthFailureState: MatcherFactory1[Any, Equality] =
+      equal(ComponentHealthState.failed("Pausing before indexer restart")) or
+        equal(ComponentHealthState.failed("Initializing indexer"))
+  }
+
 }

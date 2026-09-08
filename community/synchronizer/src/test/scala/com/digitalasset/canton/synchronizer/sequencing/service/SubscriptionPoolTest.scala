@@ -74,6 +74,8 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
 
     override def transientClose(reason: ServerSubscriptionCloseReason.TransientCloseReason): Unit =
       ()
+
+    override def fatalClose(reason: ServerSubscriptionCloseReason.FatalCloseReason): Unit = ()
   }
 
   def createSubscription(name: String): FutureUnlessShutdown[MockSubscription] =

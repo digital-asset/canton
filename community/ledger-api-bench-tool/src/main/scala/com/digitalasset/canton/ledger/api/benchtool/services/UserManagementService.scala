@@ -6,9 +6,9 @@ package com.digitalasset.canton.ledger.api.benchtool.services
 import com.daml.ledger.api.v2.admin.user_management_service.{
   CreateUserRequest,
   GrantUserRightsRequest,
-  Right as UserRight,
   User,
   UserManagementServiceGrpc,
+  Right as UserRight,
 }
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.ledger.api.benchtool.AuthorizationHelper

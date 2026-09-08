@@ -77,9 +77,6 @@ case class InformeeMessage(
       submittingParticipantSignature = Some(submittingParticipantSignature.toProtoV30),
     )
 
-  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV30)
-
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV30)
 
@@ -102,7 +99,7 @@ object InformeeMessage
     ] {
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.InformeeMessage)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.InformeeMessage)(
       supportedProtoVersion(_)((hashOps, proto) => fromProtoV30(hashOps)(proto)),
       _.toProtoV30,
     )

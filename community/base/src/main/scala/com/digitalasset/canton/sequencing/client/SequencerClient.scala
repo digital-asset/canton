@@ -290,7 +290,6 @@ abstract class SequencerClientImpl(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Status, Unit] =
     connectionPool.getAllConnections.parTraverse_(_.logout())
-
   protected val sequencersTransportState: SequencersTransportState =
     new SequencersTransportState(sequencerTransports)
 
@@ -615,7 +614,7 @@ abstract class SequencerClientImpl(
       // Do not add an aggregation rule for amplifiable requests if amplification has not been configured
       val amplifiableRequest =
         if (amplify && request.aggregationRule.isEmpty && patienceO.isDefined) {
-          val aggregationRule = AggregationRule.senderDedup(member, protocolVersion)
+          val aggregationRule = AggregationRule.senderDedup(protocolVersion)
           logger.debug(
             s"Adding aggregation rule $aggregationRule to submission request with message ID $messageId"
           )
@@ -730,10 +729,10 @@ abstract class SequencerClientImpl(
           case _: SendAsyncClientError.RequestFailed =>
             // We currently do not have proper error codes for this type of error
             "RequestFailed"
-
+          case SendAsyncClientError.RequestAlreadyExists(_) =>
+            "RequestAlreadyExists"
           case SendAsyncClientError.RequestRefused(SendAsyncError.SendAsyncErrorGrpc(grpcError)) =>
             grpcError.decodedCantonError.map(_.code.id).getOrElse("Unknown gRPC error")
-
           case SendAsyncClientError.RequestRefused(_: SendAsyncError.SendAsyncErrorDirect) =>
             // We currently do not have proper error codes for this type of error
             "SendAsyncErrorDirect"
@@ -799,6 +798,17 @@ abstract class SequencerClientImpl(
             // Trust the single sequencer to determine whether the request should indeed be refused and give up.
             // TODO(#12377) Do not trust the sequencer and instead retry sensibly
             Right(Left(error))
+
+          case err: SendAsyncClientError.RequestAlreadyExists =>
+            logger.debug(
+              s"Send request with message id $messageId was deduped by $sequencerId: ${err.message}"
+            )
+            // Trust the single sequencer to determine whether the request should indeed be refused and give up.
+            // TODO(#12377) Do not trust the sequencer (I wouldn't retry but I would track the
+            //   the request and track the failures associated to a sequencer, and use that
+            //   to start proper blacklisting of sequencers
+            Right(Left(error))
+
         }
       }
 

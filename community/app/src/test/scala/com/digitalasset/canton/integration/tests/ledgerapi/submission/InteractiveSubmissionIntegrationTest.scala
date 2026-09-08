@@ -7,10 +7,10 @@ import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
-  HashingSchemeVersion as ApiHashingSchemeVersion,
   Metadata,
   PrepareSubmissionResponse,
   PreparedTransaction,
+  HashingSchemeVersion as ApiHashingSchemeVersion,
 }
 import com.daml.ledger.api.v2.interactive.transaction.v1.interactive_submission_data.Node.NodeType
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
@@ -470,10 +470,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
       val preparedSynchronizerId =
         preparedTransaction.preparedTransaction.value.metadata.value.synchronizerId
 
-      if (testedProtocolVersion <= ProtocolVersion.v34)
-        preparedSynchronizerId shouldBe synchronizer1Id.logical.toProtoPrimitive
-      else
-        preparedSynchronizerId shouldBe synchronizer1Id.toProtoPrimitive
+      preparedSynchronizerId shouldBe synchronizer1Id.toProtoPrimitive
     }
 
     "return a clear error if the wrong kind of synchronizer ID is used" in { implicit env =>
@@ -486,11 +483,8 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
       val (signature, preparedTransactionWithWrongSyncIdFormat) =
         prepareTransactionsWithIncorrectSynchronizerIdFormat(cycle, aliceE)
 
-      val expectedErrorMessage = if (testedProtocolVersion <= ProtocolVersion.v34) {
-        "Please use a Logical Synchronizer ID in the prepared transaction metadata on PVs <= 34"
-      } else {
+      val expectedErrorMessage =
         "Please use a Physical Synchronizer ID in the prepared transaction metadata on PVs > 34"
-      }
 
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         cpn.ledger_api.interactive_submission

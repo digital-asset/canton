@@ -15,7 +15,6 @@ import com.digitalasset.canton.version.{
   HasVersionedJsonMessageCompanionDbHelpers,
   HasVersionedJsonWrapper,
   ProtoVersion,
-  ProtocolVersion,
   ReleaseProtocolVersion,
 }
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, ReassignmentCounter}
@@ -49,13 +48,12 @@ object AcsDigestTrace
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(-1) -> unsupportedProtoCodec(ProtocolVersion.v34),
       ProtoVersion(30) -> ProtoCodec(
         // TODO(#33849) replace with the stable protocol version that introduces the feature
         ReleaseProtocolVersion.acsCommitmentRedesignStorage.v,
         supportedProtoVersion(fromProtoV30),
         _.toProtoV30,
-      ),
+      )
     )
 
   private def fromProtoV30(proto: v30.AcsDigestTrace): ParsingResult[AcsDigestTrace] =

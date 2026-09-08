@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.docs.snippet
 import better.files.*
 import better.files.Dsl.{ln_s, mkdirs, rm}
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -678,6 +679,7 @@ private object DocsGenerationSynchronization {
     }
 }
 
+@UnstableTest // TODO(i35510): remove once the test does not flake anymore
 class UpgradingDocumentationIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/participant/howtos/upgrade/index.rst"),

@@ -44,9 +44,9 @@ import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.{
   Node,
   NodeId,
-  SerializationVersion as LfSerializationVersion,
   SubmittedTransaction,
   VersionedTransaction,
+  SerializationVersion as LfSerializationVersion,
 }
 import com.digitalasset.daml.lf.value.Value
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}

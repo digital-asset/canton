@@ -13,7 +13,7 @@ import com.daml.ledger.api.v2.state_service.ActiveContract
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.EventFormat
 import com.daml.ledger.javaapi.data.codegen.ContractId
-import com.daml.ledger.javaapi.data.{Command, CreatedEvent as JavaCreatedEvent, Identifier}
+import com.daml.ledger.javaapi.data.{Command, Identifier, CreatedEvent as JavaCreatedEvent}
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor}
 import com.digitalasset.canton.config.ProcessingTimeout

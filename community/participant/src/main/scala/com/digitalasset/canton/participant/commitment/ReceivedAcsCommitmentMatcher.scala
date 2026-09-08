@@ -17,7 +17,7 @@ import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.{
   MatchedCommitmentMatchPeriod,
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.protocol.messages.AcsCommitmentProtocolMessage
+import com.digitalasset.canton.protocol.messages.{AcsCommitmentProtocolMessage, CommitmentPeriod}
 import com.digitalasset.canton.tracing.{TraceContext, Traced, TracedMany}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{
@@ -153,51 +153,73 @@ class ReceivedAcsCommitmentMatcher(
     ): immutable.Iterable[MatchedCommitmentMatchPeriod] =
       intervals.map(_.copy(hashedDigest = (), offset = offset))
 
-    for {
-      outstanding <- store.lookupOutstanding(Seq(sender -> period))
-      matchesMismatched <- store.lookupMismatchedByHash(Seq((sender, digest, period)))
-      _ <- {
-        val (outstandingOutside, outstandingInside) = partition(outstanding)
-        val (mismatchOutside, mismatchToMatch) = partition(matchesMismatched)
-        val (outstandingToMatch, outstandingToMismatch) =
-          outstandingInside.partition(_.hashedDigest == digest)
-        val outstandingMatchesToInsert = toMatched(outstandingToMatch)
-        val mismatchedMatchesToInsert = toMatched(mismatchToMatch)
-        val outstandingMismatchesToInsert = outstandingToMismatch.map { interval =>
-          interval.copy(offset = offset, hashedDigest = Some(interval.hashedDigest))
-        }
-        if (outstandingMismatchesToInsert.nonEmpty) {
-          val remote =
-            AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.RemoteAcsCommitmentData(
-              sender = senderExternalized,
-              counterparticipant = envelope.acsCommitment.counterparticipant,
-              period = period,
-              digest = digest,
-            )
-          val locals = outstandingMismatchesToInsert.map { mismatched =>
-            AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.LocalDigest(
-              period = mismatched.commitmentPeriod,
-              digest = mismatched.hashedDigest.value,
+    val timepointToEmit = Option.when(lastEnvelopeForOffset)(Traced(timepoint))
+
+    def matchPeriod(
+        pruningWatermark: CantonTimestamp
+    ): FutureUnlessShutdown[Option[Traced[Timepoint]]] =
+      if (pruningWatermark >= period.toInclusive) FutureUnlessShutdown.pure(timepointToEmit)
+      else {
+        // However, we cannot simply discard the commitment as a whole if the watermark is too high already
+        // because commitment periods can extend very far into the past if the shared ACS between two participants
+        // has not changed for a long time. Therefore, we want to shorten the commitment period instead.
+        val cappedPeriod = CommitmentPeriod.tryCreate(
+          Ordering[CantonTimestamp].max(period.fromExclusive, pruningWatermark),
+          period.toInclusive,
+        )
+        for {
+          outstanding <- store.lookupOutstanding(Seq(sender -> cappedPeriod))
+          matchesMismatched <- store.lookupMismatchedByHash(Seq((sender, digest, cappedPeriod)))
+          _ <- {
+            val (outstandingOutside, outstandingInside) = partition(outstanding)
+            val (mismatchOutside, mismatchToMatch) = partition(matchesMismatched)
+            val (outstandingToMatch, outstandingToMismatch) =
+              outstandingInside.partition(_.hashedDigest == digest)
+            val outstandingMatchesToInsert = toMatched(outstandingToMatch)
+            val mismatchedMatchesToInsert = toMatched(mismatchToMatch)
+            val outstandingMismatchesToInsert = outstandingToMismatch.map { interval =>
+              interval.copy(offset = offset, hashedDigest = Some(interval.hashedDigest))
+            }
+            if (outstandingMismatchesToInsert.nonEmpty) {
+              val remote =
+                AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch
+                  .RemoteAcsCommitmentData(
+                    sender = senderExternalized,
+                    counterparticipant = envelope.acsCommitment.counterparticipant,
+                    period = period,
+                    digest = digest,
+                  )
+              val locals = outstandingMismatchesToInsert.map { mismatched =>
+                AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.LocalDigest(
+                  period = mismatched.commitmentPeriod,
+                  digest = mismatched.hashedDigest.value,
+                )
+              }
+              val mismatch =
+                AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.Mismatch(
+                  synchronizerId = envelope.psid.logical,
+                  remote = remote,
+                  local = locals,
+                )
+              mismatch.report()
+            }
+
+            store.persistMatchingOutcome(
+              deleteOutstanding = outstanding,
+              deleteMismatched = matchesMismatched,
+              insertOutstanding = outstandingOutside,
+              insertMismatchedOrUnexpected = mismatchOutside ++ outstandingMismatchesToInsert,
+              insertMatched = outstandingMatchesToInsert ++ mismatchedMatchesToInsert,
             )
           }
-          val mismatch = AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch.Mismatch(
-            synchronizerId = envelope.psid.logical,
-            remote = remote,
-            local = locals,
-          )
-          mismatch.report()
-        }
-
-        store.persistMatchingOutcome(
-          deleteOutstanding = outstanding,
-          deleteMismatched = matchesMismatched,
-          insertOutstanding = outstandingOutside,
-          insertMismatchedOrUnexpected = mismatchOutside ++ outstandingMismatchesToInsert,
-          insertMatched = outstandingMatchesToInsert ++ mismatchedMatchesToInsert,
-        )
+          // TODO(#34324) Check whether the commitment was unexpected
+        } yield timepointToEmit
       }
-      // TODO(#34324) Check whether the commitment was unexpected
-    } yield Option.when(lastEnvelopeForOffset)(Traced(timepoint))
+
+    // We have to use `period.fromExclusive` as the watermark bound even though pruning looks at `toInclusive`
+    // because the lookup may find multiple rows, some of which end below `period.toInclusive` and could therefore
+    // be subject to concurrent pruning.
+    store.runWithPruningWatermark(period.fromExclusive, matchPeriod)
   }
 
   private def persistWatermark(timepoint: TracedMany[Timepoint]): FutureUnlessShutdown[Unit] = {

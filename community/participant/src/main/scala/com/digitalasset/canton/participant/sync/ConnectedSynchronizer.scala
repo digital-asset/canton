@@ -11,7 +11,7 @@ import cats.{Eval, Monad}
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata}
@@ -37,6 +37,7 @@ import com.digitalasset.canton.participant.commitment.{
   ReceivedAcsCommitmentValidator,
   ReceivedAcsCommitmentValidatorImpl,
 }
+import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.event.{AcsChangeListener, RecordTime}
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.*
@@ -230,46 +231,6 @@ class ConnectedSynchronizer(
       loggerFactory,
     )
 
-  private val trafficCostEstimation = {
-    val trafficStateController: TrafficStateController =
-      sequencerClient.trafficStateController.getOrElse {
-        ErrorUtil.invalidState(
-          s"Sequencer client of the participant node $participantId does not have a traffic state controller"
-        )(ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty))
-      }
-
-    new TrafficCostEstimator(
-      requestGenerator,
-      topologyClient,
-      synchronizerCrypto,
-      ephemeral.contractStore,
-      ephemeral.sessionKeyStore,
-      psid,
-      participantId,
-      trafficStateController,
-      parameters.sequencerClient.defaultMaxSequencingTimeOffset,
-      clock,
-      loggerFactory,
-    )
-  }
-
-  def estimateTrafficCost(
-      transaction: LfVersionedTransaction,
-      transactionMeta: TransactionMeta,
-      submitterInfo: SubmitterInfo,
-      disclosedContracts: Map[LfContractId, LfFatContractInst],
-      costHints: CostEstimationHints,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, SubmissionCostEstimation] =
-    trafficCostEstimation.estimateTrafficCost(
-      transaction,
-      transactionMeta,
-      submitterInfo,
-      disclosedContracts,
-      costHints,
-    )
-
   private val damle =
     new DAMLe(
       participantId,
@@ -340,9 +301,90 @@ class ConnectedSynchronizer(
     Target(staticSynchronizerParameters.protocolVersion),
     loggerFactory,
     futureSupervisor,
-    testingConfig = testingConfig,
+    testingConfig,
     promiseUSFactory,
   )
+
+  private val trafficCostEstimation = {
+    val trafficStateController: TrafficStateController =
+      sequencerClient.trafficStateController.getOrElse {
+        ErrorUtil.invalidState(
+          s"Sequencer client of the participant node $participantId does not have a traffic state controller"
+        )(ErrorLoggingContext.fromTracedLogger(logger)(TraceContext.empty))
+      }
+
+    new TrafficCostEstimator(
+      requestGenerator,
+      topologyClient,
+      synchronizerCrypto,
+      ephemeral.contractStore,
+      ephemeral.sessionKeyStore,
+      psid,
+      participantId,
+      trafficStateController,
+      parameters.sequencerClient.defaultMaxSequencingTimeOffset,
+      clock,
+      unassignmentProcessor,
+      assignmentProcessor,
+      loggerFactory,
+    )
+  }
+
+  def estimateTrafficCost(
+      transaction: LfVersionedTransaction,
+      transactionMeta: TransactionMeta,
+      submitterInfo: SubmitterInfo,
+      disclosedContracts: Map[LfContractId, LfFatContractInst],
+      costHints: CostEstimationHints,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, SubmissionCostEstimation] =
+    trafficCostEstimation.estimateTrafficCost(
+      transaction,
+      transactionMeta,
+      submitterInfo,
+      disclosedContracts,
+      costHints,
+    )
+
+  /** Estimate the traffic cost of unassigning `contractIds` from this synchronizer towards
+    * `targetSynchronizer`. Charged against THIS synchronizer's traffic balance.
+    */
+  def estimateUnassignmentCost(
+      submitter: LfPartyId,
+      contractIds: Seq[LfContractId],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
+      submitterInfo: SubmitterInfo,
+      signatories: Seq[LfPartyId],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, (NonNegativeLong, NonNegativeLong)] =
+    trafficCostEstimation.estimateUnassignmentCost(
+      submitter,
+      contractIds,
+      targetSynchronizer,
+      submitterInfo,
+      signatories,
+    )
+
+  def estimateAssignmentCost(
+      submitter: LfPartyId,
+      contracts: Seq[ContractInstance],
+      sourceSynchronizer: Source[PhysicalSynchronizerId],
+      sourceSnapshot: Source[TopologySnapshot],
+      submitterInfo: SubmitterInfo,
+      signatories: Seq[LfPartyId],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, (NonNegativeLong, NonNegativeLong)] =
+    trafficCostEstimation.estimateAssignmentCost(
+      submitter,
+      contracts,
+      sourceSynchronizer,
+      sourceSnapshot,
+      submitterInfo,
+      signatories,
+    )
 
   private val trafficProcessor =
     new TrafficControlProcessor(
@@ -1345,6 +1387,11 @@ object ConnectedSynchronizer {
         futureSupervisor,
         loggerFactory,
       )
+      val oldCommitmentProcessorEnabled =
+        AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.isOldProcessorEnabled(
+          parameters.acsCommitments.disableOldAcsCommitmentProcessor,
+          synchronizerHandle.psid.protocolVersion,
+        )
       val journalGarbageCollector = new JournalGarbageCollector(
         persistentState.requestJournalStore,
         () =>
@@ -1357,13 +1404,13 @@ object ConnectedSynchronizer {
         participantNodePersistentState.map(_.inFlightSubmissionStore),
         synchronizerHandle.psid,
         parameters.journalGarbageCollectionDelay,
-        !parameters.isOldCommitmentProcessorEnabled,
+        disableLegacyAcsCommitmentProcessor = !oldCommitmentProcessorEnabled,
         parameters.processingTimeouts,
         loggerFactory,
       )
       for {
         acsCommitmentProcessorO <-
-          if (parameters.isOldCommitmentProcessorEnabled)
+          if (oldCommitmentProcessorEnabled)
             AcsCommitmentProcessor(
               participantId,
               synchronizerHandle.sequencerClient,

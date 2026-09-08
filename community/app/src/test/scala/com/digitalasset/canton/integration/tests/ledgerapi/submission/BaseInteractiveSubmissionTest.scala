@@ -53,7 +53,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.interactive.c
 import com.digitalasset.canton.topology.ForceFlag.DisablePartyWithActiveContracts
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{ExternalParty, ForceFlags, PartyId, SynchronizerId}
-import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
+import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.{BaseTest, LfTimestamp}
 import com.digitalasset.daml.lf.data.Ref.{SubmissionId, UserId}
 import com.google.protobuf.ByteString
@@ -331,11 +331,7 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
     )
 
     // This is the WRONG SyncId format, so physical for <= 34 and logical otherwise
-    val wrongSyncId =
-      if (testedProtocolVersion <= ProtocolVersion.v34)
-        synchronizer1Id
-      else
-        synchronizer1Id.logical
+    val wrongSyncId = synchronizer1Id.logical
 
     val preparedTransactionWithWrongSyncIdFormat =
       preparedTransaction

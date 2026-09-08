@@ -23,7 +23,6 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   EnvironmentSetupPlugin,
 }
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import monocle.macros.syntax.lens.*
 
 /** Test that in case the active replica is crashed a passive one can take over and keep using an
@@ -169,7 +168,7 @@ trait ParticipantFailoverWithEncryptedPrivateKeyStoreIntegrationTest
         // TODO(#23814): Add filter usage to owner_to_key_mappings
         val currentSigKey = participant.topology.owner_to_key_mappings
           .list(
-            store = TopologyStoreId.Authorized,
+            store = daId,
             filterKeyOwnerUid = participant.id.filterString,
           )
           .find(x => x.item.member == participant.id)
@@ -184,6 +183,7 @@ trait ParticipantFailoverWithEncryptedPrivateKeyStoreIntegrationTest
           participant.id,
           currentSigKey,
           newSigKey,
+          synchronizerId = daId,
         )
       }
 

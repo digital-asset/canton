@@ -9,13 +9,13 @@ import com.daml.ledger.api.v2.package_service.{
   GetPackageResponse,
   GetPackageStatusRequest,
   GetPackageStatusResponse,
-  HashFunction as APIHashFunction,
   ListPackagesRequest,
   ListPackagesResponse,
   ListVettedPackagesRequest,
   ListVettedPackagesResponse,
   PackageServiceGrpc,
   PackageStatus,
+  HashFunction as APIHashFunction,
 }
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure

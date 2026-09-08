@@ -337,6 +337,18 @@ object ServerSubscriptionCloseReason {
     override def description: String = "Too many open subscriptions for member"
   }
 
+  /** Fatal reasons associated to non-retryable gRPC statuses (e.g. PERMISSION_DENIED). */
+  sealed trait FatalCloseReason {
+    def status: Status
+    def description: String
+  }
+
+  final case class PermissionDenied(description: String) extends FatalCloseReason {
+    override def status: Status = Status.PERMISSION_DENIED
+  }
+
+  final case class GenericFatal(status: Status, description: String) extends FatalCloseReason
+
 }
 
 @VisibleForTesting

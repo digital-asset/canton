@@ -87,7 +87,7 @@ class DbSequencerStateManagerStore(
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[AggregationRule] = GetResult { r =>
     AggregationRule
-      .fromTrustedByteArray(LegacyUseMemberIdsAsEligibleMembers(protocolVersion), r.<<[Array[Byte]])
+      .fromTrustedByteArray(r.<<[Array[Byte]])
       .valueOr(err =>
         throw new DbDeserializationException(s"Failed to deserialize aggregation rule: $err")
       )
@@ -313,7 +313,7 @@ object DbSequencerStateManagerStore {
 
     override val versioningTable: VersioningTable = VersioningTable(
       ProtoVersion(30) -> VersionedProtoCodec.storage(
-        ReleaseProtocolVersion(ProtocolVersion.v34),
+        ReleaseProtocolVersion(ProtocolVersion.v35),
         v30.AggregatedSignaturesOfSender,
       )(
         supportedProtoVersion(_)(fromProtoV30),

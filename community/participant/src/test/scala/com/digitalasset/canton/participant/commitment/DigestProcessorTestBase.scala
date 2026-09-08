@@ -37,6 +37,8 @@ trait DigestProcessorTestBase extends AnyWordSpec with TestDigestUtils with Base
   val alice: LfPartyId = party("alice::aaa")
   val bob: LfPartyId = party("bob::bbb")
   val charlie: LfPartyId = party("charlie::ccc")
+  val david: LfPartyId = party("david::ddd")
+  val eve: LfPartyId = party("eve::eee")
 
   val p1: ParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::p1::zzz")
   val p2: ParticipantId = ParticipantId.tryFromProtoPrimitive("PAR::p2::yyy")

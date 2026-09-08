@@ -46,10 +46,10 @@ import java.security.{
   GeneralSecurityException,
   InvalidKeyException,
   NoSuchAlgorithmException,
-  PrivateKey as JPrivateKey,
-  PublicKey as JPublicKey,
   SecureRandom,
   Security,
+  PrivateKey as JPrivateKey,
+  PublicKey as JPublicKey,
   Signature as JSignature,
 }
 import javax.crypto.spec.{GCMParameterSpec, SecretKeySpec}

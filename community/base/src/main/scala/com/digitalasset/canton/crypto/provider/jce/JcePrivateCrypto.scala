@@ -39,9 +39,9 @@ import java.security.spec.{
 import java.security.{
   GeneralSecurityException,
   KeyFactory,
-  KeyPair as JKeyPair,
   KeyPairGenerator,
   spec,
+  KeyPair as JKeyPair,
 }
 import scala.concurrent.ExecutionContext
 

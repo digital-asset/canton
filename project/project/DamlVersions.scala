@@ -7,7 +7,7 @@ object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "3.6.0-snapshot.20260902.14799.0.v0d5b8c8e"
+  val version: String = "3.7.0-snapshot.20260907.14804.0.v66a1e6d9"
 
   /** The dpm registry to install daml components from.
     */

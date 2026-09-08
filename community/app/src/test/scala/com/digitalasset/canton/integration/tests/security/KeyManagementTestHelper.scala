@@ -9,7 +9,7 @@ import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.time.SimClock
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.concurrent.Eventually
 
@@ -24,11 +24,12 @@ trait KeyManagementTestHelper extends Eventually {
       node: InstanceReference,
       purpose: KeyPurpose,
       usageO: Option[NonEmpty[Set[SigningKeyUsage]]],
+      synchronizerId: SynchronizerId,
   ): PublicKey =
     // TODO(#23814): Add filter usage to owner_to_key_mappings
     node.topology.owner_to_key_mappings
       .list(
-        store = TopologyStoreId.Authorized,
+        store = synchronizerId,
         filterKeyOwnerUid = node.id.filterString,
       )
       .find(_.item.member == node.id)
@@ -50,13 +51,14 @@ trait KeyManagementTestHelper extends Eventually {
   @SuppressWarnings(Array("org.wartremover.warts.IsInstanceOf"))
   def rotateAndTest(
       nodeInstance: InstanceReference,
+      synchronizerId: SynchronizerId,
       ct: CantonTimestamp = new SimClock(loggerFactory = loggerFactory).now,
   ): Unit = {
 
-    def allKeysInAuthorizedStore: Seq[Fingerprint] =
+    def allKeysInSynchronizerStore: Seq[Fingerprint] =
       nodeInstance.topology.owner_to_key_mappings
         .list(
-          store = TopologyStoreId.Authorized,
+          store = synchronizerId,
           filterKeyOwnerUid = nodeInstance.id.member.filterString,
           filterKeyOwnerType = Some(nodeInstance.id.member.code),
         )
@@ -68,24 +70,24 @@ trait KeyManagementTestHelper extends Eventually {
 
     val keysInternalStore = nodeInstance.keys.secret.list()
     val keyIdsInternalStore = keysInternalStore.map(_.publicKey.fingerprint)
-    val keyIdsAuthorizedStore = allKeysInAuthorizedStore
+    val keyIdsSynchronizerStore = allKeysInSynchronizerStore
 
     val keyToRotateName = keysInternalStore.collect {
-      case keyMetadata if keyIdsAuthorizedStore.contains(keyMetadata.publicKey.fingerprint) =>
+      case keyMetadata if keyIdsSynchronizerStore.contains(keyMetadata.publicKey.fingerprint) =>
         keyMetadata.name
     }
 
-    keyIdsInternalStore should contain allElementsOf keyIdsAuthorizedStore
+    keyIdsInternalStore should contain allElementsOf keyIdsSynchronizerStore
 
-    nodeInstance.keys.secret.rotate_node_keys()
+    nodeInstance.keys.secret.rotate_node_keys(synchronizerId = synchronizerId)
 
     eventually() {
       val keysInternalStoreNew = nodeInstance.keys.secret.list()
       val keyIdsInternalStoreNew = keysInternalStoreNew.map(_.publicKey.fingerprint)
-      val keyIdsAuthorizedStoreNew = allKeysInAuthorizedStore
+      val keyIdsSynchronizerStoreNew = allKeysInSynchronizerStore
 
-      keyIdsInternalStoreNew should contain allElementsOf keyIdsAuthorizedStoreNew
-      keyIdsAuthorizedStoreNew should not equal keyIdsAuthorizedStore
+      keyIdsInternalStoreNew should contain allElementsOf keyIdsSynchronizerStoreNew
+      keyIdsSynchronizerStoreNew should not equal keyIdsSynchronizerStore
       keyIdsInternalStore.size should be < keyIdsInternalStoreNew.size
 
       // Test that rotated keys have a new tag -rotated-<timestamp>

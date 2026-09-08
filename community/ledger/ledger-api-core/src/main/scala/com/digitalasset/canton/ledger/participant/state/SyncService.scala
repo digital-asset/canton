@@ -12,6 +12,7 @@ import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.ledger.participant.state.SyncService.{
   ConnectedSynchronizerRequest,
   ConnectedSynchronizerResponse,
+  ReassignmentCostEstimation,
   SubmissionCostEstimation,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -193,6 +194,14 @@ trait SyncService
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, SubmissionCostEstimation]
 
+  def estimateReassignmentCosts(
+      synchronizerRank: SynchronizerRank,
+      submitterInfo: SubmitterInfo,
+      targetSynchronizer: PhysicalSynchronizerId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Seq[ReassignmentCostEstimation]]
+
   def randomOps: RandomOps
 }
 
@@ -204,6 +213,21 @@ object SyncService {
   ) {
     def totalCost: NonNegativeLong =
       confirmationRequestCost + confirmationResponseCost
+  }
+  final case class ReassignmentCostEstimation(
+      sourceSynchronizerId: PhysicalSynchronizerId,
+      targetSynchronizerId: PhysicalSynchronizerId,
+      contractIds: Seq[LfContractId],
+      unassignmentRequestCost: NonNegativeLong,
+      unassignmentResponseCost: NonNegativeLong,
+      assignmentRequestCost: NonNegativeLong,
+      assignmentResponseCost: NonNegativeLong,
+  ) {
+    lazy val totalCost: NonNegativeLong =
+      unassignmentRequestCost +
+        unassignmentResponseCost +
+        assignmentRequestCost +
+        assignmentResponseCost
   }
   final case class ConnectedSynchronizerRequest(
       party: Option[LfPartyId],

@@ -11,12 +11,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   failGrpcStreamObserver,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.standalone.v1.{
-  Ordered as ProtoOrdered,
   ReadOrderedRequest,
   ReadOrderedResponse,
   SendRequest,
   SendResponse,
   StandaloneBftOrderingServiceGrpc,
+  Ordered as ProtoOrdered,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.stub.StreamObserver

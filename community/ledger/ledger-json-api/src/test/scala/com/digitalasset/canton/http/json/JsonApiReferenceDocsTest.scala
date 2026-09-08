@@ -14,12 +14,6 @@ import org.scalatest.wordspec.AnyWordSpecLike
 
 /** We test if the openapi and asyncapi definitions are not changed. If so files should be updated
   * (by calling GenerateJSONApiDocs.regenerateAll())
-  *
-  * Notice: changes to .proto files do not cause this test to fail, as we use store extracted
-  * information (in proto-data.yml).
-  *
-  * This is a deliberate design choice to avoid noise / too many accidental build fails on minor
-  * changes in proto comments.
   */
 class JsonApiReferenceDocsTest extends AnyWordSpecLike with BaseTest with Checkpoints {
 
@@ -51,9 +45,6 @@ object JsonApiReferenceDocsTest {
   private val RootTestResources =
     "community/ledger/ledger-json-api/src/test/resources/json-api-docs"
 
-  val ProtoExtractedData =
-    s"community/ledger/ledger-json-api/src/main/resources/${ProtoInfo.LedgerApiDescriptionResourceLocation}"
-
   val OpenApiYaml = s"$RootTestResources/openapi.yaml"
   val AsyncApiYaml = s"$RootTestResources/asyncapi.yaml"
 
@@ -74,11 +65,6 @@ object GenerateJSONApiDocs extends App {
 
   def regenerateProtoData() = {
     val protoData = ProtoParser.readProto()
-    File(JsonApiReferenceDocsTest.ProtoExtractedData)
-      .createFileIfNotExists()
-      .overwrite(protoData.toYaml())
-      .discard
-
     ProtoInfo(protoData, ProtoInfo.loadOverrides())
   }
 

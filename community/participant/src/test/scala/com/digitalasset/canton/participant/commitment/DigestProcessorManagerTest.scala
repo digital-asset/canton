@@ -17,7 +17,7 @@ import com.digitalasset.canton.participant.commitment.DigestProcessorTestBase.Pr
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, ParticipantTestMetrics}
 import com.digitalasset.canton.participant.store.AcsDigestStore
-import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, SynchronizerAlias}
 import org.apache.pekko.stream.KillSwitch
@@ -299,6 +299,8 @@ object DigestProcessorManagerTest {
       extends TestDigestProcessor(synchronizerId, timeouts, loggerFactory)
       with ReinitializingDigestProcessor {
 
+    override def thisParticipantId: ParticipantId = ???
+
     override protected def startPipelineInternal()(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] = {
@@ -320,6 +322,8 @@ object DigestProcessorManagerTest {
   )(implicit override protected val executionContext: ExecutionContext)
       extends TestDigestProcessor(synchronizerId, timeouts, loggerFactory)
       with RunningDigestProcessor {
+
+    override def thisParticipantId: ParticipantId = ???
 
     override protected def startPipelineInternal()(implicit
         traceContext: TraceContext

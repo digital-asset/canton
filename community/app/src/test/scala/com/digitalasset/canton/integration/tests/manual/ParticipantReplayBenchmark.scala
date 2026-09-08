@@ -16,7 +16,7 @@ import com.digitalasset.canton.sequencing.client.{ReplayAction, ReplayConfig}
 import monocle.macros.syntax.lens.*
 
 import java.nio.file.Path
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.blocking
 import scala.concurrent.duration.*

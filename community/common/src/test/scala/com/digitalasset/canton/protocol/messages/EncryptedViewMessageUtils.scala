@@ -26,44 +26,26 @@ object EncryptedViewMessageUtils {
       viewEncryptionScheme: SymmetricKeyScheme,
       protocolVersion: ProtocolVersion,
   ): EncryptedViewMessage[viewType.type] =
-    if (protocolVersion >= ProtocolVersion.v35)
-      EncryptedSingleViewMessage(
-        submittingParticipantSignature,
-        viewHash,
-        viewEncryptionKeyRandomness,
-        EncryptedView[viewType.type](viewType)(
-          Encrypted.fromByteString[CompressedView[viewType.View]](encryptedViewBytes)
-        ),
-        synchronizerId,
-        viewEncryptionScheme,
-        protocolVersion,
-      )
-    else
-      EncryptedMultipleViewsMessage(
-        EncryptedMultipleViews[viewType.type](
-          viewType,
-          Encrypted
-            .fromByteString[CompressedView[MultipleViewTrees[viewType.View]]](encryptedViewBytes),
-        ),
-        NonEmpty.mk(Seq, viewHash),
-        viewEncryptionKeyRandomness,
-        synchronizerId,
-        viewEncryptionScheme,
-        submittingParticipantSignature,
-        protocolVersion,
-      )
+    EncryptedViewMessage(
+      EncryptedMultipleViews[viewType.type](
+        viewType,
+        Encrypted
+          .fromByteString[CompressedView[MultipleViewTrees[viewType.View]]](encryptedViewBytes),
+      ),
+      NonEmpty.mk(Seq, viewHash),
+      viewEncryptionKeyRandomness,
+      synchronizerId,
+      viewEncryptionScheme,
+      submittingParticipantSignature,
+      protocolVersion,
+    )
 
   object Optics {
 
     private def modifyRandomness[VT <: ViewType]: NonEmpty[
       Seq[AsymmetricEncrypted[SecureRandomness]]
     ] => EncryptedViewMessage[VT] => EncryptedViewMessage[VT] = { newRandomness =>
-      {
-        case singleViewMessage: EncryptedSingleViewMessage[VT] =>
-          singleViewMessage.copy(viewEncryptionKeyRandomness = newRandomness)
-        case multipleViewsMessage: EncryptedMultipleViewsMessage[VT] =>
-          multipleViewsMessage.copy(viewEncryptionKeyRandomness = newRandomness)
-      }
+      _.copy(viewEncryptionKeyRandomness = newRandomness)
     }
 
     def randomnessLens[VT <: ViewType]
@@ -75,15 +57,9 @@ object EncryptedViewMessageUtils {
       )
 
     private def modifyViewHash[VT <: ViewType]
-        : ViewHash => EncryptedViewMessage[VT] => EncryptedViewMessage[VT] = { newViewHash =>
-      {
-        case singleViewMessage: EncryptedSingleViewMessage[VT] =>
-          singleViewMessage.copy(viewHash = newViewHash)
-        case multipleViewsMessage: EncryptedMultipleViewsMessage[VT] =>
-          multipleViewsMessage.copy(viewHashes =
-            multipleViewsMessage.viewHashes.map(_ => newViewHash)
-          )
-      }
+        : ViewHash => EncryptedViewMessage[VT] => EncryptedViewMessage[VT] = {
+      newViewHash => (evm: EncryptedViewMessage[VT]) =>
+        evm.copy(viewHashes = evm.viewHashes.map(_ => newViewHash))
     }
 
     def viewHashOrHashesLens[VT <: ViewType]: PLens[EncryptedViewMessage[VT], EncryptedViewMessage[
@@ -95,13 +71,7 @@ object EncryptedViewMessageUtils {
 
     private def modifySignature[VT <: ViewType]
         : Option[Signature] => EncryptedViewMessage[VT] => EncryptedViewMessage[VT] = {
-      newSignature =>
-        {
-          case singleViewMessage: EncryptedSingleViewMessage[VT] =>
-            singleViewMessage.copy(submittingParticipantSignature = newSignature)
-          case multipleViewsMessage: EncryptedMultipleViewsMessage[VT] =>
-            multipleViewsMessage.copy(submittingParticipantSignature = newSignature)
-        }
+      newSignature => _.copy(submittingParticipantSignature = newSignature)
     }
 
     def signatureLens[VT <: ViewType]: Lens[EncryptedViewMessage[VT], Option[Signature]] =

@@ -882,12 +882,6 @@ object BuildCommon {
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // add the test DARs generated in daml-lf-encoder by DamlLfPlugin
         Test / managedResources ++= (DamlProjects.`daml-lf-encoder` / Test / resources).value,
-        // TODO(#35484): uncomment after shuffle
-        // The ExternalCall*IntegrationTest suites import the generated
-        // `com.digitalasset.canton.extcall.java` bindings, whose codegen is disabled above while
-        // the snapshot cannot process Stable(4) DARs. Exclude them from compilation until then.
-        Test / unmanagedSources / excludeFilter :=
-          (Test / unmanagedSources / excludeFilter).value || "ExternalCall*IntegrationTest.scala",
         // Explicit set the Daml project dependency to common
         Test / damlDependencies := (`community-common` / Compile / damlBuild).value,
         Test / damlBuildOrder := Seq(
@@ -915,16 +909,11 @@ object BuildCommon {
             (Test / damlDarOutput).value / "CantonLfDev-1.0.0.dar",
             "com.digitalasset.canton.lfdev",
           ),
-          // TODO(#35484): uncomment after shuffle
-          // ExternalCallTest now builds at --target=2.4 (Stable(4)); the snapshot compiler produces
-          // the DAR, but its codegen component still only accepts Staging(4,1), so `dpm codegen-java`
-          // exits 201. The three ExternalCall*IntegrationTest suites that consume these generated
-          // bindings are excluded from compilation (see `Test / unmanagedSources / excludeFilter`).
-          // (
-          //   (Test / sourceDirectory).value / "daml" / "ExternalCallTest",
-          //   (Test / damlDarOutput).value / "ExternalCallTest-1.0.0.dar",
-          //   "com.digitalasset.canton.extcall",
-          // ),
+          (
+            (Test / sourceDirectory).value / "daml" / "ExternalCallTest",
+            (Test / damlDarOutput).value / "ExternalCallTest-1.0.0.dar",
+            "com.digitalasset.canton.extcall",
+          ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonLfV21",
             (Test / damlDarOutput).value / "CantonLfV21-1.0.0.dar",
@@ -1080,7 +1069,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("34", "35")),
+          BuildInfoKey("stableProtocolVersions" -> List("35")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -2111,11 +2100,11 @@ object BuildCommon {
           libraryDependencies ++= Seq(
             circe_generic_extras,
             circe_parser,
-            circe_yaml % Test,
+            circe_yaml,
             icu4j_version,
             pekko_http,
             pekko_stream_testkit % Test,
-            protostuff_parser % Test,
+            protostuff_parser,
             scalapb_json4s,
             scalapb_runtime,
             scalapb_runtime_grpc,

@@ -71,9 +71,9 @@ class TopologyChangeIntegrationTest extends CommunityIntegrationTest with Shared
     }
     "roll participant and mediator keys" in { implicit env =>
       import env.*
-      participant1.keys.secret.rotate_node_keys()
+      participant1.keys.secret.rotate_node_keys(synchronizerId = daId)
       participant1.health.maybe_ping(participant1) should not be empty
-      mediator1.keys.secret.rotate_node_keys()
+      mediator1.keys.secret.rotate_node_keys(synchronizerId = daId)
       participant1.health.maybe_ping(participant1) should not be empty
 
     }
@@ -81,7 +81,7 @@ class TopologyChangeIntegrationTest extends CommunityIntegrationTest with Shared
     "disconnect p1 and then roll sequencer keys" in { implicit env =>
       import env.*
       participant1.synchronizers.disconnect_all()
-      sequencer1.keys.secret.rotate_node_keys()
+      sequencer1.keys.secret.rotate_node_keys(synchronizerId = daId)
       participant1.synchronizers.reconnect_all()
       participant1.health.maybe_ping(participant1) should not be empty
     }

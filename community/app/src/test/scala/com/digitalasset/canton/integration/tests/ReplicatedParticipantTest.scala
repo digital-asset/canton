@@ -15,6 +15,7 @@ import com.digitalasset.canton.config.{
   PositiveFiniteDuration,
   ReplicationConfig,
 }
+import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.toParticipantId
 import com.digitalasset.canton.console.{
   CommandFailure,
   InstanceReference,
@@ -28,6 +29,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.*
+import com.digitalasset.canton.integration.util.TestUtils
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
@@ -45,6 +47,7 @@ import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
 import scala.concurrent.duration.*
+import scala.util.{Success, Try}
 
 trait ReplicatedNodeHelper { self: CommunityIntegrationTest =>
   protected lazy val timeout: FiniteDuration = 180.seconds
@@ -260,6 +263,7 @@ trait ReplicatedParticipantTestSetup extends ReplicatedNodeHelper {
     EnvironmentDefinition.P4S1M1_Manual
       .clearConfigTransforms()
       .addConfigTransforms(heavyTestDefaults*)
+      .addConfigTransforms(ConfigTransforms.enableTrafficAccounting)
       .addConfigTransforms(
         // Aggressive check periods to speed up the test
         ConfigTransforms.updateAllParticipantConfigs_(
@@ -292,11 +296,61 @@ trait ReplicatedParticipantTest
 
   "A replicated participant" must {
 
+    @SuppressWarnings(Array("org.wartremover.warts.Var"))
+    var adminPartyTraffic: Long = 0L
+
+    def getAdminPartyTraffic(participant: LocalParticipantReference) =
+      participant.ledger_api.traffic.get_account(participant.adminParty.toProtoPrimitive).balance
+
+    /** Once the replica has taken over, its traffic accounting must match the last recorded value.
+      * While the node is still transitioning to active, its ledger API is not available yet and the
+      * query fails with UNAVAILABLE, which we tolerate and retry.
+      */
+    def assertTrafficPreservedAfterFailover(participant: LocalParticipantReference): Unit =
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        eventually() {
+          inside(Try(getAdminPartyTraffic(participant))) { case Success(value) =>
+            value shouldBe adminPartyTraffic
+          }
+        },
+        LogEntry.assertLogSeq(
+          mustContainWithClue = Seq.empty,
+          mayContain = Seq(_.errorMessage should include("GrpcServiceUnavailable: UNAVAILABLE")),
+        ),
+      )
+
+    /** Traffic accounting is done after the completion is emitted, so we retry until it changed. */
+    def assertTrafficConsumed(participant: LocalParticipantReference): Unit =
+      eventually() {
+        val updated = getAdminPartyTraffic(participant)
+        updated should not be adminPartyTraffic
+        adminPartyTraffic = updated
+      }
+
+    /** Ping from `participant`, checking that traffic is preserved across the fail-over and then
+      * consumed by the ping.
+      */
+    def pingAndCheckTraffic(
+        participant: LocalParticipantReference,
+        otherParticipant: ParticipantReference,
+    ): Unit = {
+      assertTrafficPreservedAfterFailover(participant)
+      activePing(participant, otherParticipant)
+      assertTrafficConsumed(participant)
+    }
+
     "accept requests on the active replica and reject on the passive" in { implicit env =>
       import env.*
 
       // Active participant (=participant1) must be able to ping another non-replicated participant node
       activePing(participant1, participant3)
+
+      // record the traffic of the admin party - we'll use it to make sure the accounting
+      // works correctly through active / passive transitions
+      adminPartyTraffic = getAdminPartyTraffic(participant1)
+      // Negative because after the ping, traffic is deducted but we didn't top up its account
+      // Importantly it should not be 0
+      adminPartyTraffic should be < 0L
 
       failPassivePing(participant2, participant3)
     }
@@ -320,8 +374,8 @@ trait ReplicatedParticipantTest
 
       participant1.stop()
 
-      // Participant2 should take over from participant1
-      activePing(participant2, participant3)
+      // Participant2 should take over from participant1, keeping the traffic accounting
+      pingAndCheckTraffic(participant2, participant3)
 
       // Start the former participant again, should now be passive and reject write requests
       participant1.start()
@@ -339,8 +393,8 @@ trait ReplicatedParticipantTest
       activeParticipantReplica.replication.set_passive()
       // user-manual-entry-end: SetPassive
 
-      // Passive participant should take over from former active participant
-      activePing(passiveParticipantReplica, participant3)
+      // Passive participant should take over from former active participant, keeping the traffic accounting
+      pingAndCheckTraffic(passiveParticipantReplica, participant3)
 
       // former active replica should now be passive and reject write requests
       failPassivePing(activeParticipantReplica, participant3)
@@ -391,5 +445,10 @@ class ReplicatedParticipantTestPostgres extends ReplicatedParticipantTest {
   setupPlugins(new UsePostgres(loggerFactory))
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    baseEnvironmentDefinition.withManualStart.withSetup(setupReplicas(_))
+    baseEnvironmentDefinition.withManualStart
+      .withSetup(setupReplicas(_))
+      .withTrafficControl(
+        TestUtils.waitForTargetTimeOnSynchronizerNode(wallClock.now, logger),
+        topUpAllMembers = true,
+      )
 }

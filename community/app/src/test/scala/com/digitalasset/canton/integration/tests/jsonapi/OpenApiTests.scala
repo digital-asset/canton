@@ -48,7 +48,7 @@ final class OpenApiTests
     super.environmentDefinition.addConfigTransform(ConfigTransforms.disableTrafficAccounting)
 
   "JSON openapi documentation" should {
-    val protoInfo = apiDocsGenerator.loadProtoData()
+    val protoInfo = apiDocsGenerator.cachedProtoData()
     val staticDocs = apiDocsGenerator.createStaticDocs(protoInfo)
 
     "be consistent with live docs" in httpTestFixture { fixture =>

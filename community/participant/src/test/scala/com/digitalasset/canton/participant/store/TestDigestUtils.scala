@@ -5,9 +5,9 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
-import com.digitalasset.canton.crypto.LtHash16
+import com.digitalasset.canton.crypto.{LtHash16, LtHash16Blake3}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.participant.commitment.Timepoint
+import com.digitalasset.canton.participant.commitment.{Timepoint, TracedLtHash16Blake3}
 import com.digitalasset.canton.participant.store.AcsDigestStore.{HashedDigest, RawDigest}
 import com.digitalasset.canton.protocol.messages.Digest
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
@@ -17,6 +17,9 @@ trait TestDigestUtils {
 
   def genRawDigest(fill: Byte): RawDigest =
     LtHash16.tryCreate(Array.fill[Byte](rawDigestByteSize)(fill)).getByteString()
+
+  def genTracedLtHash(fill: Byte) =
+    TracedLtHash16Blake3(LtHash16Blake3.tryCreate(genRawDigest(fill)), Seq.empty)
 
   def genHashedDigest(rawDigest: RawDigest): HashedDigest =
     Digest.hashDigest(rawDigest).getCryptographicEvidence

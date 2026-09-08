@@ -76,7 +76,7 @@ final class ParticipantOnboardingResignIntegrationTestH2
         val tx = stored.transaction.transaction
         tx.isEquivalentTo(synchronizerPv) shouldBe false
         tx.representativeProtocolVersion shouldBe
-          TopologyTransaction.protocolVersionRepresentativeFor(ProtocolVersion.v34)
+          TopologyTransaction.protocolVersionRepresentativeFor(ProtocolVersion.v35)
       }
 
       participant1.synchronizers.connect_local(sequencer1, alias = daName)

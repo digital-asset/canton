@@ -15,7 +15,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.SuppressionRule.Level
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
-import com.digitalasset.canton.protocol.{TestSynchronizerParameters, v30 as protocolV30}
+import com.digitalasset.canton.protocol.{
+  SynchronizerLimits,
+  TestSynchronizerParameters,
+  v31 as protocolV31,
+}
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.BytestringWithCryptographicEvidence
@@ -110,6 +114,8 @@ class GrpcSequencerServiceTest
     val sequencerSubscriptionFactory = mock[DirectSequencerSubscriptionFactory]
     private val topologyClient = mock[SynchronizerTopologyClient]
     private val mockTopologySnapshot = mock[TopologySnapshot]
+    when(topologyClient.getSynchronizerLimits)
+      .thenReturn(SynchronizerLimits.defaultFor(BaseTest.testedProtocolVersion))
     when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
       .thenReturn(FutureUnlessShutdown.pure(mockTopologySnapshot))
     when(
@@ -306,7 +312,7 @@ class GrpcSequencerServiceTest
 
     "reject empty request" in { implicit env =>
       val requestV1 =
-        protocolV30.SubmissionRequest(
+        protocolV31.SubmissionRequest(
           sender = "",
           messageId = "",
           batch = None,
@@ -363,7 +369,7 @@ class GrpcSequencerServiceTest
     }
 
     "reject envelopes with invalid sender" in { implicit env =>
-      val requestV1 = defaultRequest.toProtoV30.focus(_.sender).modify { sender =>
+      val requestV1 = defaultRequest.toProtoV31.focus(_.sender).modify { sender =>
         if (sender == "".toProtoUnvalidated) fail("sender should be set")
         else "THISWILLFAIL".toProtoUnvalidated
       }
@@ -813,7 +819,7 @@ class GrpcSequencerServiceTest
       eventually() {
         // the subscription should have been closed because the member was deactivated
         subscriptionClosed.get() shouldBe true
-        verify(observer).onError(argThat { (ex: Throwable) =>
+        verify(grpcObserverHandle).onError(argThat { (ex: Throwable) =>
           ex.asInstanceOf[StatusException].getStatus.getCode == PERMISSION_DENIED
         })
         succeed

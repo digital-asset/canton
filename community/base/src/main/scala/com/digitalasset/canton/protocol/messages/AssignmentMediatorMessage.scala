@@ -54,9 +54,6 @@ final case class AssignmentMediatorMessage(
 
   override def requestUuid: UUID = commonData.uuid
 
-  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.AssignmentMediatorMessage(toProtoV30)
-
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.AssignmentMediatorMessage(toProtoV30)
 
@@ -86,7 +83,7 @@ object AssignmentMediatorMessage
     ] {
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AssignmentMediatorMessage)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentMediatorMessage)(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30,
     )

@@ -99,16 +99,17 @@ trait AuthenticationTokenIntegrationTest
       val sender = sequencer2
       val receiver = sequencer1
 
+      val senderCrypto = SynchronizerCrypto(sender.crypto, staticSynchronizerParameters1)
+
       //  Wait until receiver sees sender's keys
-      eventually() {
+      val tokenForSender = eventually() {
         receiver.topology.owner_to_key_mappings
           .list(
             filterKeyOwnerUid = sender.id.uid.toProtoPrimitive
           ) should not be empty
-      }
 
-      val senderCrypto = SynchronizerCrypto(sender.crypto, staticSynchronizerParameters1)
-      val tokenForSender = requestToken(synchronizerId, sender.id, senderCrypto).futureValueUS.value
+        requestToken(synchronizerId, sender.id, senderCrypto).futureValueUS.value
+      }
 
       assertRefused(sendSubmissionUsingToken(synchronizerId, sender.id, tokenForSender))
     }
@@ -164,6 +165,7 @@ trait AuthenticationTokenIntegrationTest
 
         val token = sequencer1.authentication.generate_authentication_token(participant1)
         sequencer1.authentication.logout(token.token)
+
         assertUnauthenticated(
           sendSubmissionUsingToken(
             daId,
@@ -348,6 +350,7 @@ trait AuthenticationTokenIntegrationTest
         import env.*
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
         assertPingSucceeds(participant1, participant1)
+
         loggerFactory.assertLoggedWarningsAndErrorsSeq(
           {
             participant1.synchronizers.logout(daName)
@@ -361,7 +364,8 @@ trait AuthenticationTokenIntegrationTest
               // The `logout` command will cause the sequencer connection to restart. If a submission happens during that time, it may
               // receive a temporary "no connection available" error.
               // The ping will eventually work because pings have an implicit retry mechanism that works even with sim clock.
-              _.warningMessage should include("No connection available")
+              _.warningMessage should include("No connection available"),
+              _.warningMessage should include("Failed to establish subscription for"),
             ),
           ),
         )
@@ -496,7 +500,14 @@ trait AuthenticationTokenIntegrationTest
             LogEntry.assertLogSeq(
               mustContainWithClue = Seq.empty,
               mayContain = Seq(
-                _.warningMessage should include("Unable to find ParticipantSynchronizerPermission")
+                _.warningMessage should include("Unable to find ParticipantSynchronizerPermission"),
+                _.warningMessage should include("PERMISSION_DENIED"),
+                _.warningMessage should include("SYNC_SERVICE_SYNCHRONIZER_DISABLED_US"),
+                _.warningMessage should include("Failed to establish subscription for"),
+                _.warningMessage should include("Permanently closing sequencer subscription"),
+                _.warningMessage should include(
+                  "rejected our subscription attempt with permission denied"
+                ),
               ),
             ),
           )
@@ -640,6 +651,7 @@ trait AuthenticationTokenIntegrationTest
                 member = currentMapping.item.member,
                 currentKey = oldKey,
                 newKey = newKey,
+                synchronizerId = daId,
               )
 
               // Wait for the topology transaction to propagate
@@ -662,6 +674,7 @@ trait AuthenticationTokenIntegrationTest
                 _.errorMessage should include(
                   "Authentication token refresh error: Bad challenge request"
                 ),
+                _.warningMessage should include("Failed to establish subscription for"),
               ),
             ),
           )
@@ -725,54 +738,64 @@ trait AuthenticationTokenIntegrationTest
     // Verify that the token works initially
     assertRefused(sendSubmissionUsingToken(daId, leaverIdentity, token))
 
-    leaverIdentity match {
-      case _: MediatorId =>
-        val activeMediator = stayingMember.asInstanceOf[MediatorId]
-        //  Trigger Case 7 in observed by updating the group with a Replace transaction for mediators
-        proposer.topology.mediators.propose(
-          synchronizerId = daId.logical,
-          threshold = PositiveInt.one,
-          active = Seq(activeMediator), // mediator2 is the "leaver"
-          group = NonNegativeInt.zero,
-          signedBy = None,
-          store = Some(daId),
-          mustFullyAuthorize = true,
-        )
-      case _: SequencerId =>
-        //  Trigger Case 6 in observed by updating the group with a Replace transaction
-        val activeSequencer = stayingMember.asInstanceOf[SequencerId]
-        proposer.topology.sequencers.propose(
-          synchronizerId = daId.logical,
-          threshold = PositiveInt.one,
-          active = Seq(activeSequencer), // sequencer2 is the "leaver"
-          signedBy = None,
-          store = Some(daId),
-          mustFullyAuthorize = true,
-        )
+    loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      {
+        leaverIdentity match {
+          case _: MediatorId =>
+            val activeMediator = stayingMember.asInstanceOf[MediatorId]
+            //  Trigger Case 7 in observed by updating the group with a Replace transaction for mediators
+            proposer.topology.mediators.propose(
+              synchronizerId = daId.logical,
+              threshold = PositiveInt.one,
+              active = Seq(activeMediator), // mediator2 is the "leaver"
+              group = NonNegativeInt.zero,
+              signedBy = None,
+              store = Some(daId),
+              mustFullyAuthorize = true,
+            )
+          case _: SequencerId =>
+            //  Trigger Case 6 in observed by updating the group with a Replace transaction
+            val activeSequencer = stayingMember.asInstanceOf[SequencerId]
+            proposer.topology.sequencers.propose(
+              synchronizerId = daId.logical,
+              threshold = PositiveInt.one,
+              active = Seq(activeSequencer), // sequencer2 is the "leaver"
+              signedBy = None,
+              store = Some(daId),
+              mustFullyAuthorize = true,
+            )
 
-      case _: ParticipantId =>
-        // resolve "match may not be exhaustive" error
-        fail(s"testMemberRemoval does not support ParticipantId.")
-    }
+          case _: ParticipantId =>
+            // resolve "match may not be exhaustive" error
+            fail(s"testMemberRemoval does not support ParticipantId.")
+        }
 
-    // Wait for the topology update to be processed
-    proposer.topology.synchronisation.await_idle()
+        // Wait for the topology update to be processed
+        proposer.topology.synchronisation.await_idle()
 
-    eventually() {
-      // Verify that the leaver's token is now purged by sending the existing token
-      assertUnauthenticated(sendSubmissionUsingToken(daId, leaverIdentity, token))
+        eventually() {
+          // Verify that the leaver's token is now purged by sending the existing token
+          assertUnauthenticated(sendSubmissionUsingToken(daId, leaverIdentity, token))
 
-      // Verify that the remaining member is still able to submit
-      assertRefused(sendSubmissionUsingToken(daId, stayingMember, stayingToken))
-    }
+          // Verify that the remaining member is still able to submit
+          assertRefused(sendSubmissionUsingToken(daId, stayingMember, stayingToken))
+        }
 
-    // Verify leaver cannot obtain a new token
-    val reAuthAttempt = requestToken(daId, leaverIdentity, leaverCrypto).value.futureValueUS
-    inside(reAuthAttempt) { case Left(status) =>
-      status.getCode shouldBe io.grpc.Status.Code.PERMISSION_DENIED
-    }
-    proposer.topology.synchronisation.await_idle()
-
+        // Verify leaver cannot obtain a new token
+        val reAuthAttempt = requestToken(daId, leaverIdentity, leaverCrypto).value.futureValueUS
+        inside(reAuthAttempt) { case Left(status) =>
+          status.getCode shouldBe io.grpc.Status.Code.PERMISSION_DENIED
+        }
+        proposer.topology.synchronisation.await_idle()
+      },
+      LogEntry.assertLogSeq(
+        mustContainWithClue = Seq.empty,
+        mayContain = Seq(
+          _.errorMessage should include("Failed to establish subscription for"),
+          _.warningMessage should include("PERMISSION_DENIED"),
+        ),
+      ),
+    )
   }
 }
 

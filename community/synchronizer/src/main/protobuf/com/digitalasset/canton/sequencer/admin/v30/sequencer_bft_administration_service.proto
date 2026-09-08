@@ -5,7 +5,6 @@ syntax = "proto3";
 
 package com.digitalasset.canton.sequencer.admin.v30;
 
-import "com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_sequencing_parameters.proto";
 import "com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v31/bft_ordering_sequencing_parameters.proto";
 
 service SequencerBftAdministrationService {
@@ -166,7 +165,6 @@ message GetOrderingTopologyResponse {
   repeated string sequencer_ids = 2;
   // The sequencing parameters
   oneof dynamic_sequencing_parameters {
-    com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.DynamicSequencingParametersPayload dynamic_sequencing_parameters_payload = 3;
     com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v31.DynamicSequencingParametersPayload dynamic_sequencing_parameters_payload31 = 4;
   }
   // The sequencer IDs of the BFT ordering nodes in the network that are consensus leaders.

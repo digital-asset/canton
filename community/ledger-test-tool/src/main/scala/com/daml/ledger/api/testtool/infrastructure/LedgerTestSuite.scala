@@ -10,8 +10,8 @@ import com.daml.ledger.api.v2.commands.Command as CommandV1
 import com.daml.ledger.api.v2.commands.Command.toJavaProto
 import com.daml.ledger.api.v2.event.Event
 import com.daml.ledger.api.v2.value.Value.Sum
-import com.daml.ledger.api.v2.value.{GenMap, Identifier, List as ApiList, Optional, TextMap, Value}
-import com.daml.ledger.javaapi.data.{Command, Identifier as JavaIdentifier, Party}
+import com.daml.ledger.api.v2.value.{GenMap, Identifier, Optional, TextMap, Value, List as ApiList}
+import com.daml.ledger.javaapi.data.{Command, Party, Identifier as JavaIdentifier}
 import com.daml.test.evidence.tag.EvidenceTag
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.{EitherValues, LoneElement, OptionValues, TryValues}

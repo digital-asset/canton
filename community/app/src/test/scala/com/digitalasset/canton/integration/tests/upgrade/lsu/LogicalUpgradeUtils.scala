@@ -27,8 +27,6 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils
   UpgradeDataFiles,
 }
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
-import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerToKeyMapping}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
@@ -97,17 +95,12 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
       }
     }
 
-    def writeAuthorizeStoreToFile(node: InstanceReference): Unit = {
-      val byteString = node.topology.transactions
-        .export_topology_snapshotV2(
-          filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
-          filterNamespace = node.id.uid.namespace.filterString,
+    def writeAuthorizeStoreToFile(node: InstanceReference): Unit =
+      node.topology.transactions
+        .export_identity_transactionsV2(
+          s"${exportDirectory / node.name}-authorized-store",
+          successorPsid.protocolVersion,
         )
-      BinaryFileUtil.writeByteStringToFile(
-        s"${exportDirectory / node.name}-authorized-store",
-        byteString,
-      )
-    }
 
     def writeSequencerGenesisState(sequencer: SequencerReference): Unit =
       sequencer.topology.transactions.sequencer_lsu_state(
@@ -246,9 +239,7 @@ trait LogicalUpgradeUtils extends FutureHelpers with EitherValues {
       migratedNode.keys.secret.upload(keys, name)
     }
     migratedNode.topology.init_id_from_uid(files.uid)
-    migratedNode.health.wait_for_ready_for_node_topology()
-    migratedNode.topology.transactions
-      .import_topology_snapshotV2(files.authorizedStore, TopologyStoreId.Authorized)
+    migratedNode.health.wait_for_ready_for_initialization()
   }
 
   private def initializeSequencer(
@@ -279,7 +270,6 @@ object LogicalUpgradeUtils {
   final case class UpgradeDataFiles(
       uidFile: File,
       keyFiles: Seq[File],
-      authorizedStoreFile: File,
       genesisStateFile: File,
   ) {
     def uid: UniqueIdentifier =
@@ -291,9 +281,6 @@ object LogicalUpgradeUtils {
         val name = file.name.stripSuffix(".keys")
         key -> Option(name)
       }
-
-    def authorizedStore: ByteString =
-      BinaryFileUtil.tryReadByteStringFromFile(authorizedStoreFile.canonicalPath)
   }
 
   object UpgradeDataFiles {
@@ -305,7 +292,6 @@ object LogicalUpgradeUtils {
       UpgradeDataFiles(
         uidFile = baseDirectory / s"$nodeName-uid",
         keyFiles = keys,
-        authorizedStoreFile = baseDirectory / s"$nodeName-authorized-store",
         genesisStateFile = baseDirectory / s"$nodeName-genesis-state",
       )
     }

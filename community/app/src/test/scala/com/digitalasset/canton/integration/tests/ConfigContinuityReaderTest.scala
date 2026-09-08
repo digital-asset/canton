@@ -15,7 +15,7 @@ import com.digitalasset.canton.config.ConfigErrors.{
 import com.digitalasset.canton.integration.tests.ConfigContinuityReaderTest.Transforms
 import com.digitalasset.canton.integration.tests.manual.S3Synchronization
 import com.digitalasset.canton.version.ReleaseVersion
-import com.typesafe.config.{Config, ConfigFactory}
+import com.typesafe.config.{Config, ConfigFactory, ConfigValueFactory}
 import org.scalatest.wordspec.AnyWordSpec
 
 /** Simple test that loads config files in the /config folder for each release and verifies they
@@ -73,6 +73,11 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
 
           val parsedConfig = ConfigFactory.parseFile(initialConfigFile.toJava)
           val updatedConfig = makeParsable(parsedConfig, releaseVersion)
+            // Value in the config (34) is not supported anymore
+            .withValue(
+              "canton.participants.participant1.parameters.minimum-protocol-version",
+              ConfigValueFactory.fromAnyRef(35),
+            )
 
           transformedConfigFile.write(
             updatedConfig.root().render(CantonConfig.defaultConfigRenderer)

@@ -32,7 +32,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.lifecycle.UnlessShutdown
-import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.protocol.messages.{
@@ -45,11 +45,9 @@ import com.digitalasset.canton.sequencing.client.{SendResult, SequencerClient}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
-import org.scalatest
 import org.slf4j.event.Level
 
 import java.time.Duration
@@ -98,7 +96,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
 
   private var aggregationSequenced2: CantonTimestamp = _
   private var maxSequencingTimeOfAggregation: CantonTimestamp = _
-  private var topologyTimestampTombstone: CantonTimestamp = _
   private var aggregatedBatch: Batch[DefaultOpenEnvelope] = _
   private var aggregationRule1: AggregationRule = _
   private var aggregationRule2: AggregationRule = _
@@ -136,7 +133,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       maxSequencingTimeOfAggregation = now.add(
         Duration.ofMinutes(2)
       ) // cannot exceed the DynamicSynchronizerParameters.sequencerAggregateSubmissionTimeout (defaults to 5m)
-      topologyTimestampTombstone = now
       aggregatedBatch = Batch.of(
         testedProtocolVersion,
         RootHashMessage(
@@ -369,101 +365,6 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       }
     }
 
-    "new sequencer sends out tombstone for participant subscription on events before its initialization" onlyRunWith (ProtocolVersion.v34) in {
-      implicit env =>
-        import env.*
-
-        // participant3 now talks to the newly onboarded sequencer (it is already connected)
-        // What this test does is the following: the new sequencer cannot sign events with a
-        // timestamp before its onboarding. This test now sends a submission with a
-        // topologyTimestamp before the onboarding.
-        // The event will be sequenced because the topologyTimestamp is not checked in the write path
-        // but in the post process path on pv34, which is bad as it should be checked on the write and on the
-        // post process path. In that sense this test relied on a wart in the validation logic.
-        // As the old logic was that the sequencer must sign the event with the topology timestamp,
-        // it couldn't deliver it anymore.
-        // However, with pv35, topologyTimestamp cannot be used anymore which means that the
-        // condition doesn't exist and this test cannot be reproduced.
-        // TODO(#31863): remove this test with the deprecated tombstone logic
-        val logAssertions: Seq[LogEntry => scalatest.Assertion] =
-          Seq {
-            // Sequencer logs the tombstone on the read side, together with the event counter, timestamp at which it cannot sign and the member
-            (logEntry: LogEntry) =>
-              logEntry.loggerName should include(
-                "SequencerReader$EventsReader"
-              )
-              logEntry.warningMessage should (
-                include(
-                  "This sequencer cannot sign the event with sequencing timestamp"
-                ) and
-                  include(
-                    "for member PAR::participant3"
-                  ) and
-                  include(
-                    "at signing timestamp"
-                  )
-              )
-          } ++ Seq(
-            // The sequencer server's "direct subscription" warns it has terminated the server-side subscription.
-            // Note that because this is logged after the subscription has been canceled by the server, the
-            // sequencer-client-side warning/error below can be logged before this entry. Hence the use of
-            // "loggerFactory.assertLogsUnordered" above.
-            logEntry => {
-              logEntry.loggerName should include("DirectSequencerSubscription")
-              logEntry.warningMessage should (include(
-                "Subscription handler returned error"
-              ) and include(
-                "This sequencer cannot sign the event"
-              ))
-            },
-            // The participant's resilient sequencer subscription warns that it is giving up the sequencer-client-side
-            // subscription due to the tombstone error.
-            logEntry => {
-              logEntry.loggerName should include("SequencerSubscription")
-              logEntry.warningMessage should (include(
-                "Permanently closing sequencer subscription due to error"
-              ) and include("FAILED_PRECONDITION/SEQUENCER_TOMBSTONE_ENCOUNTERED"))
-
-            },
-            // The participant's sync service errors that the participant has lost access to the sequencer's
-            // corresponding synchronizer.
-            logEntry => {
-              logEntry.loggerName should include("SynchronizerConnectionsManager")
-              logEntry.errorMessage should include(
-                "SYNC_SERVICE_SYNCHRONIZER_DISCONNECTED"
-              )
-            },
-          )
-
-        val p3SequencerClient = sequencerClientOf(participant3, daId)
-        TraceContext.withNewTraceContext("tombstone") { implicit traceContext =>
-          loggerFactory.assertLogsUnordered(
-            {
-              logger.debug("Sending submission request with tombstone topology timestamp")
-              val send1ResultPromise = Promise[UnlessShutdown[SendResult]]()
-              p3SequencerClient
-                .send(
-                  Batch.empty(testedProtocolVersion),
-                  timestamps = SendRequestTimestamps(
-                    topologyTimestamp = Some(topologyTimestampTombstone),
-                    approximateTimestampForSigning = environment.now,
-                    maxSequencingTime = maxSequencingTimeOfAggregation,
-                  ),
-                  callback = send1ResultPromise.success,
-                  messageId = MessageId.tryCreate("tombstone-submission-request"),
-                )
-                .valueOrFailShutdown("tombstone submission request submission")
-                .futureValue
-              send1ResultPromise.future.futureValue
-              eventually() {
-                participant3.synchronizers.active(daName) shouldBe false
-              }
-            },
-            logAssertions*
-          )
-        }
-    }
-
     // TODO(#14573): this documents a bug and is ignored for the normal tests
     "mediator cannot change sequencer due to a connection due to a tombstoned subscription" ignore {
       implicit env =>
@@ -507,21 +408,7 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
       logger.debug("reconnect participant3 to sequencer 1")
       import env.*
 
-      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.DEBUG))(
-        modifyConnection(participant3, daName, sequencer1.sequencerConnection),
-        logs => {
-          inside(logs) {
-            case _ if testedProtocolVersion > ProtocolVersion.v34 => succeed
-            case x
-                if x.exists(r =>
-                  r.loggerName.contains("participant=participant3") && r.message.contains(
-                    "Deliver("
-                  ) && r.message.contains("message id = Some(tombstone-submission-request)")
-                ) && testedProtocolVersion == ProtocolVersion.v34 =>
-              succeed
-          }
-        },
-      )
+      modifyConnection(participant3, daName, sequencer1.sequencerConnection)
 
       participant3.health.ping(participant1, timeout = 30.seconds)
     }

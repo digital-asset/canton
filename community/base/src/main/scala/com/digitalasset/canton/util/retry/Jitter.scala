@@ -100,7 +100,9 @@ object Jitter {
           attempt: Int,
       ): FiniteDuration = {
         val temp = cappedPow(start, cap, base.toLong, attempt.toLong)
-        Duration(temp.length / 2 + random(0, temp.length / 2), temp.unit)
+        // Keep the larger half so a 1-unit delay can't round down to zero.
+        val half = temp.length / 2
+        Duration(temp.length - half + random(0, half), temp.unit)
       }
 
       override def toString = s"retry.Jitter.equal($cap, $random, $base)"

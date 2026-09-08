@@ -114,8 +114,6 @@ object ProtocolMessage {
   * by the recipient(s).
   */
 trait UnsignedProtocolMessage extends ProtocolMessage {
-  protected[messages] def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent
-
   protected[messages] def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent
 
   protected[messages] def toProtoSomeEnvelopeContentV32: v32.EnvelopeContent.SomeEnvelopeContent
@@ -206,7 +204,7 @@ object SignedProtocolMessage
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(
-      ProtocolVersion.v34
+      ProtocolVersion.v35
     )(v30.SignedProtocolMessage)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,

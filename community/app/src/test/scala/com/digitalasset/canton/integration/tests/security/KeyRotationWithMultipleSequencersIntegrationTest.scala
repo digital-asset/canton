@@ -32,10 +32,10 @@ trait KeyRotationWithMultipleSequencersIntegrationTest
         _.health.initialized() shouldBe true
       }
 
-      rotateAndTest(sequencer1, environment.clock.now)
-      rotateAndTest(sequencer2, environment.clock.now)
+      rotateAndTest(sequencer1, synchronizerId = daId, ct = environment.clock.now)
+      rotateAndTest(sequencer2, synchronizerId = daId, ct = environment.clock.now)
       loggerFactory.assertLogsUnorderedOptional(
-        rotateAndTest(mediator1, environment.clock.now),
+        rotateAndTest(mediator1, synchronizerId = daId, ct = environment.clock.now),
         (
           LogEntryOptionality.OptionalMany,
           /* It can occur, particularly when multiple sequencers are in use, that the first owner_to_key_mapping
@@ -66,7 +66,7 @@ trait KeyRotationWithMultipleSequencersIntegrationTest
 
         val owner = sequencer1.id.member
         val currentSigningKey =
-          getCurrentKey(sequencer1, KeyPurpose.Signing, Some(SigningKeyUsage.ProtocolOnly))
+          getCurrentKey(sequencer1, KeyPurpose.Signing, Some(SigningKeyUsage.ProtocolOnly), daId)
 
         // Sequencer nodes only have signing keys
         val newKey = sequencer1.keys.secret
@@ -81,6 +81,7 @@ trait KeyRotationWithMultipleSequencersIntegrationTest
             owner,
             currentSigningKey,
             newKey,
+            synchronizerId = daId,
           )
         )
     }

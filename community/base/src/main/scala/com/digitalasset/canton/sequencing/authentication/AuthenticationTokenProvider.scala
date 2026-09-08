@@ -249,6 +249,7 @@ class AuthenticationTokenProvider(
       _ = metricsO.foreach(
         _.connectionRequests.inc()(metricsContext.withExtraLabels("endpoint" -> "Authenticate"))
       )
+
       response <- CantonGrpcUtil
         .sendGrpcRequest(authenticationClient, s"sequencer-authentication-channel-$endpoint")(
           _.authenticate(

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.Eval
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.participant.store.AcsDigestStore.CheckpointType.ReconciliationIntervalBoundary
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
@@ -19,7 +20,7 @@ import com.digitalasset.canton.platform.store.interning.{MockStringInterning, St
 import com.digitalasset.canton.protocol.ExampleTransactionFactory
 import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
-import com.digitalasset.canton.{BaseTest, InternedPartyId, LfPartyId}
+import com.digitalasset.canton.{BaseTest, InternedPartyId, LedgerParticipantId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.IdString
 
@@ -38,6 +39,9 @@ trait AcsDigestTestBase extends TestDigestUtils {
 
   protected def internedPartyId(partyId: LfPartyId): InternedPartyId =
     mockStringInterning.party.internalize(partyId)
+
+  protected def internedParticipantId(participantId: LedgerParticipantId): InternedParticipantId =
+    mockStringInterning.participantId.internalize(participantId)
 
   protected def indexedSynchronizer(synchronizerIndex: Int, name: String): IndexedSynchronizer = {
     val synchronizerId: SynchronizerId = SynchronizerId.tryFromString(s"$name::id")
@@ -66,6 +70,7 @@ trait AcsDigestTestBase extends TestDigestUtils {
     new InMemoryAcsCommitmentPeriodStore(
       Eval.now(stringInterning),
       loggerFactory,
+      FutureSupervisor.Noop,
       enableConsistencyChecks = true,
     )
 

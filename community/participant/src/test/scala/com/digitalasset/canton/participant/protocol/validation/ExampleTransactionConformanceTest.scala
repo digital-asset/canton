@@ -422,6 +422,7 @@ class ExampleTransactionConformanceTest
           contractOfId = contractOfId,
           maxSequencingTime = factory.ledgerTime.plusSeconds(100),
           validatePackageVettings = true,
+          limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
         )
 
         for {
@@ -494,6 +495,7 @@ class ExampleTransactionConformanceTest
           contractOfId = contractOfId,
           maxSequencingTime = factory.ledgerTime.plusSeconds(100),
           validatePackageVettings = true,
+          limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
         )
 
         def treeWithCheckingParties(

@@ -146,14 +146,19 @@ class AutomaticReassignmentCrashIntegrationTest
       remoteP1.health.wait_for_initialized()
 
       eventually(1.minute) {
-        try {
-          val time = remoteP1.health.ping(remoteP1)
-          logger.info(s"Ping succeeded in $time")
-        } catch {
-          // Translate any CommandExecutionFailedException to a TestFailedException
-          // Because `eventually` will only retry on a TestFailedException
-          case _: CommandFailure =>
-            fail()
+        // Suppress expected connection errors (e.g., NOT_CONNECTED_TO_ANY_SYNCHRONIZER)
+        // Since the participant node was just restarted, pings will predictably fail
+        // and log noisy errors until it is reconnected to the synchronizer.
+        loggerFactory.suppressWarningsAndErrors {
+          try {
+            val time = remoteP1.health.ping(remoteP1)
+            logger.info(s"Ping succeeded in $time")
+          } catch {
+            // Translate any CommandExecutionFailedException to a TestFailedException
+            // Because `eventually` will only retry on a TestFailedException
+            case _: CommandFailure =>
+              fail()
+          }
         }
       }
 

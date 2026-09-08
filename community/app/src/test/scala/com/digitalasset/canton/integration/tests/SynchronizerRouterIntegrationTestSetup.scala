@@ -31,7 +31,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{Party, PartyId, SynchronizerId}
 import org.scalatest.LoneElement.convertToCollectionLoneElementWrapper
 
-import java.util.{List as JList, Optional}
+import java.util.{Optional, List as JList}
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 

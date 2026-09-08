@@ -12,6 +12,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   CostEstimation,
   ExecuteSubmissionAndWaitForTransactionResponse,
   ExecuteSubmissionAndWaitResponse,
+  ReassignmentCost,
 }
 import com.daml.ledger.api.v2.transaction_filter.TransactionFormat
 import com.daml.ledger.api.v2.update_service.GetUpdateResponse
@@ -27,13 +28,14 @@ import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.
   PrepareRequest as PrepareRequestInternal,
 }
 import com.digitalasset.canton.ledger.api.validation.GetPreferredPackagesRequestValidator.PackageVettingRequirements
-import com.digitalasset.canton.ledger.api.{Commands as ApiCommands, PackageReference}
+import com.digitalasset.canton.ledger.api.{PackageReference, Commands as ApiCommands}
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.{
   InteractiveSubmissionExecuteError,
   InteractiveSubmissionPreparationError,
 }
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SubmissionResult
+import com.digitalasset.canton.ledger.participant.state.SyncService.ReassignmentCostEstimation
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -67,6 +69,7 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
 }
 import com.digitalasset.canton.platform.apiserver.services.{RejectionGenerators, logging}
 import com.digitalasset.canton.platform.config.InteractiveSubmissionServiceConfig
+import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
@@ -254,33 +257,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
         case HashTracer.NoOp => None
         case stringTracer: HashTracer.StringHashTracer => Some(stringTracer.result)
       }
-      costEstimation <- costEstimationHints.traverse { costHints =>
-        syncService
-          .estimateTrafficCost(
-            synchronizerId = commandExecutionResult.synchronizerRank.synchronizerId.logical,
-            transaction = commandExecutionResult.commandInterpretationResult.transaction,
-            transactionMetadata =
-              commandExecutionResult.commandInterpretationResult.transactionMeta,
-            submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo,
-            disclosedContracts =
-              commandExecutionResult.commandInterpretationResult.processedDisclosedContracts
-                .map(contract => contract.contractId -> contract)
-                .toList
-                .toMap,
-            costHints = costHints,
-          )
-          .map { estimation =>
-            CostEstimation(
-              Some(estimation.estimationTimestamp.toProtoTimestamp),
-              estimation.confirmationRequestCost.value,
-              estimation.confirmationResponseCost.value,
-              estimation.totalCost.value,
-            )
-          }
-          .leftMap(InteractiveSubmissionPreparationError.Reject(_))
-          .leftWiden[RpcError]
-      }
-
+      costEstimation <- costEstimationHints.traverse(doCostEstimations(commandExecutionResult, _))
       _ <- trafficEnforcementBackendO.traverse(trafficEnforcementBackend =>
         trafficEnforcementBackend
           .validateTraffic(
@@ -300,6 +277,61 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
 
     result.value.map(_.leftMap(_.asGrpcError).toTry).flatMap(FutureUnlessShutdown.fromTry)
   }
+
+  private def doCostEstimations(
+      commandExecutionResult: CommandExecutionResult,
+      costEstimationHints: CostEstimationHints,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, RpcError, CostEstimation] = {
+    val submitterInfo = commandExecutionResult.commandInterpretationResult.submitterInfo
+    val synchronizerId = commandExecutionResult.synchronizerRank.synchronizerId
+
+    (for {
+      estimation <- syncService.estimateTrafficCost(
+        synchronizerId = synchronizerId.logical,
+        transaction = commandExecutionResult.commandInterpretationResult.transaction,
+        transactionMetadata = commandExecutionResult.commandInterpretationResult.transactionMeta,
+        submitterInfo = submitterInfo,
+        disclosedContracts =
+          commandExecutionResult.commandInterpretationResult.processedDisclosedContracts
+            .map(contract => contract.contractId -> contract)
+            .toList
+            .toMap,
+        costHints = costEstimationHints,
+      )
+      reassignEstimations <- syncService.estimateReassignmentCosts(
+        synchronizerRank = commandExecutionResult.synchronizerRank,
+        submitterInfo = submitterInfo,
+        targetSynchronizer = synchronizerId,
+      )
+    } yield CostEstimation(
+      estimationTimestamp = Some(estimation.estimationTimestamp.toProtoTimestamp),
+      confirmationRequestTrafficCostEstimation = estimation.confirmationRequestCost.value,
+      confirmationResponseTrafficCostEstimation = estimation.confirmationResponseCost.value,
+      totalTrafficCostEstimation =
+        estimation.totalCost.value + reassignEstimations.map(_.totalCost.value).sum,
+      reassignmentCosts = toProto(reassignEstimations),
+    ))
+      .leftMap(InteractiveSubmissionPreparationError.Reject(_))
+      .leftWiden[RpcError]
+  }
+
+  private def toProto(
+      reassignEstimations: Seq[ReassignmentCostEstimation]
+  ): Seq[ReassignmentCost] =
+    reassignEstimations.map { estimation =>
+      ReassignmentCost(
+        sourceSynchronizerId = estimation.sourceSynchronizerId.toProtoPrimitive,
+        targetSynchronizerId = estimation.targetSynchronizerId.toProtoPrimitive,
+        contractIds = estimation.contractIds.map(_.toProtoPrimitive),
+        unassignmentRequestTrafficCostEstimation = estimation.unassignmentRequestCost.value,
+        unassignmentResponseTrafficCostEstimation = estimation.unassignmentResponseCost.value,
+        assignmentRequestTrafficCostEstimation = estimation.assignmentRequestCost.value,
+        assignmentResponseTrafficCostEstimation = estimation.assignmentResponseCost.value,
+        totalReassignmentCostEstimation = estimation.totalCost.value,
+      )
+    }
 
   override def close(): Unit = ()
 

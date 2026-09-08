@@ -33,10 +33,6 @@ final case class TopologyTransactionsBroadcast(
   @transient override protected lazy val companionObj: TopologyTransactionsBroadcast.type =
     TopologyTransactionsBroadcast
 
-  override protected[messages] def toProtoSomeEnvelopeContentV30
-      : v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.TopologyTransactionsBroadcast(toProtoV30)
-
   override protected[messages] def toProtoSomeEnvelopeContentV31
       : v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.TopologyTransactionsBroadcast(toProtoV30)
@@ -81,7 +77,7 @@ object TopologyTransactionsBroadcast
     }
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.TopologyTransactionsBroadcast
     )(
       supportedProtoVersion(_)(fromProtoV30),

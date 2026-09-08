@@ -543,7 +543,7 @@ unstable_test_slow:
         num_parallel_tasks: "1"
         succeed_on_error: true
         fail_on_error_in_output: false # We won't fail anyway, but this also skips checking of stdout
-        timeout: 60m
+        timeout: 240m # Generous timeouts. Unfortunately, it is difficult to split tests, as split_tests_for_parallel_run does not see UnstableTest annotations
 
 unit_test_coverage:
   executor: canton-xlarge-docker-with-postgres-toxiproxy

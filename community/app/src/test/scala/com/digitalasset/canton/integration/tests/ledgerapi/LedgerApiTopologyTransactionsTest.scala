@@ -36,10 +36,10 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
 }
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.transaction.{
-  ParticipantPermission as PP,
   PartyToParticipant,
   TopologyChangeOp,
   TopologyMapping,
+  ParticipantPermission as PP,
 }
 import com.digitalasset.canton.topology.{PartyKind, SynchronizerId}
 import com.digitalasset.canton.{LfPartyId, config}

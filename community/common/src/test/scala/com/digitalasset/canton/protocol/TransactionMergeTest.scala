@@ -381,47 +381,6 @@ class TransactionMergeTest
       )
     }
 
-    // PV35 onwards does not allow effectful rollbacks
-    "gracefully reject contract ids escaping their rollback context" onlyRunWithOrLessThan ProtocolVersion.v34 in {
-      val cid = newLfContractId()
-      val tx1 = WithRollbackScope(
-        rollbackScopeForPath(Seq(1)),
-        WellFormedTransaction
-          .check(
-            transaction(
-              Seq(0),
-              createNode(cid, signatories = Set(signatory)),
-            ),
-            factory.mkMetadata(Map(NodeId(0) -> lfHash(0))),
-            WithAbsoluteSuffixes,
-            rollbackContextFactory,
-          )
-          .value,
-      )
-
-      val tx2 = WithRollbackScope(
-        emptyRollbackScope,
-        WellFormedTransaction
-          .check(
-            transaction(
-              Seq(0),
-              fetchNode(cid, Set(signatory), Set(signatory)),
-            ),
-            factory.mkMetadata(Map.empty),
-            WithAbsoluteSuffixes,
-            rollbackContextFactory,
-          )
-          .value,
-      )
-
-      val transactions = NonEmpty(Seq, tx1, tx2)
-
-      val (_, errorO) = underTest.merge(transactions)
-      errorO shouldBe Some(
-        s"Contract id ${cid.coid} created node with NodeId(1) in rollback scope 1 referenced outside in rollback scope  of node NodeId(2)"
-      )
-    }
-
     "gracefully reject on duplicate creates" in {
       val cid = newLfContractId()
       val tx1 = WithRollbackScope(

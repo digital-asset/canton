@@ -182,7 +182,7 @@ class TopologyTicksIntegrationTest
 
         runAsyncAndAdvanceClockUntilFinished(
           bootstrap
-            .upload_new_sequencer_identity_transactions(daId.logical, sequencer2, sequencer1),
+            .upload_new_sequencer_identity_transactions(daId, sequencer2, sequencer1),
           simClock,
           deltaTime = epsilon,
         )

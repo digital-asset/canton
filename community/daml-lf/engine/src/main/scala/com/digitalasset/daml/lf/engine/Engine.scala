@@ -14,7 +14,7 @@ import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, ParticipantId, Party, TypeConId}
-import com.digitalasset.daml.lf.interpretation.{Error as IError, InterpretationConfig}
+import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IError}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, LookupError, PackageInterface, *}
 import com.digitalasset.daml.lf.speedy.*
@@ -34,9 +34,9 @@ import com.digitalasset.daml.lf.transaction.{
   NeedKeyProgression,
   Node,
   SubmittedTransaction,
-  Transaction as Tx,
   Versioned,
   VersionedTransaction,
+  Transaction as Tx,
 }
 import com.digitalasset.daml.lf.validation.Validation
 import com.digitalasset.daml.lf.value.Value.ContractId

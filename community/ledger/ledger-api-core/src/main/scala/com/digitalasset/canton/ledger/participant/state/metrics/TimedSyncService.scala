@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.SyncService.{
   ConnectedSynchronizerRequest,
   ConnectedSynchronizerResponse,
+  ReassignmentCostEstimation,
   SubmissionCostEstimation,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -309,6 +310,15 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       disclosedContracts,
       costHints,
     )
+
+  override def estimateReassignmentCosts(
+      synchronizerRank: SynchronizerRank,
+      submitterInfo: SubmitterInfo,
+      targetSynchronizer: PhysicalSynchronizerId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Seq[ReassignmentCostEstimation]] =
+    delegate.estimateReassignmentCosts(synchronizerRank, submitterInfo, targetSynchronizer)
 
   override def physicalSynchronizerIdForSynchronizerId(
       synchronizerId: SynchronizerId

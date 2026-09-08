@@ -23,6 +23,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
   SynchronizerLimits,
+  TransactionProtocolLimits,
 }
 import com.digitalasset.canton.scalatest.{ScalaFuturesWithPatience, ScalatestEssentials}
 import com.digitalasset.canton.sequencing.HandlerResult
@@ -89,6 +90,8 @@ trait TestEssentials extends ScalatestEssentials with NamedLogging {
     BaseTest.testedReleaseProtocolVersion
   protected lazy val defaultStaticSynchronizerParameters: StaticSynchronizerParameters =
     BaseTest.defaultStaticSynchronizerParameters
+  protected lazy val defaultProtocolLimits: TransactionProtocolLimits =
+    BaseTest.defaultProtocolLimits
 
   protected implicit lazy val testedHashingSchemeVersion: HashingSchemeVersion =
     HashingSchemeVersion.getHashingSchemeVersionsForProtocolVersion(testedProtocolVersion).last1
@@ -628,6 +631,9 @@ object BaseTest extends EitherValues {
   lazy val defaultStaticSynchronizerParameters: StaticSynchronizerParameters =
     defaultStaticSynchronizerParametersWith()
 
+  lazy val defaultProtocolLimits: TransactionProtocolLimits =
+    defaultStaticSynchronizerParameters.synchronizerLimits.transactionProtocolLimits
+
   def defaultStaticSynchronizerParametersWith(
       topologyChangeDelay: NonNegativeFiniteDuration =
         StaticSynchronizerParameters.defaultTopologyChangeDelay,
@@ -645,6 +651,8 @@ object BaseTest extends EitherValues {
         enableTransparencyChecks = false,
         protocolVersion = protocolVersion,
         serial = NonNegativeInt.zero,
+        // Used to set protocol limits during testing
+        // - limit checking can be disabled by using SynchronizerLimits.max
         synchronizerLimits = SynchronizerLimits.defaultFor(protocolVersion),
       )
       .value

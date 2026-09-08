@@ -8,10 +8,10 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.SecureConfiguration
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.admin.api.client.data.{
-  DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
   OnboardingRestriction,
   ParticipantSynchronizerLimits,
   TrafficControlParameters,
+  DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
 }
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName

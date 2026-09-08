@@ -96,6 +96,7 @@ class TransactionConfirmationRequestFactory(
       contractInstanceOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
       protocolVersion: ProtocolVersion,
+      limitConfig: TransactionViewLimitConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -130,6 +131,7 @@ class TransactionConfirmationRequestFactory(
           contractInstanceOfId,
           maxSequencingTime,
           validatePackageVettings = true,
+          limitConfig = limitConfig,
         )
         .leftMap(TransactionTreeFactoryError.apply)
 
@@ -522,7 +524,7 @@ class TransactionConfirmationRequestFactory(
       def createOpenEnvelopes(
           lightTreesByRecipients: Seq[(Recipients, NonEmpty[Seq[LightTransactionViewTree]])]
       ): EitherT[FutureUnlessShutdown, TransactionConfirmationRequestCreationError, Seq[
-        OpenEnvelope[EncryptedMultipleViewsMessage[TransactionViewType.type]]
+        OpenEnvelope[EncryptedViewMessage[TransactionViewType.type]]
       ]] = {
         def encryptViews(
             lightTrees: NonEmpty[Seq[LightTransactionViewTree]],
@@ -557,38 +559,16 @@ class TransactionConfirmationRequestFactory(
       val lightTreesWithRecipientsE = viewsWithWitnessesAndRecipients.toNEF
         .traverse(makeLightTransactionViewTreeWithRecipient)
 
-      if (protocolVersion >= ProtocolVersion.v35) {
-        val lightTreesByRecipientsE =
-          lightTreesWithRecipientsE.map(groupLightTransactionViewTreesByRecipientsWithOrder)
+      val lightTreesByRecipientsE =
+        lightTreesWithRecipientsE.map(groupLightTransactionViewTreesByRecipientsWithOrder)
 
-        for {
-          lightTreesByRecipients <- EitherT.fromEither[FutureUnlessShutdown](
-            lightTreesByRecipientsE
-          )
-          envelopes <- createOpenEnvelopes(lightTreesByRecipients)
-        } yield envelopes
-      } else {
-        for {
-          lightTreeWithRecipients <- EitherT.fromEither[FutureUnlessShutdown](
-            lightTreesWithRecipientsE
-          )
-          recipients = lightTreeWithRecipients.map(_._1)
-          messages <- EncryptedViewMessageFactory
-            .encryptNonGroupedViews(TransactionViewType)(
-              lightTreeWithRecipients,
-              viewKeyDataMap,
-              submittingParticipantSignature,
-              cryptoSnapshot,
-              protocolVersion,
-              parallel,
-            )
-            .leftMap[TransactionConfirmationRequestCreationError](
-              EncryptedViewMessageCreationError.apply
-            )
-        } yield messages.zip(recipients).map { case (message, recipients) =>
-          OpenEnvelope(message, recipients)(protocolVersion)
-        }
-      }
+      for {
+        lightTreesByRecipients <- EitherT.fromEither[FutureUnlessShutdown](
+          lightTreesByRecipientsE
+        )
+        envelopes <- createOpenEnvelopes(lightTreesByRecipients)
+      } yield envelopes
+
     }
 
     for {

@@ -67,15 +67,17 @@ sealed trait MediatorTest extends CommunityIntegrationTest with SharedEnvironmen
   "Onboard new mediators" in { implicit env =>
     import env.*
 
-    val med2Identity = mediator2.topology.transactions.list()
-    val med3Identity = mediator3.topology.transactions.list()
+    val med2Identity =
+      mediator2.topology.transactions.generate_onboarding_transactions(testedProtocolVersion)
+    val med3Identity =
+      mediator3.topology.transactions.generate_onboarding_transactions(testedProtocolVersion)
 
     clue("onboarding mediator2") {
       clue(s"load $mediator2 identity") {
         synchronizerOwners.foreach(
           _.topology.transactions
             .load(
-              med2Identity.result.map(_.transaction),
+              med2Identity,
               store = synchronizerId,
               ForceFlag.AlienMember,
             )
@@ -102,7 +104,7 @@ sealed trait MediatorTest extends CommunityIntegrationTest with SharedEnvironmen
         synchronizerOwners.foreach(
           _.topology.transactions
             .load(
-              med3Identity.result.map(_.transaction),
+              med3Identity,
               synchronizerId,
               ForceFlag.AlienMember,
             )

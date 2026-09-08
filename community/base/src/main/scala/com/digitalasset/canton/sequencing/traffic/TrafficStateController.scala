@@ -190,7 +190,6 @@ class TrafficStateController(
         batch.map(_.toClosedUncompressedEnvelope),
         trafficControl.readVsWriteScalingFactor,
         groupToMembers,
-        protocolVersion,
         trafficControl.baseEventCost,
       )
       if (logCost) {

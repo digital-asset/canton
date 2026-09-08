@@ -462,23 +462,12 @@ class ModelConformanceChecker(
         snapshot.activeParticipantsOfParties(informees.toSeq)
 
       informeeParticipants = informeeParticipantsByParty.values.flatten.toSet
-      // Don't check vetting of package dependencies for protocol version v35 and beyond
-      checkDependencyVetting = protocolVersion <= ProtocolVersion.v34
-      packagesForVettingChecks =
-        if (checkDependencyVetting) {
-          // Even though it's redundant with package dependency vetting checks,
-          // preserve protocol version 34 behavior of passing all used packages from reinterpretation to loadUnvettedPackagesOrDependencies
-          usedPackages.allUsedPackageIds
-        } else {
-          // For protocol version v35 and beyond, only pass the directly used packages to loadUnvettedPackagesOrDependencies
-          usedPackages.actionNodePackageIds
-        }
+
       unvetted <- MonadUtil.parTraverseWithLimit(parallelism)(informeeParticipants)(p =>
         snapshot.loadUnvettedPackagesOrDependencies(
           participantId = p,
-          packages = packagesForVettingChecks,
+          packages = usedPackages.actionNodePackageIds,
           ledgerTime = ledgerTime,
-          checkDependencyVetting = checkDependencyVetting,
         )
       )
     } yield {
@@ -496,7 +485,6 @@ class ModelConformanceChecker(
     val requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]] = Blinding.partyPackages(tx)
     UsableSynchronizers
       .checkRequiredPackagesByParty(
-        protocolVersion,
         snapshot,
         requiredPackagesByParty,
         ledgerTime,

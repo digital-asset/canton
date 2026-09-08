@@ -21,7 +21,6 @@ import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConf
 import com.digitalasset.canton.platform.config.{
   CommandServiceConfig,
   IdentityProviderManagementConfig,
-  IndexServiceConfig as LedgerIndexServiceConfig,
   InteractiveSubmissionServiceConfig,
   PackageServiceConfig,
   PartyManagementServiceConfig,
@@ -30,6 +29,7 @@ import com.digitalasset.canton.platform.config.{
   TrafficAccountingConfig,
   UpdateServiceConfig,
   UserManagementServiceConfig,
+  IndexServiceConfig as LedgerIndexServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
@@ -392,7 +392,7 @@ final case class ParticipantNodeParameterConfig(
     caching: CachingConfigs = CachingConfigs(),
     stores: ParticipantStoreConfig = ParticipantStoreConfig(),
     minimumProtocolVersion: Option[ParticipantProtocolVersion] = Some(
-      ParticipantProtocolVersion(ProtocolVersion.v34)
+      ParticipantProtocolVersion(ProtocolVersion.v35)
     ),
     devVersionSupport: Boolean = false,
     alphaVersionSupport: Boolean = false,
@@ -434,14 +434,14 @@ final case class ParticipantNodeParameterConfig(
 
 /** Config for the ACS commitment processing pipeline.
   *
-  * @param enableRunningDigestProcessor
+  * @param enableNewAcsCommitmentProcessor
   *   whether the new ACS digest processor should be enabled or not. Default is false.
   * @param disableOldAcsCommitmentProcessor
-  *   whether the old ACS commitment processor should be disabled. Default is false. Do not disable
-  *   the old ACS commitment processor in production!
+  *   whether the old ACS commitment processor should be disabled. Default is on new protocol
+  *   versions.
   * @param maxNumUpdatesBetweenCheckpoints
   *   the maximum number of acs updates after which a checkpoint should be written. Default is
-  *   10000.
+  *   100000.
   * @param counterpartyBatchSize
   *   how many counterparties get their digest updated at a time in case of a local party onboarding
   *   or offboarding. With the assumption that a party may have a lot of counterparties, but each
@@ -466,7 +466,7 @@ final case class ParticipantNodeParameterConfig(
   *   the batching config for loading digests in the digest accumulator.
   * @param maxNumLoadedDigests
   *   the maximum number of digests that may be loaded into memory during processing. Default is
-  *   1000.
+  *   10000.
   * @param digestUpdatePersistenceBatchFactor
   *   the maximum size of digest update batches is calculated by multiplying `maxNumLoadedDigests *
   *   digestUpdatePersistenceBatchFactor`. Default is 2.
@@ -510,14 +510,16 @@ final case class ParticipantNodeParameterConfig(
   *   the parallelism, the higher the potential load on the DB. Default is 6.
   */
 final case class AcsCommitmentConfig(
-    enableRunningDigestProcessor: Boolean = true,
-    disableOldAcsCommitmentProcessor: Boolean = false,
+    enableNewAcsCommitmentProcessor: Boolean = true,
+    disableOldAcsCommitmentProcessor: AcsCommitmentConfig.DisableOldAcsCommitmentProcessor =
+      AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.OnNewProtocolVersions,
     maxNumUpdatesBetweenCheckpoints: PositiveInt = PositiveInt.tryCreate(100_000),
     counterpartyBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     tracing: AcsDigestTracingMode = AcsDigestTracingMode.Disabled,
     receivedCommitmentValidationParallelism: PositiveInt = PositiveInt.tryCreate(1),
     reinitializingJournalTombstonesBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     sender: AcsCommitmentSenderConfig = AcsCommitmentSenderConfig(),
+    consistencyCheck: AcsCommitmentConsistencyCheckConfig = AcsCommitmentConsistencyCheckConfig(),
     periodStore: AcsCommitmentPeriodConfig = AcsCommitmentPeriodConfig(),
     useSequentialDigestAccumulator: Boolean = false,
     loadBatching: BatchAggregatorConfig = BatchAggregatorConfig(),
@@ -534,6 +536,37 @@ final case class AcsCommitmentConfig(
     maxParallelActiveIdQueries: PositiveInt = PositiveInt.tryCreate(12),
     maxParallelPayloadCreateQueries: PositiveInt = PositiveInt.tryCreate(6),
 )
+
+object AcsCommitmentConfig {
+
+  /** Determines the protocol versions for which the old ACS commitment processor is disabled */
+  sealed trait DisableOldAcsCommitmentProcessor extends Product with Serializable
+  object DisableOldAcsCommitmentProcessor {
+
+    /** The ACS commitment processor is disabled for all protocol versions. Do not use in
+      * production!
+      */
+    case object Always extends DisableOldAcsCommitmentProcessor
+
+    /** The ACS commitment processor is disabled on protocol versions that support the new
+      * commitments.
+      */
+    case object OnNewProtocolVersions extends DisableOldAcsCommitmentProcessor
+
+    /** The ACS commitment processor is running on all protocol versions. */
+    case object Never extends DisableOldAcsCommitmentProcessor
+
+    private[canton] def isOldProcessorEnabled(
+        state: DisableOldAcsCommitmentProcessor,
+        protocolVersion: ProtocolVersion,
+    ): Boolean =
+      state match {
+        case Always => false
+        case Never => true
+        case OnNewProtocolVersions => protocolVersion < ProtocolVersion.acsCommitmentRedesign
+      }
+  }
+}
 
 /** Config for [[com.digitalasset.canton.participant.commitment.AcsCommitmentSender]]
   *
@@ -560,12 +593,26 @@ final case class AcsCommitmentSenderConfig(
 )
 
 object AcsCommitmentSenderConfig {
-  lazy val defaultMaxBatchSize: PositiveInt = PositiveInt.tryCreate(100)
-  lazy val defaultParallelism: PositiveInt = PositiveInt.tryCreate(10)
-  lazy val defaultMaxRetryDelay: config.NonNegativeFiniteDuration =
+  val defaultMaxBatchSize: PositiveInt = PositiveInt.tryCreate(100)
+  val defaultParallelism: PositiveInt = PositiveInt.tryCreate(10)
+  val defaultMaxRetryDelay: config.NonNegativeFiniteDuration =
     config.NonNegativeFiniteDuration(FiniteDuration(10, TimeUnit.SECONDS))
-  lazy val defaultMinSendDelayFraction: Double = 0.0d
-  lazy val defaultMaxSendDelayFraction: Double = 0.9d
+  val defaultMinSendDelayFraction: Double = 0.0d
+  val defaultMaxSendDelayFraction: Double = 0.9d
+}
+
+/** @param journalSnapshotQueryLimit
+  *   The limit (page size) passed to the
+  *   [[com.digitalasset.canton.participant.store.AcsDigestStore.DigestJournal#snapshot]] when
+  *   retrieving ACS digest updates continously. Default is 100.
+  */
+final case class AcsCommitmentConsistencyCheckConfig(
+    journalSnapshotQueryLimit: PositiveInt =
+      AcsCommitmentConsistencyCheckConfig.defaultJournalSnapshotQueryLimit
+)
+
+object AcsCommitmentConsistencyCheckConfig {
+  val defaultJournalSnapshotQueryLimit: PositiveInt = PositiveInt.tryCreate(100)
 }
 
 final case class AcsCommitmentPeriodConfig(

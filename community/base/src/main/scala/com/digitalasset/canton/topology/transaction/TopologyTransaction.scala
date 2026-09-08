@@ -233,7 +233,7 @@ object TopologyTransaction
 
   val versioningTable: VersioningTable =
     VersioningTable(
-      ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v34)(v30.TopologyTransaction)(
+      ProtoVersion(30) -> VersionedProtoCodec.applyE(ProtocolVersion.v35)(v30.TopologyTransaction)(
         supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
         _.toProtoV30,
       )

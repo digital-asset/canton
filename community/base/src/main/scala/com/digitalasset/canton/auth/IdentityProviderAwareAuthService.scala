@@ -8,11 +8,11 @@ import com.daml.jwt.{
   AuthServiceJWTCodec,
   AuthServiceJWTPayload,
   DecodedJwt,
-  Error as JwtError,
   JwtFromBearerHeader,
   JwtVerifier,
   PartyJWTPayload,
   StandardJWTPayload,
+  Error as JwtError,
 }
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext

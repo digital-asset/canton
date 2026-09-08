@@ -17,6 +17,7 @@ message DynamicSequencingParametersPayload {
   int32 max_batches_per_proposal = 5;
   google.protobuf.Duration pbft_view_change_timeout_step = 6;
   google.protobuf.Duration pbft_view_change_timeout_upper_bound = 7;
+  bool stricter_detection_of_requests_potentially_changing_ordering_topology = 8;
 }
 
 message BlacklistLeaderSelectionPolicy {

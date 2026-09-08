@@ -238,13 +238,17 @@ object MerkleTree {
         )
     })
 
-  def fromProtoOptionV30[NodeType](
+  /** Call this with this option if the structure being decoded does not contain a MerkleSeq */
+  def fromProtoOptionV30NoMerkleSeq[NodeType](
       protoNode: Option[v30.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] =
-    fromProtoOptionV30WithCounter(protoNode, DepthCounter.Default, (bytes, _) => f(bytes))
+    fromProtoOptionV30WithMerkleSeq(protoNode, DepthCounter.ZeroLimit, (bytes, _) => f(bytes))
 
-  def fromProtoOptionV30WithCounter[NodeType](
+  /** Call this method with if the structure being decoded may contain a MerkleSeq, the depthCounter
+    * is used to limit the depth of the MerkleSeq to avoid stack overflows.
+    */
+  def fromProtoOptionV30WithMerkleSeq[NodeType](
       protoNode: Option[v30.BlindableNode],
       depthCounter: DepthCounter,
       f: (ByteString, DepthCounter) => ParsingResult[MerkleTree[NodeType]],

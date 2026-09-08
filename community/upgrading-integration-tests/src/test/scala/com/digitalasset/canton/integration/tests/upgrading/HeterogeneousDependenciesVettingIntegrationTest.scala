@@ -30,11 +30,8 @@ import com.digitalasset.canton.{LfPackageId, LfPackageName}
 import scala.jdk.CollectionConverters.{CollectionHasAsScala, MapHasAsJava, MapHasAsScala}
 import scala.jdk.OptionConverters.{RichOption, RichOptional}
 
-import dvpassets.v1.java.assets.Share as ShareV1
-import dvpassets.v2.java.assets.Share as ShareV2
-import dvpassets.v1.java.assets.Iou as IouV1
-import dvpassets.v2.java.assets.Iou as IouV2
-import dvpassets.v2.java.assets.Meta as AssetsMeta
+import dvpassets.v1.java.assets.{Iou as IouV1, Share as ShareV1}
+import dvpassets.v2.java.assets.{Iou as IouV2, Meta as AssetsMeta, Share as ShareV2}
 import dvpoffer.v1.java.dvpoffer.DvpOffer as DvpOfferV1
 import dvpoffer.v2.java.dvpoffer.DvpOffer as DvpOfferV2
 import UpgradingBaseTest.Syntax.*

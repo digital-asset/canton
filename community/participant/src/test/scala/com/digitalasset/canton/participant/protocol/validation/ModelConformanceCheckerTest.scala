@@ -290,18 +290,6 @@ class ModelConformanceCheckerTest
       verifyExample(underTest, example)
     }
 
-    "exceptionTesterCreateFail" in {
-      if (testedProtocolVersion <= ProtocolVersion.v34) {
-        verifyExample(underTest, exampleFactory.exceptionTesterCreateFail())
-      }
-    }
-
-    "exceptionTesterConsumingExec" in {
-      if (testedProtocolVersion <= ProtocolVersion.v34) {
-        verifyExample(underTest, exampleFactory.exceptionTesterConsumingExec())
-      }
-    }
-
     "pass with projected views" in {
 
       // This example has a top level view visible to Alice and two subviews visible to Bob
@@ -870,6 +858,7 @@ class ModelConformanceCheckerTest
           contractOfId = contractOfId,
           maxSequencingTime = CantonTimestamp.MaxValue,
           validatePackageVettings = false,
+          limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
         )
     ).value
 

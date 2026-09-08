@@ -30,7 +30,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.{
   allCheckpointsFilter,
 }
 import com.digitalasset.canton.participant.store.{AcsDigestStore, AcsDigestTestBase}
-import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
+import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ReassignmentCounter}
@@ -380,6 +380,8 @@ class BaseDigestProcessorTest
     override protected def timeouts: ProcessingTimeout = BaseDigestProcessorTest.this.timeouts
 
     override def synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId
+
+    override def thisParticipantId: ParticipantId = ???
 
     override protected def loggerFactory: NamedLoggerFactory =
       BaseDigestProcessorTest.this.loggerFactory

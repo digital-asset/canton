@@ -49,7 +49,6 @@ import com.digitalasset.canton.protocol.{
   StaticSynchronizerParameters,
   SynchronizerParametersLookup,
   TestSynchronizerParameters,
-  v30,
   v31,
   v32,
 }
@@ -2133,9 +2132,6 @@ final class SequencerClientTest
       fail("shouldn't be used")
 
     override protected val companionObj: AnyRef = TestProtocolMessage
-
-    override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
-      v30.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
       v31.EnvelopeContent.SomeEnvelopeContent.Empty

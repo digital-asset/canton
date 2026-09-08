@@ -7,8 +7,7 @@ import scalaz.Foldable1
 
 import scala.collection.immutable as imm
 
-import imm.Map
-import imm.Set
+import imm.{Map, Set}
 import NonEmptyCollCompat.*
 
 /** Functions where ''the receiver'' is non-empty can be found implicitly with no further imports;

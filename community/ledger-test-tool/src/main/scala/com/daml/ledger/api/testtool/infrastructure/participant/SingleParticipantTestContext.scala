@@ -49,7 +49,7 @@ import com.daml.ledger.api.v2.command_service.{
   SubmitAndWaitResponse,
 }
 import com.daml.ledger.api.v2.command_submission_service.SubmitRequest
-import com.daml.ledger.api.v2.commands.{Command as ApiCommand, Commands}
+import com.daml.ledger.api.v2.commands.{Commands, Command as ApiCommand}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.contract_service.GetContractRequest
 import com.daml.ledger.api.v2.event.Event.Event.Created

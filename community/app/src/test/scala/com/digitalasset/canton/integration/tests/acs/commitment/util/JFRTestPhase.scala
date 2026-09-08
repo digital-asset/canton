@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.acs.commitment.util
 
 import com.digitalasset.canton.BaseTest
-import jdk.jfr.{Category, Description, Event as JFREvent, Label}
+import jdk.jfr.{Category, Description, Label, Event as JFREvent}
 
 import scala.annotation.meta.field
 import scala.util.{Failure, Try}

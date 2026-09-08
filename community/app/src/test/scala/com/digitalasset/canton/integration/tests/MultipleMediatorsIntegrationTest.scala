@@ -76,7 +76,10 @@ trait MultipleMediatorsBaseTest { this: BaseTest & HasProgrammableSequencer =>
       mediator: MediatorReference,
       sequencer: SequencerReference,
   ): Assertion = {
-    val med2Identity = mediator.topology.transactions.identity_transactions()
+    val med2Identity =
+      mediator.topology.transactions.generate_onboarding_transactions(
+        sequencer.physical_synchronizer_id.protocolVersion
+      )
 
     sequencer.topology.transactions.load(
       med2Identity,

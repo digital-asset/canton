@@ -146,8 +146,6 @@ object InteractiveSubmission {
     *   topology snapshot to use to validate signatures
     * @param actAs
     *   actAs parties that should be covered by the signatures
-    * @param protocolVersion
-    *   protocol version on which the transaction is being processed
     */
   def verifySignatures(
       hash: Hash,
@@ -156,7 +154,6 @@ object InteractiveSubmission {
       topologySnapshot: TopologySnapshot,
       actAs: Set[LfPartyId],
       logger: TracedLogger,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -193,7 +190,6 @@ object InteractiveSubmission {
         cryptoPureApi,
         topologySnapshot,
         logger,
-        protocolVersion,
       )
     }
   }
@@ -207,7 +203,6 @@ object InteractiveSubmission {
       cryptoPureApi: CryptoPureApi,
       topologySnapshot: TopologySnapshot,
       logger: TracedLogger,
-      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -230,7 +225,7 @@ object InteractiveSubmission {
 
         _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
           // From PV 35, one cannot submit more signatures than the number of keys registered with protocol usage
-          signatures.sizeIs <= numberOfProtocolSigningKeys || protocolVersion <= ProtocolVersion.v34,
+          signatures.sizeIs <= numberOfProtocolSigningKeys,
           s"${signatures.size} external signatures were provided, which is more than the number of registered signing keys ($numberOfProtocolSigningKeys) with protocol usage for $party",
         )
 

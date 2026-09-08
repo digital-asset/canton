@@ -13,10 +13,10 @@ import com.digitalasset.canton.sequencer.admin.v30.GetOrderingTopologyResponse.D
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security.Empty
 import com.digitalasset.canton.sequencer.admin.v30.{
-  Authenticated as ProtoAuthenticated,
   GetOrderingTopologyResponse,
   GetPeerNetworkStatusResponse,
   GetWriteReadinessResponse,
+  Authenticated as ProtoAuthenticated,
   PeerConnectionStatus as ProtoPeerConnectionStatus,
   PeerEndpoint as ProtoPeerEndpoint,
   PeerEndpointHealth as ProtoPeerEndpointHealth,
@@ -414,8 +414,6 @@ object SequencerBftAdminData {
       parsedParameters = response.dynamicSequencingParameters match {
         case DynamicSequencingParameters.Empty =>
           Left(FieldNotSet("dynamicSequencingParameters"))
-        case DynamicSequencingParameters.DynamicSequencingParametersPayload(value) =>
-          topology.SequencingParameters.fromProto30(value)
         case DynamicSequencingParameters.DynamicSequencingParametersPayload31(value) =>
           topology.SequencingParameters.fromProto31(value)
       }

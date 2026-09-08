@@ -29,10 +29,10 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
   Node,
   NodeId,
-  SerializationVersion as LfSerializationVersion,
   SubmittedTransaction,
   Transaction,
   VersionedTransaction,
+  SerializationVersion as LfSerializationVersion,
 }
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.test.ValueGenerators

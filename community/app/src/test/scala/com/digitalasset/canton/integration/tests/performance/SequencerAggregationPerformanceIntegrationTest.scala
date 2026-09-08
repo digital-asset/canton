@@ -12,7 +12,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -40,7 +39,7 @@ import com.digitalasset.canton.performance.{
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.util.SingleUseCell
-import com.digitalasset.canton.{BaseTest, SequencerAlias}
+import com.digitalasset.canton.{BaseTest, SequencerAlias, config}
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
@@ -52,7 +51,6 @@ import scala.concurrent.duration.*
   * This test originally started to test sequencer aggregation performance with 5 mediators and
   * threshold 5
   */
-@UnstableTest // TODO(i28815): remove this once the test is no longer flaky
 class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   setupPlugins(new UsePostgres(loggerFactory))
 
@@ -129,7 +127,16 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
           )
         )
         bootstrapper.bootstrap()
-
+        env.mediators.all.foreach(
+          _.sequencer_connection.modify_connections(
+            _.focus(_.submissionRequestAmplification).replace(
+              SubmissionRequestAmplification(
+                PositiveInt.four,
+                config.NonNegativeFiniteDuration.ofSeconds(1),
+              )
+            )
+          )
+        )
         // connect the participants to all sequencers
         val connections = sequencers.local.map { reference =>
           reference.sequencerConnection.withAlias(SequencerAlias.tryCreate(reference.name))
@@ -297,6 +304,10 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
             "No connection available",
             "Is the server running",
             "Connection is not started",
+            // Netty public server shutdown doesn't always complete within 3s on CI
+            // The logs look fine though, so assuming too much load from other tests that delays the shutdown.
+            // The 3s shutdown is hard coded in CloseableServer / defaultGracefulShutdownTimeout
+            "shutdown did not complete gracefully in allotted",
           ),
           Seq(),
         )

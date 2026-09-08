@@ -38,7 +38,8 @@ trait RotateKmsKeyIntegrationTest
       .rotate_kms_node_key(
         keyFingerprint,
         newKmsKeyId,
-        "kms_key_rotated",
+        synchronizerId = daId,
+        name = "kms_key_rotated",
       )
     // user-manual-entry-end: RotateKmsNodeKey
 
@@ -55,7 +56,8 @@ trait RotateKmsKeyIntegrationTest
           node.keys.secret.rotate_kms_node_key(
             signingKey.fingerprint.unwrap,
             newKmsKeyIdsMap(node.name),
-            "kms_key_rotated",
+            synchronizerId = daId,
+            name = "kms_key_rotated",
           )
       }
 

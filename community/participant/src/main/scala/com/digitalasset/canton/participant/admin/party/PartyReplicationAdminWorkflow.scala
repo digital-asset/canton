@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.ledger.api.v2.commands.Commands
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod.DeduplicationDuration
-import com.daml.ledger.api.v2.event.{CreatedEvent as ScalaCreatedEvent, Event}
+import com.daml.ledger.api.v2.event.{Event, CreatedEvent as ScalaCreatedEvent}
 import com.daml.ledger.api.v2.reassignment.Reassignment
 import com.daml.ledger.api.v2.state_service.ActiveContract
 import com.daml.ledger.api.v2.transaction.Transaction

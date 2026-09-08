@@ -21,7 +21,7 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.HasFlushFuture
 
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContextExecutor, Future}

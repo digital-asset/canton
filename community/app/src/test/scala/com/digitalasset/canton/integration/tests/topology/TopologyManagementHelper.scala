@@ -37,7 +37,53 @@ trait TopologyManagementHelper { this: BaseTest =>
 
   }
 
-  def manuallyInitNode(
+  def manuallyInitNodeId(
+      node: LocalInstanceReference,
+      kmsKeysO: Option[TopologyKmsKeys] = None,
+  )(implicit ec: ExecutionContext): Unit = {
+
+    val namespaceKey = if (kmsKeysO.isDefined) {
+      val kmsKeys = kmsKeysO.valueOrFail("no kms key ids defined")
+
+      val namespaceKmsKeyId = kmsKeys.namespaceKeyId
+        .valueOrFail(s"node [${node.name}] expects a namespace key id")
+
+      val intermediateNsKmsKeyId = namespaceKmsKeyId
+      val intermediateKey = node.keys.secret
+        .register_kms_signing_key(
+          intermediateNsKmsKeyId,
+          SigningKeyUsage.NamespaceOnly,
+          name = s"${node.name}-${SigningKeyUsage.Namespace.identifier}",
+        )
+
+      node.crypto.cryptoPrivateStore
+        .existsPrivateKey(intermediateKey.id, Signing)
+        .valueOrFail("intermediate key not registered")
+        .futureValueUS
+
+      node.keys.secret
+        .register_kms_signing_key(
+          namespaceKmsKeyId,
+          SigningKeyUsage.NamespaceOnly,
+          name = s"${node.name}-${SigningKeyUsage.Namespace.identifier}",
+        )
+    } else {
+      node.keys.secret
+        .generate_signing_key(
+          name = node.name + s"-${SigningKeyUsage.Namespace.identifier}",
+          SigningKeyUsage.NamespaceOnly,
+        )
+    }
+
+    val namespace = Namespace(namespaceKey.id)
+    node.topology.init_id_from_uid(
+      UniqueIdentifier.tryCreate("manual-" + node.name, namespace)
+    )
+
+    node.health.wait_for_ready_for_initialization()
+  }
+
+  def manuallyInitParticipant(
       node: LocalInstanceReference,
       kmsKeysO: Option[TopologyKmsKeys] = None,
   )(implicit ec: ExecutionContext): Unit = {
@@ -161,7 +207,6 @@ trait TopologyManagementHelper { this: BaseTest =>
     )
 
     // architecture-handbook-entry-end: ManualInitNode
-
   }
 
 }

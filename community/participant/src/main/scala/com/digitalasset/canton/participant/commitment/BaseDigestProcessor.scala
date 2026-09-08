@@ -18,7 +18,13 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
-import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointToBeWritten
+import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
+  CheckpointToBeWritten,
+  ContractChange,
+  ContractChangeBatch,
+  NotCheckpointFence,
+  ProcessingContext,
+}
 import com.digitalasset.canton.participant.commitment.DigestProcessorState.{
   Initial,
   Started,
@@ -30,8 +36,8 @@ import com.digitalasset.canton.participant.metrics.CommitmentMetrics
 import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{Checkpoint, CheckpointType}
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, TryUtil}
@@ -51,6 +57,9 @@ trait BaseDigestProcessor extends NamedLogging {
   protected def timeouts: ProcessingTimeout
 
   def synchronizerId: SynchronizerId
+
+  def thisParticipantId: ParticipantId
+  def thisLfParticipantId: LedgerParticipantId = thisParticipantId.toLf
 
   protected def startPipelineInternal()(implicit
       traceContext: TraceContext
@@ -279,6 +288,70 @@ trait BaseDigestProcessor extends NamedLogging {
           .toMap
         onboardingCompleted
       }
+
+  protected def getContractChangeBatches(
+      counterpartiesSet: Set[LfPartyId],
+      activeContractsOfCounterparties: Seq[InternalIndexService.ActiveContract],
+      topologySnapshot: TopologySnapshot,
+      timepoint: Timepoint,
+      enableAdditionalConsistencyChecks: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[ProcessingContext[NotCheckpointFence[ContractChangeBatch]]] = {
+
+    val stakeholdersOfContracts =
+      activeContractsOfCounterparties.iterator.flatMap(_.stakeholders).toSet
+
+    for {
+      // get the map of (party -> Set of participants where it is onboarded)
+      partyToParticipant <- getOnboardedParticipantsOfParties(
+        topologySnapshot,
+        stakeholdersOfContracts,
+      )
+    } yield {
+      val contractChanges =
+        activeContractsOfCounterparties.iterator.map { activeContractOfCounterparty =>
+          // emit the classification update for all stakeholders of the current stakeholder batch
+          // of the contract and their respective hosting participants.
+          val counterpartyStakeholders =
+            activeContractOfCounterparty.stakeholders.iterator
+              .filter(counterpartiesSet.contains)
+              .toSet
+
+          val locallyHostedStakeholders =
+            activeContractOfCounterparty.stakeholders.iterator.filter { sh =>
+              partyToParticipant.getOrElse(sh, Set.empty).contains(thisLfParticipantId)
+            }.toSeq
+
+          ContractChange(
+            counterpartyStakeholders,
+            locallyHostedStakeholders,
+            activeContractOfCounterparty.contractId,
+            activeContractOfCounterparty.reassignmentCounter,
+            isActivation = true,
+          )
+        }.toSeq
+
+      val counterpartiesToParticipant = activeContractsOfCounterparties.iterator
+        .flatMap(_.stakeholders)
+        .distinct
+        .filter(counterpartiesSet)
+        .map(party => party -> partyToParticipant.getOrElse(party, Set.empty))
+        .toMap
+
+      ProcessingContext(
+        timepoint,
+        NotCheckpointFence(
+          topologySnapshot,
+          ContractChangeBatch.create(
+            counterpartiesToParticipant,
+            contractChanges,
+            enableAdditionalConsistencyChecks,
+          ),
+        ),
+      )
+    }
+  }
 
   override def toString: String = s"${getClass.getSimpleName}($synchronizerId)"
 }

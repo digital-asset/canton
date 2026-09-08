@@ -11,8 +11,8 @@ import com.digitalasset.daml.lf.transaction.{
   ExternalCallResult,
   GlobalKey,
   GlobalKeyWithMaintainers,
-  Node as TxNode,
   NodeId,
+  Node as TxNode,
 }
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId

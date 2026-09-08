@@ -14,11 +14,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.LightTransactionViewTree.SubviewReferenceAndKey
 import com.digitalasset.canton.data.ViewType.TransactionViewType
 import com.digitalasset.canton.data.{ByCiphertextId, ByViewHash, LightTransactionViewTree}
-import com.digitalasset.canton.protocol.messages.{
-  EncryptedMultipleViews,
-  EncryptedMultipleViewsMessage,
-  EncryptedViewMessage,
-}
+import com.digitalasset.canton.protocol.messages.{EncryptedMultipleViews, EncryptedViewMessage}
 import com.digitalasset.canton.protocol.{ExampleTransaction, ViewHash}
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.tracing.TraceContext
@@ -133,7 +129,7 @@ class TransactionConfirmationRequestFactoryV2Test
         .valueOrFail("session key randomness map is empty")
 
       val messages = Seq(
-        EncryptedMultipleViewsMessage(
+        EncryptedViewMessage(
           encryptedViews = encryptedViews,
           viewHashes = NonEmptyUtil.fromUnsafe(lightTrees.map(_._1.viewHash)),
           viewEncryptionKeyRandomness = randomnessMapNE,

@@ -11,6 +11,7 @@ import com.digitalasset.canton.health.HealthComponent.AlwaysHealthyComponent
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.*
 import com.digitalasset.canton.sequencing.protocol.{
   ClosedEnvelope,
@@ -70,6 +71,7 @@ class SequencedEventValidatorTest
           toCompressed(event),
           testedProtocolVersionValidation,
           DecompressionPolicy.HardcodedDefault,
+          SynchronizerLimits.defaultFor(testedProtocolVersion),
         )
         .value
       decompressed.timestamp shouldBe event.timestamp
@@ -83,6 +85,7 @@ class SequencedEventValidatorTest
           toCompressed(event),
           testedProtocolVersionValidation,
           DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.one)),
+          SynchronizerLimits.defaultFor(testedProtocolVersion),
         )
         .left
         .value shouldBe a[DecompressionFailed]

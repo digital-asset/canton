@@ -13,8 +13,8 @@ import com.digitalasset.canton.admin.api.client.commands.{
 }
 import com.digitalasset.canton.admin.api.client.data.{
   CantonStatus,
-  DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
   NodeStatus,
+  DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
 }
 import com.digitalasset.canton.config.{LocalNodeConfig, SharedCantonConfig}
 import com.digitalasset.canton.console.CommandErrors.CommandError

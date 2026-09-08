@@ -890,6 +890,12 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.CostEstimation.fromJson
         ),
         Mapping[
+          v2.interactive.interactive_submission_service.ReassignmentCost,
+          openapi.ReassignmentCost,
+        ](
+          openapi.ReassignmentCost.fromJson
+        ),
+        Mapping[
           v2.interactive.interactive_submission_service.CostEstimationHints,
           openapi.CostEstimationHints,
         ](

@@ -47,7 +47,7 @@ object AcknowledgeRequest extends VersioningCompanionMemoization[AcknowledgeRequ
   override def name: String = "AcknowledgeRequest"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AcknowledgeRequest)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AcknowledgeRequest)(
       supportedProtoVersionMemoizedPVV(_) { (pvv, req) => bytes =>
         fromProtoV30(pvv, req)(Some(bytes))
       },

@@ -26,7 +26,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
   TopologyChangeOp,
@@ -44,12 +43,13 @@ import java.time.Instant
 import scala.concurrent.ExecutionContext
 
 class SecretKeyAdministration(
-    instance: InstanceReference,
+    protected val instance: InstanceReference,
     runner: AdminCommandRunner,
     override protected val consoleEnvironment: ConsoleEnvironment,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends Helpful
-    with FeatureFlagFilter {
+    with FeatureFlagFilter
+    with AutoDetectSynchronizerHelper {
 
   import runner.*
 
@@ -222,8 +222,11 @@ class SecretKeyAdministration(
       fingerprint: String,
       topologyAdmin: TopologyAdministrationGroup,
       owner: Member,
+      synchronizerId: SynchronizerId,
   ): PublicKey =
-    findPublicKeys(topologyAdmin, owner).find(_.fingerprint.unwrap == fingerprint) match {
+    findPublicKeys(topologyAdmin, owner, synchronizerId).find(
+      _.fingerprint.unwrap == fingerprint
+    ) match {
       case Some(key) => key
       case None => consoleEnvironment.raiseError(s"The key $fingerprint does not exist")
     }
@@ -239,17 +242,26 @@ class SecretKeyAdministration(
       |- fingerprint: The fingerprint of the key we want to rotate.
       |- newKmsKeyId: The id of the new KMS key (e.g. Resource Name).
       |- name: An optional name for the new key.
+      |- synchronizerId: Synchronizer on which to perform the rotation.  If omitted,
+      |  this will attempt to auto-detect a single configured and connected synchronizer.
       """
   )
   def rotate_kms_node_key(
       fingerprint: String,
       newKmsKeyId: String,
       name: String = "",
+      synchronizerId: Option[SynchronizerId] = None,
   ): PublicKey = {
 
     val owner = instance.id.member
 
-    val currentKey = findPublicKey(fingerprint, instance.topology, owner)
+    // We want to run the synchronizer auto-detection first, so we don't create
+    // any new keys in the KMS if the auto-detection fails.
+    val requiredSynchronizerId = synchronizerId.getOrElse(
+      autodetectSynchronizer("rotate_kms_node_key")
+    )
+
+    val currentKey = findPublicKey(fingerprint, instance.topology, owner, requiredSynchronizerId)
     val newKey = currentKey match {
       case SigningPublicKey(_, _, _, usage, _) =>
         instance.keys.secret.register_kms_signing_key(newKmsKeyId, usage, name)
@@ -264,6 +276,7 @@ class SecretKeyAdministration(
       owner,
       currentKey,
       newKey,
+      synchronizerId = Some(requiredSynchronizerId),
     )
     newKey
   }
@@ -277,12 +290,24 @@ class SecretKeyAdministration(
       |Parameters:
       |- fingerprint: The fingerprint of the key we want to rotate.
       |- name: An optional name for the new key.
+      |- synchronizerId: Synchronizer on which to perform the rotation.  If omitted,
+      |  this will attempt to auto-detect a single configured and connected synchronizer.
       """
   )
-  def rotate_node_key(fingerprint: String, name: String = ""): PublicKey = {
+  def rotate_node_key(
+      fingerprint: String,
+      name: String = "",
+      synchronizerId: Option[SynchronizerId] = None,
+  ): PublicKey = {
     val owner = instance.id.member
 
-    val currentKey = findPublicKey(fingerprint, instance.topology, owner)
+    // We want to run the synchronizer auto-detection first, so we don't create
+    // any new keys in the KMS if the auto-detection fails.
+    val requiredSynchronizerId = synchronizerId.getOrElse(
+      autodetectSynchronizer("rotate_kms_node_key")
+    )
+
+    val currentKey = findPublicKey(fingerprint, instance.topology, owner, requiredSynchronizerId)
 
     val newName =
       if (name.isEmpty)
@@ -298,6 +323,7 @@ class SecretKeyAdministration(
       owner,
       currentKey,
       newKey,
+      synchronizerId = Some(requiredSynchronizerId),
     )
     newKey
   }
@@ -310,14 +336,26 @@ class SecretKeyAdministration(
       |have an encryption key pair.
       |
       |NOTE: Namespace root or intermediate signing keys are NOT rotated by this command.
+      |
+      |Parameters:
+      |- synchronizerId: Synchronizer on which to perform the rotation.  If omitted,
+      |  this will attempt to auto-detect a single configured and connected synchronizer.
       """
   )
-  def rotate_node_keys(): Unit = {
+  def rotate_node_keys(
+      synchronizerId: Option[SynchronizerId] = None
+  ): Unit = {
 
     val owner = instance.id.member
 
+    // We want to run the synchronizer auto-detection first, so we don't create
+    // any new keys in the KMS if the auto-detection fails.
+    val requiredSynchronizerId = synchronizerId.getOrElse(
+      autodetectSynchronizer("rotate_kms_node_key")
+    )
+
     // Find the current keys
-    val currentKeys = findPublicKeys(instance.topology, owner)
+    val currentKeys = findPublicKeys(instance.topology, owner, requiredSynchronizerId)
 
     val replacements = currentKeys.map { currentKey =>
       val newKey =
@@ -339,6 +377,7 @@ class SecretKeyAdministration(
         owner,
         currentKey,
         newKey,
+        synchronizerId = Some(requiredSynchronizerId),
       )
     }
   }
@@ -348,14 +387,17 @@ class SecretKeyAdministration(
   private def findPublicKeys(
       topologyAdmin: TopologyAdministrationGroup,
       owner: Member,
-  ): Seq[PublicKey] =
+      synchronizerId: SynchronizerId,
+  ): Set[PublicKey] =
     topologyAdmin.owner_to_key_mappings
       .list(
-        store = Some(TopologyStoreId.Authorized),
+        store = Some(synchronizerId),
         filterKeyOwnerUid = owner.filterString,
         filterKeyOwnerType = Some(owner.code),
       )
       .flatMap(_.item.keys)
+      // Use a set to filter out duplicates across multiple topology stores
+      .toSet
 
   /** Helper to name new keys generated during a rotation with a ...-rotated-<timestamp> tag to
     * better identify the new keys after a rotation

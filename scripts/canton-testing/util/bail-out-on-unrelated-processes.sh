@@ -12,54 +12,75 @@
 set -eu -o pipefail
 
 TESTNAME=${CURRENT_JOB_NAME:-"unknown"}
-LOGS_DIR=${LOGS_DIR:-"unknown"}
-UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-basicInformation="*Test $TESTNAME on canton-testing:*
-Last commit:
-\`\`\`
-$(git log -1 --pretty="%an %ci commit %h%n%D%n%s")
-\`\`\`
 
-Log location: \`$LOGS_DIR\`"
+if [[ "${IS_LOCAL_DEV_RUN:-false}" == "true" ]]; then
+	echo "[LOCAL RUN] Bypassing process and memory checks for job: $TESTNAME"
+	exit 0
+else
+	LOGS_DIR=${LOGS_DIR:-"unknown"}
+	UTIL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
-if ps -C java &> /dev/null;then
-  javaPretty=$(ps -C java -o pid,user,state,start_time,args | sed G)
-  prettyForSlack=$(printf "%s" "$javaPretty" | cut -c 1-120)
-  echo "Another java process is running. Giving up."
-  echo "$javaPretty"
-  $UTIL_DIR/send-slack-message.sh "$basicInformation
+	# Note: please note that only tabs are stripped by <<- EOF
+	basicInformation=$(cat <<-EOF
+		*Test $TESTNAME on canton-testing:*
+		Last commit:
+		\`\`\`
+		$(git log -1 --pretty="%an %ci commit %h%n%D%n%s")
+		\`\`\`
 
-  Test \`$TESTNAME\` was not started because of following Java process(es) (truncated to 120 characters):
-\`\`\`
-$prettyForSlack
-\`\`\`
-"
-  exit 1
-fi
+		Log location: \`$LOGS_DIR\`
+		EOF
+	)
 
-if [ -n "$(docker ps -q)" ];then
-  dockerPretty=$(docker ps --format "Image '{{.Image}}': container '{{.ID}}'")
-  echo "Another docker process is running. Giving up."
-  echo "$dockerPretty"
-  $UTIL_DIR/send-slack-message.sh "$basicInformation
+	if ps -C java &> /dev/null; then
+		javaPretty=$(ps -C java -o pid,user,state,start_time,args | sed G)
+		prettyForSlack=$(printf "%s" "$javaPretty" | cut -c 1-120)
+		echo "Another java process is running. Giving up."
+		echo "$javaPretty"
 
-Test \`$TESTNAME\` was not started because of following Docker process(es):
-  \`\`\`
-  $dockerPretty
-  \`\`\`
-  "
-  exit 1
-fi
+		# Note: please note that only tabs are stripped by <<- EOF
+		slackPayload=$(cat <<-EOF
+			$basicInformation
 
-# Evict disk cache
-sudo sync
-echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+			Test \`$TESTNAME\` was not started because of following Java process(es) (truncated to 120 characters):
+			\`\`\`
+			$prettyForSlack
+			\`\`\`
+			EOF
+		)
+		"$UTIL_DIR/send-slack-message.sh" "$slackPayload"
+		exit 1
+	fi
 
-# Fail fast on excessive memory usage
-free_mem="$(grep MemFree /proc/meminfo | tr -dc '0-9')"
-total_mem="$(grep MemTotal /proc/meminfo | tr -dc '0-9')"
-percent_free=$((free_mem * 100 / total_mem))
-if [[ $percent_free -le 90 ]]; then
-  echo "Not enough free memory: $free_mem kB out of $total_mem kB ($percent_free %)"
-  exit 1
+	if [ -n "$(docker ps -q)" ]; then
+		dockerPretty=$(docker ps --format "Image '{{.Image}}': container '{{.ID}}'")
+		echo "Another docker process is running. Giving up."
+		echo "$dockerPretty"
+
+		# Note: please note that only tabs are stripped by <<- EOF
+		slackPayload=$(cat <<-EOF
+			$basicInformation
+
+			Test \`$TESTNAME\` was not started because of following Docker process(es):
+			\`\`\`
+			$dockerPretty
+			\`\`\`
+			EOF
+		)
+		"$UTIL_DIR/send-slack-message.sh" "$slackPayload"
+		exit 1
+	fi
+
+	# Evict disk cache
+	sudo sync
+	echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+
+	# Fail fast on excessive memory usage
+	free_mem="$(grep MemFree /proc/meminfo | tr -dc '0-9')"
+	total_mem="$(grep MemTotal /proc/meminfo | tr -dc '0-9')"
+	percent_free=$((free_mem * 100 / total_mem))
+	if [[ $percent_free -le 90 ]]; then
+		echo "Not enough free memory: $free_mem kB out of $total_mem kB ($percent_free %)"
+		exit 1
+	fi
 fi

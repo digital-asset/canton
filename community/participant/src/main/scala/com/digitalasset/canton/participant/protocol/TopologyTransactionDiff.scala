@@ -45,8 +45,8 @@ private[protocol] object TopologyTransactionDiff {
       localParticipantId: ParticipantId,
   ): Option[TopologyTransactionDiff] = {
 
-    val before = partyToParticipant(oldRelevantState, psid.protocolVersion)
-    val after = partyToParticipant(currentRelevantState, psid.protocolVersion)
+    val before = partyToParticipant(oldRelevantState)
+    val after = partyToParticipant(currentRelevantState)
 
     val added: Set[PartyToParticipantAuthorization] = after.view.collect {
       case ((partyId, participantId), (permission, onboardingAfter))
@@ -164,8 +164,7 @@ private[protocol] object TopologyTransactionDiff {
     * onboarding flag is only set starting with ProtocolVersion.v35.
     */
   private def partyToParticipant(
-      state: PositiveSignedTopologyTransactions,
-      pv: ProtocolVersion,
+      state: PositiveSignedTopologyTransactions
   ): Map[(LfPartyId, LedgerParticipantId), (AuthorizationLevel, Boolean)] = {
     val fromPartyToParticipantMapping = for {
       topologyTransaction <- SignedTopologyTransactions
@@ -173,16 +172,11 @@ private[protocol] object TopologyTransactionDiff {
         .view
       mapping = topologyTransaction.mapping
       participant <- mapping.participants
-    } yield {
-      val isPartyOnboardingAtLeastAtProtocolVersion35 = pv match {
-        case ProtocolVersion.v34 => false
-        case ProtocolVersion(_) => participant.onboarding
-      }
-      (
-        mapping.partyId.toLf -> participant.participantId.toLf,
-        (toAuthorizationLevel(participant.permission), isPartyOnboardingAtLeastAtProtocolVersion35),
-      )
-    }
+    } yield (
+      mapping.partyId.toLf -> participant.participantId.toLf,
+      (toAuthorizationLevel(participant.permission), participant.onboarding),
+    )
+
     val forAdminParties = SignedTopologyTransactions
       .collectOfMapping[TopologyChangeOp.Replace, SynchronizerTrustCertificate](state)
       .view

@@ -34,6 +34,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.participant.Pruning
 import com.digitalasset.canton.participant.Pruning.*
+import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.metrics.PruningMetrics
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.CommitmentsPruningBound
 import com.digitalasset.canton.participant.store.{
@@ -83,7 +84,7 @@ class PruningProcessor(
     metrics: PruningMetrics,
     exitOnFatalFailures: Boolean,
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
-    legacyAcsCommitmentProcessorDisabled: Boolean,
+    legacyAcsCommitmentProcessorDisabled: AcsCommitmentConfig.DisableOldAcsCommitmentProcessor,
     acsDigestProcessorEnabled: Boolean,
     override protected val timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,

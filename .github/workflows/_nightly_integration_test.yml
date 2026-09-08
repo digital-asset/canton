@@ -1,0 +1,136 @@
+name: Nightly Integration Test
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: GitHub Actions runner label
+        required: true
+        type: string
+    secrets:
+      DATADOG_API_KEY:
+        required: true
+      GCLOUD_SERVICE_KEY:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+      AWS_REGION:
+        required: false
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+jobs:
+  resolve_timings:
+    name: Resolve Timings Artifact Run
+    # One repo-wide artifact lookup for the whole matrix instead of one per shard,
+    # so the shared GITHUB_TOKEN rate-limit budget is not drained at run start.
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run-id: ${{ steps.resolve.outputs.run-id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github/actions/utils/resolve_previous_artifact_run
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve previous timings artifact run
+        id: resolve
+        # Best-effort. If the lookup is rate limited the shards just fall back to
+        # unbalanced splitting rather than failing the run.
+        continue-on-error: true
+        uses: ./.github/actions/utils/resolve_previous_artifact_run
+        with:
+          artifact-name: nightly_integration_test-timings-latest
+
+  nightly_integration_test:
+    name: Nightly Integration Test (shard ${{ matrix.shard }})
+    needs: resolve_timings
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1]
+    timeout-minutes: 60
+    env:
+      DATADOG_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+      GCLOUD_SERVICE_KEY: ${{ secrets.GCLOUD_SERVICE_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION != '' && secrets.AWS_REGION || 'us-east-1' }}
+      AWS_RETRY_MODE: adaptive
+      AWS_MAX_ATTEMPTS: "10"
+      EXECUTOR_JVM_HEAP_SIZE: 14000M
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with: {fetch-depth: 0}
+
+      - name: Start Postgres container
+        id: start_postgres
+        uses: ./.github/actions/utils/postgres/start_postgres_container_standard
+        with:
+          shard-index: ${{ matrix.shard }}
+
+      - name: Start Toxiproxy container
+        id: start_toxiproxy
+        uses: ./.github/actions/utils/toxiproxy/start_toxiproxy_container
+        with:
+          shard-index: ${{ matrix.shard }}
+          network-mode: host
+
+      - name: Prepare test inputs and timings
+        uses: ./.github/actions/test/prepare_test_inputs_with_timings
+        with:
+          timings-artifact-name: ${{ github.job }}-timings-latest
+          timings-path: ${{ github.job }}/.timings
+          github-token: ${{ github.token }}
+          previous-timings-run-id: ${{ needs.resolve_timings.outputs.run-id }}
+          previous-timings-resolved: "true"
+
+      - name: Run Nightly Integration Tests
+        uses: ./.github/actions/test/run_tests
+        with:
+          command: >-
+            dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+          fail_on_error_in_output: 'false'
+          num_test_buckets: '2'
+          shard_index: ${{ matrix.shard }}
+          num_parallel_tasks: '1'
+          include_patterns: |
+            ^com\.digitalasset\.canton\.integration\.tests\.nightly(?:\.(?!bftordering(?:\.|$)|topology(?:\.|$)).*)?$
+          timings_file: ${{ github.job }}/.timings/timings.json
+
+      - name: Stop Postgres container
+        if: always()
+        uses: ./.github/actions/utils/postgres/stop_postgres_container
+        with:
+          container-name: ${{ steps.start_postgres.outputs.container-name }}
+
+      - name: Stop Toxiproxy container
+        if: always()
+        uses: ./.github/actions/utils/toxiproxy/stop_toxiproxy_container
+        with:
+          container-name: ${{ steps.start_toxiproxy.outputs.container-name }}
+
+  aggregate_shard_outputs:
+    name: Aggregate Shard Outputs
+    needs: nightly_integration_test
+    if: always()
+    uses: ./.github/workflows/_aggregate_test_shard_outputs.yml
+    with:
+      caller_job: nightly_integration_test
+      runner: ${{ inputs.runner }}
+      protocol_version: ''

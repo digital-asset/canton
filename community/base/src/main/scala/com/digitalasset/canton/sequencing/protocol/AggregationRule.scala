@@ -19,11 +19,11 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{MediatorId, Member, SequencerId}
+import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.validation.{ProtoUnvalidatedString, ProtoValidation}
+import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -32,7 +32,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersionedCompanionDbHelpers,
   RepresentativeProtocolVersion,
   VersionedProtoCodec,
-  VersioningCompanionContext,
+  VersioningCompanion,
 }
 import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
@@ -544,24 +544,14 @@ final case class AggregationRule(
   override protected def pretty: Pretty[this.type] = prettyOfClass(
     param("input", _.input)
   )
-
-}
-
-// See https://github.com/DACH-NY/canton/pull/32193
-private[sequencing] final case class LegacyUseMemberIdsAsEligibleMembers(v: Boolean) extends AnyVal
-
-object LegacyUseMemberIdsAsEligibleMembers {
-  def apply(pv: ProtocolVersion): LegacyUseMemberIdsAsEligibleMembers =
-    if (pv == ProtocolVersion.v34) LegacyUseMemberIdsAsEligibleMembers(true)
-    else LegacyUseMemberIdsAsEligibleMembers(false)
 }
 
 object AggregationRule
-    extends VersioningCompanionContext[AggregationRule, LegacyUseMemberIdsAsEligibleMembers]
+    extends VersioningCompanion[AggregationRule]
     with ProtocolVersionedCompanionDbHelpers[AggregationRule] {
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AggregationRule)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AggregationRule)(
       supportedProtoVersionPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -577,15 +567,10 @@ object AggregationRule
       protocolVersionRepresentativeFor(protocolVersion)
     )
 
-  def senderDedup(member: Member, protocolVersion: ProtocolVersion): AggregationRule = {
-    // we stopped shipping redundant information with pv35 for speed and glory
-    val input: AggregationRuleInput = if (protocolVersion == ProtocolVersion.v34) {
-      AggregationRuleInput.Resolved(NonEmpty.mk(Seq, member), threshold = PositiveInt.one)
-    } else {
-      AggregationRuleInput.SenderDedup
-    }
-    AggregationRule(input)(protocolVersionRepresentativeFor(protocolVersion))
-  }
+  def senderDedup(protocolVersion: ProtocolVersion): AggregationRule =
+    AggregationRule(AggregationRuleInput.SenderDedup)(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
 
   def sequencerTimeAdvancingRequest(
       sequencers: NonEmpty[Seq[SequencerId]],
@@ -596,108 +581,70 @@ object AggregationRule
     )
 
   def activeSequencers(
-      sequencers: NonEmpty[Seq[SequencerId]],
-      threshold: PositiveInt,
-      protocolVersion: ProtocolVersion,
-  ): AggregationRule = {
-    val input: AggregationRuleInput = if (protocolVersion == ProtocolVersion.v34) {
-      AggregationRuleInput.Resolved(sequencers, threshold = threshold)
-    } else {
-      AggregationRuleInput.SequencerGroup
-    }
-    AggregationRule(input)(protocolVersionRepresentativeFor(protocolVersion))
-  }
+      protocolVersion: ProtocolVersion
+  ): AggregationRule =
+    AggregationRule(AggregationRuleInput.SequencerGroup)(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
 
   def activeMediators(
-      mediators: NonEmpty[Seq[MediatorId]],
       groupIndex: MediatorGroupIndex,
-      threshold: PositiveInt,
       protocolVersion: ProtocolVersion,
-  ): AggregationRule = {
-    val input: AggregationRuleInput = if (protocolVersion == ProtocolVersion.v34) {
-      AggregationRuleInput.Resolved(mediators, threshold = threshold)
-    } else {
-      AggregationRuleInput.MediatorGroup(groupIndex)
-    }
-    AggregationRule(input)(protocolVersionRepresentativeFor(protocolVersion))
-  }
+  ): AggregationRule =
+    AggregationRule(AggregationRuleInput.MediatorGroup(groupIndex))(
+      protocolVersionRepresentativeFor(protocolVersion)
+    )
 
   override def name: String = "AggregationRule"
 
   private[canton] def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      useMemberIdsAsEligibleMembers: LegacyUseMemberIdsAsEligibleMembers,
       proto: v30.AggregationRule,
   ): ParsingResult[AggregationRule] = {
     val v30.AggregationRule(eligibleMembersP, thresholdP) = proto
 
-    if (useMemberIdsAsEligibleMembers.v) {
-      for {
-        eligibleMembersSeqP <- ProtoValidation
-          .validateLength(
-            eligibleMembersP,
-            "eligible_members",
-            pvv,
-            ProtoValidation.MaxCollectionSize,
-          )
-        eligibleMembers <- ProtoConverter.parseRequiredNonEmpty(
-          (member: ProtoUnvalidatedString) =>
-            ProtoValidation
-              .validateThen(member, "eligible_members", pvv)(
-                Member.fromProtoPrimitive
-              ),
-          "eligible_members",
-          eligibleMembersSeqP,
-        )
-        threshold <- ProtoConverter.parsePositiveInt("threshold", thresholdP)
-        rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      } yield {
-        AggregationRule(AggregationRuleInput.Resolved(eligibleMembers, threshold))(rpv)
-      }
-    } else {
-      def ruleFromRecipients(recipients: List[Recipient]): ParsingResult[AggregationRuleInput] =
-        recipients match {
-          case MediatorGroupRecipient(index) :: Nil =>
-            Right(AggregationRuleInput.MediatorGroup(index))
-          case SequencersOfSynchronizer :: Nil => Right(AggregationRuleInput.SequencerGroup)
-          case Nil => Right(AggregationRuleInput.SenderDedup)
-          case other =>
-            val members = other.collect { case member: MemberRecipient =>
-              member.member
-            }
-            for {
-              membersNE <- NonEmpty
-                .from(members)
-                .toRight(
-                  ProtoDeserializationError.FieldNotSet(
-                    s"Sequence eligible_members not set or empty"
-                  )
+    def ruleFromRecipients(recipients: List[Recipient]): ParsingResult[AggregationRuleInput] =
+      recipients match {
+        case MediatorGroupRecipient(index) :: Nil =>
+          Right(AggregationRuleInput.MediatorGroup(index))
+        case SequencersOfSynchronizer :: Nil => Right(AggregationRuleInput.SequencerGroup)
+        case Nil => Right(AggregationRuleInput.SenderDedup)
+        case other =>
+          val members = other.collect { case member: MemberRecipient =>
+            member.member
+          }
+          for {
+            membersNE <- NonEmpty
+              .from(members)
+              .toRight(
+                ProtoDeserializationError.FieldNotSet(
+                  s"Sequence eligible_members not set or empty"
                 )
-              _ <- Either.cond(
-                members.sizeCompare(other) == 0,
-                (),
-                ProtoDeserializationError.InvariantViolation(
-                  "eligible_members",
-                  s"Recipients of unequal type in aggregation rule $eligibleMembersP",
-                ),
               )
-              threshold <- ProtoConverter.parsePositiveInt("threshold", thresholdP)
-            } yield AggregationRuleInput.Resolved(membersNE, threshold)
-        }
+            _ <- Either.cond(
+              members.sizeCompare(other) == 0,
+              (),
+              ProtoDeserializationError.InvariantViolation(
+                "eligible_members",
+                s"Recipients of unequal type in aggregation rule $eligibleMembersP",
+              ),
+            )
+            threshold <- ProtoConverter.parsePositiveInt("threshold", thresholdP)
+          } yield AggregationRuleInput.Resolved(membersNE, threshold)
+      }
 
-      for {
-        recipients <- ProtoValidation.validateThen(
-          eligibleMembersP,
-          "eligible_members",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )(
-          Recipient.fromProtoPrimitive
-        )
-        rule <- ruleFromRecipients(recipients.toList)
-        rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      } yield AggregationRule(rule)(rpv)
-    }
+    for {
+      recipients <- ProtoValidation.validateThen(
+        eligibleMembersP,
+        "eligible_members",
+        pvv,
+        ProtoValidation.MaxCollectionSize,
+      )(
+        Recipient.fromProtoPrimitive
+      )
+      rule <- ruleFromRecipients(recipients.toList)
+      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+    } yield AggregationRule(rule)(rpv)
   }
 
 }

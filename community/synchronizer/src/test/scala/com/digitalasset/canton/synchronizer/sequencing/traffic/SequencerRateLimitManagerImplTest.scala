@@ -36,8 +36,7 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.store.memory.{
 import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.topology.DefaultTestIdentities.*
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member, TestingTopology}
-import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
 import org.scalatest.FutureOutcome
@@ -234,9 +233,8 @@ final class SequencerRateLimitManagerImplTest
           same(batch),
           same(sequencingFactor),
           any[Map[GroupRecipient, Set[Member]]],
-          any[ProtocolVersion],
           any[NonNegativeLong],
-        )(any[TraceContext])
+        )
     ).thenReturn(eventCostDetails)
 
     f.rlm
@@ -318,9 +316,8 @@ final class SequencerRateLimitManagerImplTest
           any[Batch[ClosedEnvelope]],
           same(senderFactor),
           any[Map[GroupRecipient, Set[Member]]],
-          any[ProtocolVersion],
           any[NonNegativeLong],
-        )(any[TraceContext])
+        )
     )
       .thenReturn(eventCostDetails)
   }
@@ -338,9 +335,8 @@ final class SequencerRateLimitManagerImplTest
           any[Batch[ClosedEnvelope]],
           any[PositiveInt],
           any[Map[GroupRecipient, Set[Member]]],
-          any[ProtocolVersion],
           any[NonNegativeLong],
-        )(any[TraceContext])
+        )
     )
       .thenReturn(eventCostDetails)
   }
@@ -961,9 +957,8 @@ final class SequencerRateLimitManagerImplTest
           any[Batch[ClosedEnvelope]],
           same(sequencerFactor),
           any[Map[GroupRecipient, Set[Member]]],
-          any[ProtocolVersion],
           any[NonNegativeLong],
-        )(any[TraceContext])
+        )
     )
       .thenReturn(eventCostDetails)
 

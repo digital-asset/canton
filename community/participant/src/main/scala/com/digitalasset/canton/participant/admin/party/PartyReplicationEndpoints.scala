@@ -30,11 +30,11 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.{
-  ParticipantPermission as TopologyParticipantPermission,
   PartyToParticipant,
   SingleTransactionSignature,
   TopologyChangeOp,
   TopologyTransaction,
+  ParticipantPermission as TopologyParticipantPermission,
 }
 import com.digitalasset.canton.topology.{
   ParticipantId,

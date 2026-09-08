@@ -74,7 +74,7 @@ object SynchronizerPredecessor
 
   override val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec.storage(
-      ReleaseProtocolVersion(ProtocolVersion.v34),
+      ReleaseProtocolVersion(ProtocolVersion.v35),
       SynchronizerPredecessorProto,
     )(
       supportedProtoVersionPVV(_)(fromProtoV30),

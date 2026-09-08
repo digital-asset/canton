@@ -52,7 +52,7 @@ import com.digitalasset.canton.util.{ErrorUtil, PriorityBlockingQueueUtil}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.ManagedChannel
 
-import java.time.{Clock as JClock, Duration, Instant}
+import java.time.{Duration, Instant, Clock as JClock}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import java.util.concurrent.{Callable, PriorityBlockingQueue, TimeUnit}
 import scala.annotation.tailrec

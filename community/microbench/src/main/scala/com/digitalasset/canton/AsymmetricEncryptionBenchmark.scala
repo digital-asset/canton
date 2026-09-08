@@ -6,11 +6,17 @@ import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveNumeric
 import com.digitalasset.canton.config.{CacheConfig, CryptoConfig, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.CryptoTestHelper.TestMessage
-import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.{EciesHkdfHmacSha256Aes128Cbc, RsaOaepSha256}
+import com.digitalasset.canton.crypto.EncryptionAlgorithmSpec.{
+  EciesHkdfHmacSha256Aes128Cbc,
+  RsaOaepSha256,
+}
 import com.digitalasset.canton.crypto.EncryptionKeySpec.{EcP256, Rsa2048}
 import com.digitalasset.canton.crypto.provider.jce.JceCrypto
-import com.digitalasset.canton.crypto.store.memory.{InMemoryCryptoPrivateStore, InMemoryCryptoPublicStore}
-import com.digitalasset.canton.crypto.{Crypto, CryptoSchemes, CryptoTestHelper, EncryptionPublicKey}
+import com.digitalasset.canton.crypto.store.memory.{
+  InMemoryCryptoPrivateStore,
+  InMemoryCryptoPublicStore,
+}
+import com.digitalasset.canton.crypto.{Crypto, CryptoSchemes, EncryptionPublicKey}
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.google.protobuf.ByteString
 import org.openjdk.jmh.annotations.*
@@ -50,29 +56,53 @@ class AsymmetricEncryptionBenchmark extends TestEssentials {
         CommonMockMetrics.cryptoMetrics,
         timeouts,
         loggerFactory,
-      ).fold(err => throw new RuntimeException(s"Failed to create a JCE crypto provider: $err"), identity)
+      )
+      .fold(
+        err => throw new RuntimeException(s"Failed to create a JCE crypto provider: $err"),
+        identity,
+      )
   }
 
   private val pubKeyEcP256: EncryptionPublicKey =
-    Await.result(crypto.generateEncryptionKey(EcP256).value
-        .failOnShutdownToAbortException("prepareRun"), Duration.Inf)
-        .fold(err => throw new RuntimeException(s"Failed to create a EcP256 key: $err"), identity)
+    Await
+      .result(
+        crypto
+          .generateEncryptionKey(EcP256)
+          .value
+          .failOnShutdownToAbortException("prepareRun"),
+        Duration.Inf,
+      )
+      .fold(err => throw new RuntimeException(s"Failed to create a EcP256 key: $err"), identity)
 
-  private val pubKeyRsa2048: EncryptionPublicKey =  Await.result(crypto.generateEncryptionKey(Rsa2048).value
-      .failOnShutdownToAbortException("prepareRun"), Duration.Inf)
+  private val pubKeyRsa2048: EncryptionPublicKey = Await
+    .result(
+      crypto
+        .generateEncryptionKey(Rsa2048)
+        .value
+        .failOnShutdownToAbortException("prepareRun"),
+      Duration.Inf,
+    )
     .fold(err => throw new RuntimeException(s"Failed to create a Rsa2048 key: $err"), identity)
 
   @Benchmark
   def encryptEcP256(blackhole: Blackhole): Unit = {
-    val res = crypto.pureCrypto.encryptWith(dataToEncrypt, pubKeyEcP256, EciesHkdfHmacSha256Aes128Cbc)
-      .fold(err => throw new RuntimeException(s"Failed to encrypt with a EcP256 key: $err"), identity)
+    val res = crypto.pureCrypto
+      .encryptWith(dataToEncrypt, pubKeyEcP256, EciesHkdfHmacSha256Aes128Cbc)
+      .fold(
+        err => throw new RuntimeException(s"Failed to encrypt with a EcP256 key: $err"),
+        identity,
+      )
     blackhole.consume(res)
   }
 
   @Benchmark
   def encryptRsa2048(blackhole: Blackhole): Unit = {
-    val res = crypto.pureCrypto.encryptWith(dataToEncrypt, pubKeyRsa2048, RsaOaepSha256)
-      .fold(err => throw new RuntimeException(s"Failed to encrypt with a Rsa2048 key: $err"), identity)
+    val res = crypto.pureCrypto
+      .encryptWith(dataToEncrypt, pubKeyRsa2048, RsaOaepSha256)
+      .fold(
+        err => throw new RuntimeException(s"Failed to encrypt with a Rsa2048 key: $err"),
+        identity,
+      )
     blackhole.consume(res)
   }
 }

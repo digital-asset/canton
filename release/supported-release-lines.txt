@@ -8,3 +8,4 @@
 # Add a line when it is cut; remove it when the line goes out of support.
 # Blank lines and `#` comments are ignored.
 3.5
+3.6

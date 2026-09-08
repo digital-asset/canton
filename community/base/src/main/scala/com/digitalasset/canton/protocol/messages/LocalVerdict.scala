@@ -79,7 +79,7 @@ object LocalVerdict extends VersioningCompanion[LocalVerdict] {
   override def name: String = getClass.getSimpleName
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.LocalVerdict)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.LocalVerdict)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
     )

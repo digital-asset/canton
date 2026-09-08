@@ -24,7 +24,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
 }
 import com.daml.ledger.api.v2.value.Identifier
 import com.daml.ledger.javaapi.data.codegen.ContractId
-import com.daml.ledger.javaapi.data.{Identifier as JavaIdentifier, Template}
+import com.daml.ledger.javaapi.data.{Template, Identifier as JavaIdentifier}
 import com.daml.ledger.test.java.model.test.{
   Divulgence1,
   Divulgence2,

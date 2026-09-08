@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.jsonapi
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.ServerConfig
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
+import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.getResponseDataString
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.ParticipantSelector
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -13,10 +14,13 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import monocle.macros.syntax.lens.*
-import org.apache.pekko.http.scaladsl.model.{HttpHeader, StatusCodes, Uri}
+import org.apache.pekko.http.scaladsl.model.*
+import org.apache.pekko.stream.scaladsl.Source
+import org.apache.pekko.util.ByteString
 import org.scalatest.Assertion
 
 import java.io.File
+import scala.concurrent.Future
 
 /** Verifies that the JSON API rejects request bodies exceeding the effective
   * `maxInboundMessageSize` with HTTP 413 (Content Too Large), exercising the different ways the
@@ -72,6 +76,25 @@ class JsonMaxInboundMessageSizeTest
 
   private def jsonOfPadding(padding: Int): String = s"""{"padding":"${"x" * padding}"}"""
 
+  /** Sends only the request headers, with `Content-Length` set to `declaredSize`.
+    *
+    * Trick: pekko-http rejects an oversized request from the declared size alone. Sending the body
+    * too can lose the 413 to a broken pipe.
+    */
+  private def postJsonHeadersOnly(uri: Uri, declaredSize: Int): Future[(StatusCode, String)] =
+    singleRequest(
+      HttpRequest(
+        method = HttpMethods.POST,
+        uri = uri,
+        headers = noAuth,
+        entity = HttpEntity.Default(
+          ContentTypes.`application/json`,
+          declaredSize.toLong,
+          Source.maybe[ByteString],
+        ),
+      )
+    ).flatMap(resp => getResponseDataString(resp, debug = true).map(body => (resp.status, body)))
+
   /** Posts an oversized body (expecting 413 naming `limit`) and a body of `withinLimitPadding`
     * bytes (expecting any status other than 413) to the JSON API of the selected participant.
     */
@@ -80,19 +103,16 @@ class JsonMaxInboundMessageSizeTest
       limit: NonNegativeInt,
       withinLimitPadding: Int,
   )(implicit env: TestConsoleEnvironment): Assertion = {
-    val oversized = jsonOfPadding(limit.unwrap + 1024)
-    val oversizedBytes = oversized.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
-    oversizedBytes should be > limit.unwrap
+    val oversizedBytes = limit.unwrap + 1024
     val withinLimit = jsonOfPadding(withinLimitPadding)
     val withinLimitBytes = withinLimit.getBytes(java.nio.charset.StandardCharsets.UTF_8).length
     withinLimitBytes should be < limit.unwrap
 
     (for {
       http <- adHocHttp(participant)
-      (rejectedStatus, rejectedBody) <- postJsonStringRequestEncoded(
+      (rejectedStatus, rejectedBody) <- postJsonHeadersOnly(
         http.uri withPath submitPath,
-        oversized,
-        noAuth,
+        oversizedBytes,
       )
       (acceptedStatus, _) <- postJsonStringRequestEncoded(
         http.uri withPath submitPath,
@@ -100,8 +120,8 @@ class JsonMaxInboundMessageSizeTest
         noAuth,
       )
     } yield {
-      // Oversized body: rejected by size, before routing/auth. pekko-http names the configured limit
-      // in the EntityStreamSizeException message ("... exceeded size limit (<limit> bytes)!").
+      // Oversized request: rejected by size, before routing/auth. pekko-http names the configured
+      // limit in the EntityStreamSizeException message ("... exceeded size limit (<limit> bytes)!").
       rejectedStatus shouldBe StatusCodes.ContentTooLarge
       rejectedBody.toLowerCase should include("exceeded size limit")
       rejectedBody should include(limit.unwrap.toString)

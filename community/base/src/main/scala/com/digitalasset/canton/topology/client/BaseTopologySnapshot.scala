@@ -137,7 +137,6 @@ abstract class BaseTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
-      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages = {
     def isValid(pkg: PackageId): Boolean =
       vettedPackages.get(pkg).exists(_.validAt(ledgerTime))
@@ -154,8 +153,7 @@ abstract class BaseTopologySnapshot(
       case Right(resolvedPackagesAndDependencies) =>
         UnknownOrUnvettedPackages.unvetted(
           participantId = participant,
-          packageIds = invalidPackages ++ resolvedPackagesAndDependencies
-            .packageIds(withDependencies = checkDependencyVetting)
+          packageIds = invalidPackages ++ resolvedPackagesAndDependencies.mainPackageIds
             .filterNot(isValid),
         )
     }

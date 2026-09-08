@@ -52,8 +52,6 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
     def metrics: TrafficEnforcementMetrics
   }
 
-  def additionalPekkoConfig: Config = ConfigFactory.empty()
-
   protected val testTelemetry: TestTelemetrySetup = new TestTelemetrySetup()
   // Shadows the non-reporting tracer from BaseTest so the factories under test export their spans.
   override protected implicit lazy val tracer: Tracer = testTelemetry.tracer
@@ -83,7 +81,6 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
           |}
           |""".stripMargin
       )
-      .withFallback(additionalPekkoConfig)
 
   /** Run a test body with a dedicated actor system and a fresh backend, tearing everything down
     * afterwards.

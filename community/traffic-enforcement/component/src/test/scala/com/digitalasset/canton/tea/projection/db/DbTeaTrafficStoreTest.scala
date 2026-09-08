@@ -37,8 +37,9 @@ trait DbTeaTrafficStoreTest extends AsyncWordSpec with BaseTest with TeaTrafficS
       DBIO.seq(
         sqlu"truncate table par_traffic_enforcement_event",
         sqlu"truncate table par_traffic_enforcement_balance",
-        sqlu"truncate table pekko_projection_offset_store",
-        sqlu"truncate table pekko_projection_management",
+        // Double quotes to force H2 to use lower case table names
+        sqlu"""truncate table "pekko_projection_offset_store"""",
+        sqlu"""truncate table "pekko_projection_management"""",
       ),
       functionFullName,
     )

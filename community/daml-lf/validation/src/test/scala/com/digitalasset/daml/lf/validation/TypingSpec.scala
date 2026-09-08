@@ -7,10 +7,10 @@ import com.digitalasset.daml.lf.data.Ref.{DottedName, PackageName, PackageVersio
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{
   Ast,
-  LanguageVersion as LV,
   LookupError,
   PackageInterface,
   Reference,
+  LanguageVersion as LV,
 }
 import com.digitalasset.daml.lf.stablepackages.StablePackages.stablePackages.Tuple2
 import com.digitalasset.daml.lf.testing.parser.Implicits.*

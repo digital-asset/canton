@@ -35,7 +35,6 @@ import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtoVersion,
-  ProtocolVersion,
   ReleaseProtocolVersion,
 }
 import com.digitalasset.nonempty.NonEmpty
@@ -219,13 +218,12 @@ object ReceivedAcsCommitments
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
-      ProtoVersion(-1) -> unsupportedProtoCodec(ProtocolVersion.v34),
       ProtoVersion(30) -> ProtoCodec(
         // TODO(#33849): use the protocol version with which the acs commitment redesign is released
         ReleaseProtocolVersion.acsCommitmentRedesignStorage.v,
         supportedProtoVersion(v30participant.ReceivedAcsCommitments)(fromProtoV30),
         _.toProtoV30,
-      ),
+      )
     )
 
   private def fromProtoV30(

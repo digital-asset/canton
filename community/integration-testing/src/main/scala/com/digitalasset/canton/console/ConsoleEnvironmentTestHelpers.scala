@@ -46,8 +46,8 @@ trait ConsoleEnvironmentTestHelpers { this: ConsoleEnvironment =>
       .find(_.name == name)
       .getOrElse(sys.error(s"remote sequencer [$name] not configured"))
 
-  def m(name: String): LocalMediatorReference =
-    mediators.local
+  def m(name: String): MediatorReference =
+    mediators.all
       .find(_.name == name)
       .getOrElse(sys.error(s"mediator [$name] not configured"))
 

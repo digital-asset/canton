@@ -168,6 +168,24 @@ jobs:
       is_nightly_workflow: true
       runner: ${{ needs.pick_runner.outputs.runner }}
 
+  external_parties_test:
+    name: External Parties Test
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_external_parties_test.yml
+    secrets: inherit
+    with:
+      override_java_version_for_tests: ""
+      protocol_version: ""
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  nightly_integration_test:
+    name: Nightly Integration Test
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_nightly_integration_test.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
   notify:
     name: Notify on Failure
     needs:
@@ -187,6 +205,8 @@ jobs:
       - stability_crash_recovery_test
       - package_jsonapi
       - assembly_ledger_api_test_tool
+      - external_parties_test
+      - nightly_integration_test
     if: |
       always() &&
       (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))

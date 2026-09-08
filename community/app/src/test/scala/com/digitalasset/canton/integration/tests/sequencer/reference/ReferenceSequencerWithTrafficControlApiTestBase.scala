@@ -117,7 +117,6 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
             batch,
             config.readVsWriteScalingFactor,
             Map.empty,
-            testedProtocolVersion,
             config.baseEventCost,
           )
           .eventCost,
@@ -763,7 +762,6 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
                 Map(
                   AllMembersOfSynchronizer -> Set(p11, p12, p13, p14, p15, sequencerId, mediatorId)
                 ),
-                testedProtocolVersion,
                 trafficConfig.baseEventCost,
               )
               .eventCost,

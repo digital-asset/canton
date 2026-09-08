@@ -38,7 +38,7 @@ sealed trait SimplestPingIntegrationTest extends CommunityIntegrationTest with S
   }
 }
 
-class SimplestPingIntegrationTestInMemory extends SimplestPingIntegrationTest {
+final class SimplestPingIntegrationTestInMemory extends SimplestPingIntegrationTest {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition
       .addConfigTransform(ConfigTransforms.allInMemory)
@@ -47,13 +47,13 @@ class SimplestPingIntegrationTestInMemory extends SimplestPingIntegrationTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
-class SimplestPingBftOrderingIntegrationTestH2 extends SimplestPingIntegrationTest {
+final class SimplestPingBftOrderingIntegrationTestH2 extends SimplestPingIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
 // NOTE: If you change the class name you also need to adjust the name in the `smoke_test` test job!
-class SimplestPingBftOrderingIntegrationTestPostgres extends SimplestPingIntegrationTest {
+final class SimplestPingBftOrderingIntegrationTestPostgres extends SimplestPingIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

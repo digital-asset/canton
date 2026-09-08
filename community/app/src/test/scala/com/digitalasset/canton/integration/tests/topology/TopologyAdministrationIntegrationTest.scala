@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests.topology
 import com.digitalasset.canton.admin.api.client.data.topology.ListOwnerToKeyMappingResult
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.CommandFailure
-import com.digitalasset.canton.crypto.SigningKeyUsage.{Namespace, Protocol}
+import com.digitalasset.canton.crypto.SigningKeyUsage.{Namespace, Protocol, SequencerAuthentication}
 import com.digitalasset.canton.crypto.{
   EncryptionPublicKey,
   Fingerprint,
@@ -137,12 +137,14 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
         participant1.namespace,
         rootDelegationKey,
         CanSignAllMappings,
+        store = daId,
       )
 
       participant1.topology.namespace_delegations.propose_delegation(
         rootNamespace,
         delegationKey,
         CanSignAllButNamespaceDelegations,
+        store = daId,
       )
 
       // fails if the target key does not have the correct `Namespace` usage
@@ -155,6 +157,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
             participant1.namespace,
             keyWithWrongUsage,
             CanSignAllMappings,
+            store = daId,
           ),
         _.errorMessage should include(
           s"The key ${keyWithWrongUsage.id} must include " +
@@ -164,7 +167,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
 
       val NSDs = participant1.topology.namespace_delegations
         .list(
-          store = TopologyStoreId.Authorized,
+          store = daId,
           filterNamespace = rootNamespace.toProtoPrimitive,
         )
         .map(_.item)
@@ -184,14 +187,16 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
       participant1.topology.namespace_delegations.propose_revocation(
         rootNamespace,
         delegationKey,
+        store = daId,
       )
       participant1.topology.namespace_delegations.propose_revocation(
         rootNamespace,
         rootDelegationKey,
+        store = daId,
       )
       participant1.topology.namespace_delegations
         .list(
-          store = TopologyStoreId.Authorized,
+          store = daId,
           filterNamespace = rootNamespace.toProtoPrimitive,
         )
         .map(_.item)
@@ -213,6 +218,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
           participant1.namespace,
           restrictedKey,
           CanSignSpecificMappings(PartyToKeyMapping),
+          store = daId,
         )
 
       // cannot sign a PTP
@@ -221,6 +227,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
           PartyId.tryCreate("nsd-test", participant1.namespace),
           Seq((participant1.id, ParticipantPermission.Submission)),
           signedBy = Seq(restrictedKey.fingerprint),
+          store = daId,
         ),
         _.shouldBeCommandFailure(TopologyManagerError.NoAppropriateSigningKeyInStore),
       )
@@ -232,6 +239,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
           PositiveInt.one,
           NonEmpty(Seq, restrictedKey),
           signedBy = Some(restrictedKey.fingerprint),
+          store = daId,
         )
 
       updateP2k
@@ -290,6 +298,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
         participant1.namespace,
         vettingKey,
         CanSignSpecificMappings(VettedPackages),
+        store = daId,
       )
 
       // Propose a delegation to a key that is not the root namespace key.
@@ -314,6 +323,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
             .value
             .toSet
         ),
+        store = daId,
       )
 
       // Wait for the topology changes to be effective.
@@ -358,6 +368,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
           anotherVettingKey,
           CanSignSpecificMappings(VettedPackages),
           signedBy = Seq(noVettingKey.fingerprint),
+          store = daId,
         ),
         _.shouldBeCommandFailure(TopologyManagerError.NoAppropriateSigningKeyInStore),
       )
@@ -377,7 +388,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
 
     val addedKey = participant1.keys.secret.generate_encryption_key("added_key")
     participant1.topology.owner_to_key_mappings
-      .add_key(addedKey.fingerprint, addedKey.purpose)
+      .add_key(addedKey.fingerprint, addedKey.purpose, synchronizerId = daId)
 
     eventually() {
       val okm2 = readOkmHead()
@@ -390,7 +401,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
       encKey
     }.value
     participant1.topology.owner_to_key_mappings
-      .remove_key(removedKey.fingerprint, removedKey.purpose)
+      .remove_key(removedKey.fingerprint, removedKey.purpose, synchronizerId = daId)
 
     eventually() {
       val okm3 = readOkmHead()
@@ -400,7 +411,8 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
 
     // Indirect OKM testing by rotating a key via key vault
     val okmSigningKey = okm1.item.keys.collect { case signKey: SigningPublicKey => signKey }.head
-    participant1.keys.secret.rotate_node_key(okmSigningKey.fingerprint.toProtoPrimitive)
+    participant1.keys.secret
+      .rotate_node_key(okmSigningKey.fingerprint.toProtoPrimitive, synchronizerId = daId)
 
     eventually() {
       val okmsRotated = readOkmHead()
@@ -412,9 +424,10 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     def otkForP1(key: SigningPublicKey) =
       participant1.topology.owner_to_key_mappings.propose(
         member = participant1.id.member,
-        keys = NonEmpty(Seq, key),
+        keys = NonEmpty(Seq, key, addedKey),
         serial = Some(initialOkmSerial.tryAdd(5)),
         signedBy = Seq(key.id),
+        store = daId,
       )
 
     // Fails when creating an OTK signedBy by key that lacks `Namespace` usage
@@ -432,15 +445,17 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     // If a key is a root or intermediate namespace key and includes `Namespace`, it can be used to authorize an OTK.
     val intermediateKey = participant1.keys.secret.generate_signing_key(
       "intermediateKey",
-      NonEmpty.mk(Set, Namespace, Protocol): NonEmpty[Set[SigningKeyUsage]],
+      NonEmpty.mk(Set, Namespace, Protocol, SequencerAuthentication): NonEmpty[
+        Set[SigningKeyUsage]
+      ],
     )
     participant1.topology.namespace_delegations.propose_delegation(
       participant1.namespace,
       intermediateKey,
       CanSignAllButNamespaceDelegations,
+      store = daId,
     )
     otkForP1(intermediateKey)
-
   }
 
   "party_to_key_mappings" in { implicit env =>
@@ -451,10 +466,11 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
     @nowarn("cat=deprecation")
     def ptkForP1(key: SigningPublicKey) =
       participant1.topology.party_to_key_mappings.propose(
-        bob.party,
-        PositiveInt.one,
-        NonEmpty(Seq, key),
+        partyId = bob.party,
+        threshold = PositiveInt.one,
+        signingKeys = NonEmpty(Seq, key),
         signedBy = Some(key.id),
+        store = daId,
       )
 
     // Fails when creating an PTK signedBy by key that lacks `Namespace` usage
@@ -478,6 +494,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
       participant1.namespace,
       delegatedKey,
       CanSignAllButNamespaceDelegations,
+      store = daId,
     )
     ptkForP1(delegatedKey)
   }

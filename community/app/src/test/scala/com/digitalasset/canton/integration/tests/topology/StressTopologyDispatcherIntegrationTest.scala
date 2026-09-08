@@ -115,6 +115,7 @@ trait StressTopologyDispatcherIntegrationTest
           current,
           newKey,
           synchronize = None,
+          synchronizerId = env.daId,
         )
 
         eventually() {

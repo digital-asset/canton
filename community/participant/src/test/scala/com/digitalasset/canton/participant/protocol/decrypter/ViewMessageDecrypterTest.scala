@@ -46,7 +46,6 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
 }
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageUtils.Optics.viewHashOrHashesLens
 import com.digitalasset.canton.protocol.messages.{
-  EncryptedMultipleViewsMessage,
   EncryptedViewMessage,
   TransactionConfirmationRequest,
 }
@@ -217,7 +216,6 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
             )
             .futureValueUS
             .value
-            .asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType.type]]
 
           val ciphertextId = childEnc.encryptedViews.computeCiphertextId(pureCrypto)
 
@@ -323,6 +321,7 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
               _contractOfId: ContractInstanceOfId,
               _maxSequencingTime: CantonTimestamp,
               validatePackageVettings: Boolean,
+              _limitConfig: TransactionViewLimitConfig,
           )(implicit
               traceContext: TraceContext
           ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] =

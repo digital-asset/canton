@@ -93,6 +93,7 @@ class MaliciousParticipantNode(
     pureCrypto: CryptoPureApi,
     defaultCryptoSnapshot: () => SynchronizerSnapshotSyncCryptoApi,
     defaultProtocolVersion: ProtocolVersion,
+    defaultProtocolLimits: TransactionProtocolLimits,
     timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -522,6 +523,7 @@ class MaliciousParticipantNode(
           contractOfIdWithDisclosure,
           maxSequencingTime,
           validatePackageVettings = false,
+          limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
         )
         .leftMap(err => s"Unable to create transaction tree: $err")
 
@@ -588,6 +590,7 @@ object MaliciousParticipantNode extends FutureHelpers {
       participant: LocalParticipantReference,
       synchronizerId: PhysicalSynchronizerId,
       defaultProtocolVersion: ProtocolVersion,
+      defaultProtocolLimits: TransactionProtocolLimits,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       defaultMediatorGroup: MediatorGroupRecipient = MediatorGroupRecipient(
@@ -639,6 +642,7 @@ object MaliciousParticipantNode extends FutureHelpers {
       participantNode.cryptoPureApi,
       () => currentCryptoSnapshot(),
       defaultProtocolVersion,
+      defaultProtocolLimits,
       timeouts,
       loggerFactory,
     )

@@ -112,7 +112,7 @@ class ParticipantBootstrapDatabaseFaultIntegrationTestPostgres
           toxic.foreach(_.remove())
 
           waitActive(participant1, allowNonInit = true)
-          manuallyInitNode(participant1)
+          manuallyInitParticipant(participant1)
           waitActive(participant1, allowNonInit = false)
         },
         LogEntry.assertLogSeq(

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.SynchronizerLimits
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt.{one, zero}
 import com.digitalasset.canton.console.CommandFailure
@@ -16,7 +15,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.version.ProtocolVersion.{v34, v35}
+import org.scalatest.Outcome
 
 import java.time.Duration
 
@@ -24,10 +23,12 @@ import java.time.Duration
  * This test validates whether a given physical synchronizer id is accepted or rejected when
  * attempting the upgrade announcement.
  */
-sealed abstract class LsuSuccessorIntegrationTest(
-    currAndNextSerialAndPV: ((NonNegativeInt, ProtocolVersion), (NonNegativeInt, ProtocolVersion))
-) extends LsuBase {
-  val ((currSerial, currPV), (nextSerial, nextPV)) = currAndNextSerialAndPV
+sealed abstract class LsuSuccessorIntegrationTest extends LsuBase {
+
+  def currentSerial: NonNegativeInt
+  def currentPV: ProtocolVersion
+  def successorSerial: NonNegativeInt
+  def successorPV: ProtocolVersion
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
@@ -42,8 +43,6 @@ sealed abstract class LsuSuccessorIntegrationTest(
   override protected lazy val newOldMediators: Map[String, String] = Map("mediator2" -> "mediator1")
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
 
-  override protected lazy val testedProtocolVersion: ProtocolVersion = currPV
-
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M2_Config
       .withNetworkBootstrap { implicit env =>
@@ -51,35 +50,36 @@ sealed abstract class LsuSuccessorIntegrationTest(
         new NetworkBootstrapper(
           S1M1.copy(
             staticSynchronizerParameters = S1M1.staticSynchronizerParameters.copy(
-              protocolVersion = currPV,
-              serial = currSerial,
-              synchronizerLimits = SynchronizerLimits.defaultFor(currPV),
+              protocolVersion = currentPV,
+              serial = currentSerial,
+              synchronizerLimits = SynchronizerLimits.defaultFor(currentPV),
             )
           )
         )
       }
       .addConfigTransforms(configTransforms*)
+      .addConfigTransforms(ConfigTransforms.enableAlphaVersionSupport*)
       .withSetup { implicit env =>
         defaultEnvironmentSetup()
         env.participant1.health.ping(env.participant2.id)
       }
 }
 
-sealed abstract class LsuSuccessorAcceptedIntegrationTest(
-    // ((currSerial, currPV), (nextSerial, nextPV))
-    currAndNextSerialAndPV: ((NonNegativeInt, ProtocolVersion), (NonNegativeInt, ProtocolVersion))
-) extends LsuSuccessorIntegrationTest(currAndNextSerialAndPV) {
+sealed abstract class LsuSuccessorAcceptedIntegrationTest extends LsuSuccessorIntegrationTest {
 
   override protected def testName: String =
-    s"lsu-psid-accepted-from-${currSerial}_$currPV-to-${nextSerial}_$nextPV"
+    s"lsu-psid-accepted-from-${currentSerial}_$currentPV-to-${successorSerial}_$successorPV"
 
   "Logical synchronizer upgrade" should {
-    s"succeed for (serial=$currSerial, pv=$currPV) -> (serial=$nextSerial, pv=$nextPV)" in {
+    s"succeed for (serial=$currentSerial, pv=$currentPV) -> (serial=$successorSerial, pv=$successorPV)" in {
       implicit env =>
         import env.*
 
         val fixture =
-          fixtureWithDefaults(newPVOverride = Some(nextPV), newSerialOverride = Some(nextSerial))
+          fixtureWithDefaults(
+            newPVOverride = Some(successorPV),
+            newSerialOverride = Some(successorSerial),
+          )
 
         performSynchronizerNodesLsu(fixture)
 
@@ -95,19 +95,19 @@ sealed abstract class LsuSuccessorAcceptedIntegrationTest(
   }
 }
 
-sealed abstract class LsuSuccessorRejectedIntegrationTest(
-    // ((currSerial, currPV), (nextSerial, nextPV))
-    currAndNextSerialAndPV: ((NonNegativeInt, ProtocolVersion), (NonNegativeInt, ProtocolVersion))
-) extends LsuSuccessorIntegrationTest(currAndNextSerialAndPV) {
+sealed abstract class LsuSuccessorRejectedIntegrationTest extends LsuSuccessorIntegrationTest {
 
   override protected def testName: String =
-    s"lsu-psid-rejected-from-${currSerial}_$currPV-to-${nextSerial}_$nextPV"
+    s"lsu-psid-rejected-from-${currentSerial}_$currentPV-to-${successorSerial}_$successorPV"
 
   "Logical synchronizer upgrade announcement" should {
-    s"fail for (serial=$currSerial, pv=$currPV) -> (serial=$nextSerial, pv=$nextPV)" in {
+    s"fail for (serial=$currentSerial, pv=$currentPV) -> (serial=$successorSerial, pv=$successorPV)" in {
       implicit env =>
         val fixture =
-          fixtureWithDefaults(newPVOverride = Some(nextPV), newSerialOverride = Some(nextSerial))
+          fixtureWithDefaults(
+            newPVOverride = Some(successorPV),
+            newSerialOverride = Some(successorSerial),
+          )
 
         loggerFactory.assertLogs(
           assertThrows[CommandFailure] {
@@ -122,8 +122,36 @@ sealed abstract class LsuSuccessorRejectedIntegrationTest(
 }
 
 // If the elements change in opposite directions, serial takes priority.
-@UnstableTest // TODO(i35364): Remove once the test is stable again
-final class LsuSuccessorSerialUpPVDownIntegrationTest
-    extends LsuSuccessorAcceptedIntegrationTest((zero, v35) -> (one, v34))
-final class LsuSuccessorSerialDownPVUpIntegrationTest
-    extends LsuSuccessorRejectedIntegrationTest((one, v34) -> (zero, v35))
+final class LsuSuccessorSerialUpPVDownIntegrationTest extends LsuSuccessorAcceptedIntegrationTest {
+
+  override val currentPV: ProtocolVersion = testedProtocolVersion
+  override val currentSerial: NonNegativeInt = zero
+  override val successorPV: ProtocolVersion = currentPV.previousSupported.getOrElse(currentPV)
+  override val successorSerial: NonNegativeInt = one
+
+  override def withFixture(test: OneArgTest): Outcome =
+    if (currentPV == successorPV) {
+      cancel(
+        s"Skipping test because there's no supported PV lower than the tested protocol version $testedProtocolVersion."
+      )
+    } else {
+      super.withFixture(test)
+    }
+}
+
+final class LsuSuccessorSerialDownPVUpIntegrationTest extends LsuSuccessorRejectedIntegrationTest {
+
+  override val currentSerial: NonNegativeInt = one
+  override val currentPV: ProtocolVersion = testedProtocolVersion
+  override val successorSerial: NonNegativeInt = zero
+  override val successorPV: ProtocolVersion = currentPV.nextSupported.getOrElse(currentPV)
+
+  override def withFixture(test: OneArgTest): Outcome =
+    if (currentPV == successorPV) {
+      cancel(
+        s"Skipping test because there's no supported PV higher than the tested protocol version $testedProtocolVersion."
+      )
+    } else {
+      super.withFixture(test)
+    }
+}

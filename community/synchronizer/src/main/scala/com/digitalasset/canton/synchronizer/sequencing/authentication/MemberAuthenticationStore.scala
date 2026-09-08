@@ -218,6 +218,7 @@ class MemberAuthenticationStore(
 
   def invalidateMember(member: Member): Unit = {
     nonces.getAndUpdate(_.removed(member)).discard
+
     // this is fine racy wise as the auth token itself is unique
     // while at the same time, the tokenLookup use always makes the self-consistency check
     tokens.remove(member).foreach(_.foreach(stored => tokenLookup.remove(stored.token).discard))

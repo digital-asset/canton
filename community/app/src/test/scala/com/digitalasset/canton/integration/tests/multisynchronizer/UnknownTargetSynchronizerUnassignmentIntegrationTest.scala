@@ -90,6 +90,7 @@ final class UnknownTargetSynchronizerUnassignmentIntegrationTest
           participant2,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )

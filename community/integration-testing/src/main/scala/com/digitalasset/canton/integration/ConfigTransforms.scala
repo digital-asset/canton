@@ -21,6 +21,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.console.FeatureFlag
 import com.digitalasset.canton.http.{JsonApiConfig, WebsocketConfig}
 import com.digitalasset.canton.participant.config.{
+  AcsCommitmentConfig,
   AlphaOnlinePartyReplicationConfig,
   ParticipantNodeConfig,
   RemoteParticipantConfig,
@@ -153,12 +154,12 @@ object ConfigTransforms {
 
   lazy val enableNewAcsCommitmentProcessorPipeline: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(true)
+      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(true)
     )
 
   lazy val disableNewAcsCommitmentProcessorPipeline: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(false)
+      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(false)
     )
 
   /** Disable the old acs commitment processor if the testedProtocolVersion meets or exceeds
@@ -168,7 +169,7 @@ object ConfigTransforms {
     if (BaseTest.testedProtocolVersion >= ProtocolVersion.acsCommitmentRedesign) {
       updateAllParticipantConfigs_(
         _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-          .replace(true)
+          .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always)
       )
     } else identity
 
@@ -176,7 +177,7 @@ object ConfigTransforms {
   lazy val enableOldAcsCommitmentProcessor: ConfigTransform =
     updateAllParticipantConfigs_(
       _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
-        .replace(false)
+        .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Never)
     )
 
   def setAcsCommitmentSendDelay(min: Double, max: Double): ConfigTransform =
@@ -956,7 +957,7 @@ object ConfigTransforms {
     )
 
   def defaultsForNodes: Seq[ConfigTransform] =
-    setProtocolVersion(ProtocolVersion.v34) :+ enableAchs
+    setProtocolVersion(ProtocolVersion.v35) :+ enableAchs
 
   def setTopologyTransactionRegistrationTimeout(
       timeout: config.NonNegativeFiniteDuration

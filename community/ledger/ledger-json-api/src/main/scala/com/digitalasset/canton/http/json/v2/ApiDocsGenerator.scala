@@ -325,9 +325,8 @@ class ApiDocsGenerator(override protected val loggerFactory: NamedLoggerFactory)
     )
   }
 
-  def loadProtoData(): ProtoInfo =
-    ProtoInfo
-      .loadData()
+  def cachedProtoData(): ProtoInfo =
+    ProtoInfo.cachedProtoData
 
   def createDocs(
       lapiVersion: String,

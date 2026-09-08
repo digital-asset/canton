@@ -5,8 +5,6 @@ package com.digitalasset.canton.participant.protocol.decrypter
 
 import com.digitalasset.canton.BaseTestWordSpec
 import com.digitalasset.canton.crypto.SecureRandomness
-import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.protocol.messages.EncryptedMultipleViewsMessage
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmptyUtil
 
@@ -57,9 +55,7 @@ class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecryp
         val env = new Env(
           interceptEncryptedViewMessages = { encryptedViewMessages =>
             val parentView = encryptedViewMessages(0)
-              .asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType.type]]
             val childView = encryptedViewMessages(1)
-              .asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType.type]]
             encryptedViewMessages :+
               parentView.copy(
                 viewEncryptionKeyRandomness = childView.viewEncryptionKeyRandomness
@@ -89,8 +85,7 @@ class ViewMessageDecrypterV2Test extends BaseTestWordSpec with ViewMessageDecryp
             // Force all encrypted view messages to use the same view hash
             // to verify that decryption does not rely on view-hash uniqueness.
             encryptedViewMessages.map {
-              _.asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType.type]]
-                .copy(viewHashes = NonEmptyUtil.fromUnsafe(Seq(sharedViewHash)))
+              _.copy(viewHashes = NonEmptyUtil.fromUnsafe(Seq(sharedViewHash)))
             }
           }
         )

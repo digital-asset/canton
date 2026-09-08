@@ -27,8 +27,8 @@ test-with-big-commands.sh "$@"
 
 test-with-recording.sh "$@"
 
-# disabled until it s reliably ported to x-nodes
-# test-participant-replay.sh "$@"
+# This relies on the result of `test-with-recording.sh`
+test-participant-replay.sh "$@"
 
 echo
 echo "***** Deleting recordings..."

@@ -22,7 +22,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.DbConfig.Postgres
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{InstanceReference, ParticipantReference}
-import com.digitalasset.canton.examples.java.{cycle as C, iou}
+import com.digitalasset.canton.examples.java.{iou, cycle as C}
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.integration.{

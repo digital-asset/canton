@@ -93,7 +93,7 @@ object ProtocolVersionCompatibility {
   final case class UnsupportedVersion(version: ProtocolVersion, supported: Seq[ProtocolVersion])
       extends FailureReason {
     override def description: String =
-      s"CantonVersion $version is not supported! The supported versions are ${supported.map(_.toString).mkString(", ")}. Please configure one of these protocol versions in the SynchronizerParameters. "
+      s"Canton protocol version $version is not supported! The supported versions are ${supported.map(_.toString).mkString(", ")}. Please configure one of these protocol versions in the SynchronizerParameters. "
   }
 
   /** Returns successfully if the client and server should be compatible. Otherwise returns an error

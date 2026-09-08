@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.db
 import cats.Eval
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.annotations.AcsCommitmentTest
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStoreTest
 import com.digitalasset.canton.resource.DbStorage
@@ -43,6 +44,7 @@ trait DbAcsCommitmentPeriodStoreTest extends AcsCommitmentPeriodStoreTest with D
           Eval.now(stringInterning),
           timeouts,
           loggerFactory,
+          FutureSupervisor.Noop,
           enableConsistencyChecks,
         )(executionContext)
     )

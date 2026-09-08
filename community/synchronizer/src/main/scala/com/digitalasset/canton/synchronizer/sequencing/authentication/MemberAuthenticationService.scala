@@ -250,7 +250,7 @@ class MemberAuthenticationService(
 
     } yield {
       logger.info(
-        s"$member authenticated new token with expiry $tokenExpiry"
+        s"$member authenticated, issuing new token with expiry $tokenExpiry"
       )
       AuthenticationTokenWithExpiry(token, tokenExpiry)
     }

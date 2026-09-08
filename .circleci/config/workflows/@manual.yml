@@ -352,34 +352,6 @@ manual_topology_chaos_test:
         requires:
           - print_tests
 
-manual_test_protocol_version_34:
-  when:
-    equal: [ test-protocol-version-34, << pipeline.parameters.manual_job >> ]
-  jobs:
-    - compile:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
-    - test:
-        name: test_protocol_version_34
-        protocol_version: "34"
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - aws_kms_testing
-          - gcp_kms_testing
-          - da-images
-        filters:
-          tags:
-            only: /^v.*/
-        requires:
-          - compile
-
 manual_test_protocol_version_36:
   when:
     equal: [ test-protocol-version-36, << pipeline.parameters.manual_job >> ]
@@ -394,6 +366,34 @@ manual_test_protocol_version_36:
     - test:
         name: test_protocol_version_36
         protocol_version: "36"
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - aws_kms_testing
+          - gcp_kms_testing
+          - da-images
+        filters:
+          tags:
+            only: /^v.*/
+        requires:
+          - compile
+
+manual_test_protocol_version_37:
+  when:
+    equal: [ test-protocol-version-37, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - test:
+        name: test_protocol_version_37
+        protocol_version: "37"
         context:
           - datadog
           - artifactory

@@ -17,6 +17,11 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
+import com.digitalasset.canton.topology.transaction.{
+  SignedTopologyTransaction,
+  TopologyChangeOp,
+  TopologyMapping,
+}
 import com.digitalasset.canton.topology.{
   MediatorId,
   ParticipantId,
@@ -70,6 +75,7 @@ class NetworkBootstrapper(networks: NetworkTopologyDescription*)(implicit
       staticSynchronizerParameters = desc.staticSynchronizerParameters,
       mediatorRequestAmplification = desc.mediatorRequestAmplification,
       mediatorThreshold = desc.mediatorThreshold,
+      identityTransactions = desc.identityTransactions,
     )
 
     val synchronizerAlias = SynchronizerAlias.tryCreate(desc.synchronizerName)
@@ -104,6 +110,9 @@ final case class NetworkTopologyDescription(
     mediatorRequestAmplification: SubmissionRequestAmplification,
     overrideMediatorToSequencers: Option[Map[MediatorReference, MediatorSequencersConfiguration]],
     mediatorThreshold: PositiveInt,
+    identityTransactions: Option[
+      Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+    ],
 ) {
   def withTopologyChangeDelay(
       topologyChangeDelay: NonNegativeFiniteDuration
@@ -128,6 +137,9 @@ object NetworkTopologyDescription {
       ] = None,
       overrideStaticSynchronizerParameters: Option[StaticSynchronizerParameters] = None,
       mediatorThreshold: PositiveInt = PositiveInt.one,
+      identityTransactions: Option[
+        Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+      ] = None,
   )(implicit env: TestConsoleEnvironment): NetworkTopologyDescription =
     NetworkTopologyDescription(
       synchronizerName = synchronizerAlias.unwrap,
@@ -141,6 +153,7 @@ object NetworkTopologyDescription {
       mediatorRequestAmplification,
       overrideMediatorToSequencers,
       mediatorThreshold,
+      identityTransactions,
     )
 
   def createWithStaticSynchronizerParameters(
@@ -150,6 +163,9 @@ object NetworkTopologyDescription {
       sequencers: Seq[SequencerReference],
       mediators: Seq[MediatorReference],
       staticSynchronizerParameters: StaticSynchronizerParameters,
+      identityTransactions: Option[
+        Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+      ] = None,
   ): NetworkTopologyDescription =
     NetworkTopologyDescription(
       synchronizerName = synchronizerAlias.unwrap,
@@ -161,6 +177,7 @@ object NetworkTopologyDescription {
       SubmissionRequestAmplification.NoAmplification,
       None,
       PositiveInt.one,
+      identityTransactions,
     )
 
   /** Defines how mediators connect to the sequencers */

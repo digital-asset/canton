@@ -4,6 +4,7 @@
 package com.digitalasset.canton.http.json.v2
 
 import com.digitalasset.canton.http.json.v2.ProtoInfo.{camelToSnake, fixedName, normalizeName}
+import com.digitalasset.canton.proto.ProtoParser
 import io.circe.yaml.Printer
 
 import scala.collection.immutable.SortedMap
@@ -145,8 +146,8 @@ object ProtoInfo {
   val optionalPattern = raw"^\s*\bOptional\b".r
   val requiredPattern = raw"^\s*\bRequired\b(?!\s+unless\b)".r
   val optionalWhenRequiredUnlessPattern = raw"^\s*\bRequired\b(?:\s+unless\b)".r
-  val LedgerApiDescriptionResourceLocation = "ledger-api/proto-data.yml"
   val CommentsOverridesApiDescriptionResourceLocation = "ledger-api/json-comments-overrides.yml"
+  lazy val cachedProtoData = loadData()
   def camelToSnake(name: String): String =
     name
       .replaceAll("([a-z0-9])([A-Z])", "$1_$2")
@@ -187,25 +188,7 @@ object ProtoInfo {
       )
 
   def loadData(): ProtoInfo = {
-    import io.circe.generic.auto.*
-    import io.circe.yaml.Parser as YamlParser
-    val protoDocumentation = Using.resource(
-      Source.fromResource(
-        LedgerApiDescriptionResourceLocation,
-        classOf[com.digitalasset.canton.http.json.v2.ProtoInfo.type].getClassLoader,
-      )
-    ) { protoCommentsResource =>
-      Using.resource(protoCommentsResource.bufferedReader()) { protoCommentsReader =>
-        YamlParser.default
-          .parse(protoCommentsReader)
-          .flatMap(_.as[ExtractedProtoComments])
-          .getOrElse(
-            throw new IllegalStateException(
-              s"Cannot load scanned proto comments from $LedgerApiDescriptionResourceLocation"
-            )
-          )
-      }
-    }
+    val protoDocumentation = ProtoParser.readProto()
     val commentOverrides = loadOverrides()
     ProtoInfo(protoDocumentation, commentOverrides)
   }

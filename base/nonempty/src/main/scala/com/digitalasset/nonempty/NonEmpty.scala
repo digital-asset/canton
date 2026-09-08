@@ -9,9 +9,7 @@ import com.daml.scalautil.Statement.discard
 
 import scala.collection.{Factory, IterableOnce, immutable as imm}
 
-import imm.Iterable
-import imm.Map
-import imm.Set
+import imm.{Iterable, Map, Set}
 import NonEmptyCollCompat.*
 
 /** The visible interface of [[NonEmpty]]; use that value to access these members.

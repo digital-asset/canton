@@ -31,6 +31,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   RoutingSynchronizerState,
   SubmissionResult,
   SubmitterInfo,
+  SyncService,
   SynchronizerRank,
   TransactionMeta,
 }
@@ -276,5 +277,14 @@ object ApiPackageManagementServiceSpec {
     override def participantId: ParticipantId = DefaultTestIdentities.participant1
 
     override def randomOps: RandomOps = new SymbolicPureCrypto
+
+    override def estimateReassignmentCosts(
+        synchronizerRank: SynchronizerRank,
+        submitterInfo: SubmitterInfo,
+        targetSynchronizer: PhysicalSynchronizerId,
+    )(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, String, Seq[SyncService.ReassignmentCostEstimation]] =
+      throw new UnsupportedOperationException()
   }
 }

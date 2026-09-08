@@ -16,7 +16,6 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   ReleaseProtocolVersion,
   RepresentativeProtocolVersion,
-  UnsupportedProtoCodec,
   VersionedProtoCodec,
   VersioningCompanion,
 }
@@ -50,12 +49,11 @@ object OnboardingClearanceOperation extends VersioningCompanion[OnboardingCleara
   override val name: String = "OnboardingClearanceOperation"
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(),
     ProtoVersion(30) -> VersionedProtoCodec
       .storage(ReleaseProtocolVersion(ProtocolVersion.v35), v30.OnboardingClearanceOperation)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30,
-      ),
+      )
   )
 
   lazy val operationName: NonEmptyString =

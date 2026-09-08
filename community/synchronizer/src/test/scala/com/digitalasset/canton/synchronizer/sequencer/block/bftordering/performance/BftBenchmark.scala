@@ -30,10 +30,10 @@ import java.util.concurrent.{
   ConcurrentHashMap,
   ExecutorService,
   Executors,
-  Future as JFuture,
   ScheduledExecutorService,
   ScheduledFuture,
   TimeUnit,
+  Future as JFuture,
 }
 import java.util.function.BiFunction
 

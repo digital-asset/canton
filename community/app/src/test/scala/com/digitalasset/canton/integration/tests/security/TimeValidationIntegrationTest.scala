@@ -261,6 +261,7 @@ trait TimeValidationIntegrationTest
         participant1,
         daId,
         testedProtocolVersion,
+        defaultProtocolLimits,
         timeouts,
         loggerFactory,
         testSubmissionServiceOverrideO = Some(

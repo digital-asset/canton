@@ -11,9 +11,7 @@ import scalaz.{Foldable, Foldable1, Leibniz, Liskov, Monoid, OneAnd, Semigroup, 
 
 import scala.collection.{Factory, IterableOnce, immutable as imm}
 
-import imm.Iterable
-import imm.Map
-import imm.Set
+import imm.{Iterable, Map, Set}
 import Leibniz.===
 import Liskov.<~<
 import NonEmptyCollCompat.*

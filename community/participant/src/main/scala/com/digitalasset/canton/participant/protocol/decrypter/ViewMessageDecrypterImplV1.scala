@@ -204,7 +204,6 @@ private[decrypter] class ViewMessageDecrypterImplV1(
         sessionKeyStore,
         encryptedViewMessage,
         participantId,
-        protocolVersion,
         Some(randomness),
       )(
         LightTransactionViewTree

@@ -28,8 +28,8 @@ import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
-  NextGenContractStateMachine as ContractStateMachine,
   SerializationVersion,
+  NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.Value.{
   ContractId,

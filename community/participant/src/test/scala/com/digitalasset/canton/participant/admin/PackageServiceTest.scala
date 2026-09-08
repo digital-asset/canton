@@ -45,7 +45,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.archive.testing.Encode
-import com.digitalasset.daml.lf.archive.{DamlLf, Dar as LfDar, DarParser, DarWriter}
+import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarWriter, Dar as LfDar}
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}

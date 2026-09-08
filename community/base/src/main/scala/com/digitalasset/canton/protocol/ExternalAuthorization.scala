@@ -33,13 +33,6 @@ final case class ExternalAuthorization(
       v30.ExternalPartyAuthorization(party.toProtoPrimitive, partySignatures.map(_.toProtoV30))
     }.toSeq
 
-  private[canton] def toProtoV30: v30.ExternalAuthorization =
-    // In PV34 max record time enforced via the max sequencing time
-    v30.ExternalAuthorization(
-      authentications = authenticationsV30,
-      hashingSchemeVersion.toProtoV30,
-    )
-
   private[canton] def toProtoV31: v31.ExternalAuthorization =
     v31.ExternalAuthorization(
       authentications = authenticationsV30,
@@ -76,9 +69,6 @@ object ExternalAuthorization
   override def name: String = "ExternalAuthorization"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(protoCompanion =
-      v30.ExternalAuthorization
-    )(supportedProtoVersionPVV(_)(fromProtoV30), _.toProtoV30),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(protoCompanion =
       v31.ExternalAuthorization
     )(supportedProtoVersionPVV(_)(fromProtoV31), _.toProtoV31),
@@ -104,24 +94,6 @@ object ExternalAuthorization
           ProtoValidation.MaxCollectionSize,
         )((element, _) => Signature.fromProtoV30(element))
     } yield partyId -> partySignatures
-  }
-
-  def fromProtoV30(
-      pvv: ProtocolVersionValidation,
-      proto: v30.ExternalAuthorization,
-  ): ParsingResult[ExternalAuthorization] = {
-    val v30.ExternalAuthorization(signaturesP, _) = proto
-    for {
-      signatures <- ProtoValidation
-        .validateLengthThen(
-          signaturesP,
-          "signatures",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => fromProtoV30(pvv, element))
-      hashingSchemeVersion <- HashingSchemeVersion.fromProtoV30(proto.hashingSchemeVersion)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-    } yield ExternalAuthorization(signatures.toMap, hashingSchemeVersion, None)(rpv)
   }
 
   def fromProtoV31(

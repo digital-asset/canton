@@ -134,7 +134,6 @@ class EventCostCalculatorTest
       ),
       PositiveInt.tryCreate(5000),
       Map.empty,
-      testedProtocolVersion,
       baseEventCost = baseCost,
     ) shouldBe EventCostDetails(
       costMultiplier = PositiveInt.tryCreate(5000),

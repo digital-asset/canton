@@ -20,8 +20,8 @@ import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
   GlobalKey,
-  NextGenContractStateMachine as ContractStateMachine,
   Node,
+  NextGenContractStateMachine as ContractStateMachine,
   SubmittedTransaction as SubmittedTx,
   TransactionOuterClass as TxOuterClass,
 }

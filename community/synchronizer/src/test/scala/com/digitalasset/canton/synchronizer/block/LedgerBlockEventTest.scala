@@ -8,6 +8,7 @@ import com.digitalasset.canton.ProtoDeserializationError.MaxBytesToDecompressExc
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.protocol.ProtocolObjectTestUtils.{
   assertEnvelopeType,
   normalizeSubmissionRequest,
@@ -66,6 +67,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
         .deserializeSignedSubmissionRequest(
           testedProtocolVersion,
           defaultDecompressionPolicy,
+          SynchronizerLimits.defaultFor(testedProtocolVersion),
         )(
           byteString
         )
@@ -78,6 +80,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
       LedgerBlockEvent.deserializeSignedSubmissionRequest(
         testedProtocolVersion,
         DecompressionPolicy.PerEnvelope(MaxBytesToDecompress(NonNegativeInt.zero)),
+        SynchronizerLimits.defaultFor(testedProtocolVersion),
       )(
         byteString
       ) shouldBe Left(
@@ -91,6 +94,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
           .fromRawBlockEvent(
             testedProtocolVersion,
             defaultDecompressionPolicy,
+            SynchronizerLimits.defaultFor(testedProtocolVersion),
           )(
             RawBlockEvent.Send(byteString, 0, sequencer.toProtoPrimitive)
           )

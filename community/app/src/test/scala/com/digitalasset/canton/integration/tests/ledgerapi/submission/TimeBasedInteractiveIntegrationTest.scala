@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.submission
 
-import cats.Eval
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract}
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
@@ -11,19 +10,13 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
 import com.digitalasset.canton.admin.api.client.data.TemplateId.fromIdentifier
 import com.digitalasset.canton.damltests.java.cycle.Cycle
 import com.digitalasset.canton.damltests.java.statictimetest.Pass
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.defaultConfirmingParticipant
 import com.digitalasset.canton.integration.util.UpdateFormatHelpers.getUpdateFormat
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.TimeoutError
-import com.digitalasset.canton.synchronizer.sequencer.{
-  HasProgrammableSequencer,
-  SendDecision,
-  SendPolicy,
-}
+import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.{ExternalParty, ForceFlags}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, config}
@@ -228,87 +221,6 @@ final class TimeBasedInteractiveIntegrationTest
           )
         ),
       )
-    }
-
-    "respect max record time" onlyRunWith ProtocolVersion.v34 in { implicit env =>
-      import env.*
-      // Use another party so there's no concurrent updates of its acs with previous tests
-      val johnE = participant3.parties.testing.external.enable("John")
-      val simClock = env.environment.simClock.value
-
-      def getJohnAcsSize = participant3.ledger_api.state.acs.of_party(johnE).size
-
-      def test(sequenceAt: CantonTimestamp => CantonTimestamp, expectSuccess: Boolean): Unit = {
-        val johnAcsSize = getJohnAcsSize
-
-        // Set max record time below ledgerTimeRecordTimeTolerance
-        val maxRecordTime = simClock.now.add(ledgerTimeRecordTimeTolerance.dividedBy(2))
-        val prepared =
-          cpn.ledger_api.interactive_submission.prepare(
-            Seq(johnE),
-            Seq(createCycleCommand(johnE, "test")),
-            maxRecordTime = Some(maxRecordTime),
-            hashingSchemeVersion = testedApiHashingSchemeVersion,
-          )
-
-        val signatures = Map(
-          johnE.partyId -> global_secret.sign(prepared.preparedTransactionHash, johnE)
-        )
-
-        getProgrammableSequencer(sequencer1.name).withSendPolicy(
-          "Delay sequencing of submission request",
-          SendPolicy.processTimeProofs { implicit traceContext => submissionRequest =>
-            if (submissionRequest.isConfirmationRequest && submissionRequest.sender == epn.id) {
-              // When we receive the confirmation request, advance time to the desired sequencing time
-              simClock.advanceTo(sequenceAt(maxRecordTime))
-            }
-            SendDecision.Process
-          },
-        ) {
-
-          // exec will pick LET = clock.now
-          // and max sequencing time
-          // = Min(LET + ledgerTimeRecordTimeTolerance, maxRecordTime)
-          // = Min(clock.now + ledgerTimeRecordTimeTolerance, clock.now + ledgerTimeRecordTimeTolerance / 2)
-          // = maxRecordTime
-          if (expectSuccess) {
-            execAndWait(prepared, signatures)
-            eventually() {
-              getJohnAcsSize shouldBe johnAcsSize + 1
-            }
-          } else {
-            val (submissionId, ledgerEnd) = exec(prepared, signatures, epn)
-            val completion = findCompletion(
-              submissionId,
-              ledgerEnd,
-              johnE,
-              epn,
-              runBetweenAttempts = Eval.always {
-                // Request a time proof to advance synchronizer time on the participant so it realizes
-                // that the request has timed out and emits a completion event
-                // Need to run this between attempts because otherwise we might request the time proof too early
-                // before the transaction has been registered in phase 1
-                epn.underlying.value.sync
-                  .lookupSynchronizerTimeTracker(synchronizer1Id)
-                  .value
-                  .requestTick(maxRecordTime.immediateSuccessor, immediately = true)
-                  .discard
-              },
-            )
-            completion.status.value.code shouldBe io.grpc.Status.Code.ABORTED.value()
-            completion.status.value.message should include(TimeoutError.code.id)
-            // Acs size should not have changed
-            getJohnAcsSize shouldBe johnAcsSize
-          }
-        }
-      }
-
-      // Expect success when the event goes just before the max record time
-      // Technically exactly at max record time is fine but because there's concurrent ticks going on, testing at exactly
-      // max sequencing time ends up not going through if a tick gets sequenced before
-      test(_.minusMillis(1), expectSuccess = true)
-      // Expect failure when the event goes through right after max record time
-      test(_.immediateSuccessor, expectSuccess = false)
     }
 
     "rejects execution requests outside the submission tolerance" in { implicit env =>

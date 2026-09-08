@@ -23,7 +23,7 @@ import org.slf4j.event.Level.INFO
 
 import java.time.{Clock, Duration, Instant, ZoneId}
 import scala.concurrent.ExecutionContext
-import scala.concurrent.duration.{Duration as SDuration, FiniteDuration}
+import scala.concurrent.duration.{FiniteDuration, Duration as SDuration}
 
 class UserBasedOngoingAuthorizationSpec
     extends AsyncFlatSpec

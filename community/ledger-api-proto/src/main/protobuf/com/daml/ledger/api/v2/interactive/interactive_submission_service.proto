@@ -74,6 +74,45 @@ message CostEstimationHints {
   repeated SigningAlgorithmSpec expected_signatures = 2;
 }
 
+// Estimation of re-assignment costs
+// This is the cost of re-assigning contracts from another synchronizer if necessary.
+message ReassignmentCost {
+  // The synchronizer the contracts are currently assigned to, and against whose traffic balance
+  // the unassignment cost is charged
+  //
+  // Required
+  string source_synchronizer_id = 1;
+  // The synchronizer the contracts will be re-assigned to, and against whose traffic balance
+  // the assignment cost is charged
+  //
+  // Required
+  string target_synchronizer_id = 2;
+  // The contracts that will be unassigned together in this single unassignment request
+  //
+  // Required: must be non-empty
+  repeated string contract_ids = 3;
+  // Estimated traffic cost of the unassignment confirmation request
+  //
+  // Required
+  uint64 unassignment_request_traffic_cost_estimation = 4;
+  // Estimated traffic cost of the unassignment confirmation response
+  //
+  // Required
+  uint64 unassignment_response_traffic_cost_estimation = 5;
+  // Estimated traffic cost of the assignment confirmation request
+  //
+  // Required
+  uint64 assignment_request_traffic_cost_estimation = 6;
+  // Estimated traffic cost of the assignment confirmation response
+  //
+  // Required
+  uint64 assignment_response_traffic_cost_estimation = 7;
+  // Sum of the fields above
+  //
+  // Required
+  uint64 total_reassignment_cost_estimation = 8;
+}
+
 // Estimation of the cost of submitting the prepared transaction
 // The estimation is done against the synchronizer chosen during preparation of the transaction
 // (or the one explicitly requested).
@@ -97,6 +136,10 @@ message CostEstimation {
   //
   // Required
   uint64 total_traffic_cost_estimation = 4;
+  // Estimated cost of re-assigning contracts if necessary
+  //
+  // Optional: can be empty
+  repeated ReassignmentCost reassignment_costs = 5;
 }
 
 message PrepareSubmissionRequest {

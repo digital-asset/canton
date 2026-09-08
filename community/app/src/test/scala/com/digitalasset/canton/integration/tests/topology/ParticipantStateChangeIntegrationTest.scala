@@ -49,6 +49,7 @@ trait ParticipantStateChangeIntegrationTest
   private def rollSigningKey(
       envNodes: Seq[LocalInstanceReference],
       node: LocalInstanceReference,
+      synchronizerId: SynchronizerId,
   ): Unit = {
 
     def keys(envNode: LocalInstanceReference) = envNode.topology.owner_to_key_mappings
@@ -59,7 +60,7 @@ trait ParticipantStateChangeIntegrationTest
       .flatMap(_.item.keys.forgetNE)
       .toSet
     val before = keys(node)
-    node.keys.secret.rotate_node_keys()
+    node.keys.secret.rotate_node_keys(synchronizerId = Some(synchronizerId))
     clue(s"${node.name} keys are distinct after rolling") {
       eventually() {
         forAll(envNodes) { envNode =>
@@ -121,12 +122,12 @@ trait ParticipantStateChangeIntegrationTest
 
     // roll sequencer key
     clue("we can roll the sequencer key") {
-      rollSigningKey(env.nodes.local, sequencer1)
+      rollSigningKey(env.nodes.local, sequencer1, daId)
       assertPingSucceeds(participant1, participant1)
     }
 
     clue("we can roll the mediator key") {
-      rollSigningKey(env.nodes.local, mediator1)
+      rollSigningKey(env.nodes.local, mediator1, daId)
       assertPingSucceeds(participant1, participant1)
 
     }
@@ -183,10 +184,10 @@ trait ParticipantStateChangeIntegrationTest
     (0 to 2).foreach { idx =>
       logger.info(s"rollSigningKey iteration #$idx")
       val activeNodes = env.nodes.local.filterNot(_ == participant1)
-      rollSigningKey(activeNodes, sequencer1)
-      rollSigningKey(activeNodes, mediator1)
-      rollSigningKey(activeNodes, sequencer1)
-      rollSigningKey(activeNodes, mediator1)
+      rollSigningKey(activeNodes, sequencer1, daId)
+      rollSigningKey(activeNodes, mediator1, daId)
+      rollSigningKey(activeNodes, sequencer1, daId)
+      rollSigningKey(activeNodes, mediator1, daId)
     }
 
     clue("re-enable participant") {

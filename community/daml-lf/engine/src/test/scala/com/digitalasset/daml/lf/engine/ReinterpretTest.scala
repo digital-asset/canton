@@ -16,12 +16,12 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
-  NextGenContractStateMachine as ContractStateMachine,
   Node,
   NodeId,
   SerializationVersion,
   SubmittedTransaction,
   Transaction,
+  NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value.*

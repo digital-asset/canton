@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
-import com.digitalasset.canton.ledger.api.{Commands as ApiCommands, DisclosedContract}
+import com.digitalasset.canton.ledger.api.{DisclosedContract, Commands as ApiCommands}
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors.{
   InteractiveSubmissionExecuteError,
   InteractiveSubmissionPreparationError,

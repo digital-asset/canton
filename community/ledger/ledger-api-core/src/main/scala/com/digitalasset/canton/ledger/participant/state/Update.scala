@@ -21,9 +21,9 @@ import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
 import com.digitalasset.canton.protocol.{LfHash, UpdateId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.{
-  SynchronizerParametersState as TopologySynchronizerParametersState,
   TopologyChangeOp,
   TopologyTransaction,
+  SynchronizerParametersState as TopologySynchronizerParametersState,
 }
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.ShowUtil

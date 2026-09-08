@@ -475,7 +475,7 @@ run_crash_recovery_tests:
         command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>\""
         filter: << parameters.filter >>
         # don't fail crash recovery test on errors in output
-        fail_on_error_in_output: false
+        fail_on_error_in_output: true
         num_parallel_tasks: "1"
         # explicitly making timeouts larger here, as some crash recovery tests run ~15m and this can lead
         # to flaky timeouts when two long-running tests run within the same bucket

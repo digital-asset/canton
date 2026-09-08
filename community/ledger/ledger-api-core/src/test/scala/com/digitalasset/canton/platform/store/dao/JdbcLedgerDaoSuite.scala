@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.ledger.api.testtool.TestDars
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
-import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
+import com.digitalasset.canton.crypto.{HashPurpose, Hash as CantonHash}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TemplateFilter
 import com.digitalasset.canton.ledger.participant.state

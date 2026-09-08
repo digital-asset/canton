@@ -11,12 +11,12 @@ import com.daml.ledger.api.v2.commands.{Command, CreateCommand, ExerciseCommand}
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.value.Value.Sum
 import com.daml.ledger.api.v2.value.{
-  Identifier as IdentifierV1,
-  List as ListV1,
   Optional,
   Record,
   RecordField,
   Value,
+  Identifier as IdentifierV1,
+  List as ListV1,
 }
 import com.daml.ledger.javaapi.data.{DisclosedContract, Identifier}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
@@ -520,17 +520,25 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         owners: Seq[InstanceReference],
         threshold: PositiveInt,
         store: TopologyStoreId = TopologyStoreId.Authorized,
+        protocolVersion: ProtocolVersion,
+        identityTransactions: Option[
+          Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+        ],
+    )(implicit
+        consoleEnvironment: ConsoleEnvironment
     ): (Namespace, Seq[GenericSignedTopologyTransaction]) = {
+
       val ownersNE = NonEmpty
         .from(owners)
         .getOrElse(
-          throw new IllegalArgumentException(
+          consoleEnvironment.raiseError(
             "There must be at least 1 owner for a decentralizedNamespace."
           )
         )
       val expectedDNS = DecentralizedNamespaceDefinition.computeNamespace(
         owners.map(_.namespace).toSet
       )
+
       val proposedOrExisting = ownersNE
         .map { owner =>
           val existingDnsO =
@@ -554,7 +562,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       // require that all proposed or previously existing transactions have the same hash,
       // otherwise there is no chance for success
       if (proposedOrExisting.distinctBy(_.hash).sizeIs != 1) {
-        throw new IllegalStateException(
+        consoleEnvironment.raiseError(
           s"Proposed or previously existing transactions disagree on the founding of the synchronizer's decentralized namespace:\n$proposedOrExisting"
         )
       }
@@ -567,8 +575,11 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           DecentralizedNamespaceDefinition,
         ]]((txA, txB) => txA.addSignatures(txB.signatures))
 
-      val ownerNSDs =
-        owners.flatMap(_.topology.transactions.identity_transactions())
+      val ownerNSDs = identityTransactions.getOrElse(
+        owners.flatMap(
+          _.topology.transactions.generate_onboarding_transactions(protocolVersion)
+        )
+      )
       val foundingTransactions = ownerNSDs :+ decentralizedNamespaceDefinition
 
       owners.foreach(
@@ -671,6 +682,9 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         ],
         mediatorRequestAmplification: SubmissionRequestAmplification,
         mediatorThreshold: PositiveInt,
+        identityTransactions: Option[
+          Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+        ],
     )(implicit consoleEnvironment: ConsoleEnvironment): PhysicalSynchronizerId = {
       val synchronizerNamespace =
         DecentralizedNamespaceDefinition.computeNamespace(synchronizerOwners.map(_.namespace).toSet)
@@ -681,6 +695,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         staticSynchronizerParameters.serial,
         staticSynchronizerParameters.protocolVersion,
       )
+      val protocolVersion = staticSynchronizerParameters.protocolVersion
 
       val tempStoreForBootstrap = synchronizerOwners
         .map(
@@ -694,14 +709,15 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
       val mediators = mediatorsToSequencers.keys.toSeq
 
-      val identityTransactions =
+      val identity = identityTransactions.getOrElse(
         (sequencers ++ mediators ++ synchronizerOwners).flatMap(
-          _.topology.transactions.identity_transactions()
+          _.topology.transactions.generate_onboarding_transactions(protocolVersion)
         )
+      )
 
       synchronizerOwners.foreach(
         _.topology.transactions.load(
-          identityTransactions,
+          identity,
           store = tempStoreForBootstrap,
           ForceFlag.AlienMember,
         )
@@ -712,6 +728,8 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           synchronizerOwners,
           synchronizerThreshold,
           store = tempStoreForBootstrap,
+          protocolVersion = protocolVersion,
+          identityTransactions = Some(identity),
         )
 
       val synchronizerGenesisTxs = synchronizerOwners.flatMap(
@@ -725,7 +743,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         )
       )
 
-      val initialTopologyState = (identityTransactions ++ foundingTxs ++ synchronizerGenesisTxs)
+      val initialTopologyState = (identity ++ foundingTxs ++ synchronizerGenesisTxs)
         .mapFilter(_.selectOp[TopologyChangeOp.Replace])
         .distinct
 
@@ -854,6 +872,9 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         mediatorRequestAmplification: SubmissionRequestAmplification =
           SubmissionRequestAmplification.NoAmplification,
         mediatorThreshold: PositiveInt = PositiveInt.one,
+        identityTransactions: Option[
+          Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+        ] = None,
     )(implicit consoleEnvironment: ConsoleEnvironment): PhysicalSynchronizerId =
       synchronizer(
         synchronizerName,
@@ -864,6 +885,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         staticSynchronizerParameters,
         mediatorRequestAmplification,
         mediatorThreshold,
+        identityTransactions,
       )
 
     @Help.Summary("Bootstraps a new synchronizer")
@@ -890,6 +912,9 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         staticSynchronizerParameters: data.StaticSynchronizerParameters,
         mediatorRequestAmplification: SubmissionRequestAmplification,
         mediatorThreshold: PositiveInt,
+        identityTransactions: Option[
+          Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+        ],
     )(implicit consoleEnvironment: ConsoleEnvironment): PhysicalSynchronizerId = {
       // skip over HA sequencers
       val uniqueSequencers =
@@ -920,6 +945,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
             mediatorsToSequencers,
             mediatorRequestAmplification,
             mediatorThreshold,
+            identityTransactions,
           )
         case Left(error) =>
           consoleEnvironment.raiseError(s"The synchronizer cannot be bootstrapped: $error")
@@ -941,7 +967,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       upload_new_sequencer_identity_transactions(synchronizerId, newSequencer, existingSequencer)
 
       propose_new_sequencer_state(
-        synchronizerId,
+        synchronizerId.logical,
         newSequencer,
         existingSequencer,
         synchronizerOwners,
@@ -949,7 +975,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       )
 
       wait_for_sequencer_state_to_be_effective(
-        synchronizerId,
+        synchronizerId.logical,
         newSequencer,
         existingSequencer,
         isBftSequencer,
@@ -970,7 +996,9 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     ): Unit = {
       // extract onboarding sequencer's identity transactions
       val onboardingSequencerIdentity =
-        newSequencer.topology.transactions.identity_transactions()
+        newSequencer.topology.transactions.generate_onboarding_transactions(
+          existingSequencer.physical_synchronizer_id.protocolVersion
+        )
 
       // upload onboarding sequencer's identity transactions
       existingSequencer.topology.transactions

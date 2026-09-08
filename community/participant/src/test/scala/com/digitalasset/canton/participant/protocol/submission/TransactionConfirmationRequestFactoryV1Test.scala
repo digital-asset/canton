@@ -12,13 +12,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.LightTransactionViewTree
 import com.digitalasset.canton.data.ViewType.TransactionViewType
-import com.digitalasset.canton.protocol.messages.{
-  EncryptedMultipleViews,
-  EncryptedMultipleViewsMessage,
-  EncryptedSingleViewMessage,
-  EncryptedView,
-  EncryptedViewMessage,
-}
+import com.digitalasset.canton.protocol.messages.{EncryptedMultipleViews, EncryptedViewMessage}
 import com.digitalasset.canton.protocol.{ExampleTransaction, ViewHash}
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.tracing.TraceContext
@@ -50,101 +44,60 @@ class TransactionConfirmationRequestFactoryV1Test
     val cryptoPureApi = cryptoSnapshot.pureCrypto
     val viewEncryptionScheme = cryptoPureApi.defaultSymmetricKeyScheme
 
-    if (testedProtocolVersion >= ProtocolVersion.v35) {
-      val lightTreesByRecipientsE
-          : Seq[(Recipients, Seq[(LightTransactionViewTree, Option[Signature])])] = {
-        val groupedOrdered = lightTransactionTreeWithRecipients.groupMap(_._1)(_._2)
-        val recipientsInOrder = lightTransactionTreeWithRecipients.map(_._1).distinct
+    val lightTreesByRecipientsE
+        : Seq[(Recipients, Seq[(LightTransactionViewTree, Option[Signature])])] = {
+      val groupedOrdered = lightTransactionTreeWithRecipients.groupMap(_._1)(_._2)
+      val recipientsInOrder = lightTransactionTreeWithRecipients.map(_._1).distinct
 
-        recipientsInOrder.flatMap { recipients =>
-          groupedOrdered.get(recipients).map(recipients -> _)
-        }
-      }
-
-      lightTreesByRecipientsE.flatMap { case (recipients, lightTrees) =>
-        val (firstTree, signature) = lightTrees.head
-
-        val (_, sessionKeyRandomness) = hashToKeyMap(firstTree.viewHash)
-
-        val sessionKey = cryptoPureApi
-          .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
-          .valueOrFail("fail to create symmetric key from randomness")
-
-        val participants = firstTree.informees
-          .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
-          .flatMap(_.keySet)
-
-        val encryptedViews = EncryptedMultipleViews
-          .compressAndEncryptViews(
-            cryptoPureApi,
-            sessionKey,
-            TransactionViewType,
-            testedProtocolVersion,
-          )(
-            NonEmptyUtil.fromUnsafe(lightTrees.map(_._1)),
-            defaultMaxBytesToDecompress,
-          )
-          .valueOr(err => fail(s"fail to encrypt view tree: $err"))
-
-        val randomnessMapNE = NonEmpty
-          .from(randomnessMap(sessionKeyRandomness, participants, cryptoPureApi).values.toSeq)
-          .valueOrFail("session key randomness map is empty")
-
-        val messages = Seq(
-          EncryptedMultipleViewsMessage(
-            encryptedViews = encryptedViews,
-            viewHashes = NonEmptyUtil.fromUnsafe(lightTrees.map(_._1.viewHash)),
-            viewEncryptionKeyRandomness = randomnessMapNE,
-            synchronizerId = transactionFactory.psid,
-            viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
-            submittingParticipantSignature = signature,
-            protocolVersion = testedProtocolVersion,
-          )
-        )
-
-        messages.map((_, recipients))
-      }
-    } else {
-      lightTransactionTreeWithRecipients.map { case (recipients, (ltvt, signatureO)) =>
-        val (_, sessionKeyRandomness) = hashToKeyMap(ltvt.viewHash)
-
-        val sessionKey = cryptoPureApi
-          .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
-          .valueOrFail("fail to create symmetric key from randomness")
-
-        val participants = ltvt.informees
-          .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
-          .flatMap(_.keySet)
-
-        val randomnessMapNE = NonEmpty
-          .from(randomnessMap(sessionKeyRandomness, participants, cryptoPureApi).values.toSeq)
-          .valueOrFail("session key randomness map is empty")
-
-        val encryptedView = EncryptedView
-          .compressed(
-            cryptoPureApi,
-            sessionKey,
-            TransactionViewType,
-            testedProtocolVersion,
-          )(
-            ltvt,
-            defaultMaxBytesToDecompress,
-          )
-          .valueOr(err => fail(s"fail to encrypt view tree: $err"))
-
-        val message = EncryptedSingleViewMessage(
-          signatureO,
-          ltvt.viewHash,
-          randomnessMapNE,
-          encryptedView,
-          transactionFactory.psid,
-          SymmetricKeyScheme.Aes128Gcm,
-          testedProtocolVersion,
-        )
-
-        (message, recipients)
+      recipientsInOrder.flatMap { recipients =>
+        groupedOrdered.get(recipients).map(recipients -> _)
       }
     }
+
+    lightTreesByRecipientsE.flatMap { case (recipients, lightTrees) =>
+      val (firstTree, signature) = lightTrees.head
+
+      val (_, sessionKeyRandomness) = hashToKeyMap(firstTree.viewHash)
+
+      val sessionKey = cryptoPureApi
+        .createSymmetricKey(sessionKeyRandomness, viewEncryptionScheme)
+        .valueOrFail("fail to create symmetric key from randomness")
+
+      val participants = firstTree.informees
+        .map(cryptoSnapshot.ipsSnapshot.activeParticipantsOf(_).futureValueUS)
+        .flatMap(_.keySet)
+
+      val encryptedViews = EncryptedMultipleViews
+        .compressAndEncryptViews(
+          cryptoPureApi,
+          sessionKey,
+          TransactionViewType,
+          testedProtocolVersion,
+        )(
+          NonEmptyUtil.fromUnsafe(lightTrees.map(_._1)),
+          defaultMaxBytesToDecompress,
+        )
+        .valueOr(err => fail(s"fail to encrypt view tree: $err"))
+
+      val randomnessMapNE = NonEmpty
+        .from(randomnessMap(sessionKeyRandomness, participants, cryptoPureApi).values.toSeq)
+        .valueOrFail("session key randomness map is empty")
+
+      val messages = Seq(
+        EncryptedViewMessage(
+          encryptedViews = encryptedViews,
+          viewHashes = NonEmptyUtil.fromUnsafe(lightTrees.map(_._1.viewHash)),
+          viewEncryptionKeyRandomness = randomnessMapNE,
+          synchronizerId = transactionFactory.psid,
+          viewEncryptionScheme = SymmetricKeyScheme.Aes128Gcm,
+          submittingParticipantSignature = signature,
+          protocolVersion = testedProtocolVersion,
+        )
+      )
+
+      messages.map((_, recipients))
+    }
+
   }
 
   "A ConfirmationRequestFactory version 1 (uses ViewHash-based references)" must {

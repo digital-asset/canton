@@ -16,17 +16,10 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.protocol.{
-  ContractInstance,
-  CreatedContract,
-  LfSerializationVersion,
-  NewContractInstance,
-}
+import com.digitalasset.canton.protocol.{ContractInstance, CreatedContract, NewContractInstance}
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.MaliciousParticipantNode
-import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.daml.lf.transaction.FatContractInstance
 import com.google.protobuf.ByteString
 import monocle.Traversal
 import org.scalatest.Assertion
@@ -59,6 +52,7 @@ sealed abstract class LfSerializationVersionIntegrationTest
         participant1,
         daId,
         testedProtocolVersion,
+        defaultProtocolLimits,
         timeouts,
         loggerFactory,
       )
@@ -150,37 +144,6 @@ sealed abstract class LfSerializationVersionIntegrationTest
       test(contractMutation, logEntryAssertions)
     }
   }
-
-  "An unsupported contract serialization version" should {
-    "fail view participant data validation" onlyRunWithOrLessThan ProtocolVersion.v34 in {
-      implicit env =>
-        val contractMutation: NewContractInstance => NewContractInstance = c => {
-          val decoded = ContractInstance.decodeCreated(c.serialization).value
-          val inst = FatContractInstance.fromCreateNode(
-            decoded.toLf.copy(version = LfSerializationVersion.V2),
-            decoded.inst.createdAt,
-            decoded.inst.authenticationData,
-          )
-          ContractInstance.create(inst).value
-        }
-
-        val logEntryAssertions: Seq[LogEntry] => Assertion =
-          LogEntry.assertLogSeq(
-            Seq(
-              (
-                _.warningMessage should include regex raw"(?s)Request 5: Decryption error: SymmetricDecryptError.*FailedToDeserialize.*ViewParticipantData contains contract serialization versions not supported by protocol version 34:.*",
-                "TransactionProcessor warning",
-              ),
-              (
-                _.warningMessage should include regex raw"(?s)LOCAL_VERDICT_MALFORMED_PAYLOAD.*Rejected transaction due to malformed payload.*ViewParticipantData contains contract serialization versions not supported by protocol version 34:.*",
-                "TransactionProcessingSteps warning",
-              ),
-            )
-          )
-        test(contractMutation, logEntryAssertions)
-    }
-  }
-
 }
 
 final class ReferenceTransactionVersionIntegrationTestPostgres

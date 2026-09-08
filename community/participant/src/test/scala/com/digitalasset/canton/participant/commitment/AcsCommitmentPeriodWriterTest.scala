@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
 import com.digitalasset.canton.annotations.AcsCommitmentTest
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.CheckpointToBeWritten
@@ -60,6 +61,7 @@ class AcsCommitmentPeriodWriterTest
     new InMemoryAcsCommitmentPeriodStore(
       Eval.now(stringInterning),
       loggerFactory,
+      FutureSupervisor.Noop,
       enableConsistencyChecks,
     )
 

@@ -11,7 +11,7 @@ import com.daml.ledger.api.v2.commands.Command.Command.{
   Exercise as ProtoExercise,
   ExerciseByKey as ProtoExerciseByKey,
 }
-import com.daml.ledger.api.v2.commands.{Command, Commands as ProtoCommands, PrefetchContractKey}
+import com.daml.ledger.api.v2.commands.{Command, PrefetchContractKey, Commands as ProtoCommands}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionRequest,
   PrepareSubmissionRequest,

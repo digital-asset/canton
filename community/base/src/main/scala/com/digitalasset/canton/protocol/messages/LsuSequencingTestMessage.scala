@@ -43,10 +43,6 @@ final case class LsuSequencingTestMessage(
   @transient override protected lazy val companionObj: LsuSequencingTestMessage.type =
     LsuSequencingTestMessage
 
-  override protected[messages] def toProtoSomeEnvelopeContentV30
-      : v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.LsuSequencingTestMessage(toProtoV30)
-
   override protected[messages] def toProtoSomeEnvelopeContentV31
       : v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.LsuSequencingTestMessage(toProtoV30)
@@ -71,7 +67,7 @@ object LsuSequencingTestMessage
     }
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.LsuSequencingTestMessage
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -144,7 +140,7 @@ object LsuSequencingTestMessageContent
   override def name: String = "LsuSequencingTestMessageContent"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.LsuSequencingTestMessageContent
     )(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),

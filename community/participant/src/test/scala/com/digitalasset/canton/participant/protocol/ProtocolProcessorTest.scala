@@ -319,6 +319,7 @@ class ProtocolProcessorTest
       nodePersistentState.acsCounterParticipantConfigStore,
       Eval.now(nodePersistentState.ledgerApiStore),
       loggerFactory,
+      FutureSupervisor.Noop,
     )
     val physical =
       new InMemoryPhysicalSyncPersistentState(

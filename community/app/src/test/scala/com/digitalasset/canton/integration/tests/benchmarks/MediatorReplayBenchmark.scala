@@ -38,7 +38,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import org.scalatest.concurrent.PatienceConfiguration
 
 import java.nio.file.Path
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*

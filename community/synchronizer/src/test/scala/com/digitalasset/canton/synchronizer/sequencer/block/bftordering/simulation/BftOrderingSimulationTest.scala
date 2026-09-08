@@ -4,9 +4,12 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation
 
 import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.crypto.HashOps
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionState
@@ -432,13 +435,16 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             ) =>
           // Forces always querying for an up-to-date topology, so that we simulate correctly topology changes.
           val requestInspector = new RequestInspector {
-            override def isRequestToAllMembersOfSynchronizer(
+            override def mayRequestChangeOrderingTopology(
                 blockMetadata: BlockMetadata,
                 requestNumber: Int,
                 request: OrderingRequest,
                 maxBytesToDecompress: MaxBytesToDecompress,
+                synchronizerLimits: SynchronizerLimits,
                 logger: TracedLogger,
                 traceContext: TraceContext,
+                hashOps: HashOps,
+                stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
             )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean = true
           }
 
@@ -459,6 +465,8 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             noopMetrics,
             logger,
             timeouts,
+            new SymbolicPureCrypto(),
+            SynchronizerLimits.defaultFor(synchronizerProtocolVersion),
             requestInspector,
             epochChecker,
           )

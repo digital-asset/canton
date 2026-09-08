@@ -5,8 +5,8 @@ package com.digitalasset.canton.integration.tests.upgrading
 
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.damltests.appupgrade.v1.java.appupgrade.{
-  AppInstall as AppInstall_V1,
   AppInstallRequest,
+  AppInstall as AppInstall_V1,
   AppInstallRequest as AppInstallRequest_V1,
 }
 import com.digitalasset.canton.damltests.token

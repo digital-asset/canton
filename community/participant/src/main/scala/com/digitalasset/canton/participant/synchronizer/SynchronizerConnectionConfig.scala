@@ -212,7 +212,7 @@ object SynchronizerConnectionConfig
     with HasVersionedMessageCompanionDbHelpers[SynchronizerConnectionConfig] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
-      ProtocolVersion.v34,
+      ProtocolVersion.v35,
       supportedProtoVersion(v30.SynchronizerConnectionConfig)(fromProtoV30),
       _.toProtoV30,
     )

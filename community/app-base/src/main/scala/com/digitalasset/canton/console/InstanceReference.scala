@@ -944,7 +944,9 @@ abstract class SequencerReference(
         val mediators = active ++ observers
 
         mediators.foreach { mediator =>
-          val identityState = mediator.topology.transactions.identity_transactions()
+          val identityState = mediator.topology.transactions.generate_onboarding_transactions(
+            physical_synchronizer_id.protocolVersion
+          )
 
           topology.transactions.load(
             identityState,
@@ -1002,7 +1004,9 @@ abstract class SequencerReference(
           (additionalActive ++ additionalObservers).filterNot(m => current.contains(m.id))
 
         newMediators.foreach { med =>
-          val identityState = med.topology.transactions.identity_transactions()
+          val identityState = med.topology.transactions.generate_onboarding_transactions(
+            physical_synchronizer_id.protocolVersion
+          )
 
           topology.transactions.load(
             identityState,
@@ -1503,6 +1507,7 @@ object MediatorReference {
 
 abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, name: String)
     extends InstanceReference
+    with SequencerConnectionAdministration
     with ConsoleCommandGroup {
   override type Status = MediatorStatus
 
@@ -1584,7 +1589,6 @@ abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, nam
 class LocalMediatorReference(consoleEnvironment: ConsoleEnvironment, val name: String)
     extends MediatorReference(consoleEnvironment, name)
     with LocalInstanceReference
-    with SequencerConnectionAdministration
     with BaseInspection[MediatorNode] {
 
   override protected[canton] def executionContext: ExecutionContext =

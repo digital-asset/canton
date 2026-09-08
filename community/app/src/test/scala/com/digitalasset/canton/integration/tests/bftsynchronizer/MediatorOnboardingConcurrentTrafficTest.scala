@@ -104,7 +104,8 @@ trait MediatorOnboardingConcurrentTrafficTest
       commandId = "commandId",
     )
 
-    val mediator2Identity = mediator2.topology.transactions.identity_transactions()
+    val mediator2Identity =
+      mediator2.topology.transactions.generate_onboarding_transactions(testedProtocolVersion)
     sequencer1.topology.transactions.load(
       mediator2Identity,
       store = synchronizer1Id,

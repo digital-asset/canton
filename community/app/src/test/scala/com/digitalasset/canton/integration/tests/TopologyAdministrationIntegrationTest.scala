@@ -15,7 +15,6 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.topology.TopologyManager.assignExpectedUsageToKeys
-import com.digitalasset.canton.topology.TopologyManagerError
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.{Authorized, Temporary}
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction
@@ -25,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
   TopologyTransaction,
 }
+import com.digitalasset.canton.topology.{SynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.util.GrpcStreamingUtils
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
@@ -38,13 +38,16 @@ class TopologyAdministrationIntegrationTest
   registerPlugin(new UsePostgres(loggerFactory))
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
+      .withSetup { implicit env =>
+        import env.*
+        Seq(participant1, participant2).foreach(_.synchronizers.connect_local(sequencer1, daName))
+      }
 
   "TopologyAdministration" should {
     "identity_transactions" in { implicit env =>
       import env.*
-      val identityTransactions = sequencer1.topology.transactions.identity_transactions()
-
-      val identityTransactions2 = sequencer1.topology.transactions
+      val identityTransactions = participant1.topology.transactions.identity_transactions()
+      val identityTransactions2 = participant1.topology.transactions
         .list()
         .result
         .flatMap(tx =>
@@ -52,7 +55,7 @@ class TopologyAdministrationIntegrationTest
             .selectMapping[NamespaceDelegation]
             .orElse(tx.transaction.selectMapping[OwnerToKeyMapping])
         )
-        .filter(_.mapping.namespace == sequencer1.namespace)
+        .filter(_.mapping.namespace == participant1.namespace)
 
       identityTransactions should not be empty
       identityTransactions2 should contain theSameElementsAs identityTransactions
@@ -106,11 +109,13 @@ class TopologyAdministrationIntegrationTest
     def addKeyToOTKMForcefully(
         node: LocalInstanceReference,
         keyToAdd: SigningPublicKey,
+        synchronizerId: SynchronizerId,
     )(implicit ec: ExecutionContext) = {
 
       // it fails because namespace-only keys are not allowed in a new OwnerToKeyMapping
       loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
-        node.topology.owner_to_key_mappings.add_key(keyToAdd.id, keyToAdd.purpose),
+        node.topology.owner_to_key_mappings
+          .add_key(keyToAdd.id, keyToAdd.purpose, synchronizerId = Some(synchronizerId)),
         { logEntries =>
           val err = logEntries.head
           err.shouldBeCantonErrorCode(TopologyManagerError.InternalError)
@@ -118,14 +123,15 @@ class TopologyAdministrationIntegrationTest
         },
       )
 
-      val topologySnapshotBytes = node.topology.transactions.export_topology_snapshotV2()
+      val topologySnapshotBytes = node.topology.transactions
+        .export_topology_snapshotV2(store = TopologyStoreId.Synchronizer(synchronizerId))
 
       val topologySnapshot = GrpcStreamingUtils
         .parseDelimitedFromTrusted(topologySnapshotBytes.newInput(), StoredTopologyTransaction)
         .valueOrFail("failed to deserialize topology snapshot")
 
       val storedOtkm = topologySnapshot
-        .find(_.mapping.isInstanceOf[OwnerToKeyMapping])
+        .find(_.mapping.select[OwnerToKeyMapping].exists(_.member == node.id.member))
         .valueOrFail("retrieve OwnerToKeyMapping request")
 
       val otkm = storedOtkm.mapping.asInstanceOf[OwnerToKeyMapping]
@@ -169,7 +175,7 @@ class TopologyAdministrationIntegrationTest
         )
 
       topologySnapshotUpdated
-        .find(_.mapping.isInstanceOf[OwnerToKeyMapping])
+        .find(_.mapping.select[OwnerToKeyMapping].exists(_.member == node.id.member))
         .valueOrFail("retrieve OwnerToKeyMapping request")
         .transaction
         .transaction
@@ -187,7 +193,7 @@ class TopologyAdministrationIntegrationTest
       // we can import the previous topology snapshot with a namespace-only key in the OwnerToKeyMapping
       node.topology.transactions.import_topology_snapshotV2(
         topologySnapshotUpdatedBytes,
-        TopologyStoreId.Authorized,
+        TopologyStoreId.Synchronizer(synchronizerId),
       )
 
       node.topology.owner_to_key_mappings
@@ -219,7 +225,7 @@ class TopologyAdministrationIntegrationTest
           .asSigningKey
           .valueOrFail("retrieve namespace key")
 
-      addKeyToOTKMForcefully(participant1, namespaceSigningKey)
+      addKeyToOTKMForcefully(participant1, namespaceSigningKey, daId)
 
       // adding a new key fails because the node's namespace key is listed inside the OwnerToKeyMapping,
       // and therefore we expect the corresponding signature to be produced by a key with a `ProofOfOwnership` usage
@@ -235,6 +241,7 @@ class TopologyAdministrationIntegrationTest
         participant1.topology.owner_to_key_mappings.add_key(
           anotherKey.id,
           KeyPurpose.Signing,
+          synchronizerId = daId,
         ),
         { logEntries =>
           val err = logEntries.head
@@ -245,7 +252,7 @@ class TopologyAdministrationIntegrationTest
 
       // to be able to add a new key, we must remove the namespace key from the OwnerToKeyMapping
       participant1.topology.owner_to_key_mappings
-        .remove_key(namespaceSigningKey.id, KeyPurpose.Signing)
+        .remove_key(namespaceSigningKey.id, KeyPurpose.Signing, synchronizerId = daId)
       participant1.topology.owner_to_key_mappings
         .list()
         .flatMap(_.item.keys.forgetNE.map(_.id)) should not contain namespaceSigningKey.id
@@ -253,6 +260,7 @@ class TopologyAdministrationIntegrationTest
       participant1.topology.owner_to_key_mappings.add_key(
         anotherKey.id,
         KeyPurpose.Signing,
+        synchronizerId = daId,
       )
 
     }
@@ -274,7 +282,7 @@ class TopologyAdministrationIntegrationTest
           .futureValueUS
           .valueOrFail("generate key")
 
-        addKeyToOTKMForcefully(node, keyWithNamespaceUsage)
+        addKeyToOTKMForcefully(node, keyWithNamespaceUsage, daId)
 
         // add another key to verify that it works when there is an arbitrary namespace key in the OwnerToKeyMapping
         val anotherKey = node.crypto
@@ -290,10 +298,15 @@ class TopologyAdministrationIntegrationTest
         node.topology.owner_to_key_mappings.add_key(
           anotherKey.id,
           KeyPurpose.Signing,
+          synchronizerId = daId,
         )
 
         // it is still recommended to remove the incorrect key from the OwnerToKeyMapping
-        node.topology.owner_to_key_mappings.remove_key(keyWithNamespaceUsage.id, KeyPurpose.Signing)
+        node.topology.owner_to_key_mappings.remove_key(
+          keyWithNamespaceUsage.id,
+          KeyPurpose.Signing,
+          synchronizerId = daId,
+        )
         node.topology.owner_to_key_mappings
           .list(filterSigningKey = keyWithNamespaceUsage.id.toProtoPrimitive) shouldBe empty
       }

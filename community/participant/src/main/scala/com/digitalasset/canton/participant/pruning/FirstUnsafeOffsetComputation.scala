@@ -18,6 +18,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, H
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.Pruning
 import com.digitalasset.canton.participant.Pruning.*
+import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter
@@ -37,6 +38,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil.*
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 
 import scala.concurrent.ExecutionContext
@@ -52,7 +54,7 @@ class FirstUnsafeOffsetComputation(
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     syncPersistentStateManager: SyncPersistentStateManager,
     acsDigestProcessorEnabled: Boolean,
-    legacyDigestProcessorDisabled: Boolean,
+    legacyDigestProcessorDisabled: AcsCommitmentConfig.DisableOldAcsCommitmentProcessor,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -144,6 +146,11 @@ class FirstUnsafeOffsetComputation(
       unsafeLogicalSynchronizerOffsets <- MonadUtil.sequentialTraverseFilter(
         synchronizerIndexes.toSeq
       ) { case (lsid, synchronizerIndex) =>
+        val activeProtocolVersion = synchronizerConnectionConfigStore
+          .getActive(lsid)
+          .toOption
+          .flatMap(_.configuredPsid.toOption)
+          .map(_.protocolVersion)
         for {
           state <- logicalPersistentStates
             .get(lsid)
@@ -161,6 +168,7 @@ class FirstUnsafeOffsetComputation(
             participantNodePersistentState.value.inFlightSubmissionStore,
             pruneUptoInclusive,
             safeToPruneCommitmentState,
+            activeProtocolVersion,
           )
         } yield offset
       }
@@ -308,6 +316,7 @@ class FirstUnsafeOffsetComputation(
       inFlightSubmissionStore: InFlightSubmissionStore,
       pruneUptoInclusive: Offset,
       safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
+      activeProtocolVersion: Option[ProtocolVersion],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, LedgerPruningError, Option[UnsafeOffset]] = {
@@ -327,8 +336,14 @@ class FirstUnsafeOffsetComputation(
           Pruning.LedgerPruningOffsetUnsafeSynchronizer(synchronizerId),
         )
 
+      legacyDisabled = legacyDigestProcessorDisabled match {
+        case AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.OnNewProtocolVersions =>
+          activeProtocolVersion.exists(_ >= ProtocolVersion.acsCommitmentRedesign)
+        case AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always => true
+        case AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Never => false
+      }
       safeCommitmentTick <-
-        if (legacyDigestProcessorDisabled) {
+        if (legacyDisabled) {
           EitherT.pure[FutureUnlessShutdown, LedgerPruningError](CantonTimestamp.MaxValue)
         } else {
           EitherT

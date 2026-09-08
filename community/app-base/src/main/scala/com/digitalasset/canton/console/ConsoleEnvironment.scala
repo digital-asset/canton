@@ -44,7 +44,7 @@ import com.typesafe.scalalogging.Logger
 import io.opentelemetry.api.trace.Tracer
 import org.tpolecat.typename.TypeName
 
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.Duration as SDuration
 import scala.reflect.runtime.universe

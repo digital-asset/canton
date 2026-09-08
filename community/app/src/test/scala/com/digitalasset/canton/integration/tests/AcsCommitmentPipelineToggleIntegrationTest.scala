@@ -50,7 +50,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateAllParticipantConfigs_(
           // Initially disable the pipeline.
-          _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor).replace(false)
+          _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(false)
         ),
       )
 
@@ -118,7 +118,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
         ConfigTransforms.applyMultiple(
           participantNames.map(p =>
             ConfigTransforms.updateParticipantConfig(p)(
-              _.focus(_.parameters.acsCommitments.enableRunningDigestProcessor)
+              _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor)
                 .replace(enablePipeline)
             )
           )
@@ -276,8 +276,8 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
           )
 
           // Sanity-check that the config really was applied
-          participant1.underlying.value.config.parameters.acsCommitments.enableRunningDigestProcessor shouldBe true
-          participant2.underlying.value.config.parameters.acsCommitments.enableRunningDigestProcessor shouldBe true
+          participant1.underlying.value.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
+          participant2.underlying.value.config.parameters.acsCommitments.enableNewAcsCommitmentProcessor shouldBe true
 
           createIou(daId, participant1, participant2)
 

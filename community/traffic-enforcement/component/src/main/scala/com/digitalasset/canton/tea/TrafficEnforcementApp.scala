@@ -23,8 +23,9 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContextGrpc
 import io.grpc.inprocess.{InProcessChannelBuilder, InProcessServerBuilder}
 import io.opentelemetry.api.trace.Tracer
-import org.apache.pekko.actor.typed.ActorSystem
-import org.apache.pekko.actor.typed.scaladsl.adapter.{ClassicActorSystemOps, TypedActorSystemOps}
+import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.actor.typed.ActorSystem as TypedSystem
+import org.apache.pekko.actor.typed.scaladsl.adapter.ClassicActorSystemOps
 import org.apache.pekko.projection.ProjectionId
 
 import java.util.UUID
@@ -43,11 +44,11 @@ class TrafficEnforcementApp(
     debitProjection: TeaProjectionFactory,
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
-)(implicit system: ActorSystem[?], tracer: Tracer)
+)(implicit untypedSystem: ActorSystem, typedSystem: TypedSystem[?], tracer: Tracer)
     extends NamedLogging
     with FlagCloseable {
 
-  import system.executionContext
+  import typedSystem.executionContext
 
   // Distinguishes this instance's top-level actors from those of a previous (closing) instance.
   private val instanceId: String = UUID.randomUUID().toString
@@ -78,7 +79,7 @@ class TrafficEnforcementApp(
   // Projection for debits
   private val debitIngestion = new CloseableProjection(
     debitProjectionId,
-    system.toClassic.spawn(
+    untypedSystem.spawn(
       debitProjection.projection(
         debitProjectionId,
         debitIngestionService.grpcSource,
@@ -96,7 +97,6 @@ class TrafficEnforcementApp(
     LifeCycle.close(
       debitIngestion,
       ledgerResources,
-      LifeCycle.toCloseableActorSystem(system.classicSystem, logger, timeouts),
       LifeCycle.toCloseableServer(server, logger, serverName),
     )(logger)
 }
@@ -116,15 +116,11 @@ object TrafficEnforcementApp {
   )(implicit
       ec: ExecutionContext,
       tracer: Tracer,
+      system: ActorSystem,
   ): TrafficEnforcementApp = {
     val logger = loggerFactory.getTracedLogger(getClass)
 
-    // Pekko config to configure the TEA's actor system
-    val pekkoConfig = config.pekkoConfig(storage)
-    implicit val system: ActorSystem[Nothing] =
-      org.apache.pekko.actor
-        .ActorSystem("TrafficEnforcementAppSystem", pekkoConfig)
-        .toTyped
+    implicit val typedSystem: TypedSystem[Nothing] = system.toTyped
 
     val ledgerApiChannel = LifeCycle.toCloseableChannel(
       // In-process channel to the participant's own Ledger API gRPC server

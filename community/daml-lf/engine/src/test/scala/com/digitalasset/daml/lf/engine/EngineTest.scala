@@ -34,7 +34,6 @@ import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
-  NextGenContractStateMachine as ContractStateMachine,
   Node,
   NodeId,
   Normalization,
@@ -42,9 +41,10 @@ import com.digitalasset.daml.lf.transaction.{
   SerializationVersion,
   SubmittedTransaction,
   Transaction,
-  Transaction as Tx,
   Validation,
   VersionedTransaction,
+  NextGenContractStateMachine as ContractStateMachine,
+  Transaction as Tx,
 }
 import com.digitalasset.daml.lf.value.Value.*
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
