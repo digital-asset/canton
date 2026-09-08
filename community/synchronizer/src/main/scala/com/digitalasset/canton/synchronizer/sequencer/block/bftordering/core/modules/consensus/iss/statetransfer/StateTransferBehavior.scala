@@ -253,13 +253,16 @@ final class StateTransferBehavior[E <: Env[E]](
           setNewEpochState(newEpochInfo, membership, cryptoProvider)
         }
 
-        cleanUpPostponedMessageQueue()
+        catchupDetector.updateMembership(membership)
+
+        cleanUpConsensusPostponedMessageQueue()
 
         stateTransferManager.stateTransferNewEpoch(
           newEpochInfo.number,
           membership,
           initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
           nodesThatTimedOut = Seq.empty,
+          catchupDetector.currentTarget(newEpochInfo.number),
         )(abort)
 
       case Consensus.ConsensusMessage.AsyncException(e) =>
@@ -276,6 +279,14 @@ final class StateTransferBehavior[E <: Env[E]](
               s"$messageType: internal inconsistency, actualSender needs to be provided for network messages"
             )
           )
+        if (underlyingMessage.from == actualSender) {
+          catchupDetector
+            .updateLatestKnownNodeEpoch(
+              actualSender,
+              underlyingMessage.message.blockMetadata.epochNumber,
+            )
+            .discard
+        }
         enqueuePbftNetworkMessage(message, actualSender)
 
       case Consensus.ConsensusMessage.PbftVerifiedNetworkMessage(underlyingMessage) =>
@@ -360,7 +371,11 @@ final class StateTransferBehavior[E <: Env[E]](
         maybeLastReceivedEpochTopology match {
           // Transition back to consensus only if we transferred at least up to the minimum end epoch (if it's defined).
           case Some(newEpochTopologyMessage)
-              if initialState.minimumStateTransferEndEpoch.forall(_ <= currentEpochNumber) =>
+              if catchupDetector
+                .currentTarget(currentEpochNumber)
+                .forall(_ <= currentEpochNumber) && doneEnoughOnboardingToBeInMembership(
+                newEpochTopologyMessage
+              ) =>
             logger.info(
               s"$messageType: nothing to state transfer for epoch $currentEpochNumber from '$from', completing state transfer"
             )
@@ -377,9 +392,18 @@ final class StateTransferBehavior[E <: Env[E]](
               activeTopologyInfo.currentMembership,
               initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
               nodesThatTimedOut = Seq(from),
+              catchupDetector.currentTarget(currentEpochNumber),
             )(abort)
         }
     }
+
+  private def doneEnoughOnboardingToBeInMembership(
+      newEpochMembership: Consensus.NewEpochMembership[E]
+  ): Boolean = stateTransferType match {
+    case StateTransferType.Onboarding =>
+      newEpochMembership.membership.orderingTopology.contains(thisNode)
+    case StateTransferType.Catchup => true
+  }
 
   private def updateAvailabilityTopology(newEpochTopology: Consensus.NewEpochMembership[E])(implicit
       traceContext: TraceContext
@@ -444,7 +468,7 @@ final class StateTransferBehavior[E <: Env[E]](
         abort("Deduplication is disabled")
     }
 
-  private def cleanUpPostponedMessageQueue(): Unit = {
+  private def cleanUpConsensusPostponedMessageQueue(): Unit = {
     val currentEpochNumber = epochState.epoch.info.number
 
     postponedConsensusMessages.dequeueAll {
@@ -563,7 +587,6 @@ object StateTransferBehavior {
 
   final case class InitialState[E <: Env[E]](
       stateTransferStartEpoch: EpochNumber,
-      minimumStateTransferEndEpoch: Option[EpochNumber],
       topologyInfo: OrderingTopologyInfo[E],
       epochState: EpochState[E],
       latestCompletedEpoch: EpochStore.Epoch,
@@ -576,7 +599,6 @@ object StateTransferBehavior {
   ): Option[
     (
         EpochNumber,
-        Option[EpochNumber],
         OrderingTopologyInfo[?],
         EpochInfo,
         EpochStore.Epoch,
@@ -585,7 +607,6 @@ object StateTransferBehavior {
     Some(
       (
         behavior.initialState.stateTransferStartEpoch,
-        behavior.initialState.minimumStateTransferEndEpoch,
         behavior.activeTopologyInfo,
         behavior.epochState.epoch.info,
         behavior.latestCompletedEpoch,

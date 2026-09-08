@@ -14,20 +14,27 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### CantonBFT
+- Added the duration of the "output" stage to the performance metrics.
+- Reduced compute footprint of mempool stage
+- Make speculative download during state transfer only download epochs that are below the target epoch
+of the state transfer.
+- Fix some onboarding issues with catch up.
+- Filter out unordered events in the mempool that exceed their max_sequencing_time
+
 ### Minor Improvements
-- improvement
+- gRPC flow control now defaults to automatic mode with an explicit initial window size of 1MB
+  across all Canton gRPC connections, including CantonBFT P2P.
+  In addition, only one among flow control window size (manual flow control) and initial flow control window size
+  (automatic flow control) can be set at a time, otherwise a validation error is produced.
+  This change removes the dependency on the underlying gRPC implementation's default flow control behavior,
+  which can vary across versions, makes it easier to troubleshoot flow control issues in the future and
+  prevents configuration mistakes.
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
-
-- CantonBFT: peer-to-peer networking does not support gRPC load balancing nor health-checking because the ordering
-  protocol itself provides resilience, however they were mistakenly enabled and caused confusing log messages. This
-  has been fixed by disabling them.
-- Added additional validation of the request timestamp in confirmation response processing
-
-- ACS commitment processor reinitialization will now use a smaller memory footprint due to a leaner loading of contract-ids.
 
 ### (YY-nnn, Risk): Title
 

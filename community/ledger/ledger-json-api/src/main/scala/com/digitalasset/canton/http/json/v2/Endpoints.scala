@@ -626,8 +626,11 @@ final case class ProtoLink(file: String, service: String, method: String) {
 }
 
 object ProtoLink {
-  private val grpcMethodExtractor =
+  private val ledgerApiGrpcMethodExtractor =
     raw"com\.daml\.ledger\.api\.v2\.((?:(?:[a-z0-9])*\.)*)([A-Za-z0-9]+)".r
+
+  private val teaApiGrpcMethodExtractor =
+    raw"com\.digitalasset\.canton\.tea\.v1\.((?:(?:[a-z0-9])*\.)*)([A-Za-z0-9]+)".r
 
   private val importGRPCCommentPattern =
     raw"<gRPC:([A-Za-z0-9_/]+\.proto)/([A-Za-z0-9_]+)/([A-Za-z0-9_]+)>".r
@@ -636,16 +639,23 @@ object ProtoLink {
     val serviceName: String = methodDescriptor.getServiceName
     val bareMethodName = methodDescriptor.getBareMethodName
     serviceName match {
-      case grpcMethodExtractor(packageName, service) =>
-        val snake = service.replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase
-        val pck1 = packageName.replace('.', '/')
-        ProtoLink(pck1 + snake + ".proto", service, bareMethodName)
+      case ledgerApiGrpcMethodExtractor(packageName, service) =>
+        createProtoLink(bareMethodName, packageName, service)
+      case teaApiGrpcMethodExtractor(packageName, service) =>
+        createProtoLink(bareMethodName, packageName, service)
       case _ =>
         throw new IllegalArgumentException(
           s"Could not create link to proto documentation for: $methodDescriptor"
         )
     }
   }
+
+  private def createProtoLink(bareMethodName: String, packageName: String, service: String) = {
+    val snake = service.replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase
+    val pck1 = packageName.replace('.', '/')
+    ProtoLink(pck1 + snake + ".proto", service, bareMethodName)
+  }
+
   def unapply(link: String): Option[(String, String, String)] = link match {
     case importGRPCCommentPattern(file, service, method) =>
       Some((file, service, method))

@@ -1713,7 +1713,7 @@ jobs:
     build_and_publish_docker:
         environment:
             OCI_REGISTRY: europe-docker.pkg.dev
-        executor: canton-large-docker-on-cci
+        executor: canton-xlarge-docker-on-cci
         parameters:
             is_manual:
                 type: boolean
@@ -2243,7 +2243,7 @@ jobs:
                 num_test_buckets: ""
             - slack_red_main_with_volunteer
     run_propose_script:
-        executor: canton-large-docker-on-cci
+        executor: canton-xlarge-docker-on-cci
         parameters:
             script_argument:
                 default: ""

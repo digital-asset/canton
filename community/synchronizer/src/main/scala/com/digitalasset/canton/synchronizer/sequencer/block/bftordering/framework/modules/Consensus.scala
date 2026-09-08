@@ -326,15 +326,30 @@ object Consensus {
     final case class VerifiedStateTransferMessage(message: StateTransferNetworkMessage)
         extends StateTransferMessage
 
+    sealed trait StateTransferTimeout extends StateTransferMessage {
+      def timeoutIsForEpoch: EpochNumber
+    }
+
     final case class RetryBlockTransferRequest(
         request: SignedMessage[BlockTransferRequest],
         nodeThatTimedOut: Option[BftNodeId],
-    ) extends StateTransferMessage
+    ) extends StateTransferTimeout {
+      override def timeoutIsForEpoch: EpochNumber = request.message.epoch
+    }
+
+    final case class InitiateSendBlockTransferRequest[E <: Env[E]](
+        newEpochNumber: EpochNumber,
+        nodesThatTimedOut: Seq[BftNodeId],
+        reason: String,
+    ) extends StateTransferTimeout {
+      override def timeoutIsForEpoch: EpochNumber = newEpochNumber
+    }
 
     final case class BlockVerified[E <: Env[E]](
         commitCertificate: CommitCertificate,
         currentEpochInfo: EpochInfo,
         from: BftNodeId,
+        isForFutureEpoch: Boolean,
     ) extends StateTransferMessage
 
     final case class BlockStored[E <: Env[E]](

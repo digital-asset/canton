@@ -20,22 +20,26 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.http.JsonApiConfig
 import com.digitalasset.canton.integration.ConfigTransforms
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.participant.config.{
   CantonEngineConfig,
   LedgerApiServerConfig,
   ParticipantNodeConfig,
   ParticipantNodeParameterConfig,
+  RemoteParticipantConfig,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.mediator.{
   MediatorNodeConfig,
   MediatorNodeParameterConfig,
+  RemoteMediatorConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.{
+  RemoteSequencerConfig,
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
 }
@@ -991,6 +995,355 @@ class ConfigValidationsTest extends BaseTestWordSpec {
       )
       assertErrors(config)(
         "Authorization service cannot be configured to accept both privileged tokens and tokens for user-lists in p1"
+      )
+    }
+  }
+
+  val flowControlWindow: Option[PositiveInt] = Some(PositiveInt.tryCreate(1024))
+  val initialFlowControlWindow: Option[PositiveInt] = Some(PositiveInt.tryCreate(2048))
+
+  private val bothSetSuffix =
+    "has both flow-control-window and initial-flow-control-window set, but at most one of them should be set."
+
+  private def serverFlowControlError(nodeName: String, serverName: String): String =
+    s"gRPC server config ('$nodeName', $serverName) $bothSetSuffix"
+
+  private def clientFlowControlError(name: String): String =
+    s"gRPC client channel config ($name) $bothSetSuffix"
+
+  "serverConfigOnlyOneGrpcControlFlowMode" should {
+    "accept config with only one flow control mode on server configs" in {
+      val config = CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            adminApi = AdminServerConfig(
+              flowControlWindow = flowControlWindow,
+              initialFlowControlWindow = None,
+            ),
+            ledgerApi = LedgerApiServerConfig(
+              flowControlWindow = None,
+              initialFlowControlWindow = initialFlowControlWindow,
+            ),
+          )
+        ),
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            publicApi = PublicServerConfig(
+              flowControlWindow = flowControlWindow,
+              initialFlowControlWindow = None,
+            )
+          )
+        ),
+      )
+      assertValid(config)
+    }
+
+    "reject participant admin API server config with both flow control modes" in {
+      val config = CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            adminApi = AdminServerConfig(
+              flowControlWindow = flowControlWindow,
+              initialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(serverFlowControlError("p1", "admin"))
+    }
+
+    "reject participant ledger API server config with both flow control modes" in {
+      val config = CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            ledgerApi = LedgerApiServerConfig(
+              flowControlWindow = flowControlWindow,
+              initialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(serverFlowControlError("p1", "ledger-api"))
+    }
+
+    "reject sequencer public API server config with both flow control modes" in {
+      val config = CantonConfig(
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            publicApi = PublicServerConfig(
+              flowControlWindow = flowControlWindow,
+              initialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(serverFlowControlError("s1", "sequencer-api"))
+    }
+
+    "reject sequencer admin API server config with both flow control modes" in {
+      val config = CantonConfig(
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            adminApi = AdminServerConfig(
+              flowControlWindow = flowControlWindow,
+              initialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(serverFlowControlError("s1", "admin"))
+    }
+
+    "reject mediator admin API server config with both flow control modes" in {
+      val config = CantonConfig(
+        mediators = Map(
+          InstanceName.tryCreate("m1") -> MediatorNodeConfig(
+            adminApi = AdminServerConfig(
+              flowControlWindow = flowControlWindow,
+              initialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(serverFlowControlError("m1", "admin"))
+    }
+
+    "reject BFT sequencer P2P server endpoint with both flow control modes" in {
+      val config = CantonConfig(
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            sequencer = SequencerConfig.BftSequencer(
+              config = BftBlockOrdererConfig(
+                initialNetwork = Some(
+                  BftBlockOrdererConfig.P2PNetworkConfig(
+                    serverEndpoint = BftBlockOrdererConfig.P2PServerConfig(
+                      address = "127.0.0.1",
+                      internalPort = Some(Port.tryCreate(5000)),
+                      externalAddress = "127.0.0.1",
+                      externalPort = Port.tryCreate(5000),
+                      flowControlWindow = flowControlWindow,
+                      initialFlowControlWindow = initialFlowControlWindow,
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+      assertErrors(config)(serverFlowControlError("s1", "peer-to-peer"))
+    }
+  }
+
+  "clientChannelParamsOnlyOneGrpcControlFlowMode" should {
+    val bothChannelParams: ClientChannelParams = ClientChannelParams.Default.copy(
+      flowControlWindow = flowControlWindow,
+      initialFlowControlWindow = initialFlowControlWindow,
+    )
+
+    "accept config with only one flow control mode on client channel params" in {
+      val config = CantonConfig(
+        remoteParticipants = Map(
+          InstanceName.tryCreate("rp1") -> RemoteParticipantConfig(
+            adminApi = FullClientConfig(port = Port.tryCreate(5000)),
+            ledgerApi = FullClientConfig(port = Port.tryCreate(5001)),
+          )
+        )
+      )
+      assertValid(config)
+    }
+
+    "reject remote clock client channel with both flow control modes" in {
+      val config = CantonConfig(
+        parameters = CantonParameters(
+          clock = ClockConfig.RemoteClock(
+            remoteApi = FullClientConfig(
+              port = Port.tryCreate(5000),
+              channel = bothChannelParams,
+            )
+          )
+        ),
+        remoteParticipants = Map(
+          InstanceName.tryCreate("rp1") -> RemoteParticipantConfig(
+            adminApi = FullClientConfig(port = Port.tryCreate(5001)),
+            ledgerApi = FullClientConfig(port = Port.tryCreate(5002)),
+          )
+        ),
+      )
+      assertErrors(config)(clientFlowControlError("remote clock"))
+    }
+
+    "reject mediator sequencer client with both flow control modes" in {
+      val config = CantonConfig(
+        mediators = Map(
+          InstanceName.tryCreate("m1") -> MediatorNodeConfig(
+            sequencerClient = SequencerClientConfig(
+              channelFlowControlWindow = flowControlWindow,
+              channelInitialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("local mediator 'm1', sequencer client"))
+    }
+
+    "reject participant sequencer client with both flow control modes" in {
+      val config = CantonConfig(
+        participants = Map(
+          InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
+            sequencerClient = SequencerClientConfig(
+              channelFlowControlWindow = flowControlWindow,
+              channelInitialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("local participant 'p1', sequencer client"))
+    }
+
+    "reject sequencer sequencer client with both flow control modes" in {
+      val config = CantonConfig(
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            sequencerClient = SequencerClientConfig(
+              channelFlowControlWindow = flowControlWindow,
+              channelInitialFlowControlWindow = initialFlowControlWindow,
+            )
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("local sequencer 's1', sequencer client"))
+    }
+
+    "reject remote sequencer client admin API with both flow control modes" in {
+      val config = CantonConfig(
+        remoteSequencers = Map(
+          InstanceName.tryCreate("rs1") -> RemoteSequencerConfig(
+            adminApi = FullClientConfig(
+              port = Port.tryCreate(5000),
+              channel = bothChannelParams,
+            ),
+            publicApi = SequencerApiClientConfig(
+              address = "127.0.0.1",
+              port = Port.tryCreate(5001),
+            ),
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("remote sequencer 'rs1', client admin API"))
+    }
+
+    "reject remote sequencer public API with both flow control modes" in {
+      val config = CantonConfig(
+        remoteSequencers = Map(
+          InstanceName.tryCreate("rs1") -> RemoteSequencerConfig(
+            adminApi = FullClientConfig(port = Port.tryCreate(5000)),
+            publicApi = SequencerApiClientConfig(
+              address = "127.0.0.1",
+              port = Port.tryCreate(5001),
+              channel = bothChannelParams,
+            ),
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("remote sequencer 'rs1', public API"))
+    }
+
+    "reject remote sequencer gRPC health with both flow control modes" in {
+      val config = CantonConfig(
+        remoteSequencers = Map(
+          InstanceName.tryCreate("rs1") -> RemoteSequencerConfig(
+            adminApi = FullClientConfig(port = Port.tryCreate(5000)),
+            publicApi = SequencerApiClientConfig(
+              address = "127.0.0.1",
+              port = Port.tryCreate(5001),
+            ),
+            grpcHealth = Some(
+              FullClientConfig(
+                port = Port.tryCreate(5002),
+                channel = bothChannelParams,
+              )
+            ),
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("remote sequencer 'rs1', gRPC health"))
+    }
+
+    "reject remote mediator client admin API with both flow control modes" in {
+      val config = CantonConfig(
+        remoteMediators = Map(
+          InstanceName.tryCreate("rm1") -> RemoteMediatorConfig(
+            adminApi = FullClientConfig(
+              port = Port.tryCreate(5000),
+              channel = bothChannelParams,
+            )
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("remote mediator 'rm1', client admin API"))
+    }
+
+    "reject remote participant client admin API with both flow control modes" in {
+      val config = CantonConfig(
+        remoteParticipants = Map(
+          InstanceName.tryCreate("rp1") -> RemoteParticipantConfig(
+            adminApi = FullClientConfig(
+              port = Port.tryCreate(5000),
+              channel = bothChannelParams,
+            ),
+            ledgerApi = FullClientConfig(port = Port.tryCreate(5001)),
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("remote participant 'rp1', client admin API"))
+    }
+
+    "reject remote participant ledger API with both flow control modes" in {
+      val config = CantonConfig(
+        remoteParticipants = Map(
+          InstanceName.tryCreate("rp1") -> RemoteParticipantConfig(
+            adminApi = FullClientConfig(port = Port.tryCreate(5000)),
+            ledgerApi = FullClientConfig(
+              port = Port.tryCreate(5001),
+              channel = bothChannelParams,
+            ),
+          )
+        )
+      )
+      assertErrors(config)(clientFlowControlError("remote participant 'rp1', ledger API"))
+    }
+
+    "reject BFT sequencer P2P peer endpoint with both flow control modes" in {
+      val config = CantonConfig(
+        sequencers = Map(
+          InstanceName.tryCreate("s1") -> SequencerNodeConfig(
+            sequencer = SequencerConfig.BftSequencer(
+              config = BftBlockOrdererConfig(
+                initialNetwork = Some(
+                  BftBlockOrdererConfig.P2PNetworkConfig(
+                    serverEndpoint = BftBlockOrdererConfig.P2PServerConfig(
+                      address = "127.0.0.1",
+                      internalPort = Some(Port.tryCreate(5000)),
+                      externalAddress = "127.0.0.1",
+                      externalPort = Port.tryCreate(5000),
+                    ),
+                    peerEndpoints = Seq(
+                      BftBlockOrdererConfig.P2PEndpointConfig(
+                        address = "127.0.0.1",
+                        port = Port.tryCreate(5001),
+                        channel = bothChannelParams,
+                      )
+                    ),
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+      assertErrors(config)(
+        clientFlowControlError("CantonBFT sequencer 's1', P2P endpoint: 127.0.0.1:5001")
       )
     }
   }

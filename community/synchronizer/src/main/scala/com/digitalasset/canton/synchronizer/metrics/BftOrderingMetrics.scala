@@ -330,6 +330,7 @@ class BftOrderingMetrics private[metrics] (
               val Fetch = "output-block-fetch-batches"
               val Inspection = "output-block-inspection"
               val Backpressure = "output-backpressure"
+              val OutputStageDuration = "output-stage-duration"
             }
           }
         }

@@ -170,6 +170,10 @@ class FairBoundedQueue[ItemType](
     }.toSeq
   }
 
+  @VisibleForTesting
+  private[bftordering] def dumpPerNode: Map[BftNodeId, Seq[ItemType]] =
+    nodeQueues.toMap.view.mapValues(queue => queue.toSeq).toMap
+
   private def emitOrderingStageLatency(
       enqueuedAt: Instant
   )(implicit metricsContext: MetricsContext): Unit =

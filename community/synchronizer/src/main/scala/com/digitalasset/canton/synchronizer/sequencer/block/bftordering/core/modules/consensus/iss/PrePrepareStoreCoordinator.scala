@@ -73,10 +73,13 @@ object PrePrepareStoreCoordinator {
     def canStoreAndSendPrePrepare(send: SendPbftMessage[PrePrepare]): Boolean = {
       val msg = send.pbftMessage.message
       val msgBlockNumber = msg.blockMetadata.blockNumber
-      headBlockNumber.filter(head => msg.viewNumber == 0 && msgBlockNumber > head).fold(true) { _ =>
-        delayedSendAndStoreMsgMap.put(msgBlockNumber, send).discard
-        false
-      }
+      if (msg.viewNumber != 0)
+        abort("we don't expect pre-prepares for view numbers higher than 0 to be sent and stored")
+      else
+        headBlockNumber.filter(head => msgBlockNumber > head).fold(true) { _ =>
+          delayedSendAndStoreMsgMap.put(msgBlockNumber, send).discard
+          false
+        }
     }
 
     // when a pre-prepare is stored (when processing a SendPbftMessage[PrePrepare]), the PrePrepareStored event is emitted,

@@ -135,4 +135,5 @@ trait Output[E <: Env[E]] extends Module[E, Output.Message[E]] with FlagCloseabl
 
   def availability: ModuleRef[Availability.Message[E]]
   def consensus: ModuleRef[Consensus.Message[E]]
+  def mempool: ModuleRef[Mempool.Message]
 }

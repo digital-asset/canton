@@ -152,8 +152,7 @@ object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
   ): ParsingResult[OrderingRequestBatch] =
     for {
       rpv <- protocolVersionRepresentativeFor(SupportedVersions.ProtoData)
-    } yield OrderingRequestBatch(
-      batch.orderingRequests.map { protoOrderingRequest =>
+      requests = batch.orderingRequests.map { protoOrderingRequest =>
         Traced.fromPair[OrderingRequest](
           (
             OrderingRequest(
@@ -165,7 +164,9 @@ object OrderingRequestBatch extends VersioningCompanion[OrderingRequestBatch] {
             OrderingRequest.traceContextFromProtoString(protoOrderingRequest.traceContext),
           )
         )
-      },
+      }
+    } yield OrderingRequestBatch(
+      requests,
       EpochNumber(batch.epochNumber),
     )(rpv)
 

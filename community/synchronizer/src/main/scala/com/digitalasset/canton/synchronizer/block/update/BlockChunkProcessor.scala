@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.block.update
 import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -197,7 +198,7 @@ final class BlockChunkProcessor(
         // trigger the logging in the background, but don't wait for it to finish
         promise.completeWith(current.map { _ =>
           val eventsWithOutcomes =
-            mergeResultWithOriginalRequest(fixedTsChanges.toList, reversedOutcomes.reverse.toList)
+            mergeResultWithOriginalRequest(fixedTsChanges, reversedOutcomes.reverse)
           val countBySequencerId = fixedTsChanges
             .map(_._2.value)
             .collect { case send: Send =>
@@ -253,40 +254,49 @@ final class BlockChunkProcessor(
   }
 
   private def mergeResultWithOriginalRequest(
-      allEvents: List[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])],
-      sendOutcomes: List[SubmissionOutcome],
-  ): Seq[EventWithOutcome] = {
-    val result = Seq.newBuilder[EventWithOutcome]
-    val sendOutcomesStr = sendOutcomes.map {
-      case _: SubmissionOutcome.Deliver => "Deliver"
-      case _: SubmissionOutcome.Reject => "Reject"
-      case _: SubmissionOutcome.DeliverReceipt => "Receipt"
-      case SubmissionOutcome.Discard => "Discard"
+      allEvents: Seq[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])],
+      sendOutcomes: Seq[SubmissionOutcome],
+  )(implicit traceContext: TraceContext): Seq[EventWithOutcome] = {
+
+    val sendOutcomesStr = sendOutcomes.mapFilter {
+      case x: SubmissionOutcome.Deliver => Some((x.submission.messageId, "Deliver"))
+      case x: SubmissionOutcome.Reject => Some((x.submission.messageId, s"Reject(${x.error})"))
+      case x: SubmissionOutcome.DeliverReceipt => Some((x.submission.messageId, "Receipt"))
+      case SubmissionOutcome.Discard =>
+        logger.error(
+          "Found discard outcome but this should be filtered out in SequencedSubmissionsValidator.updateSequencedSubmissionsWithNewResult"
+        )
+        None
     }
+
     @tailrec
     def go(
         events: List[(CantonTimestamp, TracedPossiblyPrevalidated[LedgerBlockEvent])],
-        outcomes: List[String],
-    ): Unit =
+        outcomes: List[(MessageId, String)],
+        result: List[EventWithOutcome],
+    ): List[EventWithOutcome] =
       (events, outcomes) match {
-        case (Nil, _) => ()
+        case (Nil, more) =>
+          // should not happen unless we somehow inserted outcomes without an input event
+          if (more.nonEmpty)
+            logger.error(s"Have more outcomes than events? $events $outcomes")
+          result.reverse
         case (
-              (ts, ev @ TracedPossiblyPrevalidated(_: LedgerBlockEvent.Send, _)) :: restEvents,
-              outcome :: outcomes,
+              (ts, ev @ TracedPossiblyPrevalidated(send: LedgerBlockEvent.Send, _)) :: restEvents,
+              (messageId, outcome) :: restOutcomes,
             ) =>
-          result.addOne((ts, ev, Some(outcome)))
-          go(restEvents, outcomes)
+          // if message-id lines up, use it
+          if (send.signedSubmissionRequest.content.messageId == messageId)
+            go(restEvents, restOutcomes, (ts, ev, Some(outcome)) :: result)
+          // otherwise the event was discarded
+          else
+            go(restEvents, outcomes, (ts, ev, Some("Discard")) :: result)
+        // if the last one is a discard that got dropped, we won't have an outcome
         case (
               (ts, ev @ TracedPossiblyPrevalidated(_: LedgerBlockEvent.Send, _)) :: restEvents,
               Nil,
             ) =>
-          result.addOne((ts, ev, None))
-          // should not happen unless we broke the invariant that each send event must have an outcome
-          // just leaving this in case someone refactors that
-          logger.error(s"Ran out of outcomes for send event logging at ${ev.value.timestamp}")(
-            ev.traceContext
-          )
-          go(restEvents, outcomes)
+          go(restEvents, outcomes, (ts, ev, Some("Discard")) :: result)
         case (
               (
                 ts,
@@ -294,11 +304,9 @@ final class BlockChunkProcessor(
               ) :: restEvents,
               outcomes,
             ) =>
-          result.addOne((ts, ev, None))
-          go(restEvents, outcomes)
+          go(restEvents, outcomes, (ts, ev, None) :: result)
       }
-    go(allEvents, sendOutcomesStr)
-    result.result()
+    go(allEvents.toList, sendOutcomesStr.toList, List.empty)
   }
 
   private def logChunkDetails(
