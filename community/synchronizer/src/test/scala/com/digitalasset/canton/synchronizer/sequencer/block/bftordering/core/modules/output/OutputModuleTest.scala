@@ -4,9 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
@@ -2092,11 +2094,13 @@ class OutputModuleTest
       epochStoreReader,
       blockSubscription,
       SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+      SynchronizerLimits.defaultFor(synchronizerProtocolVersion),
       availabilityRef,
       consensusRef,
       mempoolRef,
       loggerFactory,
       timeouts,
+      new SymbolicPureCrypto(),
       requestInspector,
     )(
       config,
@@ -2129,13 +2133,16 @@ object OutputModuleTest {
     //  more than one block and alternating the outcome starting from `true`.
     private var outcome = true
 
-    override def isRequestToAllMembersOfSynchronizer(
+    override def mayRequestChangeOrderingTopology(
         blockMetadata: BlockMetadata,
         requestNumber: Int,
         _request: OrderingRequest,
         _maxBytesToDecompress: MaxBytesToDecompress,
+        _synchronizerLimits: SynchronizerLimits,
         _logger: TracedLogger,
         _traceContext: TraceContext,
+        _hashOps: HashOps,
+        _stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit _synchronizerProtocolVersion: ProtocolVersion): Boolean = {
       val result = outcome
       outcome = !outcome

@@ -148,8 +148,7 @@ sealed trait ReassignmentPruningIntegrationTest
       val safeOffset = participant.pruning
         .find_safe_offset(clock.now.toInstant)
         .value
-      val safeOffset2 = desiredPruningOffset
-      safeOffset should be >= safeOffset2
+      safeOffset should be >= desiredPruningOffset
     }
     participant.pruning.prune(desiredPruningOffset)
   }

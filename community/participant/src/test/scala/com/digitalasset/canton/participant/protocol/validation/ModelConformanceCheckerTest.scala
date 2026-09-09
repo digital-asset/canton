@@ -870,6 +870,7 @@ class ModelConformanceCheckerTest
           contractOfId = contractOfId,
           maxSequencingTime = CantonTimestamp.MaxValue,
           validatePackageVettings = false,
+          limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
         )
     ).value
 

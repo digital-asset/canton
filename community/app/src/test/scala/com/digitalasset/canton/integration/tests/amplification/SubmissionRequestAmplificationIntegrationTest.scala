@@ -1,13 +1,12 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.integration.tests
+package com.digitalasset.canton.integration.tests.amplification
 
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
-  SequencerConnections,
   SubmissionRequestAmplification,
   TrafficControlParameters,
 }
@@ -31,7 +30,7 @@ import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
   UseProgrammableSequencer,
 }
-import com.digitalasset.canton.integration.tests.SubmissionRequestAmplificationIntegrationTest.AmplificationMetrics
+import com.digitalasset.canton.integration.tests.amplification.SubmissionRequestAmplificationIntegrationTest.AmplificationMetrics
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -101,19 +100,14 @@ abstract class SubmissionRequestAmplificationIntegrationTest
     import env.*
 
     mediators.local.foreach(
-      _.sequencer_connection.modify_connections { old =>
-        SequencerConnections.tryMany(
-          old.connections,
-          old.sequencerTrustThreshold,
-          old.sequencerLivenessMargin,
+      _.sequencer_connection.modify_connections(
+        _.withSubmissionRequestAmplification(
           SubmissionRequestAmplification(
             PositiveInt.tryCreate(2),
             config.NonNegativeFiniteDuration.Zero,
-          ),
-          old.sequencerConnectionPoolDelays,
-          old.subscriptionLivenessLimits,
+          )
         )
-      }
+      )
     )
   }
 

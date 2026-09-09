@@ -99,7 +99,7 @@ object TransactionProtocolLimits {
   lazy val DefaultMaxRecipientsTreeDepth: PositiveInt = PositiveInt.tryCreate(500)
   lazy val DefaultMaxTransactionRootViews: PositiveInt = PositiveInt.tryCreate(1_000_000)
   lazy val DefaultMaxTransactionSubViews: PositiveInt = PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxTransactionTreeDepth: PositiveInt = PositiveInt.tryCreate(10_000)
+  lazy val DefaultMaxTransactionTreeDepth: PositiveInt = PositiveInt.tryCreate(500)
 
   lazy val default: TransactionProtocolLimits =
     TransactionProtocolLimits(

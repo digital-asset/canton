@@ -71,7 +71,7 @@ object GenReassignmentViewTree {
       commonData <- deserializeCommonData(commonDataP)
         .leftMap(error => OtherError(s"reassignmentCommonData: $error"))
       view <- MerkleTree
-        .fromProtoOptionV30(viewP, deserializeView(_))
+        .fromProtoOptionV30NoMerkleSeq(viewP, deserializeView(_))
         .leftMap(error => OtherError(s"reassignmentView: $error"))
     } yield createTree(commonData, view)
   }

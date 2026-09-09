@@ -147,6 +147,7 @@ sealed trait PackageVettingIntegrationTest
           participant2,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )

@@ -372,8 +372,9 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
       )
     ) { case Seq(healthActive, healthPassive) =>
       eventually() {
-        // The active mediator reports its readiness as 'not serving' until the synchronizer is bootstrapped
-        checkNotServing(healthActive, httpHealthConfig = Some(activeConfig))
+        // The active mediator reports its readiness as 'serving' from the beginning
+        // for Admin API access via a load-balanced connection to be possible
+        checkServing(healthActive, httpHealthConfig = Some(activeConfig))
         checkLivenessServing(healthActive, httpHealthConfig = Some(activeConfig))
         checkNotServing(healthPassive, httpHealthConfig = Some(passiveConfig))
         checkLivenessServing(healthPassive, httpHealthConfig = Some(passiveConfig))
@@ -404,8 +405,9 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
       )
     ) { case Seq(healthActive, healthPassive) =>
       eventually() {
-        // The active mediator reports its readiness as 'not serving' until the synchronizer is bootstrapped
-        checkNotServing(healthActive, httpHealthConfig = Some(activeConfig))
+        // The active mediator reports its readiness as 'serving' from the beginning
+        // for Admin API access via a load-balanced connection to be possible
+        checkServing(healthActive, httpHealthConfig = Some(activeConfig))
         checkLivenessServing(healthActive, httpHealthConfig = Some(activeConfig))
         checkNotServing(healthPassive, httpHealthConfig = Some(passiveConfig))
         checkLivenessServing(healthPassive, httpHealthConfig = Some(passiveConfig))
@@ -452,13 +454,14 @@ trait HealthReportingIndividualNodeTest extends HealthReportingTestHelper {
     ) { case Seq(health, seq) =>
       eventually() {
         // When not initialized the sequencer API should expose the health service but return not serving
-        checkNotServing(seq, httpHealthConfig = Some(seq1Config))
+        checkNotServing(seq)
         checkNotServing(
           seq,
-          httpHealthConfig = Some(seq1Config),
-          CantonGrpcUtil.sequencerHealthCheckServiceName,
+          service = CantonGrpcUtil.sequencerHealthCheckServiceName,
         )
-        checkNotServing(health, httpHealthConfig = Some(seq1Config))
+        // The sequencer reports its readiness as 'serving' from the beginning
+        // for Admin API access via a load-balanced connection to be possible
+        checkServing(health, httpHealthConfig = Some(seq1Config))
         checkLivenessServing(health, httpHealthConfig = Some(seq1Config))
       }
 
@@ -559,11 +562,10 @@ class HealthReportingNodeReferenceIntegrationTestPostgres
 
             clue("sequencer is not serving") {
               eventually() {
-                checkNotServing(seq, httpHealthConfig = Some(seq1Config))
+                checkNotServing(seq)
                 checkNotServing(
                   seq,
-                  httpHealthConfig = Some(seq1Config),
-                  CantonGrpcUtil.sequencerHealthCheckServiceName,
+                  service = CantonGrpcUtil.sequencerHealthCheckServiceName,
                 )
               }
             }

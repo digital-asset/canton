@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.store.memory
 import cats.Eval
 import cats.syntax.either.*
 import com.digitalasset.canton.SynchronizedLikeMethod
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -35,6 +36,7 @@ import scala.concurrent.ExecutionContext
 final class InMemoryAcsCommitmentPeriodStore(
     stringInterningEval: Eval[StringInterning],
     override protected val loggerFactory: NamedLoggerFactory,
+    override protected val futureSupervisor: FutureSupervisor,
     enableConsistencyChecks: Boolean,
 )(implicit
     override protected val ec: ExecutionContext
@@ -232,7 +234,7 @@ final class InMemoryAcsCommitmentPeriodStore(
     FutureUnlessShutdown.unit
   }
 
-  override protected def doPrune(
+  override protected def doPruneSynchronized(
       limit: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {

@@ -11,12 +11,13 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.{CryptoConfig, PositiveFiniteDuration}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   InstanceReference,
   LocalInstanceReference,
+  LocalParticipantReference,
   LocalSequencerReference,
   ParticipantReference,
   SequencerReference,
@@ -30,6 +31,7 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.{DefaultNew
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.metrics.MetricValue
 import com.digitalasset.canton.metrics.MetricValue.LongPoint
+import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.topology.{
   Member,
   ParticipantId,
@@ -79,7 +81,13 @@ private[lsu] trait LsuBase
       // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
       config.NonNegativeFiniteDuration.ofHours(1)
     ) ++
-    (if (useStaticTime) Seq(ConfigTransforms.useStaticTime) else Seq.empty)
+    (if (useStaticTime) Seq(ConfigTransforms.useStaticTime) else Seq.empty) ++
+    Seq(
+      ConfigTransforms.updateAllParticipantConfigs_(
+        _.focus(_.parameters.journalGarbageCollectionMinimumGap)
+          .replace(PositiveFiniteDuration.ofSeconds(1))
+      )
+    )
 
   /** Prepare the environment for LSU with default values.
     *   - Connect `participants.all` (except if override is used) to synchronizer and upload dar
@@ -330,6 +338,35 @@ private[lsu] trait LsuBase
         ignorePsidCheck = ignorePsidCheck,
       )
     }
+  }
+
+  def noOutstandingCommitments(
+      p: LocalParticipantReference,
+      ts: CantonTimestamp,
+  )(implicit env: TestConsoleEnvironment): CantonTimestamp =
+    p.underlying.value.sync.syncPersistentStateManager
+      .get(env.daId)
+      .value
+      .acsCommitmentStore
+      .noOutstandingCommitments(ts)
+      .futureValueUS
+      .value
+
+  def latestMatchedCommitmentBy(
+      p: LocalParticipantReference,
+      sender: ParticipantId,
+  )(implicit env: TestConsoleEnvironment): CantonTimestamp = {
+    val store = p.underlying.value.sync.syncPersistentStateManager
+      .acsCommitmentPeriodStore(env.daId)
+      .value
+    val interning = p.underlying.value.sync.ledgerApiIndexer.asEval
+      .map(_.ledgerApiStore.stringInterningView)
+      .value
+    val internedSender = interning.participantId.internalize(sender.toLf)
+    val period = CommitmentPeriod.tryCreate(CantonTimestamp.MinValue, CantonTimestamp.MaxValue)
+    val matches = store.lookupMatched(Seq(internedSender -> period)).futureValueUS.toSeq
+
+    matches.map(_.toInclusive).maxOption.getOrElse(CantonTimestamp.MinValue)
   }
 }
 

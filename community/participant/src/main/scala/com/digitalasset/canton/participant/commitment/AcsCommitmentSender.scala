@@ -285,10 +285,6 @@ class AcsCommitmentSender(
     digestJournal.SnapshotPaginationToken
   ], Unit]] = {
 
-    logger.info(
-      s"Preparing the ACS commitments batch [timestamp=$timestamp, batchIndex=${recursionStep.batchIndex}, attemptNumber=${recursionStep.attemptNumber}]"
-    )
-
     val batchSendingResult
         : EitherT[FutureUnlessShutdown, AcsCommitmentSenderError, BatchSendingResult[
           digestJournal.SnapshotPaginationToken
@@ -311,6 +307,10 @@ class AcsCommitmentSender(
           counterparticipant = digest.participantId.toLf,
         )
       }
+
+      _ = logger.info(
+        s"Preparing the ACS commitments batch [timestamp=$timestamp, batchIndex=${recursionStep.batchIndex}, attemptNumber=${recursionStep.attemptNumber}, toSend=${internalDigestsForActive.size}, unsents=${unsentDigests.size}]"
+      )
 
       nextBatchIndex <-
         if (internalDigestsForActive.nonEmpty || unsentDigests.nonEmpty) {

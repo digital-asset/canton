@@ -62,6 +62,7 @@ trait MalformedRequestResponseSendFailureIntegrationTest
         participant2,
         daId,
         testedProtocolVersion,
+        defaultProtocolLimits,
         timeouts,
         loggerFactory,
         testSubmissionServiceOverrideO = Some(

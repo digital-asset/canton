@@ -87,7 +87,7 @@ import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal.ping.Ping
-import com.digitalasset.canton.participant.config.LedgerApiServerConfig
+import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, LedgerApiServerConfig}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
@@ -547,7 +547,8 @@ abstract class ParticipantRestartTest
       ParticipantTestMetrics.pruning,
       exitOnFatalFailures = true,
       synchronizerConnectionConfigStore,
-      legacyAcsCommitmentProcessorDisabled = false,
+      legacyAcsCommitmentProcessorDisabled =
+        AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always,
       acsDigestProcessorEnabled,
       timeouts,
       futureSupervisor,

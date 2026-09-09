@@ -407,12 +407,20 @@ final case class TransactionView private (
       }
     } yield this
   }
+
+  /** The parse depth of a TransactionView is the parse depth of its subviews Although the
+    * TransactionView itself does not increment the depth counter in when used in a subview it will
+    * be enclosed in a MerkleSeq.Singleton that does increment the counter.
+    */
+  def parseDepth: Int =
+    subviews.subviews.parseDepth(_.subviews.subviews)
+
 }
 
 object TransactionView
     extends VersioningCompanionContext[
       TransactionView,
-      (HashOps, ProtocolVersion),
+      (HashOps, DepthCounter, ProtocolVersion),
     ] {
   override def name: String = "TransactionView"
   override val versioningTable: VersioningTable = VersioningTable(
@@ -506,27 +514,35 @@ object TransactionView
   }
 
   private def fromProtoV30(
-      context: (HashOps, ProtocolVersion),
+      context: (HashOps, DepthCounter, ProtocolVersion),
       protoView: v30.ViewNode,
   ): ParsingResult[TransactionView] = {
-    val (hashOps, expectedProtocolVersion) = context
+    val (hashOps, depthCounter, expectedProtocolVersion) = context
     for {
-      commonData <- MerkleTree.fromProtoOptionV30(
+      commonData <- MerkleTree.fromProtoOptionV30NoMerkleSeq(
         protoView.viewCommonData,
         ViewCommonData.fromByteString(expectedProtocolVersion, hashOps),
       )
-      participantData <- MerkleTree.fromProtoOptionV30(
+      participantData <- MerkleTree.fromProtoOptionV30NoMerkleSeq(
         protoView.viewParticipantData,
-        ViewParticipantData.fromByteString(expectedProtocolVersion, context),
+        ViewParticipantData.fromByteString(
+          expectedProtocolVersion,
+          (hashOps, expectedProtocolVersion),
+        ),
       )
-      subViews <- TransactionSubviews.fromProtoV30(context, protoView.subviews)
+
+      subViews <- TransactionSubviews.fromProtoV30(
+        (hashOps, expectedProtocolVersion),
+        depthCounter,
+        protoView.subviews,
+      )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       view <- createFromRepresentativePV(hashOps)(
         commonData,
         participantData,
         subViews,
         rpv,
-        ValidateKeys(context._2),
+        ValidateKeys(expectedProtocolVersion),
       ).leftMap(e =>
         ProtoDeserializationError.OtherError(s"Unable to create transaction views: $e")
       )

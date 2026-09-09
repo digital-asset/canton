@@ -4,6 +4,7 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
+import com.digitalasset.canton.ProtoDeserializationError.NestingTooDeep
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.{HashOps, Salt, TestSalt}
 import com.digitalasset.canton.data.ViewParticipantData.InvalidViewParticipantData
@@ -12,7 +13,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescription
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.validation.ProtoUnvalidated.syntax.*
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{DepthCounter, ProtocolVersion}
 import com.digitalasset.canton.{
   BaseTest,
   HasExecutionContext,
@@ -25,6 +26,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.data.Bytes
 import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.value.Value.VersionedValue
+import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.collection.immutable.ListSet
@@ -135,6 +137,18 @@ class TransactionViewTest
             view.flatten should equal(subviews)
           }
         }
+      }
+      "serialize and deserialize" in {
+        example.rootViews.foreach({ expected =>
+          val encoded: ByteString = expected.toByteString
+          val decoded = TransactionView
+            .fromByteString(
+              testedProtocolVersion,
+              (hashOps, DepthCounter.NoLimit, testedProtocolVersion),
+            )(encoded)
+            .value
+          decoded shouldBe expected
+        })
       }
     }
   }
@@ -875,6 +889,63 @@ class TransactionViewTest
           .value should matchPattern {
           case ProtoDeserializationError.InvariantViolation(Some("call_index"), _) =>
         }
+      }
+
+      // Need to work with v30 structures to avoid stack overflow during serialization
+      "return parsing failure when nesting is over limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+
+        val actualDepth = 10
+
+        import TestProtoBuilder.*
+        val v30ViewNode = buildDeepViewNode(actualDepth)
+
+        val bytes = versionedMessage(v30ViewNode)
+
+        val deserialized = TransactionView
+          .fromByteString(
+            testedProtocolVersion,
+            (
+              hashOps,
+              DepthCounter.withLimit(testedProtocolVersion, actualDepth),
+              testedProtocolVersion,
+            ),
+          )(bytes)
+          .value
+        deserialized.parseDepth shouldBe actualDepth
+
+        val expected = actualDepth - 1
+
+        TransactionView.fromByteString(
+          testedProtocolVersion,
+          (hashOps, DepthCounter.withLimit(testedProtocolVersion, expected), testedProtocolVersion),
+        )(bytes) shouldBe Left(NestingTooDeep(expected))
+
+      }
+
+      "return parsing failure when mixed view/merkle-seq nesting is over limit" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
+
+        import TestProtoBuilder.*
+
+        val actualDepth = 10
+        val element = buildDeepMerkleSeqElement(actualDepth)
+        val mixedView = wrapAsSubviewsOfViewNode(element)
+        val bytes = versionedMessage(mixedView)
+
+        val deserialized = TransactionView
+          .fromByteString(
+            testedProtocolVersion,
+            (hashOps, DepthCounter.NoLimit, testedProtocolVersion),
+          )(bytes)
+          .value
+
+        deserialized.parseDepth shouldBe actualDepth
+
+        val expected = actualDepth - 1
+
+        TransactionView.fromByteString(
+          testedProtocolVersion,
+          (hashOps, DepthCounter.withLimit(testedProtocolVersion, expected), testedProtocolVersion),
+        )(bytes) shouldBe Left(NestingTooDeep(expected))
       }
     }
   }

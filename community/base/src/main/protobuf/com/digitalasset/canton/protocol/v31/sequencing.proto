@@ -172,7 +172,7 @@ message TransactionProtocolLimits {
   // maximum number of root views in a transaction
   uint32 max_transaction_root_views = 9;
 
-  // maximum number of sub views in a transaction
+  // maximum number of sub views per root view
   uint32 max_transaction_sub_views = 10;
 
   // maximum depth of the view tree in a transaction

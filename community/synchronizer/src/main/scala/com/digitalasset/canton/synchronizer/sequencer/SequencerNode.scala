@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
+import cats.Eval
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
@@ -1030,7 +1031,12 @@ class SequencerNodeBootstrap(
       "sequencer",
       logger,
       timeouts,
-      criticalDependencies = liveness.dependencies ++ Seq(sequencerHealth),
+      // we keep `storage` here, since Admin API calls are useless if storage is not ready,
+      // even though a fatal `storage` failure transitively affects readiness via liveness.
+      criticalDependencies = Seq(storage),
+      softDependencies = Eval.now(Seq(sequencerHealth)),
+      // liveness initially is "serving", even though its dependencies may not yet be "serving"
+      serviceCriticalDependencies = Seq(liveness),
     )
     (readiness, liveness)
   }

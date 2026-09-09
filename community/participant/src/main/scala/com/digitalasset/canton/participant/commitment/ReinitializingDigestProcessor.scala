@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.LedgerParticipantId
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
@@ -14,9 +13,7 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   CheckpointFence,
   CheckpointFenceOr,
-  ContractChange,
   ContractChangeBatch,
-  NotCheckpointFence,
   ProcessingContext,
 }
 import com.digitalasset.canton.participant.config.AcsCommitmentConfig
@@ -71,7 +68,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * continue where we left off or solve it in another way
   */
 class ReinitializingDigestProcessorImpl(
-    thisParticipantId: ParticipantId,
+    override val thisParticipantId: ParticipantId,
     override val synchronizerId: SynchronizerId,
     acsCommitmentConfig: AcsCommitmentConfig,
     digestAccumulator: DigestAccumulator,
@@ -88,7 +85,6 @@ class ReinitializingDigestProcessorImpl(
     mat: Materializer,
 ) extends ReinitializingDigestProcessor {
 
-  private val thisLfParticipantId: LedgerParticipantId = thisParticipantId.toLf
   private val writeJournalTombstonesBatchSize: Int =
     acsCommitmentConfig.reinitializingJournalTombstonesBatchSize.unwrap
   private val counterpartyBatchSize: Int = acsCommitmentConfig.counterpartyBatchSize.unwrap
@@ -181,58 +177,14 @@ class ReinitializingDigestProcessorImpl(
         metrics.reinitializeContractChanges.updateValue(
           _ + activeContractsOfCounterparties.size
         )
-        val stakeholdersOfContracts =
-          activeContractsOfCounterparties.iterator.flatMap(_.stakeholders).toSet
 
-        for {
-          // get the map of (party -> Set of participants where it is onboarded)
-          partyToParticipant <- getOnboardedParticipantsOfParties(
-            topologySnapshot,
-            stakeholdersOfContracts,
-          )
-        } yield {
-          val contractChanges =
-            activeContractsOfCounterparties.iterator.map { activeContractOfCounterparty =>
-              // emit the classification update for all stakeholders of the current stakeholder batch
-              // of the contract and their respective hosting participants.
-              val counterpartyStakeholders =
-                activeContractOfCounterparty.stakeholders.iterator
-                  .filter(counterpartiesSet.contains)
-                  .toSet
-
-              val locallyHostedStakeholders =
-                activeContractOfCounterparty.stakeholders.iterator.filter { sh =>
-                  partyToParticipant.getOrElse(sh, Set.empty).contains(thisLfParticipantId)
-                }.toSeq
-
-              ContractChange(
-                counterpartyStakeholders,
-                locallyHostedStakeholders,
-                activeContractOfCounterparty.contractId,
-                activeContractOfCounterparty.reassignmentCounter,
-                isActivation = true,
-              )
-            }.toSeq
-
-          val counterpartiesToParticipant = activeContractsOfCounterparties.iterator
-            .flatMap(_.stakeholders)
-            .distinct
-            .filter(counterpartiesSet)
-            .map(party => party -> partyToParticipant.getOrElse(party, Set.empty))
-            .toMap
-
-          ProcessingContext(
-            reinitializingTimepoint,
-            NotCheckpointFence(
-              topologySnapshot,
-              ContractChangeBatch.create(
-                counterpartiesToParticipant,
-                contractChanges,
-                enableAdditionalConsistencyChecks,
-              ),
-            ),
-          )
-        }
+        getContractChangeBatches(
+          counterpartiesSet,
+          activeContractsOfCounterparties,
+          topologySnapshot,
+          reinitializingTimepoint,
+          enableAdditionalConsistencyChecks,
+        )
       }
 
     acsUpdates.concat(

@@ -1503,6 +1503,7 @@ object MediatorReference {
 
 abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, name: String)
     extends InstanceReference
+    with SequencerConnectionAdministration
     with ConsoleCommandGroup {
   override type Status = MediatorStatus
 
@@ -1584,7 +1585,6 @@ abstract class MediatorReference(val consoleEnvironment: ConsoleEnvironment, nam
 class LocalMediatorReference(consoleEnvironment: ConsoleEnvironment, val name: String)
     extends MediatorReference(consoleEnvironment, name)
     with LocalInstanceReference
-    with SequencerConnectionAdministration
     with BaseInspection[MediatorNode] {
 
   override protected[canton] def executionContext: ExecutionContext =

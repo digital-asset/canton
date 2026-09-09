@@ -48,13 +48,6 @@ LSU:
 final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimClockUtils {
   override protected def testName: String = "lsu-late-sequencer"
 
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
-
   private def createSequencingParametersShortViewChangeTimeoutNoBlacklisting(pv: ProtocolVersion) =
     topology.SequencingParameters
       .create(

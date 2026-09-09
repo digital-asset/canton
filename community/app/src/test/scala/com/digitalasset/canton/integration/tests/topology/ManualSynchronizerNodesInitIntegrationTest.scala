@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.health.HealthMonitoringTestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -15,18 +16,25 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
+import com.digitalasset.canton.{HasActorSystem, HasExecutionContext}
 import com.digitalasset.nonempty.NonEmpty
 
 /** Test to fully manually initialize synchronizer nodes with identity and topology keys. */
 trait ManualSynchronizerNodesInitIntegrationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment {
+    with SharedEnvironment
+    with HealthMonitoringTestUtils
+    with HasExecutionContext
+    with HasActorSystem {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransform(ConfigTransforms.disableAutoInit(Set("sequencer1", "mediator1")))
+      .addConfigTransforms(
+        ConfigTransforms.addMonitoringEndpointAllNodes*
+      )
 
-  private def nodeInit(node: LocalInstanceReference): Unit = {
+  private def nodeInit(node: LocalInstanceReference)(implicit env: FixtureParam): Unit = {
     // create namespace key for the node
     val namespaceKey = node.keys.secret
       .generate_signing_key(
@@ -35,6 +43,10 @@ trait ManualSynchronizerNodesInitIntegrationTest
       )
 
     node.health.wait_for_ready_for_id()
+    withHealthStubs(Seq(node.config.monitoring.grpcHealthServer.value)) { case Seq(healthStub) =>
+      logger.info(s"Checking health of ${node.name} after namespace key generation")
+      checkServing(healthStub, httpHealthConfig = Some(node.config))
+    }
 
     // initialize the node id
     node.topology.init_id_from_uid(
@@ -72,6 +84,10 @@ trait ManualSynchronizerNodesInitIntegrationTest
     )
 
     node.health.wait_for_ready_for_initialization()
+    withHealthStubs(Seq(node.config.monitoring.grpcHealthServer.value)) { case Seq(healthStub) =>
+      logger.info(s"Checking health of ${node.name} after node id initialization")
+      checkServing(healthStub, httpHealthConfig = Some(node.config))
+    }
 
   }
 

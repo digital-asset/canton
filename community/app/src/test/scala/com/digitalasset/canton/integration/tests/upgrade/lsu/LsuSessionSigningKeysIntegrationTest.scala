@@ -59,10 +59,7 @@ final class LsuSessionSigningKeysIntegrationTest
   override protected def configTransforms: Seq[ConfigTransform] =
     super.configTransforms :+ ConfigTransforms.setSigningKeysIfPV35OrHigher(
       SessionSigningKeysConfig.enabled
-    ) :+
-      // TODO(#35107) Upon disabling the old ACS commitment processor
-      //  this test fails: (enable the new pipeline) and make the fix
-      ConfigTransforms.enableOldAcsCommitmentProcessor
+    )
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S2M2_Config
       .withNetworkBootstrap(implicit env => new NetworkBootstrapper(EnvironmentDefinition.S1M1))

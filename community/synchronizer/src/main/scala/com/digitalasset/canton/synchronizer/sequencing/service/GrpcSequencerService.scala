@@ -288,9 +288,12 @@ class GrpcSequencerService(
               SubmissionRequest
                 .fromByteString(
                   protocolVersion,
-                  DecompressionPolicy.forProtocolVersion(
-                    protocolVersion,
-                    MaxBytesToDecompress(maxRequestSize.value),
+                  SubmissionRequestDeserializationContext(
+                    DecompressionPolicy.forProtocolVersion(
+                      protocolVersion,
+                      MaxBytesToDecompress(maxRequestSize.value),
+                    ),
+                    topologyClient.getSynchronizerLimits,
                   ),
                 )
             )

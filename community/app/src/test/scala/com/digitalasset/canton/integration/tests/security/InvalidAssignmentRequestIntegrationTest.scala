@@ -103,6 +103,7 @@ final class InvalidAssignmentRequestIntegrationTest
           participant2,
           acmeId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )

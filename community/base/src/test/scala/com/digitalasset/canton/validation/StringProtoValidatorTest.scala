@@ -28,7 +28,7 @@ class StringProtoValidatorTest extends AnyWordSpec with EitherValues with Matche
   "ProtoValidator[String] validating protocol version" should {
     "reject bad content from that version on" in {
       validator
-        .validate(bad, ProtocolVersion.stringValidation, field)
+        .validate(bad, ProtocolVersion.v36, field)
         .left
         .value shouldBe a[StringConversionError]
     }

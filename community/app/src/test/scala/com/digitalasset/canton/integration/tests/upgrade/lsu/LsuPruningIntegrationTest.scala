@@ -20,6 +20,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.participant.store.{
+  AcsDigestStore,
   ActiveContractStore,
   LogicalSyncPersistentState,
   PhysicalSyncPersistentState,
@@ -27,6 +28,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.synchronizer.sequencer.SequencerUtils
 import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration
@@ -56,13 +58,6 @@ import scala.util.chaining.*
 final class LsuPruningIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-pruning"
-
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
 
   registerPlugin(
     new UseBftSequencer(
@@ -108,13 +103,11 @@ final class LsuPruningIntegrationTest extends LsuBase {
         dedup duration, we don't hit other limits (e.g., the ledger time to record
         time tolerance).
          */
-        ConfigTransforms.updateMaxDeduplicationDurations(10.seconds.toJava)
-      )
-      .addConfigTransform(
+        ConfigTransforms.updateMaxDeduplicationDurations(10.seconds.toJava),
         ConfigTransforms.updateAllParticipantConfigs_(
           _.focus(_.parameters.journalGarbageCollectionDelay)
             .replace(journalGarbageCollectionDelay)
-        )
+        ),
       )
       .withSetup { implicit env =>
         defaultEnvironmentSetup()
@@ -126,18 +119,6 @@ final class LsuPruningIntegrationTest extends LsuBase {
 
   private var iou1: Iou.Contract = _
   private var iou2: Iou.Contract = _
-
-  private def noOutstandingCommitments(
-      p: LocalParticipantReference,
-      ts: CantonTimestamp,
-  )(implicit env: TestConsoleEnvironment): CantonTimestamp =
-    p.underlying.value.sync.syncPersistentStateManager
-      .get(env.daId)
-      .value
-      .acsCommitmentStore
-      .noOutstandingCommitments(ts)
-      .futureValueUS
-      .value
 
   private def getPhysicalState(
       p: LocalParticipantReference,
@@ -162,7 +143,10 @@ final class LsuPruningIntegrationTest extends LsuBase {
   )(implicit env: TestConsoleEnvironment): (Long, CantonTimestamp) = {
     import env.*
 
-    eventually() {
+    eventually(
+      // give the acs commitment matcher enough time to process the incoming commitment and raise the safe to prune offset
+      timeUntilSuccess = 1.minute
+    ) {
       environment.simClock.value.advance(15.seconds.toJava)
       participant1.health.ping(participant2)
 
@@ -213,10 +197,18 @@ final class LsuPruningIntegrationTest extends LsuBase {
       environment.simClock.value.advance(Duration.ofSeconds(5))
       participant1.health.ping(participant2)
 
-      eventually() {
-        getLogicalState(participant2, fixture.lsid).acsCommitmentStore
-          .searchComputedBetween(CantonTimestamp.Epoch, fixture.upgradeTime)
-          .futureValueUS should not be empty
+      if (fixture.currentPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+        eventually() {
+          getLogicalState(participant2, fixture.lsid).acsCommitmentStore
+            .searchComputedBetween(CantonTimestamp.Epoch, fixture.upgradeTime)
+            .futureValueUS should not be empty
+        }
+      } else {
+        eventually() {
+          getLogicalState(participant2, fixture.lsid).acsDigestStore
+            .latestReconciliationCheckpoint()
+            .futureValueUS should not be empty
+        }
       }
     }
 
@@ -237,11 +229,18 @@ final class LsuPruningIntegrationTest extends LsuBase {
   "And activity happens after LSU" in { implicit env =>
     import env.*
 
-    // ACS commitments are exchanged and upgrade time is clean (no outstanding ACS commitments)
+    // ACS commitments are exchanged and upgrade time is clean (no outstanding ACS commitments) or matched
     participant1.health.ping(participant2)
-    eventually() {
-      noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
-      noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
+    if (fixture.newPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+      eventually() {
+        noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
+        noOutstandingCommitments(participant2, upgradeTime) shouldBe upgradeTime
+      }
+    } else {
+      eventually() {
+        latestMatchedCommitmentBy(participant1, participant2.id) should be >= upgradeTime
+        latestMatchedCommitmentBy(participant2, participant1.id) should be >= upgradeTime
+      }
     }
 
     clue("archive Iou 2.0") {
@@ -299,13 +298,22 @@ final class LsuPruningIntegrationTest extends LsuBase {
           .lastRequestTimestampBeforeOrAt(safeTimestamp)
           .futureValueUS shouldBe defined
 
-        getLogicalState(participant2, fixture.lsid).acsCommitmentStore
-          .searchComputedBetween(fixture.upgradeTime, safeTimestamp)
-          .futureValueUS
-          // periods completely before safeTimestamp
-          .filter { case (period, _, _) =>
-            period.toInclusive.forgetRefinement < safeTimestamp
-          } should not be empty
+        if (fixture.newPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+          getLogicalState(participant2, fixture.lsid).acsCommitmentStore
+            .searchComputedBetween(fixture.upgradeTime, safeTimestamp)
+            .futureValueUS
+            // periods completely before safeTimestamp
+            .filter { case (period, _, _) =>
+              period.toInclusive.forgetRefinement < safeTimestamp
+            } should not be empty
+        } else {
+          getLogicalState(participant2, fixture.lsid).acsDigestStore
+            .latestCheckpointUpTo(
+              Offset.tryFromLong(safeOffset),
+              AcsDigestStore.allCheckpointsFilter,
+            )
+            .futureValueUS should not be empty
+        }
       }
 
       participant2.pruning.prune(safeOffset)
@@ -369,16 +377,29 @@ final class LsuPruningIntegrationTest extends LsuBase {
         Time needs to advance by at least the recordTime+journalGarbageCollectionDelay.
         Timestamp needs to be become clean.
        */
-      val targetTs = CantonTimestamp.Epoch.add(journalGarbageCollectionDelay.asJava).plusSeconds(15)
+
+      val targetTs =
+        CantonTimestamp.Epoch
+          .add(journalGarbageCollectionDelay.asJava)
+          .plusSeconds(15)
       environment.simClock.value.advanceTo(targetTs)
       waitForTargetTimeOnSequencer(sequencer2, targetTs, logger)
       waitP2SafeTsReaches(targetTs)
 
+      environment.simClock.value.advance(
+        participant2.config.parameters.journalGarbageCollectionMinimumGap.underlying.toJava
+      )
+      participants.all.foreach(_.testing.fetch_synchronizer_times())
+
       eventually() {
+        // Repeat `fetch_synchronizer_times` calls to produce more blocks
+        // to trigger `EmptyAcsPublicationRequired` and eventually the JournalGarbageCollector
+        environment.simClock.value.advance(
+          participant2.config.parameters.journalGarbageCollectionMinimumGap.underlying.toJava
+        )
+        participants.all.foreach(_.testing.fetch_synchronizer_times())
         pcs2.fetchStates(Seq(cid1, cid2)).futureValueUS shouldBe empty
       }
-
-      pcs2.fetchStates(Seq(cid1, cid2)).futureValueUS.foreach(println)
     }
   }
 }

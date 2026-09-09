@@ -36,6 +36,14 @@ import com.google.rpc.status.Status
 import pprint.Tree
 import pprint.Tree.{Apply, KeyValue, Literal}
 
+/** Deserialization context for sequenced events, carrying the decompression policy and synchronizer
+  * limits.
+  */
+final case class SequencedEventDeserializationContext(
+    decompressionPolicy: DecompressionPolicy,
+    synchronizerLimits: SynchronizerLimits,
+)
+
 /** The Deliver events are received as a consequence of a '''Send''' command, received by the
   * recipients of the originating '''Send''' event.
   */
@@ -85,7 +93,7 @@ sealed trait SequencedEvent[+B <: GenBatch[?]]
 object SequencedEvent
     extends VersioningCompanionContextMemoization2[
       SequencedEvent[GenBatch[?]],
-      DecompressionPolicy,
+      SequencedEventDeserializationContext,
       SequencedEvent[Batch[ClosedEnvelope]],
       Unit,
     ] {
@@ -124,7 +132,7 @@ object SequencedEvent
 
   private[sequencing] def fromProtoV30(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SequencedEventDeserializationContext,
       sequencedEventP: v30.SequencedEvent,
   )(
       bytes: ByteString
@@ -132,12 +140,12 @@ object SequencedEvent
     fromProtoGeneric(
       pvv,
       ProtoSequencedEventV30(sequencedEventP),
-      decompressBatch(pvv, decompressionPolicy),
+      decompressBatch(pvv, context),
     )(bytes)
 
   private[sequencing] def fromProtoV31(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SequencedEventDeserializationContext,
       sequencedEventP: v31.SequencedEvent,
   )(
       bytes: ByteString
@@ -145,12 +153,12 @@ object SequencedEvent
     fromProtoGeneric(
       pvv,
       ProtoSequencedEventV31(sequencedEventP),
-      decompressBatch(pvv, decompressionPolicy),
+      decompressBatch(pvv, context),
     )(bytes)
 
   private[sequencing] def fromProtoV32(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SequencedEventDeserializationContext,
       sequencedEventP: v32.SequencedEvent,
   )(
       bytes: ByteString
@@ -158,7 +166,7 @@ object SequencedEvent
     fromProtoGeneric(
       pvv,
       ProtoSequencedEventV32(sequencedEventP),
-      decompressBatch(pvv, decompressionPolicy),
+      decompressBatch(pvv, context),
     )(bytes)
 
   private[sequencing] def fromProtoV30Compressed(
@@ -207,9 +215,12 @@ object SequencedEvent
 
   private def decompressBatch(
       pvv: ProtocolVersionValidation,
-      decompressionPolicy: DecompressionPolicy,
+      context: SequencedEventDeserializationContext,
   )(proto: ProtoBatch): ParsingResult[Batch[ClosedEnvelope]] =
-    CompressedBatch(proto).decompress(pvv, decompressionPolicy)
+    CompressedBatch(proto).decompress(
+      pvv,
+      BatchDeserializationContext(context.decompressionPolicy, context.synchronizerLimits),
+    )
 
   /** Generic deserialization that delegates the batch decoding to `decodeBatch`. This allows either
     * eagerly decompressing the batch (see [[decompressBatch]]) or keeping it compressed (see
@@ -329,7 +340,9 @@ object SequencedEvent
   )(
       bytes: ByteString
   ): ParsingResult[DecompressedSequencedEvent[DefaultOpenEnvelope]] =
-    fromTrustedByteString(decompressionPolicy)(bytes).flatMap {
+    fromTrustedByteString(
+      SequencedEventDeserializationContext(decompressionPolicy, synchronizerLimits)
+    )(bytes).flatMap {
       case deliver: Deliver[Batch[ClosedEnvelope]] =>
         deliver.traverse[ParsingResult, ClosedEnvelope, DefaultOpenEnvelope](
           _.toOpenEnvelope(hashOps, synchronizerLimits, protocolVersion)
@@ -359,9 +372,14 @@ object SequencedEvent
       event: SequencedEvent[GenBatch[ClosedEnvelope]],
       pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
+      synchronizerLimits: SynchronizerLimits,
   ): ParsingResult[DecompressedSequencedEvent[ClosedEnvelope]] =
     traverseBatch(event) {
-      case compressed: CompressedBatch => compressed.decompress(pvv, decompressionPolicy)
+      case compressed: CompressedBatch =>
+        compressed.decompress(
+          pvv,
+          BatchDeserializationContext(decompressionPolicy, synchronizerLimits),
+        )
       case batch: Batch[ClosedEnvelope] => Right(batch)
     }
 

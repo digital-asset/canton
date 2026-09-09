@@ -289,10 +289,11 @@ class MediatorNodeBootstrap(
         timeouts,
         criticalDependencies = Seq(
           storage
-        ) ++ liveness.dependencies,
-        softDependencies = Eval.always(
-          deferredSequencerConnectionPoolHealthRef.get.apply()
         ),
+        softDependencies = Eval.always(
+          deferredSequencerConnectionPoolHealthRef.get.apply() ++ Seq(deferredSequencerClientHealth)
+        ),
+        serviceCriticalDependencies = Seq(liveness),
       )
 
     (readiness, liveness)

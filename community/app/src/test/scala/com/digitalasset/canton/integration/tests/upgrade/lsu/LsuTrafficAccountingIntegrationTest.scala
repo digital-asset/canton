@@ -63,13 +63,6 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
 
   override protected def testName: String = "lsu-traffic-accounting"
 
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
-
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected lazy val newOldSequencers: Map[String, String] =

@@ -171,6 +171,7 @@ object LogicalSyncPersistentState {
           acsCounterParticipantConfigStore,
           ledgerApiStore,
           loggerFactory,
+          futureSupervisor,
         )
       case db: DbStorage =>
         new DbLogicalSyncPersistentState(

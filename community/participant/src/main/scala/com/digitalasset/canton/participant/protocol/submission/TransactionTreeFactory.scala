@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   GenTransactionTree,
   TransactionView,
+  TransactionViewLimitConfig,
   ViewPosition,
 }
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
@@ -60,6 +61,7 @@ trait TransactionTreeFactory {
       contractOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
+      limitConfig: TransactionViewLimitConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree]

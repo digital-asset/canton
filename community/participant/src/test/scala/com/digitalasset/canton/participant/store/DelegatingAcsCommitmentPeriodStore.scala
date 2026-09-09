@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.store
 
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -31,6 +32,8 @@ class DelegatingAcsCommitmentPeriodStore(delegate: AcsCommitmentPeriodStore & Na
   override protected def loggerFactory: NamedLoggerFactory = delegate.loggerFactoryInternal
 
   override protected def stringInterning: StringInterning = delegate.stringInterningInternal
+
+  override protected def futureSupervisor: FutureSupervisor = delegate.futureSupervisorInternal
 
   override def lookupOutstanding(
       periods: immutable.Iterable[(InternedParticipantId, CommitmentPeriod)]
@@ -100,8 +103,11 @@ class DelegatingAcsCommitmentPeriodStore(delegate: AcsCommitmentPeriodStore & Na
   ): FutureUnlessShutdown[Unit] =
     delegate.deleteOutstandingAfter(fromExclusive)
 
-  override protected def doPrune(limit: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
-      implicit traceContext: TraceContext
+  override protected def doPruneSynchronized(
+      limit: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Int] =
     delegate.doPruneInternal(limit, lastPruning)
 

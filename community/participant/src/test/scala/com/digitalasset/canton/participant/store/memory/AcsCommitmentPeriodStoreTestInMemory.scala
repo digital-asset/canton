@@ -4,14 +4,13 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.Eval
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStoreTest
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
 
 class AcsCommitmentPeriodStoreTestInMemory extends AcsCommitmentPeriodStoreTest {
-  override def minimumProtocolVersion: ProtocolVersion = ProtocolVersion.minimum
 
   private def mkStore(stringInterning: StringInterning, enableConsistencyChecks: Boolean)(implicit
       executionContext: ExecutionContext
@@ -19,6 +18,7 @@ class AcsCommitmentPeriodStoreTestInMemory extends AcsCommitmentPeriodStoreTest 
     new InMemoryAcsCommitmentPeriodStore(
       Eval.now(stringInterning),
       loggerFactory,
+      FutureSupervisor.Noop,
       enableConsistencyChecks,
     )
 

@@ -21,6 +21,7 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.transaction.ParticipantSynchronizerLimits
+import com.digitalasset.canton.util.EitherUtil
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}
 import com.digitalasset.canton.version.*
@@ -731,7 +732,6 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
   lazy val defaultMaxRequestSize: MaxRequestSize = MaxRequestSize(
     NonNegativeInt.tryCreate(10 * 1024 * 1024)
   )
-
   private val defaultConfirmationResponseTimeout: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.tryOfSeconds(30)
   private val defaultMediatorReactionTimeout: NonNegativeFiniteDuration =
@@ -1046,11 +1046,11 @@ final case class DynamicSynchronizerParametersWithValidity(
   def isValidAt(ts: CantonTimestamp): Boolean =
     validFrom < ts && validUntil.forall(ts <= _)
 
-  private def checkValidity(ts: CantonTimestamp, goal: String): Either[String, Unit] = Either.cond(
-    isValidAt(ts),
-    (),
-    s"Cannot compute $goal for `$ts` because validity of parameters is ($validFrom, $validUntil]",
-  )
+  private def checkValidity(ts: CantonTimestamp, goal: String): Either[String, Unit] =
+    EitherUtil.condUnit(
+      isValidAt(ts),
+      s"Cannot compute $goal for `$ts` because validity of parameters is ($validFrom, $validUntil]",
+    )
 
   /** Computes the decision time for the given activeness time.
     *

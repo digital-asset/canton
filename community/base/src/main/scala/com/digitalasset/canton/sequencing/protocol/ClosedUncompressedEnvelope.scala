@@ -37,7 +37,7 @@ import com.digitalasset.canton.version.{
   RepresentativeProtocolVersion,
   UnsupportedProtoCodec,
   VersionedProtoCodec,
-  VersioningCompanion,
+  VersioningCompanionContext,
 }
 import com.digitalasset.canton.{ProtoDeserializationError, checkedToByteString}
 import com.digitalasset.nonempty.NonEmpty
@@ -217,7 +217,8 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     copy(recipients = newRecipients)
 }
 
-object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressedEnvelope] {
+object ClosedUncompressedEnvelope
+    extends VersioningCompanionContext[ClosedUncompressedEnvelope, SynchronizerLimits] {
   val recipientsLens: Lens[ClosedUncompressedEnvelope, Recipients] =
     Lens[ClosedUncompressedEnvelope, Recipients](_.recipients)(newRecipients =>
       envelope => envelope.withRecipients(newRecipients)
@@ -237,12 +238,13 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
 
   private[protocol] def fromProtoV30(
       pvv: ProtocolVersionValidation,
+      synchronizerLimits: SynchronizerLimits,
       envelopeP: v30.Envelope,
   ): ParsingResult[ClosedUncompressedEnvelope] = {
     val v30.Envelope(contentP, recipientsP, signaturesP) = envelopeP
     for {
       recipients <- ProtoConverter.parseRequired(
-        Recipients.fromProtoV30(pvv, _),
+        Recipients.fromProtoV30(pvv, synchronizerLimits, _),
         "recipients",
         recipientsP,
       )

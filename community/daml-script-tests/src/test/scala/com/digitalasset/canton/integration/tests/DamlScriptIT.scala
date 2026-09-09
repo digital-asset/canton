@@ -7,7 +7,7 @@ import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.{UseExtensionService, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
@@ -932,8 +932,6 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
 // This suite builds ScriptLF24StagingTests at --target=2.4 (Stable(4)) at test runtime; the
 // snapshot's codegen still only accepts Staging(4,1), so the build step fails. Un-ignore together
 // with the ExternalCallTest codegen entry in BuildCommon.scala.
-// TODO(#35484): uncomment after shuffle
-/*
 class DamlScriptPV36LF24IT extends DamlScriptIT(LanguageVersion.v2_4) {
   import DamlScriptIT.ExpectedResult.*
 
@@ -962,7 +960,6 @@ class DamlScriptPV36LF24IT extends DamlScriptIT(LanguageVersion.v2_4) {
 
   doRunTests(scriptIdsToTest)
 }
-**/
 
 object DamlScriptIT {
 

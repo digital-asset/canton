@@ -13,7 +13,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.{RootHash, v30}
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.version.HasProtocolVersionedWrapper
+import com.digitalasset.canton.version.{DepthCounter, HasProtocolVersionedWrapper}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.{Lens, Prism, Traversal}
@@ -238,9 +238,20 @@ object MerkleTree {
         )
     })
 
-  def fromProtoOptionV30[NodeType](
+  /** Call this with this option if the structure being decoded does not contain a MerkleSeq */
+  def fromProtoOptionV30NoMerkleSeq[NodeType](
       protoNode: Option[v30.BlindableNode],
       f: ByteString => ParsingResult[MerkleTree[NodeType]],
+  ): ParsingResult[MerkleTree[NodeType]] =
+    fromProtoOptionV30WithMerkleSeq(protoNode, DepthCounter.ZeroLimit, (bytes, _) => f(bytes))
+
+  /** Call this method with if the structure being decoded may contain a MerkleSeq, the depthCounter
+    * is used to limit the depth of the MerkleSeq to avoid stack overflows.
+    */
+  def fromProtoOptionV30WithMerkleSeq[NodeType](
+      protoNode: Option[v30.BlindableNode],
+      depthCounter: DepthCounter,
+      f: (ByteString, DepthCounter) => ParsingResult[MerkleTree[NodeType]],
   ): ParsingResult[MerkleTree[NodeType]] = {
     import v30.BlindableNode.BlindedOrNot as BON
     protoNode.map(_.blindedOrNot) match {
@@ -251,7 +262,7 @@ object MerkleTree {
             e => ProtoDeserializationError.OtherError(s"Failed to deserialize root hash: $e"),
             hash => BlindedNode.apply[NodeType](hash),
           )
-      case Some(BON.Unblinded(unblindedNode)) => f(unblindedNode)
+      case Some(BON.Unblinded(unblindedNode)) => f(unblindedNode, depthCounter)
       case Some(BON.Empty) | None =>
         Left(ProtoDeserializationError.OtherError(s"Missing blindedOrNot specification"))
     }

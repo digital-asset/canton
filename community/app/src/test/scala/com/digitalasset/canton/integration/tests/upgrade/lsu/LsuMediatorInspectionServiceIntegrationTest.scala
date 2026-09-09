@@ -15,12 +15,7 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax.testIou
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
-import com.digitalasset.canton.integration.{
-  ConfigTransform,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  TestConsoleEnvironment,
-}
+import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.mediator.admin.v30.VerdictResult.{
   VERDICT_RESULT_ACCEPTED,
@@ -56,13 +51,6 @@ abstract class LsuMediatorInspectionServiceIntegrationTest
     )
   )
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
-
-  // TODO(#35107) Upon disabling the old ACS commitment processor
-  //  this test fails: (enable the new pipeline) and make the fix
-  override def configTransforms: Seq[ConfigTransform] =
-    super.configTransforms ++ Seq(
-      ConfigTransforms.enableOldAcsCommitmentProcessor
-    )
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1S2M2_Config

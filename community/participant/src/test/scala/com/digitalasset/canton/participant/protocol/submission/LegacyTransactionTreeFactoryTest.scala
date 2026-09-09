@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.protocol.submission
 
 import cats.data.EitherT
 import com.digitalasset.canton.*
-import com.digitalasset.canton.data.GenTransactionTree
+import com.digitalasset.canton.data.{GenTransactionTree, TransactionViewLimitConfig}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.participant.DefaultParticipantStateValues
@@ -88,6 +88,7 @@ final class LegacyTransactionTreeFactoryTest
             contractOfId = contractInstanceOfId,
             maxSequencingTime = factory.ledgerTime.plusSeconds(100),
             validatePackageVettings = true,
+            limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
           )
           .failOnShutdown
       }
