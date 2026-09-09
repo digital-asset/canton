@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.metrics.api.noop.NoOpTimer
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification}
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
-import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
+import com.digitalasset.canton.crypto.{HashPurpose, Hash as CantonHash}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Added

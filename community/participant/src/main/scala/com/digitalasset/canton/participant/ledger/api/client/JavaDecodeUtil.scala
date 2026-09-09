@@ -12,10 +12,10 @@ import com.daml.ledger.javaapi.data.codegen.{
 }
 import com.daml.ledger.javaapi.data.{
   ArchivedEvent,
-  CreatedEvent as JavaCreatedEvent,
   DisclosedContract,
   Event,
   Identifier,
+  CreatedEvent as JavaCreatedEvent,
   Transaction as JavaTransaction,
 }
 import com.digitalasset.daml.lf.data.Ref

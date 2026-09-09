@@ -80,9 +80,7 @@ class DefaultVerdictSenderTest
   )
   private lazy val expectedMediatorGroupAggregationRule = Some(
     AggregationRule.activeMediators(
-      NonEmpty.mk(Seq, defaultMediatorGroup.active(0), defaultMediatorGroup.active.tail*),
       NonNegativeInt.zero,
-      PositiveInt.tryCreate(2),
       testedProtocolVersion,
     )
   )

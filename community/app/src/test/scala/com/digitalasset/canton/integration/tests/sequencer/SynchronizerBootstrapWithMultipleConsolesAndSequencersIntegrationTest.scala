@@ -37,7 +37,8 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
         // Third sequencer's console:
         // * write file with identity topology transactions
         {
-          sequencer3.topology.transactions.export_identity_transactionsV2(identityFile)
+          sequencer3.topology.transactions
+            .export_identity_transactionsV2(identityFile, testedProtocolVersion)
         }
 
         // Fist and second sequencers' (i.e., owners) console:

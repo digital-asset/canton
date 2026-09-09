@@ -192,10 +192,8 @@ object MerkleSeq
 
   override def name: String = "MerkleSeq"
 
-  type BrandOrSingleton
-
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.MerkleSeq)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.MerkleSeq)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -444,7 +442,7 @@ object MerkleSeq
     }
 
     override val versioningTable: VersioningTable = VersioningTable(
-      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.MerkleSeqElement)(
+      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.MerkleSeqElement)(
         supportedProtoVersion(_)(fromProtoV30),
         _.toProtoV30,
       )
@@ -482,7 +480,7 @@ object MerkleSeq
           newDepth: DepthCounter,
       ): ParsingResult[Option[MerkleTree[MerkleSeqElement[M]]]] =
         maybeNodeP.traverse(nodeP =>
-          MerkleTree.fromProtoOptionV30WithCounter(
+          MerkleTree.fromProtoOptionV30WithMerkleSeq(
             Some(nodeP),
             newDepth,
             fromByteStringV30((hashOps, dataFromByteString), expectedProtocolVersion),
@@ -494,7 +492,7 @@ object MerkleSeq
           newDepth: DepthCounter,
       ): ParsingResult[Option[MerkleTree[M & HasProtocolVersionedWrapper[?]]]] =
         maybeDataP.traverse(dataP =>
-          MerkleTree.fromProtoOptionV30WithCounter(Some(dataP), newDepth, dataFromByteString)
+          MerkleTree.fromProtoOptionV30WithMerkleSeq(Some(dataP), newDepth, dataFromByteString)
         )
 
       for {
@@ -553,7 +551,7 @@ object MerkleSeq
     for {
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       rootOrEmpty <- maybeRootP.traverse(_ =>
-        MerkleTree.fromProtoOptionV30WithCounter(
+        MerkleTree.fromProtoOptionV30WithMerkleSeq(
           maybeRootP,
           depthCounter,
           MerkleSeqElement

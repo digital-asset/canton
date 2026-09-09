@@ -15,14 +15,18 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.networking.grpc.GrpcError
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.sequencer.api.v30 as v30Sequencer
-import com.digitalasset.canton.sequencing.SequencerTestUtils.MockMessageContent
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason
 import com.digitalasset.canton.sequencing.client.SubscriptionCloseReason.TokenExpiration
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId, UniqueIdentifier}
+import com.digitalasset.canton.sequencing.protocol.{ClosedUncompressedEnvelope, Recipients}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+  UniqueIdentifier,
+}
 import com.digitalasset.canton.tracing.SerializableTraceContext
-import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.google.protobuf.ByteString
 import io.grpc.Context.CancellableContext
@@ -40,27 +44,29 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
     UniqueIdentifier.tryFromProtoPrimitive("da::default")
   ).toPhysical
 
-  private lazy val emptyEnvelope = v30.Envelope(
-    content = MockMessageContent.toByteString,
-    recipients = None,
-    signatures = Nil,
-  )
+  private lazy val envelope = ClosedUncompressedEnvelope
+    .create(
+      ByteString.EMPTY,
+      Recipients.ofSet(Set(DefaultTestIdentities.daSequencerId)).value,
+      Seq.empty,
+      testedProtocolVersion,
+    )
+    .toClosedCompressedEnvelope(com.digitalasset.canton.util.CompressionAlgo.Gzip)
 
   private lazy val messageP: v30Sequencer.SubscriptionResponse = v30Sequencer
     .SubscriptionResponse(
       v30
         .SignedContent(
-          v30
+          v31
             .SequencedEvent(
               previousTimestamp = None,
               timestamp = 0,
               batch = Some(
-                v30.CompressedBatch(
+                v31.CompressedBatch(
                   algorithm =
                     v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED,
-                  compressedBatch = ByteStringUtil.compressGzip(
-                    v30.Batch(envelopes = Seq(emptyEnvelope)).toByteString
-                  ),
+                  compressedEnvelopes = Seq(envelope.bytes),
+                  compressedRecipients = ByteString.empty(),
                 )
               ),
               physicalSynchronizerId = synchronizerId.toProtoPrimitive,

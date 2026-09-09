@@ -5,22 +5,16 @@ package com.digitalasset.canton.crypto.sync
 
 import com.digitalasset.canton.ProtocolVersionChecksAnyWordSpec
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.{PositiveFiniteDuration, SessionSigningKeysConfig}
-import com.digitalasset.canton.crypto.SignatureCheckError.UnsupportedDelegationSignatureError
+import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
-import com.digitalasset.canton.crypto.signer.{
-  SyncCryptoSignerWithLongTermKeys,
-  SyncCryptoSignerWithSessionKeys,
-}
+import com.digitalasset.canton.crypto.signer.SyncCryptoSignerWithSessionKeys
 import com.digitalasset.canton.crypto.{
   Signature,
   SignatureDelegation,
   SignatureDelegationValidityPeriod,
-  SigningKeyUsage,
   SynchronizerCryptoClient,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.DefaultTestIdentities.participant1
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -38,8 +32,6 @@ class SyncCryptoWithSessionKeysTest
   override protected lazy val sessionSigningKeysConfig: SessionSigningKeysConfig =
     if (testedProtocolVersion >= ProtocolVersion.v35) SessionSigningKeysConfig.enabled
     else SessionSigningKeysConfig.disabled
-
-  private var p1PV34: SynchronizerCryptoClient = _
 
   private lazy val validityDuration = sessionSigningKeysConfig.keyValidityDuration
 
@@ -593,94 +585,6 @@ class SyncCryptoWithSessionKeysTest
           testSnapshot.timestamp,
           expectSignatureDelegation = true,
         )
-
-      }
-
-    "fallback to signing with long-term key if the protocol version does not support session signing keys" onlyRunWith
-      ProtocolVersion.v34 in {
-
-        val signature = loggerFactory.assertLoggedWarningsAndErrorsSeq(
-          {
-            p1PV34 = createTestingTopologyWith(SessionSigningKeysConfig.enabled)
-              .forOwnerAndSynchronizer(participant1)
-            p1PV34.syncCryptoSigner.isInstanceOf[SyncCryptoSignerWithLongTermKeys] shouldBe true
-            p1PV34.syncCryptoSigner
-              .sign(
-                testSnapshot,
-                None,
-                hash,
-                defaultUsage,
-              )
-              .valueOrFail("sign failed")
-              .futureValueUS
-          },
-          LogEntry.assertLogSeq(
-            Seq(
-              (
-                _.warningMessage should include(
-                  s"Using a session signing key is not possible with protocol version 34. Please use protocol " +
-                    s"version PV35 or higher, or disable session signing keys. In the meantime, we will revert to using " +
-                    s"the long-term key for signing messages."
-                ),
-                "session signing keys are not supported for protocol version 34",
-              )
-            )
-          ),
-        )
-
-        signature.signatureDelegation shouldBe empty
-
-        p1PV34.syncCryptoVerifier
-          .verifySignature(
-            testSnapshot,
-            hash,
-            participant1.member,
-            signature,
-            defaultUsage,
-          )
-          .valueOrFail("verification failed")
-          .futureValueUS
-      }
-
-    "fail verification of signature delegation if the protocol version does not support session signing keys" onlyRunWith
-      ProtocolVersion.v34 in {
-
-        val signature = syncCryptoSignerP1
-          .sign(
-            testSnapshot,
-            None,
-            hash,
-            defaultUsage,
-          )
-          .valueOrFail("sign failed")
-          .futureValueUS
-
-        val fakeSignatureDelegation = SignatureDelegation
-          .create(
-            p1.crypto.cryptoPublicStore.signingKeys.futureValueUS
-              .find(key =>
-                SigningKeyUsage.matchesRelevantUsages(key.usage, SigningKeyUsage.ProtocolOnly)
-              )
-              .valueOrFail("no protocol signing key"),
-            SignatureDelegationValidityPeriod(
-              CantonTimestamp.MinValue,
-              PositiveFiniteDuration.ofMinutes(1),
-            ),
-            signature,
-          )
-          .valueOrFail("create fake signature delegation")
-
-        p1PV34.syncCryptoVerifier
-          .verifySignature(
-            testSnapshot,
-            hash,
-            participant1.member,
-            signature.addSignatureDelegation(fakeSignatureDelegation),
-            defaultUsage,
-          )
-          .futureValueUS
-          .left
-          .value shouldBe a[UnsupportedDelegationSignatureError]
       }
   }
 }

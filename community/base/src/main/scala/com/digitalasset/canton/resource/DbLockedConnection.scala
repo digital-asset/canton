@@ -10,8 +10,8 @@ import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.{
   DbLockedConnectionConfig,
-  PositiveFiniteDuration as PositiveFiniteDurationConfig,
   ProcessingTimeout,
+  PositiveFiniteDuration as PositiveFiniteDurationConfig,
 }
 import com.digitalasset.canton.crypto.PseudoRandom
 import com.digitalasset.canton.data.CantonTimestamp

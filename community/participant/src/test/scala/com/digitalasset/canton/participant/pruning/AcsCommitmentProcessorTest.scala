@@ -85,7 +85,7 @@ import com.digitalasset.nonempty.NonEmpty
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import scala.annotation.nowarn

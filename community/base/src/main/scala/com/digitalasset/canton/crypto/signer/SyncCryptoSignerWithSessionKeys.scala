@@ -356,7 +356,7 @@ class SyncCryptoSignerWithSessionKeys(
       val pendingSessionKeys = pendingRequests.toMap
       val keysInCache = sessionSigningKeysCache.asMap().values.toSeq
 
-      // Filter the cache for session keys whose validity period fully covers the required intervaland whose
+      // Filter the cache for session keys whose validity period fully covers the required interval and whose
       // delegation key matches our current activeLongTermKey. Session keys with stale delegation keys are ignored.
       val validUsableSessionKeysInCache = keysInCache.filter { skD =>
         isUsableDelegation(

@@ -498,7 +498,7 @@ class ParticipantSimulator(
     val loggerFactoryForParticipant = loggerFactory.append("participant", pid.identifier.unwrap)
     val metrics = environment.metricsRegistry.forParticipant(pid.identifier.unwrap)
     val synchronizerMetrics =
-      metrics.connectedSynchronizerMetrics(SynchronizerAlias.tryCreate("synchronizer"))
+      metrics.connectedSynchronizerMetrics(SynchronizerAlias.tryCreate("synchronizer"), pid)
 
     val connectionPoolFactory = new GrpcSequencerConnectionPoolFactory(
       clientProtocolVersions = NonEmpty(Seq, pv),

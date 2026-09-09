@@ -14,13 +14,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.ViewHash
-import com.digitalasset.canton.protocol.messages.{
-  EncryptedMultipleViews,
-  EncryptedMultipleViewsMessage,
-  EncryptedSingleViewMessage,
-  EncryptedView,
-  EncryptedViewMessage,
-}
+import com.digitalasset.canton.protocol.messages.{EncryptedMultipleViews, EncryptedViewMessage}
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.store.SessionKeyStore.RecipientGroup
@@ -28,7 +22,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{MaxBytesToDecompress, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.nonempty.NonEmpty
 import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
@@ -54,10 +48,7 @@ object EncryptedViewMessageFactory {
       ],
   )
 
-  /** Creates a message with a single view:
-    *   - [[com.digitalasset.canton.protocol.messages.EncryptedSingleViewMessage]] for pv34-
-    *   - [[com.digitalasset.canton.protocol.messages.EncryptedMultipleViewsMessage]] for pv35+
-    *     (even though it contains only one view)
+  /** Creates a message with a single view
     */
   def encryptView[VT <: ViewType](viewType: VT)(
       viewTree: viewType.View,
@@ -69,22 +60,13 @@ object EncryptedViewMessageFactory {
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, EncryptedViewMessageCreationError, EncryptedViewMessage[VT]] =
-    if (protocolVersion >= ProtocolVersion.v35) {
-      encryptGroupedViews(viewType)(
-        NonEmpty.mk(Seq, viewTree),
-        viewKeyData,
-        submittingParticipantSignature,
-        cryptoSnapshot,
-        protocolVersion,
-      ).widen[EncryptedViewMessage[VT]]
-    } else
-      encryptNonGroupedView(viewType)(
-        viewTree,
-        viewKeyData,
-        submittingParticipantSignature,
-        cryptoSnapshot,
-        protocolVersion,
-      ).widen[EncryptedViewMessage[VT]]
+    encryptGroupedViews(viewType)(
+      NonEmpty.mk(Seq, viewTree),
+      viewKeyData,
+      submittingParticipantSignature,
+      cryptoSnapshot,
+      protocolVersion,
+    ).widen[EncryptedViewMessage[VT]]
 
   /** Creates a single message with multiple views (for pv35+)
     *
@@ -101,7 +83,7 @@ object EncryptedViewMessageFactory {
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageCreationError, EncryptedMultipleViewsMessage[
+  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageCreationError, EncryptedViewMessage[
     VT
   ]] = {
     def createMultiView()(implicit
@@ -144,7 +126,7 @@ object EncryptedViewMessageFactory {
           )
       )
       multiView <- createMultiView()
-    } yield EncryptedMultipleViewsMessage[VT](
+    } yield EncryptedViewMessage[VT](
       multiView,
       viewTrees.map(_.viewHash),
       sessionKeyRandomnessMapNE,
@@ -164,129 +146,6 @@ object EncryptedViewMessageFactory {
         .findDynamicSynchronizerParameters()
     ).map(_.parameters.maxRequestSize)
       .leftMap(error => UnableToGetDynamicSynchronizerParameters(error, cryptoSnapshot.psid))
-
-  private def encryptNonGroupedView[VT <: ViewType](viewType: VT)(
-      viewTree: viewType.View,
-      viewKeyData: (SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]]),
-      submittingParticipantSignature: Signature,
-      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      protocolVersion: ProtocolVersion,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageCreationError, EncryptedSingleViewMessage[
-    VT
-  ]] = for {
-    maxRequestSize <- getMaxRequestSize(cryptoSnapshot)
-    singleMessage <- doEncryptNonGroupedView(viewType)(
-      viewTree,
-      viewKeyData,
-      submittingParticipantSignature,
-      cryptoSnapshot,
-      maxRequestSize,
-      cryptoSnapshot.pureCrypto.defaultSymmetricKeyScheme,
-      protocolVersion,
-    )
-  } yield singleMessage
-
-  /** Creates multiple messages: one for each view (for pv34-)
-    */
-  private[submission] def encryptNonGroupedViews[VT <: ViewType](viewType: VT)(
-      viewTreesWithRecipients: NonEmpty[Seq[(Recipients, viewType.View)]],
-      viewKeyDataMap: ViewKeyDataMap,
-      submittingParticipantSignature: Signature,
-      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      protocolVersion: ProtocolVersion,
-      parallel: Boolean,
-  )(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageCreationError, NonEmpty[Seq[
-    EncryptedSingleViewMessage[
-      VT
-    ],
-  ]]] = {
-    val viewEncryptionScheme = cryptoSnapshot.pureCrypto.defaultSymmetricKeyScheme
-
-    for {
-      maxRequestSize <- getMaxRequestSize(cryptoSnapshot)
-      messages <-
-        if (parallel)
-          MonadUtil.parTraverseWithLimit(cryptoSnapshot.pureCrypto.encryptionParallelism)(
-            viewTreesWithRecipients
-          ) { case (recipients, view) =>
-            doEncryptNonGroupedView(viewType)(
-              view,
-              viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
-              submittingParticipantSignature,
-              cryptoSnapshot,
-              maxRequestSize,
-              viewEncryptionScheme,
-              protocolVersion,
-            )
-          }
-        else
-          MonadUtil.sequentialTraverse(viewTreesWithRecipients) { case (recipients, view) =>
-            doEncryptNonGroupedView(viewType)(
-              view,
-              viewKeyDataMap.keyAndEncryptedRandomnessByRecipients(recipients),
-              submittingParticipantSignature,
-              cryptoSnapshot,
-              maxRequestSize,
-              viewEncryptionScheme,
-              protocolVersion,
-            )
-          }
-    } yield NonEmptyUtil.fromUnsafe(
-      messages
-    ) // We know it's non empty, since we started with a NonEmpty instance as input
-  }
-
-  private def doEncryptNonGroupedView[VT <: ViewType](viewType: VT)(
-      viewTree: viewType.View,
-      viewKeyData: (SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]]),
-      submittingParticipantSignature: Signature,
-      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
-      maxRequestSize: MaxRequestSize,
-      viewEncryptionScheme: SymmetricKeyScheme,
-      protocolVersion: ProtocolVersion,
-  )(implicit
-      ec: ExecutionContext
-  ): EitherT[FutureUnlessShutdown, EncryptedViewMessageCreationError, EncryptedSingleViewMessage[
-    VT
-  ]] = {
-    val (sessionKey, sessionKeyRandomnessMap) = viewKeyData
-
-    val sessionKeyRandomnessMapNEResult = EitherT.fromEither[FutureUnlessShutdown](
-      NonEmpty
-        .from(sessionKeyRandomnessMap)
-        .toRight(
-          UnableToDetermineSessionKeyRandomness(
-            "The session key randomness map is empty"
-          )
-        )
-    )
-
-    for {
-      sessionKeyRandomnessMapNE <- sessionKeyRandomnessMapNEResult
-      encryptedView <- EitherT.fromEither[FutureUnlessShutdown](
-        EncryptedView
-          .compressed[VT](cryptoSnapshot.pureCrypto, sessionKey, viewType, protocolVersion)(
-            viewTree,
-            MaxBytesToDecompress(maxRequestSize.value),
-          )
-          .leftMap[EncryptedViewMessageCreationError](FailedToEncryptViewMessage.apply)
-      )
-    } yield EncryptedSingleViewMessage(
-      viewTree.toBeSigned.map(_ => submittingParticipantSignature),
-      viewTree.viewHash,
-      sessionKeyRandomnessMapNE,
-      encryptedView,
-      viewTree.psid,
-      viewEncryptionScheme,
-      protocolVersion,
-    )
-  }
 
   final case class ViewParticipantsKeysAndParentRecipients(
       informeeParticipants: NonEmpty[Set[ParticipantId]],

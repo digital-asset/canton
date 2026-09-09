@@ -13,9 +13,9 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine as ContractStateMachine,
   Node,
   NodeId,
+  NextGenContractStateMachine as ContractStateMachine,
 }
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.matchers.should.Matchers

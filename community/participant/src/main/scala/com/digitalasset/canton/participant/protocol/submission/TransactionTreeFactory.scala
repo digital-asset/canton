@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.{
   CantonTimestamp,
   GenTransactionTree,
   TransactionView,
+  TransactionViewLimitConfig,
   ViewPosition,
 }
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
@@ -32,7 +33,6 @@ import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractHasher
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.transaction.LegacyTransactionErrors
 
 import java.util.UUID
@@ -60,6 +60,7 @@ trait TransactionTreeFactory {
       contractOfId: ContractInstanceOfId,
       maxSequencingTime: CantonTimestamp,
       validatePackageVettings: Boolean,
+      limitConfig: TransactionViewLimitConfig,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree]
@@ -106,25 +107,14 @@ object TransactionTreeFactory {
       hasher: ContractHasher,
       loggerFactory: NamedLoggerFactory,
   )(implicit ex: ExecutionContext): TransactionTreeFactory =
-    if (synchronizerId.protocolVersion >= ProtocolVersion.v35) {
-      new NextGenTransactionTreeFactory(
-        submittingParticipant,
-        synchronizerId,
-        cantonContractIdVersion,
-        cryptoOps,
-        hasher,
-        loggerFactory,
-      )
-    } else {
-      new LegacyTransactionTreeFactory(
-        submittingParticipant,
-        synchronizerId,
-        cantonContractIdVersion,
-        cryptoOps,
-        hasher,
-        loggerFactory,
-      )
-    }
+    new NextGenTransactionTreeFactory(
+      submittingParticipant,
+      synchronizerId,
+      cantonContractIdVersion,
+      cryptoOps,
+      hasher,
+      loggerFactory,
+    )
 
   def contractInstanceLookup(
       contractStore: ContractLookup

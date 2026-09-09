@@ -19,7 +19,7 @@ import com.digitalasset.canton.console.{
   MediatorReference,
   SequencerReference,
 }
-import com.digitalasset.canton.crypto.{KeyPurpose, Signature}
+import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -32,6 +32,7 @@ import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.{StoredTopologyTransaction, TimeQuery}
 import com.digitalasset.canton.topology.transaction.{
+  NamespaceDelegation,
   OwnerToKeyMapping,
   SequencerSynchronizerState,
   SignedTopologyTransaction,
@@ -130,16 +131,39 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
         // since the sequencer anyway should reject this topology snapshot, it doesn't matter that the snapshot is not actually suitable
         // for initialization.
 
+        // temporary store to hold the topology transactions
+        val tempStore = sequencerToFail.topology.stores
+          .create_temporary_topology_store("sequencerToFail-tempstore", testedProtocolVersion)
+
+        // create NSD and OTK serial=1,
+        val identityTransactions = sequencerToFail.topology.transactions
+          .generate_onboarding_transactions(testedProtocolVersion)
+        sequencerToFail.topology.transactions.load(
+          transactions = identityTransactions,
+          store = tempStore,
+        )
+        val nsd = identityTransactions
+          .flatMap(_.selectMapping[NamespaceDelegation])
+          .headOption
+          .valueOrFail("must have nsd")
+        val otk1 = identityTransactions
+          .flatMap(_.selectMapping[OwnerToKeyMapping])
+          .headOption
+          .valueOrFail("must have otk1")
+
         // create OTK serial=2
         val encKey = sequencerToFail.keys.secret.generate_encryption_key("enc_key_test")
-        sequencerToFail.topology.owner_to_key_mappings.add_key(
-          encKey.fingerprint,
-          KeyPurpose.Encryption,
+        sequencerToFail.topology.owner_to_key_mappings.propose(
+          member = sequencerToFail.id.member,
+          keys = otk1.mapping.keys ++ Seq(encKey),
+          signedBy = Seq(nsd.mapping.target.fingerprint),
+          store = tempStore,
         )
 
         // fetch the two OTKs
         val otks = sequencerToFail.topology.transactions
           .list(
+            store = tempStore,
             filterMappings = Seq(OwnerToKeyMapping.code),
             timeQuery = TimeQuery.Range(None, None),
             filterNamespace = sequencerToFail.id.uid.namespace.filterString,

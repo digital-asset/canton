@@ -30,6 +30,8 @@ import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
+import com.digitalasset.canton.topology.store.TopologyStoreId.TemporaryStore
+import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
@@ -141,6 +143,7 @@ class GrpcTopologyManagerReadService(
     timeTrackerLookup: PhysicalSynchronizerId => Option[SynchronizerTimeTracker],
     physicalSynchronizerIdLookup: PsidLookup,
     processingTimeout: ProcessingTimeout,
+    generateOnboardingTransactions: GenerateOnboardingTransactions,
     val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext, materializer: Materializer)
     extends adminProto.TopologyManagerReadServiceGrpc.TopologyManagerReadService
@@ -1293,6 +1296,137 @@ class GrpcTopologyManagerReadService(
       }
       adminProto.ListLsuSequencerConnectionSuccessorResponse(results)
     }
+    CantonGrpcUtil.mapErrNewEUS(ret)
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  override def generateOnboardingTopologyTransactions(
+      request: GenerateOnboardingTopologyTransactionsRequest
+  ): Future[GenerateOnboardingTopologyTransactionsResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val nodeId = member.uid
+
+    // Retrieve the identity transactions from the authorized store.  We do this
+    // for backwards compatibility.  We also verify that these transactions have
+    // the right representative protocol version.
+    def retrieveFromAuthorizedStore(
+        protocolVersion: ProtocolVersion
+    ): EitherT[FutureUnlessShutdown, RpcError, Seq[
+      topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+    ]] =
+      for {
+        transactions <- listAllStoredTopologyTransactions(
+          baseQuery = BaseQuery(
+            store = Some(TopologyStoreId.Authorized),
+            proposals = false,
+            timeQuery = TimeQuery.Range(from = None, until = None),
+            ops = None,
+            filterSigningKey = "",
+            protocolVersion = Some(protocolVersion),
+            clientVersion = None,
+          ),
+          topologyMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
+          filterNamespaceP = ProtoUnvalidatedString(nodeId.namespace.filterString),
+        )
+        desiredRepresentativeProtocolVersion =
+          TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
+        correctProtocolVersion = transactions.signedTransactions.forall(
+          _.transaction.representativeProtocolVersion == desiredRepresentativeProtocolVersion
+        )
+      } yield {
+        if (correctProtocolVersion) transactions.signedTransactions
+        else Seq()
+      }
+
+    // Generate the onboarding transactions anew.  This lets us target the right
+    // protocol version.
+    def generate(protocolVersion: ProtocolVersion): EitherT[FutureUnlessShutdown, RpcError, Seq[
+      topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
+    ]] =
+      for {
+
+        temporaryTopologyStore <- request.temporaryStore match {
+          case None =>
+            for {
+              storeId <- EitherT
+                .fromEither[FutureUnlessShutdown](
+                  TemporaryStore.create(member.toLengthLimitedString.unwrap)
+                )
+                .leftMap[RpcError](_ =>
+                  TopologyManagerError.InternalError.Unexpected("invalid temporary store name")
+                )
+            } yield new InMemoryTopologyStore(
+              storeId = storeId,
+              predecessor = None,
+              protocolVersion = protocolVersion,
+              loggerFactory,
+              timeouts = processingTimeout,
+            )
+          case Some(protoStoreId) =>
+            for {
+              storeId <- wrapErrUS(grpc.TopologyStoreId.Temporary.fromProtoV30(protoStoreId))
+              stores <- collectStores(Some(storeId))
+              store <- stores match {
+                case Seq(store) =>
+                  EitherT.pure[FutureUnlessShutdown, RpcError](
+                    // asInstanceOf is safe because we only accept temporary store IDs
+                    store.asInstanceOf[TopologyStore[TemporaryStore]]
+                  )
+                case _ =>
+                  EitherT.leftT[FutureUnlessShutdown, TopologyStore[TemporaryStore]](
+                    TopologyManagerError.TopologyStoreUnknown.Failure(
+                      TemporaryStore(storeId.name)
+                    ): RpcError
+                  )
+              }
+            } yield store
+        }
+
+        temporaryTopologyManager = generateOnboardingTransactions
+          .createTemporaryTopologyManager(temporaryTopologyStore)
+
+        _ <- generateOnboardingTransactions.generate(
+          topologyStore = temporaryTopologyStore,
+          topologyManager = temporaryTopologyManager,
+          protocolVersion = protocolVersion,
+        )
+
+        transactions <- EitherT.liftF(
+          temporaryTopologyStore.findAllTransactions(
+            asOf = CantonTimestamp.MaxValue,
+            asOfInclusive = true,
+            isProposal = false,
+            types = TopologyMapping.Code.all,
+            filterUid = None,
+            filterNamespace = None,
+          )
+        )
+
+      } yield transactions.signedTransactions
+
+    val ret
+        : EitherT[FutureUnlessShutdown, RpcError, GenerateOnboardingTopologyTransactionsResponse] =
+      for {
+        protocolVersion <- wrapErrUS(
+          ProtocolVersion.fromProtoPrimitive(request.protocolVersion)
+        )
+
+        retrieved <- retrieveFromAuthorizedStore(protocolVersion)
+        transactions <-
+          if (retrieved.isEmpty)
+            generate(protocolVersion)
+          else
+            EitherT.pure[FutureUnlessShutdown, RpcError](retrieved)
+
+      } yield GenerateOnboardingTopologyTransactionsResponse(
+        result = Some(
+          v30.SignedTopologyTransactions(
+            signedTransactions = transactions.map(_.toByteString)
+          )
+        )
+      )
+
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 

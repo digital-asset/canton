@@ -33,7 +33,10 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   NamedLoggingContext,
 }
-import com.digitalasset.canton.protocol.DynamicSynchronizerParametersWithValidity
+import com.digitalasset.canton.protocol.{
+  DynamicSynchronizerParametersWithValidity,
+  SynchronizerLimits,
+}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.UpstreamSubscriptionError
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator.decompressEvent
 import com.digitalasset.canton.sequencing.protocol.{
@@ -239,6 +242,7 @@ object SequencedEventValidator extends HasLoggerName {
             event,
             ProtocolVersionValidation.NoValidation,
             DecompressionPolicy.MaxValueUnsafe,
+            SynchronizerLimits.max,
           )
         )
       )
@@ -276,9 +280,10 @@ object SequencedEventValidator extends HasLoggerName {
       event: MaybeCompressedSerializedEvent,
       pvv: ProtocolVersionValidation,
       decompressionPolicy: DecompressionPolicy,
+      synchronizerLimits: SynchronizerLimits,
   ): Either[SequencedEventValidationError[Nothing], SequencedSerializedEvent] =
     event.signedEvent
-      .traverse(SequencedEvent.decompress(_, pvv, decompressionPolicy))
+      .traverse(SequencedEvent.decompress(_, pvv, decompressionPolicy, synchronizerLimits))
       .bimap(
         err => SequencedEventValidationError.DecompressionFailed(event.timestamp, err.toString),
         signedEvent => SequencedEventWithTraceContext(signedEvent)(event.traceContext),
@@ -693,6 +698,7 @@ class SequencedEventValidatorImpl(
               event,
               ProtocolVersionValidation.PV(psid.protocolVersion),
               DecompressionPolicy.HardcodedDefault,
+              syncCryptoApi.pureCrypto.staticSynchronizerParameters.synchronizerLimits,
             )
           )
         )
@@ -709,6 +715,7 @@ class SequencedEventValidatorImpl(
             event,
             ProtocolVersionValidation.PV(psid.protocolVersion),
             maxBytesToDecompress,
+            snapshot.pureCrypto.staticSynchronizerParameters.synchronizerLimits,
           )
         )
       } yield decompressed

@@ -2832,12 +2832,12 @@ fileComments:
             (or the one explicitly requested).
             The cost of re-assigning contracts to another synchronizer when necessary is not included in the estimation.
           fieldComments:
-            estimation_timestamp: |-
-              Timestamp at which the estimation was made
-
-              Required
             confirmation_request_traffic_cost_estimation: |-
               Estimated traffic cost of the confirmation request associated with the transaction
+
+              Required
+            estimation_timestamp: |-
+              Timestamp at which the estimation was made
 
               Required
             confirmation_response_traffic_cost_estimation: |-
@@ -2850,6 +2850,10 @@ fileComments:
               Sum of the fields above
 
               Required
+            reassignment_costs: |-
+              Estimated cost of re-assigning contracts if necessary
+
+              Optional: can be empty
       CostEstimationHints:
         message:
           comments: Hints to improve cost estimation precision of a prepared transaction
@@ -3354,6 +3358,46 @@ fileComments:
               Metadata context necessary to execute the transaction
 
               Required
+      ReassignmentCost:
+        message:
+          comments: |-
+            Estimation of re-assignment costs
+            This is the cost of re-assigning contracts from another synchronizer if necessary.
+          fieldComments:
+            unassignment_request_traffic_cost_estimation: |-
+              Estimated traffic cost of the unassignment confirmation request
+
+              Required
+            contract_ids: |-
+              The contracts that will be unassigned together in this single unassignment request
+
+              Required: must be non-empty
+            assignment_request_traffic_cost_estimation: |-
+              Estimated traffic cost of the assignment confirmation request
+
+              Required
+            source_synchronizer_id: |-
+              The synchronizer the contracts are currently assigned to, and against whose traffic balance
+              the unassignment cost is charged
+
+              Required
+            assignment_response_traffic_cost_estimation: |-
+              Estimated traffic cost of the assignment confirmation response
+
+              Required
+            unassignment_response_traffic_cost_estimation: |-
+              Estimated traffic cost of the unassignment confirmation response
+
+              Required
+            total_reassignment_cost_estimation: |-
+              Sum of the fields above
+
+              Required
+            target_synchronizer_id: |-
+              The synchronizer the contracts will be re-assigned to, and against whose traffic balance
+              the assignment cost is charged
+
+              Required
       SinglePartySignatures:
         message:
           comments: Signatures provided by a single party
@@ -3455,6 +3499,7 @@ fileComments:
       PrepareSubmissionRequest: {}
       PrepareSubmissionResponse: {}
       PreparedTransaction: {}
+      ReassignmentCost: {}
       SinglePartySignatures: {}
     services:
       InteractiveSubmissionService:

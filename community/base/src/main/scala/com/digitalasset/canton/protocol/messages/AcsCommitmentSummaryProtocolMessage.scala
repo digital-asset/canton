@@ -16,7 +16,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{v30, v31, v32}
+import com.digitalasset.canton.protocol.{v31, v32}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
@@ -47,12 +47,6 @@ final case class AcsCommitmentSummaryProtocolMessage(
   override val representativeProtocolVersion: RepresentativeProtocolVersion[
     AcsCommitmentSummaryProtocolMessage.type
   ] = AcsCommitmentSummaryProtocolMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
-
-  override protected[messages] def toProtoSomeEnvelopeContentV30
-      : v30.EnvelopeContent.SomeEnvelopeContent =
-    throw new UnsupportedOperationException(
-      s"${this.getClass.getSimpleName} cannot be serialized to envelope content v30"
-    )
 
   override protected[messages] def toProtoSomeEnvelopeContentV31
       : v31.EnvelopeContent.SomeEnvelopeContent =

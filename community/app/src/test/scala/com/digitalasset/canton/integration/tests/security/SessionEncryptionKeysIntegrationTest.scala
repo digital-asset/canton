@@ -27,13 +27,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.protocol.SynchronizerLimits
-import com.digitalasset.canton.protocol.messages.{
-  EncryptedMultipleViews,
-  EncryptedMultipleViewsMessage,
-  EncryptedSingleViewMessage,
-  EncryptedView,
-  EncryptedViewMessage,
-}
+import com.digitalasset.canton.protocol.messages.{EncryptedMultipleViews, EncryptedViewMessage}
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   MemberRecipient,
@@ -299,37 +293,21 @@ trait SessionKeyIntegrationTest
 
       encryptedViewMessages.length shouldBe 1
 
-      val isCorrectlyDecrypted = encryptedViewMessages.head match {
-        case viewMessage: EncryptedSingleViewMessage[?] =>
-          val message = viewMessage.asInstanceOf[EncryptedSingleViewMessage[TransactionViewType]]
+      val isCorrectlyDecrypted = {
+        val message =
+          encryptedViewMessages.head.asInstanceOf[EncryptedViewMessage[TransactionViewType]]
 
-          EncryptedView
-            .decrypt[LightTransactionViewTree](
-              pureCrypto,
-              sessionKeyGroupTx,
-              message.encryptedView.viewTree,
-              testedProtocolVersion,
-            )(
-              deserialize,
-              defaultMaxBytesToDecompress,
-            )
-            .isRight
-        case multiViewMessage: EncryptedMultipleViewsMessage[?] =>
-          val message = multiViewMessage
-            .asInstanceOf[EncryptedMultipleViewsMessage[TransactionViewType]]
-
-          EncryptedMultipleViews
-            .decrypt[LightTransactionViewTree](
-              testedProtocolVersionValidation,
-              pureCrypto,
-              sessionKeyGroupTx,
-              message.encryptedViews.viewTrees,
-              testedProtocolVersion,
-            )(
-              deserialize,
-              defaultMaxBytesToDecompress,
-            )
-            .isRight
+        EncryptedMultipleViews
+          .decrypt[LightTransactionViewTree](
+            testedProtocolVersion,
+            pureCrypto,
+            sessionKeyGroupTx,
+            message.encryptedViews.viewTrees,
+          )(
+            deserialize,
+            defaultMaxBytesToDecompress,
+          )
+          .isRight
       }
 
       assert(isCorrectlyDecrypted, "The view has not been decrypted correctly")
@@ -384,8 +362,8 @@ trait SessionKeyIntegrationTest
         val targetSerial = startingSerial.tryAdd(startingOtk.item.keys.size * 2)
 
         // rotate encryption key and ping
-        if (rotateSender) participant1.keys.secret.rotate_node_keys()
-        else participant2.keys.secret.rotate_node_keys()
+        if (rotateSender) participant1.keys.secret.rotate_node_keys(synchronizerId = daId)
+        else participant2.keys.secret.rotate_node_keys(synchronizerId = daId)
 
         Seq(participant1, participant2).foreach { p =>
           eventually() {

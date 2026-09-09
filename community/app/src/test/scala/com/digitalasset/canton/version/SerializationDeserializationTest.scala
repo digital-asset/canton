@@ -146,10 +146,7 @@ final class SerializationDeserializationTest
         }
 
         test(AcknowledgeRequest, version)
-        testContext(AggregationRule, LegacyUseMemberIdsAsEligibleMembers(version), version)
-        if (version < ProtocolVersion.v35) {
-          test(ClosedUncompressedEnvelope, version)
-        }
+        test(AggregationRule, version)
         test(SequencingSubmissionCost, version)
 
         // Merkle tree leaves
@@ -191,14 +188,10 @@ final class SerializationDeserializationTest
           getByteStringId,
         )
 
-        if (version >= ProtocolVersion.v35) {
-          test(EncryptedMultipleViewsMessage, version)(
-            encryptedMultipleViewsMessage,
-            getByteStringId,
-          )
-        } else {
-          test(EncryptedSingleViewMessage, version)(encryptedSingleViewMessage, getByteStringId)
-        }
+        test(EncryptedViewMessage, version)(
+          encryptedViewMessageArb,
+          getByteStringId,
+        )
 
         test(TopologyTransaction, version)
         testContext(TopologyTransactionsBroadcast, version, version)
@@ -212,9 +205,23 @@ final class SerializationDeserializationTest
 
         testContext(ViewParticipantData, (TestHash, version), version)
         // the generated recipient trees can be quite big, even they are already limited
-        testContext(Batch, defaultDecompressionPolicy, version)
+        testContext(
+          Batch,
+          BatchDeserializationContext(
+            defaultDecompressionPolicy,
+            SynchronizerLimits.defaultFor(version),
+          ),
+          version,
+        )
         test(SetTrafficPurchasedMessage, version)
-        testContext(SubmissionRequest, defaultDecompressionPolicy, version)
+        testContext(
+          SubmissionRequest,
+          SubmissionRequestDeserializationContext(
+            defaultDecompressionPolicy,
+            SynchronizerLimits.defaultFor(version),
+          ),
+          version,
+        )
         testVersioned(SequencerConnections, version)
         testVersioned(CounterParticipantIntervalsBehind, version)
         test(GetTrafficStateForMemberRequest, version)
@@ -239,7 +246,14 @@ final class SerializationDeserializationTest
 
         // Generated sequenced events get quite big because each batched envelope has recipient trees
         // of quadratic size breadth * depth, so this test takes longer than other tests.
-        testContext(SequencedEvent, defaultDecompressionPolicy, version)
+        testContext(
+          SequencedEvent,
+          SequencedEventDeserializationContext(
+            defaultDecompressionPolicy,
+            SynchronizerLimits.defaultFor(version),
+          ),
+          version,
+        )
         // Also cover the deferred-decompression path: parse keeping the batch compressed, then
         // decompress separately.
         testProtocolVersionedCommon[Id, SequencedEvent[GenBatch[?]], SequencedEvent[
@@ -251,11 +265,16 @@ final class SerializationDeserializationTest
               .fromTrustedByteStringCompressed(bytes)
               .flatMap(
                 SequencedEvent
-                  .decompress(_, pvv, defaultDecompressionPolicy)
+                  .decompress(
+                    _,
+                    pvv,
+                    defaultDecompressionPolicy,
+                    SynchronizerLimits.defaultFor(version),
+                  )
               ),
         )
         test(SignedContent, version)
-        testContext(TransactionView, (TestHash, DepthCounter.Default, version), version)
+        testContext(TransactionView, (TestHash, DepthCounter.NoLimit, version), version)
         testContext(
           FullInformeeTree,
           (GenTransactionTreeDeserializationContext(TestHash, synchronizerLimits), version),
@@ -271,7 +290,7 @@ final class SerializationDeserializationTest
                 SubmitterMetadata.fromTrustedByteString(
                   SubmitterMetadataDeserializationContext(TestHash, synchronizerLimits)
                 )(bytes),
-              DepthCounter.Default,
+              DepthCounter.NoLimit,
             ),
             version,
           ),
@@ -386,7 +405,14 @@ final class SerializationDeserializationTest
     )
 
     val untestedClasses = requiredTests.diff(testedClasses)
-    val missingTests = untestedClasses.diff(exceptions)
+    val missingTests = untestedClasses
+      .diff(exceptions)
+      .diff(
+        Set(
+          // (De)serialization is not supported anymore
+          "com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope$"
+        )
+      )
     /*
         If this test fails, it means that one class inheriting from HasProtocolVersionWrapper in the
         package is not tested in the SerializationDeserializationTests

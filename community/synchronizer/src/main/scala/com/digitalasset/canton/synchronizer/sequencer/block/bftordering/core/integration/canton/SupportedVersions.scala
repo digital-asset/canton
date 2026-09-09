@@ -18,7 +18,7 @@ object SupportedVersions {
   //  and only one protobuf data version.
 
   val CantonProtocol: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
-    ProtocolVersion.v34
+    ProtocolVersion.v35
 
   // Each protobuf data version can work with multiple Canton protocol versions; the set of consecutive Canton
   //  protocol versions that use the same protobuf data version are designated via a representative

@@ -15,8 +15,8 @@ import com.digitalasset.canton.sequencing.protocol.{
   AggregationId,
   AggregationRule,
   AggregationRuleInput,
-  GeneratorsProtocol as GeneratorsProtocolSeq,
   TrafficState,
+  GeneratorsProtocol as GeneratorsProtocolSeq,
 }
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficPurchased}
 import com.digitalasset.canton.synchronizer.block.update.InFlightAggregations

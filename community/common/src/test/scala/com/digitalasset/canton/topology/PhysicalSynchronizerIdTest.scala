@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt.{one, two, zero}
 import com.digitalasset.canton.crypto.Fingerprint
-import com.digitalasset.canton.version.ProtocolVersion.{latest, v34, v35}
+import com.digitalasset.canton.version.ProtocolVersion.{latest, v35, v36}
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -33,14 +33,14 @@ class PhysicalSynchronizerIdTest extends AnyWordSpec with EitherValues with Matc
       val lsid2: SynchronizerId = SynchronizerId(UniqueIdentifier.tryCreate("da2", namespace))
 
       val inCorrectOrder = List(
-        PhysicalSynchronizerId(lsid1, zero, v34),
         PhysicalSynchronizerId(lsid1, zero, v35),
-        PhysicalSynchronizerId(lsid1, two, v34),
+        PhysicalSynchronizerId(lsid1, zero, v36),
         PhysicalSynchronizerId(lsid1, two, v35),
-        PhysicalSynchronizerId(lsid2, zero, v34),
+        PhysicalSynchronizerId(lsid1, two, v36),
         PhysicalSynchronizerId(lsid2, zero, v35),
-        PhysicalSynchronizerId(lsid2, one, v34),
+        PhysicalSynchronizerId(lsid2, zero, v36),
         PhysicalSynchronizerId(lsid2, one, v35),
+        PhysicalSynchronizerId(lsid2, one, v36),
       )
       Random.shuffle(inCorrectOrder).sorted shouldBe inCorrectOrder
 

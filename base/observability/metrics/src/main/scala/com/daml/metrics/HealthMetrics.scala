@@ -5,7 +5,7 @@ package com.daml.metrics
 
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
-import com.daml.metrics.api.{MetricInfo, MetricName as MN, MetricQualification, MetricsContext}
+import com.daml.metrics.api.{MetricInfo, MetricQualification, MetricsContext, MetricName as MN}
 
 import java.util.concurrent.TimeoutException
 import scala.concurrent.{Await, ExecutionContext, Future}

@@ -78,6 +78,7 @@ class ParticipantOffboardingIntegrationTest
           staticParameters,
           mediatorRequestAmplification = SubmissionRequestAmplification.NoAmplification,
           mediatorThreshold = PositiveInt.one,
+          identityTransactions = None,
         )
       }
     }

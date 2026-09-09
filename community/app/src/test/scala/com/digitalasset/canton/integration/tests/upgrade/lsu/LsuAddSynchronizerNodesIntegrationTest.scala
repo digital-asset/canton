@@ -93,7 +93,7 @@ final class LsuAddSynchronizerNodesIntegrationTest extends LsuBase with Onboards
     )
 
     existingSequencer.topology.transactions.load(
-      newMediator.topology.transactions.identity_transactions(),
+      newMediator.topology.transactions.generate_onboarding_transactions(psid.protocolVersion),
       psid,
       ForceFlag.AlienMember,
     )

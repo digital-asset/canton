@@ -30,9 +30,9 @@ final case class TrafficState(
     serial: Option[PositiveInt],
 ) extends PrettyPrinting {
   def extraTrafficRemainder: Long = extraTrafficPurchased.value - extraTrafficConsumed.value
-  // Need big decimal here because it could overflow a long especially if extraTrafficPurchased == Long.MAX
-  lazy val availableTraffic: BigDecimal =
-    BigDecimal(extraTrafficRemainder) + BigDecimal(baseTrafficRemainder.value)
+  // Need big int here because it could overflow a long especially if extraTrafficPurchased == Long.MAX
+  lazy val availableTraffic: BigInt =
+    BigInt(extraTrafficRemainder) + BigInt(baseTrafficRemainder.value)
 
   def toProtoV30: v30.TrafficState = v30.TrafficState(
     extraTrafficPurchased = extraTrafficPurchased.value,

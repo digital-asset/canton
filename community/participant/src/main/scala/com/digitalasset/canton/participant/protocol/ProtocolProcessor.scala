@@ -260,7 +260,8 @@ abstract class ProtocolProcessor[
               if (mod < 0) mod + mediatorCount else mod
             }
             val chosen = checked(allActiveMediatorGroups(chosenIndex)).index
-            logger.debug(s"Chose the mediator group $chosen")
+            if (mediatorCount > 1)
+              logger.debug(s"Chose the mediator group $chosen")
             Right(MediatorGroupRecipient(chosen))
           }
       }
@@ -1634,12 +1635,7 @@ abstract class ProtocolProcessor[
         pendingRequestData: PendingRequestData
     ): FutureUnlessShutdown[Boolean] =
       for {
-        snapshot <- crypto.awaitSnapshot(
-          // use topologyTimestamp on pv34, otherwise use sequencing timestamp as aggregation
-          // will now only contain signatures from mediators valid at the sequencing timestamp of
-          // the verdict delivery
-          if (protocolVersion <= ProtocolVersion.v34) requestId.unwrap else resultTs
-        )
+        snapshot <- crypto.awaitSnapshot(resultTs)
         res <- result.verifyMediatorSignatures(snapshot, pendingRequestData.mediator.group).value
       } yield {
         res match {

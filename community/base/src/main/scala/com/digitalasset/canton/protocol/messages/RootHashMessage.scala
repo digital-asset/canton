@@ -45,9 +45,6 @@ final case class RootHashMessage[+Payload <: RootHashMessagePayload](
   override val representativeProtocolVersion: RepresentativeProtocolVersion[RootHashMessage.type] =
     RootHashMessage.protocolVersionRepresentativeFor(psid.protocolVersion)
 
-  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV30)
-
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.RootHashMessage(toProtoV30)
 
@@ -107,7 +104,7 @@ object RootHashMessage
     ], ByteString => ParsingResult[RootHashMessagePayload]] {
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.RootHashMessage)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.RootHashMessage)(
       supportedProtoVersionPVV(_)((pv, deserializer, proto) =>
         fromProtoV30(pv, deserializer)(proto)
       ),

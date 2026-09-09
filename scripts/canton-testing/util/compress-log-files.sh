@@ -10,10 +10,14 @@
 
 set -eu -o pipefail
 
-echo
-echo "***** Compressing log files..."
+if [[ "${IS_LOCAL_DEV_RUN:-false}" == "true" ]]; then
+  echo
+  echo "No compression of log files for local run."
+else
+  echo
+  echo "***** Compressing log files..."
 
-gzip "$LOGS_DIR"/*.log
+  gzip "$LOGS_DIR"/*.log
 
-$DB_UTIL_DIR/compress-db-log-files.sh
-
+  $DB_UTIL_DIR/compress-db-log-files.sh
+fi

@@ -77,7 +77,7 @@ object FullInformeeTree
   override protected val pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.FullInformeeTree)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.FullInformeeTree)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
     )

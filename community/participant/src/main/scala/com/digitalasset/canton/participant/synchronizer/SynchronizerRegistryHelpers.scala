@@ -14,9 +14,9 @@ import com.digitalasset.canton.common.sequencer.SequencerConnectClient
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerAggregatedInfo
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.{
-  NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig,
   ProcessingTimeout,
   TestingConfigInternal,
+  NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig,
 }
 import com.digitalasset.canton.crypto.{
   SyncCryptoApiParticipantProvider,
@@ -235,7 +235,9 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
                   config.copy(recordingConfig = updateMemberRecordingPath(config.recordingConfig))
                 )
             ),
-            metrics.connectedSynchronizerMetrics(config.synchronizerAlias).sequencerClient,
+            metrics
+              .connectedSynchronizerMetrics(config.synchronizerAlias, participantId)
+              .sequencerClient,
             participantNodeParameters.loggingConfig,
             participantNodeParameters.exitOnFatalFailures,
             synchronizerLoggerFactory,

@@ -7,7 +7,6 @@ import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
 import com.daml.ledger.api.testtool.suites.{V2_2, V2_3}
 import com.daml.ledger.api.testtool.{TestDar, TestDars}
 import com.daml.tls.TlsClientConfig
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.language.LanguageVersion
 
 trait AvailableTests {
@@ -26,10 +25,6 @@ object AvailableTests {
   val v2_3 = new V2_3(TestDars.v2_3)
 
   val latestStableLf = v2_3
-
-  def testsForProtocol(protocolVersion: ProtocolVersion): AvailableTests =
-    if (protocolVersion <= ProtocolVersion.v34) v2_2
-    else latestStableLf
 
   private def map = Map(
     LanguageVersion.v2_2 -> v2_2,

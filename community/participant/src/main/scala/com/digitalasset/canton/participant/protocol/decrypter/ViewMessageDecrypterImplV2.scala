@@ -36,8 +36,6 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.Transac
 import com.digitalasset.canton.participant.protocol.decrypter.ViewMessageDecrypterImplV2.DecryptedViewsChained
 import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
-  EncryptedMultipleViewsMessage,
-  EncryptedSingleViewMessage,
   EncryptedViewMessage,
   EncryptedViewMessageError,
   MultipleViewTrees,
@@ -112,7 +110,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
     */
   private[canton] val ciphertextIdsMap: TrieMap[
     Hash,
-    Seq[OpenEnvelope[EncryptedMultipleViewsMessage[TransactionViewType]]],
+    Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]],
   ] = TrieMap.empty
 
   private def decryptSubviewsAndMergeResults(
@@ -210,7 +208,7 @@ private[decrypter] class ViewMessageDecrypterImplV2(
   }
 
   private def decryptMessageWithRandomness(
-      encryptedViewsMessage: EncryptedMultipleViewsMessage[TransactionViewType],
+      encryptedViewsMessage: EncryptedViewMessage[TransactionViewType],
       recipients: Recipients,
       ciphertextId: Hash,
       randomness: SecureRandomness,
@@ -230,7 +228,6 @@ private[decrypter] class ViewMessageDecrypterImplV2(
           sessionKeyStore,
           encryptedViewsMessage,
           participantId,
-          protocolVersion,
           Some(randomness),
         )(
           LightTransactionViewTree
@@ -325,24 +322,8 @@ private[decrypter] class ViewMessageDecrypterImplV2(
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
     LightTransactionViewTree
   ]] = {
-    // the new decryption logic is designed for PV`transparency` and above, where we expect all view messages to be
-    // EncryptedMultipleViewsMessage. If we encounter an EncryptedSingleViewMessage, it indicates a
-    // mismatch between the decryption logic and the protocol version, and we should raise an error.
-    val batchEncryptedViews =
-      batch.map(envelope =>
-        envelope
-          .traverse {
-            case _: EncryptedSingleViewMessage[TransactionViewType] => None
-            case multi: EncryptedMultipleViewsMessage[TransactionViewType] => Some(multi)
-          }
-          .getOrElse {
-            ErrorUtil.invalidState(
-              s"Invalid view message: expected an EncryptedMultipleViewsMessage, but got an ${envelope.protocolMessage.getClass.getSimpleName}"
-            )
-          }
-      )
     // hash ciphertexts to retrieve the corresponding ciphertext IDs
-    batchEncryptedViews.forgetNE.foreach { envelope =>
+    batch.forgetNE.foreach { envelope =>
       val ciphertextId =
         envelope.protocolMessage.encryptedViews.computeCiphertextId(snapshot.pureCrypto)
 

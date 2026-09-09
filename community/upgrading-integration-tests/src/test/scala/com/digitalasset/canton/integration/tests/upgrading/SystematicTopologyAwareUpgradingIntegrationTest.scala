@@ -19,7 +19,6 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.damltests.bar.v1.java.bar.Bar
 import com.digitalasset.canton.damltests.bar.v1.java.bar.Bar as BarV1
-import com.digitalasset.canton.damltests.bar.v1.java.ibar.IBar
 import com.digitalasset.canton.damltests.bar.v2.java.bar.Bar as BarV2
 import com.digitalasset.canton.damltests.baz.v1.java.baz.Baz
 import com.digitalasset.canton.damltests.baz.v1.java.baz.Baz as BazV1
@@ -609,11 +608,6 @@ class SystematicTopologyAwareUpgradingIntegrationTest
           SetupPackageVetting(
             darPaths = AllDars,
             targetTopology = Map(env.daId -> AllVettedUpToV3),
-            // IBar is a static dependency of Foo V3
-            // appearing in a choice return type that is not used in the resulting transaction
-            explicitDependencyUnvettingTopology = Map(
-              env.daId -> Map(bobParticipant -> Set(IBar.PACKAGE_ID.toPackageId))
-            ),
           )
           test(
             bobSees = Some(BazV2.PACKAGE_ID),

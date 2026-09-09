@@ -16,34 +16,34 @@ import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.ConsoleEnvironment
 import com.digitalasset.canton.crypto.{
+  SignatureFormat,
   CryptoKeyFormat as CryptoKeyFormatInternal,
   HashAlgorithm as HashAlgorithmInternal,
   RequiredEncryptionSpecs as RequiredEncryptionSpecsInternal,
   RequiredSigningSpecs as RequiredSigningSpecsInternal,
-  SignatureFormat,
   SymmetricKeyScheme as SymmetricKeySchemeInternal,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters.InvalidDynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{
+  v30,
+  v31,
   AcsCommitmentsCatchUpParameters as AcsCommitmentsCatchUpParametersInternal,
   DynamicSynchronizerParameters as DynamicSynchronizerParametersInternal,
   OnboardingRestriction as OnboardingRestrictionInternal,
   StaticSynchronizerParameters as StaticSynchronizerParametersInternal,
   SynchronizerLimits as InternalSynchronizerLimits,
-  v30,
-  v31,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequired}
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.time.{
   Clock,
-  NonNegativeFiniteDuration as InternalNonNegativeFiniteDuration,
   PositiveSeconds,
   RemoteClock,
   SimClock,
+  NonNegativeFiniteDuration as InternalNonNegativeFiniteDuration,
 }
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.validation.{ProtoUnvalidatedSeq, ProtoValidation}

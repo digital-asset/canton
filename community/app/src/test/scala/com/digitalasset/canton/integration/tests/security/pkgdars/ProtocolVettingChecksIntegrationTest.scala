@@ -18,7 +18,7 @@ import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.protocol.validation.TransactionConfirmationResponsesFactory
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.tests.vettingmain
-import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, Party, PartyId}
+import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser}
@@ -55,6 +55,7 @@ class ProtocolVettingChecksIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )
@@ -73,32 +74,6 @@ class ProtocolVettingChecksIntegrationTest
       .toSeq
 
   "A submitting participant" when {
-    s"connected to a PV ${ProtocolVersion.v34} or lower synchronizer" should {
-      "NOT be able to submit a command with a vetted package that has an unvetted dependency from which no template nor interface is used in the transaction" taggedAs_ (ledgerIntegrity
-        .setHappyCase(_)) onlyRunWithOrLessThan ProtocolVersion.v34 in { implicit env =>
-        import env.*
-
-        // Main depends on Dep
-        participant1.dars.upload(VettingMainPath)
-        // Unvet Dep main package
-        unvet(participant1)(removes = Seq(tryReadDar(VettingDepPath).main))
-
-        clue(
-          "Creating a MainT contract should not be possible even if the unvetted dependency (Dep) is not used in the transaction"
-        ) {
-          assertThrowsAndLogsCommandFailures(
-            participant1.ledger_api.javaapi.commands.submit(Seq(alice), createMainCommand(alice)),
-            logEntry => {
-              logEntry.shouldBeCantonErrorCode(PackageSelectionFailed)
-              logEntry.commandFailureMessage should include(
-                "No synchronizers satisfy the topology requirements for the submitted command"
-              )
-            },
-          )
-        }
-      }
-    }
-
     s"connected to a PV ${ProtocolVersion.v35} or higher synchronizer" should {
       "be able to submit a command with a vetted package that has an unvetted dependency that doesn't appear in a transaction action node" taggedAs_ (ledgerIntegrity
         .setHappyCase(_)) onlyRunWithOrGreaterThan ProtocolVersion.v35 in { implicit env =>
@@ -156,40 +131,6 @@ class ProtocolVettingChecksIntegrationTest
   }
 
   "A confirming participant" when {
-    "receives a confirmation request referencing a package with an unvetted dependency but the unvetted dependency doesn't appear in a transaction action node" should {
-      s"reject the transaction if connected to a PV ${ProtocolVersion.v34} synchronizer" taggedAs ledgerIntegrity
-        .setAttack(
-          Attack(
-            actor = "malicious submitting participant",
-            threat =
-              "submits a command yielding a transaction that references an unvetted package that does not appear in an action node (in PV34 or lower)",
-            mitigation = "confirming participant rejects the command",
-          )
-        ) onlyRunWhen (testedProtocolVersion <= ProtocolVersion.v34 && onlyLocalParty(
-        UsesMaliciousNode
-      )) in { implicit env =>
-        import env.*
-
-        // Setup vetted Main with unvetted Dep dependency for participant2
-        participant2.dars.upload(VettingMainPath)
-        unvet(participant2)(removes = Seq(tryReadDar(VettingDepPath).main))
-
-        val createForAliceAndBob = createMainCommand(alice, Some(bob)).loneElement
-
-        loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
-          maliciousP1
-            .submitCommand(
-              CommandsWithMetadata(
-                Seq(Command.fromJavaProto(createForAliceAndBob.toProtoCommand)),
-                Seq(alice),
-              )
-            )
-            .futureValueUS
-            .value,
-          expectModelConformanceRejectLogs(participant1, participant2),
-        )
-      }
-    }
 
     "receives a confirmation request referencing a package with an unvetted dependency that appears in a transaction action node" should {
       "reject the transaction on any protocol version" taggedAs ledgerIntegrity.setAttack(
@@ -277,8 +218,5 @@ class ProtocolVettingChecksIntegrationTest
       participant.id,
       store = env.daId,
       removes = removes.map(DamlPackageStore.readPackageId),
-      force =
-        if (testedProtocolVersion <= ProtocolVersion.v34) ForceFlag.AllowUnvettedDependencies
-        else ForceFlags.none,
     )
 }

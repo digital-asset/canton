@@ -7,10 +7,10 @@ import cats.implicits.{toBifunctorOps, toTraverseOps}
 import com.daml.ledger.api.v2.command_submission_service.{SubmitReassignmentRequest, SubmitRequest}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service as iss
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
-  CostEstimationHints as CostEstimationHintsP,
   PartySignatures,
   PrepareSubmissionRequest,
   SinglePartySignatures,
+  CostEstimationHints as CostEstimationHintsP,
 }
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.crypto.Signature
@@ -22,7 +22,7 @@ import com.digitalasset.canton.ledger.api.validation.ValueValidator.*
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
-import com.digitalasset.canton.topology.{PartyId as TopologyPartyId, Synchronizer}
+import com.digitalasset.canton.topology.{Synchronizer, PartyId as TopologyPartyId}
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.canton.version.HashingSchemeVersion.{V2, V3, V4}
 import io.grpc.StatusRuntimeException

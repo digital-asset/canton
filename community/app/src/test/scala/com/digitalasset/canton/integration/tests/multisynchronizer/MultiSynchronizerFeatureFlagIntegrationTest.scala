@@ -123,6 +123,7 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )
@@ -131,6 +132,7 @@ final class MultiSynchronizerFeatureFlagIntegrationTest
           participant1,
           acmeId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )

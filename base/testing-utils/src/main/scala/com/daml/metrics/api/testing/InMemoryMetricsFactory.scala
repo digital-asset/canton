@@ -26,7 +26,7 @@ import com.daml.scalautil.Statement.discard
 import java.time.Duration
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import java.util.concurrent.{ConcurrentLinkedQueue, TimeUnit}
-import scala.collection.concurrent.{Map as ConcurrentMap, TrieMap}
+import scala.collection.concurrent.{TrieMap, Map as ConcurrentMap}
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 
 class InMemoryMetricsFactory extends LabeledMetricsFactory {

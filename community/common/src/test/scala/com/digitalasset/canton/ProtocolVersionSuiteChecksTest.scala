@@ -24,16 +24,16 @@ final class ProtocolVersionSuiteChecksTest extends AnyWordSpec with BaseTest {
 
     "ignore all tests of a suite requiring an earlier protocol version" in {
       checkIgnored(
-        new MaxV34Suite,
-        expectIgnored = testedProtocolVersion > ProtocolVersion.v34,
+        new MaxV35Suite,
+        expectIgnored = testedProtocolVersion > ProtocolVersion.v35,
       )
     }
 
     "not ignore any test of a suite whose declared range contains the tested protocol version" in {
       checkIgnored(
-        new MinV34MaxDevSuite,
+        new MinV35MaxDevSuite,
         expectIgnored =
-          testedProtocolVersion < ProtocolVersion.v34 || testedProtocolVersion > ProtocolVersion.dev,
+          testedProtocolVersion < ProtocolVersion.v35 || testedProtocolVersion > ProtocolVersion.dev,
       )
     }
   }
@@ -72,10 +72,10 @@ final class ProtocolVersionSuiteChecksTest extends AnyWordSpec with BaseTest {
   @MinProtocolVersion("dev")
   private class MinDevSuite extends ExampleSuite
 
-  @MaxProtocolVersion("34")
-  private class MaxV34Suite extends ExampleSuite
+  @MaxProtocolVersion("35")
+  private class MaxV35Suite extends ExampleSuite
 
-  @MinProtocolVersion("34")
+  @MinProtocolVersion("35")
   @MaxProtocolVersion("dev")
-  private class MinV34MaxDevSuite extends ExampleSuite
+  private class MinV35MaxDevSuite extends ExampleSuite
 }

@@ -91,4 +91,10 @@ object ContractsReassignmentBatch {
       case Seq(batch) => Right(batch)
       case more => Left(DifferingStakeholders(more.map(_.stakeholders)))
     }
+
+  def create(
+      head: ContractReassignment,
+      tail: Seq[ContractReassignment],
+  ): ContractsReassignmentBatch =
+    new ContractsReassignmentBatch(NonEmpty.mk(Seq, head, tail*))
 }

@@ -47,7 +47,7 @@ object OnboardingStateForSequencerV2 extends VersioningCompanion[OnboardingState
   )(protocolVersionRepresentativeFor(protocolVersion))
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.OnboardingStateForSequencerV2
     )(supportedProtoVersion(_)(fromProtoV30), _.toProtoV30)
   )

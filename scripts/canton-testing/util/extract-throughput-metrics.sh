@@ -19,12 +19,37 @@ LATE_EVENT_PERCENTILE="$2"
 ### Read metrics csv files
 
 load-metrics() {
-  # pass filter arguments for rows where we need to filter out the attributes
-  flt=""
-  if [ $# -gt 2 ]; then
-    flt="$3"
-  fi
-  eval "$(read-csv-metric.py "$METRICS_DIR/$1" "$2" "$EARLY_EVENT_PERCENTILE" "$LATE_EVENT_PERCENTILE" "$flt")"
+	local metric_file="$1"
+	local prefix="$2"
+	local flt="${3:-}"
+
+	local is_known_missing_metrics="false"
+
+	if [[ "$prefix" == *SEQUENCER* && "${KNOWN_MISSING_SEQUENCER_METRICS:-false}" == "true" ]]; then
+		is_known_missing_metrics="true"
+	elif [[ "$prefix" == *MEDIATOR* && "${KNOWN_MISSING_MEDIATOR_METRICS:-false}" == "true" ]]; then
+		is_known_missing_metrics="true"
+	elif [[ "$prefix" == *FAILED_TRADER* && "${KNOWN_MISSING_FAILED_TRADER_METRICS:-false}" == "true" ]]; then
+		is_known_missing_metrics="true"
+	fi
+
+	# If file is missing and marked as known missing
+	if [[ "$is_known_missing_metrics" == "true" && ! -f "$METRICS_DIR/$metric_file" ]]; then
+		echo "[WARN] Metric file $metric_file not found in $METRICS_DIR. Defaulting $prefix metrics to 0."
+		eval "${prefix}_EARLY_TS=0 ${prefix}_EARLY_COUNT=0 ${prefix}_LATE_TS=0 ${prefix}_LATE_COUNT=0 ${prefix}_EARLY_TO_LATE_COUNT=0 ${prefix}_EARLY_TO_LATE_TIME=0"
+		return 0
+	fi
+
+	# file is missing and it is a local dev run (which might be short enough, not to record certain metrics)
+	if [[ ! -f "$METRICS_DIR/$metric_file" && "${IS_LOCAL_DEV_RUN:-false}" == "true" ]]; then
+		echo "[LOCAL RUN] Metric file $metric_file not found in $METRICS_DIR. Defaulting $prefix metrics to 0."
+		eval "${prefix}_EARLY_TS=0 ${prefix}_EARLY_COUNT=0 ${prefix}_LATE_TS=0 ${prefix}_LATE_COUNT=0 ${prefix}_EARLY_TO_LATE_COUNT=0 ${prefix}_EARLY_TO_LATE_TIME=0"
+		return 0
+	fi
+
+	echo "Loading metrics from $METRICS_DIR/$metric_file ..."
+
+	eval "$(read-csv-metric.py "$METRICS_DIR/$metric_file" "$prefix" "$EARLY_EVENT_PERCENTILE" "$LATE_EVENT_PERCENTILE" "$flt")"
 }
 
 load-metrics participant1.daml.participant.console.tx-nodes-emitted.csv TX "measurement=canton.transactions-emitted"

@@ -12,9 +12,9 @@ import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands.W
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, TopologyAdminCommands}
 import com.digitalasset.canton.admin.api.client.data.topology.*
 import com.digitalasset.canton.admin.api.client.data.{
-  DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
   SequencingParameters,
   TopologyQueueStatus,
+  DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
@@ -43,7 +43,6 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamObserver}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, BaseWriteRequest, TopologyStoreId}
 import com.digitalasset.canton.topology.admin.v30.{
   ExportTopologySnapshotResponse,
@@ -52,6 +51,7 @@ import com.digitalasset.canton.topology.admin.v30.{
   GenesisStateV2Response,
   SequencerLsuStateResponse,
 }
+import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
@@ -72,6 +72,7 @@ import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import io.grpc.Context
 
+import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicReference
@@ -83,13 +84,14 @@ import scala.reflect.ClassTag
 import scala.util.control.NoStackTrace
 
 class TopologyAdministrationGroup(
-    instance: InstanceReference,
+    protected val instance: InstanceReference,
     topologyQueueStatus: => Option[TopologyQueueStatus],
     val consoleEnvironment: ConsoleEnvironment,
     val loggerFactory: NamedLoggerFactory,
 ) extends ConsoleCommandGroup
     with Helpful
-    with FeatureFlagFilter {
+    with FeatureFlagFilter
+    with AutoDetectSynchronizerHelper {
 
   protected val runner: AdminCommandRunner = instance
   import runner.*
@@ -334,6 +336,40 @@ class TopologyAdministrationGroup(
         .result
         .map(_.transaction)
 
+    @Help.Summary("Generate identity topology transactions")
+    @Help.Description(
+      """Generate the identity topology transactions used to onboard a member to
+        |a synchronizer.  Note that the private key of the node's namespace must
+        |be accessible by the node for this to work.
+        |
+        |For backwards compatibility, the node will first look in the authorized
+        |store for these transactions with the requested protocol version.  This
+        |is only relevant for participant nodes: sequencer and mediator nodes no
+        |longer use the authorized store.
+        |
+        |Parameters:
+        |- protocolVersion: Desired protocol version for the topology transactions. Must
+        |  match the protocol version of the synchronizer the node wants to join.
+        |- temporaryStore: By default, a new temporary topology store will be created to
+        |  generate the topology transactions.  However, this is problematic if the root
+        |  key is not present on the node.  Therefore, one can pass in a temporary store
+        |  to use that is already seeded with both a signed root certificate, as well as
+        |  a namespace delegation to an intermediate key that is present on the node.
+        """
+    )
+    def generate_onboarding_transactions(
+        protocolVersion: ProtocolVersion,
+        temporaryStore: Option[TopologyStoreId.Temporary] = None,
+    ): Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+      consoleEnvironment.run {
+        adminCommand(
+          TopologyAdminCommands.Read.GenerateOnboardingTopologyTransactions(
+            protocolVersion = protocolVersion,
+            temporaryStore = temporaryStore,
+          )
+        )
+      }.transactions
+
     @Help.Summary("Serializes node's topology identity transactions to a file")
     @Help.Description(
       "Transactions serialized this way should be loaded into another node with load_from_file"
@@ -355,13 +391,25 @@ class TopologyAdministrationGroup(
     @Help.Description(
       "Transactions serialized this way should be loaded into another node with load_from_file"
     )
-    def export_identity_transactionsV2(file: String): Unit = {
-      val bytes = instance.topology.transactions
-        .export_topology_snapshotV2(
-          filterMappings = Seq(NamespaceDelegation.code, OwnerToKeyMapping.code),
-          filterNamespace = instance.namespace.filterString,
-        )
-      writeToFile(file, bytes)
+    def export_identity_transactionsV2(
+        file: String,
+        protocolVersion: ProtocolVersion,
+    ): Unit = {
+      val out = new ByteArrayOutputStream()
+      instance.topology.transactions.generate_onboarding_transactions(protocolVersion).foreach {
+        tx =>
+          val stx = StoredTopologyTransaction(
+            sequenced = SequencedTime(SignedTopologyTransaction.InitialTopologySequencingTime),
+            validFrom = EffectiveTime(SignedTopologyTransaction.InitialTopologySequencingTime),
+            validUntil = None,
+            transaction = tx,
+            rejectionReason = None,
+          )
+          stx.writeDelimitedTo(protocolVersion, out).valueOr { err =>
+            consoleEnvironment.raiseError(err)
+          }
+      }
+      writeToFile(file, ByteString.copyFrom(out.toByteArray))
     }
 
     @Help.Summary("Loads topology transactions from a file into the specified topology store")
@@ -1497,6 +1545,8 @@ class TopologyAdministrationGroup(
         |  propagated into the node.
         |- mustFullyAuthorize: Whether to only add the key if the member is in the position to
         |  authorize the change.
+        |- synchronizerId: Synchronizer to add the key to.  If omitted, this will
+        |  attempt to auto-detect a single configured and connected synchronizer.
         """
     )
     def add_key(
@@ -1509,15 +1559,20 @@ class TopologyAdministrationGroup(
         ),
         // configurable in case of a key under a decentralized namespace
         mustFullyAuthorize: Boolean = true,
-    ): Unit = update(
-      NonEmpty.mk(Seq, (key, purpose)),
-      keyOwner,
-      signedBy,
-      synchronize,
-      add = true,
-      mustFullyAuthorize = mustFullyAuthorize,
-      force = ForceFlags.none,
-    )
+        synchronizerId: Option[SynchronizerId] = None,
+    ): Unit =
+      update(
+        NonEmpty.mk(Seq, (key, purpose)),
+        keyOwner,
+        signedBy,
+        synchronize,
+        add = true,
+        synchronizerId = synchronizerId.getOrElse(
+          autodetectSynchronizer("add_key")
+        ),
+        mustFullyAuthorize = mustFullyAuthorize,
+        force = ForceFlags.none,
+      )
 
     @Help.Summary("Add a set of keys to an owner to key mapping")
     @Help.Description(
@@ -1536,6 +1591,8 @@ class TopologyAdministrationGroup(
         |  propagated into the node.
         |- mustFullyAuthorize: Whether to only add the key if the member is in the position to
         |  authorize the change.
+        |- synchronizerId: Synchronizer to add the keys to.  If omitted, this will
+        |  attempt to auto-detect a single configured and connected synchronizer.
         """
     )
     def add_keys(
@@ -1547,6 +1604,7 @@ class TopologyAdministrationGroup(
         ),
         // configurable in case of a key under a decentralized namespace
         mustFullyAuthorize: Boolean = true,
+        synchronizerId: Option[SynchronizerId] = None,
     ): Unit =
       update(
         NonEmpty
@@ -1556,6 +1614,9 @@ class TopologyAdministrationGroup(
         signedBy,
         synchronize,
         add = true,
+        synchronizerId = synchronizerId.getOrElse(
+          autodetectSynchronizer("add_keys")
+        ),
         mustFullyAuthorize = mustFullyAuthorize,
         force = ForceFlags.none,
       )
@@ -1579,6 +1640,8 @@ class TopologyAdministrationGroup(
         |- mustFullyAuthorize: Whether to only add the key if the member is in the position to
         |  authorize the change.
         |- force: Removing the last key is dangerous and must therefore be manually forced.
+        |- synchronizerId: The synchronizer from which to remove the key.  If omitted,
+        |  this will attempt to auto-detect a single configured and connected synchronizer.
         """
     )
     def remove_key(
@@ -1592,12 +1655,16 @@ class TopologyAdministrationGroup(
         // configurable in case of a key under a decentralized namespace
         mustFullyAuthorize: Boolean = true,
         force: ForceFlags = ForceFlags.none,
+        synchronizerId: Option[SynchronizerId] = None,
     ): Unit = update(
       NonEmpty.mk(Seq, (key, purpose)),
       keyOwner,
       signedBy,
       synchronize,
       add = false,
+      synchronizerId = synchronizerId.getOrElse(
+        autodetectSynchronizer("remove_key")
+      ),
       mustFullyAuthorize = mustFullyAuthorize,
       force = force,
     )
@@ -1614,6 +1681,9 @@ class TopologyAdministrationGroup(
         |- owner: The member that owns the owner to key mapping.
         |- currentKey: The current public key that will be rotated.
         |- newKey: The new public key that has been generated.
+        |- synchronizerId: The synchronizer on which to add and remove the keys.
+        |  If omitted, this will attempt to auto-detect a single configured and
+        |  connected synchronizer.
         """
     )
     def rotate_key(
@@ -1623,6 +1693,7 @@ class TopologyAdministrationGroup(
         synchronize: Option[config.NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
+        synchronizerId: Option[SynchronizerId] = None,
     ): Unit = {
       val keysInStore = instance.keys.secret.list().map(_.publicKey)
       require(
@@ -1632,14 +1703,18 @@ class TopologyAdministrationGroup(
       require(keysInStore.contains(newKey), "The new key must exist and pertain to this node")
       require(currentKey.purpose == newKey.purpose, "The rotated keys must have the same purpose")
 
+      val finalSynchronizerId = synchronizerId.getOrElse(
+        autodetectSynchronizer("rotate_key")
+      )
+
       def verifyKeyPresence(key: PublicKey, contains: Boolean): Unit =
         // retry until we observe the change in the respective store
         ConsoleMacros.utils.retry_until_true(
           instance.topology.owner_to_key_mappings
             .list(
-              filterKeyOwnerUid = instance.uid.toProtoPrimitive
+              filterKeyOwnerUid = instance.uid.toProtoPrimitive,
+              store = finalSynchronizerId,
             )
-            .filter(_.context.storeId != Authorized)
             .forall(_.item.keys.contains(key) == contains)
         )(consoleEnvironment)
 
@@ -1651,6 +1726,7 @@ class TopologyAdministrationGroup(
         member,
         signedBy = Seq.empty,
         add = true,
+        synchronizerId = finalSynchronizerId,
         synchronize = synchronize,
       )
 
@@ -1662,6 +1738,7 @@ class TopologyAdministrationGroup(
         member,
         signedBy = Seq.empty,
         add = false,
+        synchronizerId = finalSynchronizerId,
         synchronize = synchronize,
       )
 
@@ -1688,6 +1765,7 @@ class TopologyAdministrationGroup(
         signedBy: Seq[Fingerprint],
         synchronize: Option[config.NonNegativeDuration],
         add: Boolean,
+        synchronizerId: SynchronizerId,
         mustFullyAuthorize: Boolean = true,
         force: ForceFlags = ForceFlags.none,
     ): Unit = {
@@ -1702,7 +1780,7 @@ class TopologyAdministrationGroup(
       // Look for an existing authorized OKM mapping.
       val maybePreviousState = expectAtMostOneResult(
         list(
-          store = Some(TopologyStoreId.Authorized),
+          store = synchronizerId,
           filterKeyOwnerUid = keyOwner.filterString,
           filterKeyOwnerType = Some(keyOwner.code),
         )
@@ -1772,7 +1850,7 @@ class TopologyAdministrationGroup(
           ),
           mapping = proposedMapping,
           signedBy = signedBy,
-          store = TopologyStoreId.Authorized,
+          store = synchronizerId,
           change = ops,
           serial = Some(serial),
           mustFullyAuthorize = mustFullyAuthorize,

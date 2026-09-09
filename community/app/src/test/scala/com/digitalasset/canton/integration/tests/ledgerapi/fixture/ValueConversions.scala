@@ -13,13 +13,13 @@ import com.daml.ledger.api.v2.value.Value.Sum
 import com.daml.ledger.api.v2.value.Value.Sum.{
   ContractId,
   Int64,
-  List as DamlListValue,
   Numeric,
   Party,
   Text,
   Timestamp,
+  List as DamlListValue,
 }
-import com.daml.ledger.api.v2.value.{Identifier, List as DamlList, Record, RecordField, Value}
+import com.daml.ledger.api.v2.value.{Identifier, Record, RecordField, Value, List as DamlList}
 
 import java.time.Instant
 import java.util.concurrent.TimeUnit

@@ -212,6 +212,17 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
           remoteMediator1.health.wait_for_ready_for_initialization()
         }
 
+        val identityTransactions =
+          // generate_onboarding_transactions is the recommended way to retrieve
+          // the identity transactions, but it was only introduced in 3.7, so we
+          // need to branch here.
+          if (Ordering.Tuple2[Int, Int].lt(release.majorMinor, (3, 7)))
+            remoteSequencer1.topology.transactions.identity_transactions() ++
+              remoteMediator1.topology.transactions.identity_transactions()
+          else
+            remoteSequencer1.topology.transactions.generate_onboarding_transactions(pv) ++
+              remoteMediator1.topology.transactions.generate_onboarding_transactions(pv)
+
         val staticParams = StaticSynchronizerParameters.defaults(protocolVersion = pv)
         NetworkBootstrapper(
           Seq(
@@ -222,6 +233,7 @@ trait ProtocolContinuityConformanceTestSynchronizer extends ProtocolContinuityCo
               sequencers = Seq(remoteSequencer1),
               mediators = Seq(remoteMediator1),
               staticSynchronizerParameters = staticParams,
+              identityTransactions = Some(identityTransactions),
             )
           )
         )(env).bootstrap()
@@ -427,7 +439,12 @@ private[continuity] object ProtocolContinuityConformanceTest {
 
     val latestStableAndNonStablePerMinor = ReleaseUtils
       .listAllReleases()
-      .filter(_ < current)
+      /*
+       Filter out releases:
+        - that are not older than the current release
+        - containing "api" in the key because each release comes once with and once without -api suffix
+       */
+      .filter(r => r < current && !r.fullVersion.contains("-api"))
       .groupBy(_.majorMinor)
       .toSeq
       .flatMap { case (_, versions) =>

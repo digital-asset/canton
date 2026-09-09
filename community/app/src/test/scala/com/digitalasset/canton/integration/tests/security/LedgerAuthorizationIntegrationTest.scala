@@ -237,6 +237,7 @@ trait LedgerAuthorizationIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
           testSubmissionServiceOverrideO = Some(submissionService),

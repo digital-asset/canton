@@ -23,7 +23,6 @@ import com.digitalasset.canton.tea.projection.{
   TeaTrafficStore,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.typesafe.config.Config
 import org.apache.pekko.actor.typed.ActorSystem
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -38,8 +37,9 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
       DBIO.seq(
         sqlu"truncate table par_traffic_enforcement_event",
         sqlu"truncate table par_traffic_enforcement_balance",
-        sqlu"truncate table pekko_projection_offset_store",
-        sqlu"truncate table pekko_projection_management",
+        // Double quotes to force H2 to use lower case table names
+        sqlu"""truncate table "pekko_projection_offset_store"""",
+        sqlu"""truncate table "pekko_projection_management"""",
       ),
       functionFullName,
     )
@@ -48,9 +48,6 @@ trait DbTeaProjectionFactoryTest extends AnyWordSpec with BaseTest with TeaProje
   // The DB backends persist the offset in the pekko offset store, so a restarted projection
   // resumes exactly where the previous one left off.
   override protected def offsetsArePersisted: Boolean = true
-
-  override def additionalPekkoConfig: Config =
-    TrafficEnforcementServerConfig.Internal().pekkoConfig(storage.underlying)
 
   // The store is a stateless query wrapper; data isolation between tests is provided by cleanDb.
   // The execution context comes from HasExecutionContext (mixed in via DbTest).

@@ -9,7 +9,7 @@ import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Result.lookupHandler
-import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
+import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IE}
 import com.digitalasset.daml.lf.language.Ast.TTyCon
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.SValue.SAny

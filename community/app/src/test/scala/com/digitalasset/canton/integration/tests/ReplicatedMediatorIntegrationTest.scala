@@ -43,7 +43,7 @@ trait ReplicatedMediatorTestSetup extends ReplicatedNodeHelper {
     registerPlugin(UseSharedStorage.forMediators(mediator1Name, Seq(mediator2Name), loggerFactory))
   }
 
-  private def addTwoReplicatedMediators: ConfigTransform = {
+  private def addTwoReplicatedMediators(): ConfigTransform = {
     def mkReplicatedMediatorNodeConfig = MediatorNodeConfig(
       adminApi = AdminServerConfig(internalPort = UniquePortGenerator.next.some)
     )
@@ -60,8 +60,8 @@ trait ReplicatedMediatorTestSetup extends ReplicatedNodeHelper {
   protected def preNetworkBootstrapSetup(env: TestConsoleEnvironment): Unit = {
     import env.*
     // Start m1 first to make sure it's always the active one when bootstrapping the synchronizer
-    m(mediator1Name).start()
-    m(mediator1Name).health.wait_for_running()
+    lm(mediator1Name).start()
+    lm(mediator1Name).health.wait_for_running()
     waitActive(m(mediator1Name), allowNonInit = true)
   }
 
@@ -90,7 +90,7 @@ trait ReplicatedMediatorTestSetup extends ReplicatedNodeHelper {
       )
       .withManualStart
       .addConfigTransforms(
-        addTwoReplicatedMediators,
+        addTwoReplicatedMediators(),
         ConfigTransforms.setPassiveCheckPeriodMediators(config.PositiveFiniteDuration.ofSeconds(3)),
         // The default of 20 seconds is too low after switching to the AZ runners
         ConfigTransforms.setDelayLoggingThreshold(config.NonNegativeFiniteDuration.ofSeconds(30)),
@@ -143,7 +143,7 @@ trait ReplicatedMediatorIntegrationTest
     implicit env =>
       import env.*
 
-      val activeMediator = waitUntilOneActive(m(mediator1Name), m(mediator2Name))
+      val activeMediator = waitUntilOneActive(lm(mediator1Name), lm(mediator2Name))
 
       logger.debug(s"Stopping active mediator $activeMediator")
       activeMediator.stop()

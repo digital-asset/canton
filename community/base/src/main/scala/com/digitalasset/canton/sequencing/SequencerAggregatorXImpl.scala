@@ -8,7 +8,7 @@ import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.{CryptoPureApi, Hash, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -414,13 +414,15 @@ object SequencerAggregatorXImpl {
 
   final case class EventAndOrdinal private (
       event: ProcessingSerializedEvent,
-      ordinal: NonNegativeInt,
+      ordinal: NonNegativeLong,
   ) {
     def next(event: ProcessingSerializedEvent): EventAndOrdinal =
       EventAndOrdinal(
         event = event,
+        // The ordinal for the aggregator starts at 0 every time a member connects to the synchronizer.
+        // Assuming 1000 events per second, this will take ~292 million years to overflow, which should be safe in practice.
+        // By comparison, an Int would overflow in ~25 days.
         ordinal = ordinal.increment
-          // TODO(i34459): See if we can avoid throwing here, possibly be looping back to NonNegativeInt.zero
           .valueOr(err => throw new IllegalStateException(err.message))
           .toNonNegative,
       )
@@ -428,9 +430,9 @@ object SequencerAggregatorXImpl {
 
   object EventAndOrdinal {
     def zero(event: ProcessingSerializedEvent): EventAndOrdinal =
-      EventAndOrdinal(event = event, ordinal = NonNegativeInt.zero)
+      EventAndOrdinal(event = event, ordinal = NonNegativeLong.zero)
 
     def first(event: ProcessingSerializedEvent): EventAndOrdinal =
-      EventAndOrdinal(event = event, ordinal = NonNegativeInt.one)
+      EventAndOrdinal(event = event, ordinal = NonNegativeLong.one)
   }
 }

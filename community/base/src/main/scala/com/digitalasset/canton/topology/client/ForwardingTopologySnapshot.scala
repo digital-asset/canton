@@ -93,14 +93,12 @@ class ForwardingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
-      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
     parent.findUnvettedPackagesOrDependencies(
       participant,
       packages,
       ledgerTime,
       vettedPackages,
-      checkDependencyVetting,
     )
 
   /** returns the list of currently known mediators */
@@ -373,14 +371,12 @@ class CachingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
-      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
     parent.findUnvettedPackagesOrDependencies(
       participant,
       packages,
       ledgerTime,
       vettedPackages,
-      checkDependencyVetting,
     )
 
   override def inspectKeys(

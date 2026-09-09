@@ -15,7 +15,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
   UpdateFormat,
 }
 import com.daml.ledger.api.v2.value.Value.toJavaProto
-import com.daml.ledger.api.v2.value.{Identifier as ScalaPbIdentifier, Record}
+import com.daml.ledger.api.v2.value.{Record, Identifier as ScalaPbIdentifier}
 import com.daml.ledger.javaapi.data
 import com.daml.ledger.javaapi.data.{Identifier, Template}
 import com.digitalasset.base.error.ErrorCode

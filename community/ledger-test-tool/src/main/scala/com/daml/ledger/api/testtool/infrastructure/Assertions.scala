@@ -8,7 +8,7 @@ import com.digitalasset.base.error.utils.ErrorDetails
 import com.google.rpc.ErrorInfo
 import io.grpc.StatusRuntimeException
 import io.grpc.protobuf.StatusProto
-import munit.{Assertions as MUnit, ComparisonFailException}
+import munit.{ComparisonFailException, Assertions as MUnit}
 import org.scalatest.{LoneElement, OptionValues}
 
 import java.util.regex.Pattern

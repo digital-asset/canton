@@ -14,7 +14,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   AggregationBySender,
   AggregationId,
   AggregationRule,
-  LegacyUseMemberIdsAsEligibleMembers,
 }
 import com.digitalasset.canton.sequencing.traffic.{TrafficConsumed, TrafficPurchased}
 import com.digitalasset.canton.serialization.ProtoConverter
@@ -118,7 +117,7 @@ final case class SequencerSnapshot(
 
 object SequencerSnapshot extends VersioningCompanionContext[SequencerSnapshot, ProtocolVersion] {
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SequencerSnapshot)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -175,7 +174,6 @@ object SequencerSnapshot extends VersioningCompanionContext[SequencerSnapshot, P
           AggregationRule
             .fromProtoV30(
               ProtocolVersionValidation(expectedProtocolVersion),
-              LegacyUseMemberIdsAsEligibleMembers(expectedProtocolVersion),
               _,
             ),
           "v30.SequencerSnapshot.InFlightAggregationWithId.aggregation_rule",

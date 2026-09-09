@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.acs.commitment.util
 
 import com.daml.ledger.javaapi.data.Contract
-import com.daml.ledger.javaapi.data.codegen.{Contract as ContractWithId, ContractId}
+import com.daml.ledger.javaapi.data.codegen.{ContractId, Contract as ContractWithId}
 import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommands.Inspection.{
   SynchronizerTimeRange,
   TimeRange,

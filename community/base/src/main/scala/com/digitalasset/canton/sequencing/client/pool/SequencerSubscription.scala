@@ -264,7 +264,7 @@ class SequencerSubscriptionImpl private[sequencing] (
         )
 
         // We have not received any event yet -- use the aggregated event's ordinal only, implying our ordinal is 0
-        eventAndOrdinal.ordinal > maxOrdinalDelta
+        eventAndOrdinal.ordinal.unwrap > maxOrdinalDelta.unwrap
     }
 
     if (limitsAreExceeded) {

@@ -3,7 +3,7 @@
 
 package com.daml.testing.utils
 
-import com.daml.ledger.resources.{Resource as LedgerResource, ResourceContext, ResourceOwner}
+import com.daml.ledger.resources.{ResourceContext, ResourceOwner, Resource as LedgerResource}
 import io.grpc.netty.shaded.io.grpc.netty.{NettyChannelBuilder, NettyServerBuilder}
 import io.grpc.{BindableService, Channel, Server, ServerInterceptor}
 

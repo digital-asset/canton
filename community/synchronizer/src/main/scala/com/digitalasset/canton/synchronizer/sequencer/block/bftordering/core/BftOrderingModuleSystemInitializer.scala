@@ -5,8 +5,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.{
   BftOrderingStores,
@@ -107,6 +109,8 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
     timeouts: ProcessingTimeout,
+    hashOps: HashOps,
+    synchronizerLimits: SynchronizerLimits,
     requestInspector: RequestInspector =
       OutputModule.DefaultRequestInspector, // Only set by simulation and performance tests
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // Only set by simulation tests
@@ -309,11 +313,13 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             stores.epochStoreReader,
             blockSubscription,
             metrics,
+            synchronizerLimits,
             availabilityRef,
             consensusRef,
             mempoolRef,
             loggerFactory,
             timeouts,
+            hashOps,
             requestInspector,
             epochChecker,
             previousStoredBlock = outputPreviousStoredBlock,

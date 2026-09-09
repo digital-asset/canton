@@ -50,4 +50,17 @@ for FILE in "$@" ; do
   . "$FILE"
 done
 
+ensure_dir_exists() {
+  local dir_var="$1"
+  if [ -n "$dir_var" ]; then
+    mkdir -p "$dir_var"
+  fi
+}
+
+ensure_dir_exists "${LOGS_DIR:-}"
+ensure_dir_exists "${METRICS_BASE_DIR:-}"
+ensure_dir_exists "${METRICS_DIR:-}"
+ensure_dir_exists "${RECORDINGS_DIR:-}"
+ensure_dir_exists "${PIDS_DIR:-}"
+
 set +o allexport

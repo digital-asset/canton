@@ -93,7 +93,7 @@ object ViewCommonData
   override val name: String = "ViewCommonData"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ViewCommonData)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ViewCommonData)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

@@ -214,7 +214,7 @@ object MerkleTreeTest {
     override val versioningTable: VersioningTable = VersioningTable(
       ProtoVersion(30) -> VersionedProtoCodec
         .raw[Id, VersionedAbstractLeaf, Unit, VersionedAbstractLeaf, this.type](
-          ProtocolVersion.v34,
+          ProtocolVersion.v35,
           (_, _, _, bytes) => fromProto(30)(bytes),
           _.getCryptographicEvidence,
         )

@@ -68,18 +68,6 @@ final case class SubmitterMetadata private (
 
   @transient override protected lazy val companionObj: SubmitterMetadata.type = SubmitterMetadata
 
-  protected def toProtoV30: v30.SubmitterMetadata = v30.SubmitterMetadata(
-    actAs = actAs.toSeq.map(_.toProtoUnvalidated),
-    userId = userId.toProtoPrimitive,
-    commandId = commandId.toProtoPrimitive,
-    submittingParticipantUid = submittingParticipant.uid.toProtoPrimitive,
-    salt = Some(salt.toProtoV30),
-    submissionId = submissionId.getOrElse("").toProtoUnvalidated,
-    dedupPeriod = Some(SerializableDeduplicationPeriod(dedupPeriod).toProtoV30),
-    maxSequencingTime = maxSequencingTime.toProtoPrimitive,
-    externalAuthorization = externalAuthorization.map(_.toProtoV30),
-  )
-
   protected def toProtoV31: v31.SubmitterMetadata = v31.SubmitterMetadata(
     actAs = actAs.toSeq.map(_.toProtoUnvalidated),
     userId = userId.toProtoPrimitive,
@@ -119,10 +107,6 @@ object SubmitterMetadata
   override val name: String = "SubmitterMetadata"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.SubmitterMetadata)(
-      supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
-      _.toProtoV30,
-    ),
     ProtoVersion(31) -> VersionedProtoCodec(ProtocolVersion.v35)(v31.SubmitterMetadata)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV31),
       _.toProtoV31,
@@ -185,48 +169,6 @@ object SubmitterMetadata
           protocolVersion,
         )
     }
-
-  private def fromProtoV30(
-      pvv: ProtocolVersionValidation,
-      context: SubmitterMetadataDeserializationContext,
-      metaDataP: v30.SubmitterMetadata,
-  )(
-      bytes: ByteString
-  ): ParsingResult[SubmitterMetadata] = {
-    val SubmitterMetadataDeserializationContext(hashOps, synchronizerLimits) = context
-    val v30.SubmitterMetadata(
-      saltOP,
-      actAsP,
-      userIdP,
-      commandIdP,
-      submittingParticipantUidP,
-      submissionIdP,
-      dedupPeriodOP,
-      maxSequencingTimeOP,
-      externalAuthorizationOP,
-    ) = metaDataP
-
-    for {
-      externalAuthorizationO <- externalAuthorizationOP.traverse(
-        ExternalAuthorization.fromProtoV30(pvv, _)
-      )
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      result <- fromProto(pvv, hashOps, synchronizerLimits, bytes)(
-        saltOP,
-        actAsP,
-        userIdP,
-        commandIdP,
-        submittingParticipantUidP,
-        submissionIdP,
-        dedupPeriodOP,
-        maxSequencingTimeOP,
-        externalAuthorizationO,
-        rpv,
-      )
-
-    } yield result
-
-  }
 
   private def fromProtoV31(
       pvv: ProtocolVersionValidation,

@@ -14,6 +14,7 @@ import com.digitalasset.canton.http.json.v2.JsPartyManagementCodecs.*
 import com.digitalasset.canton.http.{HttpService, Party, UserId}
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.*
 import com.digitalasset.canton.ledger.client.LedgerClient as DamlLedgerClient
+import com.digitalasset.canton.util.ShowUtil.*
 import com.google.protobuf.ByteString as ProtoByteString
 import io.circe.parser.{decode, parse}
 import io.circe.syntax.EncoderOps
@@ -82,7 +83,8 @@ trait HttpTestFuns extends HttpJsonApiTestBase with HttpServiceUserFixture {
       jsonString: String,
       headers: List[HttpHeader],
   ): Future[(StatusCode, String)] = {
-    logger.info(s"postJson: ${uri.toString} json: ${jsonString: String}")
+    // Keep a deliberately huge payload out of the logs.
+    logger.info(s"postJson: ${uri.toString} json: ${jsonString.limit(maxLoggedJsonChars)}")
     singleRequest(
       HttpRequest(
         method = HttpMethods.POST,
@@ -402,6 +404,7 @@ trait HttpTestFuns extends HttpJsonApiTestBase with HttpServiceUserFixture {
 object HttpTestFuns {
   val tokenPrefix: String = "jwt.token."
   val wsProtocol: String = "daml.ws.auth"
+  val maxLoggedJsonChars: Int = 64 * 1024
 
   def validSubprotocol(jwt: Jwt): Option[String] = Option(
     s"""$tokenPrefix${jwt.value},$wsProtocol"""

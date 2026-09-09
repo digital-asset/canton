@@ -52,7 +52,7 @@ class TestEngine(
     commandId: String = "TestCmdId",
     iterationsBetweenInterruptions: Long = 1000,
     cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
-    interpretationConfig: LfInterpretationConfig = InterpretationConfig.Legacy,
+    interpretationConfig: LfInterpretationConfig = InterpretationConfig.Default,
     loggerFactory: NamedLoggerFactory,
 ) extends EitherValues
     with OptionValues {

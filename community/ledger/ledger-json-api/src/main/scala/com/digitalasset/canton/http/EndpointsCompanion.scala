@@ -15,7 +15,7 @@ import com.digitalasset.canton.http.util.Logging.{
 import com.digitalasset.canton.ledger.service.Grpc.StatusEnvelope
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.NoTracing
-import com.google.rpc.{Code as GrpcCode, Status}
+import com.google.rpc.{Status, Code as GrpcCode}
 import io.circe.Json
 import org.apache.pekko.http.scaladsl.model.*
 import org.apache.pekko.http.scaladsl.server.RouteResult.Complete

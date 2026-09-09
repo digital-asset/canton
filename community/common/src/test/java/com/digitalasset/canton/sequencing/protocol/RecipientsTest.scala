@@ -4,15 +4,23 @@
 package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.option.*
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.sequencing.protocol.Recipients.cc
 import com.digitalasset.canton.sequencing.protocol.RecipientsTest.*
 import com.digitalasset.canton.topology.ParticipantId
-import com.digitalasset.canton.{BaseTest, HasExecutionContext}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAnyWordSpec}
 import com.digitalasset.nonempty.NonEmpty
+import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AnyWordSpec
 
-class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext {
+class RecipientsTest
+    extends AnyWordSpec
+    with BaseTest
+    with HasExecutionContext
+    with ProtocolVersionChecksAnyWordSpec {
 
   lazy val recipients: Recipients = Recipients(NonEmpty(Seq, t5, t2, t3, t5, t6))
 
@@ -31,9 +39,81 @@ class RecipientsTest extends AnyWordSpec with BaseTest with HasExecutionContext 
     }
 
     "be preserved through serialization / deserialization" in {
+      val synchronizerLimits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+
       val proto = recipients.toProtoV30
-      val fromProto = Recipients.fromProtoV30(testedProtocolVersionValidation, proto)
+      val fromProto = Recipients.fromProtoV30(
+        testedProtocolVersionValidation,
+        synchronizerLimits,
+        proto,
+      )
       fromProto shouldBe Right(recipients)
+    }
+
+    "deserialization checks the limits" onlyRunWithOrGreaterThan ProtocolVersion.boundsCheck in {
+      val limits = SynchronizerLimits.defaultFor(testedProtocolVersion)
+
+      val t123 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP1, recP2, recP3))
+
+      //      Recipients
+      //        ├── t5
+      //        │   └── {p5}
+      //        │       ├── {p3}
+      //        │       │   ├── {p1}
+      //        │       │   └── {p2}
+      //        │       └── {p4}
+      //        └── t123
+      //            └── {p1, p2, p3}
+      val proto = Recipients(NonEmpty(Seq, t5, t123)).toProtoV30
+
+      Recipients.fromProtoV30(
+        testedProtocolVersionValidation,
+        limits
+          .focus(_.transactionProtocolLimits.maxRecipientsTreeDepth)
+          .replace(PositiveInt.two),
+        proto,
+      ) shouldBe Left(
+        InvariantViolation("recipients_tree", "depth exceeds maximum of 2")
+      )
+
+      Recipients.fromProtoV30(
+        testedProtocolVersionValidation,
+        limits
+          .focus(_.transactionProtocolLimits.maxRecipientsTrees)
+          .replace(PositiveInt.one),
+        proto,
+      ) shouldBe Left(
+        InvariantViolation(
+          "recipients_tree",
+          "repeated field has 2 elements, exceeding the maximum of 1",
+        )
+      )
+
+      Recipients.fromProtoV30(
+        testedProtocolVersionValidation,
+        limits
+          .focus(_.transactionProtocolLimits.maxRecipientsPerRecipientsTreeLevel)
+          .replace(PositiveInt.two),
+        proto,
+      ) shouldBe Left(
+        InvariantViolation(
+          "RecipientsTreeProto.recipients",
+          "repeated field has 3 elements, exceeding the maximum of 2",
+        )
+      )
+
+      Recipients.fromProtoV30(
+        testedProtocolVersionValidation,
+        limits
+          .focus(_.transactionProtocolLimits.maxChildrenPerRecipientsTreeLevel)
+          .replace(PositiveInt.one),
+        proto,
+      ) shouldBe Left(
+        InvariantViolation(
+          "children",
+          "repeated field has 2 elements, exceeding the maximum of 1",
+        )
+      )
     }
 
     "store all recipients" in {

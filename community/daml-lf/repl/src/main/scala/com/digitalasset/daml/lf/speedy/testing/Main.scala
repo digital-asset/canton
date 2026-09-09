@@ -12,7 +12,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.language.Ast.*
-import com.digitalasset.daml.lf.language.{LanguageVersion as LV, PackageInterface}
+import com.digitalasset.daml.lf.language.{PackageInterface, LanguageVersion as LV}
 import com.digitalasset.daml.lf.speedy.Pretty.*
 import com.digitalasset.daml.lf.speedy.SExpr.LfDefRef
 import com.digitalasset.daml.lf.speedy.SResult.*

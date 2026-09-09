@@ -160,7 +160,7 @@ private[reassignment] class UnassignmentProcessingSteps(
           .map(Right(_).withLeft[ReassignmentProcessorError])
       )
 
-      contractCounters <- (MonadUtil.sequentialTraverse(contractIds) { contractId =>
+      contractCounters <- MonadUtil.sequentialTraverse(contractIds) { contractId =>
         for {
           contract <- ephemeralState.contractLookup
             .lookup(contractId)
@@ -198,7 +198,7 @@ private[reassignment] class UnassignmentProcessingSteps(
           Target(targetValidationPackageId),
           newReassignmentCounter,
         )
-      })
+      }
       contracts <- EitherT.fromEither[FutureUnlessShutdown] {
         ContractsReassignmentBatch
           .create(contractCounters)
@@ -391,7 +391,6 @@ private[reassignment] class UnassignmentProcessingSteps(
         sessionKeyStore,
         message,
         participantId,
-        protocolVersion.value,
       )(deserializeTree)
       .flatMap { multiView =>
         EitherT.cond[FutureUnlessShutdown](

@@ -60,9 +60,6 @@ final case class UnassignmentMediatorMessage(
       submittingParticipantSignature = Some(submittingParticipantSignature.toProtoV30),
     )
 
-  override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
-    v30.EnvelopeContent.SomeEnvelopeContent.UnassignmentMediatorMessage(toProtoV30)
-
   override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.UnassignmentMediatorMessage(toProtoV30)
 
@@ -86,7 +83,7 @@ object UnassignmentMediatorMessage
     ] {
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.UnassignmentMediatorMessage
     )(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),

@@ -33,6 +33,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions.Generic
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
+  SignedTopologyTransactions,
   TopologyChangeOp,
   TopologyMapping,
   TopologyTransaction,
@@ -894,6 +895,40 @@ object TopologyAdminCommands {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
+    final case class GenerateOnboardingTopologyTransactions(
+        protocolVersion: ProtocolVersion,
+        temporaryStore: Option[TopologyStoreId.Temporary] = None,
+    ) extends BaseCommand[
+          v30.GenerateOnboardingTopologyTransactionsRequest,
+          v30.GenerateOnboardingTopologyTransactionsResponse,
+          SignedTopologyTransactions[TopologyChangeOp, TopologyMapping],
+        ] {
+      override protected def createRequest()
+          : Either[String, v30.GenerateOnboardingTopologyTransactionsRequest] =
+        Right(
+          v30.GenerateOnboardingTopologyTransactionsRequest(
+            protocolVersion = protocolVersion.toProtoPrimitive,
+            temporaryStore = temporaryStore.map(id => v30.StoreId.Temporary(id.name.unwrap)),
+          )
+        )
+
+      override protected def submitRequest(
+          service: TopologyManagerReadServiceStub,
+          request: v30.GenerateOnboardingTopologyTransactionsRequest,
+      ): Future[v30.GenerateOnboardingTopologyTransactionsResponse] =
+        service.generateOnboardingTopologyTransactions(request)
+
+      override protected def handleResponse(
+          response: v30.GenerateOnboardingTopologyTransactionsResponse
+      ) =
+        ProtoConverter
+          .parseRequired(
+            SignedTopologyTransactions.fromProtoV30(ProtocolVersionValidation.AlwaysValidation, _),
+            "result",
+            response.result,
+          )
+          .leftMap(_.toString)
+    }
   }
 
   object Aggregation {

@@ -8,6 +8,7 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
@@ -48,6 +49,7 @@ class DbAcsCommitmentPeriodStore(
     stringInterningEval: Eval[StringInterning],
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
+    override protected val futureSupervisor: FutureSupervisor,
     enableConsistencyChecks: Boolean,
 )(override implicit protected val ec: ExecutionContext)
     extends AcsCommitmentPeriodStore
@@ -646,8 +648,11 @@ class DbAcsCommitmentPeriodStore(
     storage.update_(query, functionFullName)
   }
 
-  override protected def doPrune(limit: CantonTimestamp, lastPruning: Option[CantonTimestamp])(
-      implicit traceContext: TraceContext
+  override protected def doPruneSynchronized(
+      limit: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Int] = maybeCheckInvariant {
     def query(tableName: String & Singleton) =
       sqlu"""

@@ -14,7 +14,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetupPlugin,
   SharedEnvironment,
 }
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -30,11 +30,11 @@ trait NamespaceIntermediateKmsKeyIntegrationTest
 
   private def setupIntermediateKey(
       counter: AtomicInteger
-  )(node: InstanceReference): SigningPublicKey = {
+  )(node: InstanceReference, synchronizerId: SynchronizerId): SigningPublicKey = {
 
     val namespaceDelegations =
       node.topology.namespace_delegations.list(
-        store = TopologyStoreId.Authorized,
+        store = synchronizerId,
         filterNamespace = node.namespace.toProtoPrimitive,
       )
 
@@ -56,7 +56,7 @@ trait NamespaceIntermediateKmsKeyIntegrationTest
     // Check that the new namespace delegations appears
     eventually() {
       val updatedNamespaceDelegations = node.topology.namespace_delegations.list(
-        store = TopologyStoreId.Authorized,
+        store = synchronizerId,
         filterNamespace = node.namespace.toProtoPrimitive,
       )
       assertResult(1, updatedNamespaceDelegations)(

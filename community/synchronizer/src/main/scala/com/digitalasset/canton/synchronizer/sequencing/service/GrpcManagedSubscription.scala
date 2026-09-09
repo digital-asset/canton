@@ -54,6 +54,16 @@ trait ManagedSubscription extends FlagCloseable with CloseNotification {
     * the connection to the sequencer itself is not terminated, and the subscription can be retried.
     */
   def transientClose(reason: ServerSubscriptionCloseReason.TransientCloseReason): Unit
+
+  /** Close the subscription for a fatal reason using the provided reason.
+    *
+    * Unlike [[transientClose]], which signals a temporary retryable condition (UNAVAILABLE), this
+    * method indicates that the subscription is permanently terminated (e.g. due to permission
+    * revocation or unrecoverable initialization error) and should not be automatically retried by
+    * the client.
+    */
+  def fatalClose(reason: ServerSubscriptionCloseReason.FatalCloseReason): Unit
+
 }
 
 /** Creates and manages a SequencerSubscription for the given grpc response observer. The sequencer
@@ -99,6 +109,11 @@ private[service] class GrpcManagedSubscription[T](
   override def transientClose(reason: ServerSubscriptionCloseReason.TransientCloseReason): Unit =
     signalAndClose(
       ErrorSignal(Status.UNAVAILABLE.withDescription(reason.description).asException())
+    )
+
+  override def fatalClose(reason: ServerSubscriptionCloseReason.FatalCloseReason): Unit =
+    signalAndClose(
+      ErrorSignal(reason.status.withDescription(reason.description).asException())
     )
 
   private val handler: SequencedEventOrErrorHandler[SequencedEventError] = {

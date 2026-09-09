@@ -21,8 +21,8 @@ class ProtocolVersionTest extends AnyWordSpec with BaseTest {
     "parse version string if valid" in {
       // New format
       ProtocolVersion
-        .create(ProtocolVersion.v34.toProtoPrimitiveS)
-        .value shouldBe ProtocolVersion.v34
+        .create(ProtocolVersion.v35.toProtoPrimitiveS)
+        .value shouldBe ProtocolVersion.v35
 
       ProtocolVersion
         .create(Int.MaxValue.toString)

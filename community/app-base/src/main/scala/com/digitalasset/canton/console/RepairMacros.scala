@@ -111,8 +111,11 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
         identityFile.overwrite(idStr)
 
         // Own identity only, the rest will be loaded from the reinitialized sequencer
-        val transactionsFromAuthorizedStore =
-          node.topology.transactions.identity_transactions().map { tx =>
+        // This is only relevant for the participant, as it is the only node using the
+        // authorized store, but for simplicity we always write the file.
+        val transactionsFromAuthorizedStore = node.topology.transactions
+          .generate_onboarding_transactions(protocolVersion)
+          .map { tx =>
             StoredTopologyTransaction(
               sequenced = SequencedTime.MinValue,
               validFrom = EffectiveTime.MinValue,
@@ -161,7 +164,11 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
         store: TopologyStoreId,
         description: String,
     )(implicit traceContext: TraceContext): Unit = {
-      node.health.wait_for_ready_for_node_topology()
+      // sequencer and mediator nodes no longer need the topology during init
+      if (node.id.member.code == ParticipantId.Code)
+        node.health.wait_for_ready_for_node_topology()
+      else
+        node.health.wait_for_ready_for_initialization()
       // Topology transactions are needed to advance bootstrap as far as possible after initializing the node ID
       logger.info(
         s"Uploading ${txs.length} topology txs ($description) to the node ${node.name}"
@@ -236,23 +243,6 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
         logger.info(s"Uploaded ${num + 1} secret keys to node ${node.name}")
         initId(node, sourceDir)
 
-        val authorizedStoreFile = File(sourceDir, TOPOLOGY_AUTHORIZED).pathAsString
-        logger.info(s"Reading authorized store topology from $authorizedStoreFile")
-        val authorizedStoreTopologyTxs =
-          StoredTopologyTransactions.tryReadFromTrustedFile(
-            authorizedStoreFile
-          )
-        logger.info(
-          s"Uploading initial topology transactions to the node ${node.name}"
-        )
-
-        loadStoredTopologyTransactions(
-          node,
-          authorizedStoreTopologyTxs.result,
-          store = TopologyStoreId.Authorized,
-          description = "initial",
-        )
-
         node match {
 
           case sequencer: SequencerReference =>
@@ -299,7 +289,23 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
               )
 
           case _: LocalParticipantReference =>
-            () // nothing more to do for a participant
+            // The authorized store is only used by participants.
+            val authorizedStoreFile = File(sourceDir, TOPOLOGY_AUTHORIZED).pathAsString
+            logger.info(s"Reading authorized store topology from $authorizedStoreFile")
+            val authorizedStoreTopologyTxs =
+              StoredTopologyTransactions.tryReadFromTrustedFile(
+                authorizedStoreFile
+              )
+            logger.info(
+              s"Uploading initial topology transactions to the node ${node.name}"
+            )
+
+            loadStoredTopologyTransactions(
+              node,
+              authorizedStoreTopologyTxs.result,
+              store = TopologyStoreId.Authorized,
+              description = "initial",
+            )
 
           case other =>
             sys.error(s"Unexpected node type $other")

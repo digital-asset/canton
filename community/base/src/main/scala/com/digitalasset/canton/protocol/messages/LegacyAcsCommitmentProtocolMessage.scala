@@ -15,7 +15,6 @@ import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionValidation,
   RepresentativeProtocolVersion,
-  UnsupportedProtoCodec,
   VersionedProtoCodec,
   VersioningCompanionContext,
 }
@@ -54,12 +53,6 @@ final case class LegacyAcsCommitmentProtocolMessage(
       signatures = signatures.map(_.toProtoV30),
     )
 
-  override protected[messages] def toProtoSomeEnvelopeContentV30
-      : v30.EnvelopeContent.SomeEnvelopeContent =
-    throw new UnsupportedOperationException(
-      s"${this.getClass.getSimpleName} cannot be serialized to envelope content v30"
-    )
-
   override protected[messages] def toProtoSomeEnvelopeContentV31
       : v31.EnvelopeContent.SomeEnvelopeContent =
     v31.EnvelopeContent.SomeEnvelopeContent.AcsCommitmentProtocolMessage(toProtoV30)
@@ -78,13 +71,12 @@ object LegacyAcsCommitmentProtocolMessage
   override def name: String = "LegacyAcsCommitmentProtocolMessage"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(-1) -> UnsupportedProtoCodec(),
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.AcsCommitmentProtocolMessage
     )(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
-    ),
+    )
   )
 
   private[messages] def fromProtoV30(

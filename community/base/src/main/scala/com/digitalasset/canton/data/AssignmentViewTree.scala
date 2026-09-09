@@ -94,7 +94,7 @@ object AssignmentViewTree
   override val name: String = "AssignmentViewTree"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ReassignmentViewTree)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ReassignmentViewTree)(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30,
     )
@@ -206,7 +206,7 @@ object AssignmentCommonData
   override val name: String = "AssignmentCommonData"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AssignmentCommonData)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentCommonData)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -367,7 +367,7 @@ object AssignmentView extends VersioningCompanionContextMemoization[AssignmentVi
   override val name: String = "AssignmentView"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.AssignmentView)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.AssignmentView)(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),
       _.toProtoV30,
     )

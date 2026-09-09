@@ -107,6 +107,7 @@ class DbLogicalSyncPersistentState(
     ledgerApiStore.map(_.stringInterningView),
     timeouts,
     loggerFactory,
+    futureSupervisor,
     enableAdditionalConsistencyChecks,
   )
 

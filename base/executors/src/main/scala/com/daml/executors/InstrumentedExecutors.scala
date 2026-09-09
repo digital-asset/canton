@@ -5,7 +5,7 @@ package com.daml.executors
 
 import com.daml.executors.executors.NamedExecutionContextExecutorService
 
-import java.util.concurrent.{Executors as JavaExecutors, ThreadFactory}
+import java.util.concurrent.{ThreadFactory, Executors as JavaExecutors}
 import scala.concurrent.ExecutionContext
 
 object InstrumentedExecutors {

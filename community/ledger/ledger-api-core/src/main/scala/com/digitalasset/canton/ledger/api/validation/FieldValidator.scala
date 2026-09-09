@@ -17,9 +17,9 @@ import com.digitalasset.canton.ledger.api.{SubmissionId, WorkflowId}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.topology.{
   ParticipantId,
-  PartyId as TopologyPartyId,
   PhysicalSynchronizerId,
   SynchronizerId,
+  PartyId as TopologyPartyId,
 }
 import com.digitalasset.canton.user.IdentityProviderId
 import com.digitalasset.daml.lf.data.Ref

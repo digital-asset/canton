@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.*
 import com.digitalasset.daml.lf.engine.Result.lookupHandler
-import com.digitalasset.daml.lf.interpretation.{Error as IE, InterpretationConfig}
+import com.digitalasset.daml.lf.interpretation.{InterpretationConfig, Error as IE}
 import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder

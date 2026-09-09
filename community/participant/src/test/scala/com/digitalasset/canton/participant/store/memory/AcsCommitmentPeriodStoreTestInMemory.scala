@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store.memory
 
 import cats.Eval
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStoreTest
 import com.digitalasset.canton.platform.store.interning.StringInterning
 
@@ -17,6 +18,7 @@ class AcsCommitmentPeriodStoreTestInMemory extends AcsCommitmentPeriodStoreTest 
     new InMemoryAcsCommitmentPeriodStore(
       Eval.now(stringInterning),
       loggerFactory,
+      FutureSupervisor.Noop,
       enableConsistencyChecks,
     )
 

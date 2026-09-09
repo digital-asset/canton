@@ -350,7 +350,6 @@ private[protocol] object AuthenticationValidator {
           topology.ipsSnapshot,
           actAs.forgetNE,
           logger,
-          physicalSynchronizerId.protocolVersion,
         )
 
     submitterMetadata.externalAuthorization match {

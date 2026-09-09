@@ -50,12 +50,10 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.{Remove, Replace}
 import com.digitalasset.canton.topology.{Member, PartyId}
 import com.digitalasset.canton.util.{ErrorUtil, MaliciousParticipantNode, SingleUseCell}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
-import org.slf4j.event.Level.WARN
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
@@ -95,6 +93,7 @@ class InvalidTopologyBroadcastIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )
@@ -272,66 +271,6 @@ class InvalidTopologyBroadcastIntegrationTest
           store = daId,
           filterNamespace = mediator1.namespace.filterString,
         ) shouldBe empty
-    }
-
-    // As topologyTimestamp is no longer used, this test now fails immediately with rejects by the sequencer
-    "not specify a topology timestamp for topology transaction broadcasts" onlyRunWithOrLessThan (ProtocolVersion.v34) in {
-      implicit env =>
-        import env.*
-
-        val topologyTimestamp = CantonTimestamp.now()
-        loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
-          {
-            waitForMessageToBeProcessed(Left(participant1)) {
-              registerTopologyMapping(
-                SynchronizerTrustCertificate(
-                  participant1.id,
-                  daId,
-                ),
-                participant1.namespace.fingerprint,
-                PositiveInt.two,
-                op = Replace,
-                topologyTimestamp = Some(topologyTimestamp),
-              )
-            }
-
-            utils.synchronize_topology()
-
-            // the SynchronizerTrustCertificate(serial=2) should not be processed at all
-            Seq[InstanceReference](participant1, mediator1, sequencer1).foreach(
-              _.topology.synchronizer_trust_certificates
-                .list(store = daId, filterUid = participant1.id.filterString)
-                .loneElement
-                .context
-                .serial shouldBe PositiveInt.one
-            )
-          },
-          { entries =>
-            // keep track of which nodes emit topology manager alarms
-            val checkedNodes = mutable.Set[String]()
-            LogEntry.assertLogSeq(
-              Seq(
-                (
-                  entry => {
-                    entry.shouldBeCantonError(
-                      TopologyManagerAlarm.code,
-                      _ should include regex raw"Discarding a topology broadcast with sc=\d+ at \S+ with explicit topology timestamp $topologyTimestamp",
-                    )
-                    val nodeName = entry.mdc.getOrElse(
-                      "participant",
-                      entry.mdc.getOrElse("sequencer", entry.mdc.getOrElse("mediator", "")),
-                    )
-                    checkedNodes += nodeName
-                    succeed
-                  },
-                  "topology alarm",
-                )
-              )
-            )(entries)
-            // we expect topology manager alarms from these nodes
-            checkedNodes shouldBe Set(participant1.name, sequencer1.name, mediator1.name)
-          },
-        )
     }
 
     s"not cause a ledger fork by adding other recipients in addition to the broadcast address $AllMembersOfSynchronizer" in {

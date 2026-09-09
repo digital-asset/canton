@@ -50,12 +50,7 @@ sealed trait ActionDescription extends Product with Serializable with PrettyPrin
   /** The node seed for the root action of a view. Empty for fetch and lookupByKey nodes */
   def seedOption: Option[LfHash]
 
-  protected def toProtoDescriptionV30: v30.ActionDescription.Description
-
   protected def toProtoDescriptionV31: v31.ActionDescription.Description
-
-  def toProtoV30: v30.ActionDescription =
-    v30.ActionDescription(description = toProtoDescriptionV30)
 
   def toProtoV31: v31.ActionDescription =
     v31.ActionDescription(description = toProtoDescriptionV31)
@@ -283,21 +278,6 @@ object ActionDescription {
     } yield FetchActionDescription(inputContractId, actors, byKey, templateId, interfaceId)
   }
 
-  private[data] def fromProtoV30(
-      pvv: ProtocolVersionValidation,
-      actionDescriptionP: v30.ActionDescription,
-  ): ParsingResult[ActionDescription] = {
-    import v30.ActionDescription.Description.*
-    val v30.ActionDescription(description) = actionDescriptionP
-
-    description match {
-      case Create(create) => fromCreateProtoV30(pvv, create)
-      case Exercise(exercise) => fromExerciseProtoV30(pvv, exercise)
-      case Fetch(fetch) => fromFetchProtoV30(pvv, fetch)
-      case Empty => Left(FieldNotSet("description"))
-    }
-  }
-
   private[data] def fromProtoV31(
       pvv: ProtocolVersionValidation,
       actionDescriptionP: v31.ActionDescription,
@@ -336,9 +316,6 @@ object ActionDescription {
         nodeSeed = seed.toProtoPrimitive,
       )
 
-    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Create =
-      v30.ActionDescription.Description.Create(toCreateActionDescriptionV30)
-
     override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Create =
       v31.ActionDescription.Description.Create(toCreateActionDescriptionV30)
 
@@ -366,9 +343,6 @@ object ActionDescription {
       .valueOr(err => throw InvalidActionDescription(s"Failed to serialize chosen value: $err"))
 
     override def seedOption: Option[LfHash] = Some(seed)
-
-    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Exercise =
-      v30.ActionDescription.Description.Exercise(toExerciseActionDescriptionV30)
 
     override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Exercise =
       v31.ActionDescription.Description.Exercise(toExerciseActionDescriptionV30)
@@ -517,9 +491,6 @@ object ActionDescription {
         templateId = new RefIdentifierSyntax(templateId).toProtoPrimitive,
         interfaceId = interfaceId.map(i => new RefIdentifierSyntax(i).toProtoPrimitive),
       )
-
-    override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Fetch =
-      v30.ActionDescription.Description.Fetch(toFetchActionDescriptionV30)
 
     override protected def toProtoDescriptionV31: v31.ActionDescription.Description.Fetch =
       v31.ActionDescription.Description.Fetch(toFetchActionDescriptionV30)

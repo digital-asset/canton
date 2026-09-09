@@ -5,10 +5,10 @@ package com.digitalasset.canton.platform.apiserver.execution
 
 import com.daml.ledger.api.v2.admin.command_inspection_service.{
   CommandState,
-  CommandStatus as ApiCommandStatus,
   CommandUpdates,
   RequestStatistics,
   Timing,
+  CommandStatus as ApiCommandStatus,
 }
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.completion.Completion

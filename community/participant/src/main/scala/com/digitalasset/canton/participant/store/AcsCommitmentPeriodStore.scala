@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.store
 
 import cats.syntax.either.*
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -13,6 +14,7 @@ import com.digitalasset.canton.logging.pretty.{
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
+import com.digitalasset.canton.participant.commitment.WatermarkTracker
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   HashedDigest,
   InternedParticipantId,
@@ -28,6 +30,7 @@ import com.digitalasset.canton.util.{
   HexString,
   IntervalOps,
   MergeableDisjointIntervals,
+  Thereafter,
 }
 import com.digitalasset.canton.{LedgerParticipantId, checked}
 import com.digitalasset.nonempty.NonEmpty
@@ -383,10 +386,48 @@ trait AcsCommitmentPeriodStore extends PrunableByTime with AutoCloseable with Pu
     * [[com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.CommitmentMatchPeriod.toInclusive]]
     * is smaller than `limit`.
     */
-  override protected def doPrune(
+  override protected final def doPrune(
+      limit: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] =
+    for {
+      // Delay pruning until all users of `runWithMark` tasks up to the `limit` have finished.
+      // This ensures that they get a consistent view on the state of the store.
+      _ <- FutureUnlessShutdown.outcomeF(pruningWatermarkTracker.increaseWatermark(limit))
+      pruned <- doPruneSynchronized(limit, lastPruning)
+    } yield pruned
+
+  protected def doPruneSynchronized(
       limit: CantonTimestamp,
       lastPruning: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int]
+
+  @inline final private[canton] def doPruneSynchronizedInternal(
+      limit: CantonTimestamp,
+      lastPruning: Option[CantonTimestamp],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] =
+    doPruneSynchronized(limit, lastPruning)
+
+  protected def futureSupervisor: FutureSupervisor
+  @inline final private[canton] def futureSupervisorInternal: FutureSupervisor = futureSupervisor
+
+  private val pruningWatermarkTracker: WatermarkTracker[CantonTimestamp] = {
+    // The pruning watermark tracker is meant to synchronize pruning with clients that access the store.
+    // When the store is created, no pruning operation is running and therefore we do not have to
+    // set the mark to the last pruning timestamp. We can safely set it to the minimum timestamp.
+    val initial = CantonTimestamp.MinValue
+    new WatermarkTracker[CantonTimestamp](initial, loggerFactory, futureSupervisor)
+  }
+
+  /** Runs `f` with `timestamp` if `timestamp` is at or above the pruning watermark, and with the
+    * pruning watermark otherwise. Delays pruning calls with higher timestamps than the mark `f`
+    * runs with until `f` has finished.
+    */
+  def runWithPruningWatermark[F[_], A](
+      timestamp: CantonTimestamp,
+      f: CantonTimestamp => F[A],
+  )(implicit traceContext: TraceContext, F: Thereafter[F]): F[A] =
+    pruningWatermarkTracker.runWithMark(timestamp, f)
 
   override protected def kind: String = "ACS commitment matching state"
 }

@@ -63,7 +63,7 @@ import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.{TempDirectory, config}
 import org.scalatest.concurrent.PatienceConfiguration
 
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.ExecutionContextExecutor
 import scala.concurrent.duration.*

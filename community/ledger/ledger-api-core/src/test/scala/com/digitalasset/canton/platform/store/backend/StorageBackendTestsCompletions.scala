@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
-import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
+import com.digitalasset.canton.crypto.{HashPurpose, Hash as CantonHash}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.platform.indexer.parallel.{PostPublishData, PublishSource}
 import com.digitalasset.canton.platform.store.dao.events.OffsetRange

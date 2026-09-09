@@ -7,7 +7,8 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
-import com.digitalasset.canton.config.{NonNegativeFiniteDuration, SessionSigningKeysConfig}
+import com.digitalasset.canton.config.SessionSigningKeysConfig
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.KeyPurpose.Signing
 import com.digitalasset.canton.crypto.SigningError.InvariantViolation
@@ -15,25 +16,13 @@ import com.digitalasset.canton.crypto.provider.jce.JceSecurityProvider
 import com.digitalasset.canton.crypto.signer.SyncCryptoSigner.SigningTimestampOverrides
 import com.digitalasset.canton.crypto.signer.{SyncCryptoSigner, SyncCryptoSignerWithSessionKeys}
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore
-import com.digitalasset.canton.crypto.{
-  CryptoKeyFormat,
-  Fingerprint,
-  Hash,
-  HashPurpose,
-  Signature,
-  SignatureDelegation,
-  SignatureDelegationValidityPeriod,
-  SigningAlgorithmSpec,
-  SigningError,
-  SigningKeySpec,
-  SigningKeyUsage,
-  SigningKeysWithThreshold,
-  SigningPublicKey,
-  SyncCryptoError,
-  SynchronizerCryptoClient,
-  SynchronizerSnapshotSyncCryptoApi,
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  ReassignmentSubmitterMetadata,
+  RollbackContextFactory,
+  TransactionViewLimitConfig,
+  ViewPosition,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, RollbackContextFactory, ViewPosition}
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, TransactionMeta}
@@ -41,34 +30,19 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.TransactionProcessingSteps
+import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentProcessingSteps.SubmissionParam as UnassignmentSubmissionParam
+import com.digitalasset.canton.participant.protocol.reassignment.{
+  AssignmentProcessor,
+  UnassignmentProcessor,
+}
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.ContractInstanceOfId
 import com.digitalasset.canton.participant.store.ContractStore
-import com.digitalasset.canton.participant.traffic.TrafficCostEstimator.{
-  MockCryptoSigner,
-  mediatorGroupIndex,
-  mediatorGroupRecipient,
-  mockSignature,
-  rootHash,
-}
+import com.digitalasset.canton.participant.traffic.TrafficCostEstimator.*
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
+import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.protocol.messages.{
-  ConfirmationResponse,
-  ConfirmationResponses,
-  LocalApprove,
-  SignedProtocolMessage,
-}
-import com.digitalasset.canton.protocol.{
-  ContractInstance,
-  LfContractId,
-  LfFatContractInst,
-  LfVersionedTransaction,
-  RequestId,
-  RootHash,
-  TransactionMetadata,
-  WellFormedTransaction,
-}
+import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.{Batch, MediatorGroupRecipient, Recipients}
 import com.digitalasset.canton.sequencing.traffic.TrafficStateController
@@ -81,8 +55,15 @@ import com.digitalasset.canton.topology.client.{
 }
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.HashingSchemeVersion.V2
-import com.digitalasset.canton.{LedgerSubmissionId, WorkflowId}
+import com.digitalasset.canton.{
+  LedgerSubmissionId,
+  LfPartyId,
+  ReassignmentCounter,
+  WorkflowId,
+  config,
+}
 import com.digitalasset.nonempty.NonEmpty
 import com.google.protobuf.ByteString
 
@@ -108,26 +89,19 @@ class TrafficCostEstimator(
     psid: PhysicalSynchronizerId,
     participantId: ParticipantId,
     trafficStateController: TrafficStateController,
-    defaultMaxSequencingTimeOffset: NonNegativeFiniteDuration,
+    defaultMaxSequencingTimeOffset: config.NonNegativeFiniteDuration,
     clock: Clock,
+    unassignmentProcessor: UnassignmentProcessor,
+    assignmentProcessor: AssignmentProcessor,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
 
-  def estimateTrafficCost(
-      transaction: LfVersionedTransaction,
-      transactionMeta: TransactionMeta,
-      submitterInfo: SubmitterInfo,
-      disclosedContracts: Map[LfContractId, LfFatContractInst],
-      costHints: CostEstimationHints,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, SubmissionCostEstimation] = {
-    val snapshot: TopologySnapshot = topologyClient.headSnapshot
+  private def topologySnapshot()(implicit traceContext: TraceContext): TopologySnapshot =
+    topologyClient.headSnapshot
 
-    // Create a crypto synchronizer object which overrides the crypto signer with a mock one to avoid
-    // potentially expensive KMS calls.
-    val client: SynchronizerSnapshotSyncCryptoApi = synchronizerCrypto.createWithCustomCryptoSigner(
+  private def cryptoClient(snapshot: TopologySnapshot): SynchronizerSnapshotSyncCryptoApi =
+    synchronizerCrypto.createWithCustomCryptoSigner(
       snapshot,
       { currentSigner =>
         val hasSessionKeys = currentSigner match {
@@ -143,72 +117,211 @@ class TrafficCostEstimator(
       },
     )
 
-    def estimateCost(freeConfirmationResponses: Boolean) = for {
-      transactionMetadata <- EitherT.fromEither[FutureUnlessShutdown](
-        TransactionMetadata.fromTransactionMeta(
-          transactionMeta.ledgerEffectiveTime,
-          transactionMeta.preparationTime,
-          transactionMeta.optNodeSeeds,
-        )
-      )
-      wfTransaction <- EitherT.fromEither[FutureUnlessShutdown](
-        WellFormedTransaction.check(
-          transaction,
-          transactionMetadata,
-          WithoutSuffixes,
-          RollbackContextFactory(psid.protocolVersion),
-        )
-      )
-      disclosedContractInstances <- EitherT.fromEither[FutureUnlessShutdown](
-        disclosedContracts.toList
-          .parTraverse { case (cid, fci) =>
-            ContractInstance.create(fci).map(cid -> _)
-          }
-          .map(_.toMap)
-      )
-      confirmationRequestEstimatedCost <- estimateConfirmationRequestCost(
-        trafficStateController,
-        submitterInfo,
-        client,
-        snapshot,
-        wfTransaction,
-        costHints,
-        disclosedContractInstances,
-      )
-      confirmationResponseEstimatedCost <-
-        if (freeConfirmationResponses)
-          EitherT.pure[FutureUnlessShutdown, String](NonNegativeLong.zero)
-        else
-          estimateConfirmationResponseCost(
-            trafficStateController,
-            submitterInfo,
-            client,
-            snapshot,
-          )
-    } yield SubmissionCostEstimation(
-      snapshot.timestamp,
-      confirmationRequestEstimatedCost,
-      confirmationResponseEstimatedCost,
-    )
-
+  private def doIfTrafficControlEnabled[A](whenDisabled: => A)(
+      whenEnabled: TrafficControlParameters => EitherT[FutureUnlessShutdown, String, A]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, A] =
     EitherT
       .liftF[FutureUnlessShutdown, String, Option[TrafficControlParameters]](
-        snapshot.trafficControlParameters(psid.protocolVersion)
+        topologySnapshot().trafficControlParameters(psid.protocolVersion)
       )
       .flatMap {
-        // If traffic control is disabled, cost is 0.
-        // Short circuit early to avoid unnecessarily generation a confirmation request / response
         case None =>
-          EitherT.pure(
-            SubmissionCostEstimation(
-              snapshot.timestamp,
-              NonNegativeLong.zero,
-              NonNegativeLong.zero,
-            )
-          )
-        case Some(params) => estimateCost(params.freeConfirmationResponses)
+          // Traffic control disabled on the source synchronizer: cost is 0, skip building the request
+          EitherT.pure[FutureUnlessShutdown, String](whenDisabled)
+        case Some(parameters) => whenEnabled(parameters)
       }
+
+  def estimateTrafficCost(
+      transaction: LfVersionedTransaction,
+      transactionMeta: TransactionMeta,
+      submitterInfo: SubmitterInfo,
+      disclosedContracts: Map[LfContractId, LfFatContractInst],
+      costHints: CostEstimationHints,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, SubmissionCostEstimation] = {
+    val snapshot = topologySnapshot()
+    val client = cryptoClient(snapshot)
+
+    doIfTrafficControlEnabled(
+      SubmissionCostEstimation(snapshot.timestamp, NonNegativeLong.zero, NonNegativeLong.zero)
+    ) { params =>
+      for {
+        transactionMetadata <- EitherT.fromEither[FutureUnlessShutdown](
+          TransactionMetadata.fromTransactionMeta(
+            transactionMeta.ledgerEffectiveTime,
+            transactionMeta.preparationTime,
+            transactionMeta.optNodeSeeds,
+          )
+        )
+        wfTransaction <- EitherT.fromEither[FutureUnlessShutdown](
+          WellFormedTransaction.check(
+            transaction,
+            transactionMetadata,
+            WithoutSuffixes,
+            RollbackContextFactory(psid.protocolVersion),
+          )
+        )
+        disclosedContractInstances <- EitherT.fromEither[FutureUnlessShutdown](
+          disclosedContracts.toList
+            .parTraverse { case (cid, fci) =>
+              ContractInstance.create(fci).map(cid -> _)
+            }
+            .map(_.toMap)
+        )
+        confirmationRequestEstimatedCost <- estimateConfirmationRequestCost(
+          trafficStateController,
+          submitterInfo,
+          client,
+          snapshot,
+          wfTransaction,
+          costHints,
+          disclosedContractInstances,
+        )
+        confirmationResponseEstimatedCost <-
+          if (params.freeConfirmationResponses)
+            EitherT.pure[FutureUnlessShutdown, String](NonNegativeLong.zero)
+          else
+            estimateConfirmationResponseCost(
+              submitterInfo.actAs,
+              trafficStateController,
+              client,
+              snapshot,
+            )
+      } yield SubmissionCostEstimation(
+        snapshot.timestamp,
+        confirmationRequestEstimatedCost,
+        confirmationResponseEstimatedCost,
+      )
+    }
   }
+
+  def estimateUnassignmentCost(
+      submitter: LfPartyId,
+      contractIds: Seq[LfContractId],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
+      submitterInfo: SubmitterInfo,
+      signatories: Seq[LfPartyId],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, (NonNegativeLong, NonNegativeLong)] =
+    doIfTrafficControlEnabled((NonNegativeLong.zero, NonNegativeLong.zero)) { params =>
+      val snapshot = topologySnapshot()
+      val submissionParam: UnassignmentSubmissionParam =
+        UnassignmentSubmissionParam(
+          submitterMetadata = ReassignmentSubmitterMetadata(
+            submitter = submitter,
+            submittingParticipant = participantId,
+            commandId = submitterInfo.commandId,
+            submissionId = submitterInfo.submissionId,
+            userId = submitterInfo.userId,
+            workflowId = None,
+          ),
+          contractIds = contractIds,
+          targetSynchronizer = targetSynchronizer,
+          overrideSourceValidationPkgIds = Map.empty,
+          overrideTargetValidationPkgIds = Map.empty,
+        )
+
+      val client = cryptoClient(snapshot)
+
+      estimateUnassigmentRequestCost(submissionParam, client, snapshot).flatMap { requestCost =>
+        (if (params.freeConfirmationResponses)
+           EitherT.pure[FutureUnlessShutdown, String](NonNegativeLong.zero)
+         else
+           estimateConfirmationResponseCost(
+             signatories,
+             trafficStateController,
+             client,
+             snapshot,
+           )).map(responseCost => (requestCost, responseCost))
+      }
+    }
+
+  def estimateAssignmentCost(
+      submitter: LfPartyId,
+      contracts: Seq[ContractInstance],
+      sourceSynchronizer: Source[PhysicalSynchronizerId],
+      sourceSnapshot: Source[TopologySnapshot],
+      submitterInfo: SubmitterInfo,
+      signatories: Seq[LfPartyId],
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, (NonNegativeLong, NonNegativeLong)] =
+    doIfTrafficControlEnabled((NonNegativeLong.zero, NonNegativeLong.zero)) { params =>
+      val snapshot = topologySnapshot()
+      val client = cryptoClient(snapshot)
+
+      val submitterMetadata = ReassignmentSubmitterMetadata(
+        submitter = submitter,
+        submittingParticipant = participantId,
+        commandId = submitterInfo.commandId,
+        submissionId = submitterInfo.submissionId,
+        userId = submitterInfo.userId,
+        workflowId = None,
+      )
+
+      estimateAssignmentRequestCost(
+        submitterMetadata,
+        contracts = contracts,
+        sourceSynchronizer = sourceSynchronizer,
+        sourceSnapshot = sourceSnapshot,
+        client = client,
+        snapshot = snapshot,
+      ).flatMap { requestCost =>
+        (if (params.freeConfirmationResponses)
+           EitherT.pure[FutureUnlessShutdown, String](NonNegativeLong.zero)
+         else
+           estimateConfirmationResponseCost(
+             signatories,
+             trafficStateController,
+             client,
+             snapshot,
+           )).map(responseCost => (requestCost, responseCost))
+      }
+    }
+
+  private[traffic] def estimateAssignmentRequestCost(
+      submitterMetadata: ReassignmentSubmitterMetadata,
+      contracts: Seq[ContractInstance],
+      sourceSynchronizer: Source[PhysicalSynchronizerId],
+      sourceSnapshot: Source[TopologySnapshot],
+      client: SynchronizerSnapshotSyncCryptoApi,
+      snapshot: TopologySnapshot,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, NonNegativeLong] =
+    for {
+      batch <- assignmentProcessor
+        .buildSubmissionBatchForCostEstimation(
+          submitterMetadata,
+          contracts,
+          sourceSynchronizer,
+          sourceSnapshot,
+          mediatorGroupRecipient,
+          client,
+          clock.now,
+          ReassignmentCounter.Genesis,
+        )
+        .leftMap(_.toString)
+      estimatedCost <- computeCost(trafficStateController, snapshot, batch)
+    } yield estimatedCost
+
+  private[traffic] def estimateUnassigmentRequestCost(
+      submissionParam: UnassignmentSubmissionParam,
+      client: SynchronizerSnapshotSyncCryptoApi,
+      snapshot: TopologySnapshot,
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, NonNegativeLong] =
+    for {
+      batch <- unassignmentProcessor
+        .buildSubmissionBatch(
+          submissionParam,
+          mediatorGroupRecipient,
+          client,
+        )
+        .leftMap(_.toString)
+      estimatedCost <- computeCost(trafficStateController, snapshot, batch)
+    } yield estimatedCost
 
   /** Estimate the cost of the confirmation request by creating one from the transaction and mocking
     * out the rest of the data
@@ -269,6 +382,8 @@ class TrafficCostEstimator(
           )
       }
       now = clock.now
+      protocolLimits = topologyClient.getSynchronizerLimits.transactionProtocolLimits
+      limitConfig = TransactionViewLimitConfig(protocolLimits)
       // Generate a confirmation request
       mockedConfirmationRequest <- confirmationRequestFactory
         .createConfirmationRequest(
@@ -289,19 +404,27 @@ class TrafficCostEstimator(
           // when computing the cost.
           now.add(defaultMaxSequencingTimeOffset.asJava),
           psid.protocolVersion,
+          limitConfig,
         )
         .leftMap(_.toString)
       batch <- EitherT.liftF(mockedConfirmationRequest.asBatch(snapshot))
-      estimatedCost <- EitherT.liftF(
-        trafficStateController
-          // Do not log the cost estimation for this dry run as logs are used to observe real costs
-          .computeCost(batch, snapshot, logCost = false)
-          // We already short-circuit earlier so the cost should not be empty here but fallback to 0 again anyway
-          // when traffic control is disabled
-          .map(_.map(_.cost).getOrElse(NonNegativeLong.zero))
-      )
+      estimatedCost <- computeCost(trafficStateController, snapshot, batch)
     } yield estimatedCost
   }
+
+  private def computeCost(
+      trafficStateController: TrafficStateController,
+      snapshot: TopologySnapshot,
+      batch: Batch[DefaultOpenEnvelope],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, NonNegativeLong] =
+    EitherT.liftF(
+      trafficStateController
+        // Do not log the cost estimation for this dry run as logs are used to observe real costs
+        .computeCost(batch, snapshot, logCost = false)
+        // We already short-circuit earlier so the cost should not be empty here but fallback to 0 again anyway
+        // when traffic control is disabled
+        .map(_.map(_.cost).getOrElse(NonNegativeLong.zero))
+    )
 
   /** Estimate the cost of the confirmation response sent by the _executing_ participant node. This
     * is also a good estimation of the cost incurred by the confirming participants of the external
@@ -309,13 +432,17 @@ class TrafficCostEstimator(
     * accurate for nodes that confirm subviews.
     */
   private def estimateConfirmationResponseCost(
+      candidateConfirmingParties: Seq[LfPartyId],
       trafficStateController: TrafficStateController,
-      submitterInfo: SubmitterInfo,
       client: SynchronizerSnapshotSyncCryptoApi,
       snapshot: TopologySnapshot,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, NonNegativeLong] =
     for {
-      hosting <- EitherT.liftF(snapshot.activeParticipantsOfParties(submitterInfo.actAs))
+      hosting <- EitherT.liftF(snapshot.activeParticipantsOfParties(candidateConfirmingParties))
+      confirmingParties = Set(participantId.adminParty.toLf) ++ hosting.collect {
+        case (party, hostingParticipants) if hostingParticipants.contains(participantId) =>
+          party
+      }.toSeq
       confirmationResponse <- EitherT.pure[FutureUnlessShutdown, String](
         ConfirmationResponse.tryCreate(
           // Estimate the cost for a participant that has full visibility of the transaction
@@ -326,10 +453,7 @@ class TrafficCostEstimator(
           LocalApprove(psid.protocolVersion),
           // The executing participant adds its own admin party to the set of confirming parties
           // Additionally add all other hosting participants of the submitting parties that are not this one
-          Set(participantId.adminParty.toLf) ++ hosting.collect {
-            case (party, hostingParticipants) if hostingParticipants.contains(participantId) =>
-              party
-          }.toSeq,
+          Set(participantId.adminParty.toLf) ++ confirmingParties,
         )
       )
       signedConfirmationResponse <- EitherT.liftF {
@@ -352,14 +476,7 @@ class TrafficCostEstimator(
         psid.protocolVersion,
         signedConfirmationResponse -> Recipients.cc(mediatorGroupRecipient),
       )
-      estimatedCost <- EitherT.liftF(
-        trafficStateController
-          // Do not log the cost estimation for this dry run as logs are used to observe real costs
-          .computeCost(batch, snapshot, logCost = false)
-          // We already short-circuit earlier so the cost should not be empty here but fallback to 0 again anyway
-          // when traffic control is disabled
-          .map(_.map(_.cost).getOrElse(NonNegativeLong.zero))
-      )
+      estimatedCost <- computeCost(trafficStateController, snapshot, batch)
     } yield estimatedCost
 
   private def mockSignatures(

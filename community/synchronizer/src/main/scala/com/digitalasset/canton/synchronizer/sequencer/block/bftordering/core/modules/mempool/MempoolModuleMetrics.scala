@@ -45,7 +45,7 @@ private[mempool] object MempoolModuleMetrics {
   ): Unit = {
     metrics.ingress.requestsQueued.updateValue(mempoolState.receivedOrderRequests.size)
     metrics.ingress.bytesQueued.updateValue(
-      mempoolState.receivedOrderRequests.map(_._1.tx.value.payload.size()).sum
+      mempoolState.receivedOrderRequests.map(_.orderRequest.tx.value.payload.size()).sum
     )
     metrics.mempool.requestedBatches.updateValue(mempoolState.toBeProvidedToAvailability)
   }

@@ -24,7 +24,7 @@ import com.digitalasset.canton.util.ReleaseUtils
   * NOTE: if the test fails, you might have introduced a feature flag that has not been there in a
   * previous version.
   */
-trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConformanceTest {
+sealed trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConformanceTest {
   override lazy val testedReleases: List[ReleaseUtils.TestedRelease] = {
     val all = ProtocolContinuityConformanceTest.previousSupportedReleases(logger)
     val latestMinor = all.map(_.releaseVersion.majorMinor).max1
@@ -35,12 +35,12 @@ trait LatestProtocolContinuityConformanceTest extends ProtocolContinuityConforma
   override val shard: Int = 0
 }
 
-class LatestProtocolContinuityConformanceTestSynchronizer
+final class LatestProtocolContinuityConformanceTestSynchronizer
     extends ProtocolContinuityConformanceTestSynchronizer
     with LatestProtocolContinuityConformanceTest
 
 @UnstableTest // TODO(i32825): remove this once the test is no longer flaky
-class LatestProtocolContinuityConformanceTestParticipant
+final class LatestProtocolContinuityConformanceTestParticipant
     extends ProtocolContinuityConformanceTestParticipant
     with LatestProtocolContinuityConformanceTest {
 
@@ -48,6 +48,6 @@ class LatestProtocolContinuityConformanceTestParticipant
 
 }
 
-class LatestProtocolContinuityConformanceTestPing
+final class LatestProtocolContinuityConformanceTestPing
     extends ProtocolContinuityConformanceTestPing
     with LatestProtocolContinuityConformanceTest

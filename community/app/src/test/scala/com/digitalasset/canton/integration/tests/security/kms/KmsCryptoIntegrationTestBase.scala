@@ -70,19 +70,18 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
 
         if (
           sequencer1.config.init.identity.isManual && !sequencer1.config.init.generateTopologyTransactionsAndKeys
-        ) {
-          manuallyInitNode(
+        )
+          manuallyInitNodeId(
             sequencer1,
             if (sequencer1.config.crypto.provider == CryptoProvider.Kms)
               Some(getTopologyKeysForNode(sequencer1.name))
             else None,
           )
-        }
 
         if (
           mediator1.config.init.identity.isManual && !mediator1.config.init.generateTopologyTransactionsAndKeys
         )
-          manuallyInitNode(
+          manuallyInitNodeId(
             mediator1,
             if (mediator1.config.crypto.provider == CryptoProvider.Kms)
               Some(getTopologyKeysForNode(mediator1.name))
@@ -127,7 +126,7 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
 
         Seq(participant1, participant2) foreach {
           case p: LocalParticipantReference if p.config.init.identity.isManual =>
-            manuallyInitNode(
+            manuallyInitParticipant(
               p,
               if (p.config.crypto.provider == CryptoProvider.Kms)
                 Some(getTopologyKeysForNode(p.name))

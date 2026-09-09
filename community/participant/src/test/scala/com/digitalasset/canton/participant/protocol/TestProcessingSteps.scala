@@ -193,16 +193,7 @@ class TestProcessingSteps(
 
     val decryptedViewTrees = batch.map { envelope =>
       val message = envelope.protocolMessage
-      val hashE = message match {
-        case singleViewMessage: EncryptedSingleViewMessage[TestViewType] =>
-          Hash
-            .fromByteString(singleViewMessage.encryptedView.viewTree.ciphertext)
-        case multipleViewsMessage: EncryptedMultipleViewsMessage[TestViewType] =>
-          Hash
-            .fromByteString(
-              multipleViewsMessage.encryptedViews.viewTrees.ciphertext
-            )
-      }
+      val hashE = Hash.fromByteString(message.encryptedViews.viewTrees.ciphertext)
 
       hashE.bimap(
         err =>

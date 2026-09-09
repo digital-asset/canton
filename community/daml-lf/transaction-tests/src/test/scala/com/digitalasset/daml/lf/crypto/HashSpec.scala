@@ -15,7 +15,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 import shapeless.record.Record as HRecord
 import shapeless.syntax.singleton.*
-import shapeless.{Coproduct as HSum, HNil}
+import shapeless.{HNil, Coproduct as HSum}
 
 import scala.language.implicitConversions
 

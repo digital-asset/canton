@@ -46,7 +46,10 @@ object TransferTesting {
       waitUntilReady: config.NonNegativeDuration = config.NonNegativeDuration.ofMinutes(
         sys.env.get("WAIT_UNTIL_READY_MINUTES").map(_.toLong).getOrElse(15L)
       ),
-      protocolVersion: ProtocolVersion = ProtocolVersion.v35,
+      protocolVersion: ProtocolVersion = sys.env
+        .get("CANTON_PROTOCOL_VERSION")
+        .map(ProtocolVersion.tryCreate)
+        .getOrElse(ProtocolVersion.v36),
       startupParallelism: Int = sys.env.get("STARTUP_PARALLELISM").map(_.toInt).getOrElse(4),
   )(implicit
       consoleEnvironment: ConsoleEnvironment
@@ -194,6 +197,16 @@ object TransferTesting {
     runnerP1
   }
 
+  private def rateSettingsFromEnv(): SubmissionRateSettings =
+    (sys.env.get("RATE_TYPE"), sys.env.get("FIXED_RATE"), sys.env.get("TARGET_LATENCY_MS")) match {
+      case (Some("fixed"), Some(rate), _) =>
+        SubmissionRateSettings.FixedRate(rate.toDouble)
+      case (Some("target-latency"), _, Some(latency)) =>
+        SubmissionRateSettings.TargetLatencyNew(targetLatencyMs = latency.toInt)
+      case _ =>
+        SubmissionRateSettings.TargetLatencyNew(targetLatencyMs = 9000)
+    }
+
   def startupParticipants(
       masterName: String = "1Master",
       partyDiscriminator: String = "",
@@ -201,9 +214,7 @@ object TransferTesting {
       transferersPerNode: Int = 5,
       onlyLocalIssuer: Boolean = true,
       rateSettings: RateSettings = RateSettings(
-        SubmissionRateSettings.TargetLatencyNew(
-          targetLatencyMs = sys.env.get("TARGET_LATENCY_MS").map(_.toInt).getOrElse(9000)
-        ),
+        rateSettingsFromEnv(),
         batchSize = 1,
       ),
       waitUntilReady: config.NonNegativeDuration = config.NonNegativeDuration.ofMinutes(

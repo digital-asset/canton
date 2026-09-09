@@ -28,9 +28,9 @@ import com.digitalasset.daml.lf.transaction.{
   Node,
   NodeId,
   SerializationVersion,
-  TransactionOuterClass as proto,
   Util,
   VersionedTransaction,
+  TransactionOuterClass as proto,
 }
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId

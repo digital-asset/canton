@@ -272,11 +272,8 @@ final case class PhysicalSynchronizerId(
 
   /** Synchronizer identifier to use for the computation of the external signing hash
     */
-  def forExternalTransactionHashing: Synchronizer =
-    if (protocolVersion <= ProtocolVersion.v34) logical
-    // TODO(i30737): From PV35, we use the physical synchronizer ID to maintain deduplication guarantees during LSU.
-    // This will likely be revised when the mediator transaction data is migrated during LSUs
-    else this
+  // TODO(i30737): Change again to logical once mediator state is transferred
+  def forExternalTransactionHashing: Synchronizer = this
 
   override def toProtoPrimitive: String = toLengthLimitedString.unwrap
 

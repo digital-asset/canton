@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.multihostedparties.offpr
 
-import com.digitalasset.canton.admin.api.client.data.{FlagNotSet, FlagSet}
+import com.digitalasset.canton.admin.api.client.data.FlagNotSet
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,16 +19,10 @@ import com.digitalasset.canton.participant.admin.party.PartyManagementServiceErr
   EffectivePartyToParticipantMappingNotFound,
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
-import com.digitalasset.canton.protocol.{
-  DynamicSynchronizerParameters,
-  DynamicSynchronizerParametersHistory,
-  DynamicSynchronizerParametersWithValidity,
-}
 import com.digitalasset.canton.time.DelegatingSimClock
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{Party, PartyKind, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{HasExecutionContext, HasTempDirectory, SynchronizerAlias, config}
 
 import java.time.Duration
@@ -218,12 +212,6 @@ trait OfflinePartyReplicationIntegrationTestBase
 
     source.health.ping(target)
 
-    runIfPv34(
-      // Trigger the asynchronous onboarding flag clearance process
-      target.parties.clear_party_onboarding_flag(party, psid.logical, targetLedgerEnd),
-      otherwise = (),
-    )
-
     // Total duration needed for the asynchronous onboarding flag clearance to complete.
     // Depends on the historical decision timeout and of topology transaction actually removing the onboarding flag
     // becoming effective.
@@ -263,10 +251,6 @@ trait OfflinePartyReplicationIntegrationTestBase
 
     reconnectAndEnsureOnboardingClearance(clock, party, daName)
   }
-
-  protected[offpr] def runIfPv34(block: => Unit, otherwise: => Unit): Unit =
-    if (testedProtocolVersion == ProtocolVersion.v34) block else otherwise
-
 }
 
 /** Setup:
@@ -353,28 +337,10 @@ final class OfflinePartyReplicationIntegrationTest
     clock.advance(Duration.ofSeconds(30))
     checkOnboardingFlag(daId, setOnTarget = true)
 
-    runIfPv34(
-      {
-        val targetLedgerEnd = target.ledger_api.state.end()
+    target.synchronizers.reconnect(daName)
 
-        target.synchronizers.reconnect(daName)
-
-        source.health.ping(target)
-        target.ledger_api.state.acs.of_party(alice).size shouldBe 2
-
-        // Trigger the asynchronous onboarding flag clearance process
-        val status = target.parties.clear_party_onboarding_flag(alice, daId, targetLedgerEnd)
-        val expectedTimestamp = computeExpectedDecisionDeadline(getOnboardingEffectiveAt(daId))
-
-        status shouldBe FlagSet(expectedTimestamp)
-      },
-      otherwise = {
-        target.synchronizers.reconnect(daName)
-
-        source.health.ping(target)
-        target.ledger_api.state.acs.of_party(alice).size shouldBe 2
-      },
-    )
+    source.health.ping(target)
+    target.ledger_api.state.acs.of_party(alice).size shouldBe 2
 
     // Assert contract archival and creation (submission) does NOT work
     // while the onboarding flag has not been cleared yet (local parties only).
@@ -430,22 +396,6 @@ final class OfflinePartyReplicationIntegrationTest
       p.participantId shouldBe target.id
       p.onboarding should be(setOnTarget)
     }
-  }
-
-  private def computeExpectedDecisionDeadline(
-      effectiveAt: CantonTimestamp
-  ): CantonTimestamp = {
-    val paramsWithValidity = DynamicSynchronizerParametersWithValidity(
-      parameters = DynamicSynchronizerParameters.defaultValues(testedProtocolVersion),
-      validFrom = CantonTimestamp.MinValue,
-      validUntil = None,
-    )
-
-    DynamicSynchronizerParametersHistory
-      .latestDecisionDeadlineEffectiveAt(
-        Seq(paramsWithValidity),
-        effectiveAt,
-      )
   }
 }
 

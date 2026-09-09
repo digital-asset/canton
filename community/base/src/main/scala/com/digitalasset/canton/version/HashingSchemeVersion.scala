@@ -12,7 +12,6 @@ import com.digitalasset.nonempty.NonEmpty
 import scala.collection.immutable.{SortedMap, SortedSet}
 
 sealed abstract class HashingSchemeVersion(val index: Int) extends Product with Serializable {
-  def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion
   def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion
   def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion
   def toLedgerApiProto: ApiHashingSchemeVersion
@@ -21,8 +20,6 @@ sealed abstract class HashingSchemeVersion(val index: Int) extends Product with 
 object HashingSchemeVersion {
 
   case object V2 extends HashingSchemeVersion(2) {
-    override def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion =
-      v30.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
     override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
       v31.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
     override def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion =
@@ -31,8 +28,6 @@ object HashingSchemeVersion {
       ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V2
   }
   case object V3 extends HashingSchemeVersion(3) {
-    override def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion =
-      throw new IllegalStateException(s"Hashing scheme V3 is not supported in proto v30")
     override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
       v31.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3
     override def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion =
@@ -41,8 +36,6 @@ object HashingSchemeVersion {
       ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V3
   }
   case object V4 extends HashingSchemeVersion(4) {
-    override def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion =
-      throw new IllegalStateException("Hashing scheme V4 is not supported in proto v30")
     override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
       throw new IllegalStateException("Hashing scheme V4 is not supported in proto v31")
     override def toProtoV32: v32.ExternalAuthorization.HashingSchemeVersion =
@@ -84,16 +77,6 @@ object HashingSchemeVersion {
         )
       )
       ._2
-
-  def fromProtoV30(
-      version: v30.ExternalAuthorization.HashingSchemeVersion
-  ): ParsingResult[HashingSchemeVersion] = version match {
-    case v30.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2 => Right(V2)
-    case v30.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_UNSPECIFIED =>
-      Left(FieldNotSet("hashing_scheme_version"))
-    case v30.ExternalAuthorization.HashingSchemeVersion.Unrecognized(unrecognizedValue) =>
-      Left(UnrecognizedEnum("hashing_scheme_version", unrecognizedValue))
-  }
 
   def fromProtoV31(
       version: v31.ExternalAuthorization.HashingSchemeVersion

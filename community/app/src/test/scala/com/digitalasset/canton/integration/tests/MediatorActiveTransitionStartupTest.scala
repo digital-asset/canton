@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.ConfigTransforms.updateMediatorConfig
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.health.HealthMonitoringTestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransform,
@@ -26,6 +27,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.resource.{DbLock, DbLockCounters, DbLockedConnectionPool, DbStorage}
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
+import com.digitalasset.canton.{HasActorSystem, HasExecutionContext}
 import monocle.macros.GenLens
 import monocle.macros.syntax.lens.*
 import slick.util.AsyncExecutorWithMetrics
@@ -37,7 +39,10 @@ import scala.concurrent.{Await, Future}
   */
 abstract class MediatorActiveTransitionStartupTestSetup
     extends CommunityIntegrationTest
-    with IsolatedEnvironments { self =>
+    with IsolatedEnvironments
+    with HealthMonitoringTestUtils
+    with HasExecutionContext
+    with HasActorSystem { self =>
 
   private val noFailFast: StorageConfig => StorageConfig = {
     case dbConfig: ModifiableDbConfig[?] =>
@@ -66,6 +71,9 @@ abstract class MediatorActiveTransitionStartupTestSetup
             // delay between retries (set above) when waiting for the node ID to be initialized, otherwise we may not trigger the race between
             // transition to active and initialization
         ),
+      )
+      .addConfigTransforms(
+        ConfigTransforms.addMonitoringEndpointAllNodes*
       )
 
   // Trigger a double initialization race by reaching the "wait for Id" stage with a passive DB connection, then
@@ -100,9 +108,9 @@ abstract class MediatorActiveTransitionStartupTestSetup
           futureSupervisor,
           loggerFactory,
           mediatorPoolExecutor,
-        )
+        )(parallelExecutionContext, traceContext, cc)
 
-        val startF = Future(mediator1.start())
+        val startF = Future(mediator1.start())(parallelExecutionContext)
 
         logger.info("Waiting for mediator to be in 'wait-for-id' state")
         mediator1.health.wait_for_running()
@@ -114,11 +122,18 @@ abstract class MediatorActiveTransitionStartupTestSetup
 
         logger.info("Observe mediator starts and can be bootstrapped into a synchronizer")
         val () = Await.result(startF, 1.minute)
-        mediator1.health.wait_for_running()
         eventually() {
           mediator1.health.active shouldBe true
         }
         mediator1.health.wait_for_ready_for_initialization()
+        // Below is an additional check for the health reporting during the storage unavailability in HA setup
+        withHealthStubs(Seq(mediator1.config.monitoring.grpcHealthServer.value)) {
+          case Seq(mediatorHealthStub) =>
+            eventually() {
+              checkServing(mediatorHealthStub, httpHealthConfig = Some(mediator1.config))
+            }
+        }
+
         sequencer1.start()
         sequencer1.health.wait_for_running()
         // Make sure we can bootstrap a synchronizer with this mediator

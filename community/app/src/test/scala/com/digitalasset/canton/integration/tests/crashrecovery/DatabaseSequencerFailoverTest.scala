@@ -10,8 +10,8 @@ import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, PositiveInt}
 import com.digitalasset.canton.config.{
-  NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig,
   PemFile,
+  NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig,
 }
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper

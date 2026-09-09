@@ -11,6 +11,7 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
+import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
@@ -24,13 +25,7 @@ import com.digitalasset.canton.crypto.{
   RandomOps,
   SyncCryptoApiParticipantProvider,
 }
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  Offset,
-  PathRollbackContextFactory,
-  ReassignmentSubmitterMetadata,
-  SynchronizerSuccessor,
-}
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.error.TransactionRoutingError.{
@@ -48,7 +43,10 @@ import com.digitalasset.canton.ledger.api.{
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
-import com.digitalasset.canton.ledger.participant.state.SyncService.SubmissionCostEstimation
+import com.digitalasset.canton.ledger.participant.state.SyncService.{
+  ReassignmentCostEstimation,
+  SubmissionCostEstimation,
+}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -2036,6 +2034,74 @@ class CantonSyncService(
         costHints,
       )
     } yield estimatedTrafficCost
+
+  override def estimateReassignmentCosts(
+      synchronizerRankTarget: SynchronizerRank,
+      submitterInfo: SubmitterInfo,
+      targetSynchronizer: PhysicalSynchronizerId,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Seq[ReassignmentCostEstimation]] =
+    if (synchronizerRankTarget.reassignments.isEmpty)
+      EitherT.pure[FutureUnlessShutdown, String](Seq.empty)
+    else {
+      def sourceSynchronizerOf(
+          source: PhysicalSynchronizerId
+      ): EitherT[FutureUnlessShutdown, String, ConnectedSynchronizer] =
+        EitherT.fromOption[FutureUnlessShutdown](
+          connectedSynchronizersLookupContainer.get(source),
+          s"Node is not connected to source synchronizer $source",
+        )
+
+      val batches = synchronizerRankTarget.reassignments.toSeq
+
+      for {
+        estimates <- batches.parTraverse { case ((submitter, source, stakeholders), cids) =>
+          val contractIds = cids.toSeq
+          for {
+            sourceSynchronizer <- sourceSynchronizerOf(source)
+            unassignmentCost <- sourceSynchronizer.estimateUnassignmentCost(
+              submitter,
+              contractIds,
+              Target(targetSynchronizer),
+              submitterInfo,
+              stakeholders.signatories.toSeq,
+            )
+            (unassignmentRequestCost, unassignmentResponseCost) = unassignmentCost
+
+            contracts <- contractIds.parTraverse { cid =>
+              sourceSynchronizer.ephemeral.contractLookup
+                .lookup(cid)
+                .toRight(s"Cannot find contract with id $cid")
+            }
+
+            targetConnected <- EitherT.fromOption[FutureUnlessShutdown](
+              connectedSynchronizersLookupContainer.get(targetSynchronizer),
+              s"Node is not connected to target synchronizer $targetSynchronizer",
+            )
+
+            assignmentCost <- targetConnected.estimateAssignmentCost(
+              submitter,
+              contracts,
+              Source(sourceSynchronizer.psid),
+              Source(sourceSynchronizer.topologyClient.headSnapshot),
+              submitterInfo,
+              stakeholders.signatories.toSeq,
+            )
+
+            (assignmentRequestCost, assignmentResponseCost) = assignmentCost
+          } yield ReassignmentCostEstimation(
+            sourceSynchronizerId = source,
+            targetSynchronizerId = targetSynchronizer,
+            contractIds = contractIds,
+            unassignmentRequestCost = unassignmentRequestCost,
+            unassignmentResponseCost = unassignmentResponseCost,
+            assignmentRequestCost = assignmentRequestCost,
+            assignmentResponseCost = assignmentResponseCost,
+          )
+        }
+      } yield estimates
+    }
 
   override def hashOps: HashOps = this.syncCrypto.pureCrypto
 

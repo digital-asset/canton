@@ -72,6 +72,13 @@ object SendAsyncClientError extends SequencerErrorGroup {
     )
   }
 
+  /** The request already exists and was therefore rejected */
+  final case class RequestAlreadyExists(message: String) extends SendAsyncClientResponseError {
+    override protected def pretty: Pretty[RequestAlreadyExists] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
+    )
+  }
+
   /** We were able to contact the server but the request was declined */
   final case class RequestRefused(error: SendAsyncError) extends SendAsyncClientResponseError {
     override protected def pretty: Pretty[RequestRefused] = prettyOfClass(unnamedParam(_.error))

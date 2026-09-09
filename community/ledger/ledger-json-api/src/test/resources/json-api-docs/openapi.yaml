@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: JSON Ledger API HTTP endpoints
-  version: 3.6.0-SNAPSHOT
+  version: 3.7.0-SNAPSHOT
 paths:
   /v2/commands/submit-and-wait:
     post:
@@ -3006,6 +3006,14 @@ components:
             Required
           type: integer
           format: int64
+        reassignmentCosts:
+          description: |-
+            Estimated cost of re-assigning contracts if necessary
+
+            Optional: can be empty
+          type: array
+          items:
+            $ref: '#/components/schemas/ReassignmentCost'
     CostEstimationHints:
       title: CostEstimationHints
       description: Hints to improve cost estimation precision of a prepared transaction
@@ -7034,6 +7042,79 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ReassignmentCommand'
+    ReassignmentCost:
+      title: ReassignmentCost
+      description: |-
+        Estimation of re-assignment costs
+        This is the cost of re-assigning contracts from another synchronizer if necessary.
+      type: object
+      required:
+      - sourceSynchronizerId
+      - targetSynchronizerId
+      - unassignmentRequestTrafficCostEstimation
+      - unassignmentResponseTrafficCostEstimation
+      - assignmentRequestTrafficCostEstimation
+      - assignmentResponseTrafficCostEstimation
+      - totalReassignmentCostEstimation
+      - contractIds
+      properties:
+        sourceSynchronizerId:
+          description: |-
+            The synchronizer the contracts are currently assigned to, and against whose traffic balance
+            the unassignment cost is charged
+
+            Required
+          type: string
+        targetSynchronizerId:
+          description: |-
+            The synchronizer the contracts will be re-assigned to, and against whose traffic balance
+            the assignment cost is charged
+
+            Required
+          type: string
+        contractIds:
+          description: |-
+            The contracts that will be unassigned together in this single unassignment request
+
+            Required: must be non-empty
+          type: array
+          items:
+            type: string
+        unassignmentRequestTrafficCostEstimation:
+          description: |-
+            Estimated traffic cost of the unassignment confirmation request
+
+            Required
+          type: integer
+          format: int64
+        unassignmentResponseTrafficCostEstimation:
+          description: |-
+            Estimated traffic cost of the unassignment confirmation response
+
+            Required
+          type: integer
+          format: int64
+        assignmentRequestTrafficCostEstimation:
+          description: |-
+            Estimated traffic cost of the assignment confirmation request
+
+            Required
+          type: integer
+          format: int64
+        assignmentResponseTrafficCostEstimation:
+          description: |-
+            Estimated traffic cost of the assignment confirmation response
+
+            Required
+          type: integer
+          format: int64
+        totalReassignmentCostEstimation:
+          description: |-
+            Sum of the fields above
+
+            Required
+          type: integer
+          format: int64
     RevokeUserRightsRequest:
       title: RevokeUserRightsRequest
       description: |-

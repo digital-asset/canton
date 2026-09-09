@@ -277,28 +277,7 @@ final class GeneratorsMessages(
     } yield AsymmetricEncrypted(encrypted, encryptionAlgorithmSpec, fingerprint)
   )
 
-  val encryptedSingleViewMessage: Arbitrary[EncryptedSingleViewMessage[ViewType]] = Arbitrary(
-    for {
-      signatureO <- Gen.option(Arbitrary.arbitrary[Signature])
-      viewHash <- Arbitrary.arbitrary[ViewHash]
-      encryptedViewBytestring <- byteStringArb.arbitrary
-      sessionKey <- Generators.nonEmptyListGen[AsymmetricEncrypted[SecureRandomness]]
-      viewType <- viewTypeArb.arbitrary
-      encryptedView = EncryptedView(viewType)(Encrypted.fromByteString(encryptedViewBytestring))
-      synchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
-      viewEncryptionScheme <- genArbitrary[SymmetricKeyScheme].arbitrary
-    } yield EncryptedSingleViewMessage.apply(
-      submittingParticipantSignature = signatureO,
-      viewHash = viewHash,
-      viewEncryptionKeyRandomness = sessionKey,
-      encryptedView = encryptedView,
-      synchronizerId = synchronizerId,
-      viewEncryptionScheme = viewEncryptionScheme,
-      protocolVersion = protocolVersion,
-    )
-  )
-
-  val encryptedMultipleViewsMessage: Arbitrary[EncryptedMultipleViewsMessage[ViewType]] = Arbitrary(
+  val encryptedViewMessageArb: Arbitrary[EncryptedViewMessage[ViewType]] = Arbitrary(
     for {
       viewType <- viewTypeArb.arbitrary
       signatureO <- Gen.option(Arbitrary.arbitrary[Signature])
@@ -309,7 +288,7 @@ final class GeneratorsMessages(
       sessionKey <- Generators.nonEmptyListGen[AsymmetricEncrypted[SecureRandomness]]
       synchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       viewEncryptionScheme <- genArbitrary[SymmetricKeyScheme].arbitrary
-    } yield EncryptedMultipleViewsMessage.apply(
+    } yield EncryptedViewMessage.apply(
       encryptedViews = EncryptedMultipleViews(viewType, Encrypted.fromByteString(encryptedViews)),
       viewHashes = NonEmptyUtil.fromUnsafe(viewHashes),
       viewEncryptionKeyRandomness = sessionKey,
@@ -319,14 +298,6 @@ final class GeneratorsMessages(
       protocolVersion = protocolVersion,
     )
   )
-
-  val encryptedViewMessage: Arbitrary[EncryptedViewMessage[ViewType]] =
-    Arbitrary(
-      if (protocolVersion >= ProtocolVersion.v35)
-        encryptedMultipleViewsMessage.arbitrary
-      else
-        encryptedSingleViewMessage.arbitrary
-    )
 
   val assignmentMediatorMessageArb: Arbitrary[AssignmentMediatorMessage] = Arbitrary(
     for {
@@ -392,7 +363,7 @@ final class GeneratorsMessages(
       ),
       GeneratorForClass(informeeMessageArb.arbitrary, classOf[InformeeMessage]),
       GeneratorForClass(
-        encryptedViewMessage.arbitrary,
+        encryptedViewMessageArb.arbitrary,
         classOf[EncryptedViewMessage[ViewType]],
       ),
       GeneratorForClass(assignmentMediatorMessageArb.arbitrary, classOf[AssignmentMediatorMessage]),

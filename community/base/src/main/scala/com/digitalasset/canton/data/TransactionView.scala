@@ -27,9 +27,9 @@ import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.protocol.{v30, *}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.collection.MapsUtil
-import com.digitalasset.canton.util.{ErrorUtil, MonadUtil, RoseTree}
+import com.digitalasset.canton.util.{ErrorUtil, RoseTree}
 import com.digitalasset.canton.version.*
-import com.digitalasset.canton.{LfPartyId, LfVersioned, ProtoDeserializationError, checked}
+import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, checked}
 import com.google.common.annotations.VisibleForTesting
 import monocle.Lens
 import monocle.macros.GenLens
@@ -186,39 +186,6 @@ final case class TransactionView private (
     */
   def keyMaintainers(): Map[LfGlobalKey, Set[LfPartyId]] =
     viewParticipantData.tryUnwrap.keyResolution.fmap(_.unversioned.maintainers)
-
-  private lazy val legacyGlobalKeyInputsE
-      : Either[String, Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]]] =
-    for {
-      viewParticipantData <- unblindViewParticipantData("Global key inputs")
-
-      _ <- subviews.allUnblinded(hash =>
-        s"Global key inputs of view $viewHash can be computed only if all subviews are unblinded, but $hash is blinded"
-      )
-      inputs <-
-        MonadUtil.foldLeftM(viewParticipantData.keyResolution, subviews.unblindedElements) {
-          case (acc, subview) =>
-            subview.legacyGlobalKeyInputsE.map { subviewGki =>
-              MapsUtil.mergeWith(acc, subviewGki)((accRes, _) => accRes)
-            }
-        }
-
-    } yield inputs
-
-  /** Legacy view global keys mapping
-    *
-    * Used to support protocol behaviour until
-    * [[com.digitalasset.canton.version.ProtocolVersion.v34]]
-    *
-    * @throws java.lang.IllegalStateException
-    *   if the [[ViewParticipantData]] of this view or any subview is blinded
-    */
-  def legacyGlobalKeyInputs(implicit
-      loggingContext: NamedLoggingContext
-  ): Map[LfGlobalKey, LfVersioned[LegacyKeyResolutionWithMaintainers]] =
-    getOrError(legacyGlobalKeyInputsE).fmap(
-      _.map(LegacyKeyResolutionWithMaintainers.tryFromNextGen)
-    )
 
   /** The input contracts of the view (including subviews).
     *
@@ -424,7 +391,7 @@ object TransactionView
     ] {
   override def name: String = "TransactionView"
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(v30.ViewNode)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.ViewNode)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -519,11 +486,11 @@ object TransactionView
   ): ParsingResult[TransactionView] = {
     val (hashOps, depthCounter, expectedProtocolVersion) = context
     for {
-      commonData <- MerkleTree.fromProtoOptionV30(
+      commonData <- MerkleTree.fromProtoOptionV30NoMerkleSeq(
         protoView.viewCommonData,
         ViewCommonData.fromByteString(expectedProtocolVersion, hashOps),
       )
-      participantData <- MerkleTree.fromProtoOptionV30(
+      participantData <- MerkleTree.fromProtoOptionV30NoMerkleSeq(
         protoView.viewParticipantData,
         ViewParticipantData.fromByteString(
           expectedProtocolVersion,

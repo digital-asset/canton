@@ -22,13 +22,11 @@ import com.digitalasset.canton.protocol.messages.{
   TypedSignedProtocolMessageContent,
   UnsignedProtocolMessage,
 }
-import com.digitalasset.canton.protocol.{SynchronizerLimits, v30, v31}
-import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.protocol.{SynchronizerLimits, v31}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ByteStringUtil, MaxBytesToDecompress, MonadUtil}
-import com.digitalasset.canton.validation.ProtoValidation
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
   ProtoVersion,
@@ -36,8 +34,7 @@ import com.digitalasset.canton.version.{
   ProtocolVersionValidation,
   RepresentativeProtocolVersion,
   UnsupportedProtoCodec,
-  VersionedProtoCodec,
-  VersioningCompanion,
+  VersioningCompanionContext,
 }
 import com.digitalasset.canton.{ProtoDeserializationError, checkedToByteString}
 import com.digitalasset.nonempty.NonEmpty
@@ -55,6 +52,7 @@ import scala.concurrent.ExecutionContext
   * a [[com.digitalasset.canton.protocol.messages.TypedSignedProtocolMessageContent]] otherwise. It
   * itself is serialized without version wrappers inside a [[Batch]].
   */
+// TODO(#35535) Consider deleting (de)serialization machinery for this one
 final case class ClosedUncompressedEnvelope private[protocol] (
     override val bytes: ByteString,
     override val recipients: Recipients,
@@ -165,12 +163,6 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     )
   }
 
-  def toProtoV30: v30.Envelope = v30.Envelope(
-    content = bytes,
-    recipients = Some(recipients.toProtoV30),
-    signatures = signatures.map(_.toProtoV30),
-  )
-
   def updateSignatures(signatures: Seq[Signature]): ClosedUncompressedEnvelope =
     copy(signatures = signatures)
 
@@ -217,7 +209,8 @@ final case class ClosedUncompressedEnvelope private[protocol] (
     copy(recipients = newRecipients)
 }
 
-object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressedEnvelope] {
+object ClosedUncompressedEnvelope
+    extends VersioningCompanionContext[ClosedUncompressedEnvelope, SynchronizerLimits] {
   val recipientsLens: Lens[ClosedUncompressedEnvelope, Recipients] =
     Lens[ClosedUncompressedEnvelope, Recipients](_.recipients)(newRecipients =>
       envelope => envelope.withRecipients(newRecipients)
@@ -225,44 +218,10 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
 
   override def name: String = "ClosedUncompressedEnvelope"
 
+  // If (de)serialization is needed in the future, remove exception in SerializationDeserializationTest
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(
-      ProtocolVersion.v34
-    )(v30.Envelope)(
-      supportedProtoVersionPVV(_)(fromProtoV30),
-      _.toProtoV30,
-    ),
-    ProtoVersion(31) -> UnsupportedProtoCodec(ProtocolVersion.v35),
+    ProtoVersion(31) -> UnsupportedProtoCodec(ProtocolVersion.v35)
   )
-
-  private[protocol] def fromProtoV30(
-      pvv: ProtocolVersionValidation,
-      envelopeP: v30.Envelope,
-  ): ParsingResult[ClosedUncompressedEnvelope] = {
-    val v30.Envelope(contentP, recipientsP, signaturesP) = envelopeP
-    for {
-      recipients <- ProtoConverter.parseRequired(
-        Recipients.fromProtoV30(pvv, _),
-        "recipients",
-        recipientsP,
-      )
-      signatures <- ProtoValidation
-        .validateLengthThen(
-          signaturesP,
-          "signatures",
-          pvv,
-          ProtoValidation.MaxCollectionSize,
-        )((element, _) => Signature.fromProtoV30(element))
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      closedEnvelope = create(
-        contentP,
-        recipients,
-        signatures,
-        rpv,
-        pvv,
-      )
-    } yield closedEnvelope
-  }
 
   def tryFromProtocolMessage(
       protocolMessage: ProtocolMessage,

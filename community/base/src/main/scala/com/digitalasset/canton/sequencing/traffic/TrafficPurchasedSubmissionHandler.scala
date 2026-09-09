@@ -138,9 +138,7 @@ class TrafficPurchasedSubmissionHandler(
         ),
       )
       aggregationRule = AggregationRule.activeSequencers(
-        sequencers = activeSequencers,
-        threshold = sequencerGroup.threshold,
-        protocolVersion = protocolVersion,
+        protocolVersion = protocolVersion
       )
       setTrafficPurchasedMessage = SetTrafficPurchasedMessage.apply(
         member,

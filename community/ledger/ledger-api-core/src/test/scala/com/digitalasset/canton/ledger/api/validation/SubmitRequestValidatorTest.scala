@@ -7,8 +7,8 @@ import com.daml.ledger.api.v2.command_service.SubmitAndWaitForTransactionRequest
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod as DeduplicationPeriodProto
 import com.daml.ledger.api.v2.commands.{Command, Commands, CreateCommand, PrefetchContractKey}
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
-  HashingSchemeVersion as ApiHashingSchemeVersion,
   PrepareSubmissionRequest,
+  HashingSchemeVersion as ApiHashingSchemeVersion,
 }
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters, TransactionFormat}
@@ -22,15 +22,15 @@ import com.daml.ledger.api.v2.value.{
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.ApiMocks.{commandId, submissionId, userId, workflowId}
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
-import com.digitalasset.canton.ledger.api.{ApiMocks, Commands as ApiCommands, DisclosedContract}
+import com.digitalasset.canton.ledger.api.{ApiMocks, DisclosedContract, Commands as ApiCommands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.command.{
+  ApiContractKey,
   ApiCommand as LfCommand,
   ApiCommands as LfCommands,
-  ApiContractKey,
 }
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.TypeConRef
@@ -50,7 +50,7 @@ import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 
 class SubmitRequestValidatorTest
     extends AnyWordSpec

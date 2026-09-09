@@ -24,9 +24,9 @@ import com.daml.ledger.api.v2.admin.user_management_service.{
   ListUsersResponse,
   RevokeUserRightsRequest,
   RevokeUserRightsResponse,
-  Right as Permission,
   UpdateUserIdentityProviderIdRequest,
   User,
+  Right as Permission,
 }
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.base.error.utils.ErrorDetails.matches

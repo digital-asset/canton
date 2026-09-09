@@ -30,10 +30,10 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
   Active,
   Archived,
-  ContractState as AcsContractState,
   DoubleContractCreation,
   ReassignedAway,
   Status,
+  ContractState as AcsContractState,
 }
 import com.digitalasset.canton.participant.store.ReassignmentStore.{
   ReassignmentAlreadyCompleted,

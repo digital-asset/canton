@@ -25,12 +25,12 @@ import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   CostEstimationHints,
-  ExecuteSubmissionAndWaitResponse as ExecuteAndWaitResponseProto,
-  ExecuteSubmissionResponse as ExecuteResponseProto,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
-  PrepareSubmissionResponse as PrepareResponseProto,
   PreparedTransaction,
+  ExecuteSubmissionAndWaitResponse as ExecuteAndWaitResponseProto,
+  ExecuteSubmissionResponse as ExecuteResponseProto,
+  PrepareSubmissionResponse as PrepareResponseProto,
 }
 import com.daml.ledger.api.v2.reassignment.Reassignment as ReassignmentProto
 import com.daml.ledger.api.v2.state_service.{
@@ -53,10 +53,10 @@ import com.daml.ledger.api.v2.transaction_filter.{
   ParticipantAuthorizationTopologyFormat,
   TemplateFilter,
   TopologyFormat,
-  TransactionFormat as TransactionFormatProto,
   TransactionShape,
   UpdateFormat,
   WildcardFilter,
+  TransactionFormat as TransactionFormatProto,
 }
 import com.daml.ledger.javaapi as javab
 import com.daml.ledger.javaapi.data.{

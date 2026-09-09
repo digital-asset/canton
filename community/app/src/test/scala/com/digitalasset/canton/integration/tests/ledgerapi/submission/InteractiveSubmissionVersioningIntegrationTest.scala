@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi.submission
 
-import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion as ApiHashingSchemeVersion
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion.{
   HASHING_SCHEME_VERSION_V2,
   HASHING_SCHEME_VERSION_V3,
@@ -48,23 +47,6 @@ class InteractiveSubmissionVersioningIntegrationTest extends InteractiveSubmissi
 
         prepared.hashingSchemeVersion shouldBe expected
       }
-    }
-
-    "fail if unsupported hashing scheme version is used" onlyRunWith ProtocolVersion.v34 in {
-      implicit env =>
-        val command = createCycleCommand(aliceE, "c1")
-
-        assertThrowsAndLogsCommandFailures(
-          epn.ledger_api.interactive_submission
-            .prepare(
-              Seq(aliceE),
-              Seq(command),
-              hashingSchemeVersion = ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V3,
-            ),
-          le => {
-            le.errorMessage should include regex "INVALID_ARGUMENT/FAILED_TO_PREPARE_TRANSACTION.*Hashing scheme version V3 is not supported on protocol version 34"
-          },
-        )
     }
 
     /*

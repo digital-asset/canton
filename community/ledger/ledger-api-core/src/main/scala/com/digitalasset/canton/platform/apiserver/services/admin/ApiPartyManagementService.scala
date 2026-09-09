@@ -21,12 +21,12 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   GetPartiesResponse,
   ListKnownPartiesRequest,
   ListKnownPartiesResponse,
-  PartyDetails as ProtoPartyDetails,
   PartyManagementServiceGrpc,
   UpdatePartyDetailsRequest,
   UpdatePartyDetailsResponse,
   UpdatePartyIdentityProviderIdRequest,
   UpdatePartyIdentityProviderIdResponse,
+  PartyDetails as ProtoPartyDetails,
 }
 import com.daml.logging.LoggingContext
 import com.daml.platform.v1.page_tokens.ListPartiesPageTokenPayload

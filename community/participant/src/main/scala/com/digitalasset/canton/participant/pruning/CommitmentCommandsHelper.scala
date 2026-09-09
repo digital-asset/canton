@@ -108,7 +108,7 @@ object CommitmentContractMetadata
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.CommitmentContractMeta)(fromProtoV30),
         _.toProtoV30,
       )
@@ -213,7 +213,7 @@ object CommitmentInspectContract extends HasVersionedMessageCompanion[Commitment
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.CommitmentContract)(fromProtoV30),
         _.toProtoV30,
       )
@@ -510,7 +510,7 @@ object ContractStateOnSynchronizer
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.ContractState.SynchronizerState)(fromProtoV30),
         _.toProtoV30,
       )
@@ -573,7 +573,7 @@ object ContractCreated
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.ContractState.Created)(fromProtoV30),
         _.toProtoV30,
       )
@@ -620,7 +620,7 @@ object ContractAssigned
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.ContractState.Assigned)(fromProtoV30),
         _.toProtoV30,
       )
@@ -680,7 +680,7 @@ object ContractUnassigned extends HasVersionedMessageCompanion[ContractUnassigne
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.ContractState.Unassigned)(fromProtoV30),
         _.toProtoV30,
       )
@@ -733,7 +733,7 @@ object ContractArchived
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.ContractState.Archived)(fromProtoV30),
         _.toProtoV30,
       )
@@ -768,7 +768,7 @@ object ContractUnknown
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30.ContractState.Unknown)(fromProtoV30),
         _.toProtoV30,
       )

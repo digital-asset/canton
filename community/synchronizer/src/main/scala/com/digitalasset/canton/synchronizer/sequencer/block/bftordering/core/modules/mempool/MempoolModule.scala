@@ -17,7 +17,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SequencerNode,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{Env, ModuleRef}
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.dequeueN
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import io.opentelemetry.api.trace.{StatusCode, Tracer}
 
@@ -118,7 +117,7 @@ class MempoolModule[E <: Env[E]](
               logger.debug(
                 s"Mempool accepting client request with tag '${orderingRequest.tag}' of size $payloadSize"
               )
-              mempoolState.receivedOrderRequests.enqueue((r, span))
+              mempoolState.enqueueRequest(r, span)
               from.foreach(_.asyncSend(SequencerNode.RequestAccepted))
               if (mempoolState.receivedOrderRequests.sizeIs >= config.minRequestsInBatch.toInt) {
                 // every time we receive a new transaction we only try to create new batches if we've reached
@@ -147,9 +146,9 @@ class MempoolModule[E <: Env[E]](
         createAndSendBatches()
         emitStateStats(metrics, mempoolState)
 
-      // From local output module
-      // TODO(#34672): discard queued requests whose max sequencing time has passed
-      case Mempool.LatestKnownSequencingTimeUpdate(_) => ()
+      // From the local output module
+      case Mempool.LatestKnownSequencingTimeUpdate(latestKnownSequencingTime) =>
+        mempoolState.updateLatestKnownSequencingTime(latestKnownSequencingTime)
 
       // From P2P output module
       case upd @ Mempool.P2PConnectivityUpdate(membership, authenticatedCountIncludingSelf) =>
@@ -199,22 +198,21 @@ class MempoolModule[E <: Env[E]](
     }
 
   private def createAndSendBatch()(implicit context: E#ActorContextT[Mempool.Message]): Unit = {
-    val requestsAndSpans =
-      dequeueN(
-        mempoolState.receivedOrderRequests,
-        currentOrderingTopology.sequencingParameters.maxRequestsInBatch,
-        maxCombinedWeight = currentOrderingTopology.maxRequestPayloadBytes,
-      )(
-        _._1.tx.value.payload.size()
+    val queuedRequests =
+      mempoolState.dequeueForBatch(
+        currentOrderingTopology.sequencingParameters.maxRequestsInBatch.toInt,
+        currentOrderingTopology.maxRequestPayloadBytes,
       )
-    val batchCreationInstant = Instant.now
-    locally {
-      val requests = requestsAndSpans.map(_._1.tx)
-      implicit val traceContext = context.traceContextOfBatch(requests)
-      emitRequestsQueuedForBatchInclusionLatencies(requests, batchCreationInstant)
-      availability.asyncSend(Availability.LocalDissemination.LocalBatchCreated(requests))
+    if (queuedRequests.nonEmpty) {
+      val batchCreationInstant = Instant.now
+      locally {
+        val requests = queuedRequests.map(_.orderRequest.tx)
+        implicit val traceContext = context.traceContextOfBatch(requests)
+        emitRequestsQueuedForBatchInclusionLatencies(requests, batchCreationInstant)
+        availability.asyncSend(Availability.LocalDissemination.LocalBatchCreated(requests))
+      }
+      queuedRequests.foreach(_.span.end())
     }
-    requestsAndSpans.foreach(_._2.end())
     emitStateStats(metrics, mempoolState)
   }
 

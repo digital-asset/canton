@@ -498,7 +498,7 @@ object PendingOperationStoreTest {
     def name: String = "TestPendingOperationMessage"
 
     override val versioningTable: VersioningTable = VersioningTable(
-      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(VersionedMessageV0)(
+      ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(VersionedMessageV0)(
         supportedProtoVersion(_)(fromProtoV0),
         _.toProtoV0,
       )

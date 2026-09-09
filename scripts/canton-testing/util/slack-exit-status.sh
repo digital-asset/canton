@@ -13,14 +13,24 @@ slack-exit-status() {
   set +eu +o pipefail
   TEST_NAME=${CURRENT_JOB_NAME:-unknown}
 
-  echo
-  echo "Posting exit code $EXIT_CODE to slack..."
-  if [ "$EXIT_CODE" -eq 0 ]; then
-    send-slack-message.sh "Performance test '$TEST_NAME' has terminated normally at $HOSTNAME with exit code $EXIT_CODE."
+  if [[ "${IS_LOCAL_DEV_RUN:-false}" == "true" ]]; then
+    echo
+    echo "[LOCAL RUN] Exit status for '$TEST_NAME' at $HOSTNAME: code $EXIT_CODE"
+    if [ "$EXIT_CODE" -ne 0 ]; then
+      LOGS_LOCATION=$( [ -d "$LOGS_DIR" ] && echo "$LOGS_DIR" || echo "${CRON_OUTPUT_FILE:-unknown}" )
+      echo "[LOCAL RUN] Test failed. Logs location: $LOGS_LOCATION"
+    fi
+    echo
   else
-    # If the build failed, the logs directory does not yet exist; point to the CRON output file instead.
-    LOGS_LOCATION=$( [ -d "$LOGS_DIR" ] && echo "$LOGS_DIR" || echo "${CRON_OUTPUT_FILE:-unknown}" )
-    send-slack-message.sh "<!here> :bangbang: Performance test '$TEST_NAME' has terminated at $HOSTNAME with non-zero exit code $EXIT_CODE! Log location is \`$LOGS_LOCATION\`. The person on the CI rota should investigate."
+    echo
+    echo "Posting exit code $EXIT_CODE to slack..."
+    if [ "$EXIT_CODE" -eq 0 ]; then
+      send-slack-message.sh "Performance test '$TEST_NAME' has terminated normally at $HOSTNAME with exit code $EXIT_CODE."
+    else
+      # If the build failed, the logs directory does not yet exist; point to the CRON output file instead.
+      LOGS_LOCATION=$( [ -d "$LOGS_DIR" ] && echo "$LOGS_DIR" || echo "${CRON_OUTPUT_FILE:-unknown}" )
+      send-slack-message.sh "<!here> :bangbang: Performance test '$TEST_NAME' has terminated at $HOSTNAME with non-zero exit code $EXIT_CODE! Log location is \`$LOGS_LOCATION\`. The person on the CI rota should investigate."
+    fi
   fi
 
   echo

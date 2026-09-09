@@ -23,7 +23,7 @@ import com.digitalasset.canton.platform.apiserver.services.metrics.{
   TrafficEnforcementInventory,
   TrafficEnforcementMetrics,
 }
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 
 import scala.collection.concurrent.TrieMap
 
@@ -151,7 +151,10 @@ class ParticipantMetrics(
 
   val pruning = new ParticipantPruningMetrics(inventory.pruning, openTelemetryMetricsFactory)
 
-  def connectedSynchronizerMetrics(alias: SynchronizerAlias): ConnectedSynchronizerMetrics =
+  def connectedSynchronizerMetrics(
+      alias: SynchronizerAlias,
+      participantId: ParticipantId,
+  ): ConnectedSynchronizerMetrics =
     clients
       .getOrElseUpdate(
         alias,
@@ -163,7 +166,12 @@ class ParticipantMetrics(
           new ConnectedSynchronizerMetrics(
             inventory.connectedSynchronizer,
             openTelemetryMetricsFactory,
-          )(mc.withExtraLabels("synchronizer" -> alias.unwrap))
+          )(
+            mc.withExtraLabels(
+              "synchronizer" -> alias.unwrap,
+              "participant_id" -> participantId.toProtoPrimitive.stripPrefix("PAR::"),
+            )
+          )
         ),
       )
       .value

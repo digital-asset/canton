@@ -9,7 +9,6 @@ import com.auth0.jwt.interfaces.DecodedJWT as Auth0DecodedJWT
 import com.daml.jwt.{
   AuthServiceJWTCodec,
   AuthServiceJWTPayload,
-  Error as JwtError,
   Jwt,
   JwtDecoder,
   JwtException,
@@ -17,6 +16,7 @@ import com.daml.jwt.{
   JwtVerifier,
   Leeway,
   PartyJWTPayload,
+  Error as JwtError,
 }
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.auth.{AuthService, ClaimSet, UninitializedPartyJWTAuthService}

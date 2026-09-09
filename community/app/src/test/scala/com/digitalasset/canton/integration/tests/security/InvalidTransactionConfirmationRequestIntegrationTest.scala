@@ -47,12 +47,9 @@ import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
   EncryptedMultipleViews,
-  EncryptedView,
   EncryptedViewMessage,
   RootHashMessage,
   TransactionConfirmationRequest,
-  TransactionMultiViewMessage,
-  TransactionSingleViewMessage,
 }
 import com.digitalasset.canton.protocol.{
   ContractInstance,
@@ -116,6 +113,7 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )
@@ -689,39 +687,23 @@ trait InvalidTransactionConfirmationRequestIntegrationTest
                 )(bytes)
                 .leftMap(err => DefaultDeserializationError(err.message))
 
-            val viewTree = message match {
-              case singleViewMessage: TransactionSingleViewMessage =>
-                val encryptedViewTree = singleViewMessage.encryptedView.viewTree
+            val viewTree = {
+              val encryptedViewTrees = message.encryptedViews.viewTrees
 
-                EncryptedView
-                  .decrypt[LightTransactionViewTree](
-                    pureCrypto,
-                    viewKey,
-                    encryptedViewTree,
-                    testedProtocolVersion,
-                  )(
-                    deserialize,
-                    MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
-                  )
-                  .value
-              case multipleViewsMessage: TransactionMultiViewMessage =>
-                val encryptedViewTrees = multipleViewsMessage.encryptedViews.viewTrees
+              val viewTrees = EncryptedMultipleViews
+                .decrypt[LightTransactionViewTree](
+                  testedProtocolVersion,
+                  pureCrypto,
+                  viewKey,
+                  encryptedViewTrees,
+                )(
+                  deserialize,
+                  MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
+                )
+                .value
 
-                val viewTrees = EncryptedMultipleViews
-                  .decrypt[LightTransactionViewTree](
-                    testedProtocolVersionValidation,
-                    pureCrypto,
-                    viewKey,
-                    encryptedViewTrees,
-                    testedProtocolVersion,
-                  )(
-                    deserialize,
-                    MaxBytesToDecompress(synchronizerParameters.maxRequestSize),
-                  )
-                  .value
-
-                viewTrees.viewTrees.length shouldBe 1
-                viewTrees.viewTrees.head1
+              viewTrees.viewTrees.length shouldBe 1
+              viewTrees.viewTrees.head1
             }
 
             // change the randomness assigned to the first subview in the view tree

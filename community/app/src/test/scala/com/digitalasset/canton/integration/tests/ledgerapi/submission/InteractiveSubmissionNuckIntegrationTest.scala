@@ -13,9 +13,9 @@ import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.value as lapiValue
 import com.daml.ledger.javaapi.data.{
   Command,
-  CreatedEvent as JCreatedEvent,
   ExerciseByKeyCommand,
   Value,
+  CreatedEvent as JCreatedEvent,
 }
 import com.digitalasset.canton.damltestslf23.java.basickeys.{BasicKey, KeyOps}
 import com.digitalasset.canton.integration.util.TestUtils

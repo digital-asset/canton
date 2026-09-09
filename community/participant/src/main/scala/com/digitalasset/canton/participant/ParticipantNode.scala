@@ -765,8 +765,7 @@ class ParticipantNodeBootstrap(
           persistentState.map(_.settingsStore)
         )
 
-        // running the new pipeline requires both dev-version-support and the digest processor to be explicitly enabled
-        acsDigestProcessorEnabled = parameters.acsCommitments.enableRunningDigestProcessor
+        acsDigestProcessorEnabled = parameters.acsCommitments.enableNewAcsCommitmentProcessor
 
         pruningProcessor = new PruningProcessor(
           persistentState,
@@ -1037,7 +1036,7 @@ class ParticipantNodeBootstrap(
                   ledgerApiStore,
                   ledgerApiStore.stringInterningView,
                   parameters.acsCommitments,
-                  metrics.connectedSynchronizerMetrics(_).commitments,
+                  alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
                   enableAdditionalConsistencyChecks = parameters.enableAdditionalConsistencyChecks,
                   timeouts,
                   loggerFactory,
@@ -1049,7 +1048,7 @@ class ParticipantNodeBootstrap(
                   ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
                   ledgerApiStore.stringInterningView,
                   parameters.acsCommitments.matchingParallelism,
-                  metrics.connectedSynchronizerMetrics(_).commitments,
+                  alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
                   loggerFactory,
                 )
 
@@ -1058,7 +1057,7 @@ class ParticipantNodeBootstrap(
                     digestProcessorFactory,
                     matcherFactory,
                     syncPersistentStateManager.aliasForSynchronizerId,
-                    metrics.connectedSynchronizerMetrics(_).commitments,
+                    alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
                     parameters.exitOnFatalFailures,
                     futureSupervisor,
                     timeouts,
@@ -1097,7 +1096,7 @@ class ParticipantNodeBootstrap(
         // If the new pipeline does not run now, it could have run before restart.
         // So we delete all digests to prevent problems later when the pipeline is re-enabled
         // (e.g., the last checkpoint offset having already been pruned).
-        cleanDigestStore = !parameters.acsCommitments.enableRunningDigestProcessor
+        cleanDigestStore = !parameters.acsCommitments.enableNewAcsCommitmentProcessor
         _ <- EitherT.right(MonadUtil.when(cleanDigestStore) {
           MonadUtil
             .sequentialTraverse_(syncPersistentStateManager.getAllLogical.values) { state =>

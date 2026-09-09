@@ -805,7 +805,6 @@ class BlockSequencer(
           batch,
           trafficParams.readVsWriteScalingFactor,
           groupToMembers,
-          protocolVersion,
           trafficParams.baseEventCost,
         )
       } yield eventCost

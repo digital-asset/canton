@@ -29,7 +29,7 @@ import slick.util.{DumpInfo, Dumpable}
 
 import java.lang.Long as JLong
 import java.net.URI
-import java.time.{Duration as JDuration, Instant}
+import java.time.{Instant, Duration as JDuration}
 import java.util.UUID
 import scala.annotation.nowarn
 import scala.concurrent.duration.{Duration, FiniteDuration}
@@ -69,6 +69,8 @@ trait PrettyInstances {
   implicit def prettyLong: Pretty[Long] = prettyOfString(_.toString)
 
   implicit def prettyBigDecimal: Pretty[BigDecimal] = prettyOfString(_.toString)
+
+  implicit def prettyBigInt: Pretty[BigInt] = prettyOfString(_.toString)
 
   implicit def prettyJLong: Pretty[JLong] = prettyOfString(_.toString)
 

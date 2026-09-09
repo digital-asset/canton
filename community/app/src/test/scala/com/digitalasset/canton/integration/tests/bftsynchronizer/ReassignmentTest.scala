@@ -162,7 +162,9 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
     import env.*
 
     val mediatorsD2b = Seq(mediator4)
-    val medD2bIdentity = mediatorsD2b.flatMap(_.topology.transactions.identity_transactions())
+    val medD2bIdentity = mediatorsD2b.flatMap(
+      _.topology.transactions.generate_onboarding_transactions(testedProtocolVersion)
+    )
     synchronizerOwnersD2.head.topology.transactions
       .load(medD2bIdentity, synchronizerId2, ForceFlag.AlienMember)
 

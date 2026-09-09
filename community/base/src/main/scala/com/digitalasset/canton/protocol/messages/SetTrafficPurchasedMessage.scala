@@ -69,7 +69,7 @@ object SetTrafficPurchasedMessage
   override val name: String = "SetTrafficPurchasedMessage"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.v34)(
+    ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.SetTrafficPurchasedMessage
     )(
       supportedProtoVersionMemoizedPVV(_)(fromProtoV30),

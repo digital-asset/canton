@@ -55,7 +55,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
     SequencingParameters(None)(representativeProtocolVersion)
 
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(
       v30.DynamicSequencingParameters
     )(
       supportedProtoVersion(_)(fromProtoV30),

@@ -7,26 +7,32 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.health.HealthMonitoringTestUtils
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
-import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
-import com.digitalasset.nonempty.NonEmpty
+import com.digitalasset.canton.topology.UniqueIdentifier
+import com.digitalasset.canton.{HasActorSystem, HasExecutionContext}
 
 /** Test to fully manually initialize synchronizer nodes with identity and topology keys. */
 trait ManualSynchronizerNodesInitIntegrationTest
     extends CommunityIntegrationTest
-    with SharedEnvironment {
+    with SharedEnvironment
+    with HealthMonitoringTestUtils
+    with HasExecutionContext
+    with HasActorSystem {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransform(ConfigTransforms.disableAutoInit(Set("sequencer1", "mediator1")))
+      .addConfigTransforms(
+        ConfigTransforms.addMonitoringEndpointAllNodes*
+      )
 
-  private def nodeInit(node: LocalInstanceReference): Unit = {
+  private def nodeInit(node: LocalInstanceReference)(implicit env: FixtureParam) = {
     // create namespace key for the node
     val namespaceKey = node.keys.secret
       .generate_signing_key(
@@ -35,44 +41,21 @@ trait ManualSynchronizerNodesInitIntegrationTest
       )
 
     node.health.wait_for_ready_for_id()
+    withHealthStubs(Seq(node.config.monitoring.grpcHealthServer.value)) { case Seq(healthStub) =>
+      logger.info(s"Checking health of ${node.name} after namespace key generation")
+      checkServing(healthStub, httpHealthConfig = Some(node.config))
+    }
 
     // initialize the node id
     node.topology.init_id_from_uid(
       UniqueIdentifier.tryCreate(node.name, namespaceKey.fingerprint)
     )
 
-    node.health.wait_for_ready_for_node_topology()
-
-    node.topology.namespace_delegations.propose_delegation(
-      Namespace(namespaceKey.fingerprint),
-      namespaceKey,
-      CanSignAllMappings,
-    )
-
-    // every node needs to create a signing key
-    val protocolSigningKey = node.keys.secret
-      .generate_signing_key(
-        s"${node.name}-${SigningKeyUsage.Protocol.identifier}",
-        usage = SigningKeyUsage.ProtocolOnly,
-      )
-
-    // create a sequencer authentication signing key for the mediator
-    val sequencerAuthKey = node.keys.secret
-      .generate_signing_key(
-        s"${node.name}-${SigningKeyUsage.SequencerAuthentication.identifier}",
-        usage = SigningKeyUsage.SequencerAuthenticationOnly,
-      )
-
-    val keys = NonEmpty(Seq, protocolSigningKey, sequencerAuthKey)
-
-    node.topology.owner_to_key_mappings.propose(
-      member = node.id.member,
-      keys = keys,
-      signedBy = (namespaceKey +: keys).map(_.fingerprint),
-    )
-
     node.health.wait_for_ready_for_initialization()
-
+    withHealthStubs(Seq(node.config.monitoring.grpcHealthServer.value)) { case Seq(healthStub) =>
+      logger.info(s"Checking health of ${node.name} after node id initialization")
+      checkServing(healthStub, httpHealthConfig = Some(node.config))
+    }
   }
 
   "manually initialize the mediator node" in { implicit env =>

@@ -11,7 +11,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   MinLedgerTime,
 }
 import com.daml.ledger.api.v2.transaction_filter.TransactionFormat
-import com.daml.ledger.api.v2.{crypto as lapicrypto, package_reference}
+import com.daml.ledger.api.v2.{package_reference, crypto as lapicrypto}
 import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput, v2Endpoint}
@@ -333,6 +333,9 @@ object JsInteractiveSubmissionServiceCodecs {
 
   implicit val executeSubmissionResponseRW
       : Codec[interactive_submission_service.ExecuteSubmissionResponse] =
+    deriveRelaxedCodec
+
+  implicit val reassignmentCostRW: Codec[interactive_submission_service.ReassignmentCost] =
     deriveRelaxedCodec
 
   implicit val estimateTrafficCostResponseRW: Codec[interactive_submission_service.CostEstimation] =

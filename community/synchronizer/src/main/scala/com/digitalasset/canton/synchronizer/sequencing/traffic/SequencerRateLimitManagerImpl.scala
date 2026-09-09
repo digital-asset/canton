@@ -358,7 +358,6 @@ class SequencerRateLimitManagerImpl(
         batch,
         parameters.readVsWriteScalingFactor,
         groupToMembers,
-        protocolVersion,
         parameters.baseEventCost,
       )
     } yield ValidCostWithDetails(

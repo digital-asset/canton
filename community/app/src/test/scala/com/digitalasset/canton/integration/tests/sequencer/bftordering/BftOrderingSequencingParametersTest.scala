@@ -72,6 +72,7 @@ class BftOrderingSequencingParametersTest extends CommunityIntegrationTest with 
             newPbftViewChangeTimeout,
             newSegmentLength,
             newLeaderSelectionPolicyConfig,
+            stricterDetectionOfRequestsPotentiallyChangingOrderingTopology = true,
           )(
             testedProtocolVersion
           )

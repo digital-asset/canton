@@ -247,7 +247,6 @@ class FixedSyncCryptoApiForSigning(
         participantId: ParticipantId,
         packages: Set[PackageId],
         ledgerTime: CantonTimestamp,
-        checkDependencyVetting: Boolean,
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages] =
       notImplementedUS
 

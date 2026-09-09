@@ -117,6 +117,7 @@ sealed trait InvalidReassignmentIdIntegrationTest
           participant1,
           acmeId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )

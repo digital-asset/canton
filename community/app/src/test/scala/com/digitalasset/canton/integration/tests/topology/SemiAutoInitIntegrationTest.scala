@@ -23,6 +23,7 @@ import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
   CanSignAllButNamespaceDelegations,
   CanSignAllMappings,
 }
+import com.digitalasset.canton.topology.transaction.OwnerToKeyMapping
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
 import com.digitalasset.canton.util.SingleUseCell
@@ -95,6 +96,8 @@ class SemiAutoInitIntegrationTest
       )
       .withSetup(_.participant2.start())
 
+  val sequencer1Identity = new SingleUseCell[Seq[GenericSignedTopologyTransaction]]()
+
   "identity is manual, but keys are automatic" when {
     "node can be started" in { implicit env =>
       import env.*
@@ -119,15 +122,19 @@ class SemiAutoInitIntegrationTest
 
     }
 
-    "node has created and used the intermediate certificate" in { implicit env =>
+    "node can create and use the intermediate certificate" in { implicit env =>
       import env.*
+      val identity =
+        sequencer1.topology.transactions.generate_onboarding_transactions(testedProtocolVersion)
       val intermediateKey = sequencer1.keys.secret
         .list(filterName = "sequencer1-intermediate-namespace")
         .headOption
         .valueOrFail("should have")
-      val otk =
-        sequencer1.topology.owner_to_key_mappings.list().headOption.valueOrFail("should have")
-      otk.context.signedBy.forgetNE should contain(intermediateKey.id)
+      sequencer1Identity.putIfAbsent(identity)
+      identity
+        .flatMap(_.selectMapping[OwnerToKeyMapping])
+        .flatMap(_.signatures.forgetNE)
+        .map(_.authorizingLongTermKey) should contain(intermediateKey.id)
     }
 
     "node can be restarted" in { implicit env =>
@@ -177,6 +184,8 @@ class SemiAutoInitIntegrationTest
 
   }
 
+  val mediator2Identity = new SingleUseCell[Seq[GenericSignedTopologyTransaction]]()
+
   "identity is external, but keys are automatic" when {
     "we can startup and create a signing key" in { implicit env =>
       import env.*
@@ -193,7 +202,20 @@ class SemiAutoInitIntegrationTest
         mediator2.health.is_ready_for_initialization() shouldBe true
       }
       mediator2.keys.secret.list().map(_.id) should contain(intermediateKey.id)
-
+      val temporaryStore = mediator2.topology.stores.create_temporary_topology_store(
+        name = "mediator2-onboarding",
+        protocolVersion = testedProtocolVersion,
+      )
+      mediator2.topology.transactions.load(
+        transactions = Seq(rootNd, intermediateNd),
+        store = temporaryStore,
+      )
+      mediator2Identity.putIfAbsent(
+        mediator2.topology.transactions.generate_onboarding_transactions(
+          protocolVersion = testedProtocolVersion,
+          temporaryStore = Some(temporaryStore),
+        )
+      )
     }
 
     "mediator can be restarted and resumes without certs" in { implicit env =>
@@ -210,7 +232,7 @@ class SemiAutoInitIntegrationTest
 
   "participant can start with external init via admin-api" should {
 
-    val certs = new SingleUseCell[
+    val participant1Certs = new SingleUseCell[
       (GenericSignedTopologyTransaction, GenericSignedTopologyTransaction, SigningPublicKey)
     ]()
 
@@ -223,13 +245,13 @@ class SemiAutoInitIntegrationTest
       val (rootNd, intermediateNd, intermediateKey) =
         createExternalRootKey(participant2, participant1, "participant")
       intermediateNd.writeToFile(intermediateCert.getPath)
-      certs.putIfAbsent((rootNd, intermediateNd, intermediateKey))
+      participant1Certs.putIfAbsent((rootNd, intermediateNd, intermediateKey))
     }
 
     "refuse to start with invalid certs" in { implicit env =>
       import env.*
 
-      val (rootNd, _, intermediateKey) = certs.get.valueOrFail("should have certs")
+      val (rootNd, _, intermediateKey) = participant1Certs.get.valueOrFail("should have certs")
 
       // fail to start with wrong uid
       this.assertThrowsAndLogsCommandFailures(
@@ -265,7 +287,8 @@ class SemiAutoInitIntegrationTest
     "successfully start with valid certs" in { implicit env =>
       import env.*
 
-      val (rootNd, intermediateNd, intermediateKey) = certs.get.valueOrFail("should have certs")
+      val (rootNd, intermediateNd, intermediateKey) =
+        participant1Certs.get.valueOrFail("should have certs")
 
       participant1.topology.init_id_from_uid(
         UniqueIdentifier.tryCreate("myparticipant", rootNd.mapping.namespace),
@@ -294,6 +317,10 @@ class SemiAutoInitIntegrationTest
         synchronizerThreshold = PositiveInt.tryCreate(1),
         sequencers = Seq(sequencer1),
         mediators = Seq(mediator2),
+        identityTransactions = Some(
+          mediator2Identity.get.valueOrFail("should have mediator2 identity") ++
+            sequencer1.topology.transactions.generate_onboarding_transactions(testedProtocolVersion)
+        ),
       )
     )
     bootstrap.bootstrap()

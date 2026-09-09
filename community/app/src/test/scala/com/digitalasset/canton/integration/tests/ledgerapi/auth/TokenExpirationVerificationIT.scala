@@ -41,7 +41,7 @@ import java.time.temporal.ChronoUnit
 import java.time.{Duration, Instant}
 import java.util.UUID
 import scala.concurrent.Future
-import scala.concurrent.duration.{Duration as SDuration, FiniteDuration}
+import scala.concurrent.duration.{FiniteDuration, Duration as SDuration}
 
 class TokenExpirationVerificationIT
     extends CantonFixture

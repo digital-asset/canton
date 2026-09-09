@@ -57,7 +57,7 @@ class JsApiDocsService(
     apiDocsCache.get().map(Future.successful(_)).getOrElse {
       for {
         version <- versionClient.getApiVersion(token)
-        protoDocs = apidocsGenerator.loadProtoData()
+        protoDocs = apidocsGenerator.cachedProtoData()
         apidocs = apidocsGenerator.createDocs(version, endpointDescriptions, protoDocs)
         _ = apiDocsCache.set(Some(apidocs))
       } yield apidocs

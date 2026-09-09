@@ -188,6 +188,7 @@ trait TopologyManagementIntegrationTest
         sequencer1.namespace,
         intermediateCAKey,
         CanSignAllButNamespaceDelegations,
+        store = daId,
       )
 
       eventually() {
@@ -1585,15 +1586,18 @@ trait TopologyManagementIntegrationTest
       participant1.topology.owner_to_key_mappings.add_key(
         key.fingerprint,
         key.purpose,
+        synchronizerId = daId,
       )
 
       eventually() {
         participant1.topology.owner_to_key_mappings.list(
+          store = daId,
           filterKeyOwnerUid = participant1.filterString,
           filterKeyOwnerType = Some(SequencerId.Code),
         ) shouldBe empty
         participant1.topology.owner_to_key_mappings
           .list(
+            store = daId,
             filterKeyOwnerUid = participant1.filterString,
             filterKeyOwnerType = Some(ParticipantId.Code),
             proposals = true,
@@ -1602,6 +1606,7 @@ trait TopologyManagementIntegrationTest
 
         participant1.topology.owner_to_key_mappings
           .list(
+            store = daId,
             filterKeyOwnerUid = participant1.filterString,
             filterKeyOwnerType = Some(ParticipantId.Code),
           )

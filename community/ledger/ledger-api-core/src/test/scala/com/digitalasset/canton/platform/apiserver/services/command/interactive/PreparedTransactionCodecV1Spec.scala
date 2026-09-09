@@ -37,9 +37,9 @@ import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   Node,
   NodeId,
-  SerializationVersion as LfSerializationVersion,
   SubmittedTransaction,
   VersionedTransaction,
+  SerializationVersion as LfSerializationVersion,
 }
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.value.test.ValueGenerators

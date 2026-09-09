@@ -219,7 +219,7 @@ object StoredTopologyTransaction
   override def supportedProtoVersions: StoredTopologyTransaction.SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        ProtocolVersion.v34,
+        ProtocolVersion.v35,
         supportedProtoVersion(adminTopoV30.TopologyTransactions.Item)(fromProtoV30),
         _.toAdminProtoV30,
       )
@@ -1021,10 +1021,7 @@ final case class UnknownOrUnvettedPackages(
 final case class ResolvedPackagesAndDependencies(
     mainPackageIds: Set[PackageId],
     mainPackageAndDependencyIds: Set[PackageId],
-) {
-  def packageIds(withDependencies: Boolean): Set[PackageId] =
-    if (withDependencies) mainPackageAndDependencyIds else mainPackageIds
-}
+)
 
 object ResolvedPackagesAndDependencies {
   val empty: ResolvedPackagesAndDependencies = ResolvedPackagesAndDependencies(Set.empty, Set.empty)

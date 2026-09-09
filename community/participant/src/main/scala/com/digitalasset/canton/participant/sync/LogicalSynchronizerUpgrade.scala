@@ -18,7 +18,7 @@ import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LifeCycleContainer
 import com.digitalasset.canton.participant.admin.data.ManualLsuRequest as AdminManualLsuRequest
-import com.digitalasset.canton.participant.config.LsuConfig
+import com.digitalasset.canton.participant.config.{AcsCommitmentConfig, LsuConfig}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.UnknownPsid
@@ -586,7 +586,7 @@ class AutomaticLogicalSynchronizerUpgrade(
     override val pendingLsuOperationsStore: PendingLsuOperation.Store,
     override val lsuConfig: LsuConfig,
     override val loggerFactory: NamedLoggerFactory,
-    disableLegacyAcsCommitmentProcessor: Boolean,
+    disableLegacyAcsCommitmentProcessor: AcsCommitmentConfig.DisableOldAcsCommitmentProcessor,
 )(override val request: FullAutomaticLsuRequest)(implicit
     override val executionContext: ExecutionContext,
     override val traceContext: TraceContext,
@@ -676,7 +676,12 @@ class AutomaticLogicalSynchronizerUpgrade(
     def runningCommitmentWatermarkCheck(
         currentSyncPersistentState: SyncPersistentState
     ): EitherT[FutureUnlessShutdown, NegativeResult, Unit] =
-      if (disableLegacyAcsCommitmentProcessor) EitherTUtil.unitUS
+      if (
+        !AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.isOldProcessorEnabled(
+          disableLegacyAcsCommitmentProcessor,
+          currentPsid.protocolVersion,
+        )
+      ) EitherTUtil.unitUS
       else {
         val fut = currentSyncPersistentState.acsCommitmentStore.runningCommitments.watermark.map {
           watermark =>

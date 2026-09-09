@@ -27,8 +27,8 @@ import com.digitalasset.canton.ledger.api.validation.{
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.index.{
-  IndexActiveContractsService as ACSBackend,
   IndexUpdateService,
+  IndexActiveContractsService as ACSBackend,
 }
 import com.digitalasset.canton.ledger.participant.state.{SyncService, SynchronizerIndex}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown

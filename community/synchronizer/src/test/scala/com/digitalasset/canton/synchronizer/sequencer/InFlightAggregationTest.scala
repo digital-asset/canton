@@ -169,9 +169,7 @@ class InFlightAggregationTest
       aggregatedSenders = SortedMap.empty,
       maxSequencingTimestamp = maxTs,
       rule = AggregationRule.activeMediators(
-        NonEmpty.mk(Seq, mediator1, mediator2, mediator3),
         groupIndex = NonNegativeInt.zero,
-        threshold = PositiveInt.two,
         protocolVersion = testedProtocolVersion,
       ),
       cachedDeliveredAt = Some(None),

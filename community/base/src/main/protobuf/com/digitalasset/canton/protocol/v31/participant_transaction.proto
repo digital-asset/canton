@@ -14,7 +14,6 @@ import "scalapb/scalapb.proto";
 
 // Messages sent by a participant as part of the transaction protocol
 
-// Compared to v30: ExternalAuthorization updated to v31
 message SubmitterMetadata {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 

@@ -32,7 +32,7 @@ import org.slf4j.event
 
 trait SingleVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
   protected def lfVersion: LanguageVersion =
-    AvailableTests.testsForProtocol(testedProtocolVersion).lfVersion
+    AvailableTests.latestStableLf.lfVersion
 
   protected def lapittVersion: LAPITTVersion = LAPITTVersion.Local
 
@@ -137,7 +137,7 @@ class LedgerApiConformanceMultiSynchronizerTest
     new UseLedgerApiTestTool(
       loggerFactory,
       connectedSynchronizersCount = connectedSynchronizersCount,
-      lfVersion = AvailableTests.testsForProtocol(testedProtocolVersion).lfVersion,
+      lfVersion = AvailableTests.latestStableLf.lfVersion,
       version = LAPITTVersion.Local,
     )
   registerPlugin(new UsePostgres(loggerFactory))
@@ -221,11 +221,6 @@ object LedgerApiConformanceBase {
     "RaceConditionIT:RWTransientCreateVsNonTransientCreate",
   )
 
-  private val excludedTestsForPV34 = Seq(
-    // Package dependency unvetting becomes supported starting with PV35
-    "VettingIT:PVUnvettedDependenciesSupported"
-  )
-
   private val excludedTestsForPV35AndAbove = Seq(
     // Test disabled due to package dependency unvetting becoming supported starting with PV35
     "VettingIT:PVCheckUnvettedPackagesExceptWithForceFlag"
@@ -248,7 +243,6 @@ object LedgerApiConformanceBase {
   def excludedTests(version: ProtocolVersion, protocolType: ProtocolType): Set[String] = {
     val perProtocolVersionExclusions =
       (version, protocolType) match {
-        case (ProtocolVersion.v34, _) => excludedTestsForPV34
         case (ProtocolVersion.v35, Json) => excludedTestsForPV35AndAbove ++ jsonExcludedTestsForPV35
         case (version, _) if version >= ProtocolVersion.v35 => excludedTestsForPV35AndAbove
         case _ => Seq.empty

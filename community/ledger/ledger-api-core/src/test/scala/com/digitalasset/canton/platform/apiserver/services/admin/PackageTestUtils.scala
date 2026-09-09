@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services.admin
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.archive.testing.Encode
-import com.digitalasset.daml.lf.archive.{Dar as LfDar, DarWriter}
+import com.digitalasset.daml.lf.archive.{DarWriter, Dar as LfDar}
 import com.digitalasset.daml.lf.data.Ref.PackageName
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}

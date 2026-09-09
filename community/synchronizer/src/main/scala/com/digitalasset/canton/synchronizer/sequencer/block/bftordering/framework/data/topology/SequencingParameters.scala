@@ -19,7 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   HowManyCanWeBlacklist,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.{v30, v31}
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v31
 import com.digitalasset.canton.time.PositiveFiniteDuration
 import com.digitalasset.canton.version.{
   HasProtocolVersionedWrapper,
@@ -50,6 +50,7 @@ final case class SequencingParameters private (
     blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
     maxRequestsInBatch: Short,
     maxBatchesPerBlockProposal: Short,
+    stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       topology.SequencingParameters.type
@@ -93,6 +94,8 @@ final case class SequencingParameters private (
         this.blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short = this.maxRequestsInBatch,
       maxBatchesPerBlockProposal: Short = this.maxBatchesPerBlockProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+        this.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   ): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout = pbftViewChangeTimeout,
@@ -102,11 +105,9 @@ final case class SequencingParameters private (
       blacklistLeaderSelectionPolicyConfig = blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch = maxRequestsInBatch,
       maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(representativeProtocolVersion)
-
-  def toProto30: v30.DynamicSequencingParametersPayload = v30.DynamicSequencingParametersPayload(
-    Option(pbftViewChangeTimeout.toProtoPrimitive)
-  )
 
   def toProto31: v31.DynamicSequencingParametersPayload = v31.DynamicSequencingParametersPayload(
     Option(pbftViewChangeTimeout.toProtoPrimitive),
@@ -116,6 +117,8 @@ final case class SequencingParameters private (
     maxBatchesPerBlockProposal.toInt,
     pbftViewChangeTimeoutStep = Option(pbftViewChangeTimeoutStep.toProtoPrimitive),
     pbftViewChangeTimeoutUpperBound = Option(pbftViewChangeTimeoutUpperBound.toProtoPrimitive),
+    stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   )
 }
 
@@ -157,6 +160,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
   val DefaultSegmentLength: SegmentLength = SegmentLength(PositiveLong.tryCreate(10L))
   val DefaultMaxRequestsInBatch: Short = 32
   val DefaultMaxBatchesPerProposal: Short = 16
+  val DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+    false
   def Default(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       DefaultPbftViewChangeTimeout,
@@ -166,6 +171,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -178,27 +185,11 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       NoBlacklistingLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
-
-  def fromProto30(
-      proto: v30.DynamicSequencingParametersPayload
-  ): ParsingResult[SequencingParameters] =
-    for {
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
-      pbftViewChangeTimeout <- PositiveFiniteDuration.fromProtoPrimitiveO("pbftViewChangeTimeout")(
-        proto.pbftViewChangeTimeout
-      )
-    } yield SequencingParameters(
-      pbftViewChangeTimeout,
-      DefaultPbftViewChangeTimeoutStep,
-      DefaultPbftViewChangeTimeoutUpperBound,
-      DefaultSegmentLength,
-      DefaultLeaderSelectionPolicyConfig,
-      DefaultMaxRequestsInBatch,
-      DefaultMaxBatchesPerProposal,
-    )(rpv)
 
   def fromProto31(
       proto: v31.DynamicSequencingParametersPayload
@@ -237,6 +228,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
         if (proto.maxBatchesPerProposal == 0L) DefaultMaxBatchesPerProposal
         else proto.maxBatchesPerProposal.toShort
       }
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        proto.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology
     } yield SequencingParameters(
       pbftViewChangeTimeout,
       pbftViewChangeTimeoutStep,
@@ -245,26 +238,20 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch,
       maxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(rpv)
 
   override def name: String = "SequencingParameters"
 
   override def versioningTable: data.topology.SequencingParameters.VersioningTable =
     VersioningTable(
-      ProtoVersion(30) ->
-        VersionedProtoCodec(ProtocolVersion.v34)(
-          v30.DynamicSequencingParametersPayload
-        )(
-          supportedProtoVersion(_)(SequencingParameters.fromProto30),
-          _.toProto30,
-        ),
       ProtoVersion(31) ->
         VersionedProtoCodec(ProtocolVersion.v35)(
           v31.DynamicSequencingParametersPayload
         )(
           supportedProtoVersion(_)(SequencingParameters.fromProto31),
           _.toProto31,
-        ),
+        )
     )
 
   def create(
@@ -277,6 +264,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       pbftViewChangeTimeoutStep: NonNegativeFiniteDuration = DefaultPbftViewChangeTimeoutStep,
       pbftViewChangeTimeoutUpperBound: NonNegativeFiniteDuration =
         DefaultPbftViewChangeTimeoutUpperBound,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout,
@@ -286,6 +275,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch,
       maxBatchesPerBlockProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )

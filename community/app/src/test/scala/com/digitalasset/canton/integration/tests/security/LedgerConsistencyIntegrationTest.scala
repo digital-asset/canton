@@ -30,6 +30,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.config.AcsCommitmentConfig
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
@@ -132,7 +133,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
         ),
         // disable old acs commitment processor
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor).replace(true)
+          _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
+            .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always)
         ),
       )
       .withSetup { implicit env =>
@@ -178,6 +180,7 @@ abstract sealed class LedgerConsistencyIntegrationTest
           participant1,
           daId,
           testedProtocolVersion,
+          defaultProtocolLimits,
           timeouts,
           loggerFactory,
         )

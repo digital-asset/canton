@@ -22,6 +22,7 @@ object CompressionAlgorithm {
       case CompressionAlgo.Zstd => ZSTD
     }
 
+  // TODO(#35535) Can we kill this instance?
   case object Unspecified extends CompressionAlgorithm {
     override def toProtoV30: CompressedBatch.CompressionAlgorithm =
       v30.CompressedBatch.CompressionAlgorithm.COMPRESSION_ALGORITHM_UNSPECIFIED

@@ -31,13 +31,13 @@ import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.topology.{
   ForceFlag,
   ForceFlags,
-  ParticipantId as TopoParticipantId,
   SynchronizerId,
   UniqueIdentifier,
+  ParticipantId as TopoParticipantId,
 }
 import com.digitalasset.canton.util.{EitherUtil, OptionUtil}
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPackageVersion}
-import com.digitalasset.daml.lf.command.{ApiCommands as LfCommands, ApiContractKey}
+import com.digitalasset.daml.lf.command.{ApiContractKey, ApiCommands as LfCommands}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.logging.*
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}

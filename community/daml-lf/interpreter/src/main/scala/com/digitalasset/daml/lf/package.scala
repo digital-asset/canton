@@ -5,9 +5,9 @@ package com.digitalasset.daml.lf
 
 import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.transaction.{
-  NextGenContractStateMachine as ContractStateMachine,
   Node,
   NodeId,
+  NextGenContractStateMachine as ContractStateMachine,
   TransactionError as TxErr,
 }
 

@@ -6,8 +6,9 @@ package com.digitalasset.canton.ledger.api.validation
 import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
 import com.daml.ledger.api.v2.transaction_filter.{
-  EventFormat as ProtoEventFormat,
   Filters,
+  WildcardFilter,
+  EventFormat as ProtoEventFormat,
   InterfaceFilter as ProtoInterfaceFilter,
   ParticipantAuthorizationTopologyFormat as ProtoParticipantAuthorizationTopologyFormat,
   TemplateFilter as ProtoTemplateFilter,
@@ -15,7 +16,6 @@ import com.daml.ledger.api.v2.transaction_filter.{
   TransactionFormat as ProtoTransactionFormat,
   TransactionShape as ProtoTransactionShape,
   UpdateFormat as ProtoUpdateFormat,
-  WildcardFilter,
 }
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.ledger.api.validation.ValueValidator.*

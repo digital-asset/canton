@@ -28,7 +28,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
-import com.digitalasset.canton.topology.{Namespace, UniqueIdentifier}
+import com.digitalasset.canton.topology.{Namespace, ParticipantId, UniqueIdentifier}
 import com.digitalasset.canton.version.ReleaseVersion
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
@@ -188,44 +188,47 @@ trait MemberAutoInitIntegrationTest
                 name = s"${node.name}-${SigningKeyUsage.Namespace.identifier}",
                 SigningKeyUsage.NamespaceOnly,
               )
-          val sequencerAuthKey =
-            node.keys.secret
-              .generate_signing_key(
-                name = s"${node.name}-${SigningKeyUsage.SequencerAuthentication.identifier}",
-                SigningKeyUsage.SequencerAuthenticationOnly,
-              )
-          val signingKey =
-            node.keys.secret
-              .generate_signing_key(
-                name = s"${node.name}-${SigningKeyUsage.Protocol.identifier}",
-                SigningKeyUsage.ProtocolOnly,
-              )
-          // Only participants need an encryption key, but for simplicity every node gets one
-          val encryptionKey =
-            node.keys.secret.generate_encryption_key(name = node.name + "-encryption")
-          val namespace = Namespace(namespaceKey.id)
 
           // waiting for ready-for-id is automatically done in init_id,
           // but doing it explicitly here for the purpose of the test
           node.health.wait_for_ready_for_id()
+          val namespace = Namespace(namespaceKey.id)
           node.topology.init_id_from_uid(
             UniqueIdentifier.tryCreate("manual-" + base, namespace)
           )
 
-          node.health.wait_for_ready_for_node_topology()
-          logger.debug(s"Adding root certificate for manual-$base")
-          node.topology.namespace_delegations.propose_delegation(
-            namespace,
-            namespaceKey,
-            CanSignAllMappings,
-          )
-          logger.debug(s"Adding owner-to-key mappings for manual-$base")
-          node.topology.owner_to_key_mappings.propose(
-            member = node.id.member,
-            keys = NonEmpty(Seq, sequencerAuthKey, signingKey, encryptionKey),
-            signedBy =
-              Seq(namespaceKey.fingerprint, sequencerAuthKey.fingerprint, signingKey.fingerprint),
-          )
+          // For non-participant nodes, we are done at this point.
+          if (node.id.member.code == ParticipantId.Code) {
+            val sequencerAuthKey =
+              node.keys.secret
+                .generate_signing_key(
+                  name = s"${node.name}-${SigningKeyUsage.SequencerAuthentication.identifier}",
+                  SigningKeyUsage.SequencerAuthenticationOnly,
+                )
+            val signingKey =
+              node.keys.secret
+                .generate_signing_key(
+                  name = s"${node.name}-${SigningKeyUsage.Protocol.identifier}",
+                  SigningKeyUsage.ProtocolOnly,
+                )
+            val encryptionKey =
+              node.keys.secret.generate_encryption_key(name = node.name + "-encryption")
+
+            node.health.wait_for_ready_for_node_topology()
+            logger.debug(s"Adding root certificate for manual-$base")
+            node.topology.namespace_delegations.propose_delegation(
+              namespace,
+              namespaceKey,
+              CanSignAllMappings,
+            )
+            logger.debug(s"Adding owner-to-key mappings for manual-$base")
+            node.topology.owner_to_key_mappings.propose(
+              member = node.id.member,
+              keys = NonEmpty(Seq, sequencerAuthKey, signingKey, encryptionKey),
+              signedBy =
+                Seq(namespaceKey.fingerprint, sequencerAuthKey.fingerprint, signingKey.fingerprint),
+            )
+          }
         }
       }
 

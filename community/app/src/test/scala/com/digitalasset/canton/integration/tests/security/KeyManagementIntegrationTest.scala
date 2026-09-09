@@ -16,7 +16,6 @@ import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
 import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
@@ -62,11 +61,14 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
     ),
   )
 
-  protected def setupNamespaceIntermediateKey(node: InstanceReference): SigningPublicKey = {
+  protected def setupNamespaceIntermediateKey(
+      node: InstanceReference,
+      synchronizerId: SynchronizerId,
+  ): SigningPublicKey = {
 
     val namespaceDelegations =
       node.topology.namespace_delegations.list(
-        store = TopologyStoreId.Authorized,
+        store = synchronizerId,
         filterNamespace = node.namespace.toProtoPrimitive,
       )
 
@@ -83,6 +85,7 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
       node.namespace,
       intermediateKey,
       CanSignAllButNamespaceDelegations,
+      store = synchronizerId,
     )
 
     // architecture-handbook-entry-end: CreateNamespaceIntermediateKey
@@ -90,7 +93,7 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
     // Check that the new namespace delegations appears
     eventually() {
       val updatedNamespaceDelegations = node.topology.namespace_delegations.list(
-        store = TopologyStoreId.Authorized,
+        store = synchronizerId,
         filterNamespace = node.namespace.toProtoPrimitive,
       )
       assertResult(1, updatedNamespaceDelegations)(
@@ -104,7 +107,8 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
   protected def rotateIntermediateNamespaceKeyAndPing(
       node: InstanceReference,
       kmsRotationKeyIdO: Option[String],
-      setupIntermediateKey: InstanceReference => SigningPublicKey = setupNamespaceIntermediateKey,
+      setupIntermediateKey: (InstanceReference, SynchronizerId) => SigningPublicKey =
+        setupNamespaceIntermediateKey,
   )(implicit env: TestConsoleEnvironment): Assertion = {
     import env.*
 
@@ -118,14 +122,14 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
         .getOrElse(fail("Cannot get namespace signing key"))
         .publicKey
 
-    val intermediateKey = setupIntermediateKey(node)
+    val intermediateKey = setupIntermediateKey(node, daId)
 
     // To test the namespace key rotation, we assign a new node key to a node authorized with the new intermediate key
     // and remove the previous node key that was authorized by the previous intermediate key.
 
     // Find the current signing key
     val currentSigningKey =
-      getCurrentKey(node, KeyPurpose.Signing, Some(SigningKeyUsage.ProtocolOnly))
+      getCurrentKey(node, KeyPurpose.Signing, Some(SigningKeyUsage.ProtocolOnly), daId)
 
     val newSigningKey = kmsRotationKeyIdO match {
       case Some(kmsKeyId) =>
@@ -146,6 +150,7 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
       newSigningKey.fingerprint,
       KeyPurpose.Signing,
       signedBy = Seq(intermediateKey.fingerprint, newSigningKey.fingerprint),
+      synchronizerId = daId,
     )
 
     waitForKeyTopologyUpdate(
@@ -160,6 +165,7 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
       currentSigningKey.fingerprint,
       currentSigningKey.purpose,
       signedBy = Seq(intermediateKey.fingerprint),
+      synchronizerId = daId,
     )
 
     waitForKeyTopologyUpdate(
@@ -170,7 +176,7 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
     )
 
     // Create a new namespace intermediate key
-    val newIntermediateKey = setupIntermediateKey(node)
+    val newIntermediateKey = setupIntermediateKey(node, daId)
 
     // architecture-handbook-entry-begin: RotateNamespaceIntermediateKey
 
@@ -178,6 +184,7 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
     node.topology.namespace_delegations.propose_revocation(
       node.namespace,
       intermediateKey,
+      store = daId,
     )
 
     // architecture-handbook-entry-end: RotateNamespaceIntermediateKey
@@ -224,8 +231,8 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
     // Find the current key in the node's store
     val currentKey = purpose match {
       case KeyPurpose.Signing =>
-        getCurrentKey(node, purpose, Some(NonEmptyUtil.fromUnsafe(defaultSigningKeyUsage)))
-      case KeyPurpose.Encryption => getCurrentKey(node, purpose, None)
+        getCurrentKey(node, purpose, Some(NonEmptyUtil.fromUnsafe(defaultSigningKeyUsage)), daId)
+      case KeyPurpose.Encryption => getCurrentKey(node, purpose, None, daId)
     }
 
     // Generate a new key on the node
@@ -240,6 +247,7 @@ trait KeyManagementIntegrationTestHelper extends KeyManagementTestHelper {
       owner,
       currentKey,
       newKey,
+      synchronizerId = daId,
     )
 
     // check that only the new key is listed before running a ping
@@ -472,6 +480,7 @@ sealed trait KeyManagementIntegrationTest
           privateKeyMetadata.publicKey.id,
           KeyPurpose.Signing,
           participant1.member,
+          synchronizerId = daId,
         )
 
       waitForKeyTopologyUpdate(
@@ -486,6 +495,7 @@ sealed trait KeyManagementIntegrationTest
         privateKeyMetadata.publicKey.fingerprint,
         KeyPurpose.Signing,
         participant1.member,
+        synchronizerId = daId,
       )
 
       waitForKeyTopologyUpdate(
@@ -600,11 +610,12 @@ sealed trait KeyManagementIntegrationTest
           .valueOrFail("could not find a valid key to rotate")
 
       // Rotate a participant's keys
-      participant1.keys.secret.rotate_node_keys()
+      participant1.keys.secret.rotate_node_keys(synchronizerId = daId)
 
       val p2KeyNew = participant2.keys.secret.rotate_node_key(
         p2Key.publicKey.fingerprint.unwrap,
         "key_rotated",
+        synchronizerId = daId,
       )
 
       val (p2StoredPubKey, p2StoredPubKeyName) = participant2.keys.secret
@@ -620,12 +631,12 @@ sealed trait KeyManagementIntegrationTest
       val newKeys = participant1.keys.secret.list()
       currentKeys should not equal newKeys
 
-      rotateAndTest(sequencer1, environment.clock.now)
-      rotateAndTest(mediator1, environment.clock.now)
+      rotateAndTest(sequencer1, daId, environment.clock.now)
+      rotateAndTest(mediator1, daId, environment.clock.now)
 
       // Rotate the synchronizer keys again (and use snippet for documentation)
-      sequencer1.keys.secret.rotate_node_keys()
-      mediator1.keys.secret.rotate_node_keys()
+      sequencer1.keys.secret.rotate_node_keys(synchronizerId = daId)
+      mediator1.keys.secret.rotate_node_keys(synchronizerId = daId)
 
       participant1.health.ping(participant2)
     }
@@ -672,4 +683,66 @@ sealed trait KeyManagementIntegrationTest
 class KeyManagementBftOrderingIntegrationTestPostgres extends KeyManagementIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
+}
+
+// Our key management utilities (add_key, rotate_key, rotate_node_key, ...) take
+// an optional synchronizer ID as argument.  Ideally users should always specify
+// this, since having different keys per synchronizer improves security posture.
+//
+// For backwards-compatibility, we also allow omitting the argument, but only if
+// there is just a single choice for the synchronizer.
+class KeyManagementAutoDetectSynchronizerIntegrationTest
+    extends CommunityIntegrationTest
+    with SharedEnvironment
+    with KeyManagementIntegrationTestHelper
+    with SecurityTestSuite {
+
+  override lazy val environmentDefinition: EnvironmentDefinition =
+    EnvironmentDefinition.P2_S1M1_S1M1
+      .withSetup { implicit env =>
+        import env.*
+        participants.all.synchronizers.connect_local(sequencer1, alias = daName)
+      }
+
+  "Key management synchronizer auto-detection" should {
+    "work when only a single synchronizer is known" taggedAs rotateNodeKeysTest(
+      "participant node"
+    ) in { implicit env =>
+      import env.*
+
+      participant1.keys.secret.rotate_node_keys(synchronizerId = None)
+    }
+
+    "fail when multiple synchronizers exist" taggedAs rotateNodeKeysTest("participant node") in {
+      implicit env =>
+        import env.*
+
+        val keysBeforeFailedRotation = participant1.keys.secret.list()
+
+        participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
+
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          participant1.keys.secret.rotate_node_keys(synchronizerId = None),
+          _.errorMessage should (
+            include("auto-detect synchronizer") and
+              include("multiple synchronizers: 2 registered, 2 connected")
+          ),
+        )
+
+        participant1.synchronizers.disconnect(acmeName)
+
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          participant1.keys.secret.rotate_node_keys(synchronizerId = None),
+          _.errorMessage should (
+            include("auto-detect synchronizer") and
+              include("multiple synchronizers: 2 registered, 1 connected")
+          ),
+        )
+
+        participant1.health.ping(participant2)
+
+        val keysAfterFailedRotation = participant1.keys.secret.list()
+        keysAfterFailedRotation shouldBe keysBeforeFailedRotation
+    }
+  }
 }

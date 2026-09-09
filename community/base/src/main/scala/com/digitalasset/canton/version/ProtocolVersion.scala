@@ -105,6 +105,10 @@ sealed case class ProtocolVersion private[version] (v: Int)
   def toProtoPrimitiveS: String = v.toString
 
   override def compare(that: ProtocolVersion): Int = v.compare(that.v)
+
+  def nextSupported: Option[ProtocolVersion] = supported.filter(_.v > v).minOption
+
+  def previousSupported: Option[ProtocolVersion] = supported.filter(_.v < v).maxOption
 }
 
 object ProtocolVersion {
@@ -245,10 +249,11 @@ object ProtocolVersion {
       ProtocolVersion(31),
       ProtocolVersion(32),
       ProtocolVersion(33),
+      ProtocolVersion(34),
     )
 
   val stable: NonEmpty[List[StableProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v34, ProtocolVersion.v35)
+    NonEmpty.mk(List, ProtocolVersion.v35)
 
   // LF versions that should only be used with alpha/beta protocol versions
   val alphaOnlyLfVersions: NonEmpty[List[LanguageVersion]] =
@@ -265,7 +270,7 @@ object ProtocolVersion {
     s"stable protocol versions $stable should be in sync with build info $releaseStable",
   )
 
-  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.v36)
+  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.v36, ProtocolVersion.v37)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -320,6 +325,9 @@ object ProtocolVersion {
   lazy val v36: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(36)
 
+  lazy val v37: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    ProtocolVersion.createAlpha(37)
+
   // TODO(#33849): remove and replace with the target protocol version
   lazy val acsCommitmentRedesign: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = v36
 
@@ -330,7 +338,7 @@ object ProtocolVersion {
   lazy val boundsCheck: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
 
   // Minimum stable protocol version introduced
-  lazy val minimum: ProtocolVersion = v34
+  lazy val minimum: ProtocolVersion = v35
 
   private def parseFromBuildInfo(pv: Seq[String]): List[ProtocolVersion] =
     pv.map(parseUncheckedS)

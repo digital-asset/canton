@@ -36,7 +36,7 @@ import java.util.concurrent.{
   ScheduledExecutorService,
   TimeUnit,
 }
-import java.util.{List as JList, UUID}
+import java.util.{UUID, List as JList}
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try

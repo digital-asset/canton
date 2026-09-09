@@ -7,7 +7,7 @@ import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.{UseExtensionService, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.{
   CantonEnvironmentSetup,
   CommunityIntegrationTest,
@@ -456,100 +456,6 @@ abstract class DamlScriptIT(langVersion: LanguageVersion)
 
 }
 
-class DamlScriptPV34LF22IT extends DamlScriptIT(LanguageVersion.v2_2) {
-
-  import DamlScriptIT.ExpectedResult.*
-
-  override lazy val projectName = "ScriptLF22Tests"
-  override lazy val protocolVersionForTesting = ProtocolVersion.v34
-
-  override protected def scriptIdsToTest: List[String] = listDamlScriptIds(projectName)
-
-  override def expectedResults = super.expectedResults ++ List(
-    "ActionTest:testFilterA" -> Success(),
-    "AuthEvalOrder:t1_create_success" -> Failure("t1 finished with no authorization failure"),
-    "AuthEvalOrder:t2_create_badlyAuthorized" -> Failure(
-      "requires authorizers .* but only .* were given"
-    ),
-    "AuthEvalOrder:t3_createViaExerice_success" -> Failure(
-      "t3 finished with no authorization failure"
-    ),
-    "AuthEvalOrder:t4_createViaExerice_badlyAuthorized" -> Failure(
-      "requires authorizers .* but only .* were given"
-    ),
-    "AuthFailure:t1_CreateMissingAuthorization" -> Failure(
-      "requires authorizers .* but only .* were given"
-    ),
-    "AuthFailure:t3_FetchMissingAuthorization" -> Failure(
-      "requires one of the stakeholders .* of the fetched contract to be an authorizer"
-    ),
-    "AuthFailure:t5_ExerciseMissingAuthorization" -> Failure(
-      "requires authorizers .* but only .* were given"
-    ),
-    "AuthorizedDivulgence:test_authorizedFetch" -> Success(),
-    "AuthorizedDivulgence:test_divulgeChoiceTargetContractId" -> Success(),
-    "AuthorizedDivulgence:test_noDivulgenceForFetch" -> Success(),
-    "AuthorizedDivulgence:test_noDivulgenceOfCreateArguments" -> Success(),
-    "BasicTests:test_createAndFetch" -> Success(),
-    "BasicTests:test_doubleLetTest" -> Success(),
-    "BasicTests:test_exponentiation" -> Success(),
-    "BasicTests:test_failedAuths" -> Success(),
-    "BasicTests:test_getTimeTest" -> Success(),
-    "BasicTests:test_letTest" -> Success(),
-    "BasicTests:test_listMatchTest" -> Success(),
-    "BasicTests:test_mustFails" -> Success(),
-    "BasicTests:test_payoutTest" -> Success(),
-    "BasicTests:test_screateAndExercise" -> Success(),
-    "BasicTests:test_screateAndExerciseComposit" -> Success(),
-    "BasicTests:test_sgetTimeTest" -> Success(),
-    "BasicTests:test_testXyzTest" -> Success(),
-    "BasicTests:test_typeWithParameters" -> Success(),
-    "ChoiceShadowing:test1" -> Success(),
-    "CoerceContractId:test" -> Success(),
-    "Conjunction:main" -> Success(),
-    "ConjunctionChoices:demo" -> Success(),
-    "ConsumingTests:main" -> Success(),
-    "CreateAndExercise:main" -> Success(),
-    "DamlScriptTrySubmit:authorizationError" -> Success(),
-    "DamlScriptTrySubmit:failureStatusError" -> Success(),
-    "DamlScriptTrySubmit:wronglyTypedContract" -> Success(),
-    "EqContractId:main" -> Success(),
-    "ExceptionSemantics:handledArithmeticError" -> Success(),
-    "ExceptionSemantics:handledUserException" -> Success(),
-    "ExceptionSemantics:uncaughtArithmeticError" -> Success(),
-    "ExceptionSemantics:uncaughtUserException" -> Success(),
-    "ExceptionSemantics:unhandledArithmeticError" -> Failure(
-      "UNHANDLED_EXCEPTION/DA.Exception.ArithmeticError:ArithmeticError"
-    ),
-    "ExceptionSemantics:unhandledUserException" -> Failure(
-      "UNHANDLED_EXCEPTION/ExceptionSemantics:E"
-    ),
-    "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
-    "ExceptionSemantics:rollbackArchive" -> Success(),
-    "ExceptionSemantics:rollbackConsumingExercise" -> Success(),
-    "ExceptionSemantics:rollbackCreate" -> Success(),
-    "FailedFetch:fetchNonStakeholder" -> Failure("CONTRACT_NOT_FOUND"),
-    "Interface:main" -> Success(),
-    "InterfaceArchive:main" -> Success(),
-    "Iou12:main" -> Success(),
-    "LargeTransaction:largeListAsAChoiceArgTest" -> Success(),
-    "LargeTransaction:largeTransactionWithManyContractsTest" -> Success(),
-    "LargeTransaction:largeTransactionWithOneContractTest" -> Success(),
-    "LargeTransaction:listSizeTest" -> Success(),
-    "LargeTransaction:rangeOfIntsToListContainerTest" -> Success(),
-    "LargeTransaction:rangeOfIntsToListTest" -> Success(),
-    "LargeTransaction:rangeTest" -> Success(),
-    "LedgerTestException:test" -> Failure("ohno"),
-    "LfInterfaces:run" -> Success(),
-    "MoreChoiceObserverDivulgence:test" -> Success(),
-    "Self2:main" -> Success(),
-    "Self:main" -> Success(),
-    "TransientFailure:testBio" -> Failure("FAILED_PRECONDITION"),
-  )
-
-  doRunTests(scriptIdsToTest)
-}
-
 abstract class DamlScriptPV35IT(langVersion: LanguageVersion) extends DamlScriptIT(langVersion) {
 
   import DamlScriptIT.ExpectedResult.*
@@ -932,8 +838,6 @@ class DamlScriptPVDevLFDevIT extends DamlScriptIT(LanguageVersion.v2_dev) {
 // This suite builds ScriptLF24StagingTests at --target=2.4 (Stable(4)) at test runtime; the
 // snapshot's codegen still only accepts Staging(4,1), so the build step fails. Un-ignore together
 // with the ExternalCallTest codegen entry in BuildCommon.scala.
-// TODO(#35484): uncomment after shuffle
-/*
 class DamlScriptPV36LF24IT extends DamlScriptIT(LanguageVersion.v2_4) {
   import DamlScriptIT.ExpectedResult.*
 
@@ -962,7 +866,6 @@ class DamlScriptPV36LF24IT extends DamlScriptIT(LanguageVersion.v2_4) {
 
   doRunTests(scriptIdsToTest)
 }
-**/
 
 object DamlScriptIT {
 

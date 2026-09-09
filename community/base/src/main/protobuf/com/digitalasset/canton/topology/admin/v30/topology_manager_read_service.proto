@@ -57,6 +57,8 @@ service TopologyManagerReadService {
   // Fetch the topology state
   // The returned bytestring can be used directly to initialize a successor sequencer
   rpc SequencerLsuState(SequencerLsuStateRequest) returns (stream SequencerLsuStateResponse);
+
+  rpc GenerateOnboardingTopologyTransactions(GenerateOnboardingTopologyTransactionsRequest) returns (GenerateOnboardingTopologyTransactionsResponse);
 }
 
 message BaseQuery {
@@ -394,4 +396,20 @@ message SequencerLsuStateRequest {
 message SequencerLsuStateResponse {
   // versioned stored topology transactions
   bytes chunk = 1;
+}
+
+message GenerateOnboardingTopologyTransactionsRequest {
+  // The protocol version for which the topology transactions should be generated.
+  int32 protocol_version = 1;
+
+  // When this param is not set, a new temporary topology store will be created to
+  // generate the topology transactions.  However, this does not work if the root
+  // key is not present on the node.  Therefore, one can pass in a temporary store
+  // to use that is already seeded with both a signed root certificate, as well as
+  // a namespace delegation to an intermediate key that is present on the node.
+  optional v30.StoreId.Temporary temporary_store = 2;
+}
+
+message GenerateOnboardingTopologyTransactionsResponse {
+  com.digitalasset.canton.protocol.v30.SignedTopologyTransactions result = 1;
 }

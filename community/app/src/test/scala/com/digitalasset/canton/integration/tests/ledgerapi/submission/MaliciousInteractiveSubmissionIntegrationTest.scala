@@ -118,6 +118,7 @@ final class MaliciousInteractiveSubmissionIntegrationTest
       cpn,
       daId,
       testedProtocolVersion,
+      defaultProtocolLimits,
       timeouts,
       loggerFactory,
     )
@@ -226,11 +227,7 @@ final class MaliciousInteractiveSubmissionIntegrationTest
       implicit env =>
         import env.*
 
-        val wrongSyncId =
-          if (testedProtocolVersion <= ProtocolVersion.v34)
-            synchronizer1Id
-          else
-            synchronizer1Id.logical
+        val wrongSyncId = synchronizer1Id.logical
 
         val mutation = (tx: PreparedTransaction) =>
           tx.update(_.metadata.synchronizerId := wrongSyncId.toProtoPrimitive)

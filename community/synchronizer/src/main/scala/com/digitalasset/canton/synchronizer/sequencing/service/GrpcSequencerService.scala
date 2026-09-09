@@ -288,9 +288,12 @@ class GrpcSequencerService(
               SubmissionRequest
                 .fromByteString(
                   protocolVersion,
-                  DecompressionPolicy.forProtocolVersion(
-                    protocolVersion,
-                    MaxBytesToDecompress(maxRequestSize.value),
+                  SubmissionRequestDeserializationContext(
+                    DecompressionPolicy.forProtocolVersion(
+                      protocolVersion,
+                      MaxBytesToDecompress(maxRequestSize.value),
+                    ),
+                    topologyClient.getSynchronizerLimits,
                   ),
                 )
             )
@@ -639,6 +642,7 @@ class GrpcSequencerService(
             case _ => ()
           }
       }
+      val alreadyHandledStatus = Status.ABORTED.withDescription("ALREADY_HANDLED_BY_FATAL_CLOSE")
 
       // Note: we do the first part of the subscription creation above in the same thread,
       // so that we can use the GRPC interceptor injected context to grab the authentication token.
@@ -662,7 +666,7 @@ class GrpcSequencerService(
             Status.UNAVAILABLE.withDescription("Subscription pool is closed.")
           }
 
-        // additional check on the topology snapshot to ensure member is still active.
+        // Additional check on the topology snapshot to ensure member is still active.
         // Mitigates the following race condition:
         // 1. Unwrapping of resultET revealed a valid token. This token was revoked, but its revocation
         // through invalidateAndExpire completes after the check, but before the subscription creation
@@ -678,14 +682,19 @@ class GrpcSequencerService(
             logger.debug(
               s"Member $member was revoked during subscription creation. Closing the subscription."
             )
-            subscription.close()
-            Status.PERMISSION_DENIED.withDescription("Member access was revoked.")
+            import com.digitalasset.canton.sequencing.client.transports.ServerSubscriptionCloseReason
+            // Close the subscription with onError with a PERMISSION_DENIED exception
+            subscription.fatalClose(
+              ServerSubscriptionCloseReason.PermissionDenied("Member access was revoked.")
+            )
+            alreadyHandledStatus
           },
         )
       } yield subscription
       createSubscriptionP.completeWith(resultET.mapK(FutureUnlessShutdown.outcomeK).value.unwrap)
       FutureUtil.doNotAwait(
-        resultET.fold(err => observer.onError(err.asException()), _ => ()),
+        // If the result contains an error, e.g., if the member's token was revoked during subscription creation, fail the Pekko queue
+        resultET.fold(err => queue.fail(err.asException()), _ => ()),
         failureMessage = s"Failed to establish subscription for ${request.member}",
       )
     }
@@ -812,7 +821,9 @@ class GrpcSequencerService(
       TopologyStateForInitRequest
         .fromProtoV30(ProtocolVersionValidation.PV(protocolVersion), requestP) match {
         case Left(parsingError) =>
-          responseObserver.onError(ProtoDeserializationFailure.Wrap(parsingError).asGrpcError)
+          // OK to call .onError here directly on the stream observer, because Pekko has not been handed the observer yet
+          // and there is no potential race condition
+          observer.onError(ProtoDeserializationFailure.Wrap(parsingError).asGrpcError)
         case Right(request) =>
           val streamCompletionF = topologyStateForInitializationService
             .initialSnapshot(request.member)

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.auth
 
 import com.auth0.jwk.{JwkException, UrlJwkProvider}
-import com.daml.jwt.{Error as JwtError, JwksUrl, JwtException, JwtTimestampLeeway, JwtVerifier}
+import com.daml.jwt.{JwksUrl, JwtException, JwtTimestampLeeway, JwtVerifier, Error as JwtError}
 import com.daml.metrics.CacheMetrics
 import com.digitalasset.canton.auth.CachedJwtVerifierLoader.CacheKey
 import com.digitalasset.canton.caching.ScaffeineCache

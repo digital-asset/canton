@@ -22,9 +22,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
-import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.InvalidTrafficPurchasedMessage
 import com.digitalasset.canton.synchronizer.sequencer.ProgrammableSequencerPolicies.isTopUpBalance
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
@@ -33,7 +31,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
 }
 import com.digitalasset.canton.topology.Member
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.Promise
 import scala.concurrent.duration.*
@@ -139,37 +136,17 @@ trait TrafficControlConcurrentTopologyChangeTest
       val (serial, _) = getLatestSerialAndBalanceForMember(participant1)
       val newSerial = serial.increment.value
       newSerial should be > PositiveInt.one
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        {
-          sequencer1.traffic_control
-            .set_traffic_balance(participant1, newSerial, newBalance)
-            .discard
 
-          // The top-up is never observed
-          always(durationOfSuccess = 5.seconds) {
-            val (serial, balance) = getLatestSerialAndBalanceForMember(participant1)
-            serial should be < newSerial
-            balance should be < newBalance.value
-          }
-        },
-        LogEntry.assertLogSeq(
-          mustContainWithClue =
-            if (testedProtocolVersion <= ProtocolVersion.v34) {
-              // with pv34, the event is delivered as it reached threshold 1 but then rejected by the traffic control processor
-              Seq(
-                (
-                  _.shouldBeCantonError(
-                    InvalidTrafficPurchasedMessage,
-                    _ should include(s"signature threshold not reached"),
-                  ),
-                  "rejected top-up",
-                )
-              )
-            }
-            // with pv35, the event will not even be delivered, as the threshold is checked at delivery time
-            else Seq.empty
-        ),
-      )
+      sequencer1.traffic_control
+        .set_traffic_balance(participant1, newSerial, newBalance)
+        .discard
+
+      // The top-up is never observed
+      always(durationOfSuccess = 5.seconds) {
+        val (serial, balance) = getLatestSerialAndBalanceForMember(participant1)
+        serial should be < newSerial
+        balance should be < newBalance.value
+      }
 
       afterChangeThresholdF.futureValue
 

@@ -797,8 +797,9 @@ final class ParticipantTrafficEnforcementDegradationTest extends ParticipantTraf
 
         // Charlie's balance is zero, so a lookup that did complete would reject this submission.
         val degradedMessage = "allowing the submission to proceed without a balance check"
-        // In rare cases the database query may complete in time, so we retry until we see the degraded message.
-        eventually() {
+        // If the lookup is faster than the timeout, the console throws `CommandFailure`, which isn't retried by default.
+        // `logElapsed` shows whether we actually used the retry window or just failed right away.
+        eventually(retryOnTestFailuresOnly = false, logElapsed = Some("degraded submission")) {
           loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
             participant1.ledger_api.javaapi.commands
               .submit(Seq(charlie), Seq(createCycleCommandJava(charlie, "degraded")))

@@ -602,8 +602,6 @@ trait VettedPackagesSnapshotClient {
       participantId: ParticipantId,
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
-      // TODO(#33919): Remove flag once support for PV34 (checkDependencyVetting=true) is removed
-      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages]
 
   /** Checks the vetting state for the given packages and returns the packages that have no entry in
@@ -1153,14 +1151,12 @@ trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient with Vet
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
-      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages
 
   override final def loadUnvettedPackagesOrDependencies(
       participantId: ParticipantId,
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
-      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[UnknownOrUnvettedPackages] =
     for (vettedPackages <- loadVettedPackages(participantId))
       yield findUnvettedPackagesOrDependencies(
@@ -1168,7 +1164,6 @@ trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient with Vet
         packages,
         ledgerTime,
         vettedPackages,
-        checkDependencyVetting,
       )
 
   override final def determinePackagesWithNoVettingEntry(

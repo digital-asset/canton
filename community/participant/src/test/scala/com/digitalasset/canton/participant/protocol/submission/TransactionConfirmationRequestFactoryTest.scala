@@ -152,6 +152,7 @@ trait TransactionConfirmationRequestFactoryTest
           _contractOfId: ContractInstanceOfId,
           _maxSequencingTime: CantonTimestamp,
           validatePackageVettings: Boolean,
+          _limitConfig: TransactionViewLimitConfig,
       )(implicit
           traceContext: TraceContext
       ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, GenTransactionTree] = {
@@ -409,6 +410,7 @@ trait TransactionConfirmationRequestFactoryTest
                 contractInstanceOfId,
                 maxSequencingTime,
                 testedProtocolVersion,
+                limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
               )
               .value
               .failOnShutdown
@@ -437,6 +439,7 @@ trait TransactionConfirmationRequestFactoryTest
             contractInstanceOfId,
             maxSequencingTime,
             testedProtocolVersion,
+            limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
           )
           .failOnShutdown
           .map { tcr =>
@@ -471,6 +474,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
+              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
             )
             .failOnShutdown
             .map(_ =>
@@ -536,6 +540,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
+              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
             )
             .failOnShutdown
             .value
@@ -580,6 +585,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
+              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
             )
             .failOnShutdown
             .value
@@ -620,6 +626,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
+              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
             )
             .failOnShutdown
             .value
@@ -658,6 +665,7 @@ trait TransactionConfirmationRequestFactoryTest
               contractInstanceOfId,
               maxSequencingTime,
               testedProtocolVersion,
+              limitConfig = TransactionViewLimitConfig(defaultProtocolLimits),
             )
             .failOnShutdown
             .value

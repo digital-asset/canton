@@ -49,6 +49,16 @@ case object TransactionViewDecompositionFactory {
     val message: String = s"Number of root views for a transaction exceeded $limit"
   }
 
+  /** @param depth
+    *   the actual parse depth of the transaction view
+    * @param limit
+    *   the maximum allowed parse depth for a transaction view
+    */
+  final case class TransactionTreeDepthLimitExceeded(depth: Int, limit: Int)
+      extends TransactionViewLimitExceeded {
+    val message: String = s"The parse depth of the transaction view exceeded $limit"
+  }
+
   object RollbackState {
     private val firstChild: PositiveInt = PositiveInt.one
     val empty: RollbackState = RollbackState(Vector.empty, firstChild)
@@ -243,17 +253,18 @@ case object TransactionViewDecompositionFactory {
       views: Seq[NewView],
       optLimitConfig: Option[TransactionViewLimitConfig],
   ): Either[TransactionViewLimitExceeded, Seq[NewView]] =
+    // TODO (#35479): Inline Transaction View Limit Checking
     optLimitConfig.fold[Either[TransactionViewLimitExceeded, Seq[NewView]]](Right(views)) {
       limitConfig =>
         def checkSubViewLimits(view: NewView): Either[TransactionViewLimitExceeded, NewView] =
-          if (view.viewCount > limitConfig.maxSubViews) {
-            Left(TransactionSubViewLimitExceeded(view.viewCount, limitConfig.maxSubViews))
+          if (view.viewCount > limitConfig.maxSubViews.value) {
+            Left(TransactionSubViewLimitExceeded(view.viewCount, limitConfig.maxSubViews.value))
           } else {
             Right(view)
           }
 
-        if (views.length > limitConfig.maxRootViews) {
-          Left(TransactionRootViewLimitExceeded(views.length, limitConfig.maxRootViews))
+        if (views.length > limitConfig.maxRootViews.value) {
+          Left(TransactionRootViewLimitExceeded(views.length, limitConfig.maxRootViews.value))
         } else {
           views.traverse(checkSubViewLimits)
         }

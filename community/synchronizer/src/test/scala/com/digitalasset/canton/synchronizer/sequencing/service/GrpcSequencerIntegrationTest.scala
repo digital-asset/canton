@@ -58,7 +58,6 @@ import com.digitalasset.canton.protocol.messages.UnsignedProtocolMessage
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   TestSynchronizerParameters,
-  v30 as protocolV30,
   v31 as protocolV31,
   v32 as protocolV32,
 }
@@ -650,9 +649,6 @@ class GrpcSequencerIntegrationTest
 
     override def psid: PhysicalSynchronizerId =
       DefaultTestIdentities.physicalSynchronizerId
-
-    override def toProtoSomeEnvelopeContentV30: protocolV30.EnvelopeContent.SomeEnvelopeContent =
-      protocolV30.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def toProtoSomeEnvelopeContentV31: protocolV31.EnvelopeContent.SomeEnvelopeContent =
       protocolV31.EnvelopeContent.SomeEnvelopeContent.Empty

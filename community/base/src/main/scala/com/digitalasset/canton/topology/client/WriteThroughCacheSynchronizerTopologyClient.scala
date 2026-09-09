@@ -551,7 +551,6 @@ class ValidatingTopologySnapshot(
       packages: Set[PackageId],
       ledgerTime: CantonTimestamp,
       vettedPackages: Map[PackageId, VettedPackage],
-      checkDependencyVetting: Boolean,
   )(implicit traceContext: TraceContext): UnknownOrUnvettedPackages =
     verify[Id, UnknownOrUnvettedPackages](
       s"findUnvettedPackagesOrDependencies $participant $packages $ledgerTime $vettedPackages"
@@ -561,7 +560,6 @@ class ValidatingTopologySnapshot(
         packages,
         ledgerTime,
         vettedPackages,
-        checkDependencyVetting,
       )
     )
 
