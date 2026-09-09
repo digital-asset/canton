@@ -6,7 +6,12 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tls.{TlsClientConfig, TlsServerConfig}
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  Port,
+  PositiveInt,
+}
 import com.digitalasset.canton.config.{
   ActiveRequestLimitsConfig,
   AdminTokenConfig,
@@ -32,12 +37,15 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultBlockingDbReadTimeout,
   DefaultConsensusBlockCompletionTimeout,
   DefaultConsensusEmptyBlockCreationTimeout,
+  DefaultConsensusFlushingMinBlocks,
   DefaultConsensusNewEpochTopologyWarnTimeout,
   DefaultConsensusQueueMaxSize,
   DefaultConsensusQueuePerNodeQuota,
   DefaultDedicatedExecutionContextDivisor,
   DefaultDelayedInitQueueMaxSize,
+  DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel,
   DefaultEpochStateTransferTimeout,
+  DefaultEpochStateTransferTimeoutForFutureEpoch,
   DefaultInitQueryTimeout,
   DefaultInitTimeout,
   DefaultMaxBatchCreationInterval,
@@ -134,11 +142,27 @@ import scala.util.Random
   *   it leads is in progress, it will flush the segment and complete all slots in parallel to avoid
   *   making other nodes wait for the epoch to complete. This is a performance optimization that can
   *   be disabled if issues arise with the flushing logic.
+  * @param consensusFlushingMinBlocks
+  *   The minimum number of blocks that must be missing to complete in a segment before the node
+  *   will be able to decide to flush the segment and complete all slots in parallel if it detects
+  *   that a strong quorum of segments are completed while the one it leads is in progress. If fewer
+  *   blocks than this are missing, the node will complete them normally one at a time.
   * @param delayedInitQueueMaxSize
   *   The maximum size of the delayed init queue. This queue is used by modules to save incoming
   *   events in memory while the module is still initializing. Once startup is complete, the module
   *   processes all events from the delayed init queue first before continuing to read newly
   *   received events.
+  * @param epochStateTransferFutureEpochQueueMaxSize
+  *   The maximum size of future epoch queue.
+  * @param epochStateTransferFutureEpochQueuePerNodeQuota
+  *   The maximum number of messages per node stored in future epoch queue
+  * @param epochStateTransferHowManyFutureEpochsToDownloadInParallel
+  *   The amount of epochs to speculatively download in parallel during State Transfer. Can be 0 to
+  *   turn off speculative downloading
+  * @param epochStateTransferTimeoutForFutureEpoch
+  *   A timeout for how long we will wait if we already potentially have all blocks due to
+  *   speculatively downloaded an epoch before we make a new network request. This timeout should be
+  *   quite short since it is only accounting for local processing.
   * @param epochStateTransferRetryTimeout
   *   The state transfer retry timeout covering periods from requesting blocks from a single epoch
   *   up to receiving all the corresponding batches.
@@ -240,7 +264,14 @@ final case class BftBlockOrdererConfig(
       DefaultConsensusNewEpochTopologyWarnTimeout,
     consensusEnableLogEndOfEpochProgress: Boolean = false,
     consensusEnableFlushingSegment: Boolean = true,
+    consensusFlushingMinBlocks: Int = DefaultConsensusFlushingMinBlocks,
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
+    epochStateTransferFutureEpochQueueMaxSize: Int = DefaultConsensusQueueMaxSize,
+    epochStateTransferFutureEpochQueuePerNodeQuota: Int = DefaultConsensusQueuePerNodeQuota,
+    epochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
+      DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel,
+    epochStateTransferTimeoutForFutureEpoch: FiniteDuration =
+      DefaultEpochStateTransferTimeoutForFutureEpoch,
     epochStateTransferRetryTimeout: FiniteDuration = DefaultEpochStateTransferTimeout,
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
     outputFetchMinimumDelay: FiniteDuration = DefaultOutputFetchMinimumDelay,
@@ -288,9 +319,13 @@ object BftBlockOrdererConfig {
   val DefaultConsensusQueuePerNodeQuota: Int = 1_024
   val DefaultConsensusBlockCompletionTimeout: FiniteDuration = 10.seconds
   val DefaultConsensusEmptyBlockCreationTimeout: FiniteDuration = 5.seconds
+  val DefaultConsensusFlushingMinBlocks = 2
   val DefaultConsensusNewEpochTopologyWarnTimeout: FiniteDuration = 2.seconds
   val DefaultDelayedInitQueueMaxSize: Int = 1_024
+  val DefaultEpochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
+    NonNegativeLong.tryCreate(5L)
   val DefaultEpochStateTransferTimeout: FiniteDuration = 4.seconds
+  val DefaultEpochStateTransferTimeoutForFutureEpoch: FiniteDuration = 500.millis
   val DefaultOutputFetchTimeout: FiniteDuration = 1_000.millis
   val DefaultOutputFetchMinimumDelay: FiniteDuration = 1_000.millis
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5_000.millis
@@ -428,8 +463,6 @@ object BftBlockOrdererConfig {
       tls: Option[TlsServerConfig] = None,
       override val maxInboundMessageSize: NonNegativeInt =
         ServerConfig.defaultMaxInboundMessageSize,
-      // Keep Canton defaults for P2P server-side flow control, i.e. automatic flow control
-      //  with implementation defaults for the initial window size
       override val flowControlWindow: Option[PositiveInt] = ServerConfig.defaultFlowControlWindow,
       override val initialFlowControlWindow: Option[PositiveInt] =
         ServerConfig.defaultInitialFlowControlWindow,
@@ -468,9 +501,7 @@ object BftBlockOrdererConfig {
       override val tlsConfig: Option[TlsClientConfig] = Some(
         TlsClientConfig(trustCollectionFile = None, clientCert = None, enabled = true)
       ),
-      // Don't disable automatic flow control for P2P client connections and use implementation defaults for its
-      //  initial window size
-      channel: ClientChannelParams = ClientChannelParams.Default.copy(flowControlWindow = None),
+      channel: ClientChannelParams = ClientChannelParams.Default,
   ) extends ClientConfig
 
   final case class EndpointId(
@@ -569,10 +600,13 @@ object BftBlockOrdererConfig {
 
   /** Configuration for simulating delays in fetching the ordering topology.
     *
-    * @param broadcastInEpochProbability
-    *   Optional probability of there being a broadcast submission request ordered during the epoch,
-    *   which triggers getting an up-to-date ordering topology via `getOrderingTopology` before
-    *   starting a new epoch.
+    * @param broadcastRequestProbability
+    *   Optional probability of a submission request being a broadcast, which triggers a deeper and
+    *   more costly inspection about whether it may affect the ordering topology.
+    * @param possibleOrderingTopologyChangeInRequestProbability
+    *   Optional probability of detecting that a broadcast submission request may also alter the
+    *   ordering topology for the subsequent epoch, which triggers getting an up-to-date ordering
+    *   topology via `getOrderingTopology` before starting a new epoch.
     * @param pendingTopologyChangesProbability
     *   Optional probability of the ordering topology returned by `getOrderingTopology` signalling
     *   that there are pending topology changes, which triggers getting an up-to-date ordering
@@ -580,15 +614,24 @@ object BftBlockOrdererConfig {
     *   submission requests are going to be ordered before the end of the epoch.
     * @param getOrderingTopologyDelay
     *   Optional delay distribution (slowdown) applied when fetching the ordering topology.
+    * @param requestInspectionDelay
+    *   Optional delay distribution (slowdown) applied when inspecting a request to determine
+    *   whether it contains submission requests that may alter the ordering topology.
     */
   final case class BftBlockOrderingStandaloneTopologyDelayConfig(
-      broadcastInEpochProbability: Option[Double] = None,
+      broadcastRequestProbability: Option[Double] = None,
+      possibleOrderingTopologyChangeInRequestProbability: Option[Double] = None,
       pendingTopologyChangesProbability: Option[Double] = None,
       getOrderingTopologyDelay: Option[FiniteDurationDistribution] = None,
+      requestInspectionDelay: Option[FiniteDurationDistribution] = None,
   ) {
     require(
-      broadcastInEpochProbability.forall(p => p >= 0.0 && p <= 1.0),
-      "broadcastInEpochProbability must be between 0.0 and 1.0",
+      broadcastRequestProbability.forall(p => p >= 0.0 && p <= 1.0),
+      "broadcastRequestProbability must be between 0.0 and 1.0",
+    )
+    require(
+      possibleOrderingTopologyChangeInRequestProbability.forall(p => p >= 0.0 && p <= 1.0),
+      "possibleOrderingTopologyChangeInRequestProbability must be between 0.0 and 1.0",
     )
     require(
       pendingTopologyChangesProbability.forall(p => p >= 0.0 && p <= 1.0),

@@ -24,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PrePrepare,
   PrePrepareStored,
 }
+import org.scalatest.exceptions.TestFailedException
 import org.scalatest.wordspec.AsyncWordSpec
 
 class PrePrepareStoreCoordinatorTest extends AsyncWordSpec with BftSequencerBaseTest {
@@ -115,22 +116,16 @@ class PrePrepareStoreCoordinatorTest extends AsyncWordSpec with BftSequencerBase
       coordinator.canStoreAndSendPrePrepare(sendFourth) shouldBe true
     }
 
-    "just accept all from views above 0" in {
+    "abort when given messages from views above 0, since they should never be sent and stored" in {
       val coordinator = createCoordinator(completedBlocks = Seq.empty)
       val sendSecondInLaterView = sendPrePrepare(BlockNumber(4L), view = ViewNumber(1L))
       val sendThirdInLaterView = sendPrePrepare(BlockNumber(8L), view = ViewNumber(1L))
 
-      coordinator.canStoreAndSendPrePrepare(sendThirdInLaterView) shouldBe true
-      coordinator.canStoreAndSendPrePrepare(sendSecondInLaterView) shouldBe true
-      coordinator.onPrePrepareStored(
-        prePrepareStored(BlockNumber.First, ViewNumber(1L))
-      ) shouldBe None
-      coordinator.onPrePrepareStored(
-        prePrepareStored(BlockNumber(8L), ViewNumber(1L))
-      ) shouldBe None
-      coordinator.onPrePrepareStored(
-        prePrepareStored(BlockNumber(4L), ViewNumber(1L))
-      ) shouldBe None
+      val msg = "we don't expect pre-prepares for view numbers higher than 0 to be sent and stored"
+      intercept[TestFailedException](coordinator.canStoreAndSendPrePrepare(sendThirdInLaterView))
+        .getMessage() should include(msg)
+      intercept[TestFailedException](coordinator.canStoreAndSendPrePrepare(sendSecondInLaterView))
+        .getMessage() should include(msg)
     }
   }
 

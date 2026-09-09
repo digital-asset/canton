@@ -29,6 +29,21 @@ final class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3
         "canton.participants.participant1.parameters.engine.contract-state-mode"
       )
     ),
+    (3, 5, 17) -> Transforms(
+      Seq(
+        // Old configs used manual flow control (channel-flow-control-window = 1MB) as the
+        // default, with channel-initial-flow-control-window unset. The defaults were flipped
+        // to use automatic flow control instead (channel-initial-flow-control-window = 1MB,
+        // channel-flow-control-window unset). When loading old config dumps, the serialized
+        // channel-flow-control-window combines with the new default for the missing
+        // channel-initial-flow-control-window, resulting in both being set, which is now
+        // rejected by validation. Removing channel-flow-control-window lets the new default
+        // apply cleanly.
+        "canton.participants.participant1.sequencer-client.channel-flow-control-window",
+        "canton.sequencers.sequencer1.sequencer-client.channel-flow-control-window",
+        "canton.mediators.mediator1.sequencer-client.channel-flow-control-window",
+      )
+    ),
   )
 
   /** Make the config parsable by applying some transformations. It basically makes some breaking

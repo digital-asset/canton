@@ -8,9 +8,11 @@ import com.digitalasset.canton.HasExecutionContext
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultConsensusFlushingMinBlocks
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.UnitTestContext.DelayCount
@@ -71,6 +73,8 @@ import com.digitalasset.canton.time.{PositiveFiniteDuration, SimClock}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AsyncWordSpec
+import org.slf4j.event.Level
+import org.slf4j.event.Level.INFO
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ArrayBuffer
@@ -1979,6 +1983,181 @@ class IssSegmentModuleTest
       }
     }
 
+    "most segments are complete" should {
+      val membership = Membership.forTesting(myId, otherNodes = otherIds.toSet)
+      val epochStateEpoch = Epoch(SecondEpochInfo, membership, membership)
+      // have other segments completed
+      val completedBlocks = epochStateEpoch.segments
+        .filterNot(_.originalLeader == myId)
+        .flatMap(_.slotNumbers)
+        .map(blockNumber =>
+          EpochStore.Block(
+            SecondEpochNumber,
+            blockNumber,
+            CommitCertificate(
+              PrePrepare
+                .create(
+                  BlockMetadata(SecondEpochNumber, blockNumber),
+                  ViewNumber.First,
+                  OrderingBlock(oneRequestOrderingBlock3Ack.proofs),
+                  CanonicalCommitSet.empty,
+                  myId,
+                )
+                .fakeSign,
+              Seq.empty,
+            ),
+          )
+        )
+
+      "flush segment and all remaining blocks" in {
+        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+        val availabilityBuffer =
+          new ArrayBuffer[Availability.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val availabilityRef = fakeRecordingModule(availabilityBuffer)
+        val parentBuffer =
+          new ArrayBuffer[Consensus.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val parentRef = fakeRecordingModule(parentBuffer)
+        val p2pBuffer = new ArrayBuffer[P2PNetworkOut.Message](defaultBufferSize)
+        val p2pNetworkRef = fakeRecordingModule(p2pBuffer)
+
+        val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
+          availabilityModuleRef = availabilityRef,
+          parentModuleRef = parentRef,
+          p2pNetworkOutModuleRef = p2pNetworkRef,
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          otherNodes = otherIds.toSet,
+          epochInProgress = EpochStore.EpochInProgress(completedBlocks = completedBlocks),
+          consensusFlushingMinBlocks = 2,
+        )(epochInfo = SecondEpochInfo)
+
+        consensus.receive(ConsensusSegment.Start)
+        // upon getting proposal from availability, this node sees other segments have completed,
+        // so it should flush the segment
+        inside(availabilityBuffer.toSeq) {
+          case Seq(Availability.Consensus.CreateProposal(b, e, m, _, ackO)) =>
+            b shouldBe BlockNumber(13L)
+            e shouldBe SecondEpochNumber
+            m.orderingTopology shouldBe fullTopology
+            ackO shouldBe empty
+        }
+        loggerFactory.assertLogs(SuppressionRule.LevelAndAbove(INFO))(
+          consensus.receive(
+            ConsensusSegment.ConsensusMessage.LocalAvailability(
+              Consensus.LocalAvailability
+                .ProposalCreated(BlockNumber(13L), oneRequestOrderingBlock3Ack)
+            )
+          ),
+          log => {
+            log.level shouldBe Level.INFO
+            log.message should include("received proposal for block 13 from local availability")
+            log.message should include("Starting consensus process on 2 blocks to flush segment")
+          },
+        )
+
+        val blockMetadata1 = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(myId))
+        val blockMetadata2 =
+          secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(myId) + allIds.size)
+
+        // as part of flushing we see both the block from the proposal and the rest of the blocks in the segment starting to be ordered
+        val messages1 = context.runPipedMessages()
+        messages1.collect { case MessageFromPipeToSelf(Some(msg), _) => msg } should matchPattern {
+          case Seq(
+                PbftSignedNetworkMessage(SignedMessage(pp1: PrePrepare, _)),
+                PbftSignedNetworkMessage(SignedMessage(pp2: PrePrepare, _)),
+              ) if pp1.blockMetadata == blockMetadata1 && pp2.blockMetadata == blockMetadata2 =>
+        }
+        messages1.foreach(consensus.receive)
+
+        val messages2 = context.runPipedMessages()
+        messages2.collect { case MessageFromPipeToSelf(Some(msg), _) => msg } should matchPattern {
+          case Seq(
+                PbftSignedNetworkMessage(SignedMessage(pp1: Prepare, _)),
+                PbftSignedNetworkMessage(SignedMessage(pp2: Prepare, _)),
+              ) if pp1.blockMetadata == blockMetadata1 && pp2.blockMetadata == blockMetadata2 =>
+        }
+        messages2.foreach(consensus.receive)
+
+        // first pre-prepare is broadcast (and stored)
+        p2pBuffer.toList.collect {
+          case P2PNetworkOut.Multicast(
+                P2PNetworkOut.BftOrderingNetworkMessage.ConsensusMessage(msg),
+                _,
+              ) =>
+            msg.message
+        } should matchPattern {
+          case Seq(pp: PrePrepare) if pp.blockMetadata == blockMetadata1 =>
+        }
+        p2pBuffer.clear()
+
+        // only after first one is stored will second one be sent and stored as we still require pre-prepares to be stored in order
+        consensus.receive(
+          ConsensusSegment.ConsensusMessage.PrePrepareStored(blockMetadata1, ViewNumber.First)
+        )
+        p2pBuffer.toList.collect {
+          case P2PNetworkOut.Multicast(
+                P2PNetworkOut.BftOrderingNetworkMessage.ConsensusMessage(msg),
+                _,
+              ) =>
+            msg.message
+        } should matchPattern {
+          case Seq(pp: PrePrepare, p: Prepare)
+              if pp.blockMetadata == blockMetadata2 && p.blockMetadata == blockMetadata1 =>
+        }
+        p2pBuffer.clear()
+        succeed
+      }
+
+      "not flush segment if there are fewer remaining blocks than consensusFlushingMinBlocks" in {
+        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+        val availabilityBuffer =
+          new ArrayBuffer[Availability.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val availabilityRef = fakeRecordingModule(availabilityBuffer)
+        val parentBuffer =
+          new ArrayBuffer[Consensus.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val parentRef = fakeRecordingModule(parentBuffer)
+        val p2pBuffer = new ArrayBuffer[P2PNetworkOut.Message](defaultBufferSize)
+        val p2pNetworkRef = fakeRecordingModule(p2pBuffer)
+
+        val consensus = createIssSegmentModule[ProgrammableUnitTestEnv](
+          availabilityModuleRef = availabilityRef,
+          parentModuleRef = parentRef,
+          p2pNetworkOutModuleRef = p2pNetworkRef,
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+          otherNodes = otherIds.toSet,
+          epochInProgress = EpochStore.EpochInProgress(completedBlocks = completedBlocks),
+          consensusFlushingMinBlocks =
+            3, // setting this to 3 means we have 2 remaining blocks, which is less than the threshold, so we should not flush
+        )(epochInfo = SecondEpochInfo)
+
+        consensus.receive(ConsensusSegment.Start)
+        inside(availabilityBuffer.toSeq) {
+          case Seq(Availability.Consensus.CreateProposal(b, e, m, _, ackO)) =>
+            b shouldBe BlockNumber(13L)
+            e shouldBe SecondEpochNumber
+            m.orderingTopology shouldBe fullTopology
+            ackO shouldBe empty
+        }
+        consensus.receive(
+          ConsensusSegment.ConsensusMessage.LocalAvailability(
+            Consensus.LocalAvailability
+              .ProposalCreated(BlockNumber(13L), oneRequestOrderingBlock3Ack)
+          )
+        )
+
+        // node only starts ordering one block instead of flushing the segment, since there are fewer remaining blocks than consensusFlushingMinBlocks
+        val blockMetadata = secondEpochBlockMetadata4Nodes(blockOrder4Nodes.indexOf(myId))
+        val messages1 = context.runPipedMessages()
+        messages1.collect { case MessageFromPipeToSelf(Some(msg), _) => msg } should matchPattern {
+          case Seq(
+                PbftSignedNetworkMessage(SignedMessage(pp1: PrePrepare, _))
+              ) if pp1.blockMetadata == blockMetadata =>
+        }
+        succeed
+      }
+    }
+
     "receiving no proposals available from Availability" should {
       "do nothing if not blocking progress " in {
         implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
@@ -2366,6 +2545,7 @@ class IssSegmentModuleTest
       epochStore: EpochStore[E] = new InMemoryUnitTestEpochStore[E](),
       epochInProgress: EpochStore.EpochInProgress = EpochStore.EpochInProgress(),
       epochMetricsAccumulator: EpochMetricsAccumulator = new EpochMetricsAccumulator(),
+      consensusFlushingMinBlocks: Int = DefaultConsensusFlushingMinBlocks,
   )(
       epochInfo: EpochInfo = bootstrapEpoch(TestBootstrapTopologyActivationTime).info.next(
         epochLength,
@@ -2410,6 +2590,7 @@ class IssSegmentModuleTest
       p2pNetworkOutModuleRef,
       config.consensusEmptyBlockCreationTimeout,
       config.consensusEnableFlushingSegment,
+      consensusFlushingMinBlocks,
       config.viewChangeTimeoutOverride,
       metrics,
       timeouts,

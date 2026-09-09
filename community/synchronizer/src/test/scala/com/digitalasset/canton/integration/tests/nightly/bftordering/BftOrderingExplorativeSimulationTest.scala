@@ -49,7 +49,7 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
     // We might get messages about waiting for new membership after epoch completion, don't count these as errors.
     { logEntry =>
       logEntry.message should include(
-        "Waiting for new membership after epoch completion"
+        "Waiting for new topology after epoch completion"
       )
       logEntry.loggerName should include("IssConsensusModule")
     },

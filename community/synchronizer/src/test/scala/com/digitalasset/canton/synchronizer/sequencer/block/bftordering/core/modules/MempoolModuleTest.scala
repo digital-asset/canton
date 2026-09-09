@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -205,7 +206,7 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         val mempool =
           createMempool[UnitTestEnv](fakeModuleExpectingSilence, mempoolState = mempoolState)
         sendRequest(mempool)
-        mempoolState.receivedOrderRequests.map(_._1) should contain only AnOrderRequest
+        mempoolState.receivedOrderRequests.map(_.orderRequest) should contain only AnOrderRequest
       }
     }
 
@@ -332,7 +333,7 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         .get()
         .getOrElse(fail("No batch sent"))
       batchCreated.requests.size should be(1)
-      mempoolState.receivedOrderRequests.map(_._1) should contain only AnOrderRequest
+      mempoolState.receivedOrderRequests.map(_.orderRequest) should contain only AnOrderRequest
       mempoolState.toBeProvidedToAvailability shouldBe 0
     }
   }
@@ -397,8 +398,69 @@ class MempoolModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       .get()
       .getOrElse(fail("No batch sent"))
     batchCreated.requests.size should be(1)
-    mempoolState.receivedOrderRequests.map(_._1) should contain only request
+    mempoolState.receivedOrderRequests.map(_.orderRequest) should contain only request
     mempoolState.toBeProvidedToAvailability shouldBe 0
+  }
+
+  "it receives a latest known sequencing time update" should {
+    "cause an already-queued expired request to be discarded instead of batched" in {
+      val batchCreatedCell =
+        new AtomicReference[Option[Availability.LocalDissemination.LocalBatchCreated]](None)
+      val mempoolState = createMempoolState()
+      val mempool = createMempool[UnitTestEnv](
+        availability = fakeCellModule[Availability.Message[
+          UnitTestEnv
+        ], Availability.LocalDissemination.LocalBatchCreated](batchCreatedCell),
+        mempoolState = mempoolState,
+      )
+
+      val latestKnownSequencingTime = CantonTimestamp.Epoch.plusSeconds(10)
+      val expiredRequest = Mempool.OrderRequest(
+        Traced(
+          OrderingRequest(BlockFormat.SendTag, messageId = "expired", ByteString.copyFromUtf8("b"))
+        ),
+        maxSequencingTime = Some(latestKnownSequencingTime),
+      )
+      mempool.receiveInternal(expiredRequest)
+      sendRequest(mempool) // AnOrderRequest, with no max sequencing time
+
+      mempool.receiveInternal(Mempool.LatestKnownSequencingTimeUpdate(latestKnownSequencingTime))
+      mempool.receiveInternal(Mempool.CreateLocalBatches(1))
+
+      val batchCreated = batchCreatedCell
+        .get()
+        .getOrElse(fail("No batch sent"))
+      batchCreated.requests.map(_.value) should contain only AnOrderRequest.tx.value
+      mempoolState.receivedOrderRequests shouldBe empty
+    }
+
+    "not produce a batch if the only queued request is expired by it" in {
+      val batchCreatedCell =
+        new AtomicReference[Option[Availability.LocalDissemination.LocalBatchCreated]](None)
+      val mempoolState = createMempoolState()
+      val mempool = createMempool[UnitTestEnv](
+        availability = fakeCellModule[Availability.Message[
+          UnitTestEnv
+        ], Availability.LocalDissemination.LocalBatchCreated](batchCreatedCell),
+        mempoolState = mempoolState,
+      )
+
+      val latestKnownSequencingTime = CantonTimestamp.Epoch.plusSeconds(10)
+      val expiredRequest = Mempool.OrderRequest(
+        Traced(
+          OrderingRequest(BlockFormat.SendTag, messageId = "expired", ByteString.copyFromUtf8("b"))
+        ),
+        maxSequencingTime = Some(latestKnownSequencingTime),
+      )
+      mempool.receiveInternal(expiredRequest)
+
+      mempool.receiveInternal(Mempool.LatestKnownSequencingTimeUpdate(latestKnownSequencingTime))
+      mempool.receiveInternal(Mempool.CreateLocalBatches(1))
+
+      batchCreatedCell.get() shouldBe empty
+      mempoolState.receivedOrderRequests shouldBe empty
+      mempoolState.toBeProvidedToAvailability shouldBe 0
+    }
   }
 
   "it receives a P2P connectivity update" should {

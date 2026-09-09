@@ -24,11 +24,12 @@ import scala.jdk.CollectionConverters.*
 
 /** @param flowControlWindow
   *   Switches to manual gRPC flow control and sets its window; if `None`, then it is not configured
-  *   and the implementation default is used.
+  *   and the implementation default is used. At most one of `flowControlWindow` and
+  *   `initialFlowControlWindow` can be set.
   * @param initialFlowControlWindow
   *   Switches to automatic gRPC flow control and sets its initial window; if `None`, then it is not
-  *   configured and the implementation default is used. If present, it is set after the
-  *   `flowControlWindow` parameters, so it overrides it.
+  *   configured and the implementation default is used. At most one of `flowControlWindow` and
+  *   `initialFlowControlWindow` can be set.
   */
 final case class ClientChannelParams(
     maxInboundMessageSize: NonNegativeInt,
@@ -55,8 +56,11 @@ object ClientChannelParams {
       initialFlowControlWindow = ClientChannelParams.DefaultInitialFlowControlWindow,
       TracingConfig.Propagation.Enabled,
     )
-  val DefaultFlowControlWindow: Option[PositiveInt] = Some(PositiveInt.tryCreate(1024 * 1024))
-  val DefaultInitialFlowControlWindow: Option[PositiveInt] = None
+  // Unset, i.e. impl. (Netty) defaults, unless overridden by initial flow control window
+  val DefaultFlowControlWindow: Option[PositiveInt] = None
+  // Explicit auto flow control with 1MB initial window size
+  val DefaultInitialFlowControlWindow: Option[PositiveInt] =
+    Some(PositiveInt.tryCreate(1024 * 1024))
   val DefaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(128 * 1024 * 1024)
 }
 
@@ -203,25 +207,21 @@ object ClientChannelBuilder {
       clientConfig: ClientConfig,
       maxInboundMessageSize: Option[Int],
   )(implicit executor: Executor): ManagedChannelBuilderProxy = {
-    val clientChannelParams = clientConfig.channel
-    val nettyChannelBuilder = // Mutable builder
+    val config = clientConfig.channel
+    val builder = // Mutable builder
       NettyChannelBuilder
         .forAddress(clientConfig.address, clientConfig.port.unwrap)
         .executor(executor)
         .maxInboundMessageSize(
-          maxInboundMessageSize.getOrElse(clientChannelParams.maxInboundMessageSize.value)
+          maxInboundMessageSize.getOrElse(config.maxInboundMessageSize.value)
         )
 
-    clientChannelParams.flowControlWindow.foreach { flowControlWindow =>
-      nettyChannelBuilder.flowControlWindow(flowControlWindow.value).discard
-    }
+    // Leveraging mutable builder for conciseness
+    config.flowControlWindow.map(_.value).map(builder.flowControlWindow).discard
+    config.initialFlowControlWindow.map(_.value).map(builder.initialFlowControlWindow).discard
 
-    clientChannelParams.initialFlowControlWindow.foreach { initialFlowControlWindow =>
-      nettyChannelBuilder.initialFlowControlWindow(initialFlowControlWindow.value).discard
-    }
-
-    if (clientChannelParams.traceContextPropagation == Propagation.Enabled)
-      nettyChannelBuilder
+    if (config.traceContextPropagation == Propagation.Enabled)
+      builder
         .intercept(TraceContextGrpc.clientInterceptor())
         .discard
 
@@ -229,17 +229,17 @@ object ClientChannelBuilder {
     clientConfig.tlsConfig
       .flatMap(tls =>
         Option.when(tls.enabled) {
-          nettyChannelBuilder
+          builder
             .useTransportSecurity()
             .sslContext(sslContext(tls))
         }
       )
-      .getOrElse(nettyChannelBuilder.usePlaintext())
+      .getOrElse(builder.usePlaintext())
       .discard
 
     // apply keep alive settings
     ManagedChannelBuilderProxy(
-      configureKeepAlive(clientChannelParams.keepAliveClient, nettyChannelBuilder)
+      configureKeepAlive(config.keepAliveClient, builder)
     )
   }
 }

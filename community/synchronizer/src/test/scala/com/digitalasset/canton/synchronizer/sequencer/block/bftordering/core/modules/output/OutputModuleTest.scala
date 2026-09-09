@@ -4,7 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
+import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
+import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencer.admin.v30
@@ -98,6 +99,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
+  Mempool,
   Output,
   SequencerNode,
 }
@@ -2036,6 +2038,7 @@ class OutputModuleTest
       initialMembership: Membership = defaultTestMembership,
       availabilityRef: ModuleRef[Availability.Message[E]] = fakeModuleExpectingSilence,
       consensusRef: ModuleRef[Consensus.Message[E]] = fakeModuleExpectingSilence,
+      mempoolRef: ModuleRef[Mempool.Message] = fakeIgnoringModule,
       store: OutputMetadataStore[E] = createOutputMetadataStore[E],
       epochStoreReader: EpochStoreReader[E] = createEpochStore[E],
       blacklistLeaderSelectionPolicyState: Option[BlacklistLeaderSelectionPolicyState] = None,
@@ -2092,8 +2095,10 @@ class OutputModuleTest
       SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
       availabilityRef,
       consensusRef,
+      mempoolRef,
       loggerFactory,
       timeouts,
+      new SymbolicPureCrypto(),
       requestInspector,
     )(
       config,
@@ -2126,13 +2131,15 @@ object OutputModuleTest {
     //  more than one block and alternating the outcome starting from `true`.
     private var outcome = true
 
-    override def isRequestToAllMembersOfSynchronizer(
-        blockMetadata: BlockMetadata,
-        requestNumber: Int,
+    override def mayChangeOrderingTopology(
         _request: OrderingRequest,
+        _blockMetadata: BlockMetadata,
+        _requestNumber: Int,
         _maxBytesToDecompress: MaxBytesToDecompress,
         _logger: TracedLogger,
         _traceContext: TraceContext,
+        _hashOps: HashOps,
+        _stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit _synchronizerProtocolVersion: ProtocolVersion): Boolean = {
       val result = outcome
       outcome = !outcome

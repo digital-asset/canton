@@ -210,8 +210,6 @@ final class IssConsensusModule[E <: Env[E]](
             startStateTransfer(
               startEpochInfo.number,
               StateTransferType.Onboarding,
-              // We only know the minimum end epoch when receiving it from the catchup detector.
-              minimumEndEpochNumber = None,
             )
 
           case BootstrapKind.RegularStartup =>
@@ -898,7 +896,7 @@ final class IssConsensusModule[E <: Env[E]](
           s"Switching to catch-up state transfer (up to at least $minimumEndEpochNumber) while in epoch $currentEpochNumber; " +
             s"latestCompletedEpoch is $latestCompletedEpochNumber and message epoch is $pbftMessageEpochNumber"
         )
-        startStateTransfer(currentEpochNumber, StateTransferType.Catchup, minimumEndEpochNumber)
+        startStateTransfer(currentEpochNumber, StateTransferType.Catchup)
         true
       }
     } else {
@@ -909,14 +907,12 @@ final class IssConsensusModule[E <: Env[E]](
   private def startStateTransfer(
       startEpochNumber: EpochNumber,
       stateTransferType: StateTransferType,
-      minimumEndEpochNumber: Option[EpochNumber],
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
     logger.info(s"Starting $stateTransferType state transfer from epoch $startEpochNumber")
     resetConsensusWaitingForEpochCompletion()
     val newBehavior = new StateTransferBehavior(
       StateTransferBehavior.InitialState[E](
         startEpochNumber,
-        minimumEndEpochNumber,
         activeTopologyInfo,
         epochState,
         latestCompletedEpoch,
@@ -933,6 +929,10 @@ final class IssConsensusModule[E <: Env[E]](
       timeouts,
     )()
     context.become(newBehavior)
+    // It is possible that we were doing state transfer and quickly went back to consensus. And during the time we were
+    // in consensus we got the new topology message. From consensus point of view it is 1 epoch to far in the future so
+    // consensus just stores but don't act on it.
+    newEpochTopology.foreach(context.self.asyncSend(_))
   }
 
   private def storeEpochCompletion(

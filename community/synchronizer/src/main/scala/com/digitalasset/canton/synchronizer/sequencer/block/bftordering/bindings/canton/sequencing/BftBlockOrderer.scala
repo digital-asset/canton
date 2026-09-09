@@ -10,7 +10,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.crypto.{HashOps, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
@@ -101,7 +101,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ModuleRef,
   P2PConnectionEventListener,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  FiniteDurationDistribution,
+  Probability,
+}
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.{AuthenticationServices, SequencerSnapshot}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.standalone.v1.{
@@ -504,14 +507,22 @@ final class BftBlockOrderer(
       metrics,
       loggerFactory,
       timeouts,
+      cryptoApi.pureCrypto,
       requestInspector =
         config.standalone.fold[RequestInspector](OutputModule.DefaultRequestInspector)(
           standaloneConfig =>
             StandaloneRequestInspector(
               standaloneConfig.testSlowdown
                 .flatMap(_.topologyDelay)
-                .flatMap(_.broadcastInEpochProbability)
-                .map(Probability(_))
+                .flatMap(_.broadcastRequestProbability)
+                .map(Probability(_)),
+              standaloneConfig.testSlowdown
+                .flatMap(_.topologyDelay)
+                .flatMap(_.possibleOrderingTopologyChangeInRequestProbability)
+                .map(Probability(_)),
+              standaloneConfig.testSlowdown
+                .flatMap(_.topologyDelay)
+                .flatMap(_.requestInspectionDelay),
             )
         ),
       outputPreviousStoredBlock = outputPreviousStoredBlock,
@@ -671,6 +682,7 @@ final class BftBlockOrderer(
         signedSubmissionRequest.content.messageId.unwrap,
         signedSubmissionRequest.content.sender,
         signedSubmissionRequest.toByteString,
+        Some(signedSubmissionRequest.content.maxSequencingTime),
       )
     } { _ =>
       if (!warnedAboutStandaloneSend) {
@@ -692,6 +704,7 @@ final class BftBlockOrderer(
       "ACK-" + request.timestamp,
       signedAcknowledgeRequest.content.member,
       signedAcknowledgeRequest.toByteString,
+      maxSequencingTime = None,
     ).value.map(_ => ())
   }
 
@@ -857,19 +870,21 @@ final class BftBlockOrderer(
       messageId: String,
       sender: Member,
       payload: ByteString,
+      maxSequencingTime: Option[CantonTimestamp],
   )(implicit traceContext: TraceContext): EitherT[Future, SequencerDeliverError, Unit] =
-    sendToMempoolGeneric(tag, messageId, payload, Some(sender))
+    sendToMempoolGeneric(tag, messageId, payload, maxSequencingTime, Some(sender))
 
   private def orderSendRequest(
       request: SendRequest
   )(implicit traceContext: TraceContext): Future[SendResponse] =
-    sendToMempoolGeneric(request.tag, "standalone", request.payload)
+    sendToMempoolGeneric(request.tag, "standalone", request.payload, maxSequencingTime = None)
       .fold(e => SendResponse(Some(e.cause)), _ => SendResponse(None))
 
   private def sendToMempoolGeneric(
       tag: String,
       messageId: String,
       payload: ByteString,
+      maxSequencingTime: Option[CantonTimestamp],
       sender: Option[Member] = None,
   )(implicit traceContext: TraceContext): EitherT[Future, SequencerDeliverError, Unit] = {
     val orderingRequestTraceContext =
@@ -896,6 +911,7 @@ final class BftBlockOrderer(
         tracedOrderingRequest,
         Some(replyRef),
         sender,
+        maxSequencingTime,
       )
     )
     EitherT(replyPromise.future.map {
@@ -947,18 +963,32 @@ object BftBlockOrderer {
     }
 
   private final case class StandaloneRequestInspector(
-      probabilityOfBroadcast: Option[Probability]
+      broadcastRequestProbability: Option[Probability],
+      possibleOrderingTopologyChangeInRequestProbability: Option[Probability],
+      requestInspectionDelay: Option[FiniteDurationDistribution],
   ) extends RequestInspector {
 
-    override def isRequestToAllMembersOfSynchronizer(
+    override def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         logger: TracedLogger,
         traceContext: TraceContext,
+        hashOps: HashOps,
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
-      probabilityOfBroadcast.fold(false)(_.flipCoin(new Random(ThreadLocalRandom.current())))
+      broadcastRequestProbability.fold(false) { brp =>
+        if (brp.flipCoin(new Random(ThreadLocalRandom.current()))) {
+          requestInspectionDelay.foreach { delayDistribution =>
+            val delay = delayDistribution.generateRandomDuration(ThreadLocalRandom.current())
+            Threading.sleep(delay.toMillis, (delay.toNanos % 1_000_000L).toInt)
+          }
+          possibleOrderingTopologyChangeInRequestProbability.fold(false)(
+            _.flipCoin(new Random(ThreadLocalRandom.current()))
+          )
+        } else false
+      }
   }
 
   private[bftordering] def adaptOrderingRequestTraceContextForBatchValidation(

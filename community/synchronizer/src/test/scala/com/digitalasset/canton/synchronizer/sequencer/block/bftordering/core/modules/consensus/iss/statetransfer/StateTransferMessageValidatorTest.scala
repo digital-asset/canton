@@ -5,8 +5,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType.BftSignedStateTransferMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.BootstrapEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.StateTransferTestHelpers.{
+  aBlockMetadata,
   aCommit,
   aCommitCert,
   aPrePrepare,
@@ -197,20 +199,44 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
     context.extractSelfMessages() shouldBe empty
   }
 
-  "skip block transfer response signature verification" in {
-    implicit val context: ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
-      new ProgrammableUnitTestContext
+  "block transfer response signature verification" when {
+    "it contains None" in {
+      implicit val context
+          : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext
+      val cryptoProvider = spy(ProgrammableUnitTestEnv.noSignatureCryptoProvider)
 
-    val response = BlockTransferResponse.create(None, otherId)
-    validator.verifyStateTransferMessage(
-      response.fakeSign,
-      aMembershipWith2Nodes,
-      failingCryptoProvider,
-    )
+      val response = BlockTransferResponse.create(None, otherId)
+      validator.verifyStateTransferMessage(
+        response.fakeSign,
+        aMembershipWith2Nodes,
+        cryptoProvider,
+      )
 
-    context.extractSelfMessages() should contain only
-      Consensus.StateTransferMessage.VerifiedStateTransferMessage(response)
+      context.runPipedMessages() should contain only
+        Consensus.StateTransferMessage.VerifiedStateTransferMessage(response)
+
+      verify(cryptoProvider, times(1))
+        .verifySignedMessage(response.fakeSign, BftSignedStateTransferMessage)
+    }
+
+    "contains commit certificate is skipped" in {
+      implicit val context
+          : ProgrammableUnitTestContext[Consensus.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext
+
+      val response = BlockTransferResponse.create(Some(aCommitCert(aBlockMetadata)), otherId)
+      validator.verifyStateTransferMessage(
+        response.fakeSign,
+        aMembershipWith2Nodes,
+        failingCryptoProvider,
+      )
+
+      context.extractSelfMessages() should contain only
+        Consensus.StateTransferMessage.VerifiedStateTransferMessage(response)
+    }
   }
+
 }
 
 object StateTransferMessageValidatorTest {

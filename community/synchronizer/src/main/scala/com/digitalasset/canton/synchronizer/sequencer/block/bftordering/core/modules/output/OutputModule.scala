@@ -6,16 +6,21 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.sequencing.protocol.AllMembersOfSynchronizer
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.deserializeSignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.{
+  CryptoProvider,
+  DelegationCryptoProvider,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.{
   OrderingTopologyProvider,
   TopologyActivationTime,
@@ -90,6 +95,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
+  Mempool,
   Output,
   SequencerNode,
 }
@@ -99,6 +105,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Env,
   ModuleRef,
   PureFun,
+}
+import com.digitalasset.canton.topology.SequencerId
+import com.digitalasset.canton.topology.transaction.{
+  OwnerToKeyMapping,
+  SequencerSynchronizerState,
+  SequencingParametersState,
+  SynchronizerParametersState,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{MaxBytesToDecompress, SingleUseCell}
@@ -131,8 +144,10 @@ class OutputModule[E <: Env[E]](
     metrics: BftOrderingMetrics,
     override val availability: ModuleRef[Availability.Message[E]],
     override val consensus: ModuleRef[Consensus.Message[E]],
+    override val mempool: ModuleRef[Mempool.Message],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
+    hashOps: HashOps,
     requestInspector: RequestInspector = DefaultRequestInspector, // For testing
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // For testing
     // Passed from BftBlockOrderer to allow a near-0 latency `GetTime` implementation
@@ -235,6 +250,8 @@ class OutputModule[E <: Env[E]](
   private var backPressureStartInstant: Option[Instant] = None
 
   private var backPressureDelayedEvent: Option[CancellableEvent] = None
+
+  private val outputStageDurations = new mutable.HashMap[BlockNumber, Instant]()
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   override def receiveInternal(message: Message[E])(implicit
@@ -616,11 +633,15 @@ class OutputModule[E <: Env[E]](
           case BlockOrdered(orderedBlockForOutput) =>
             val orderedBlock = orderedBlockForOutput.orderedBlock
             val epochNumber = orderedBlock.metadata.epochNumber
+            val blockNumber = orderedBlock.metadata.blockNumber
+            val alreadyProvided = completedBlocksPeanoQueue.alreadyInserted(blockNumber)
+            if (lastAcknowledgedBlockNumber.forall(blockNumber > _) && !alreadyProvided)
+              outputStageDurations.getOrElseUpdate(blockNumber, Instant.now()).discard
+
             if (leaderSelectionPolicy.currentEpoch.exists(_ < epochNumber)) {
               // Leader Selection wants us to process epochs in order and this block is from a future one, so we delay it
               blocksRecoveredFromConsensus.addMessages(Seq(orderedBlockForOutput))
             } else {
-              val blockNumber = orderedBlock.metadata.blockNumber
               val viewNumber = orderedBlockForOutput.viewNumber
               val orderedBatchIds = orderedBlockForOutput.orderedBlock.batchRefs.map(_.batchId)
               val mode = orderedBlockForOutput.orderingMode
@@ -638,10 +659,10 @@ class OutputModule[E <: Env[E]](
                 s"Output received from local consensus ordered block (mode = $mode) with batch IDs ${orderedBlock.batchRefs
                     .map(_.batchId)}"
               )
-              if (!completedBlocksPeanoQueue.alreadyInserted(blockNumber))
+              if (!alreadyProvided)
                 leaderSelectionPolicy.addBlock(epochNumber, blockNumber, viewNumber)
 
-              if (completedBlocksPeanoQueue.alreadyInserted(blockNumber)) {
+              if (alreadyProvided) {
                 // This can happen if we start catching up in the middle of an epoch, as state transfer has epoch granularity.
                 logger.debug(s"Skipping block $blockNumber as it's been provided already")
               } else if (orderedBatchIds.isEmpty) {
@@ -787,6 +808,18 @@ class OutputModule[E <: Env[E]](
                 )
 
               blockSubscription.receiveBlock(fullyAssembledBlock)(blockTraceContext, mc)
+              outputStageDurations.remove(orderedBlockNumber).foreach { startInstant =>
+                metrics.performance.orderingStageLatency.emitOrderingStageLatency(
+                  metrics.performance.orderingStageLatency.labels.stage.values.output.OutputStageDuration,
+                  Duration.between(startInstant, Instant.now()),
+                )
+              }
+
+              // Block BFT times are monotonically increasing, so no future block can be sequenced
+              // earlier than this one, safe to use as the mempool's expiry cutoff
+              mempool.asyncSend(
+                Mempool.LatestKnownSequencingTimeUpdate(orderedBlockBftTime)
+              )(blockTraceContext, mc)
             }
 
           case UpdateLeaderSelection(topologyFetched) =>
@@ -1077,17 +1110,20 @@ class OutputModule[E <: Env[E]](
     emitOrderingStageLatency(
       labels.stage.values.output.Inspection,
       () =>
-        orderedBlockData.requestsView.zipWithIndex.toSeq.findLast {
+        orderedBlockData.requestsView.zipWithIndex.exists {
           case (tracedOrderingRequest @ Traced(orderingRequest), idx) =>
-            requestInspector.isRequestToAllMembersOfSynchronizer(
+            requestInspector.mayChangeOrderingTopology(
+              orderingRequest,
               orderedBlockData.orderedBlockForOutput.orderedBlock.metadata,
               idx,
-              orderingRequest,
               MaxBytesToDecompress(currentMembership.orderingTopology.maxRequestPayloadBytes),
               logger,
               tracedOrderingRequest.traceContext,
+              hashOps,
+              stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+                currentMembership.orderingTopology.sequencingParameters.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
             )
-        }.isDefined,
+        },
     )
   }
 
@@ -1187,8 +1223,20 @@ class OutputModule[E <: Env[E]](
       leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, newEpochNumber)
     val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders, newEpochBlacklisted)
     val cryptoProvider =
-      newMembershipAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
-
+      newMembershipAndCryptoProvider.fold(currentEpochCryptoProvider) {
+        case (newMembership, newCryptoProvider) =>
+          if (newMembership.orderingTopology.contains(thisNode)) {
+            newCryptoProvider
+          } else {
+            // If our activation time is between two epochs then during onboarding the very first epoch will not contain
+            // our node. So in order to sign messages we use the current crypto provider (which is from a topology later
+            // where we are in, and we have keys we can sign with).
+            DelegationCryptoProvider(
+              signer = currentEpochCryptoProvider,
+              verifier = newCryptoProvider,
+            )
+          }
+      }
     if (epochMetadataStored)
       setEpochMetadataStoredCache(newEpochNumber)
     cleanupEpochMetadataStoredCache(newEpochNumber)
@@ -1404,25 +1452,29 @@ object OutputModule {
 
   trait RequestInspector {
 
-    def isRequestToAllMembersOfSynchronizer(
+    def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         logger: TracedLogger,
         traceContext: TraceContext,
+        hashOps: HashOps,
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean
   }
 
   object DefaultRequestInspector extends RequestInspector {
 
-    override def isRequestToAllMembersOfSynchronizer(
+    override def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         logger: TracedLogger,
         traceContext: TraceContext,
+        hashOps: HashOps,
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
       // TODO(#21615) we should avoid a further deserialization downstream, which would also eliminate
       //  a zip bomb vulnerability in the BUG that could be triggered by byzantine sequencers (#26169)
@@ -1430,11 +1482,43 @@ object OutputModule {
         request.payload
       ) match {
         case Right(signedSubmissionRequest) =>
-          signedSubmissionRequest.content.batch.allRecipients
-            .contains(AllMembersOfSynchronizer)
+          (if (
+             !signedSubmissionRequest.content.batch.allRecipients.contains(AllMembersOfSynchronizer)
+           ) false
+           else if (stricterDetectionOfRequestsPotentiallyChangingOrderingTopology)
+             signedSubmissionRequest.content.batch.toClosedUncompressedBatchResult
+               .exists { // If we can't decompress it then it won't have a topology tx in there
+                 batch =>
+                   batch.envelopes.exists { envelope =>
+                     envelope
+                       .toOpenEnvelope(
+                         hashOps = hashOps,
+                         protocolVersion = synchronizerProtocolVersion,
+                       )
+                       .exists { open =>
+                         open.protocolMessage match {
+                           case message: TopologyTransactionsBroadcast =>
+                             message.transactions.transactions.exists { signed =>
+                               signed.transaction.mapping match {
+                                 case OwnerToKeyMapping(member, _) =>
+                                   member.code == SequencerId.Code
+                                 case _: SequencerSynchronizerState => true
+                                 case _: SequencingParametersState => true
+                                 case _: SynchronizerParametersState => true
+                                 case _ => false
+                               }
+                             }
+                           case _ => false
+                         }
+                       }
+                   }
+               }
+           else
+             true // we are not doing strict filtering so the fact that the request is to all members is enough
+          )
             .tap(result =>
               logger.debug(
-                s"BFT ordering request at index $requestNumber in output block $blockMetadata with message ID ${signedSubmissionRequest.content.messageId} is to all members of synchronizer: $result"
+                s"BFT ordering request at index $requestNumber in output block $blockMetadata with message ID ${signedSubmissionRequest.content.messageId} may change ordering topology: $result"
               )(traceContext)
             )
         case Left(error) =>
@@ -1447,13 +1531,15 @@ object OutputModule {
 
   class FixedResultRequestInspector(result: Boolean) extends RequestInspector {
 
-    override def isRequestToAllMembersOfSynchronizer(
+    override def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         logger: TracedLogger,
         traceContext: TraceContext,
+        hashOps: HashOps,
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
       result
   }

@@ -50,6 +50,7 @@ final case class SequencingParameters private (
     blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
     maxRequestsInBatch: Short,
     maxBatchesPerBlockProposal: Short,
+    stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       topology.SequencingParameters.type
@@ -93,6 +94,8 @@ final case class SequencingParameters private (
         this.blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short = this.maxRequestsInBatch,
       maxBatchesPerBlockProposal: Short = this.maxBatchesPerBlockProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+        this.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   ): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout = pbftViewChangeTimeout,
@@ -102,6 +105,8 @@ final case class SequencingParameters private (
       blacklistLeaderSelectionPolicyConfig = blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch = maxRequestsInBatch,
       maxBatchesPerBlockProposal = maxBatchesPerBlockProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(representativeProtocolVersion)
 
   def toProto30: v30.DynamicSequencingParametersPayload = v30.DynamicSequencingParametersPayload(
@@ -116,6 +121,8 @@ final case class SequencingParameters private (
     maxBatchesPerBlockProposal.toInt,
     pbftViewChangeTimeoutStep = Option(pbftViewChangeTimeoutStep.toProtoPrimitive),
     pbftViewChangeTimeoutUpperBound = Option(pbftViewChangeTimeoutUpperBound.toProtoPrimitive),
+    stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   )
 }
 
@@ -157,6 +164,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
   val DefaultSegmentLength: SegmentLength = SegmentLength(PositiveLong.tryCreate(10L))
   val DefaultMaxRequestsInBatch: Short = 32
   val DefaultMaxBatchesPerProposal: Short = 16
+  val DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+    false
   def Default(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       DefaultPbftViewChangeTimeout,
@@ -166,6 +175,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -178,6 +189,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       NoBlacklistingLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
@@ -198,6 +211,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       DefaultLeaderSelectionPolicyConfig,
       DefaultMaxRequestsInBatch,
       DefaultMaxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(rpv)
 
   def fromProto31(
@@ -237,6 +252,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
         if (proto.maxBatchesPerProposal == 0L) DefaultMaxBatchesPerProposal
         else proto.maxBatchesPerProposal.toShort
       }
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
+        proto.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology
     } yield SequencingParameters(
       pbftViewChangeTimeout,
       pbftViewChangeTimeoutStep,
@@ -245,6 +262,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch,
       maxBatchesPerProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(rpv)
 
   override def name: String = "SequencingParameters"
@@ -277,6 +295,8 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       pbftViewChangeTimeoutStep: NonNegativeFiniteDuration = DefaultPbftViewChangeTimeoutStep,
       pbftViewChangeTimeoutUpperBound: NonNegativeFiniteDuration =
         DefaultPbftViewChangeTimeoutUpperBound,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean =
+        DefaultstricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
   )(implicit synchronizerProtocolVersion: ProtocolVersion): SequencingParameters =
     SequencingParameters(
       pbftViewChangeTimeout,
@@ -286,6 +306,7 @@ object SequencingParameters extends VersioningCompanion[SequencingParameters] {
       blacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch,
       maxBatchesPerBlockProposal,
+      stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
     )(
       protocolVersionRepresentativeFor(synchronizerProtocolVersion)
     )
