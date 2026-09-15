@@ -63,6 +63,7 @@ import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTriggers
 import com.digitalasset.canton.participant.admin.repair.{CommitmentsService, RepairService}
+import com.digitalasset.canton.participant.commitment.AcsCommitmentProcessorManager
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors.SubmissionDuringShutdown
@@ -1244,6 +1245,8 @@ class CantonSyncService(
       source: Source[SynchronizerAlias],
       target: Target[SynchronizerConnectionConfig],
       force: Boolean,
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
+      commitmentProcessorManager: Option[AcsCommitmentProcessorManager],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
@@ -1277,6 +1280,8 @@ class CantonSyncService(
               source,
               target,
               targetSynchronizerInfo.map(_.psid),
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
+              commitmentProcessorManager,
             )
             .leftMap[SyncServiceError](
               SyncServiceError.SyncServiceMigrationError(source, target.map(_.synchronizerAlias), _)

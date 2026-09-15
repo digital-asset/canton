@@ -312,6 +312,33 @@ def add_broken_nightly_label(idx: str) -> None:
         print(f"Could not add '{NIGHTLY_BROKEN_LABEL}' label to #{idx}: {result.stderr.strip()}")
 
 
+def _parse_iso(value: str) -> datetime.datetime:
+    # gh emits ISO-8601 with a trailing Z. fromisoformat needs an explicit offset.
+    return datetime.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+
+
+def flake_predates_close(idx: str, commit_hash: str) -> bool:
+    """True when closed issue #idx was closed after commit_hash was committed, i.e. a pre-fix stale flake. Fails open to False on any error."""
+    query = (
+        'query($n:Int!,$oid:GitObjectID!){repository(owner:"DACH-NY",name:"canton"){'
+        'issue(number:$n){state closedAt} object(oid:$oid){...on Commit{committedDate}}}}'
+    )
+    try:
+        result = run_gh_with_retries(
+            ["api", "graphql", "-f", f"query={query}", "-F", f"n={idx}", "-f", f"oid={commit_hash}"]
+        )
+        if result.returncode != 0:
+            return False
+        repo = json.loads(result.stdout)["data"]["repository"]
+        issue, commit = repo["issue"], repo["object"]
+        if issue["state"] != "CLOSED" or not issue["closedAt"] or not commit:
+            return False
+        return _parse_iso(commit["committedDate"]) < _parse_iso(issue["closedAt"])
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        print(f"flake_predates_close: could not evaluate #{idx}/{commit_hash[:12]}: {exc}")
+        return False
+
+
 def are_consecutive_commits(older_hash: str, newer_hash: str) -> bool:
     """Returns True if newer_hash is a direct child of older_hash in git history."""
     result = run_gh_with_retries(
@@ -360,6 +387,13 @@ def update_issue(
 
     body = migrate_table_header_to_cause(body)
     commit_hash = get_ci_commit_hash()
+
+    if commit_hash != 'unknown' and flake_predates_close(idx, commit_hash):
+        print(
+            f"Issue #{idx} was closed after commit {commit_hash[:12]} was committed. "
+            f"Skipping reopen for this stale flake."
+        )
+        return None
 
     consecutive_streak = False
     nightly = is_nightly_job(job)
@@ -450,7 +484,40 @@ def self_test():
     test_nightly_streak_detection()
     test_recent_nightly_commits_counts_current_run_once()
     test_update_issue_nightly_streak_labels_and_returns()
+    test_flake_predates_close()
     print("manage_flaky_issues self-checks passed")
+
+
+def test_flake_predates_close():
+    def resp(state, closed_at, committed):
+        payload = {
+            "data": {
+                "repository": {
+                    "issue": {"state": state, "closedAt": closed_at},
+                    "object": {"committedDate": committed} if committed else None,
+                }
+            }
+        }
+        return subprocess.CompletedProcess([], 0, json.dumps(payload), '')
+
+    # Flake commit predates the close -> stale, skip the reopen.
+    with patch(
+        f"{__name__}.run_gh_with_retries",
+        return_value=resp("CLOSED", "2026-09-07T15:33:49Z", "2026-09-07T15:02:52Z"),
+    ):
+        assert flake_predates_close("24208", "d85876fdd63a") is True
+    # Flake commit lands after the close -> genuine regression, reopen.
+    with patch(
+        f"{__name__}.run_gh_with_retries",
+        return_value=resp("CLOSED", "2026-09-07T15:33:49Z", "2026-09-07T16:00:00Z"),
+    ):
+        assert flake_predates_close("24208", "abc0000000de") is False
+    # Issue still open -> never stale.
+    with patch(
+        f"{__name__}.run_gh_with_retries",
+        return_value=resp("OPEN", None, "2026-09-07T15:02:52Z"),
+    ):
+        assert flake_predates_close("24208", "d85876fdd63a") is False
 
 
 def _nightly_body(commits: list) -> str:

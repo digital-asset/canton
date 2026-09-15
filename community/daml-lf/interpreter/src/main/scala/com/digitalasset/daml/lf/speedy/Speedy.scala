@@ -362,12 +362,12 @@ private[lf] object Speedy {
           }(Control.`Defer Control`)
       }
 
-    private[speedy] override def asUpdateMachine(location: String)(
+    private[speedy] override def asUpdateMachine(location: => String)(
         f: UpdateMachine => Control[Question.Update]
     ): Control[Question.Update] =
       f(this)
 
-    private[speedy] override def asCmdMachine(location: String)(
+    private[speedy] override def asCmdMachine(location: => String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Control[Question.Update] =
       throw SError.Crash(location, "unexpected update machine in cmd context")
@@ -387,7 +387,7 @@ private[lf] object Speedy {
           unhandledException(excep)
         } else {
           popKont() match {
-            case handler: KTryCatchV1Handler =>
+            case handler: KTryCatchV1Handler[Question.Update] =>
               // The machine's ptx is updated even if the handler does not catch the exception.
               // This may cause the transaction trace to report the error from the handler's location.
               // Ideally we should embed the trace into the exception directly.
@@ -404,7 +404,7 @@ private[lf] object Speedy {
               }
             case KCloseExercise =>
               unwind(ptx.abortExercises)
-            case KPreventException() =>
+            case KPreventException =>
               unhandledException(excep)
             case _ =>
               unwind(ptx)
@@ -637,12 +637,12 @@ private[lf] object Speedy {
         logger = logger,
       ) {
 
-    private[speedy] override def asUpdateMachine(location: String)(
+    private[speedy] override def asUpdateMachine(location: => String)(
         f: UpdateMachine => Control[Question.Update]
     ): Nothing =
       throw SError.Crash(location, "unexpected pure machine")
 
-    private[speedy] override def asCmdMachine(location: String)(
+    private[speedy] override def asCmdMachine(location: => String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Nothing =
       throw SError.Crash(location, "unexpected pure machine in cmd context")
@@ -694,7 +694,7 @@ private[lf] object Speedy {
 
     private[this] val hasGasBudget = initialGasBudget.isDefined
 
-    private[speedy] def handleException(excep: SValue.SAny): Control[Nothing]
+    private[speedy] def handleException(excep: SValue.SAny): Control[Q]
 
     private[speedy] def trace(message: String): Unit = logger.trace(message, getLastLocation)
     private[speedy] def warn(message: String): Unit = logger.warn(message, getLastLocation)
@@ -779,11 +779,11 @@ private[lf] object Speedy {
     @inline
     private[speedy] final def kontDepth(): Int = kontStack.size
 
-    private[speedy] def asUpdateMachine(location: String)(
+    private[speedy] def asUpdateMachine(location: => String)(
         f: UpdateMachine => Control[Question.Update]
     ): Control[Q]
 
-    private[speedy] def asCmdMachine(location: String)(
+    private[speedy] def asCmdMachine(location: => String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Control[Q]
 
@@ -1253,18 +1253,36 @@ private[lf] object Speedy {
         logger = logger,
       ) {
 
-    private[speedy] override def asUpdateMachine(location: String)(
+    private[speedy] override def asUpdateMachine(location: => String)(
         f: UpdateMachine => Control[Question.Update]
     ): Control[Question.Cmd] =
       throw SError.Crash(location, "unexpected cmd machine in update context")
 
-    private[speedy] override def asCmdMachine(location: String)(
+    private[speedy] override def asCmdMachine(location: => String)(
         f: CmdMachine => Control[Question.Cmd]
     ): Control[Question.Cmd] =
       f(this)
 
-    private[speedy] override def handleException(excep: SValue.SAny): Control[Nothing] =
-      unhandledException(excep)
+    private[speedy] override def handleException(excep: SValue.SAny): Control[Question.Cmd] = {
+      @tailrec
+      def unwind(): Control[Question.Cmd] =
+        if (kontDepth() == 0) {
+          unhandledException(excep)
+        } else {
+          popKont() match {
+            case handler: KTryCatchV1Handler[Question.Cmd] =>
+              handler.restore()
+              popTempStackToBase()
+              pushKont(KPushTo(handler.machine, handler.handler))
+              pushKont(KPure(_ => Control.Value(excep)))
+              Control.Question(Question.Cmd.AbortTry)
+            case _ =>
+              unwind()
+          }
+        }
+
+      unwind()
+    }
   }
 
   // Environment
@@ -1561,13 +1579,13 @@ private[lf] object Speedy {
     * When a throw is executed, the kont-stack is unwound to the nearest enclosing
     * KTryCatchV1Handler (if there is one), and the code for the handler executed.
     */
-  private[speedy] final case class KTryCatchV1Handler private (
-      machine: UpdateMachine,
+  private[speedy] final case class KTryCatchV1Handler[Q] private (
+      machine: Machine[Q],
       savedBase: Int,
       frame: Frame,
       actuals: Actuals,
       handler: SExpr,
-  ) extends Kont[Question.Update]
+  ) extends Kont[Q]
       with NoCopy {
     // we must restore when catching a throw, or for normal execution
     def restore(): Unit = {
@@ -1575,19 +1593,25 @@ private[lf] object Speedy {
       machine.restoreFrameAndActuals(frame, actuals)
     }
 
-    override def execute(machine: Machine[Question.Update], v: SValue): Control[Question.Update] = {
+    override def execute(machine: Machine[Q], v: SValue): Control[Q] = {
       machine.updateGasBudget(_.KTryCatchV1Handler.cost)
-
-      machine.asUpdateMachine(getClass.getSimpleName) { machine =>
-        restore()
-        machine.ptx = machine.ptx.endTry
-        Control.Value(v)
+      machine match {
+        case machine: UpdateMachine =>
+          restore()
+          machine.ptx = machine.ptx.endTry
+          Control.Value(v)
+        case machine: CmdMachine =>
+          restore()
+          machine.pushKont(KPure(_ => Control.Value(v)))
+          Control.Question(Question.Cmd.CloseTry.asInstanceOf[Q])
+        case _: PureMachine =>
+          throw SError.Crash(getClass.getSimpleName, "unexpected pure machine")
       }
     }
   }
 
   object KTryCatchV1Handler {
-    def apply(machine: UpdateMachine, handler: SExpr): KTryCatchV1Handler =
+    def apply[Q](machine: Machine[Q], handler: SExpr): KTryCatchV1Handler[Q] =
       KTryCatchV1Handler(
         machine,
         machine.markBase(),
@@ -1627,8 +1651,8 @@ private[lf] object Speedy {
     }
   }
 
-  private[speedy] final case class KPreventException[Q]() extends Kont[Q] {
-    override def execute(machine: Machine[Q], v: SValue): Control.Value = {
+  private[speedy] final case object KPreventException extends Kont[Question.Update] {
+    override def execute(machine: Machine[Question.Update], v: SValue): Control.Value = {
       machine.updateGasBudget(_.KPreventException.cost)
       Control.Value(v)
     }

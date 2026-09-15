@@ -5,7 +5,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Signature
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
@@ -46,7 +50,7 @@ final case class OrderingTopology(
     activationTime: TopologyActivationTime,
     areTherePendingCantonTopologyChanges: Option[Boolean],
 ) extends MessageAuthorizer
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   lazy val size: Int = nodesTopologyInfo.size
 
@@ -73,7 +77,12 @@ final case class OrderingTopology(
   override def isAuthorized(from: BftNodeId, keyId: BftKeyId): Boolean =
     nodesTopologyInfo.get(from).exists(_.keyIds.contains(keyId))
 
-  override protected def pretty: Pretty[OrderingTopology.this.type] =
+  override def prettyCompanion: PrettyPrintingCompanion[OrderingTopology] = OrderingTopology
+}
+
+object OrderingTopology extends PrettyPrintingCompanion[OrderingTopology] {
+
+  override protected val pretty: Pretty[OrderingTopology] =
     prettyOfClass(
       param("activationTime", _.activationTime.value),
       param("size", _.size),
@@ -90,15 +99,17 @@ final case class OrderingTopology(
         _.areTherePendingCantonTopologyChanges,
       ),
     )
-}
-
-object OrderingTopology {
 
   final case class NodeTopologyInfo(
       keyIds: Set[BftKeyId]
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[NodeTopologyInfo] =
+    override def prettyCompanion: PrettyPrintingCompanion[NodeTopologyInfo] = NodeTopologyInfo
+  }
+
+  object NodeTopologyInfo extends PrettyPrintingCompanion[NodeTopologyInfo] {
+
+    override protected val pretty: Pretty[NodeTopologyInfo] =
       prettyOfClass(
         param("keyIds", _.keyIds.map(_.doubleQuoted))
       )

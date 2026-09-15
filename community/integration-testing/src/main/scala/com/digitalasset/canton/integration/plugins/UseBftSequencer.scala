@@ -51,6 +51,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
   DefaultSendBlacklistTtl,
+  P2PConnectionManagementConfig,
   P2PNetworkConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
@@ -146,6 +147,7 @@ final class UseBftSequencer(
     ),
     p2pClientChannelParams: ClientChannelParams =
       ClientChannelParams.Default.copy(flowControlWindow = None),
+    p2pConnectionManagementConfig: P2PConnectionManagementConfig = P2PConnectionManagementConfig(),
 ) extends EnvironmentSetupPlugin
     with EitherValues {
 
@@ -222,6 +224,11 @@ final class UseBftSequencer(
                     networkSendRetryMinimumDelay = networkSendRetryMinimumDelay,
                     networkSendRetryJitterCap = networkSendRetryJitterCap,
                   )
+                  // connection management config's lens
+                  .focus(_.initialNetwork)
+                  .some
+                  .andThen(GenLens[P2PNetworkConfig](_.connectionManagementConfig))
+                  .replace(p2pConnectionManagementConfig)
                   // server endpoint's lens
                   .focus(_.initialNetwork)
                   .some
@@ -334,6 +341,7 @@ final class UseBftSequencer(
               _.focus(_.channel).replace(p2pClientChannelParams)
             ),
             overwriteStoredEndpoints = shouldOverwriteStoredEndpoints,
+            connectionManagementConfig = p2pConnectionManagementConfig,
           )
           val standaloneOpt = createStandaloneConfig(selfInstanceName, otherInitialNames)
           val blockSequencerConfig = {
@@ -486,10 +494,17 @@ final class UseBftSequencer(
       config: BftBlockOrderingP2PSendDelayConfig,
   ): BftBlockOrderingP2PSendDelayConfig =
     config.copy(delaysByRecipients = config.delaysByRecipients.map {
-      case DelayByRecipients(sources, delayDistribution) =>
+      case DelayByRecipients(
+            sources,
+            delayDistribution,
+            probabilityOfGrpcSendSuccess,
+            probabilityOfGrpcReady,
+          ) =>
         DelayByRecipients(
           sources.flatMap(idx => otherInstanceNames.find(oin => idx == getSuffixDigits(oin))),
           delayDistribution,
+          probabilityOfGrpcSendSuccess,
+          probabilityOfGrpcReady,
         )
     })
 

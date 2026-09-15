@@ -27,6 +27,7 @@ import org.apache.pekko.projection.{
 }
 import org.apache.pekko.stream.scaladsl.Source
 
+import java.sql.{SQLNonTransientConnectionException, SQLRecoverableException, SQLTransientException}
 import scala.concurrent.{ExecutionContext, Future}
 
 /** Shared storage backing all TEA ingestion projections.
@@ -108,11 +109,18 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
           env: Traced[ProjectionEvent],
           cause: Throwable,
           recoveryStrategy: HandlerRecoveryStrategy,
-      ): Unit =
-        logger.warn(
-          s"Error during envelope processing of ${env.value} for projectionId $projectionId",
-          cause,
-        )(env.traceContext)
+      ): Unit = {
+        val message =
+          s"Error during envelope processing of ${env.value} for projectionId $projectionId"
+        cause match {
+          // DbExceptionRetryPolicy treats these as transient, so they’re retried and usually succeed,
+          // so WARN would mostly be noise.
+          case _: SQLTransientException | _: SQLRecoverableException |
+              _: SQLNonTransientConnectionException =>
+            logger.info(message, cause)(env.traceContext)
+          case _ => logger.warn(message, cause)(env.traceContext)
+        }
+      }
     }
 
   /** Create a projection source provider from a source of ProjectionEvent

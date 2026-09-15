@@ -48,6 +48,7 @@ class RecipientsValidator[I](
     *
     * A view v will be kept iff there is a path rp through the recipients tree (ordered leaf to
     * root) such that the following conditions hold:
+    *
     *   1. Every informee of the view is hosted by an active participant.
     *   1. Every informee participant of the view v is declared as a recipient of v in the first
     *      element of rp.

@@ -1,0 +1,21 @@
+name: upgrades-example-FailsWhenDepIsInvalidPreviousVersionOfSelf
+version: 2.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/upgrades-FailsWhenDepIsInvalidPreviousVersionOfSelf-v1.dar
+dependencies:
+  - daml-script
+module-prefixes:
+  upgrades-example-FailsWhenDepIsInvalidPreviousVersionOfSelf-1.0.0: V1
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-FailsWhenDepIsInvalidPreviousVersionOfSelf-v2.dar
+upgrades: ${TARGET_ROOT}/upgrades-FailsWhenDepIsInvalidPreviousVersionOfSelf-v1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

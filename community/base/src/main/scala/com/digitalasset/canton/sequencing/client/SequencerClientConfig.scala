@@ -87,7 +87,7 @@ import com.digitalasset.canton.tracing.TracingConfig.Propagation
   * @param channelInitialFlowControlWindow
   *   Switches to automatic gRPC flow control and sets its initial window; if `None`, then it is not
   *   configured and the implementation default is used. If present, it is set after the
-  *   `flowControlWindow` parameters, so it overrides it.
+  *   `flowControlWindow` parameter, so it overrides it.
   */
 final case class SequencerClientConfig(
     eventInboxSize: PositiveInt = PositiveInt.tryCreate(100),

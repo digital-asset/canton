@@ -48,7 +48,7 @@ object ConcurrentEnvironmentLimiter extends LazyLogging {
 
   val IntegrationTestConcurrencyLimit = "canton-test.integration.concurrency"
 
-  private val concurrencyLimit: Int = System.getProperty(IntegrationTestConcurrencyLimit, "3").toInt
+  private val concurrencyLimit: Int = System.getProperty(IntegrationTestConcurrencyLimit, "2").toInt
 
   /** Configured to be fair so earlier started tests will be first to get environments */
   private val semaphore = new Semaphore(concurrencyLimit, true)
@@ -86,8 +86,8 @@ object ConcurrentEnvironmentLimiter extends LazyLogging {
       // creations can easily fail and throw
       // capture these and immediately release the permit as the destroy method will not be called
       case NonFatal(e) =>
-        semaphore.release(numPermits)
         change(name, Failed, purge = true)
+        semaphore.release(numPermits)
         throw e
     }
   }
@@ -96,7 +96,7 @@ object ConcurrentEnvironmentLimiter extends LazyLogging {
   def destroy[A](name: String, permits: PositiveInt)(block: => A): A =
     try block
     finally {
-      semaphore.release(getNumPermits(permits))
       change(name, Done, purge = true)
+      semaphore.release(getNumPermits(permits))
     }
 }

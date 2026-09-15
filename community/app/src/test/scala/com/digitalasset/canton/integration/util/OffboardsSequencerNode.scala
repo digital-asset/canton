@@ -73,9 +73,11 @@ trait OffboardsSequencerNode {
 
     // user-manual-entry-begin: SequencerOffboardingRemoveExclusiveKeys
 
-    // Remove the OwnerToKeyMapping of the offboarded sequencer. Once the sequencer
-    // has been removed from the synchronizer, its OTK becomes dangling and must be
-    // removed by the remaining synchronizer owners using decentralized authorization.
+    // Remove the OwnerToKeyMapping (OTK) of the offboarded sequencer. Once the
+    // sequencer has been removed from the synchronizer, its OTK becomes dangling and
+    // must be removed by the remaining synchronizer owners using decentralized
+    // authorization (`mustFullyAuthorize` = false). Since the mapping belongs to the
+    // offboarded sequencer, `ForceFlag.AlienMember` is required to propose its removal.
     sequencersOnSynchronizer.head1.topology.owner_to_key_mappings
       .list(store = Some(synchronizerId), filterKeyOwnerUid = sequencerToOffboard.id.filterString)
       .headOption

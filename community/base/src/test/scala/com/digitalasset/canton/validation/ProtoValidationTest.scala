@@ -22,8 +22,8 @@ class ProtoValidationTest extends AnyWordSpec with EitherValues with Matchers {
   private def seq[E](es: E*): ProtoUnvalidatedSeq[E] = ProtoUnvalidatedSeq(es)
   private def seqStr(ss: String*): ProtoUnvalidatedSeq[ProtoUnvalidatedString] = seq(ss.map(u)*)
   // Each check has its own validating protocol version, so pin each fixture to that alias.
-  private val pvvStrings = ProtocolVersionValidation.PV(ProtocolVersion.stringValidation)
-  private val pvvBounds = ProtocolVersionValidation.PV(ProtocolVersion.boundsCheck)
+  private val pvvStrings = ProtocolVersionValidation.PV(ProtocolVersion.v36)
+  private val pvvBounds = ProtocolVersionValidation.PV(ProtocolVersion.v36)
   private val pvv35 = ProtocolVersionValidation.PV(ProtocolVersion.v35) // below both of them
 
   /** The field an error blames, the caller's only pointer to what failed. */

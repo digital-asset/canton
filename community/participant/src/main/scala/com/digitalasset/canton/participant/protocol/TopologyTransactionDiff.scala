@@ -90,7 +90,7 @@ private[protocol] object TopologyTransactionDiff {
     }
 
     val changedSynchronizerParam =
-      if (psid.protocolVersion >= ProtocolVersion.acsCommitmentRedesign) {
+      if (psid.protocolVersion >= ProtocolVersion.v36) {
         extractSynchronizerParameterStateChanges(
           oldRelevantState = oldRelevantState,
           currentRelevantState = currentRelevantState,

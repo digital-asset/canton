@@ -84,6 +84,7 @@ final class TestDars private (val lfVersion: LanguageVersion) {
   val darsToUpload: List[TestDar] = lfVersion match {
     case LanguageVersion.v2_2 => v22Plus
     case LanguageVersion.v2_3 => v22Plus ++ v23Plus
+    case LanguageVersion.v2_4 => v22Plus ++ v23Plus
     case _ => sys.error(s"Unsupported LF version $lfVersion")
   }
 
@@ -93,4 +94,5 @@ final class TestDars private (val lfVersion: LanguageVersion) {
 object TestDars {
   val v2_2: TestDars = new TestDars(LanguageVersion.v2_2)
   val v2_3: TestDars = new TestDars(LanguageVersion.v2_3)
+  val v2_4: TestDars = new TestDars(LanguageVersion.v2_4)
 }

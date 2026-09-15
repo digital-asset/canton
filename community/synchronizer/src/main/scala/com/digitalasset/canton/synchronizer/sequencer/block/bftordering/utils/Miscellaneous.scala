@@ -9,7 +9,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.tracing.TraceContext
@@ -104,8 +108,16 @@ private[bftordering] object Miscellaneous {
       }
   }
 
-  final case class BeforeAndAfter[T <: PrettyPrinting](before: T, after: T) extends PrettyPrinting {
-    override protected def pretty: Pretty[BeforeAndAfter[T]] =
+  final case class BeforeAndAfter[+T <: PrettyPrintingFromCompanion](before: T, after: T)
+      extends PrettyPrintingFromCompanion {
+    override def prettyCompanion
+        : PrettyPrintingCompanion[BeforeAndAfter[PrettyPrintingFromCompanion]] =
+      BeforeAndAfter
+  }
+
+  object BeforeAndAfter
+      extends PrettyPrintingCompanion[BeforeAndAfter[PrettyPrintingFromCompanion]] {
+    override protected val pretty: Pretty[BeforeAndAfter[PrettyPrintingFromCompanion]] =
       prettyOfClass(param("before", _.before), param("after", _.after))
   }
 

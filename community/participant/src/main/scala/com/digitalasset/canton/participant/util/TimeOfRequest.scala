@@ -6,7 +6,11 @@ package com.digitalasset.canton.participant.util
 import cats.syntax.apply.*
 import com.digitalasset.canton.RequestCounter
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import slick.jdbc.GetResult
 
 /** The time when a request has made a change of state.
@@ -17,15 +21,12 @@ import slick.jdbc.GetResult
   *   The timestamp when this change takes place.
   */
 final case class TimeOfRequest(rc: RequestCounter, timestamp: CantonTimestamp)
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[TimeOfRequest] = prettyOfClass(
-    param("request counter", _.rc),
-    param("timestamp", _.timestamp),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[TimeOfRequest] = TimeOfRequest
 }
 
-object TimeOfRequest {
+object TimeOfRequest extends PrettyPrintingCompanion[TimeOfRequest] {
   implicit val orderingTimeOfRequest: Ordering[TimeOfRequest] =
     Ordering.by[TimeOfRequest, (CantonTimestamp, RequestCounter)](toc => (toc.timestamp, toc.rc))
 
@@ -40,5 +41,10 @@ object TimeOfRequest {
       GetResult[Option[RequestCounter]].apply(r),
       GetResult[Option[CantonTimestamp]].apply(r),
     ).mapN(TimeOfRequest.apply)
+  )
+
+  override protected val pretty: Pretty[TimeOfRequest] = prettyOfClass(
+    param("request counter", _.rc),
+    param("timestamp", _.timestamp),
   )
 }

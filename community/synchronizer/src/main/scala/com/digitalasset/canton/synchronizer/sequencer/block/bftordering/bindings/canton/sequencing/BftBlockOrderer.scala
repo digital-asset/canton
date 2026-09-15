@@ -103,7 +103,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ModuleRef,
   P2PConnectionEventListener,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Probability
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  FiniteDurationDistribution,
+  Probability,
+}
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.{AuthenticationServices, SequencerSnapshot}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.standalone.v1.{
@@ -330,7 +333,13 @@ final class BftBlockOrderer(
     } yield epochNumber
     awaitFuture(
       PartitionManager
-        .create(localStorage, timeouts, loggerFactory, onboardedSequencerEpochNumberO),
+        .create(
+          localStorage,
+          timeouts,
+          loggerFactory,
+          onboardedSequencerEpochNumberO,
+          manualVacuumEnabled = config.manualVacuumEnabled,
+        ),
       "Initializing partition management",
     )
   }
@@ -514,8 +523,15 @@ final class BftBlockOrderer(
             StandaloneRequestInspector(
               standaloneConfig.testSlowdown
                 .flatMap(_.topologyDelay)
-                .flatMap(_.broadcastInEpochProbability)
-                .map(Probability(_))
+                .flatMap(_.broadcastRequestProbability)
+                .map(Probability(_)),
+              standaloneConfig.testSlowdown
+                .flatMap(_.topologyDelay)
+                .flatMap(_.possibleOrderingTopologyChangeInRequestProbability)
+                .map(Probability(_)),
+              standaloneConfig.testSlowdown
+                .flatMap(_.topologyDelay)
+                .flatMap(_.requestInspectionDelay),
             )
         ),
       outputPreviousStoredBlock = outputPreviousStoredBlock,
@@ -586,7 +602,9 @@ final class BftBlockOrderer(
   //  is propagated to the peer as an error.
   private def createPeerReceiverForIncomingConnection(
       sendingStreamObserver: StreamObserver[BftOrderingMessage]
-  )(implicit traceContext: TraceContext): UnlessShutdown[StreamObserver[BftOrderingMessage]] =
+  )(implicit
+      traceContext: TraceContext
+  ): Option[UnlessShutdown[StreamObserver[BftOrderingMessage]]] =
     p2pNetworkManager.connectionManager.createServerSidePeerReceiver(
       p2pNetworkInModuleRef,
       sendingStreamObserver,
@@ -946,13 +964,15 @@ final class BftBlockOrderer(
 object BftBlockOrderer {
 
   private final case class StandaloneRequestInspector(
-      probabilityOfBroadcast: Option[Probability]
+      broadcastRequestProbability: Option[Probability],
+      possibleOrderingTopologyChangeInRequestProbability: Option[Probability],
+      requestInspectionDelay: Option[FiniteDurationDistribution],
   ) extends RequestInspector {
 
-    override def mayRequestChangeOrderingTopology(
+    override def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         synchronizerLimits: SynchronizerLimits,
         logger: TracedLogger,
@@ -960,7 +980,17 @@ object BftBlockOrderer {
         hashOps: HashOps,
         stricterDetectionOfRequestsPotentiallyChangingOrderingTopology: Boolean,
     )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
-      probabilityOfBroadcast.fold(false)(_.flipCoin(new Random(ThreadLocalRandom.current())))
+      broadcastRequestProbability.fold(false) { brp =>
+        if (brp.flipCoin(new Random(ThreadLocalRandom.current()))) {
+          requestInspectionDelay.foreach { delayDistribution =>
+            val delay = delayDistribution.generateRandomDuration(ThreadLocalRandom.current())
+            Threading.sleep(delay.toMillis, (delay.toNanos % 1_000_000L).toInt)
+          }
+          possibleOrderingTopologyChangeInRequestProbability.fold(false)(
+            _.flipCoin(new Random(ThreadLocalRandom.current()))
+          )
+        } else false
+      }
   }
 
   @VisibleForTesting

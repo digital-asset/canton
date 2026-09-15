@@ -208,6 +208,7 @@ final class RepairServiceContractsImporter(
       packageMetadataSnapshot: PackageMetadata,
       representativePackageIdOverride: RepresentativePackageIdOverride,
       workflowIdPrefix: Option[String] = None,
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val parameters = Map(
       "workflowIdPrefix" -> workflowIdPrefix.toString
@@ -252,7 +253,12 @@ final class RepairServiceContractsImporter(
       val doneF = for {
         synchronizer <- toFuture(helpers.readSynchronizerData(synchronizerId, repairIndexer))
         // 1. Explicitly trigger crash recovery cleanup and verify ACS commitment watermarks
-        _ <- toFuture(helpers.verifyRepairPreconditions(synchronizer))
+        _ <- toFuture(
+          helpers.verifyRepairPreconditions(
+            synchronizer,
+            forceRepairWhenTopologyTransactionAtLedgerEnd,
+          )
+        )
         // 2. Execute the stream only after the Active Contract Store is clean
         _ <- indexedContractBatches
           .mapAsync(parallelism) { data =>

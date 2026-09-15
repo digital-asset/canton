@@ -24,6 +24,7 @@ import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.
   SyncStateInspectionError,
 }
 import com.digitalasset.canton.participant.admin.repair.RepairService
+import com.digitalasset.canton.participant.commitment.AcsCommitmentProcessorManager
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
   MigrationErrors,
@@ -273,6 +274,8 @@ class SynchronizerMigration(
       source: Source[SynchronizerAlias],
       target: Target[SynchronizerConnectionConfig],
       targetPsid: Target[PhysicalSynchronizerId],
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
+      commitmentProcessorManager: Option[AcsCommitmentProcessorManager],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerMigrationError, Unit] = {
@@ -285,6 +288,13 @@ class SynchronizerMigration(
       for {
         // check that the request makes sense
         sourcePsid <- checkMigrationRequest(source, target, targetPsid.map(_.logical))
+
+        // stop the commitment pipeline for the source synchronizer
+        _ = commitmentProcessorManager.zip(sourcePsid.unwrap.toOption).foreach {
+          case (commitmentProcessorManager, source) =>
+            commitmentProcessorManager.closePipelineForSynchronizer(source.logical)
+        }
+
         // check if the target alias already exists.
         targetStatusO = target.traverse(config =>
           synchronizerConnectionConfigStore
@@ -342,7 +352,12 @@ class SynchronizerMigration(
       sourcePsid <- synchronizeWithClosing(functionFullName)(prepare())
       sourceLsid <- source.traverse(getSynchronizerId(_))
       _ <- prepareSynchronizerConnection(Traced(target.unwrap.synchronizerAlias))
-      _ <- migrateContracts(source, sourceLsid, targetPsid.map(_.logical))
+      _ <- migrateContracts(
+        source,
+        sourceLsid,
+        targetPsid.map(_.logical),
+        forceRepairWhenTopologyTransactionAtLedgerEnd,
+      )
       _ <- updateSynchronizerStatus(
         target.map(_.synchronizerAlias),
         targetPsid.map(KnownPhysicalSynchronizerId(_): ConfiguredPhysicalSynchronizerId),
@@ -373,6 +388,7 @@ class SynchronizerMigration(
       sourceAlias: Source[SynchronizerAlias],
       source: Source[SynchronizerId],
       target: Target[SynchronizerId],
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerMigrationError, Unit] =
@@ -399,6 +415,7 @@ class SynchronizerMigration(
               source,
               target,
               skipInactive = true,
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
             )
           )
             .leftMap[SynchronizerMigrationError](

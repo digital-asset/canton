@@ -8,8 +8,19 @@ import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicat
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus.*
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
+import com.digitalasset.canton.participant.admin.data.PartyReplicationStatus.{
+  AcsIndexingProgress,
+  AcsReplicationProgress,
+  PartyReplicationAuthorization,
+  PartyReplicationError,
+  ReplicationParameters,
+  SequencerChannelAgreement,
+}
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus as InternalStatus
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -28,7 +39,7 @@ final case class PartyReplicationStatus(
     indexingO: Option[AcsIndexingProgress.type],
     hasCompleted: Boolean,
     errorO: Option[PartyReplicationError],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   require(
     indexingO.isEmpty || replicationO.nonEmpty,
@@ -57,7 +68,12 @@ final case class PartyReplicationStatus(
     )
   }
 
-  override protected def pretty: Pretty[PartyReplicationStatus] =
+  override def prettyCompanion: PrettyPrintingCompanion[PartyReplicationStatus] =
+    PartyReplicationStatus
+}
+
+object PartyReplicationStatus extends PrettyPrintingCompanion[PartyReplicationStatus] {
+  override protected val pretty: Pretty[PartyReplicationStatus] =
     prettyOfClass(
       param("parameters", _.parameters),
       paramIfDefined("agreementStatus", _.agreementStatusO),
@@ -67,9 +83,7 @@ final case class PartyReplicationStatus(
       paramIfDefined("error", _.errorO),
       paramIfTrue("complete", _.hasCompleted),
     )
-}
 
-object PartyReplicationStatus {
   def fromInternal: InternalStatus => PartyReplicationStatus = {
     // When new fields are added, adapt this deciding which fields may need to be exposed externally erring
     // on the side of cautious not exposing fields that don't have clear external utility and can be preserved
@@ -121,7 +135,7 @@ object PartyReplicationStatus {
       sourceParticipantId: ParticipantId,
       targetParticipantId: ParticipantId,
       serial: PositiveInt,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     def toProtoV30: v30.PartyReplicationStatus.ReplicationParameters =
       v30.PartyReplicationStatus.ReplicationParameters(
@@ -133,20 +147,11 @@ object PartyReplicationStatus {
         serial.unwrap,
       )
 
-    override protected def pretty: Pretty[ReplicationParameters] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("request", _.requestId.doubleQuoted),
-        param("party", _.partyId),
-        param("synchronizer", _.synchronizerId),
-        param("source participant", _.sourceParticipantId),
-        param("target participant", _.targetParticipantId),
-        param("serial", _.serial),
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[ReplicationParameters] =
+      ReplicationParameters
   }
 
-  private object ReplicationParameters {
+  private object ReplicationParameters extends PrettyPrintingCompanion[ReplicationParameters] {
     def fromInternal: InternalStatus.ReplicationParams => ReplicationParameters = {
       case InternalStatus.ReplicationParams(
             requestId,
@@ -199,19 +204,31 @@ object PartyReplicationStatus {
       targetParticipantId,
       topologySerial,
     )
-  }
 
-  final case class SequencerChannelAgreement(sequencerId: SequencerId) extends PrettyPrinting {
-    def toProtoV30: v30.PartyReplicationStatus.SequencerChannelAgreement =
-      v30.PartyReplicationStatus.SequencerChannelAgreement(sequencerId.uid.toProtoPrimitive)
-
-    override protected def pretty: Pretty[SequencerChannelAgreement] = {
+    override protected val pretty: Pretty[ReplicationParameters] = {
       import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(param("sequencer", _.sequencerId))
+      prettyOfClass(
+        param("request", _.requestId.doubleQuoted),
+        param("party", _.partyId),
+        param("synchronizer", _.synchronizerId),
+        param("source participant", _.sourceParticipantId),
+        param("target participant", _.targetParticipantId),
+        param("serial", _.serial),
+      )
     }
   }
 
-  private object SequencerChannelAgreement {
+  final case class SequencerChannelAgreement(sequencerId: SequencerId)
+      extends PrettyPrintingFromCompanion {
+    def toProtoV30: v30.PartyReplicationStatus.SequencerChannelAgreement =
+      v30.PartyReplicationStatus.SequencerChannelAgreement(sequencerId.uid.toProtoPrimitive)
+
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerChannelAgreement] =
+      SequencerChannelAgreement
+  }
+
+  private object SequencerChannelAgreement
+      extends PrettyPrintingCompanion[SequencerChannelAgreement] {
     val fromInternal: InternalStatus.AgreementStatus => Option[SequencerChannelAgreement] = {
       case InternalStatus.AgreementStatus.Exists(_, sequencerId) =>
         Some(SequencerChannelAgreement(sequencerId))
@@ -226,12 +243,17 @@ object PartyReplicationStatus {
           .fromProtoPrimitive(proto.sequencerUid, "sequencer_uid")
           .map(SequencerId(_))
       } yield SequencerChannelAgreement(sequencerId)
+
+    override protected val pretty: Pretty[SequencerChannelAgreement] = {
+      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+      prettyOfClass(param("sequencer", _.sequencerId))
+    }
   }
 
   final case class PartyReplicationAuthorization(
       onboardingAt: CantonTimestamp,
       isOnboardingFlagCleared: Boolean,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     def toProtoV30: v30.PartyReplicationStatus.PartyReplicationAuthorization =
       v30.PartyReplicationStatus.PartyReplicationAuthorization(
@@ -239,16 +261,12 @@ object PartyReplicationStatus {
         isOnboardingFlagCleared,
       )
 
-    override protected def pretty: Pretty[PartyReplicationAuthorization] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("onboarding at", _.onboardingAt),
-        paramIfTrue("onboarding cleared", _.isOnboardingFlagCleared),
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[PartyReplicationAuthorization] =
+      PartyReplicationAuthorization
   }
 
-  private object PartyReplicationAuthorization {
+  private object PartyReplicationAuthorization
+      extends PrettyPrintingCompanion[PartyReplicationAuthorization] {
     def fromInternal
         : InternalStatus.PartyReplicationAuthorization => PartyReplicationAuthorization = {
       case InternalStatus.PartyReplicationAuthorization(onboardingAt, isOnboardingFlagCleared) =>
@@ -261,12 +279,20 @@ object PartyReplicationStatus {
       onboardingAtP <- ProtoConverter.required("onboarding_at", proto.onboardingAt)
       onboardingAt <- CantonTimestamp.fromProtoTimestamp(onboardingAtP)
     } yield PartyReplicationAuthorization(onboardingAt, proto.isOnboardingFlagCleared)
+
+    override protected val pretty: Pretty[PartyReplicationAuthorization] = {
+      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+      prettyOfClass(
+        param("onboarding at", _.onboardingAt),
+        paramIfTrue("onboarding cleared", _.isOnboardingFlagCleared),
+      )
+    }
   }
 
   final case class AcsReplicationProgress(
       processedContractCount: NonNegativeLong,
       fullyProcessedAcs: Boolean,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     def toProtoV30: v30.PartyReplicationStatus.AcsReplicationProgress =
       v30.PartyReplicationStatus.AcsReplicationProgress(
@@ -274,16 +300,11 @@ object PartyReplicationStatus {
         fullyProcessedAcs,
       )
 
-    override protected def pretty: Pretty[AcsReplicationProgress] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("contracts", _.processedContractCount),
-        paramIfTrue("fully replicated", _.fullyProcessedAcs),
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[AcsReplicationProgress] =
+      AcsReplicationProgress
   }
 
-  private object AcsReplicationProgress {
+  private object AcsReplicationProgress extends PrettyPrintingCompanion[AcsReplicationProgress] {
     def fromInternal(internal: InternalStatus.AcsReplicationProgress): AcsReplicationProgress = {
       val (processedContractCount, fullyProcessedAcs) = internal match {
         case InternalStatus.PersistentProgress(count, _, done) => (count, done)
@@ -301,11 +322,19 @@ object PartyReplicationStatus {
         proto.processedContractCount,
       )
     } yield AcsReplicationProgress(replicatedContractCount, proto.fullyProcessedAcs)
+
+    override protected val pretty: Pretty[AcsReplicationProgress] = {
+      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+      prettyOfClass(
+        param("contracts", _.processedContractCount),
+        paramIfTrue("fully replicated", _.fullyProcessedAcs),
+      )
+    }
   }
 
-  case object AcsIndexingProgress extends PrettyPrinting {
-    override protected def pretty: Pretty[AcsIndexingProgress.type] =
-      prettyOfObject[AcsIndexingProgress.type]
+  case object AcsIndexingProgress extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[AcsIndexingProgress.this.type] =
+      AcsIndexingProgressPrettyPrintingCompanion
 
     def fromInternal: InternalStatus.AcsIndexingProgress => AcsIndexingProgress.type = {
       case InternalStatus.AcsIndexingProgress(_indexedContractCount, _nextIndexingCounter, _done) =>
@@ -320,20 +349,30 @@ object PartyReplicationStatus {
     ): ParsingResult[AcsIndexingProgress.type] = Right(AcsIndexingProgress)
   }
 
-  final case class PartyReplicationError(message: String) extends PrettyPrinting {
+  private object AcsIndexingProgressPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[AcsIndexingProgress.type] {
+    override protected val pretty: Pretty[AcsIndexingProgress.type] =
+      prettyOfObject[AcsIndexingProgress.type]
+  }
+
+  final case class PartyReplicationError(message: String) extends PrettyPrintingFromCompanion {
 
     def toProtoV30: v30.PartyReplicationStatus.PartyReplicationError =
       v30.PartyReplicationStatus.PartyReplicationError(message)
 
-    override protected def pretty: Pretty[PartyReplicationError] = prettyOfString(_.message)
+    override def prettyCompanion: PrettyPrintingCompanion[PartyReplicationError] =
+      PartyReplicationError
   }
 
-  private object PartyReplicationError {
+  private object PartyReplicationError extends PrettyPrintingCompanion[PartyReplicationError] {
     def fromInternal: InternalStatus.PartyReplicationError => PartyReplicationError = err =>
       PartyReplicationError(err.message)
 
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.PartyReplicationError
     ): ParsingResult[PartyReplicationError] = Right(PartyReplicationError(proto.errorMessage))
+
+    override protected val pretty: Pretty[PartyReplicationError] = prettyOfString(_.message)
   }
+
 }

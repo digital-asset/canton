@@ -9,7 +9,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.resource.{DbStorage, DbStore, MemoryStorage, Storage}
 import com.digitalasset.canton.time.PositiveFiniteDuration
@@ -185,8 +189,12 @@ private[mediator] object MediatorDeduplicationStore {
       uuid: UUID,
       requestTime: CantonTimestamp,
       expireAfter: CantonTimestamp,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[DeduplicationData] =
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[DeduplicationData] = DeduplicationData
+  }
+
+  object DeduplicationData extends PrettyPrintingCompanion[DeduplicationData] {
+    override protected val pretty: Pretty[DeduplicationData] =
       prettyOfClass(
         param("uuid", _.uuid),
         param("requestTime", _.requestTime),

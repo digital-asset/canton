@@ -20,7 +20,11 @@ import com.digitalasset.canton.ledger.participant.state.SubmitterInfo
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.submission.EncryptedViewMessageFactory.{
   ViewHashAndRecipients,
@@ -656,14 +660,20 @@ object TransactionConfirmationRequestFactory {
   sealed trait TransactionConfirmationRequestCreationError
       extends Product
       with Serializable
-      with PrettyPrinting
+      with PrettyPrintingFromCompanion
 
   /** Indicates that the submitterNode is not allowed to represent the submitter or to submit
     * requests.
     */
   final case class ParticipantAuthorizationError(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[ParticipantAuthorizationError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ParticipantAuthorizationError] =
+      ParticipantAuthorizationError
+  }
+
+  object ParticipantAuthorizationError
+      extends PrettyPrintingCompanion[ParticipantAuthorizationError] {
+    override protected val pretty: Pretty[ParticipantAuthorizationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -672,7 +682,11 @@ object TransactionConfirmationRequestFactory {
     */
   final case class MalformedSubmitter(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[MalformedSubmitter] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[MalformedSubmitter] = MalformedSubmitter
+  }
+
+  object MalformedSubmitter extends PrettyPrintingCompanion[MalformedSubmitter] {
+    override protected val pretty: Pretty[MalformedSubmitter] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
@@ -681,7 +695,12 @@ object TransactionConfirmationRequestFactory {
     */
   final case class ContractConsistencyError(errors: Seq[ReferenceToFutureContractError])
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[ContractConsistencyError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ContractConsistencyError] =
+      ContractConsistencyError
+  }
+
+  object ContractConsistencyError extends PrettyPrintingCompanion[ContractConsistencyError] {
+    override protected val pretty: Pretty[ContractConsistencyError] = prettyOfClass(
       unnamedParam(_.errors)
     )
   }
@@ -690,7 +709,13 @@ object TransactionConfirmationRequestFactory {
   final case class EncryptedViewMessageCreationError(
       error: EncryptedViewMessageFactory.EncryptedViewMessageCreationError
   ) extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[EncryptedViewMessageCreationError] = prettyOfParam(
+    override def prettyCompanion: PrettyPrintingCompanion[EncryptedViewMessageCreationError] =
+      EncryptedViewMessageCreationError
+  }
+
+  object EncryptedViewMessageCreationError
+      extends PrettyPrintingCompanion[EncryptedViewMessageCreationError] {
+    override protected val pretty: Pretty[EncryptedViewMessageCreationError] = prettyOfParam(
       _.error
     )
   }
@@ -701,33 +726,59 @@ object TransactionConfirmationRequestFactory {
     */
   final case class TransactionTreeFactoryError(cause: TransactionTreeConversionError)
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[TransactionTreeFactoryError] = prettyOfParam(_.cause)
+    override def prettyCompanion: PrettyPrintingCompanion[TransactionTreeFactoryError] =
+      TransactionTreeFactoryError
+  }
+
+  object TransactionTreeFactoryError extends PrettyPrintingCompanion[TransactionTreeFactoryError] {
+    override protected val pretty: Pretty[TransactionTreeFactoryError] = prettyOfParam(_.cause)
   }
 
   final case class RecipientsCreationError(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[RecipientsCreationError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[RecipientsCreationError] =
+      RecipientsCreationError
+  }
+
+  object RecipientsCreationError extends PrettyPrintingCompanion[RecipientsCreationError] {
+    override protected val pretty: Pretty[RecipientsCreationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   final case class LightTransactionViewTreeCreationError(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[LightTransactionViewTreeCreationError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[LightTransactionViewTreeCreationError] =
+      LightTransactionViewTreeCreationError
+  }
+
+  object LightTransactionViewTreeCreationError
+      extends PrettyPrintingCompanion[LightTransactionViewTreeCreationError] {
+    override protected val pretty: Pretty[LightTransactionViewTreeCreationError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }
 
   final case class TransactionSigningError(cause: SyncCryptoError)
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[TransactionSigningError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[TransactionSigningError] =
+      TransactionSigningError
+  }
+
+  object TransactionSigningError extends PrettyPrintingCompanion[TransactionSigningError] {
+    override protected val pretty: Pretty[TransactionSigningError] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }
 
   final case class NoViewsToEncryptError(message: String)
       extends TransactionConfirmationRequestCreationError {
-    override protected def pretty: Pretty[NoViewsToEncryptError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[NoViewsToEncryptError] =
+      NoViewsToEncryptError
+  }
+
+  object NoViewsToEncryptError extends PrettyPrintingCompanion[NoViewsToEncryptError] {
+    override protected val pretty: Pretty[NoViewsToEncryptError] = prettyOfClass(
       unnamedParam(_.message.unquoted)
     )
   }

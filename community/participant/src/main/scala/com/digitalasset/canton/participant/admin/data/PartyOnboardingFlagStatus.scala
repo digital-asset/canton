@@ -4,23 +4,36 @@
 package com.digitalasset.canton.participant.admin.data
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.google.protobuf.timestamp.Timestamp
 
-sealed trait PartyOnboardingFlagStatus extends PrettyPrinting {
+sealed trait PartyOnboardingFlagStatus extends PrettyPrintingFromCompanion {
   val status: (Boolean, Option[CantonTimestamp])
 }
 
 case object FlagNotSet extends PartyOnboardingFlagStatus {
   override val status: (Boolean, Option[CantonTimestamp]) = (true, None)
 
-  override protected def pretty: Pretty[FlagNotSet.type] = prettyOfObject[FlagNotSet.type]
+  override def prettyCompanion: PrettyPrintingCompanion[FlagNotSet.this.type] =
+    FlagNotSetPrettyPrintingCompanion
+}
+
+private object FlagNotSetPrettyPrintingCompanion extends PrettyPrintingCompanion[FlagNotSet.type] {
+  override protected val pretty: Pretty[FlagNotSet.type] = prettyOfObject[FlagNotSet.type]
 }
 
 final case class FlagSet(safeToClear: CantonTimestamp) extends PartyOnboardingFlagStatus {
   override val status: (Boolean, Option[CantonTimestamp]) = (false, Some(safeToClear))
 
-  override protected def pretty: Pretty[FlagSet] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[FlagSet] = FlagSet
+}
+
+object FlagSet extends PrettyPrintingCompanion[FlagSet] {
+  override protected val pretty: Pretty[FlagSet] = prettyOfClass(
     param("earliest safe time to clear the flag", _.safeToClear)
   )
 }

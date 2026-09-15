@@ -220,6 +220,7 @@ object TransferTesting {
       waitUntilReady: config.NonNegativeDuration = config.NonNegativeDuration.ofMinutes(
         sys.env.get("WAIT_UNTIL_READY_MINUTES").map(_.toLong).getOrElse(15L)
       ),
+      ignoreParticipants: Set[String] = Set.empty,
   )(implicit consoleEnvironment: ConsoleEnvironment) = {
 
     import consoleEnvironment.*
@@ -282,56 +283,57 @@ object TransferTesting {
       notgood.isEmpty
     }
 
-    participants.all.sortBy(_.name).map { participant =>
-      val (baseSynchronizer, otherSynchronizers) =
-        participant.synchronizers
-          .list_connected()
-          .map(_.synchronizerId)
-          .sortBy(_.uid.toProtoPrimitive)
-          .toList match {
-          case (one :: rest) => (one, rest)
-          case _ => sys.error("ops participant is not connected anywhere?")
+    participants.all.sortBy(_.name).filterNot(p => ignoreParticipants.contains(p.name)).map {
+      participant =>
+        val (baseSynchronizer, otherSynchronizers) =
+          participant.synchronizers
+            .list_connected()
+            .map(_.synchronizerId)
+            .sortBy(_.uid.toProtoPrimitive)
+            .toList match {
+            case (one :: rest) => (one, rest)
+            case _ => sys.error("ops participant is not connected anywhere?")
+          }
+        val connectivity = participant match {
+          case ref: LocalParticipantReference =>
+            Connectivity(ref.name, ref.config.ledgerApi.clientConfig)
+          case ref: RemoteParticipantReference => Connectivity(ref.name, ref.config.ledgerApi)
+          case _ => sys.error("unknown type")
         }
-      val connectivity = participant match {
-        case ref: LocalParticipantReference =>
-          Connectivity(ref.name, ref.config.ledgerApi.clientConfig)
-        case ref: RemoteParticipantReference => Connectivity(ref.name, ref.config.ledgerApi)
-        case _ => sys.error("unknown type")
-      }
 
-      val issuers = (0 until issuersPerNode).map(idx =>
-        DvpIssuer(s"${partyDiscriminator}issuer-${participant.name}-$idx", rateSettings)
-      )
-
-      val useIssuers = if (onlyLocalIssuer) issuers.map(_.name).toSet else Set.empty[String]
-
-      val transfers = (0 until transferersPerNode).map(idx =>
-        Transfer(
-          s"${partyDiscriminator}transfer-${participant.name}-$idx",
-          rateSettings,
-          issuers = useIssuers,
+        val issuers = (0 until issuersPerNode).map(idx =>
+          DvpIssuer(s"${partyDiscriminator}issuer-${participant.name}-$idx", rateSettings)
         )
-      )
-      val prconfig = PerformanceRunnerConfig(
-        master = masterName,
-        localRoles = (issuers ++ transfers).toSet,
-        ledger = connectivity,
-        baseSynchronizerId = baseSynchronizer,
-        otherSynchronizers = otherSynchronizers,
-        maxRetries = PositiveInt
-          .tryCreate((waitUntilReady.unwrap.toMillis / 500L).toInt), // retry interval is 500ms
-      )
-      myLogger.info(s"Starting up perf runner for ${participant.name}")
-      println(s"Starting up perf runner for ${participant.name}")
-      val runner = new PerformanceRunner(
-        prconfig,
-        environment.metricsRegistry,
-        loggerFactory.append("runner", participant.name),
-      )(environment.executionContext)
 
-      environment.addUserCloseable(runner)
-      FutureUtil.doNotAwait(runner.startup(), "perf-runner failed")
-      runner
+        val useIssuers = if (onlyLocalIssuer) issuers.map(_.name).toSet else Set.empty[String]
+
+        val transfers = (0 until transferersPerNode).map(idx =>
+          Transfer(
+            s"${partyDiscriminator}transfer-${participant.name}-$idx",
+            rateSettings,
+            issuers = useIssuers,
+          )
+        )
+        val prconfig = PerformanceRunnerConfig(
+          master = masterName,
+          localRoles = (issuers ++ transfers).toSet,
+          ledger = connectivity,
+          baseSynchronizerId = baseSynchronizer,
+          otherSynchronizers = otherSynchronizers,
+          maxRetries = PositiveInt
+            .tryCreate((waitUntilReady.unwrap.toMillis / 500L).toInt), // retry interval is 500ms
+        )
+        myLogger.info(s"Starting up perf runner for ${participant.name}")
+        println(s"Starting up perf runner for ${participant.name}")
+        val runner = new PerformanceRunner(
+          prconfig,
+          environment.metricsRegistry,
+          loggerFactory.append("runner", participant.name),
+        )(environment.executionContext)
+
+        environment.addUserCloseable(runner)
+        FutureUtil.doNotAwait(runner.startup(), "perf-runner failed")
+        runner
     }
   }
 

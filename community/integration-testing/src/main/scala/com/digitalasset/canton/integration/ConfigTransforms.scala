@@ -163,10 +163,10 @@ object ConfigTransforms {
     )
 
   /** Disable the old acs commitment processor if the testedProtocolVersion meets or exceeds
-    * ProtocolVersion.acsCommitmentRedesign.
+    * ProtocolVersion.v36.
     */
   lazy val disableOldAcsCommitmentProcessor: ConfigTransform =
-    if (BaseTest.testedProtocolVersion >= ProtocolVersion.acsCommitmentRedesign) {
+    if (BaseTest.testedProtocolVersion >= ProtocolVersion.v36) {
       updateAllParticipantConfigs_(
         _.focus(_.parameters.acsCommitments.disableOldAcsCommitmentProcessor)
           .replace(AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always)

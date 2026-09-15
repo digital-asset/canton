@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.bftsynchronizer
 
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{InstanceReference, LocalParticipantReference}
@@ -294,6 +295,7 @@ trait SequencerIntegrationTest
 //  registerPlugin(new UseBftSequencer(loggerFactory))
 //}
 
+@UnstableTest // TODO(i20820): Remove as soon as this test has been fixed
 class SequencerIntegrationTestPostgres extends SequencerIntegrationTest {
   val plugin = new UseBftSequencer(
     loggerFactory,

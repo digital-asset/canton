@@ -25,6 +25,11 @@ def parse_args():
         default="",
         help="Optional previous timings JSON used as fallback for tests missing in current inputs.",
     )
+    parser.add_argument(
+        "--allow-empty-current",
+        action="store_true",
+        help="Allow empty merged current timings (still fails when no files match --input-glob).",
+    )
     return parser.parse_args()
 
 
@@ -47,12 +52,12 @@ def merge_previous_as_fallback(current, previous):
     return current
 
 
-def validate_current_timings(paths, merged):
+def validate_current_timings(paths, merged, allow_empty_current=False):
     if not paths:
         raise ValueError(
             "No timing files matched --input-glob. Failing to avoid silently dropping timing history."
         )
-    if not merged:
+    if not merged and not allow_empty_current:
         raise ValueError(
             "Merged current timings are empty before applying --previous-timings. Failing to avoid silent fallback to default timings."
         )
@@ -64,7 +69,7 @@ def main():
     merged = merge_timings(paths)
 
     try:
-        validate_current_timings(paths, merged)
+        validate_current_timings(paths, merged, args.allow_empty_current)
     except ValueError as e:
         print(f"merge-timings error: {e}", file=sys.stderr)
         raise SystemExit(1)
@@ -91,6 +96,7 @@ def self_test():
     test_validate_current_timings_rejects_empty_paths()
     test_validate_current_timings_rejects_empty_merged()
     test_validate_current_timings_accepts_non_empty_input()
+    test_validate_current_timings_allows_empty_merged_when_flag_enabled()
     test_merge_timings_sums_values()
     test_merge_timings_missing_file_is_skipped()
     test_merge_timings_empty_input()
@@ -124,6 +130,10 @@ def test_validate_current_timings_rejects_empty_merged():
 
 def test_validate_current_timings_accepts_non_empty_input():
     validate_current_timings(["/tmp/s0.json"], {"com.example.FooTest": 1.0})
+
+
+def test_validate_current_timings_allows_empty_merged_when_flag_enabled():
+    validate_current_timings(["/tmp/s0.json"], {}, allow_empty_current=True)
 
 
 def test_merge_timings_sums_values():

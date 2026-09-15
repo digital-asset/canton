@@ -34,7 +34,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
   private val className = classOf[InMemoryState].getSimpleName
 
   s"$className.initialized" should "return false if not initialized" in withTestFixture {
-    case (inMemoryState, _, _, _, _, _, _, _, _, _) =>
+    case (inMemoryState, _, _, _, _, _, _, _, _, _, _) =>
       inMemoryState.initialized shouldBe false
   }
 
@@ -42,6 +42,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
     case (
           inMemoryState,
           mutableLedgerEndCache,
+          achsStateCache,
           contractStateCaches,
           inMemoryFanoutBuffer,
           stringInterningView,
@@ -63,6 +64,10 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         initPublicationTime,
         Map.empty,
       ) // Fake map
+      val initAchsState = ParameterStorageBackend.AchsState(
+        validAt = 0,
+        AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+      )
 
       when(updateStringInterningView(stringInterningView, initLedgerEnd))
         .thenReturn(Future.unit)
@@ -81,10 +86,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         // INITIALIZED THE STATE
         _ <- inMemoryState.initializeTo(
           Some(initLedgerEnd),
-          ParameterStorageBackend.AchsState(
-            validAt = 0,
-            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
-          ),
+          initAchsState,
         )
 
         _ = {
@@ -96,12 +98,14 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
           inOrder
             .verify(mutableLedgerEndCache)
             .set(Some(initLedgerEnd))
+          inOrder.verify(achsStateCache).set(initAchsState)
           inOrder.verify(transactionSubmissionTracker).close()
           inOrder.verify(reassignmentSubmissionTracker).close()
           inOrder
             .verify(dispatcherState)
             .startDispatcher(Some(initLedgerEnd.lastOffset))
 
+          inMemoryState.cachesUpdatedUpto.get() shouldBe Some(initOffset)
           inMemoryState.initialized shouldBe true
         }
 
@@ -121,10 +125,12 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         _ = {
           reset(
             mutableLedgerEndCache,
+            achsStateCache,
             contractStateCaches,
             inMemoryFanoutBuffer,
             updateStringInterningView,
           )
+          when(achsStateCache.get()).thenReturn(initAchsState)
           when(updateStringInterningView(stringInterningView, reInitLedgerEnd))
             .thenReturn(
               Future.unit
@@ -144,10 +150,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         // RE-INITIALIZE THE STATE
         _ <- inMemoryState.initializeTo(
           Some(reInitLedgerEnd),
-          ParameterStorageBackend.AchsState(
-            validAt = 0,
-            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
-          ),
+          initAchsState,
         )
 
         // ASSERT STATE RE-INITIALIZED
@@ -161,23 +164,78 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
           inOrder
             .verify(mutableLedgerEndCache)
             .set(Some(reInitLedgerEnd))
+          inOrder.verify(achsStateCache).set(initAchsState)
           inOrder.verify(dispatcherState).startDispatcher(Some(reInitOffset))
+
+          inMemoryState.cachesUpdatedUpto.get() shouldBe Some(reInitOffset)
 
           when(dispatcherState.isRunning).thenReturn(true)
           inMemoryState.initialized shouldBe true
         }
 
         // RE-INITIALIZE THE SAME STATE
+        _ = when(mutableLedgerEndCache.apply()).thenReturn(Some(reInitLedgerEnd))
         _ <- inMemoryState.initializeTo(
           Some(reInitLedgerEnd),
-          ParameterStorageBackend.AchsState(
-            validAt = 0,
-            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
-          ),
+          initAchsState,
         )
 
         // ASSERT STATE RE-INITIALIZED
-        _ = inMemoryState.initialized shouldBe true
+        _ = {
+          verify(dispatcherState, times(2)).stopDispatcher()
+          verify(dispatcherState, times(2)).startDispatcher(Some(reInitOffset))
+          verify(contractStateCaches, times(1)).reset(Some(reInitLedgerEnd))
+          inMemoryState.initialized shouldBe true
+          inMemoryState.cachesUpdatedUpto.get() shouldBe Some(reInitOffset)
+        }
+      } yield succeed
+  }
+
+  s"$className.initializeTo" should "reset the state when dispatcher is not running" in withTestFixture {
+    case (
+          inMemoryState,
+          mutableLedgerEndCache,
+          achsStateCache,
+          contractStateCaches,
+          inMemoryFanoutBuffer,
+          _,
+          dispatcherState,
+          _,
+          transactionSubmissionTracker,
+          reassignmentSubmissionTracker,
+          inOrder,
+        ) =>
+      val initOffset = Offset.tryFromLong(42L)
+      val initLedgerEnd = LedgerEnd(
+        lastOffset = initOffset,
+        lastEventSeqId = 7L,
+        lastStringInterningId = 3,
+        lastPublicationTime = CantonTimestamp.now(),
+        synchronizerIndices = Map.empty,
+      )
+      val achsState = ParameterStorageBackend.AchsState(
+        validAt = 1,
+        lastPointers = AchsLastPointers(lastRemoved = 2, lastPopulated = 3),
+      )
+
+      when(dispatcherState.isRunning).thenReturn(false)
+      when(dispatcherState.stopDispatcher()).thenReturn(Future.unit)
+
+      for {
+        _ <- inMemoryState.initializeTo(Some(initLedgerEnd), achsState)
+        _ = {
+          inOrder.verify(dispatcherState).stopDispatcher()
+          inOrder.verify(contractStateCaches).reset(Some(initLedgerEnd))
+          inOrder.verify(inMemoryFanoutBuffer).flush()
+          inOrder.verify(mutableLedgerEndCache).set(Some(initLedgerEnd))
+          inOrder.verify(achsStateCache).set(achsState)
+          inOrder.verify(transactionSubmissionTracker).close()
+          inOrder.verify(reassignmentSubmissionTracker).close()
+          inOrder.verify(dispatcherState).startDispatcher(Some(initOffset))
+
+          inMemoryState.cachesUpdatedUpto.get() shouldBe Some(initOffset)
+          inMemoryState.initialized shouldBe false
+        }
       } yield succeed
   }
 
@@ -186,6 +244,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
     case (
           inMemoryState,
           mutableLedgerEndCache,
+          achsStateCache,
           contractStateCaches,
           inMemoryFanoutBuffer,
           _,
@@ -209,20 +268,25 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
       inMemoryState.ledgerEndCache() shouldBe None
       dispatcherState.getDispatcher.getHead() shouldBe None
       inMemoryState.cachesUpdatedUpto.get() shouldBe None
+      val achsState = ParameterStorageBackend.AchsState(
+        validAt = 0,
+        AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+      )
 
       for {
         _ <- inMemoryState.initializeTo(
           None,
-          ParameterStorageBackend.AchsState(
-            validAt = 0,
-            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
-          ),
+          achsState,
         )
 
         _ = {
+          verify(dispatcherState).stopDispatcher()
+          verify(dispatcherState).startDispatcher(None)
           inOrder.verify(contractStateCaches).reset(None)
           inOrder.verify(inMemoryFanoutBuffer).flush()
           inOrder.verify(mutableLedgerEndCache).set(None)
+          inOrder.verify(achsStateCache).set(achsState)
+          inMemoryState.cachesUpdatedUpto.get() shouldBe None
         }
       } yield succeed
   }
@@ -231,6 +295,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
       test: (
           InMemoryState,
           MutableLedgerEndCache,
+          AchsStateCache,
           ContractStateCaches,
           InMemoryFanoutBuffer,
           StringInterningView,
@@ -243,6 +308,12 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
   ): Future[Assertion] = {
     val mutableLedgerEndCache = mock[MutableLedgerEndCache]
     val achsStateCache = mock[AchsStateCache]
+    when(achsStateCache.get()).thenReturn(
+      ParameterStorageBackend.AchsState(
+        validAt = 0,
+        AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+      )
+    )
     val contractStateCaches = mock[ContractStateCaches]
     val offsetCheckpointCache = mock[OffsetCheckpointCache]
     val inMemoryFanoutBuffer = mock[InMemoryFanoutBuffer]
@@ -258,6 +329,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
     // Mocks should be called in the asserted order
     val inOrderMockCalls = Mockito.inOrder(
       mutableLedgerEndCache,
+      achsStateCache,
       contractStateCaches,
       inMemoryFanoutBuffer,
       stringInterningView,
@@ -286,6 +358,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
     test(
       inMemoryState,
       mutableLedgerEndCache,
+      achsStateCache,
       contractStateCaches,
       inMemoryFanoutBuffer,
       stringInterningView,

@@ -125,6 +125,21 @@ class AcsCommitmentProcessorManager(
       )
     }
 
+  /** Closes the acs commitment pipeline for the given `synchronizerId`.
+    */
+  def closePipelineForSynchronizer(synchronizerId: SynchronizerId): Unit =
+    lock.exclusive {
+      // The call to close must be in the lock, so that it's not possible to spawn a
+      // new pipeline for the same synchronizer while the old pipeline is still being
+      // shut down, which can lead to data corruption.
+      LifeCycle.close(
+        synchronizers
+          .remove(synchronizerId)
+          .toList
+          .flatMap(state => closeSynchronizerCommitmentState((synchronizerId, state)))
+      )(logger)
+    }
+
   private def createSignallerHealth(
       synchronizerId: SynchronizerId,
       signaller: LocalEventSignaller[TickListener, Offset],
@@ -168,30 +183,23 @@ class AcsCommitmentProcessorManager(
       val handle = sync.subscribeToConnections {
         _.withTraceContext { implicit traceContext => synchronizerId =>
           logger.info(s"Starting commitment processor pipeline for synchronizer $synchronizerId")
-          FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-            {
-              val syncState = getOrCreate(synchronizerId)
-              val connectedSynchronizerO = sync.readyConnectedSynchronizerById(synchronizerId)
-              if (connectedSynchronizerO.isEmpty) {
-                logger.warn(s"Cannot start ACS commitment sender for synchronizer $synchronizerId")
-              }
-              val senderO = connectedSynchronizerO.flatMap { connectedSynchronizer =>
-                Option.when(
-                  connectedSynchronizer.psid.protocolVersion >= ProtocolVersion.acsCommitmentRedesign
-                )(connectedSynchronizer.ephemeral.acsCommitmentSender)
-              }
-              for {
-                _ <- syncState.digestProcessorManager.startRunningDigestProcessor()
-                _ = senderO.foreach(
-                  _.startPipeline(
-                    syncState.tickSignaller
-                      .readSignals(TickListener.TickOnlyListener, "ACS commitment sender")
-                      .map(_.signal)
-                  )
-                )
-              } yield ()
-            },
-            s"failed to start running digest processor for $synchronizerId",
+          val syncState = getOrCreate(synchronizerId)
+          val connectedSynchronizerO = sync.readyConnectedSynchronizerById(synchronizerId)
+          if (connectedSynchronizerO.isEmpty) {
+            logger.warn(s"Cannot start ACS commitment sender for synchronizer $synchronizerId")
+          }
+          val senderO = connectedSynchronizerO.flatMap { connectedSynchronizer =>
+            Option.when(
+              connectedSynchronizer.psid.protocolVersion >= ProtocolVersion.v36
+            )(connectedSynchronizer.ephemeral.acsCommitmentSender)
+          }
+          syncState.digestProcessorManager.startRunningDigestProcessorAsync()
+          senderO.foreach(
+            _.startPipeline(
+              syncState.tickSignaller
+                .readSignals(TickListener.TickOnlyListener, "ACS commitment sender")
+                .map(_.signal)
+            )
           )
         }
       }

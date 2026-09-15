@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
@@ -35,17 +39,14 @@ final class P2PGrpcConnectionState(
 ) extends P2PConnectionState
     with NamedLogging
     with NamedLoggingUtils
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   import P2PGrpcConnectionState.*
 
   private val stateRef = new AtomicReference(State())
 
-  override protected def pretty: Pretty[P2PGrpcConnectionState] =
-    prettyOfClass(
-      param("thisNode", _.thisNode.doubleQuoted),
-      param("state", _.stateRef.get()),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[P2PGrpcConnectionState] =
+    P2PGrpcConnectionState
 
   override def connections(implicit
       traceContext: TraceContext
@@ -289,14 +290,39 @@ final class P2PGrpcConnectionState(
     peerSenderO
   }
 
+  def shutdownAndCleanupActiveConnectionAndReturnEndpointIds(
+      peerSender: PeerSender
+  )(implicit traceContext: TraceContext): Seq[P2PEndpoint.Id] = {
+    val (prevState, newState, networkRefO, endpointIds) =
+      AtomicUtil
+        .updateAndGetComputed(stateRef)(_.clearActiveConnectionState(peerSender))
+        .logAndExtract(
+          logger,
+          prefix = s"Shutting down and cleaning up active connection of sender $peerSender: ",
+        )
+    networkRefO.foreach { networkRef =>
+      logger.info(
+        s"Closing network ref ${objId(networkRef)} for $peerSender as part of connection shutdown and cleanup"
+      )
+      networkRef.close()
+    }
+    val trimmedPrevState = prevState.only(peerSender)
+    val trimmedNewState = newState.only(peerSender)
+    logger.info(
+      s"Relevant P2P connection state before and after `shutdownAndCleanupActiveConnection($peerSender)`: " +
+        s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
+    )
+    endpointIds
+  }
+
   def unassociateSenderAndReturnEndpointIds(
       peerSender: PeerSender
   )(implicit traceContext: TraceContext): Seq[P2PEndpoint.Id] = {
-    val (prevState, newState, result) =
+    val (prevState, newState, endpointIds) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(_.unassociateSenderAndReturnEndpointIds(peerSender))
         .logAndExtract(logger, prefix = s"Unassociating sender $peerSender: ")
-    if (result.nonEmpty) {
+    if (endpointIds.nonEmpty) {
       val trimmedPrevState = prevState.only(peerSender)
       val trimmedNewState = newState.only(peerSender)
       logger.info(
@@ -304,9 +330,9 @@ final class P2PGrpcConnectionState(
           s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
       )
     } else {
-      logger.debug(s"No association change for sender $peerSender: $result")
+      logger.debug(s"No association change for sender $peerSender: $endpointIds")
     }
-    result
+    endpointIds
   }
 
   // Only used to simulate a restart
@@ -316,16 +342,28 @@ final class P2PGrpcConnectionState(
   }
 }
 
-object P2PGrpcConnectionState {
+object P2PGrpcConnectionState extends PrettyPrintingCompanion[P2PGrpcConnectionState] {
+
+  override protected val pretty: Pretty[P2PGrpcConnectionState] =
+    prettyOfClass(
+      param("thisNode", _.thisNode.doubleQuoted),
+      param("state", _.stateRef.get()),
+    )
 
   private final class P2PNetworkRefEntry(
       private val createNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
       val isOutgoingConnection: Boolean,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     lazy val networkRef: P2PNetworkRef[BftOrderingMessage] = createNetworkRef()
 
-    override protected def pretty: Pretty[P2PNetworkRefEntry] =
+    override def prettyCompanion: PrettyPrintingCompanion[P2PNetworkRefEntry] =
+      P2PNetworkRefEntry
+  }
+
+  private object P2PNetworkRefEntry extends PrettyPrintingCompanion[P2PNetworkRefEntry] {
+
+    override protected val pretty: Pretty[P2PNetworkRefEntry] =
       prettyOfClass(
         param("networkRef", _.networkRef.toString.unquoted),
         param("isOutgoingConnection", _.isOutgoingConnection),
@@ -349,36 +387,9 @@ object P2PGrpcConnectionState {
       //  if an outgoing connection turns out to be a duplicate of an existing one
       //  for the same BFT node ID.
       p2pEndpointIdToNetworkRef: Map[P2PEndpoint.Id, P2PNetworkRefEntry] = Map.empty,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[State] =
-      prettyOfClass(
-        param(
-          "bftNodeIdToPeerSender",
-          _.bftNodeIdToPeerSender.map { case (bftNodeId, sender) =>
-            bftNodeId.doubleQuoted -> sender.toString.unquoted
-          },
-        ),
-        param(
-          "peerSenderToBftNodeId",
-          _.peerSenderToBftNodeId.map { case (sender, bftNodeId) =>
-            sender.toString.unquoted -> bftNodeId.doubleQuoted
-          },
-        ),
-        param(
-          "p2pEndpointIdToBftNodeId",
-          _.p2pEndpointIdToBftNodeId.map { case (p2pEndpointId, bftNodeId) =>
-            p2pEndpointId -> bftNodeId.doubleQuoted
-          },
-        ),
-        param(
-          "bftNodeIdToNetworkRef",
-          _.bftNodeIdToNetworkRef.map { case (bftNodeId, networkRefEntry) =>
-            bftNodeId.doubleQuoted -> networkRefEntry
-          },
-        ),
-        param("p2pEndpointIdToNetworkRef", _.p2pEndpointIdToNetworkRef),
-      )
+    override def prettyCompanion: PrettyPrintingCompanion[State] = State
 
     // TODO(#34191) and restructure to avoid local mutability
     // Returns the new state with the endpoint associated to the node,
@@ -810,6 +821,51 @@ object P2PGrpcConnectionState {
           )
         }
 
+    // Completely clear the state for a connection with a sender (i.e., active); this is used to clean up
+    //  incoming P2P connections that are closed by the counterparty.
+    def clearActiveConnectionState(
+        peerSender: PeerSender
+    ): (
+        State,
+        ResultWithLogs[
+          (State, State, Option[P2PNetworkRef[BftOrderingMessage]], Seq[P2PEndpoint.Id])
+        ],
+    ) =
+      peerSenderToBftNodeId
+        .get(peerSender)
+        .fold {
+          this -> ResultWithLogs(
+            (
+              this,
+              this,
+              Option.empty[P2PNetworkRef[BftOrderingMessage]],
+              Seq.empty[P2PEndpoint.Id],
+            ),
+            Level.DEBUG -> (() =>
+              s"Not removing connection state for $peerSender because it does not exist yet " +
+                "(or possibly removed as duplicate)"
+            ),
+          )
+        } { bftNodeId =>
+          val ResultWithLogs((updatedState1, networkRefO), logs1*) =
+            cleanupNetworkRef(bftNodeId, clearNetworkRefAssociations = true, closeNetworkRef = true)
+          val (updatedState2, ResultWithLogs((_, _, endpointIds), logs2*)) =
+            updatedState1.unassociateSenderAndReturnEndpointIds(peerSender)
+          val (discardedEndpointToBftNodeId, updatedEndpointToBftNodeId) =
+            updatedState2.p2pEndpointIdToBftNodeId.partition { case (endpointId, nodeId) =>
+              endpointIds.contains(endpointId) && nodeId == bftNodeId
+            }
+          val updatedState3 =
+            updatedState2.copy(p2pEndpointIdToBftNodeId = updatedEndpointToBftNodeId)
+          updatedState3 -> ResultWithLogs(
+            (this, updatedState3, networkRefO, discardedEndpointToBftNodeId.keys.toSeq),
+            (logs1 ++ logs2 :+ Level.DEBUG -> (() =>
+              s"Removed connection state for $peerSender <-> $bftNodeId " +
+                s"and cleaned up its associations with $endpointIds"
+            ))*
+          )
+        }
+
     // Removes the association of a network to the node and its endpoints, returning the new state with logs
     //  and the network ref that was associated, if any.
     private def cleanupNetworkRef(
@@ -948,6 +1004,38 @@ object P2PGrpcConnectionState {
             p2pEndpointIdToBftNodeId.get(endpointId).contains(nodeId)
           }
         },
+      )
+  }
+
+  private object State extends PrettyPrintingCompanion[State] {
+
+    override protected val pretty: Pretty[State] =
+      prettyOfClass(
+        param(
+          "bftNodeIdToPeerSender",
+          _.bftNodeIdToPeerSender.map { case (bftNodeId, sender) =>
+            bftNodeId.doubleQuoted -> sender.toString.unquoted
+          },
+        ),
+        param(
+          "peerSenderToBftNodeId",
+          _.peerSenderToBftNodeId.map { case (sender, bftNodeId) =>
+            sender.toString.unquoted -> bftNodeId.doubleQuoted
+          },
+        ),
+        param(
+          "p2pEndpointIdToBftNodeId",
+          _.p2pEndpointIdToBftNodeId.map { case (p2pEndpointId, bftNodeId) =>
+            p2pEndpointId -> bftNodeId.doubleQuoted
+          },
+        ),
+        param(
+          "bftNodeIdToNetworkRef",
+          _.bftNodeIdToNetworkRef.map { case (bftNodeId, networkRefEntry) =>
+            bftNodeId.doubleQuoted -> networkRefEntry
+          },
+        ),
+        param("p2pEndpointIdToNetworkRef", _.p2pEndpointIdToNetworkRef),
       )
   }
 }

@@ -8,7 +8,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+  PrettyUtil,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableState.{
   LockCounter,
@@ -644,12 +649,13 @@ class LockableStatesTest extends AsyncWordSpec with BaseTest with HasExecutorSer
 }
 
 object LockableStatesTest {
-  final case class Status(status: Int) extends PrettyPrinting with HasPrunable {
-    override protected def pretty: Pretty[Status.this.type] = status =>
-      Pretty[Int].treeOf(status.status)
+  final case class Status(status: Int) extends PrettyPrintingFromCompanion with HasPrunable {
+    override def prettyCompanion: PrettyPrintingCompanion[Status] = Status
     override def prunable: Boolean = status < 0
   }
-  object Status {
+  object Status extends PrettyPrintingCompanion[Status] {
+    override protected val pretty: Pretty[Status] = status => Pretty[Int].treeOf(status.status)
+
     implicit val lockableStatusStatus: LockableStatus[Status] = new LockableStatus[Status] {
       override def kind: String = "test"
       override def isFree(status: Status): Boolean = status.status <= 0

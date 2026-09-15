@@ -1,0 +1,17 @@
+name: upgrades-MissingTemplateDifferentPackageName
+version: 1.1.0
+source: .
+data-dependencies: []
+dependencies: []
+module-prefixes: null
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-MissingTemplateDifferentPackageName.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

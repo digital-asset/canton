@@ -875,9 +875,9 @@ manual_nightly_test_bftordering:
         requires:
           - print_tests
 
-manual_nightly_test_upgrades_matrix:
+manual_nightly_test_upgrades_matrix_and_check:
   when:
-    equal: [ nightly-test-upgrades-matrix, << pipeline.parameters.manual_job >> ]
+    equal: [ nightly-test-upgrades-matrix-and-check, << pipeline.parameters.manual_job >> ]
   jobs:
     - print_tests:
         context:
@@ -886,7 +886,7 @@ manual_nightly_test_upgrades_matrix:
           - azure-self-cache
           - maven-mirror
           - da-images
-    - nightly_test_upgrades_matrix:
+    - nightly_test_upgrades_matrix_and_check:
         context:
           - datadog
           - artifactory

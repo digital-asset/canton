@@ -13,6 +13,7 @@ import com.digitalasset.canton.data.ViewType.UnassignmentViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -47,6 +48,7 @@ class UnassignmentProcessor(
     clock: Clock,
     override protected val timeouts: ProcessingTimeout,
     sourceProtocolVersion: Source[ProtocolVersion],
+    reassignmentMetrics: ReassignmentMetrics,
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     override val testingConfig: TestingConfigInternal,
@@ -68,6 +70,7 @@ class UnassignmentProcessor(
         contractValidator,
         clock,
         sourceProtocolVersion,
+        reassignmentMetrics,
         loggerFactory,
       ),
       inFlightSubmissionSynchronizerTracker,

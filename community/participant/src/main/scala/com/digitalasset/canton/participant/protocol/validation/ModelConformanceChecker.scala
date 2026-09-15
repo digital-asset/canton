@@ -15,7 +15,11 @@ import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewParticipantData.RootAction
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.protocol.EngineController.{
@@ -667,7 +671,7 @@ object ModelConformanceChecker {
       } yield hash
   }
 
-  sealed trait Error extends PrettyPrinting
+  sealed trait Error extends PrettyPrintingFromCompanion
 
   /** Enriches a model conformance error with the valid subtransaction, if any. If there is a valid
     * subtransaction, the list of valid subview trees will not be empty.
@@ -708,14 +712,23 @@ object ModelConformanceChecker {
 
   final case class DAMLeError(cause: DAMLe.ReinterpretationError, viewHash: ViewHash)
       extends Error {
-    override protected def pretty: Pretty[DAMLeError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DAMLeError] = DAMLeError
+  }
+
+  object DAMLeError extends PrettyPrintingCompanion[DAMLeError] {
+    override protected val pretty: Pretty[DAMLeError] = prettyOfClass(
       param("cause", _.cause),
       param("view hash", _.viewHash),
     )
   }
 
   final case class TransactionNotWellFormed(cause: String, viewHash: ViewHash) extends Error {
-    override protected def pretty: Pretty[TransactionNotWellFormed] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[TransactionNotWellFormed] =
+      TransactionNotWellFormed
+  }
+
+  object TransactionNotWellFormed extends PrettyPrintingCompanion[TransactionNotWellFormed] {
+    override protected val pretty: Pretty[TransactionNotWellFormed] = prettyOfClass(
       param("cause", _.cause.unquoted),
       unnamedParam(_.viewHash),
     )
@@ -728,7 +741,12 @@ object ModelConformanceChecker {
 
     def cause: String = "Failed to construct transaction tree."
 
-    override protected def pretty: Pretty[TransactionTreeError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[TransactionTreeError] =
+      TransactionTreeError
+  }
+
+  object TransactionTreeError extends PrettyPrintingCompanion[TransactionTreeError] {
+    override protected val pretty: Pretty[TransactionTreeError] = prettyOfClass(
       param("cause", _.cause.unquoted),
       unnamedParam(_.details),
       unnamedParam(_.viewHash),
@@ -742,7 +760,12 @@ object ModelConformanceChecker {
 
     def cause = "Reconstructed view differs from received view."
 
-    override protected def pretty: Pretty[ViewReconstructionError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ViewReconstructionError] =
+      ViewReconstructionError
+  }
+
+  object ViewReconstructionError extends PrettyPrintingCompanion[ViewReconstructionError] {
+    override protected val pretty: Pretty[ViewReconstructionError] = prettyOfClass(
       param("cause", _.cause.unquoted),
       param("received", _.received),
       param("reconstructed", _.reconstructed),
@@ -752,7 +775,11 @@ object ModelConformanceChecker {
   final case class UnvettedPackages(
       unvetted: Map[ParticipantId, Set[PackageId]]
   ) extends Error {
-    override protected def pretty: Pretty[UnvettedPackages] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnvettedPackages] = UnvettedPackages
+  }
+
+  object UnvettedPackages extends PrettyPrintingCompanion[UnvettedPackages] {
+    override protected val pretty: Pretty[UnvettedPackages] = prettyOfClass(
       unnamedParam(
         _.unvetted
           .map { case (participant, packageIds) =>
@@ -766,7 +793,11 @@ object ModelConformanceChecker {
   final case class PackageNotFound(
       missing: Map[ParticipantId, Set[PackageId]]
   ) extends Error {
-    override protected def pretty: Pretty[PackageNotFound] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[PackageNotFound] = PackageNotFound
+  }
+
+  object PackageNotFound extends PrettyPrintingCompanion[PackageNotFound] {
+    override protected val pretty: Pretty[PackageNotFound] = prettyOfClass(
       unnamedParam(
         _.missing
           .map { case (participant, packageIds) =>
@@ -780,7 +811,12 @@ object ModelConformanceChecker {
   final case class ConflictingNameBindings(
       conflicting: Map[ParticipantId, Map[PackageName, Set[PackageId]]]
   ) extends Error {
-    override protected def pretty: Pretty[ConflictingNameBindings] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ConflictingNameBindings] =
+      ConflictingNameBindings
+  }
+
+  object ConflictingNameBindings extends PrettyPrintingCompanion[ConflictingNameBindings] {
+    override protected val pretty: Pretty[ConflictingNameBindings] = prettyOfClass(
       unnamedParam(
         _.conflicting
           .map { case (participant, conflicts) =>
@@ -796,11 +832,20 @@ object ModelConformanceChecker {
   }
 
   final case class MergeError(cause: String) extends Error {
-    override protected def pretty: Pretty[MergeError] = prettyOfParam(_.cause.unquoted)
+    override def prettyCompanion: PrettyPrintingCompanion[MergeError] = MergeError
+  }
+
+  object MergeError extends PrettyPrintingCompanion[MergeError] {
+    override protected val pretty: Pretty[MergeError] = prettyOfParam(_.cause.unquoted)
   }
 
   final case class ConflictingStoredContract(cause: String) extends Error {
-    override protected def pretty: Pretty[ConflictingStoredContract] =
+    override def prettyCompanion: PrettyPrintingCompanion[ConflictingStoredContract] =
+      ConflictingStoredContract
+  }
+
+  object ConflictingStoredContract extends PrettyPrintingCompanion[ConflictingStoredContract] {
+    override protected val pretty: Pretty[ConflictingStoredContract] =
       prettyOfParam(_.cause.unquoted)
   }
 

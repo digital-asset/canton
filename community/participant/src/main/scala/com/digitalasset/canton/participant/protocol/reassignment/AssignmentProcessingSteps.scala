@@ -16,6 +16,7 @@ import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.conflictdetection.{
   ActivenessCheck,
@@ -65,6 +66,7 @@ private[reassignment] class AssignmentProcessingSteps(
     staticSynchronizerParameters: Target[StaticSynchronizerParameters],
     clock: Clock,
     val protocolVersion: Target[ProtocolVersion],
+    reassignmentMetrics: ReassignmentMetrics,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ReassignmentProcessingSteps[
@@ -327,6 +329,11 @@ private[reassignment] class AssignmentProcessingSteps(
           submissionData.rootHash,
           _ => reassignmentId,
         )
+
+      _ = reassignmentMetrics.submitted.inc()(
+        ReassignmentMetrics.assignment(sourceSynchronizer.map(_.logical), psid.map(_.logical))
+      )
+
     } yield (
       ReassignmentsSubmission(
         Batch.of(protocolVersion.unwrap, submissionData.messages*),
@@ -461,6 +468,11 @@ private[reassignment] class AssignmentProcessingSteps(
   ] = {
     val reassignmentId = parsedRequest.reassignmentId
     val sourceSynchronizer = parsedRequest.fullViewTree.sourceSynchronizer
+
+    reassignmentMetrics.requests.inc()(ReassignmentMetrics.assignmentRequest)
+    reassignmentMetrics.batchSize.update(parsedRequest.fullViewTree.contracts.contractIds.size)(
+      ReassignmentMetrics.assignmentRequest
+    )
 
     for {
       reassignmentDataE <- EitherT.right[ReassignmentProcessorError](
@@ -633,6 +645,14 @@ private[reassignment] class AssignmentProcessingSteps(
                   target = psid.map(_.logical),
                 )
               } else EitherTUtil.unitUS[ReassignmentProcessorError]
+
+            _ = if (assignmentValidationResult.isReassigningParticipant)
+              reassignmentMetrics.finalized.inc()(
+                ReassignmentMetrics.assignment(
+                  assignmentValidationResult.sourcePsid.map(_.logical),
+                  psid.map(_.logical),
+                )
+              )
             update = assignmentValidationResult.createReassignmentAccepted(
               psid.map(_.logical),
               participantId,

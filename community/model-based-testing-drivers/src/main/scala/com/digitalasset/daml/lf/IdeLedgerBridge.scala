@@ -6,7 +6,6 @@ package com.digitalasset.daml.lf
 import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.engine.refinement.CommandPreprocessor
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.script.{IdeLedger, IdeLedgerRunner}
 import com.digitalasset.daml.lf.speedy.{Compiler, MachineLogger}
@@ -53,9 +52,7 @@ object IdeLedgerBridge {
       error: String
   ) extends SubmitResult
 
-  /** Translate a sequence of API commands into a speedy SExpr, then submit it against the given IDE
-    * ledger.
-    */
+  /** Submit a sequence of API commands against the given IDE ledger. */
   def submitApiCommands(
       handle: CompiledPackagesHandle,
       ledger: IdeLedger,
@@ -66,13 +63,6 @@ object IdeLedgerBridge {
       disclosures: Iterable[FatContractInstance] = Iterable.empty,
   )(implicit loggingContext: NamedLoggingContext): SubmitResult = {
     val compiledPackages = handle.compiledPackages
-    val preprocessor = new CommandPreprocessor(
-      pkgInterface = compiledPackages.pkgInterface,
-      forbidLocalContractIds = true,
-    )
-
-    val speedyCommands = preprocessor.unsafePreprocessApiCommands(Map.empty, apiCommands)
-    val sexpr = compiledPackages.compiler.unsafeCompile(speedyCommands)
     val ledgerApi = IdeLedgerRunner.ScriptLedgerApi(ledger)
     val result = IdeLedgerRunner.submit(
       compiledPackages = compiledPackages,
@@ -80,7 +70,7 @@ object IdeLedgerBridge {
       ledger = ledgerApi,
       committers = committers,
       readAs = readAs,
-      commands = sexpr,
+      commands = apiCommands.toList,
       location = None,
       seed = seed,
       machineLogger = MachineLogger(),

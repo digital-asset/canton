@@ -5,7 +5,11 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.ReassignmentRef
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
   ReassignmentProcessorError,
   SubmissionValidationError,
@@ -16,16 +20,19 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
 
-trait ReassignmentValidationError extends Serializable with Product with PrettyPrinting {
-  override protected def pretty: Pretty[ReassignmentValidationError.this.type] =
-    prettyOfString(_.message)
+trait ReassignmentValidationError
+    extends Serializable
+    with Product
+    with PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[this.type] =
+    ReassignmentValidationError
   def message: String
 
   def toSubmissionValidationError: ReassignmentProcessorError =
     SubmissionValidationError(s"Submission failed because: $message")
 }
 
-object ReassignmentValidationError {
+object ReassignmentValidationError extends PrettyPrintingCompanion[ReassignmentValidationError] {
 
   final case class ReinterpretationAborted(reassignmentRef: ReassignmentRef, reason: String)
       extends ReassignmentValidationError {
@@ -136,4 +143,7 @@ object ReassignmentValidationError {
     override def message: String =
       s"Cannot unassign contract `$contractId`: aborted due to shutdown"
   }
+
+  override protected val pretty: Pretty[ReassignmentValidationError] =
+    prettyOfString(_.message)
 }

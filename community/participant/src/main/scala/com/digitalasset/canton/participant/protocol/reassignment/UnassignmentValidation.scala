@@ -4,10 +4,12 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.*
+import cats.syntax.functor.*
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessResult
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
@@ -35,6 +37,7 @@ private[reassignment] class UnassignmentValidation(
     participantId: ParticipantId,
     contractValidator: ContractValidator,
     getTopologyAtTs: GetTopologyAtTimestamp,
+    reassignmentMetrics: ReassignmentMetrics,
 )(implicit val ec: ExecutionContext, traceContext: TraceContext) {
 
   def perform(
@@ -59,6 +62,7 @@ private[reassignment] class UnassignmentValidation(
             participantId,
             contractValidator,
             getTopologyAtTs,
+            reassignmentMetrics,
           ).performValidations(
             parsedRequest
           )
@@ -160,6 +164,7 @@ private[reassignment] object UnassignmentValidation {
       val participantId: ParticipantId,
       val contractValidator: ContractValidator,
       val getTopologyAtTs: GetTopologyAtTimestamp,
+      val reassignmentMetrics: ReassignmentMetrics,
   )(implicit val executionContext: ExecutionContext, val traceContext: TraceContext) {
 
     private def checkAssignmentExclusivity(
@@ -186,7 +191,7 @@ private[reassignment] object UnassignmentValidation {
             synchronizerId,
             topologySnapshot,
             stakeholders.all.map(_ -> packageIds).toMap,
-            topologySnapshot.referenceTime,
+            topologySnapshot.timestamp,
           )
           .value
           .map(
@@ -271,6 +276,19 @@ private[reassignment] object UnassignmentValidation {
         )
       }
 
+    private def recordLocalTargetTsLag(
+        fullViewTree: FullUnassignmentTree,
+        targetTopology: Target[TopologySnapshot],
+    ): Unit = {
+      val lag = fullViewTree.targetTimestamp.unwrap - targetTopology.unwrap.timestamp
+      reassignmentMetrics.localTargetTimestampLag.update(math.max(0L, lag.toMillis))(
+        ReassignmentMetrics.synchronizers(
+          fullViewTree.sourceSynchronizer.map(_.logical),
+          fullViewTree.targetSynchronizer.map(_.logical),
+        )
+      )
+    }
+
     def performValidations(
         parsedRequest: ParsedReassignmentRequest[FullUnassignmentTree]
     ): ValidationErrorOr[ReassigningParticipantValidation] = {
@@ -290,7 +308,8 @@ private[reassignment] object UnassignmentValidation {
                 ),
               )
             ),
-          targetTopology =>
+          targetTopology => {
+            recordLocalTargetTsLag(fullViewTree, targetTopology)
             for {
               assignmentExclusivity <- checkAssignmentExclusivity(fullViewTree, targetTopology)
               reassigningParticipantValidationResult <-
@@ -298,7 +317,8 @@ private[reassignment] object UnassignmentValidation {
             } yield ReassigningParticipantValidation(
               assignmentExclusivity,
               reassigningParticipantValidationResult,
-            ),
+            )
+          },
         )
     }
 

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.Timepoint
 import com.digitalasset.canton.participant.store.db.DbAcsCommitmentSenderWatermarkStore
@@ -28,7 +27,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
   import AcsCommitmentSenderWatermarkStoreTest.*
 
   "AcsCommitmentSenderWatermarkStore" should {
-    "retrieve None when there is no watermark" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "retrieve None when there is no watermark" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val watermarkStore1 = mkWatermarkStore(indexedSynchronizer1)
       val watermarkStore2 = mkWatermarkStore(indexedSynchronizer2)
 
@@ -36,7 +35,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
       watermarkStore2.lookupWatermark().futureValueUS shouldBe None
     }
 
-    "increase and retrieve the expected watermark" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "increase and retrieve the expected watermark" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val watermarkStore1 = mkWatermarkStore(indexedSynchronizer1)
       val watermarkStore2 = mkWatermarkStore(indexedSynchronizer2)
 
@@ -47,7 +46,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
       watermarkStore2.lookupWatermark().futureValueUS.value.tupled shouldBe tp1.tupled
     }
 
-    "increase the already existing watermark" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "increase the already existing watermark" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val watermarkStore = mkWatermarkStore(indexedSynchronizer1)
 
       watermarkStore.increaseWatermark(tp0).futureValueUS
@@ -60,7 +59,7 @@ trait AcsCommitmentSenderWatermarkStoreTest
       watermarkStore.lookupWatermark().futureValueUS.value.tupled shouldBe tp2a.tupled
     }
 
-    "not increase the already existing watermark if the existing value is higher" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "not increase the already existing watermark if the existing value is higher" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val watermarkStore = mkWatermarkStore(indexedSynchronizer1)
 
       watermarkStore.increaseWatermark(tp2).futureValueUS
@@ -117,17 +116,14 @@ abstract class DbAcsCommitmentSenderWatermarkStoreTest
   }
 }
 
-@AcsCommitmentTest
 class DbAcsCommitmentSenderWatermarkStoreTestPostgres
     extends DbAcsCommitmentSenderWatermarkStoreTest
     with PostgresTest
 
-@AcsCommitmentTest
 class DbAcsCommitmentSenderWatermarkStoreTestH2
     extends DbAcsCommitmentSenderWatermarkStoreTest
     with H2Test
 
-@AcsCommitmentTest
 class AcsCommitmentSenderWatermarkStoreTestInMemory extends AcsCommitmentSenderWatermarkStoreTest {
 
   // @nowarn("cat=unused")

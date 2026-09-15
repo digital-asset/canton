@@ -8,7 +8,7 @@ import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrintingFromCompanion}
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.{
   ArchivalCommit,
   CreationCommit,
@@ -175,7 +175,7 @@ private[protocol] object ConflictDetectionHelpers extends ScalaFuturesWithPatien
     )
   }
 
-  def mkActivenessCheckResult[Key: Pretty, Status <: PrettyPrinting](
+  def mkActivenessCheckResult[Key: Pretty, Status <: PrettyPrintingFromCompanion](
       locked: Set[Key] = Set.empty[Key],
       notFresh: Set[Key] = Set.empty[Key],
       unknown: Set[Key] = Set.empty[Key],

@@ -18,7 +18,11 @@ import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoCli
 import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator.TopologyTimestampVerificationError
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
@@ -933,7 +937,7 @@ object SequencerReader {
       latestTopologyClientRecipientTimestamp: Option[CantonTimestamp],
       lastBatchWasFull: Boolean = false,
       nextPreviousEventTimestamp: Option[CantonTimestamp] = None,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     def changeString(previous: ReadState): Option[String] = {
       def build[T](a: T, b: T, name: String): Option[String] =
@@ -977,7 +981,12 @@ object SequencerReader {
       result
     }
 
-    override protected def pretty: Pretty[ReadState] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ReadState] = ReadState
+  }
+
+  private[SequencerReader] object ReadState extends PrettyPrintingCompanion[ReadState] {
+
+    override protected val pretty: Pretty[ReadState] = prettyOfClass(
       param("member", _.member),
       param("memberId", _.memberId),
       param("memberRegisteredFrom", _.memberRegisteredFrom),

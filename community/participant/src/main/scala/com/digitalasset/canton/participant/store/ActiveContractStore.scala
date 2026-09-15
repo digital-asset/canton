@@ -12,7 +12,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange}
@@ -354,7 +358,10 @@ object ActiveContractStore {
     )
   }
 
-  sealed trait ActivenessChangeDetail extends Product with Serializable with PrettyPrinting {
+  sealed trait ActivenessChangeDetail
+      extends Product
+      with Serializable
+      with PrettyPrintingFromCompanion {
     def name: String36
 
     def reassignmentCounterO: Option[ReassignmentCounter]
@@ -403,7 +410,11 @@ object ActiveContractStore {
 
       override def isReassignment: Boolean = false
 
-      override protected def pretty: Pretty[Create.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[Create] = Create
+    }
+
+    object Create extends PrettyPrintingCompanion[Create] {
+      override protected val pretty: Pretty[Create] = prettyOfClass(
         param("reassignment counter", _.reassignmentCounter)
       )
     }
@@ -418,7 +429,11 @@ object ActiveContractStore {
 
       override def isReassignment: Boolean = false
 
-      override protected def pretty: Pretty[Add.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[Add] = Add
+    }
+
+    object Add extends PrettyPrintingCompanion[Add] {
+      override protected val pretty: Pretty[Add] = prettyOfClass(
         param("reassignment counter", _.reassignmentCounter)
       )
     }
@@ -438,7 +453,12 @@ object ActiveContractStore {
 
       override def isReassignment: Boolean = false
 
-      override protected def pretty: Pretty[Archive.this.type] = prettyOfObject[Archive.this.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Archive.this.type] =
+        ArchivePrettyPrintingCompanion
+    }
+
+    private object ArchivePrettyPrintingCompanion extends PrettyPrintingCompanion[Archive.type] {
+      override protected val pretty: Pretty[Archive.type] = prettyOfObject[Archive.type]
     }
 
     case object Purge extends ActivenessChangeDetail {
@@ -453,7 +473,12 @@ object ActiveContractStore {
 
       override def isReassignment: Boolean = false
 
-      override protected def pretty: Pretty[Purge.this.type] = prettyOfObject[Purge.this.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Purge.this.type] =
+        PurgePrettyPrintingCompanion
+    }
+
+    private object PurgePrettyPrintingCompanion extends PrettyPrintingCompanion[Purge.type] {
+      override protected val pretty: Pretty[Purge.type] = prettyOfObject[Purge.type]
     }
 
     final case class Assignment(
@@ -468,7 +493,11 @@ object ActiveContractStore {
 
       override def contractChange: ContractChange = ContractChange.Assigned
 
-      override protected def pretty: Pretty[Assignment.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[Assignment] = Assignment
+    }
+
+    object Assignment extends PrettyPrintingCompanion[Assignment] {
+      override protected val pretty: Pretty[Assignment] = prettyOfClass(
         param("contract change", _.contractChange),
         param("reassignment counter", _.reassignmentCounter),
         param("remote synchronizer index", _.remoteSynchronizerIdx),
@@ -487,7 +516,11 @@ object ActiveContractStore {
 
       override def contractChange: ContractChange = ContractChange.Unassigned
 
-      override protected def pretty: Pretty[Unassignment.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[Unassignment] = Unassignment
+    }
+
+    object Unassignment extends PrettyPrintingCompanion[Unassignment] {
+      override protected val pretty: Pretty[Unassignment] = prettyOfClass(
         param("contract change", _.contractChange),
         param("reassignment counter", _.reassignmentCounter),
         param("remote synchronizer index", _.remoteSynchronizerIdx),
@@ -624,7 +657,11 @@ object ActiveContractStore {
   }
 
   /** Status of a contract in the ACS */
-  sealed trait Status extends Product with Serializable with PrettyPrinting with HasPrunable {
+  sealed trait Status
+      extends Product
+      with Serializable
+      with PrettyPrintingFromCompanion
+      with HasPrunable {
 
     /** Returns whether pruning may delete a contract in this state */
     override def prunable: Boolean
@@ -648,7 +685,11 @@ object ActiveContractStore {
   final case class Active(reassignmentCounter: ReassignmentCounter) extends Status {
     override def prunable: Boolean = false
 
-    override protected def pretty: Pretty[Active] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[Active] = Active
+  }
+
+  object Active extends PrettyPrintingCompanion[Active] {
+    override protected val pretty: Pretty[Active] = prettyOfClass(
       param("reassignment counter", _.reassignmentCounter)
     )
   }
@@ -656,13 +697,23 @@ object ActiveContractStore {
   /** The contract has been archived and it is not active. */
   case object Archived extends Status {
     override def prunable: Boolean = true
-    override protected def pretty: Pretty[Archived.type] = prettyOfObject[Archived.type]
+    override def prettyCompanion: PrettyPrintingCompanion[Archived.this.type] =
+      ArchivedPrettyPrintingCompanion
     // reassignment counter remains None, because we do not write it back to the ACS
+  }
+
+  private object ArchivedPrettyPrintingCompanion extends PrettyPrintingCompanion[Archived.type] {
+    override protected val pretty: Pretty[Archived.type] = prettyOfObject[Archived.type]
   }
 
   case object Purged extends Status {
     override def prunable: Boolean = true
-    override protected def pretty: Pretty[Purged.type] = prettyOfObject[Purged.type]
+    override def prettyCompanion: PrettyPrintingCompanion[Purged.this.type] =
+      PurgedPrettyPrintingCompanion
+  }
+
+  private object PurgedPrettyPrintingCompanion extends PrettyPrintingCompanion[Purged.type] {
+    override protected val pretty: Pretty[Purged.type] = prettyOfObject[Purged.type]
   }
 
   /** The contract has been unassigned to the given `targetSynchronizer` after it had resided on
@@ -682,7 +733,11 @@ object ActiveContractStore {
       reassignmentCounter: ReassignmentCounter,
   ) extends Status {
     override def prunable: Boolean = true
-    override protected def pretty: Pretty[ReassignedAway] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ReassignedAway] = ReassignedAway
+  }
+
+  object ReassignedAway extends PrettyPrintingCompanion[ReassignedAway] {
+    override protected val pretty: Pretty[ReassignedAway] = prettyOfClass(
       unnamedParam(_.targetSynchronizer)
     )
   }
@@ -902,15 +957,17 @@ object ActiveContractSnapshot {
 
 }
 
-sealed trait ContractChange extends Product with Serializable with PrettyPrinting {
-  override protected def pretty: Pretty[ContractChange.this.type] = prettyOfObject[this.type]
+sealed trait ContractChange extends Product with Serializable with PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[ContractChange] = ContractChange
 }
-object ContractChange {
+object ContractChange extends PrettyPrintingCompanion[ContractChange] {
   case object Created extends ContractChange
   case object Archived extends ContractChange
   case object Purged extends ContractChange
   case object Unassigned extends ContractChange
   case object Assigned extends ContractChange
+
+  override protected val pretty: Pretty[ContractChange] = prettyOfObject[ContractChange]
 }
 
 /** Type of state change of a contract as returned by
@@ -918,8 +975,12 @@ object ContractChange {
   * [[com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange]]
   */
 final case class StateChangeType(change: ContractChange, reassignmentCounter: ReassignmentCounter)
-    extends PrettyPrinting {
-  override protected def pretty: Pretty[StateChangeType] =
+    extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[StateChangeType] = StateChangeType
+}
+
+object StateChangeType extends PrettyPrintingCompanion[StateChangeType] {
+  override protected val pretty: Pretty[StateChangeType] =
     prettyOfClass(
       param("operation", _.change),
       param("reassignment counter", _.reassignmentCounter),

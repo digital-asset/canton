@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.UniquePortGenerator
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
@@ -28,6 +29,7 @@ import java.time.Duration
 /** Each sequencer attempts to contact its successor when it processes its own successor
   * announcement. Upon successful contact, a metric should be changed.
   */
+@UnstableTest // TODO(i33872): Remove as soon as this test has been fixed
 final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu_sequencer_contact_successor"

@@ -6,7 +6,11 @@ package com.digitalasset.canton.participant.protocol
 import cats.syntax.either.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.protocol.ProcessingStartingPoints.InvalidStartingPointsException
 
 /** Summarizes the counters and timestamps where request processing
@@ -33,16 +37,11 @@ final case class MessageProcessingStartingPoint(
     lastSequencerTimestamp: CantonTimestamp,
     currentRecordTime: CantonTimestamp,
     nextRepairCounter: RepairCounter,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   require(currentRecordTime >= lastSequencerTimestamp)
 
-  override protected def pretty: Pretty[MessageProcessingStartingPoint] = prettyOfClass(
-    param("next request counter", _.nextRequestCounter),
-    param("next sequencer counter", _.nextSequencerCounter),
-    param("last sequencer timestamp", _.lastSequencerTimestamp),
-    param("current record time", _.currentRecordTime),
-    param("next repair counter", _.nextRepairCounter),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[MessageProcessingStartingPoint] =
+    MessageProcessingStartingPoint
 
   def toMessageCleanReplayStartingPoint: MessageCleanReplayStartingPoint =
     MessageCleanReplayStartingPoint(
@@ -52,7 +51,8 @@ final case class MessageProcessingStartingPoint(
     )
 }
 
-object MessageProcessingStartingPoint {
+object MessageProcessingStartingPoint
+    extends PrettyPrintingCompanion[MessageProcessingStartingPoint] {
   def default: MessageProcessingStartingPoint =
     MessageProcessingStartingPoint(
       RequestCounter.Genesis,
@@ -61,6 +61,14 @@ object MessageProcessingStartingPoint {
       CantonTimestamp.MinValue,
       RepairCounter.Genesis,
     )
+
+  override protected val pretty: Pretty[MessageProcessingStartingPoint] = prettyOfClass(
+    param("next request counter", _.nextRequestCounter),
+    param("next sequencer counter", _.nextSequencerCounter),
+    param("last sequencer timestamp", _.lastSequencerTimestamp),
+    param("current record time", _.currentRecordTime),
+    param("next repair counter", _.nextRepairCounter),
+  )
 }
 
 /** Summarizes the counters and timestamps where replay can start
@@ -83,22 +91,26 @@ final case class MessageCleanReplayStartingPoint(
     nextRequestCounter: RequestCounter,
     nextSequencerCounter: SequencerCounter,
     prenextTimestamp: CantonTimestamp,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[MessageCleanReplayStartingPoint] = prettyOfClass(
-    param("next request counter", _.nextRequestCounter),
-    param("next sequencer counter", _.nextSequencerCounter),
-    param("prenext timestamp", _.prenextTimestamp),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[MessageCleanReplayStartingPoint] =
+    MessageCleanReplayStartingPoint
 }
 
-object MessageCleanReplayStartingPoint {
+object MessageCleanReplayStartingPoint
+    extends PrettyPrintingCompanion[MessageCleanReplayStartingPoint] {
   def default: MessageCleanReplayStartingPoint =
     MessageCleanReplayStartingPoint(
       RequestCounter.Genesis,
       SequencerCounter.Genesis,
       CantonTimestamp.MinValue,
     )
+
+  override protected val pretty: Pretty[MessageCleanReplayStartingPoint] = prettyOfClass(
+    param("next request counter", _.nextRequestCounter),
+    param("next sequencer counter", _.nextSequencerCounter),
+    param("prenext timestamp", _.prenextTimestamp),
+  )
 }
 
 /** Starting points for processing on a
@@ -117,7 +129,7 @@ object MessageCleanReplayStartingPoint {
 final case class ProcessingStartingPoints private (
     cleanReplay: MessageCleanReplayStartingPoint,
     processing: MessageProcessingStartingPoint,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   if (cleanReplay.prenextTimestamp > processing.lastSequencerTimestamp)
     throw InvalidStartingPointsException(
@@ -132,13 +144,11 @@ final case class ProcessingStartingPoints private (
       s"Clean replay next sequencer counter ${cleanReplay.nextSequencerCounter} is after processing next sequencer counter ${processing.nextSequencerCounter}"
     )
 
-  override protected def pretty: Pretty[ProcessingStartingPoints] = prettyOfClass(
-    param("clean replay", _.cleanReplay),
-    param("processing", _.processing),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ProcessingStartingPoints] =
+    ProcessingStartingPoints
 }
 
-object ProcessingStartingPoints {
+object ProcessingStartingPoints extends PrettyPrintingCompanion[ProcessingStartingPoints] {
   final case class InvalidStartingPointsException(message: String) extends RuntimeException(message)
 
   def tryCreate(
@@ -165,4 +175,9 @@ object ProcessingStartingPoints {
       cleanReplay = MessageCleanReplayStartingPoint.default,
       processing = MessageProcessingStartingPoint.default,
     )
+
+  override protected val pretty: Pretty[ProcessingStartingPoints] = prettyOfClass(
+    param("clean replay", _.cleanReplay),
+    param("processing", _.processing),
+  )
 }

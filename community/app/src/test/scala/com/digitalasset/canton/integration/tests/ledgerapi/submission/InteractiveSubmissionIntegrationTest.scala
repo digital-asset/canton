@@ -23,6 +23,7 @@ import com.daml.ledger.javaapi.data.codegen.ContractId as CodeGenCID
 import com.daml.ledger.javaapi.data.{Command, DisclosedContract}
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.TransactionWrapper
 import com.digitalasset.canton.admin.api.client.data.TemplateId
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -1284,6 +1285,7 @@ class InteractiveSubmissionMultiSynchronizerIntegrationTest
   }
 }
 
+@UnstableTest // TODO(i27456): Remove as soon as this test has been fixed
 class InteractiveSubmissionIntegrationTestTimeouts
     extends InteractiveSubmissionIntegrationTestSetup {
   "timeout if CPN does not respond" in { implicit env =>

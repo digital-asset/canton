@@ -13,10 +13,11 @@ case class InterpretationConfig(
 )
 
 object InterpretationConfig {
-  val Default: InterpretationConfig = InterpretationConfig(
+  val Stable: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions = LanguageVersion.stableLfVersions,
     contractStateMode = ContractStateMachine.Mode.Key,
   )
+  val Default: InterpretationConfig = Stable
   val Dev: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions = LanguageVersion.allLfVersions,
     contractStateMode = ContractStateMachine.Mode.Key,

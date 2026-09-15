@@ -20,6 +20,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
+import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetectionHelpers.mkActivenessResult
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers.TestValidator
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.{
@@ -511,6 +512,7 @@ class UnassignmentValidationTest
       participantId = validatingParticipant,
       contractValidator = contractValidator,
       getTopologyAtTs = getTopologyAtTs,
+      reassignmentMetrics = ParticipantTestMetrics.synchronizer.reassignments,
     )
 
     unassignmentValidation.perform(

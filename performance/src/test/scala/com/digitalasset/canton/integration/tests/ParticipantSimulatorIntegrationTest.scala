@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
-  DbConfig,
   NonNegativeFiniteDuration,
   PositiveDurationSeconds,
   StorageConfig,
@@ -14,7 +13,6 @@ import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
-  UseH2,
   UsePostgres,
   UseReferenceBlockSequencer,
 }
@@ -41,6 +39,9 @@ import scala.jdk.CollectionConverters.*
 sealed trait ParticipantSimulatorIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
+
+  override protected def numPermits: PositiveInt = PositiveInt.two
+
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
@@ -60,9 +61,8 @@ sealed trait ParticipantSimulatorIntegrationTest
           .focus(_.monitoring.logging.delayLoggingThreshold)
           .replace(NonNegativeFiniteDuration.ofDays(100))
       )
-      .addConfigTransforms(ConfigTransforms.disableOldAcsCommitmentProcessor)
 
-  "simulate many participants with parties and commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+  "simulate many participants with parties and commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
     implicit env =>
       import env.*
 
@@ -227,17 +227,6 @@ class ParticipantSimulatorIntegrationTestInMemory extends ParticipantSimulatorIn
 
   registerPlugin(new UseReferenceBlockSequencer[StorageConfig.Memory](loggerFactory))
 
-}
-
-class ParticipantSimulatorReferenceIntegrationTestH2 extends ParticipantSimulatorIntegrationTest {
-  registerPlugin(new UseH2(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
-}
-
-class ParticipantSimulatorReferenceIntegrationTestPostgres
-    extends ParticipantSimulatorIntegrationTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
 }
 
 class ParticipantSimulatorBftOrderingIntegrationTestPostgres

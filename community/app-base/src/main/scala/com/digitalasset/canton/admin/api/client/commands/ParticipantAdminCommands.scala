@@ -949,6 +949,7 @@ object ParticipantAdminCommands {
         representativePackageIdOverride: RepresentativePackageIdOverride,
         excludedStakeholders: Set[PartyId],
         synchronizerId: SynchronizerId,
+        forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
     ) extends GrpcAdminCommand[
           Unit,
           v30.ImportAcsResponse,
@@ -980,6 +981,7 @@ object ParticipantAdminCommands {
                 excludedStakeholders.map(_.toProtoPrimitive).toSeq,
                 Option.when(isFirst)(representativePackageIdOverride.toProtoV30),
                 Option.when(isFirst)(synchronizerId.toProtoPrimitive),
+                forceRepairWhenTopologyTransactionAtLedgerEnd,
               )
             },
             inputStream,
@@ -995,6 +997,7 @@ object ParticipantAdminCommands {
         synchronizerAlias: SynchronizerAlias,
         contracts: Seq[LfContractId],
         ignoreAlreadyPurged: Boolean,
+        forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
     ) extends GrpcAdminCommand[v30.PurgeContractsRequest, v30.PurgeContractsResponse, Unit] {
 
       override type Svc = ParticipantRepairServiceStub
@@ -1008,6 +1011,8 @@ object ParticipantAdminCommands {
             synchronizerAlias = synchronizerAlias.toProtoPrimitive,
             contractIds = contracts.map(_.coid),
             ignoreAlreadyPurged = ignoreAlreadyPurged,
+            forceRepairWhenTopologyTransactionAtLedgerEnd =
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
           )
         )
 
@@ -1026,6 +1031,7 @@ object ParticipantAdminCommands {
         sourceSynchronizerAlias: SynchronizerAlias,
         targetSynchronizerConfig: InternalSynchronizerConnectionConfig,
         force: Boolean,
+        forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
     ) extends GrpcAdminCommand[
           v30.MigrateSynchronizerRequest,
           v30.MigrateSynchronizerResponse,
@@ -1047,6 +1053,8 @@ object ParticipantAdminCommands {
             sourceSynchronizerAlias.toProtoPrimitive,
             Some(targetSynchronizerConfig.toProtoV30),
             force = force,
+            forceRepairWhenTopologyTransactionAtLedgerEnd =
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
           )
         )
 
@@ -1064,6 +1072,7 @@ object ParticipantAdminCommands {
         targetSynchronizerAlias: SynchronizerAlias,
         skipInactive: Boolean,
         contracts: Seq[(LfContractId, Option[ReassignmentCounter])],
+        forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
     ) extends GrpcAdminCommand[v30.ChangeAssignationRequest, v30.ChangeAssignationResponse, Unit] {
       override type Svc = ParticipantRepairServiceStub
 
@@ -1087,6 +1096,8 @@ object ParticipantAdminCommands {
                 reassignmentCounter.map(_.toProtoPrimitive),
               )
             },
+            forceRepairWhenTopologyTransactionAtLedgerEnd =
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
           )
         )
 
@@ -1202,6 +1213,7 @@ object ParticipantAdminCommands {
         reassignmentId: String,
         source: SynchronizerId,
         target: SynchronizerId,
+        forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
     ) extends GrpcAdminCommand[
           v30.RollbackUnassignmentRequest,
           v30.RollbackUnassignmentResponse,
@@ -1218,6 +1230,8 @@ object ParticipantAdminCommands {
             reassignmentId = reassignmentId,
             sourceSynchronizerId = source.toProtoPrimitive,
             targetSynchronizerId = target.toProtoPrimitive,
+            forceRepairWhenTopologyTransactionAtLedgerEnd =
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
           )
         )
 
@@ -2406,8 +2420,7 @@ object ParticipantAdminCommands {
     )
 
     final case class ReinitializeDigestCommitments(
-        synchronizerId: SynchronizerId,
-        runningDigestProcessorShouldStartAfter: Boolean,
+        synchronizerId: SynchronizerId
     ) extends Base[
           v30.ReinitializeDigestCommitmentsRequest,
           v30.ReinitializeDigestCommitmentsResponse,
@@ -2418,8 +2431,7 @@ object ParticipantAdminCommands {
           : Right[String, v30.ReinitializeDigestCommitmentsRequest] =
         Right(
           v30.ReinitializeDigestCommitmentsRequest(
-            synchronizerId.toProtoPrimitive,
-            runningDigestProcessorShouldStartAfter,
+            synchronizerId.toProtoPrimitive
           )
         )
 

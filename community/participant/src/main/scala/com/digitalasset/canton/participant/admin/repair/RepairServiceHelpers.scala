@@ -147,6 +147,7 @@ private[repair] final class RepairServiceHelpers(
   def initRepairRequestAndVerifyPreconditions(
       synchronizerId: SynchronizerId,
       repairIndexer: FutureQueue[RepairUpdate],
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
       repairCountersToAllocate: PositiveInt = PositiveInt.one,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, RepairRequest] =
     for {
@@ -154,6 +155,7 @@ private[repair] final class RepairServiceHelpers(
       repairRequest <- initRepairRequestAndVerifyPreconditions(
         synchronizerData,
         repairCountersToAllocate,
+        forceRepairWhenTopologyTransactionAtLedgerEnd,
       )
     } yield repairRequest
 
@@ -162,7 +164,8 @@ private[repair] final class RepairServiceHelpers(
     *   Next RepairCounter
     */
   def verifyRepairPreconditions(
-      synchronizer: RepairRequest.SynchronizerData
+      synchronizer: RepairRequest.SynchronizerData,
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, RepairCounter] = {
@@ -191,6 +194,36 @@ private[repair] final class RepairServiceHelpers(
            |and the repair command would be assigned a record time of $rtRepair.
            |Reconnect to the synchronizer to reprocess inflight validation requests and retry repair afterwards.""".stripMargin,
       )
+      // Effective time of the topology transactions is exclusive, meaning it will become effective after the effective time.
+      // Repair events are placed onto the last observed record time, so it would be possible, that repair transactions on
+      // the same time are actually following the effective time PTP topology event, making sequencing conceptually incorrect.
+      // This is a very unlikely scenario, since the sequencer emits a SequencerIndexMoved event even if there is no usual
+      // traffic on the synchronizer. But still, the participant could crash right after persisting the topology transaction
+      // and before processing the next update.
+      // Therefore, we check if the last event is a topology event and if so, we require the user to either reconnect to the synchronizer
+      // or to force the repair command to be applied even though the observed sequence of events are incorrect.
+      topologyEventPreventsRepair <-
+        if (forceRepairWhenTopologyTransactionAtLedgerEnd) {
+          EitherT.rightT[FutureUnlessShutdown, String](false)
+        } else {
+          EitherT.liftF(
+            FutureUnlessShutdown.outcomeF(
+              ledgerApiIndexer.value.ledgerApiStore
+                .topologyEventOffsetPublishedOnRecordTime(
+                  synchronizer.persistentState.lsid,
+                  rtRepair.timestamp,
+                )
+                .map(_.isDefined)
+            )
+          )
+        }
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        !topologyEventPreventsRepair,
+        (),
+        s"""Cannot apply a repair command as the last event is a topology offset. Please reconnect to the synchronizer
+           |to move the ledger end. In case the synchronizer cannot be connected again without this operation, contact
+           |support.""".stripMargin,
+      )
     } yield synchronizer.nextRepairCounter
   }
 
@@ -199,6 +232,7 @@ private[repair] final class RepairServiceHelpers(
   def initRepairRequestAndVerifyPreconditions(
       synchronizer: RepairRequest.SynchronizerData,
       repairCountersToAllocate: PositiveInt,
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, RepairRequest] = {
     val rtRepair = RecordTime.fromTimeOfChange(
       TimeOfChange(
@@ -209,7 +243,10 @@ private[repair] final class RepairServiceHelpers(
     logger.debug(s"Starting repair request on ${synchronizer.persistentState.psid} at $rtRepair.")
 
     for {
-      nextRepairCounter <- verifyRepairPreconditions(synchronizer)
+      nextRepairCounter <- verifyRepairPreconditions(
+        synchronizer,
+        forceRepairWhenTopologyTransactionAtLedgerEnd,
+      )
       repairCounters <- EitherT.fromEither[FutureUnlessShutdown](
         repairCounterSequence(
           nextRepairCounter,

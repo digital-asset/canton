@@ -4,7 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.BlacklistStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig.{
@@ -34,12 +38,9 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v31
 final case class BlacklistLeaderSelectionPolicyConfig(
     howLongToBlacklist: HowLongToBlacklist,
     howManyCanWeBlacklist: HowManyCanWeBlacklist,
-) extends PrettyPrinting {
-  override def pretty: Pretty[this.type] =
-    prettyOfClass(
-      param("howLongToBlacklist", _.howLongToBlacklist),
-      param("howManyCanWeBlacklist", _.howManyCanWeBlacklist),
-    )
+) extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[BlacklistLeaderSelectionPolicyConfig] =
+    BlacklistLeaderSelectionPolicyConfig
 
   def toProto: v31.BlacklistLeaderSelectionPolicy = v31.BlacklistLeaderSelectionPolicy(
     howLongToBlacklist.toProto,
@@ -47,7 +48,15 @@ final case class BlacklistLeaderSelectionPolicyConfig(
   )
 }
 
-object BlacklistLeaderSelectionPolicyConfig {
+object BlacklistLeaderSelectionPolicyConfig
+    extends PrettyPrintingCompanion[BlacklistLeaderSelectionPolicyConfig] {
+
+  override protected val pretty: Pretty[BlacklistLeaderSelectionPolicyConfig] =
+    prettyOfClass(
+      param("howLongToBlacklist", _.howLongToBlacklist),
+      param("howManyCanWeBlacklist", _.howManyCanWeBlacklist),
+    )
+
   def fromProto(
       proto: v31.BlacklistLeaderSelectionPolicy
   ): ParsingResult[BlacklistLeaderSelectionPolicyConfig] = for {
@@ -91,7 +100,10 @@ object BlacklistLeaderSelectionPolicyConfig {
     howManyCanWeBlacklist,
   )
 
-  sealed trait HowLongToBlacklist extends PrettyPrinting with Product with Serializable {
+  sealed trait HowLongToBlacklist
+      extends PrettyPrintingFromCompanion
+      with Product
+      with Serializable {
     def punishNodeThatFailed(failedEpochSoFar: Long): BlacklistStatus
     // Since the HowLongToBlacklist might have changed between epochs, how long we need to wait until next trial might
     // change. So this method recomputes it.
@@ -102,9 +114,7 @@ object BlacklistLeaderSelectionPolicyConfig {
   object HowLongToBlacklist {
 
     final case class Linear(maximumEpochBlacklisted: Option[Long]) extends HowLongToBlacklist {
-      override def pretty: Pretty[this.type] = prettyOfClass[this.type](
-        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted)
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[Linear] = Linear
 
       override def punishNodeThatFailed(failedEpochSoFar: Long): BlacklistStatus =
         BlacklistStatus.Blacklisted.create(
@@ -121,17 +131,20 @@ object BlacklistLeaderSelectionPolicyConfig {
         maximumEpochBlacklisted.getOrElse(epochsLeftUntilNextTrial).min(epochsLeftUntilNextTrial)
     }
 
+    object Linear extends PrettyPrintingCompanion[Linear] {
+      override protected val pretty: Pretty[Linear] = prettyOfClass(
+        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted)
+      )
+    }
+
     // X |-> min(slope*X+initialValue, maximumEpochBlacklisted)
     final case class LinearWithParameters(
         maximumEpochBlacklisted: Option[Long],
         slope: Long,
         initialValue: Long,
     ) extends HowLongToBlacklist {
-      override protected def pretty: Pretty[LinearWithParameters] = prettyOfClass(
-        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted),
-        param("slope", _.slope),
-        param("initialValue", _.initialValue),
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[LinearWithParameters] =
+        LinearWithParameters
 
       override def punishNodeThatFailed(failedEpochSoFar: Long): BlacklistStatus =
         BlacklistStatus.Blacklisted.create(
@@ -154,14 +167,19 @@ object BlacklistLeaderSelectionPolicyConfig {
         )
     }
 
+    object LinearWithParameters extends PrettyPrintingCompanion[LinearWithParameters] {
+      override protected val pretty: Pretty[LinearWithParameters] = prettyOfClass(
+        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted),
+        param("slope", _.slope),
+        param("initialValue", _.initialValue),
+      )
+    }
+
     final case class Exponential(
         maximumEpochBlacklisted: Option[Long],
         initialValue: Long,
     ) extends HowLongToBlacklist {
-      override protected def pretty: Pretty[Exponential] = prettyOfClass(
-        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted),
-        param("initialValue", _.initialValue),
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[Exponential] = Exponential
 
       override def punishNodeThatFailed(failedEpochSoFar: Long): BlacklistStatus =
         BlacklistStatus.Blacklisted.create(
@@ -193,8 +211,16 @@ object BlacklistLeaderSelectionPolicyConfig {
         )
     }
 
+    object Exponential extends PrettyPrintingCompanion[Exponential] {
+      override protected val pretty: Pretty[Exponential] = prettyOfClass(
+        param("maximumEpochBlacklisted", _.maximumEpochBlacklisted),
+        param("initialValue", _.initialValue),
+      )
+    }
+
     case object NoBlacklisting extends HowLongToBlacklist {
-      override final def pretty: Pretty[this.type] = prettyOfObject[this.type]
+      override final def prettyCompanion: PrettyPrintingCompanion[NoBlacklisting.this.type] =
+        NoBlacklistingPrettyPrintingCompanion
       override def punishNodeThatFailed(failedEpochSoFar: Long): BlacklistStatus =
         BlacklistStatus.Clean
       override def toProto: v31.BlacklistLeaderSelectionPolicy.HowLongToBlacklist =
@@ -204,15 +230,28 @@ object BlacklistLeaderSelectionPolicyConfig {
 
       override def updateLeftUntilNextTrial(epochsLeftUntilNextTrial: Long): Long = 0L
     }
+
+    private object NoBlacklistingPrettyPrintingCompanion
+        extends PrettyPrintingCompanion[NoBlacklisting.type] {
+      override protected val pretty: Pretty[NoBlacklisting.type] =
+        prettyOfObject[NoBlacklisting.type]
+    }
   }
 
-  sealed trait HowManyCanWeBlacklist extends PrettyPrinting with Product with Serializable {
-    override final def pretty: Pretty[this.type] = prettyOfObject[this.type]
+  sealed trait HowManyCanWeBlacklist
+      extends PrettyPrintingFromCompanion
+      with Product
+      with Serializable {
+    override final def prettyCompanion: PrettyPrintingCompanion[HowManyCanWeBlacklist] =
+      HowManyCanWeBlacklist
     def howManyCanWeBlacklist(orderingTopology: OrderingTopology): Int
     def toProto: v31.BlacklistLeaderSelectionPolicy.HowManyCanWeBlacklist
   }
 
-  object HowManyCanWeBlacklist {
+  object HowManyCanWeBlacklist extends PrettyPrintingCompanion[HowManyCanWeBlacklist] {
+
+    override protected val pretty: Pretty[HowManyCanWeBlacklist] =
+      prettyOfObject[HowManyCanWeBlacklist]
 
     case object NumFaultsTolerated extends HowManyCanWeBlacklist {
       override def howManyCanWeBlacklist(orderingTopology: OrderingTopology): Int =

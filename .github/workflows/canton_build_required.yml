@@ -268,15 +268,6 @@ jobs:
     with:
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  temp_acs_commitment_tests_pv_dev:
-    name: Temp ACS Commitment Tests PV Dev
-    needs: [pick_runner, compile]
-    if: github.event_name == 'pull_request'
-    uses: ./.github/workflows/_temp_acs_commitment_tests_pv_dev.yml
-    secrets: inherit
-    with:
-      runner: ${{ needs.pick_runner.outputs.runner }}
-
   test_data_continuity_dumps:
     name: Test Data Continuity Dumps
     needs: [pick_runner, compile]
@@ -413,7 +404,6 @@ jobs:
       - scalafix
       - sequential_test
       - smoke_test
-      - temp_acs_commitment_tests_pv_dev
       - test_data_continuity_dumps
       - test_docker_images
       - test_protocol_version_36
@@ -468,7 +458,6 @@ jobs:
       - scalafix
       - sequential_test
       - smoke_test
-      - temp_acs_commitment_tests_pv_dev
       - test_data_continuity_dumps
       - test_docker_images
       - test_protocol_version_36

@@ -186,7 +186,7 @@ cleanup_test_job:
         when: always
         command: |
           if [[ -d log ]]; then
-            .ci/nix-exec pigz $(find log -not -name "*.gz" -and -not -type "d")
+            find log -not -name "*.gz" -not -type d -print0 | xargs -0 -r .ci/nix-exec pigz
           fi
     - store_artifacts:
         name: Store test logs as artifacts (if any)

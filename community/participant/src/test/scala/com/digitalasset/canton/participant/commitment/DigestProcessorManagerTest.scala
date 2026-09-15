@@ -3,16 +3,19 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
-import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.lifecycle.{
+  FutureUnlessShutdown,
+  PromiseUnlessShutdown,
+  ShutdownFailedException,
+}
+import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
 import com.digitalasset.canton.participant.commitment.DigestProcessorManagerTest.{
   TestReinitializingDigestProcessor,
   TestRunningDigestProcessor,
 }
-import com.digitalasset.canton.participant.commitment.DigestProcessorState.{Started, Stopped}
+import com.digitalasset.canton.participant.commitment.DigestProcessorState.Stopped
 import com.digitalasset.canton.participant.commitment.DigestProcessorTestBase.PromiseKillSwitch
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, ParticipantTestMetrics}
@@ -22,11 +25,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, SynchronizerAlias}
 import org.apache.pekko.stream.KillSwitch
 import org.scalatest.wordspec.AnyWordSpec
+import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.Success
+import scala.util.{Failure, Success}
 
-@AcsCommitmentTest
 class DigestProcessorManagerTest
     extends AnyWordSpec
     with DigestProcessorTestBase
@@ -36,7 +39,8 @@ class DigestProcessorManagerTest
   "DigestProcessorManager" should {
 
     "starting a running processor on top of a running digest processor does nothing" in {
-      val fixture = new Fixture(reinitializingTimepoint = tp(10))
+      val fixture =
+        new Fixture(reinitializingTimepoint = tp(10))
       import fixture.*
 
       get() shouldBe empty
@@ -45,9 +49,164 @@ class DigestProcessorManagerTest
       val proc1 = get().value
 
       mgr.startRunningDigestProcessor().futureValueUS
-      val proc2 = get().value
+      always() {
+        val proc2 = get().value
+        proc2 shouldBe proc1
+      }
+      mgr.close()
+    }
 
-      proc2 shouldBe proc1
+    "not start a new running digest processor if the current running digest processor stops with a failure" in {
+      val fixture = new Fixture(reinitializingTimepoint = tp(10))
+      import fixture.*
+
+      get() shouldBe empty
+
+      mgr.startRunningDigestProcessor().futureValueUS
+      val proc1 = get().value.asInstanceOf[TestRunningDigestProcessor]
+
+      val exception = new RuntimeException("expected failure")
+      proc1.promiseKillSwitch.abort(exception)
+
+      always() {
+        val proc = get().value
+        proc shouldBe proc1
+      }
+
+      loggerFactory.assertThrowsAndLogs[ShutdownFailedException](
+        mgr.close(),
+        entry => {
+          entry.warningMessage should include regex ("current digest processor.* failed!")
+          entry.throwable.value shouldBe exception
+        },
+      )
+    }
+
+    "not start a new running digest processor if the current running digest processor stops with a failure during startup" in {
+      val fixture = new Fixture(reinitializingTimepoint = tp(10), immediatePipelineStartUp = false)
+      import fixture.*
+
+      get() shouldBe empty
+
+      mgr.startRunningDigestProcessorAsync()
+      val proc1 = eventually() {
+        get().value.asInstanceOf[TestRunningDigestProcessor]
+      }
+
+      val failure = Failure(new RuntimeException("expected startup failure"))
+      loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.ERROR))(
+        {
+          proc1.startingPromise.complete(failure)
+          // explicitly return unit, so that assertEventuallyLogsSeq doesn't detect the promise
+          // as a (failed) future and subsequently skip the log assertions
+          ()
+        },
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              entry => {
+                entry.errorMessage should include("Failed to start digest processor")
+              },
+              "logged startup failure",
+            ),
+            (
+              entry => {
+                entry.errorMessage should include("Failed to start running digest processor")
+              },
+              "logged async startup failure",
+            ),
+          )
+        ),
+      )
+
+      eventually() {
+        val proc = get().value
+        proc shouldBe proc1
+        proc.stateInternal shouldBe Stopped(failure, failure)
+      }
+      always() {
+        get().value shouldBe proc1
+      }
+
+      loggerFactory.assertThrowsAndLogs[ShutdownFailedException](
+        mgr.close(),
+        entry => {
+          entry.warningMessage should include regex ("current digest processor.* failed!")
+          entry.throwable.value shouldBe failure.exception
+        },
+      )
+    }
+
+    "start a new running digest processor if the current running digest processor is shut down orderly" in {
+      val fixture = new Fixture(reinitializingTimepoint = tp(10))
+      import fixture.*
+
+      get() shouldBe empty
+
+      mgr.startRunningDigestProcessor().futureValueUS
+      val proc1 = get().value.asInstanceOf[TestRunningDigestProcessor]
+
+      proc1.promiseKillSwitch.shutdown()
+
+      val proc2 = eventually() {
+        val proc = get().value
+        proc should not be proc1
+        proc shouldBe a[RunningDigestProcessor]
+        proc
+      }
+
+      proc2.stop().futureValueUS
+
+      mgr.close()
+    }
+
+    "start a new running digest processor if the current running digest processor is shut down during startup" in {
+      val fixture = new Fixture(reinitializingTimepoint = tp(10), immediatePipelineStartUp = false)
+      import fixture.*
+
+      get() shouldBe empty
+
+      mgr.startRunningDigestProcessorAsync()
+      val proc1 = eventually() {
+        get().value.asInstanceOf[TestRunningDigestProcessor]
+      }
+
+      proc1.startingPromise.shutdown_()
+
+      val proc2 = eventually() {
+        val proc = get().value
+        proc should not be proc1
+        proc shouldBe a[TestRunningDigestProcessor]
+        proc.asInstanceOf[TestRunningDigestProcessor]
+      }
+
+      // stop the new processor to not hang during shutdown
+      val exception = new RuntimeException("expected failure")
+
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          proc2.startingPromise.failure(exception)
+          a[ShutdownFailedException] should be thrownBy (mgr.close())
+        },
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              {
+                _.warningMessage should include regex ("Closing.*current digest processor.* failed!")
+              },
+              "Error reported during shutdown",
+            ),
+            (
+              entry => {
+                entry.errorMessage should include("Failed to start digest processor")
+                entry.throwable.value shouldBe exception
+              },
+              "processor startup error",
+            ),
+          )
+        ),
+      )
+
     }
 
     "starting a reinitialization processor stops the current running digest processor" in {
@@ -138,7 +297,9 @@ class DigestProcessorManagerTest
       }
     }
 
-    "a running digest processor can be queued after the reinitialization processor" in {
+    def runningDigestProcessorAfterReinitialization(
+        explicitlyTryToStartRunningDigestProcessor: Boolean
+    ) = {
       val reinitTimepoint = tp(100)
       val donePromise = Promise[Unit]()
       val fixture =
@@ -162,67 +323,35 @@ class DigestProcessorManagerTest
       val reinitProc = get().value
       reinitProc shouldBe a[ReinitializingDigestProcessor]
 
-      val queueAnotherRunningDigestProcessor = mgr.startRunningDigestProcessor()
+      if (explicitlyTryToStartRunningDigestProcessor)
+        mgr.startRunningDigestProcessor().futureValueUS
 
       // the reinitialization is still going on
       get().value shouldBe reinitProc
 
       donePromise.success(())
 
-      // Verify that the queued running digest processor starts
+      // Verify that a RunningDigestProcessor is automatically started
       eventually() {
         val proc2 = get().value
         proc2 shouldBe a[RunningDigestProcessor]
       }
-
-      queueAnotherRunningDigestProcessor.futureValueUS
     }
 
-    "be able to start a processor if the previous processor has terminated" in {
-      val fixture = new Fixture(
-        reinitializingTimepoint = tp(10),
-        donePromise = () => Promise[Unit](),
+    "starting a running digest processor while reinitialization is ongoing does nothing" in {
+      runningDigestProcessorAfterReinitialization(explicitlyTryToStartRunningDigestProcessor = true)
+    }
+
+    "a running digest processor is automatically started after reinitialization" in {
+      runningDigestProcessorAfterReinitialization(explicitlyTryToStartRunningDigestProcessor =
+        false
       )
-      import fixture.*
-
-      get() shouldBe empty
-
-      def terminatePipeline(processor: DigestProcessor): Unit =
-        processor.stateInternal match {
-          case Started(ks, completionFuture) =>
-            ks.shutdown()
-            completionFuture.futureValueUS
-          case Stopped(_, _) => ()
-          case unexpectedState => fail(s"unexpected processor state $unexpectedState")
-        }
-
-      def startAndTerminate(startProcessor: () => FutureUnlessShutdown[Unit]): Unit = {
-        val oldProcO = get()
-
-        startProcessor().futureValueUS
-
-        val proc = get().value
-
-        // Shutdown the killswitch and await completion
-        terminatePipeline(proc)
-
-        eventually() {
-          proc.stateInternal shouldBe Stopped.success
-        }
-
-        oldProcO.foreach(_ should not be proc)
-      }
-
-      startAndTerminate(() => mgr.startReinitializationDigestProcessor().map(_ => ()))
-      startAndTerminate(() => mgr.startReinitializationDigestProcessor().map(_ => ()))
-      startAndTerminate(() => mgr.startRunningDigestProcessor())
-      startAndTerminate(() => mgr.startRunningDigestProcessor())
-      startAndTerminate(() => mgr.startReinitializationDigestProcessor().map(_ => ()))
     }
   }
 
   class Fixture(
       reinitializingTimepoint: Timepoint,
+      immediatePipelineStartUp: Boolean = true,
       donePromise: () => Promise[Unit] = () => Promise.successful(()),
   ) {
     val factory = new TestDigestProcessorFactory(
@@ -235,7 +364,9 @@ class DigestProcessorManagerTest
           loggerFactory,
           reinitializingTimepoint,
           donePromise = donePromise(),
+          immediatePipelineStartUp = immediatePipelineStartUp,
         ),
+      immediatePipelineStartUp = immediatePipelineStartUp,
     )
 
     val mgr = new DigestProcessorManager(
@@ -257,6 +388,7 @@ class DigestProcessorManagerTest
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
       makeReinitProcessor: () => TestReinitializingDigestProcessor,
+      immediatePipelineStartUp: Boolean,
   )(implicit val executionContext: ExecutionContext)
       extends DigestProcessorFactory {
 
@@ -271,7 +403,12 @@ class DigestProcessorManagerTest
         synchronizerId: SynchronizerId,
         tickSignaller: TickSignaller,
     )(implicit traceContext: TraceContext): RunningDigestProcessor =
-      new TestRunningDigestProcessor(synchronizerId, timeouts, loggerFactory)
+      new TestRunningDigestProcessor(
+        synchronizerId,
+        timeouts,
+        loggerFactory,
+        immediatePipelineStartUp = immediatePipelineStartUp,
+      )
 
     override def needsReinitialization(
         synchronizerId: SynchronizerId
@@ -295,18 +432,24 @@ object DigestProcessorManagerTest {
       loggerFactory: NamedLoggerFactory,
       override val reinitializingTimepoint: Timepoint,
       val donePromise: Promise[Unit] = Promise.successful(()),
+      immediatePipelineStartUp: Boolean,
   )(implicit override protected val executionContext: ExecutionContext)
       extends TestDigestProcessor(synchronizerId, timeouts, loggerFactory)
       with ReinitializingDigestProcessor {
 
     override def thisParticipantId: ParticipantId = ???
 
+    val startingPromise: PromiseUnlessShutdown[Unit] = PromiseUnlessShutdown.unsupervised[Unit]()
+
     override protected def startPipelineInternal()(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] = {
-      val ks = new PromiseKillSwitch()
-      val completionF = Future.firstCompletedOf(Seq(ks.promise.future, donePromise.future))
-      FutureUnlessShutdown.pure((ks, completionF))
+      if (immediatePipelineStartUp) startingPromise.outcome_(())
+      startingPromise.futureUS.map { _ =>
+        val ks = new PromiseKillSwitch()
+        val completionF = Future.firstCompletedOf(Seq(ks.promise.future, donePromise.future))
+        (ks, completionF)
+      }
     }
 
     override private[canton] def metrics: CommitmentMetrics =
@@ -319,17 +462,21 @@ object DigestProcessorManagerTest {
       synchronizerId: SynchronizerId,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
+      immediatePipelineStartUp: Boolean,
   )(implicit override protected val executionContext: ExecutionContext)
       extends TestDigestProcessor(synchronizerId, timeouts, loggerFactory)
       with RunningDigestProcessor {
 
     override def thisParticipantId: ParticipantId = ???
 
+    val promiseKillSwitch = new PromiseKillSwitch()
+    val startingPromise: PromiseUnlessShutdown[Unit] = PromiseUnlessShutdown.unsupervised[Unit]()
+
     override protected def startPipelineInternal()(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] = {
-      val ks = new PromiseKillSwitch()
-      FutureUnlessShutdown.pure((ks, ks.promise.future))
+      if (immediatePipelineStartUp) startingPromise.outcome_(())
+      startingPromise.futureUS.map(_ => (promiseKillSwitch, promiseKillSwitch.promise.future))
     }
 
     override private[canton] def metrics: CommitmentMetrics =

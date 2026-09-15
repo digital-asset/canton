@@ -287,8 +287,8 @@ class GrpcSequencerConnectService(
   ): Either[Status, Seq[GenericSignedTopologyTransaction]] =
     for {
       _ <-
-        // Below boundsCheck the bound is not enforced, so keep the previous length check
-        if (serverProtocolVersion < ProtocolVersion.boundsCheck) {
+        // Below PV36 the bound is not enforced, so keep the previous length check
+        if (serverProtocolVersion < ProtocolVersion.v36) {
           EitherUtil.condUnit(
             topologyTransactions.sizeIs <= maxOnboardingTransactions.value,
             invalidArgument(

@@ -14,6 +14,7 @@ import com.digitalasset.base.error.{
 }
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.IndexErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
+import org.slf4j.event.Level
 
 @Explanation("Errors raised by the Participant Index persistence layer.")
 object IndexErrors extends IndexErrorGroup {
@@ -64,11 +65,13 @@ object IndexErrors extends IndexErrorGroup {
     object SqlNetworkTimeoutError
         extends ErrorCode(
           id = "INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR",
-          ErrorCategory.SystemInternalAssumptionViolated,
+          ErrorCategory.TransientServerFailure,
         ) {
-      final case class Reject(throwable: Throwable)(implicit
-          val loggingContext: ErrorLoggingContext
-      ) extends DbError(
+      final case class Reject(
+          throwable: Throwable,
+          override val overrideLogLevel: Option[Level] = Some(Level.WARN),
+      )(implicit val loggingContext: ErrorLoggingContext)
+          extends DbError(
             cause =
               s"Processing the request failed due to a network timeout database error: ${throwable.getMessage}",
             throwableO = Some(throwable),

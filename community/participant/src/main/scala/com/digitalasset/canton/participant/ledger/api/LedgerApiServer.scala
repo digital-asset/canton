@@ -22,7 +22,11 @@ import com.digitalasset.canton.ledger.localstore.*
 import com.digitalasset.canton.ledger.participant.state.metrics.TimedSyncService
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.LifeCycle.FastCloseableChannel
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,
@@ -452,7 +456,10 @@ object LedgerApiServer {
       .acquireFlagCloseable("Ledger API Server")
   }
 
-  sealed trait LedgerApiServerError extends Product with Serializable with PrettyPrinting {
+  sealed trait LedgerApiServerError
+      extends Product
+      with Serializable
+      with PrettyPrintingFromCompanion {
     protected def errorMessage: String = ""
     def cause: Throwable
     def asRuntimeException(additionalMessage: String = ""): RuntimeException =
@@ -469,7 +476,13 @@ object LedgerApiServer {
 
   final case class FailedToConfigureLedgerApiStorage(override protected val errorMessage: String)
       extends LedgerApiServerErrorWithoutCause {
-    override protected def pretty: Pretty[FailedToConfigureLedgerApiStorage] =
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToConfigureLedgerApiStorage] =
+      FailedToConfigureLedgerApiStorage
+  }
+
+  object FailedToConfigureLedgerApiStorage
+      extends PrettyPrintingCompanion[FailedToConfigureLedgerApiStorage] {
+    override protected val pretty: Pretty[FailedToConfigureLedgerApiStorage] =
       prettyOfClass(unnamedParam(_.errorMessage.unquoted))
   }
 }

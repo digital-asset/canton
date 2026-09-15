@@ -10,7 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.pretty.PrettyPrinting
+import com.digitalasset.canton.logging.pretty.PrettyPrintingFromCompanion
 import com.digitalasset.canton.participant.store.ActiveContractSnapshot.ActiveContractIdsChange
 import com.digitalasset.canton.participant.store.ActiveContractStore.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail.{
@@ -2436,7 +2436,7 @@ trait ActiveContractStoreTest extends PrunableByTimeTest with InUS {
     }
   }
 
-  private implicit class ConflictDetectionStoreOps[K, A <: PrettyPrinting](
+  private implicit class ConflictDetectionStoreOps[K, A <: PrettyPrintingFromCompanion](
       store: ConflictDetectionStore[K, A]
   ) {
     def fetchState(

@@ -146,7 +146,7 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
                 .toInt
 
               val pv = ProtocolVersion
-                .fromProtoPrimitive(rawPv)
+                .fromProtoPrimitive(rawPv, allowDeleted = true)
                 .valueOrFail(s"Unsupported protocol version $rawPv")
 
               if (pv.isDeleted)

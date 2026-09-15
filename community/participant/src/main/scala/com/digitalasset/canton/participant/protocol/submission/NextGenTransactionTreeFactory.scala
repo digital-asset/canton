@@ -124,7 +124,7 @@ class NextGenTransactionTreeFactory(
         Some(participantId.adminParty.toLf),
         rollbackContextFactory,
         // Transaction view limits are applied on submission paths
-        Option.when(protocolVersion >= ProtocolVersion.boundsCheck)(limitConfig),
+        Option.when(protocolVersion >= ProtocolVersion.v36)(limitConfig),
       )
 
     val commonMetadata = CommonMetadata

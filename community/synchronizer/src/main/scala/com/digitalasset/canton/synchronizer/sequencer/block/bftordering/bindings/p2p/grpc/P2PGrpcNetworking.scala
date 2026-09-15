@@ -7,7 +7,11 @@ import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
@@ -58,14 +62,19 @@ object P2PGrpcNetworking {
         transportSecurity: Boolean,
     ) extends Ordered[Id]
         with Product
-        with PrettyPrinting {
+        with PrettyPrintingFromCompanion {
 
       lazy val url = s"${if (transportSecurity) "https" else "http"}://$address:$port"
 
       override def compare(that: Id): Int =
         Id.unapply(this).compare(Id.unapply(that))
 
-      override protected def pretty: Pretty[Id] =
+      override def prettyCompanion: PrettyPrintingCompanion[Id] = Id
+    }
+
+    object Id extends PrettyPrintingCompanion[Id] {
+
+      override protected val pretty: Pretty[Id] =
         prettyOfClassWithName("P2PUrl")(unnamedParam(_.url.doubleQuoted))
     }
 

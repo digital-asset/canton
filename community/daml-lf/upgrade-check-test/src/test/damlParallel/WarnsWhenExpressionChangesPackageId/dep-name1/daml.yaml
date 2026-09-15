@@ -1,0 +1,17 @@
+name: upgrades-WarnsWhenExpressionChangesPackageId-dep-name1
+version: 1.0.0
+source: .
+data-dependencies: []
+dependencies: []
+module-prefixes: null
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-WarnsWhenExpressionChangesPackageId-dep-name1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

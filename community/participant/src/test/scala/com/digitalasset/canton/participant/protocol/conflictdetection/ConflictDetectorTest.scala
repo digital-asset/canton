@@ -13,7 +13,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.{Epoch, ofEpochMilli}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.pretty.PrettyPrinting
+import com.digitalasset.canton.logging.pretty.PrettyPrintingFromCompanion
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.*
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableState.{
   LockCounter,
@@ -1978,7 +1978,7 @@ final class ConflictDetectorTest
   )(clue: String): FutureUnlessShutdown[Assertion] =
     acs.fetchState(coid).map(result => assert(result == state, clue))
 
-  private[this] def mkState[A <: PrettyPrinting](
+  private[this] def mkState[A <: PrettyPrintingFromCompanion](
       state: Option[StateChange[A]],
       pendingActivenessCount: Int,
       locks: Int,
@@ -2049,7 +2049,7 @@ final class ConflictDetectorTest
       assert(fin == Either.unit)
     }
 
-  private implicit class ConflictDetectionStoreOps[K, A <: PrettyPrinting](
+  private implicit class ConflictDetectionStoreOps[K, A <: PrettyPrintingFromCompanion](
       store: ConflictDetectionStore[K, A]
   ) {
     def fetchState(

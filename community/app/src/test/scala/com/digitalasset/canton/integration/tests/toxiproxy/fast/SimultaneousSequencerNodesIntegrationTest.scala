@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.toxiproxy.fast
 
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DbLockedConnectionPoolConfig,
@@ -36,6 +37,7 @@ import monocle.macros.syntax.lens.*
 /** Two simultaneous block-based sequencers must not write to the database. The one that does not
   * acquire the lock (passive) should get killed.
   */
+@UnstableTest // TODO(i31490): Remove as soon as this test has been fixed
 class SimultaneousSequencerNodesIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {

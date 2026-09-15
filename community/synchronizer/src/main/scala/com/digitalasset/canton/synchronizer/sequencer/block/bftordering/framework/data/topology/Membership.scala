@@ -4,7 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -20,20 +24,22 @@ final case class Membership(
     orderingTopology: OrderingTopology,
     leaders: Seq[BftNodeId],
     blacklistedNodes: Seq[BftNodeId],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   val otherNodes: Set[BftNodeId] = orderingTopology.nodes - myId
   lazy val sortedNodes: Seq[BftNodeId] = orderingTopology.sortedNodes
 
-  override protected def pretty: Pretty[Membership.this.type] =
+  override def prettyCompanion: PrettyPrintingCompanion[Membership] = Membership
+}
+
+object Membership extends PrettyPrintingCompanion[Membership] {
+
+  override protected val pretty: Pretty[Membership] =
     prettyOfClass(
       param("myId", _.myId.doubleQuoted),
       param("orderingTopology", _.orderingTopology),
       param("leaders", _.leaders.map(_.doubleQuoted)),
       param("blacklistedNodes", _.blacklistedNodes.map(_.doubleQuoted)),
     )
-}
-
-object Membership {
 
   // Simple constructors for tests so that we don't have to provide a full ordering topology.
 

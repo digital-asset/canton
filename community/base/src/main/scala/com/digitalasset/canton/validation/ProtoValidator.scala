@@ -27,7 +27,7 @@ trait ProtoValidator[A] {
       pv: ProtocolVersion,
       field: Option[String],
   ): ParsingResult[A] =
-    if (pv >= ProtocolVersion.stringValidation) validate(value, field) else Right(value)
+    if (pv >= ProtocolVersion.v36) validate(value, field) else Right(value)
 }
 
 object ProtoValidator {

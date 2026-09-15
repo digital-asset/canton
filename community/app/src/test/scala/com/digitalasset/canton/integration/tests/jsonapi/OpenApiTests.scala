@@ -30,6 +30,7 @@ final class OpenApiTests
     "version",
     "contracts",
     "jose",
+    "traffic",
   )
 
   private val expectedRootOpenApiServices = Seq(
@@ -43,9 +44,9 @@ final class OpenApiTests
     "updates",
   )
 
-  // The traffic service is not part of the static docs. Disable it so the live server matches.
+  // The traffic service is part of the static docs by default. Enable it so the live server matches as well
   override def environmentDefinition: EnvironmentDefinition =
-    super.environmentDefinition.addConfigTransform(ConfigTransforms.disableTrafficAccounting)
+    super.environmentDefinition.addConfigTransform(ConfigTransforms.enableTrafficAccounting)
 
   "JSON openapi documentation" should {
     val protoInfo = apiDocsGenerator.cachedProtoData()

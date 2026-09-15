@@ -12,7 +12,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore
@@ -233,8 +237,12 @@ class DbInFlightSubmissionStore(
   }
 
   case class SequencedRootHash(rootHash: RootHash, submission: SequencedSubmission)
-      extends PrettyPrinting {
-    override protected def pretty: Pretty[SequencedRootHash] =
+      extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[SequencedRootHash] = SequencedRootHash
+  }
+
+  object SequencedRootHash extends PrettyPrintingCompanion[SequencedRootHash] {
+    override protected val pretty: Pretty[SequencedRootHash] =
       prettyOfClass(
         param("rootHash", _.rootHash),
         param("submission", _.submission),

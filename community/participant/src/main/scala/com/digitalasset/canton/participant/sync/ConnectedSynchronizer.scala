@@ -279,6 +279,7 @@ class ConnectedSynchronizer(
     clock,
     timeouts,
     Source(staticSynchronizerParameters.protocolVersion),
+    metrics.reassignments,
     loggerFactory,
     futureSupervisor,
     testingConfig = testingConfig,
@@ -299,6 +300,7 @@ class ConnectedSynchronizer(
     clock,
     timeouts,
     Target(staticSynchronizerParameters.protocolVersion),
+    metrics.reassignments,
     loggerFactory,
     futureSupervisor,
     testingConfig,
@@ -424,7 +426,7 @@ class ConnectedSynchronizer(
 
   private val messageDispatcher: MessageDispatcher = {
     val receivedAcsCommitmentValidator =
-      if (staticSynchronizerParameters.protocolVersion >= ProtocolVersion.acsCommitmentRedesign)
+      if (staticSynchronizerParameters.protocolVersion >= ProtocolVersion.v36)
         new ReceivedAcsCommitmentValidatorImpl(
           psid,
           participantId,

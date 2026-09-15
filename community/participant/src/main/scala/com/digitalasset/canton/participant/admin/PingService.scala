@@ -32,7 +32,11 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdownFactory,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.PingService.AdditionalRetryOnKnownRaceConditions
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
@@ -47,6 +51,7 @@ import com.digitalasset.canton.time.Clock.ClockHandle
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.util.{FutureUtil, LoggerUtil}
 import com.google.rpc.status.Status
@@ -251,7 +256,7 @@ object PingService {
         initialSynchronizerId: SynchronizerId,
         val workflowId: WorkflowId,
         val expire: CantonTimestamp,
-    ) extends PrettyPrinting {
+    ) extends PrettyPrintingFromCompanion {
 
       protected def prettyData: String
 
@@ -262,18 +267,7 @@ object PingService {
       protected val currentSynchronizer =
         new AtomicReference[(SynchronizerId, Long)]((initialSynchronizerId, 0))
 
-      override protected def pretty: Pretty[ContractWithExpiry] = prettyOfClass(
-        param("coid", x => x.contractId.contractId.readableHash),
-        param("data", _.prettyData.singleQuoted),
-        param(
-          "template",
-          x =>
-            s"${x.template.getModuleName}.${x.template.getEntityName}@${x.template.getPackageId
-                .take(8)}...".singleQuoted,
-        ),
-        param("expire", _.expire),
-        param("synchronizerId", _.synchronizerId),
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[ContractWithExpiry] = ContractWithExpiry
 
       def synchronizerId: SynchronizerId = currentSynchronizer.get()._1
 
@@ -311,6 +305,21 @@ object PingService {
       /** Invoked when archived */
       def archived(): Unit = ()
 
+    }
+
+    private[admin] object ContractWithExpiry extends PrettyPrintingCompanion[ContractWithExpiry] {
+      override protected val pretty: Pretty[ContractWithExpiry] = prettyOfClass(
+        param("coid", x => x.contractId.contractId.readableHash),
+        param("data", _.prettyData.singleQuoted),
+        param(
+          "template",
+          x =>
+            s"${x.template.getModuleName}.${x.template.getEntityName}@${x.template.getPackageId
+                .take(8)}...".singleQuoted,
+        ),
+        param("expire", _.expire),
+        param("synchronizerId", _.synchronizerId),
+      )
     }
 
     private val acs = TrieMap[ContractIdS, ContractWithExpiry]()
@@ -663,7 +672,7 @@ object PingService {
         synchronizerId: Option[SynchronizerId],
         workflowId: Option[WorkflowId],
     )(implicit val traceContext: TraceContext)
-        extends PrettyPrinting {
+        extends PrettyPrintingFromCompanion {
 
       /** The promise which will be fulfilled once the ping completes
         *
@@ -721,15 +730,7 @@ object PingService {
         removeRequest(id)
           .foreach(_.promise.trySuccess(Failure(error)))
 
-      override protected def pretty: Pretty[PingRequest] = prettyOfClass(
-        param("id", _.id.singleQuoted),
-        paramIfNonEmpty("synchronizerId", _.synchronizerId),
-        paramIfNonEmpty("workflowId", _.workflowId.map(_.unwrap.singleQuoted)),
-        param("target", _.targetParties),
-        param("timeout", _.timeout),
-        paramIfNonEmpty("validators", _.validators),
-        paramIfNotDefault("maxLevel", _.maxLevel.value, 0),
-      )
+      override def prettyCompanion: PrettyPrintingCompanion[PingRequest] = PingRequest
 
       def submit(): Unit = {
         val (name, command) =
@@ -788,6 +789,18 @@ object PingService {
 
       }
 
+    }
+
+    private object PingRequest extends PrettyPrintingCompanion[PingRequest] {
+      override protected val pretty: Pretty[PingRequest] = prettyOfClass(
+        param("id", _.id.singleQuoted),
+        paramIfNonEmpty("synchronizerId", _.synchronizerId),
+        paramIfNonEmpty("workflowId", _.workflowId.map(_.unwrap.singleQuoted)),
+        param("target", _.targetParties),
+        param("timeout", _.timeout),
+        paramIfNonEmpty("validators", _.validators),
+        paramIfNotDefault("maxLevel", _.maxLevel.value, 0),
+      )
     }
 
     private[admin] def pingCreated(

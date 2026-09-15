@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import cats.syntax.functor.*
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
@@ -54,7 +53,6 @@ import scala.util.chaining.*
   *     - ActiveContractStore is cleaned
   */
 @nowarn("cat=deprecation")
-@UnstableTest // TODO(i31581): remove once the test is no longer flaky
 final class LsuPruningIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-pruning"
@@ -197,7 +195,7 @@ final class LsuPruningIntegrationTest extends LsuBase {
       environment.simClock.value.advance(Duration.ofSeconds(5))
       participant1.health.ping(participant2)
 
-      if (fixture.currentPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+      if (fixture.currentPsid.protocolVersion < ProtocolVersion.v36) {
         eventually() {
           getLogicalState(participant2, fixture.lsid).acsCommitmentStore
             .searchComputedBetween(CantonTimestamp.Epoch, fixture.upgradeTime)
@@ -231,7 +229,7 @@ final class LsuPruningIntegrationTest extends LsuBase {
 
     // ACS commitments are exchanged and upgrade time is clean (no outstanding ACS commitments) or matched
     participant1.health.ping(participant2)
-    if (fixture.newPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+    if (fixture.newPsid.protocolVersion < ProtocolVersion.v36) {
       eventually() {
         noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
         noOutstandingCommitments(participant2, upgradeTime) shouldBe upgradeTime
@@ -298,7 +296,7 @@ final class LsuPruningIntegrationTest extends LsuBase {
           .lastRequestTimestampBeforeOrAt(safeTimestamp)
           .futureValueUS shouldBe defined
 
-        if (fixture.newPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+        if (fixture.newPsid.protocolVersion < ProtocolVersion.v36) {
           getLogicalState(participant2, fixture.lsid).acsCommitmentStore
             .searchComputedBetween(fixture.upgradeTime, safeTimestamp)
             .futureValueUS

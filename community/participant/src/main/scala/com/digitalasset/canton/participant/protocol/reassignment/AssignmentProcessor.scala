@@ -18,6 +18,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.participant.metrics.ReassignmentMetrics
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
 import com.digitalasset.canton.participant.protocol.submission.{
@@ -87,6 +88,7 @@ class AssignmentProcessor private (
       clock: Clock,
       timeouts: ProcessingTimeout,
       targetProtocolVersion: Target[ProtocolVersion],
+      reassignmentMetrics: ReassignmentMetrics,
       loggerFactory: NamedLoggerFactory,
       futureSupervisor: FutureSupervisor,
       testingConfig: TestingConfigInternal,
@@ -102,6 +104,7 @@ class AssignmentProcessor private (
       staticSynchronizerParameters,
       clock,
       targetProtocolVersion,
+      reassignmentMetrics,
       loggerFactory,
     ),
     participantId,

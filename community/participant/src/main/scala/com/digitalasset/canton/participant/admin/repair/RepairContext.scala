@@ -8,7 +8,11 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
   LengthLimitedStringWrapperCompanion,
   String255,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.tracing.TraceContext
 
 /** Make tracecontext mandatory throughout repair operations.
@@ -21,15 +25,15 @@ import com.digitalasset.canton.tracing.TraceContext
   */
 final case class RepairContext(override protected val str: String255)
     extends LengthLimitedStringWrapper
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   def toLengthLimitedString: String255 = str
 
-  override protected def pretty: Pretty[RepairContext] = prettyOfClass(
-    unnamedParam(_.str.unwrap.unquoted)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[RepairContext] = RepairContext
 }
 
-object RepairContext extends LengthLimitedStringWrapperCompanion[String255, RepairContext] {
+object RepairContext
+    extends LengthLimitedStringWrapperCompanion[String255, RepairContext]
+    with PrettyPrintingCompanion[RepairContext] {
 
   def tryFromTraceContext(implicit traceContext: TraceContext): RepairContext =
     RepairContext(
@@ -48,4 +52,8 @@ object RepairContext extends LengthLimitedStringWrapperCompanion[String255, Repa
   override protected def companion: String255.type = String255
 
   override protected def factoryMethodWrapper(str: String255): RepairContext = RepairContext(str)
+
+  override protected val pretty: Pretty[RepairContext] = prettyOfClass(
+    unnamedParam(_.str.unwrap.unquoted)
+  )
 }

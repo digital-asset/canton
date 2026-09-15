@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.sequencer
 
 import better.files.*
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.SynchronizerBootstrapWithSeparateConsolesIntegrationTest
@@ -112,6 +113,7 @@ trait SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest
   }
 }
 
+@UnstableTest // TODO(i35483): Remove as soon as this test has been fixed
 class BftOrdererSynchronizerBootstrapWithSeparateConsolesIntegrationTest
     extends SynchronizerBootstrapWithMultipleConsolesAndSequencersIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

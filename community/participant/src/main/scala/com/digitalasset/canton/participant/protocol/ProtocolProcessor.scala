@@ -32,7 +32,11 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.event.AcsChangeSupport
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
@@ -774,7 +778,7 @@ abstract class ProtocolProcessor[
 
           case Some((snapshot, uncheckedDecryptedViews, synchronizerParameters)) =>
             for {
-              result <- decryptAndValidateViews(
+              result <- validateAndReconstructViews(
                 rc,
                 ts,
                 rootHashMessage,
@@ -1033,7 +1037,7 @@ abstract class ProtocolProcessor[
     } yield result
   }
 
-  private def decryptAndValidateViews(
+  private def validateAndReconstructViews(
       rc: RequestCounter,
       ts: CantonTimestamp,
       rootHashMessage: RootHashMessage[SerializedRootHashMessagePayload],
@@ -2057,7 +2061,7 @@ abstract class ProtocolProcessor[
 
 object ProtocolProcessor {
 
-  sealed trait ProcessorError extends Product with Serializable with PrettyPrinting
+  sealed trait ProcessorError extends Product with Serializable with PrettyPrintingFromCompanion
 
   sealed trait SubmissionProcessingError extends ProcessorError
 
@@ -2071,20 +2075,34 @@ object ProtocolProcessor {
   final case class SequencerRequestError(sendError: SendAsyncClientError)
       extends SubmissionOrTimeoutError
       with RequestProcessingError {
-    override protected def pretty: Pretty[SequencerRequestError] = prettyOfParam(_.sendError)
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerRequestError] =
+      SequencerRequestError
+  }
+
+  object SequencerRequestError extends PrettyPrintingCompanion[SequencerRequestError] {
+    override protected val pretty: Pretty[SequencerRequestError] = prettyOfParam(_.sendError)
   }
 
   /** The sequencer refused to sequence the batch for delivery */
   final case class SequencerDeliverError(deliverError: DeliverError)
       extends SubmissionProcessingError
       with RequestProcessingError {
-    override protected def pretty: Pretty[SequencerDeliverError] = prettyOfParam(_.deliverError)
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerDeliverError] =
+      SequencerDeliverError
+  }
+
+  object SequencerDeliverError extends PrettyPrintingCompanion[SequencerDeliverError] {
+    override protected val pretty: Pretty[SequencerDeliverError] = prettyOfParam(_.deliverError)
   }
 
   /** The identity snapshot does not list a mediator, so we cannot pick one. */
   final case class NoMediatorError(topologySnapshotTimestamp: CantonTimestamp)
       extends SubmissionProcessingError {
-    override protected def pretty: Pretty[NoMediatorError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[NoMediatorError] = NoMediatorError
+  }
+
+  object NoMediatorError extends PrettyPrintingCompanion[NoMediatorError] {
+    override protected val pretty: Pretty[NoMediatorError] = prettyOfClass(
       param("topology snapshot timestamp", _.topologySnapshotTimestamp)
     )
   }
@@ -2092,7 +2110,13 @@ object ProtocolProcessor {
   /** The sequencer did not sequence our event within the allotted time
     */
   case object SequencerTimeoutError extends SubmissionOrTimeoutError with RequestProcessingError {
-    override protected def pretty: Pretty[SequencerTimeoutError] =
+    override def prettyCompanion: PrettyPrintingCompanion[SequencerTimeoutError.this.type] =
+      SequencerTimeoutErrorPrettyPrintingCompanion
+  }
+
+  private object SequencerTimeoutErrorPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[SequencerTimeoutError.type] {
+    override protected val pretty: Pretty[SequencerTimeoutError.type] =
       prettyOfObject[SequencerTimeoutError]
   }
   type SequencerTimeoutError = SequencerTimeoutError.type
@@ -2102,7 +2126,14 @@ object ProtocolProcessor {
       ts: CantonTimestamp,
   ) extends RequestProcessingError
       with ResultProcessingError {
-    override protected def pretty: Pretty[UnableToGetDynamicSynchronizerParameters] = prettyOfClass(
+    override def prettyCompanion
+        : PrettyPrintingCompanion[UnableToGetDynamicSynchronizerParameters] =
+      UnableToGetDynamicSynchronizerParameters
+  }
+
+  object UnableToGetDynamicSynchronizerParameters
+      extends PrettyPrintingCompanion[UnableToGetDynamicSynchronizerParameters] {
+    override protected val pretty: Pretty[UnableToGetDynamicSynchronizerParameters] = prettyOfClass(
       param("synchronizer id", _.synchronizerId),
       param("timestamp", _.ts),
     )
@@ -2111,54 +2142,89 @@ object ProtocolProcessor {
   final case class RequestTrackerError(error: RequestTracker.RequestTrackerError)
       extends RequestProcessingError
       with ResultProcessingError {
-    override protected def pretty: Pretty[RequestTrackerError] = prettyOfParam(_.error)
+    override def prettyCompanion: PrettyPrintingCompanion[RequestTrackerError] = RequestTrackerError
+  }
+
+  object RequestTrackerError extends PrettyPrintingCompanion[RequestTrackerError] {
+    override protected val pretty: Pretty[RequestTrackerError] = prettyOfParam(_.error)
   }
 
   final case class DecisionTimeElapsed(requestId: RequestId, timestamp: CantonTimestamp)
       extends ResultProcessingError {
-    override protected def pretty: Pretty[DecisionTimeElapsed] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[DecisionTimeElapsed] = DecisionTimeElapsed
+  }
+
+  object DecisionTimeElapsed extends PrettyPrintingCompanion[DecisionTimeElapsed] {
+    override protected val pretty: Pretty[DecisionTimeElapsed] = prettyOfClass(
       param("request id", _.requestId),
       param("timestamp", _.timestamp),
     )
   }
 
   final case class UnknownPendingRequest(requestId: RequestId) extends ResultProcessingError {
-    override protected def pretty: Pretty[UnknownPendingRequest] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnknownPendingRequest] =
+      UnknownPendingRequest
+  }
+
+  object UnknownPendingRequest extends PrettyPrintingCompanion[UnknownPendingRequest] {
+    override protected val pretty: Pretty[UnknownPendingRequest] = prettyOfClass(
       unnamedParam(_.requestId)
     )
   }
 
   final case class InvalidPendingRequest(requestId: RequestId) extends ResultProcessingError {
-    override protected def pretty: Pretty[InvalidPendingRequest] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[InvalidPendingRequest] =
+      InvalidPendingRequest
+  }
+
+  object InvalidPendingRequest extends PrettyPrintingCompanion[InvalidPendingRequest] {
+    override protected val pretty: Pretty[InvalidPendingRequest] = prettyOfClass(
       unnamedParam(_.requestId)
     )
   }
 
   final case class TimeoutResultTooEarly(requestId: RequestId) extends ResultProcessingError {
-    override protected def pretty: Pretty[TimeoutResultTooEarly] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[TimeoutResultTooEarly] =
+      TimeoutResultTooEarly
+  }
+
+  object TimeoutResultTooEarly extends PrettyPrintingCompanion[TimeoutResultTooEarly] {
+    override protected val pretty: Pretty[TimeoutResultTooEarly] = prettyOfClass(
       unnamedParam(_.requestId)
     )
   }
 
   final case class FutureRequestId(requestId: RequestId, resultTs: CantonTimestamp)
       extends ResultProcessingError {
-    override protected def pretty: Pretty[FutureRequestId] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[FutureRequestId] = FutureRequestId
+  }
+
+  object FutureRequestId extends PrettyPrintingCompanion[FutureRequestId] {
+    override protected val pretty: Pretty[FutureRequestId] = prettyOfClass(
       param("request id", _.requestId),
       param("result timestamp", _.resultTs),
     )
   }
 
-  sealed trait MalformedPayload extends Product with Serializable with PrettyPrinting
+  sealed trait MalformedPayload extends Product with Serializable with PrettyPrintingFromCompanion
 
   final case class ViewMessageError[VT <: ViewType](
       error: EncryptedViewMessageError
   ) extends MalformedPayload {
-    override protected def pretty: Pretty[ViewMessageError.this.type] = prettyOfParam(_.error)
+    override def prettyCompanion: PrettyPrintingCompanion[ViewMessageError[?]] = ViewMessageError
+  }
+
+  object ViewMessageError extends PrettyPrintingCompanion[ViewMessageError[?]] {
+    override protected val pretty: Pretty[ViewMessageError[?]] = prettyOfParam(_.error)
   }
 
   final case class WrongRootHash(viewTree: ViewTree, expectedRootHash: RootHash)
       extends MalformedPayload {
-    override protected def pretty: Pretty[WrongRootHash] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[WrongRootHash] = WrongRootHash
+  }
+
+  object WrongRootHash extends PrettyPrintingCompanion[WrongRootHash] {
+    override protected val pretty: Pretty[WrongRootHash] = prettyOfClass(
       param("view tree", _.viewTree),
       param("expected root hash", _.expectedRootHash),
     )
@@ -2168,20 +2234,30 @@ object ProtocolProcessor {
 
   final case class WrongRecipients(viewTree: ViewTree) extends WrongRecipientsBase {
 
-    override protected def pretty: Pretty[WrongRecipients] =
-      prettyOfClass(
-        param("viewHash", _.viewTree.viewHash),
-        param("viewPosition", _.viewTree.viewPosition),
-      )
+    override def prettyCompanion: PrettyPrintingCompanion[WrongRecipients] = WrongRecipients
 
     def dueToTopologyChange: WrongRecipientsDueToTopologyChange =
       WrongRecipientsDueToTopologyChange(viewTree)
   }
 
+  object WrongRecipients extends PrettyPrintingCompanion[WrongRecipients] {
+    override protected val pretty: Pretty[WrongRecipients] =
+      prettyOfClass(
+        param("viewHash", _.viewTree.viewHash),
+        param("viewPosition", _.viewTree.viewPosition),
+      )
+  }
+
   final case class WrongRecipientsDueToTopologyChange(viewTree: ViewTree)
       extends WrongRecipientsBase {
 
-    override protected def pretty: Pretty[WrongRecipientsDueToTopologyChange] =
+    override def prettyCompanion: PrettyPrintingCompanion[WrongRecipientsDueToTopologyChange] =
+      WrongRecipientsDueToTopologyChange
+  }
+
+  object WrongRecipientsDueToTopologyChange
+      extends PrettyPrintingCompanion[WrongRecipientsDueToTopologyChange] {
+    override protected val pretty: Pretty[WrongRecipientsDueToTopologyChange] =
       prettyOfClass(
         param("viewHash", _.viewTree.viewHash),
         param("viewPosition", _.viewTree.viewPosition),
@@ -2192,7 +2268,12 @@ object ProtocolProcessor {
       position: ViewPosition
   ) extends MalformedPayload {
 
-    override protected def pretty: Pretty[IncompleteLightViewTree] =
+    override def prettyCompanion: PrettyPrintingCompanion[IncompleteLightViewTree] =
+      IncompleteLightViewTree
+  }
+
+  object IncompleteLightViewTree extends PrettyPrintingCompanion[IncompleteLightViewTree] {
+    override protected val pretty: Pretty[IncompleteLightViewTree] =
       prettyOfClass(param("position", _.position))
   }
 
@@ -2200,7 +2281,12 @@ object ProtocolProcessor {
       position: ViewPosition
   ) extends MalformedPayload {
 
-    override protected def pretty: Pretty[DuplicateLightViewTree] =
+    override def prettyCompanion: PrettyPrintingCompanion[DuplicateLightViewTree] =
+      DuplicateLightViewTree
+  }
+
+  object DuplicateLightViewTree extends PrettyPrintingCompanion[DuplicateLightViewTree] {
+    override protected val pretty: Pretty[DuplicateLightViewTree] =
       prettyOfClass(param("position", _.position))
   }
 }

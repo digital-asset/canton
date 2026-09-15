@@ -9,7 +9,11 @@ import com.digitalasset.canton.data.{CantonTimestamp, Counter}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestState.Clean
@@ -224,7 +228,7 @@ object RequestJournal {
       extends Ordered[RequestState]
       with Product
       with Serializable
-      with PrettyPrinting {
+      with PrettyPrintingFromCompanion {
     def index: Int
 
     override def compare(state: RequestState): Int = index - state.index
@@ -239,7 +243,7 @@ object RequestJournal {
     def visitCursor[A](f: RequestStateWithCursor => Option[A]): Option[A] = None
 
     // All implementations of this trait are case objects, so prettyOfObject does the right thing.
-    override protected def pretty: Pretty[this.type] = prettyOfObject[this.type]
+    override def prettyCompanion: PrettyPrintingCompanion[RequestState] = RequestState
   }
 
   /** State of a transaction confirmation request whose head value the request journal tracks with a
@@ -250,7 +254,7 @@ object RequestJournal {
     override def visitCursor[A](f: RequestStateWithCursor => Option[A]): Option[A] = f(this)
   }
 
-  object RequestState {
+  object RequestState extends PrettyPrintingCompanion[RequestState] {
 
     /** Initial state */
     case object Pending extends RequestState {
@@ -272,6 +276,8 @@ object RequestJournal {
 
     def apply(index: Int): Option[RequestState] =
       if (index >= 0 && states.lengthCompare(index) > 0) Some(states(index)) else None
+
+    override protected val pretty: Pretty[RequestState] = prettyOfObject[RequestState]
   }
 
   /** Summarizes the data to be stored for a request in the request journal.
@@ -293,7 +299,7 @@ object RequestJournal {
       state: RequestState,
       requestTimestamp: CantonTimestamp,
       commitTime: Option[CantonTimestamp],
-  ) extends PrettyPrinting
+  ) extends PrettyPrintingFromCompanion
       with NoCopy {
 
     require(
@@ -305,12 +311,7 @@ object RequestJournal {
       s"Request $rc: The commit time $commitTime must be at least the request timestamp $requestTimestamp",
     )
 
-    override protected def pretty: Pretty[RequestData] = prettyOfClass(
-      param("requestCounter", _.rc),
-      param("state", _.state),
-      param("requestTimestamp", _.requestTimestamp),
-      paramIfDefined("commitTime", _.commitTime),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[RequestData] = RequestData
 
     /** Sets the `newState`, and the `commitTime` unless the commit time has previously been set.
       * @throws java.lang.IllegalArgumentException
@@ -321,7 +322,7 @@ object RequestJournal {
       new RequestData(rc, newState, requestTimestamp, commitTime.orElse(commitTime))
   }
 
-  object RequestData {
+  object RequestData extends PrettyPrintingCompanion[RequestData] {
     def apply(
         requestCounter: RequestCounter,
         state: RequestState,
@@ -338,6 +339,13 @@ object RequestJournal {
         commitTime: CantonTimestamp,
     ): RequestData =
       new RequestData(requestCounter, Clean, requestTimestamp, Some(commitTime))
+
+    override protected val pretty: Pretty[RequestData] = prettyOfClass(
+      param("requestCounter", _.rc),
+      param("state", _.state),
+      param("requestTimestamp", _.requestTimestamp),
+      paramIfDefined("commitTime", _.commitTime),
+    )
   }
 }
 

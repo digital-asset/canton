@@ -7,7 +7,11 @@ import cats.Order
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.ExternalCallPayloadDescription.{byteCount, hexPayloadSize}
 import com.digitalasset.canton.data.{ExternalCallKey, ParticipantTransactionView, ViewPosition}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.util.ByteStringUtil
 import com.digitalasset.daml.lf.data.Bytes
 import com.google.protobuf.ByteString
@@ -26,8 +30,13 @@ object ExternalCallConsistencyChecker {
       viewPosition: ViewPosition,
       exerciseIndex: NonNegativeInt,
       callIndex: NonNegativeInt,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[ExternalCallOccurrence] = prettyOfClass(
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ExternalCallOccurrence] =
+      ExternalCallOccurrence
+  }
+
+  object ExternalCallOccurrence extends PrettyPrintingCompanion[ExternalCallOccurrence] {
+    override protected val pretty: Pretty[ExternalCallOccurrence] = prettyOfClass(
       param("viewPosition", _.viewPosition),
       param("exerciseIndex", _.exerciseIndex),
       param("callIndex", _.callIndex),
@@ -46,7 +55,7 @@ object ExternalCallConsistencyChecker {
       key: ExternalCallKey,
       outputs: Set[Bytes],
       occurrences: Set[ExternalCallOccurrence],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
     def description: String = toString
 
     private def outputByteSizes: Seq[Int] = outputs.toSeq.map(byteCount).sorted
@@ -54,7 +63,11 @@ object ExternalCallConsistencyChecker {
     private def orderedOccurrences: Seq[ExternalCallOccurrence] =
       occurrences.toSeq.sorted(orderExternalCallOccurrence)
 
-    override protected def pretty: Pretty[Inconsistency] =
+    override def prettyCompanion: PrettyPrintingCompanion[Inconsistency] = Inconsistency
+  }
+
+  object Inconsistency extends PrettyPrintingCompanion[Inconsistency] {
+    override protected val pretty: Pretty[Inconsistency] =
       prettyOfClass(
         param("extensionId", _.key.extensionId.unquoted),
         param("functionId", _.key.functionId.unquoted),

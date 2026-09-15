@@ -72,14 +72,14 @@ private[backend] trait StorageBackendTestsBatchSize
   // may need adjustment. Note that in the sev1 2670 exercises and 1580 informees were present.
   it should "ingest a transaction with 2670 exercises and 1580 informee (sev1 #4433)" in {
     loggerFactory.assertEventuallyLogsSeq(
-      SuppressionRule.Level(event.Level.ERROR)
+      SuppressionRule.Level(event.Level.WARN)
     )(
       within = runBatchSizeTest(
         numOfDtos = 2670,
         numOfInformees = 1580,
       ),
       assertion = logs => {
-        val logMessages = logs.map(_.message)
+        val logMessages = logs.map(_.warningMessage)
         logMessages.size shouldBe 1
         logMessages.forall(_.contains("INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR")) shouldBe true
       },

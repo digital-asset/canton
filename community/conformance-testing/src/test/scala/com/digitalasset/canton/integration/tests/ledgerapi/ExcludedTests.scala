@@ -26,7 +26,7 @@ object ExcludedTests {
     "PrefetchContractKeysIT",
   )
 
-  lazy val grpcOnlyTestNames: Seq[String] = AvailableTests.latestStableLf
+  lazy val grpcOnlyTestNames: Seq[String] = AvailableTests.latestStableTestDars
     .defaultTests(timeoutScaleFactor = 1.0)
     .flatMap(_.tests)
     .collect {

@@ -170,7 +170,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       }
 
       // Wait for partyToParticipant mapping to become effective on the source participant via ledger api
-      val partyToSourceParticipantEffectiveAtOffset = eventually() {
+      eventually() {
         val offsetPartyOnboardingOnTPO = (for {
           ptp <- sourceParticipant.ledger_api.updates.topology_transactions(
             completeAfter = PositiveInt.two,
@@ -186,7 +186,6 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
             Offset.tryFromLong(offset)
         }.lastOption
         offsetPartyOnboardingOnTPO.nonEmpty shouldBe true
-        offsetPartyOnboardingOnTPO.value
       }
 
       // Run a ping to make sure the AcsInspection does not get upset about the timestamp at the end
@@ -237,20 +236,26 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           timeouts,
         ).tap(_.add(initialStatus).value.futureValueUS.value)
 
-      val sourceProcessor = PartyReplicationSourceParticipantProcessor(
-        daId,
-        alice,
-        requestId,
-        partyToSourceParticipantEffectiveAtOffset,
-        Set.empty,
-        sourceParticipant.underlying.value.participantServices.ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
-        inMemoryStateManager(sourceParticipant.id),
-        noOpProgressAndCompletionCallback,
-        noOpProgressAndCompletionCallback2,
-        futureSupervisor,
-        exitOnFatalFailures = false,
-        timeouts,
-        loggerFactory,
+      val connectedSynchronizerSP =
+        sourceParticipant.underlying.value.sync.connectedSynchronizerForAlias(daName).value
+      val sourceProcessor = asyncExec("Initialize SP processor")(
+        PartyReplicationSourceParticipantProcessor.initialize(
+          daId,
+          alice,
+          requestId,
+          partyToTargetParticipantEffectiveAt,
+          targetParticipant.id,
+          sourceParticipant.underlying.value.participantServices.ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
+          inMemoryStateManager(sourceParticipant.id),
+          noOpProgressAndCompletionCallback,
+          noOpProgressAndCompletionCallback2,
+          connectedSynchronizerSP.synchronizerHandle.syncPersistentState.topologyStore,
+          sourceParticipant.underlying.value.sync.participantNodePersistentState.value.ledgerApiStore,
+          futureSupervisor,
+          exitOnFatalFailures = false,
+          timeouts,
+          loggerFactory,
+        )
       )
       val connectedSynchronizer =
         targetParticipant.underlying.value.sync.connectedSynchronizerForAlias(daName).value

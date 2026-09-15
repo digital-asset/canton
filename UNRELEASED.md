@@ -49,11 +49,28 @@ It is considered a security best practice to have a distinct key per synchronize
 
 ### Minor Improvements
 - participant_id label is added onto participant metrics
+- To maintain ledger consistency when importing repair events, repair events are now rejected if the last persisted event was a topology event. If this happens, reconnect to the synchronizer to move the record time. If cannot reconnect, use the `forceRepairWhenTopologyTransactionAtLedgerEnd` flag. Using the force flag can corrupt the data in the system.
+- Deprecated configuration settings: `canton.participants.<participant>.parameters.ledger-api-server.indexer.use-weighted-batching` and `canton.participants.<participant>.parameters.ledger-api-server.indexer.submission-batch-insertion-size`. These are no longer supported.
+- Support for OTLP remote metrics reporting, including optional OAuth2 Client Credentials authentication
+  ```
+  canton.monitoring.metrics.reporters = [{
+    type = otlp
+      endpoint = "http://localhost:4317"
+      protocol = grpc
+      auth {
+        type = oauth-client-credentials
+        token-url = "http://localhost:8080/token"
+        client-id = "test-client"
+        client-secret = "test-secret"
+      }
+   }]
+  ```
 
 ### Preview Features
 - preview feature
 
 ## Bugfixes
+- bump da-base-image to 1.0.14
 
 ### (YY-nnn, Risk): Title
 

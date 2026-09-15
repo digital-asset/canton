@@ -11,14 +11,18 @@ import com.digitalasset.canton.error.MediatorError.{
   MalformedMessage,
   Timeout,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.messages.{NonPositiveLocalVerdict, Verdict}
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import pprint.Tree
 
-sealed trait MediatorVerdict extends Product with Serializable with PrettyPrinting {
+sealed trait MediatorVerdict extends Product with Serializable with PrettyPrintingFromCompanion {
   def toVerdict(protocolVersion: ProtocolVersion): Verdict
 }
 
@@ -27,9 +31,15 @@ object MediatorVerdict {
     override def toVerdict(protocolVersion: ProtocolVersion): Verdict =
       Verdict.Approve(protocolVersion)
 
-    override protected def pretty: Pretty[MediatorApprove] = prettyOfObject[MediatorApprove]
+    override def prettyCompanion: PrettyPrintingCompanion[MediatorApprove.this.type] =
+      MediatorApprovePrettyPrintingCompanion
   }
   type MediatorApprove = MediatorApprove.type
+
+  private object MediatorApprovePrettyPrintingCompanion
+      extends PrettyPrintingCompanion[MediatorApprove] {
+    override protected val pretty: Pretty[MediatorApprove] = prettyOfObject[MediatorApprove]
+  }
 
   final case class ParticipantReject(
       reasons: NonEmpty[List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)]]
@@ -37,7 +47,11 @@ object MediatorVerdict {
     override def toVerdict(protocolVersion: ProtocolVersion): Verdict =
       Verdict.ParticipantReject(reasons, protocolVersion)
 
-    override protected def pretty: Pretty[ParticipantReject] = {
+    override def prettyCompanion: PrettyPrintingCompanion[ParticipantReject] = ParticipantReject
+  }
+
+  object ParticipantReject extends PrettyPrintingCompanion[ParticipantReject] {
+    override protected val pretty: Pretty[ParticipantReject] = {
       import Pretty.PrettyOps
 
       prettyOfClass(
@@ -66,7 +80,11 @@ object MediatorVerdict {
       )
     }
 
-    override protected def pretty: Pretty[MediatorReject] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[MediatorReject] = MediatorReject
+  }
+
+  object MediatorReject extends PrettyPrintingCompanion[MediatorReject] {
+    override protected val pretty: Pretty[MediatorReject] = prettyOfClass(
       param("reason", _.reason)
     )
   }

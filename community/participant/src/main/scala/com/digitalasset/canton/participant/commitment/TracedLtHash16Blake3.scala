@@ -5,7 +5,12 @@ package com.digitalasset.canton.participant.commitment
 
 import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.crypto.LtHash16Blake3.LtHash16Blake3Impl
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+  PrettyUtil,
+}
 import com.digitalasset.canton.participant.digest.DigestOperation
 import com.digitalasset.canton.util.{ShowUtil, SnapshottableVector}
 
@@ -13,7 +18,7 @@ import com.digitalasset.canton.util.{ShowUtil, SnapshottableVector}
   * and is intended to be updated in-place, also the traced changes are kept in a mutable data
   * structure.
   */
-sealed trait TracedLtHash16Blake3 extends PrettyPrinting {
+sealed trait TracedLtHash16Blake3 extends PrettyPrintingFromCompanion {
 
   /** The digest itself */
   def digest: LtHash16Blake3
@@ -106,10 +111,13 @@ sealed trait TracedLtHash16Blake3 extends PrettyPrinting {
       )
     else this
 
-  override protected def pretty: Pretty[TracedLtHash16Blake3] = TracedLtHash16Blake3.pretty
+  override def prettyCompanion: PrettyPrintingCompanion[TracedLtHash16Blake3] = TracedLtHash16Blake3
 }
 
-object TracedLtHash16Blake3 extends PrettyUtil with ShowUtil {
+object TracedLtHash16Blake3
+    extends PrettyUtil
+    with ShowUtil
+    with PrettyPrintingCompanion[TracedLtHash16Blake3] {
 
   /** Factory method for an empty hash with an empty trace.
     */
@@ -125,7 +133,7 @@ object TracedLtHash16Blake3 extends PrettyUtil with ShowUtil {
       case impl: LtHash16Blake3Impl => TracedLtHash16Blake3Impl(impl, tracedChanges)
     }
 
-  val pretty: Pretty[TracedLtHash16Blake3] = prettyOfClass(
+  override protected val pretty: Pretty[TracedLtHash16Blake3] = prettyOfClass(
     param("digest", _.digest.hexString().unquoted),
     paramIfDefined("trace", _.trace),
   )

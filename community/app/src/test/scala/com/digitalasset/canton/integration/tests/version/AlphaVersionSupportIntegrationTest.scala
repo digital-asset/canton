@@ -83,7 +83,7 @@ sealed trait AlphaVersionSupportIntegrationTest
   }
 }
 
-class AlphaVersionSupportIntegrationTestH2 extends AlphaVersionSupportIntegrationTest {
+final class AlphaVersionSupportIntegrationTestH2 extends AlphaVersionSupportIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(
     new UseBftSequencer(
@@ -93,7 +93,7 @@ class AlphaVersionSupportIntegrationTestH2 extends AlphaVersionSupportIntegratio
   )
 }
 
-class AlphaVersionSupportIntegrationTestPostgres extends AlphaVersionSupportIntegrationTest {
+final class AlphaVersionSupportIntegrationTestPostgres extends AlphaVersionSupportIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
     new UseBftSequencer(

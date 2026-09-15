@@ -11,7 +11,11 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.ChangeId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.protocol.submission.{
   ChangeIdHash,
   SerializableSubmissionId,
@@ -103,21 +107,24 @@ object CommandDeduplicationStore {
   final case class OffsetAndPublicationTime(
       offset: Offset,
       publicationTime: CantonTimestamp,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[OffsetAndPublicationTime] = prettyOfClass(
-      param("offset", _.offset),
-      param("publication time", _.publicationTime),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[OffsetAndPublicationTime] =
+      OffsetAndPublicationTime
   }
 
-  object OffsetAndPublicationTime {
+  object OffsetAndPublicationTime extends PrettyPrintingCompanion[OffsetAndPublicationTime] {
     implicit val getResultOffsetAndPublicationTime: GetResult[OffsetAndPublicationTime] =
       GetResult { r =>
         val offset = r.<<[Offset]
         val publicationTime = r.<<[CantonTimestamp]
         OffsetAndPublicationTime(offset, publicationTime)
       }
+
+    override protected val pretty: Pretty[OffsetAndPublicationTime] = prettyOfClass(
+      param("offset", _.offset),
+      param("publication time", _.publicationTime),
+    )
   }
 }
 
@@ -135,8 +142,7 @@ final case class CommandDeduplicationData private (
     changeId: ChangeId,
     latestDefiniteAnswer: DefiniteAnswerEvent,
     latestAcceptance: Option[DefiniteAnswerEvent],
-) extends PrettyPrinting {
-  import com.digitalasset.canton.participant.pretty.Implicits.*
+) extends PrettyPrintingFromCompanion {
 
   latestAcceptance.foreach { acceptance =>
     if (acceptance.offset > latestDefiniteAnswer.offset) {
@@ -146,14 +152,11 @@ final case class CommandDeduplicationData private (
     }
   }
 
-  override protected def pretty: Pretty[CommandDeduplicationData] = prettyOfClass(
-    param("change id", _.changeId),
-    param("latest definite answer", _.latestDefiniteAnswer),
-    paramIfDefined("latest acceptance", _.latestAcceptance),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[CommandDeduplicationData] =
+    CommandDeduplicationData
 }
 
-object CommandDeduplicationData {
+object CommandDeduplicationData extends PrettyPrintingCompanion[CommandDeduplicationData] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   final case class InvalidCommandDeduplicationData(message: String, cause: Throwable = null)
       extends RuntimeException(message, cause)
@@ -192,6 +195,15 @@ object CommandDeduplicationData {
       )
     )
   }
+
+  override protected val pretty: Pretty[CommandDeduplicationData] = {
+    import com.digitalasset.canton.participant.pretty.Implicits.*
+    prettyOfClass(
+      param("change id", _.changeId),
+      param("latest definite answer", _.latestDefiniteAnswer),
+      paramIfDefined("latest acceptance", _.latestAcceptance),
+    )
+  }
 }
 
 /** @param offset
@@ -207,20 +219,15 @@ final case class DefiniteAnswerEvent(
     submissionIdO: Option[LedgerSubmissionId],
     // TODO(#7348) add submission rank
 )(val traceContext: TraceContext)
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
 
   def serializableSubmissionId: Option[SerializableSubmissionId] =
     submissionIdO.map(SerializableSubmissionId(_))
 
-  override protected def pretty: Pretty[DefiniteAnswerEvent] = prettyOfClass(
-    param("offset", _.offset),
-    param("publication time", _.publicationTime),
-    paramIfNonEmpty("submission id", _.submissionIdO),
-    param("trace context", _.traceContext),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[DefiniteAnswerEvent] = DefiniteAnswerEvent
 }
 
-object DefiniteAnswerEvent {
+object DefiniteAnswerEvent extends PrettyPrintingCompanion[DefiniteAnswerEvent] {
   implicit def getResultDefiniteAnswerEvent(implicit
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[DefiniteAnswerEvent] = GetResult { r =>
@@ -257,4 +264,11 @@ object DefiniteAnswerEvent {
           )
       }
     }
+
+  override protected val pretty: Pretty[DefiniteAnswerEvent] = prettyOfClass(
+    param("offset", _.offset),
+    param("publication time", _.publicationTime),
+    paramIfNonEmpty("submission id", _.submissionIdO),
+    param("trace context", _.traceContext),
+  )
 }

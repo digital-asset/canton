@@ -15,7 +15,7 @@ import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.MetricsConfig.JvmMetrics
-import com.digitalasset.canton.metrics.MetricsReporterConfig.{Csv, Logging, Prometheus}
+import com.digitalasset.canton.metrics.MetricsReporterConfig.{Csv, Logging, Otlp, Prometheus}
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.synchronizer.metrics.{MediatorMetrics, SequencerMetrics}
 import com.digitalasset.canton.telemetry.OpenTelemetryFactory
@@ -129,11 +129,35 @@ sealed trait MetricsReporterConfig {
 
 }
 
+sealed trait OtlpAuth
+object OtlpAuth {
+  final case class OauthClientCredentials(
+      tokenUrl: String,
+      clientId: String,
+      clientSecret: String,
+      scope: Option[String] = None,
+  ) extends OtlpAuth
+}
+
+sealed trait OtlpProtocol
+object OtlpProtocol {
+  case object Grpc extends OtlpProtocol
+  case object HttpProtobuf extends OtlpProtocol
+}
+
 object MetricsReporterConfig {
 
   final case class Prometheus(
       address: String = "localhost",
       port: Port = Port.tryCreate(9464),
+      filters: Seq[MetricsFilterConfig] = Seq.empty,
+  ) extends MetricsReporterConfig
+
+  final case class Otlp(
+      endpoint: String = "http://localhost:4317",
+      protocol: OtlpProtocol = OtlpProtocol.Grpc,
+      interval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(10),
+      auth: Option[OtlpAuth] = None,
       filters: Seq[MetricsFilterConfig] = Seq.empty,
   ) extends MetricsReporterConfig
 
@@ -277,6 +301,7 @@ object MetricsRegistry extends LazyLogging {
   def registerReporters(
       config: MetricsConfig,
       loggerFactory: NamedLoggerFactory,
+      otlpExporterFactory: OtlpReporter.ExporterFactory,
   )(
       sdkMeterProviderBuilder: SdkMeterProviderBuilder
   )(implicit scheduledExecutorService: ScheduledExecutorService): SdkMeterProviderBuilder = {
@@ -298,6 +323,14 @@ object MetricsRegistry extends LazyLogging {
             .setHost(hostname)
             .setPort(port.unwrap)
             .build()
+        case config: Otlp =>
+          logger.info(
+            s"Starting OtlpReporter to ${config.endpoint}: with interval ${config.interval}"
+          )
+          buildPeriodicReader(
+            otlpExporterFactory.createExporter(config, loggerFactory),
+            config.interval,
+          )
         case config: Csv =>
           logger.info(s"Starting CsvReporter with interval ${config.interval}")
           buildPeriodicReader(new CsvReporter(config, loggerFactory), config.interval)

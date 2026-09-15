@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BlockNumber,
@@ -18,7 +22,7 @@ final case class EpochInfo(
     startBlockNumber: BlockNumber,
     length: EpochLength,
     topologyActivationTime: TopologyActivationTime,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   def relativeBlockIndex(blockNumber: BlockNumber): Int =
     (blockNumber - startBlockNumber).toInt
@@ -39,16 +43,18 @@ final case class EpochInfo(
 
   def lastBlockNumber: BlockNumber = BlockNumber(startBlockNumber + length - 1)
 
-  override protected def pretty: Pretty[EpochInfo] =
+  override def prettyCompanion: PrettyPrintingCompanion[EpochInfo] = EpochInfo
+}
+
+object EpochInfo extends PrettyPrintingCompanion[EpochInfo] {
+
+  override protected val pretty: Pretty[EpochInfo] =
     prettyOfClass(
       param("number", _.number),
       param("startBlockNumber", _.startBlockNumber),
       param("length", _.length),
       param("topologyActivationTime", _.topologyActivationTime.value),
     )
-}
-
-object EpochInfo {
 
   /** A convenience constructor for tests, also so that we don't have to provide timestamps. */
   @VisibleForTesting

@@ -9,7 +9,11 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.{SubmissionRequest, TrafficState}
 import com.digitalasset.canton.sequencing.traffic.EventCostCalculator.EventCostDetails
@@ -179,8 +183,12 @@ object SequencerRateLimitError extends SequencerErrorGroup {
   final case class TrafficNotFound(
       member: Member
   ) extends SequencerRateLimitError
-      with PrettyPrinting {
-    override protected def pretty: Pretty[TrafficNotFound] = prettyOfClass(
+      with PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[TrafficNotFound] = TrafficNotFound
+  }
+
+  object TrafficNotFound extends PrettyPrintingCompanion[TrafficNotFound] {
+    override protected val pretty: Pretty[TrafficNotFound] = prettyOfClass(
       param("member", _.member)
     )
   }
@@ -199,16 +207,19 @@ object SequencerRateLimitError extends SequencerErrorGroup {
       trafficCost: NonNegativeLong,
       trafficState: TrafficState,
   ) extends SequencerRateLimitError
-      with PrettyPrinting {
+      with PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[AboveTrafficLimit] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[AboveTrafficLimit] = AboveTrafficLimit
+  }
+
+  object AboveTrafficLimit extends PrettyPrintingCompanion[AboveTrafficLimit] {
+
+    override protected val pretty: Pretty[AboveTrafficLimit] = prettyOfClass(
       param("member", _.member),
       param("trafficCost", _.trafficCost),
       param("trafficState", _.trafficState),
     )
-  }
 
-  object AboveTrafficLimit {
     def apply(notEnoughTraffic: NotEnoughTraffic): AboveTrafficLimit = AboveTrafficLimit(
       notEnoughTraffic.member,
       notEnoughTraffic.cost,
@@ -231,9 +242,13 @@ object SequencerRateLimitError extends SequencerErrorGroup {
             s"Ordering sequencer: $orderingSequencerId"
         )
         with SequencingCostValidationError
-        with PrettyPrinting {
+        with PrettyPrintingFromCompanion {
       override val correctEventCost: NonNegativeLong = correctCostDetails.eventCost
-      override protected def pretty: Pretty[Error] = prettyOfClassWithName("IncorrectEventCost")(
+      override def prettyCompanion: PrettyPrintingCompanion[Error] = Error
+    }
+
+    object Error extends PrettyPrintingCompanion[Error] {
+      override protected val pretty: Pretty[Error] = prettyOfClassWithName("IncorrectEventCost")(
         param("member", _.member),
         param("submissionTimestamp", _.submissionTimestamp),
         paramIfDefined("submittedEventCost", _.submittedEventCost),

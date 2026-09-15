@@ -21,41 +21,36 @@ trait NodesBootstrapTest extends CommunityIntegrationTest with SharedEnvironment
   "submit conflicting topology transactions" in { implicit env =>
     import env.*
 
-    val seq1Tx = Future.sequence {
-      synchronizerOwners1
-        .map(node =>
-          Future(
-            node.topology.sequencers.propose(
-              daId,
-              threshold = PositiveInt.one,
-              active = Seq(sequencer1.id),
-              // we need to mention the other sequencer here, otherwise it gets "deactivated" and is likely not recoverable anymore
-              passive = Seq(sequencer2.id),
-              serial = Some(PositiveInt.two),
-            )
-          )
-        )
-    }
+    val seq1Tx = Future(
+      sequencer1.topology.sequencers.propose(
+        daId,
+        threshold = PositiveInt.one,
+        active = Seq(sequencer1.id),
+        // We need to mention the other sequencer here, otherwise it gets "deactivated" and is likely not recoverable anymore.
+        passive = Seq(sequencer2.id),
+        serial = Some(PositiveInt.two),
+        // Skips the server-side awaitUS on the asyncResult.
+        synchronize = None,
+      )
+    )
 
-    val seq2Tx = Future.sequence {
-      synchronizerOwners1
-        .map(node =>
-          Future(
-            node.topology.sequencers.propose(
-              daId,
-              threshold = PositiveInt.one,
-              active = Seq(sequencer2.id),
-              // we need to mention the other sequencer here, otherwise it gets "deactivated" and is likely not recoverable anymore
-              passive = Seq(sequencer1.id),
-              serial = Some(PositiveInt.two),
-            )
-          )
-        )
-    }
+    val seq2Tx = Future(
+      sequencer2.topology.sequencers.propose(
+        daId,
+        threshold = PositiveInt.one,
+        active = Seq(sequencer2.id),
+        // We need to mention the other sequencer here, otherwise it gets "deactivated" and is likely not recoverable anymore.
+        passive = Seq(sequencer1.id),
+        serial = Some(PositiveInt.two),
+        // Skips the server-side awaitUS on the asyncResult.
+        synchronize = None,
+      )
+    )
 
-    seq1Tx.futureValue.head.serial.value shouldBe 2
-    seq2Tx.futureValue.head.serial.value shouldBe 2
+    seq1Tx.futureValue.serial.value shouldBe 2
+    seq2Tx.futureValue.serial.value shouldBe 2
 
+    // Wait for conflict resolution and state distribution.
     eventually() {
       val seq1 = sequencer1.topology.sequencers.list(store = daId)
       val seq2 = sequencer2.topology.sequencers.list(store = daId)
@@ -64,8 +59,9 @@ trait NodesBootstrapTest extends CommunityIntegrationTest with SharedEnvironment
       seq2 should not be empty
       seq1.head.context.serial.value shouldBe 2
       seq2.head.context.serial.value shouldBe 2
-      // we don't necessarily know which of the two transactions got accepted,
-      // but we know that both sequencers must have accepted the same transaction
+
+      // We don't know which transaction won the race, but both sequencers
+      // must have accepted the exact same transaction.
       seq1.head.item.active shouldBe seq2.head.item.active
     }
   }

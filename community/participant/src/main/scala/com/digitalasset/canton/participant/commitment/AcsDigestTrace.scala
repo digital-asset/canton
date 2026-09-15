@@ -5,7 +5,12 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+  PrettyUtil,
+}
 import com.digitalasset.canton.participant.protocol.v30
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -15,7 +20,7 @@ import com.digitalasset.canton.version.{
   HasVersionedJsonMessageCompanionDbHelpers,
   HasVersionedJsonWrapper,
   ProtoVersion,
-  ReleaseProtocolVersion,
+  ProtocolVersion,
 }
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Bytes
@@ -25,7 +30,7 @@ import slick.jdbc.SetParameter
   */
 final case class AcsDigestTrace(traces: Seq[TraceElement])
     extends HasVersionedJsonWrapper[AcsDigestTrace]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override protected def companionObj: AcsDigestTrace.type = AcsDigestTrace
 
@@ -37,20 +42,20 @@ final case class AcsDigestTrace(traces: Seq[TraceElement])
         v30.TraceElement(v30.TraceElement.Trace.Single(single.toProtoV30))
     })
 
-  override protected def pretty: Pretty[AcsDigestTrace] = AcsDigestTrace.pretty
+  override def prettyCompanion: PrettyPrintingCompanion[AcsDigestTrace] = AcsDigestTrace
 }
 
 object AcsDigestTrace
     extends HasVersionedJsonMessageCompanion[AcsDigestTrace]
     with HasVersionedJsonMessageCompanionDbHelpers[AcsDigestTrace]
-    with PrettyUtil {
+    with PrettyUtil
+    with PrettyPrintingCompanion[AcsDigestTrace] {
   override def name: String = "AcsDigestTrace"
 
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        // TODO(#33849) replace with the stable protocol version that introduces the feature
-        ReleaseProtocolVersion.acsCommitmentRedesignStorage.v,
+        ProtocolVersion.v35,
         supportedProtoVersion(fromProtoV30),
         _.toProtoV30,
       )
@@ -72,18 +77,16 @@ object AcsDigestTrace
       .map(AcsDigestTrace(_))
 
   implicit val setParameterAcsDigestTrace: SetParameter[AcsDigestTrace] =
-    // TODO(#33849): replace with ReleaseProtocolversion.latest
-    AcsDigestTrace.getVersionedSetParameter(ReleaseProtocolVersion.acsCommitmentRedesignStorage.v)
+    AcsDigestTrace.getVersionedSetParameter(ProtocolVersion.latest)
   implicit val setParameterAcsDigestTraceO: SetParameter[Option[AcsDigestTrace]] =
-    // TODO(#33849): replace with ReleaseProtocolversion.latest
-    AcsDigestTrace.getVersionedSetParameterO(ReleaseProtocolVersion.acsCommitmentRedesignStorage.v)
+    AcsDigestTrace.getVersionedSetParameterO(ProtocolVersion.latest)
 
-  val pretty: Pretty[AcsDigestTrace] = prettyOfParam(_.traces)
+  override protected val pretty: Pretty[AcsDigestTrace] = prettyOfParam(_.traces)
 }
 
 /** Base type for trace groups and single traces.
   */
-sealed trait TraceElement extends Product with Serializable with PrettyPrinting
+sealed trait TraceElement extends Product with Serializable with PrettyPrintingFromCompanion
 
 /** Represents a group of changes that were applied to an ACS digest (e.g. in case of party on- or
   * offboarding). The traces describe the state of the digest that was added to or subtracted from
@@ -95,11 +98,11 @@ final case class TraceGroup(description: String, traces: Seq[SingleTrace], added
   def toProtoV30: v30.TraceElement.TraceGroup =
     v30.TraceElement.TraceGroup(description, traces.map(_.toProtoV30), addedToHash)
 
-  override protected def pretty: Pretty[TraceGroup] = TraceGroup.pretty
+  override def prettyCompanion: PrettyPrintingCompanion[TraceGroup] = TraceGroup
 }
 
-object TraceGroup extends PrettyUtil with ShowUtil {
-  val pretty: Pretty[TraceGroup] =
+object TraceGroup extends PrettyUtil with ShowUtil with PrettyPrintingCompanion[TraceGroup] {
+  override protected val pretty: Pretty[TraceGroup] =
     prettyOfClass(
       param("description", _.description.unquoted),
       paramIfTrue("added", _.addedToHash),
@@ -126,10 +129,10 @@ final case class SingleTrace(
       isActivation = isActivation,
     )
 
-  override protected def pretty: Pretty[SingleTrace] = SingleTrace.pretty
+  override def prettyCompanion: PrettyPrintingCompanion[SingleTrace] = SingleTrace
 }
 
-object SingleTrace extends PrettyUtil {
+object SingleTrace extends PrettyUtil with PrettyPrintingCompanion[SingleTrace] {
   def fromProtoV30(
       proto: v30.TraceElement.SingleTrace
   ): ParsingResult[SingleTrace] =
@@ -147,9 +150,8 @@ object SingleTrace extends PrettyUtil {
       isActivation = proto.isActivation
     } yield SingleTrace(cid, rc, p1, p2, isActivation)
 
-  val pretty: Pretty[SingleTrace] = prettyOfString[SingleTrace](st =>
+  override protected val pretty: Pretty[SingleTrace] = prettyOfString[SingleTrace](st =>
     s"${st.contractId}|${st.reassignmentCounter}|${st.partyId1}|${st.partyId2}|${if (st.isActivation) "+"
       else "-"}"
   )
-
 }

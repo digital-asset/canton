@@ -4,6 +4,7 @@
 package com.digitalasset.canton.util
 
 import cats.Eq
+import cats.implicits.catsSyntaxOptionId
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.daml.metrics.api.testing.InMemoryMetricsFactory.InMemoryCounter
@@ -16,7 +17,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
-import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.logging.{ErrorLoggingContext, SuppressionRule}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.PekkoUtil.{
   Commit,
@@ -28,6 +29,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   PekkoSourceQueueToFutureQueue,
   RecoveringFutureQueueImpl,
   RecoveringQueueMetrics,
+  RecoveryStrategy,
   ShutdownInProgress,
   StashOfferResult,
   WithKillSwitch,
@@ -1020,6 +1022,47 @@ class PekkoUtilTest
         probe.expectNext(6)
       }
       probe.expectComplete()
+    }
+
+    "recover from failure" in {
+      val f = Source(List(1, 2, 3, 4, 5, 6))
+        .map(i =>
+          if (i == 4) throw new Exception("4")
+          else i
+        )
+        .foldConcatF(0)(_ + _) { (errO, i) =>
+          i shouldBe 6
+          errO.map(_.getMessage) shouldBe Some("4")
+          Future.successful(Source.single(i))
+        }
+      val res = f.toMat(Sink.seq)(Keep.right).run()
+      res.futureValue shouldBe Seq(1, 2, 3, 6)
+    }
+
+    "successfully map failure" in {
+      val f = Source(List(1, 2, 3, 4, 5, 6))
+        .map(i =>
+          if (i == 4) throw new Exception("4")
+          else i
+        )
+        .foldConcatF(0)(_ + _) { (errO, i) =>
+          errO.map(_.getMessage) shouldBe Some("4")
+          i shouldBe 6
+          Future.failed(new Exception("5"))
+        }
+      val res = f.toMat(Sink.seq)(Keep.right).run()
+      res.failed.futureValue.getMessage shouldBe "5"
+    }
+
+    "successfully fail from completing source" in {
+      val f = Source(List(1, 2, 3))
+        .foldConcatF(0)(_ + _) { (errO, i) =>
+          errO shouldBe None
+          i shouldBe 6
+          Future.failed(new Exception("5"))
+        }
+      val res = f.toMat(Sink.seq)(Keep.right).run()
+      res.failed.futureValue.getMessage shouldBe "5"
     }
   }
 
@@ -2723,7 +2766,7 @@ class PekkoUtilTest
   }
 
   "aggregate" should {
-    "pull until full or downstream demands" in {
+    "emit only when full or completed" in {
       val (source, sink) = TestSource
         .probe[Seq[Int]]
         .aggregate(Predef.identity)(_.sizeIs >= 10, _ ++ _, Predef.identity)
@@ -2741,7 +2784,10 @@ class PekkoUtilTest
       sink.expectNext() shouldBe (1 to 10)
       sink.request(2)
       sink.expectNext() shouldBe (11 to 30)
+      sink.expectNoMessage()
+      source.sendComplete()
       sink.expectNext() shouldBe (31 to 33)
+      sink.expectComplete()
     }
 
     "propagate completion" in {
@@ -3147,6 +3193,344 @@ class PekkoUtilTest
         sampleAverage(samples) should be < 10.0
         samplePercentage(samples)(_ <= 1) should be > 90.0
       }
+    }
+  }
+
+  "recoveringSource" should {
+    val fixedRetryStrategy = new RecoveryStrategy {
+      override def recoverable(
+          lastAttempt: Option[PekkoUtil.RecoverAttempt],
+          throwable: Throwable,
+          elc: ErrorLoggingContext,
+      ): Option[PekkoUtil.RecoverAttempt] =
+        lastAttempt match {
+          case Some(attempt) if attempt.attempt > 2 => None
+          case Some(attempt) => attempt.copy(attempt = attempt.attempt + 1).some
+          case None =>
+            PekkoUtil
+              .RecoverAttempt(
+                attempt = 1,
+                delay = 2.millis,
+              )
+              .some
+        }
+    }
+
+    def testRecovery(
+        firstFailureAt: Int,
+        firstFailureCount: Int,
+        secondFailureAt: Int,
+        secondFailureCount: Int,
+        expectedNumInit: Int,
+    )(
+        futureAssert: Future[Seq[Int]] => Unit
+    ) = {
+      val failureCount1 = new AtomicInteger(0)
+      val failureCount2 = new AtomicInteger(0)
+      val initCount = new AtomicInteger(0)
+      futureAssert(
+        PekkoUtil
+          .recoveringSource(
+            init = 9,
+            recoveryStrategy = fixedRetryStrategy,
+          ) { init =>
+            initCount.incrementAndGet()
+            Source
+              .fromIterator(() => Iterator.from(init + 1).takeWhile(_ < 16))
+              .map(i =>
+                if (i == firstFailureAt && failureCount1.get() < firstFailureCount) {
+                  failureCount1.incrementAndGet()
+                  throw new Exception(s"failed first at $i")
+                } else if (i == secondFailureAt && failureCount2.get() < secondFailureCount) {
+                  failureCount2.incrementAndGet()
+                  throw new Exception(s"failed second at $i")
+                } else
+                  i
+              )
+          }(identity)
+          .toMat(Sink.seq)(Keep.right)
+          .run()
+      )
+      initCount.get() shouldBe expectedNumInit
+      failureCount1.get() shouldBe firstFailureCount
+      failureCount2.get() shouldBe secondFailureCount
+    }
+
+    "work if no failure" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 0,
+        secondFailureAt = 14,
+        secondFailureCount = 0,
+        expectedNumInit = 1,
+      )(_.futureValue shouldBe Seq(10, 11, 12, 13, 14, 15))
+    }
+
+    "recover from one failure" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 1,
+        secondFailureAt = 14,
+        secondFailureCount = 0,
+        expectedNumInit = 2,
+      )(_.futureValue shouldBe Seq(10, 11, 12, 13, 14, 15))
+    }
+
+    "recover from two failure at the same place" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 2,
+        secondFailureAt = 14,
+        secondFailureCount = 0,
+        expectedNumInit = 3,
+      )(_.futureValue shouldBe Seq(10, 11, 12, 13, 14, 15))
+    }
+
+    "fail with 4 failure at the same place" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 4,
+        secondFailureAt = 14,
+        secondFailureCount = 0,
+        expectedNumInit = 4,
+      )(_.failed.futureValue.getMessage shouldBe "failed first at 12")
+    }
+
+    "recover from two failure at different places" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 1,
+        secondFailureAt = 14,
+        secondFailureCount = 1,
+        expectedNumInit = 3,
+      )(_.futureValue shouldBe Seq(10, 11, 12, 13, 14, 15))
+    }
+
+    "recover from two failure (two times each) at different places" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 2,
+        secondFailureAt = 14,
+        secondFailureCount = 2,
+        expectedNumInit = 5,
+      )(_.futureValue shouldBe Seq(10, 11, 12, 13, 14, 15))
+    }
+
+    "fail only after the second failure" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 2,
+        secondFailureAt = 14,
+        secondFailureCount = 4,
+        expectedNumInit = 6,
+      )(_.failed.futureValue.getMessage shouldBe "failed second at 14")
+    }
+
+    "recover after failure 3 times each" in {
+      testRecovery(
+        firstFailureAt = 12,
+        firstFailureCount = 3,
+        secondFailureAt = 14,
+        secondFailureCount = 3,
+        expectedNumInit = 7,
+      )(_.futureValue shouldBe Seq(10, 11, 12, 13, 14, 15))
+    }
+
+    "recover after failure 3 times each on the boundaries" in {
+      testRecovery(
+        firstFailureAt = 10,
+        firstFailureCount = 3,
+        secondFailureAt = 15,
+        secondFailureCount = 3,
+        expectedNumInit = 7,
+      )(_.futureValue shouldBe Seq(10, 11, 12, 13, 14, 15))
+    }
+  }
+
+  "exponentialBackoff" should {
+    val testRecoveryStrategy =
+      PekkoUtil.RecoveryStrategy.exponentialBackoff(
+        initialDelay = 5.second,
+        maxDelay = 60.seconds,
+        streamName = "NAME",
+        warnLoggingAttemptThreshold = 3,
+        errorLoggingAttemptThreshold = 6,
+        failingAttemptThreshold = 9,
+      )(_.getMessage.contains("PASS"))
+
+    "recover first time" in {
+      testRecoveryStrategy.recoverable(
+        lastAttempt = None,
+        throwable = new Exception("should PASS"),
+        elc = implicitly,
+      ) shouldBe Some(
+        PekkoUtil.RecoverAttempt(
+          attempt = 1,
+          delay = 5.seconds,
+        )
+      )
+    }
+
+    "fail first time if not recoverable" in {
+      testRecoveryStrategy.recoverable(
+        lastAttempt = None,
+        throwable = new Exception("should no pass"),
+        elc = implicitly,
+      ) shouldBe None
+    }
+
+    "recover 2 time renders correct attempt" in {
+      testRecoveryStrategy.recoverable(
+        lastAttempt = Some(
+          PekkoUtil.RecoverAttempt(
+            attempt = 2,
+            delay = 20.seconds,
+          )
+        ),
+        throwable = new Exception("should PASS"),
+        elc = implicitly,
+      ) shouldBe Some(
+        PekkoUtil.RecoverAttempt(
+          attempt = 3,
+          delay = 40.seconds,
+        )
+      )
+    }
+
+    "recover 2 time renders correct attempt with capped delay" in {
+      testRecoveryStrategy.recoverable(
+        lastAttempt = Some(
+          PekkoUtil.RecoverAttempt(
+            attempt = 2,
+            delay = 50.seconds,
+          )
+        ),
+        throwable = new Exception("should PASS"),
+        elc = implicitly,
+      ) shouldBe Some(
+        PekkoUtil.RecoverAttempt(
+          attempt = 3,
+          delay = 60.seconds,
+        )
+      )
+    }
+
+    "recover 4 time renders correct attempt and logs warning" in {
+      loggerFactory.assertLogs(
+        testRecoveryStrategy.recoverable(
+          lastAttempt = Some(
+            PekkoUtil.RecoverAttempt(
+              attempt = 4,
+              delay = 60.seconds,
+            )
+          ),
+          throwable = new Exception("should PASS"),
+          elc = implicitly,
+        ) shouldBe Some(
+          PekkoUtil.RecoverAttempt(
+            attempt = 5,
+            delay = 60.seconds,
+          )
+        ),
+        _.warningMessage should include(
+          "NAME failed with error. Recovering (attempt: 5) after 60 seconds."
+        ),
+      )
+    }
+
+    "fail after 4 attempts correctly logs warning" in {
+      loggerFactory.assertLogs(
+        testRecoveryStrategy.recoverable(
+          lastAttempt = Some(
+            PekkoUtil.RecoverAttempt(
+              attempt = 4,
+              delay = 60.seconds,
+            )
+          ),
+          throwable = new Exception("should not pASS"),
+          elc = implicitly,
+        ) shouldBe None,
+        _.warningMessage should include(
+          "NAME failed with error. Failure is not recoverable (attempt: 4). Propagating failure."
+        ),
+      )
+    }
+
+    "recover 8 time renders correct attempt and logs error" in {
+      loggerFactory.assertLogs(
+        testRecoveryStrategy.recoverable(
+          lastAttempt = Some(
+            PekkoUtil.RecoverAttempt(
+              attempt = 8,
+              delay = 60.seconds,
+            )
+          ),
+          throwable = new Exception("should PASS"),
+          elc = implicitly,
+        ) shouldBe Some(
+          PekkoUtil.RecoverAttempt(
+            attempt = 9,
+            delay = 60.seconds,
+          )
+        ),
+        _.errorMessage should include(
+          "NAME failed with error. Recovering (attempt: 9) after 60 seconds."
+        ),
+      )
+    }
+
+    "fail after 8 attempts correctly logs error" in {
+      loggerFactory.assertLogs(
+        testRecoveryStrategy.recoverable(
+          lastAttempt = Some(
+            PekkoUtil.RecoverAttempt(
+              attempt = 8,
+              delay = 60.seconds,
+            )
+          ),
+          throwable = new Exception("should not pASS"),
+          elc = implicitly,
+        ) shouldBe None,
+        _.errorMessage should include(
+          "NAME failed with error. Failure is not recoverable (attempt: 8). Propagating failure."
+        ),
+      )
+    }
+
+    "fail after 9 attempts with recoverable correctly logs error" in {
+      loggerFactory.assertLogs(
+        testRecoveryStrategy.recoverable(
+          lastAttempt = Some(
+            PekkoUtil.RecoverAttempt(
+              attempt = 9,
+              delay = 60.seconds,
+            )
+          ),
+          throwable = new Exception("should PASS"),
+          elc = implicitly,
+        ) shouldBe None,
+        _.errorMessage should include(
+          "NAME failed with error. Failed to recover as maximum attempts reached (9). Propagating failure."
+        ),
+      )
+    }
+
+    "fail after 19 attempts with recoverable correctly logs error" in {
+      loggerFactory.assertLogs(
+        testRecoveryStrategy.recoverable(
+          lastAttempt = Some(
+            PekkoUtil.RecoverAttempt(
+              attempt = 19,
+              delay = 60.seconds,
+            )
+          ),
+          throwable = new Exception("should PASS"),
+          elc = implicitly,
+        ) shouldBe None,
+        _.errorMessage should include(
+          "NAME failed with error. Failed to recover as maximum attempts reached (19). Propagating failure."
+        ),
+      )
     }
   }
 }

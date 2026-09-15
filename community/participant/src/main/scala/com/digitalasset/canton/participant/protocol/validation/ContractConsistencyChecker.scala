@@ -7,7 +7,11 @@ import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{GenContractInstance, LfContractId}
 import com.digitalasset.daml.lf.transaction.CreationTime
 
@@ -20,8 +24,14 @@ object ContractConsistencyChecker {
       contractId: LfContractId,
       contractCreationTime: CantonTimestamp,
       transactionLedgerTime: CantonTimestamp,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[ReferenceToFutureContractError] = prettyOfString(self =>
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ReferenceToFutureContractError] =
+      ReferenceToFutureContractError
+  }
+
+  object ReferenceToFutureContractError
+      extends PrettyPrintingCompanion[ReferenceToFutureContractError] {
+    override protected val pretty: Pretty[ReferenceToFutureContractError] = prettyOfString(self =>
       show"A request with ledger time ${self.transactionLedgerTime} uses a future contract (created at ${self.contractCreationTime}, id = ${self.contractId})"
     )
   }

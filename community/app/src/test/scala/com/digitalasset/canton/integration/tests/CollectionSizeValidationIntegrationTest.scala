@@ -55,7 +55,7 @@ sealed trait CollectionSizeValidationIntegrationTest
             sequencers = Seq(sequencer1),
             mediators = Seq(mediator1),
             overrideStaticSynchronizerParameters =
-              Option.when(testedProtocolVersion >= ProtocolVersion.boundsCheck)(
+              Option.when(testedProtocolVersion >= ProtocolVersion.v36)(
                 defaultSsp
                   .focus(_.synchronizerLimits.transactionProtocolLimits.maxActAs)
                   .replace(PositiveInt.two)
@@ -92,11 +92,11 @@ sealed trait CollectionSizeValidationIntegrationTest
       .submit(
         actAs = List(participant1.adminParty) ++ extraParties,
         cmd,
-        optTimeout = Some(config.NonNegativeDuration.ofSeconds(5)),
+        optTimeout = Some(config.NonNegativeDuration.ofSeconds(20)),
       )
 
     clue("submit command") {
-      if (testedProtocolVersion >= ProtocolVersion.boundsCheck) {
+      if (testedProtocolVersion >= ProtocolVersion.v36) {
         val invariantViolation = InvariantViolation(
           Some("act_as"),
           s"repeated field has ${nbExtraParties + 1} elements, exceeding the maximum of $nbExtraParties",

@@ -1,0 +1,20 @@
+name: upgrades-example-DoesNotWarnWhenExpressionUpgradesUtilityDependencyIdentifier
+version: 2.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/upgrades-DoesNotWarnWhenExpressionUpgradesUtilityDependencyIdentifierDep-v2.dar
+dependencies:
+  - daml-script
+module-prefixes: null
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-DoesNotWarnWhenExpressionUpgradesUtilityDependencyIdentifier-v2.dar
+upgrades: ${TARGET_ROOT}/upgrades-DoesNotWarnWhenExpressionUpgradesUtilityDependencyIdentifier-v1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

@@ -5,7 +5,7 @@
 #
 
 ###############################################################################
-# Runs the nightly performance test to record events.
+# Runs the nightly performance test to replay recorded events.
 ###############################################################################
 
 set -eu -o pipefail
@@ -70,7 +70,8 @@ echo "***** Replaying events..."
   export JAVA_OPTS="$COMMON_JAVA_OPTS $PARTICIPANTS_JAVA_OPTS"
 
   run-in-namespace.sh "$PARTICIPANTS_NAMESPACE" \
-  sbt -J-Dlogback.configurationFile=logback.xml "testOnly **.ParticipantReplayBenchmark"
+  sbt -J-Dlogback.configurationFile=logback.xml \
+      "community-app/testOnly com.digitalasset.canton.integration.tests.manual.ParticipantReplayBenchmark"
 )
 
 # so metrics don't get confused if the synchronizer keeps runnning

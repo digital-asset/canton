@@ -243,6 +243,7 @@ private[index] class IndexServiceImpl(
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
       configOverrides: ActiveContractsServiceStreamsConfigOverrides,
+      continuationToken: Option[ByteString],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[InternalIndexService.ActiveContract, NotUsed] = {
@@ -259,7 +260,7 @@ private[index] class IndexServiceImpl(
     getActiveContracts(
       eventFormat = eventFormat,
       activeAt = Some(activeAt),
-      rangeInfo = AcsRangeInfo.empty,
+      rangeInfo = AcsRangeInfo.assertFromContinuationTokenBytes(continuationToken),
       configOverrides = Some(configOverrides),
     ).async
       .mapAsync(parallelism = acsFilteringParallelism) { getActiveContractsResponse =>
@@ -280,6 +281,7 @@ private[index] class IndexServiceImpl(
                       contractId = LfContractId.assertFromString(createdEvent.contractId),
                       stakeholders = stakeholders,
                       reassignmentCounter = ReassignmentCounter(activeContract.reassignmentCounter),
+                      continuationToken = getActiveContractsResponse.streamContinuationToken,
                     )
                   )
               }

@@ -6,14 +6,17 @@ package com.digitalasset.canton.participant.protocol.party
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.data.ActiveContract
+import com.digitalasset.canton.participant.admin.party.LapiAcsHelper
 import com.digitalasset.canton.participant.protocol.party.PartyReplicationAcsReader.*
+import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
-import org.apache.pekko.NotUsed
-import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.scaladsl.{Keep, Sink}
 import org.apache.pekko.stream.{KillSwitches, Materializer}
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,9 +30,28 @@ import scala.util.chaining.scalaUtilChainingOps
   * that the TP has requested.
   *
   * It also provides a helper method to read and dequeue contracts from the queue in a safe manner.
+  *
+  * @param partyId
+  *   The party whose ACS is being replicated.
+  * @param synchronizerId
+  *   The synchronizer within which the ACS is being replicated.
+  * @param effectiveAtLapiOffset
+  *   The Ledger API offset at which the party is being onboarded, needed to read the correct ACS
+  *   snapshot via the LAPI.
+  * @param excludedStakeholders
+  *   Shared contract stakeholder parties to exclude from the read ACS, for example as in the case
+  *   of party replication, exclude parties already hosted by the target participants.
+  * @param lapiIndexService
+  *   The Ledger API index service used to read the ACS.
+  * @param spStore
+  *   The source participant store interface used to determine which range of contracts to retrieve.
   */
 private[party] final class PartyReplicationAcsReader(
-    extractLedgerApiACS: TraceContext => Source[ActiveContract, NotUsed],
+    partyId: PartyId,
+    synchronizerId: SynchronizerId,
+    effectiveAtLapiOffset: Offset,
+    excludedStakeholders: Set[PartyId],
+    lapiIndexService: InternalIndexService,
     spStore: SourceParticipantStore,
     protected val loggerFactory: NamedLoggerFactory,
     protected val timeouts: ProcessingTimeout,
@@ -48,7 +70,14 @@ private[party] final class PartyReplicationAcsReader(
   private val hasAcsReaderCompletedSuccessfully = new AtomicBoolean(false)
 
   private val (killSwitch, doneF) =
-    extractLedgerApiACS(traceContext)
+    LapiAcsHelper
+      .ledgerApiAcsSource(
+        lapiIndexService,
+        Set(partyId),
+        effectiveAtLapiOffset,
+        excludedStakeholders,
+        Some(synchronizerId),
+      )(traceContext)
       .viaMat(KillSwitches.single)(Keep.right)
       .zipWithIndex
       // Use mapAsync(parallelism=1) for flow-control rather than map

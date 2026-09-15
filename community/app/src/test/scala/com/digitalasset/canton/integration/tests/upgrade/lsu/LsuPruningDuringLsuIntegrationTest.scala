@@ -113,7 +113,7 @@ final class LsuPruningDuringLsuIntegrationTest extends LsuBase {
       }
 
       eventually() {
-        if (fixture.currentPsid.protocolVersion < ProtocolVersion.acsCommitmentRedesign) {
+        if (fixture.currentPsid.protocolVersion < ProtocolVersion.v36) {
           noOutstandingCommitments(participant1, pruningTs) shouldBe pruningTs
         } else {
           latestMatchedCommitmentBy(participant1, participant1.id) should be >= pruningTs

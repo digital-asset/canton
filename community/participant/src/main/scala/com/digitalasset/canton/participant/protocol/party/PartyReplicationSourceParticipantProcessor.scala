@@ -9,7 +9,7 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.crypto.Hash
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -17,20 +17,23 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.EphemeralSequencerChannelProgress
-import com.digitalasset.canton.participant.admin.party.{
-  LapiAcsHelper,
-  PartyReplicationTestInterceptor,
-}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.AcsReplicationProgress
-import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
+import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStore}
+import com.digitalasset.canton.topology.transaction.{
+  PartyToParticipant,
+  TopologyChangeOp,
+  TopologyMapping,
+}
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.{RepairCounter, checked}
 import com.digitalasset.nonempty.{NonEmpty, NonEmptyUtil}
 import com.google.protobuf.ByteString
-import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
-import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.ExecutionContext
 
@@ -49,8 +52,16 @@ import scala.concurrent.ExecutionContext
   *
   * @param psid
   *   The synchronizer id of the synchronizer to replicate active contracts within.
-  * @param createLedgerApiAcsSource
-  *   Creates the ledger Api ACS pekko source.
+  * @param partyId
+  *   The party whose ACS is being replicated.
+  * @param effectiveAtLapiOffset
+  *   The Ledger API offset at which the party is being onboarded, needed to read the correct ACS
+  *   snapshot via the LAPI.
+  * @param excludedStakeholders
+  *   Shared contract stakeholder parties to exclude from the read ACS, for example as in the case
+  *   of party replication, exclude parties already hosted by the target participants.
+  * @param lapiIndexService
+  *   The Ledger API index service used to read the ACS.
   * @param replicationProgressState
   *   Interface for processor to read and update ACS replication progress.
   * @param onError
@@ -61,9 +72,12 @@ import scala.concurrent.ExecutionContext
   *   Test interceptor only alters behavior in integration tests.
   */
 final class PartyReplicationSourceParticipantProcessor private (
-    requestId: Hash,
     val psid: PhysicalSynchronizerId,
-    createLedgerApiAcsSource: TraceContext => Source[ActiveContract, NotUsed],
+    partyId: PartyId,
+    requestId: Hash,
+    effectiveAtLapiOffset: Offset,
+    excludedStakeholders: Set[PartyId],
+    lapiIndexService: InternalIndexService,
     protected val replicationProgressState: AcsReplicationProgress,
     protected val onError: String => Unit,
     protected val onDisconnect: (String, TraceContext) => Unit,
@@ -150,7 +164,11 @@ final class PartyReplicationSourceParticipantProcessor private (
       processorStore.initializeSourceParticipantState(
         initialContractOrdinalInclusive,
         new PartyReplicationAcsReader(
-          createLedgerApiAcsSource,
+          partyId,
+          psid.logical,
+          effectiveAtLapiOffset,
+          excludedStakeholders,
+          lapiIndexService,
           _,
           _,
           timeouts,
@@ -297,18 +315,18 @@ final class PartyReplicationSourceParticipantProcessor private (
 }
 
 object PartyReplicationSourceParticipantProcessor {
-  def apply(
+  def initialize(
       psid: PhysicalSynchronizerId,
       partyId: PartyId,
       requestId: Hash,
-      effectiveAtLapiOffset: Offset,
-      // TODO(#23097): Revisit mechanism to consider "other parties" once we support support multiple concurrent OnPRs
-      //  as the set of other parties would change dynamically.
-      partiesHostedByTargetParticipant: Set[PartyId],
+      asOf: CantonTimestamp,
+      targetParticipant: ParticipantId,
       lapiIndexService: InternalIndexService,
       replicationProgressState: AcsReplicationProgress,
       onError: String => Unit,
       onDisconnect: (String, TraceContext) => Unit,
+      topologyStore: TopologyStore[SynchronizerStore],
+      ledgerApiStore: LedgerApiStore,
       futureSupervisor: FutureSupervisor,
       exitOnFatalFailures: Boolean,
       timeouts: ProcessingTimeout,
@@ -317,18 +335,50 @@ object PartyReplicationSourceParticipantProcessor {
         PartyReplicationTestInterceptor.AlwaysProceed,
   )(implicit
       executionContext: ExecutionContext,
+      traceContext: TraceContext,
       mat: Materializer,
-  ): PartyReplicationSourceParticipantProcessor =
-    new PartyReplicationSourceParticipantProcessor(
-      requestId,
+  ): EitherT[FutureUnlessShutdown, String, PartyReplicationSourceParticipantProcessor] = {
+    def partiesHostedByParticipant(): FutureUnlessShutdown[Set[PartyId]] =
+      topologyStore
+        .inspect(
+          proposals = false,
+          timeQuery = TimeQuery.Snapshot(asOf),
+          asOfExclusiveO = None, // ignored for TimeQuery.Snapshot; always exclusive
+          op = Some(TopologyChangeOp.Replace),
+          types = Seq(TopologyMapping.Code.PartyToParticipant),
+          idFilter = None,
+          namespaceFilter = None,
+        )
+        .map(
+          _.collectOfMapping[PartyToParticipant]
+            .collectOfType[TopologyChangeOp.Replace]
+            .result
+            .withFilter { x =>
+              val ptp = x.mapping
+              ptp.partyId != partyId &&
+              ptp.participants.exists(_.participantId == targetParticipant)
+            }
+            .map(_.mapping.partyId)
+            .toSet
+        )
+
+    for {
+      excludedStakeholders <- EitherT.right[String](partiesHostedByParticipant())
+      effectiveAtLapiOffset <- EitherT(
+        ledgerApiStore
+          .lastSynchronizerOffsetBeforeOrAtRecordTime(psid.logical, asOf)
+          .map(
+            _.flatMap(_.lastSynchronizerOffset.map(_.offset))
+              .toRight(s"Cannot locate Ledger API offset at $asOf for $partyId")
+          )
+      )
+    } yield new PartyReplicationSourceParticipantProcessor(
       psid,
-      createLedgerApiAcsSource = LapiAcsHelper.ledgerApiAcsSource(
-        lapiIndexService,
-        Set(partyId),
-        effectiveAtLapiOffset,
-        partiesHostedByTargetParticipant,
-        Some(psid.logical),
-      )(_),
+      partyId,
+      requestId,
+      effectiveAtLapiOffset,
+      excludedStakeholders,
+      lapiIndexService,
       replicationProgressState,
       onError,
       onDisconnect,
@@ -341,4 +391,5 @@ object PartyReplicationSourceParticipantProcessor {
         .append("requestId", requestId.toHexString),
       testInterceptor,
     )
+  }
 }

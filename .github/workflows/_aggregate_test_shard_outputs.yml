@@ -22,6 +22,11 @@ on:
       protocol_version:
         required: true
         type: string
+      allow_empty_current_timings:
+        required: false
+        default: false
+        description: Allow empty merged current timings in merge_timings.py.
+        type: boolean
 
 permissions:
   contents: read
@@ -38,6 +43,7 @@ jobs:
     if: always()
     env:
       CALLER_JOB: ${{ inputs.caller_job }}
+      ALLOW_EMPTY_CURRENT_TIMINGS: ${{ inputs.allow_empty_current_timings }}
       # Prefix for the run-over-run "latest" aggregate artifacts. Keyed on the
       # per-leg job_name when the caller sets one so that legs sharing a
       # caller_job (the per-protocol-version _test.yml legs) stop overwriting
@@ -109,13 +115,19 @@ jobs:
           overwrite: true
 
       - name: Build merged timings
-        uses: ./.github/actions/nix/nix_run
+        uses: ./.github/actions/nix/nix_script_run
         with:
           command: |
+            EXTRA_ARGS=()
+            if [[ "$ALLOW_EMPTY_CURRENT_TIMINGS" == "true" ]]; then
+              EXTRA_ARGS+=(--allow-empty-current)
+            fi
+
             python3 scripts/ci/split-tests/merge_timings.py \
               --input-glob "$CALLER_JOB/.shard-bundles/**/timings/timings.json" \
               --output "$CALLER_JOB/.timings/timings.json" \
-              --previous-timings "$CALLER_JOB/.timings/previous/timings.json"
+              --previous-timings "$CALLER_JOB/.timings/previous/timings.json" \
+              "${EXTRA_ARGS[@]}"
 
       - name: Upload merged timings
         uses: actions/upload-artifact@v7

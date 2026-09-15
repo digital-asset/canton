@@ -2292,6 +2292,115 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
+  /v2/traffic/accounts/{account-id}:
+    get:
+      description: |-
+        Get account state for a given account ID.
+        Permissioned only to users having ActAs or ExecuteAs rights for the party ID associated with the account ID.
+
+        NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
+      operationId: getV2TrafficAccountsAccount-id
+      parameters:
+      - name: account-id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAccountResponse'
+        '400':
+          description: Invalid value
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/traffic/accounts:
+    post:
+      description: |-
+        Update account state for a given account ID.
+        Permissioned only to Ledger API admin users.
+
+        NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
+      operationId: postV2TrafficAccounts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAccountRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateAccountResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
+  /v2/traffic/events/prune:
+    post:
+      description: |-
+        Prune events from the event log that are older than a given timestamp.
+        Permissioned only to Ledger API admin users.
+        WARNING: Affects de-duplication. If an event is pruned, de-duplication UpdateAccount requests on it will NOT be possible.
+
+        NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)
+      operationId: postV2TrafficEventsPrune
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PruneEventsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PruneEventsResponse'
+        '400':
+          description: 'Invalid value, Invalid value for: body'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
 components:
   schemas:
     AllocateExternalPartyRequest:
@@ -4106,6 +4215,20 @@ components:
 
             Required: must be non-empty
           type: string
+    GetAccountResponse:
+      title: GetAccountResponse
+      type: object
+      required:
+      - accountId
+      - balance
+      properties:
+        accountId:
+          description: Required
+          type: string
+        balance:
+          description: Required
+          type: integer
+          format: int64
     GetActiveContractsPageRequest:
       title: GetActiveContractsPageRequest
       type: object
@@ -6966,6 +7089,32 @@ components:
           $ref: '#/components/schemas/UnknownFieldSet'
         valueDecoded:
           type: string
+    PruneEventsRequest:
+      title: PruneEventsRequest
+      type: object
+      required:
+      - beforeOrAt
+      properties:
+        beforeOrAt:
+          description: |-
+            The timestamp before which events should be pruned.
+            Events with a timestamp less than or equal to this value will be pruned.
+
+            Required
+          type: string
+    PruneEventsResponse:
+      title: PruneEventsResponse
+      type: object
+      required:
+      - prunedEventCount
+      properties:
+        prunedEventCount:
+          description: |-
+            The number of events that were pruned.
+
+            Required
+          type: integer
+          format: int32
     Reassignment:
       title: Reassignment
       description: Complete view of an on-ledger reassignment.
@@ -7781,6 +7930,54 @@ components:
         properties:
           Transaction:
             $ref: '#/components/schemas/Transaction'
+    UpdateAccountRequest:
+      title: UpdateAccountRequest
+      type: object
+      required:
+      - accountId
+      - deduplicationId
+      properties:
+        accountId:
+          description: |-
+            The account ID whose account to update.
+
+            NOTE: Currently, the account ID is tied to and identified by a party ID.
+            This constraint is expected to be removed in a future release, allowing for user-defined
+            account IDs that are not necessarily tied to a specific party.
+
+            Required
+          type: string
+        balanceDelta:
+          description: |-
+            Balance DELTA to apply to the current balance.
+            Negative values will decrease the balance, positive values will increase the balance.
+            If unset, the balance will not be updated
+
+            Note that setting a negative value may result in a negative balance if the delta is larger than the current balance.
+            Optional
+          type: integer
+          format: int64
+        deduplicationId:
+          description: |-
+            Identifier of this logical update, used to de-duplicate.
+            The caller MUST use a distinct id for every distinct update, and MUST reuse the same id when
+            retrying an update that failed after a retryable error. An already processed id is ignored,
+            while a fresh id applies the delta again.
+
+            Required
+          type: string
+    UpdateAccountResponse:
+      title: UpdateAccountResponse
+      type: object
+      required:
+      - response
+      properties:
+        response:
+          $ref: '#/components/schemas/GetAccountResponse'
+          description: |-
+            The account state after the update
+
+            Required
     UpdateFormat:
       title: UpdateFormat
       description: A format specifying what updates to include and how to render them.

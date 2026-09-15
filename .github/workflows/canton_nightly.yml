@@ -2,12 +2,12 @@ name: Canton Nightly Workflow
 on:
   # TODO(#34877): Re-enable workflow_dispatch and the separate nightly scheduler
   # after the CircleCI migration is complete. Until then, keep this workflow
-  # limited to temporary gha-migration/* push testing.
-  # workflow_dispatch:
+  # limited to workflow_dispatch for manual testing and parity with CircleCI.
+  workflow_dispatch:
   # Optional parity/testing trigger while migrating from CircleCI.
-  push:
-    branches:
-      - 'gha-migration/*'
+#  push:
+#    branches:
+#      - 'gha-migration/*'
 
 jobs:
   pick_runner:
@@ -113,15 +113,15 @@ jobs:
       job_name: test_with_java17
       runner: ${{ needs.pick_runner.outputs.runner }}
 
-  test_protocol_version_34:
-    name: Test Protocol Version 34
+  test_protocol_version_37:
+    name: Test Protocol Version 37
     needs: [pick_runner, compile]
     uses: ./.github/workflows/_test.yml
     secrets: inherit
     with:
       override_java_version_for_tests: ""
-      protocol_version: "34"
-      job_name: test_protocol_version_34
+      protocol_version: "37"
+      job_name: test_protocol_version_37
       runner: ${{ needs.pick_runner.outputs.runner }}
 
   ledger_api_compatibility_tests:
@@ -199,7 +199,7 @@ jobs:
       - build_docs
       - unstable_test
       - test_with_java17
-      - test_protocol_version_34
+      - test_protocol_version_37
       - ledger_api_compatibility_tests
       - protocol_continuity_test_all
       - stability_crash_recovery_test

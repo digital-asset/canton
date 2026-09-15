@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.crypto.LtHash16Blake3
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -740,7 +739,6 @@ trait SequentialDigestAccumulatorTest
   private def cid(i: Int): LfContractId = ExampleTransactionFactory.suffixedId(i, i)
 }
 
-@AcsCommitmentTest
 class SequentialDigestAccumulatorTestInMemory extends SequentialDigestAccumulatorTest {
   override protected def createStore(stringInterning: StringInterning): AcsDigestStore =
     InMemoryAcsDigestStore.create(Eval.now(stringInterning), loggerFactory)
@@ -762,10 +760,8 @@ abstract class BaseDbSequentialDigestAccumulatorTest
     )
 }
 
-@AcsCommitmentTest
 class SequentialDigestAccumulatorTestH2 extends BaseDbSequentialDigestAccumulatorTest with H2Test
 
-@AcsCommitmentTest
 class SequentialDigestAccumulatorTestPostgres
     extends BaseDbSequentialDigestAccumulatorTest
     with PostgresTest

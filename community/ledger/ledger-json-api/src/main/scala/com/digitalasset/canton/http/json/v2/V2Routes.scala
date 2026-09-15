@@ -62,10 +62,10 @@ class V2Routes(
       .endpoints() ++ interactiveSubmissionService
       .endpoints() ++ metadataServiceIfEnabled.toList.flatMap(
       _.endpoints()
-    ) ++ trafficServiceIfEnabled.toList
-      .flatMap(_.endpoints()) ++ jsHealthService
+    ) ++ jsHealthService
       .endpoints() ++ contractService.endpoints() ++
-      joseService.endpoints()
+      joseService.endpoints() ++ trafficServiceIfEnabled.toList
+        .flatMap(_.endpoints())
 
   private val docs =
     new JsApiDocsService(

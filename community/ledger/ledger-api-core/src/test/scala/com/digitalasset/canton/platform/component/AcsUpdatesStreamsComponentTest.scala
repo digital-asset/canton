@@ -90,7 +90,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
     (recordTime, update, contract)
   }
 
-  private lazy val internalIndexService = new InternalIndexServiceImpl(index)
+  private lazy val internalIndexService = new InternalIndexServiceImpl(index, loggerFactory)
 
   private def acsUpdates(
       synchronizerId: SynchronizerId,
@@ -692,15 +692,17 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(party1.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
 
-      contractsParty1All shouldBe Seq(
+      contractsParty1All.map(_.copy(continuationToken = ByteString.empty())) shouldBe Seq(
         InternalIndexService.ActiveContract(
           contractId = contract1.contractId,
           stakeholders = Set(party1.value, partyCommon.value),
           reassignmentCounter = ReassignmentCounter(0L),
+          continuationToken = ByteString.EMPTY,
         )
       )
 
@@ -711,6 +713,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(party1.value),
           stakeholders2 = Set(party1.value),
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -724,6 +727,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(party1.value),
           stakeholders2 = Set(partyCommon.value),
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -737,6 +741,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(partyCommon.value),
           stakeholders2 = Set(party1.value),
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -750,15 +755,17 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(party2.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
 
-      contractsParty2All shouldBe Seq(
+      contractsParty2All.map(_.copy(continuationToken = ByteString.empty())) shouldBe Seq(
         InternalIndexService.ActiveContract(
           contractId = contract2.contractId,
           stakeholders = Set(party2.value, partyCommon.value),
           reassignmentCounter = ReassignmentCounter(0L),
+          continuationToken = ByteString.EMPTY,
         )
       )
 
@@ -769,6 +776,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(partyCommon.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -797,6 +805,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set.empty,
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -813,6 +822,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set.empty,
           stakeholders2 = Set(party1.value),
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -833,6 +843,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -863,6 +874,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set(bob.value),
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -893,6 +905,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue shouldBe empty
@@ -908,6 +921,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(alice.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue shouldBe empty
@@ -928,6 +942,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(acsArchivedParty.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue
@@ -949,6 +964,7 @@ trait AcsUpdatesStreamsComponentTest extends AnyWordSpec with IndexComponentTest
           stakeholders1 = Set(acsArchivedParty.value),
           stakeholders2 = Set.empty,
           configOverrides = configOverrides,
+          continuationToken = None,
         )
         .runWith(Sink.seq)
         .futureValue shouldBe empty

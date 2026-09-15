@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -44,7 +43,6 @@ LSU:
 - (s2, m2) upgrade
 - p2 and p3 automatically connect to the new synchronizer
  */
-@UnstableTest // TODO(i30850): remove this once the test is no longer flaky
 final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimClockUtils {
   override protected def testName: String = "lsu-late-sequencer"
 
@@ -52,7 +50,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase with HasSimCl
     topology.SequencingParameters
       .create(
         // Speed up ordering when sequencer6 = succ(sequencer2) is late to the party
-        pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava),
+        pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(3.second.toJava),
         // Avoid sequencer6 = succ(sequencer2) being blacklisted due to being late to the party
         blacklistLeaderSelectionPolicyConfig =
           topology.SequencingParameters.NoBlacklistingLeaderSelectionPolicyConfig,

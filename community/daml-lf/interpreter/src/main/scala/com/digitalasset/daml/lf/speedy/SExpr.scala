@@ -209,7 +209,7 @@ private[lf] object SExpr {
       args: ArraySeq[SExprAtomic],
       body: SExpr,
   ) extends SExpr {
-    override def execute[Q](machine: Machine[Q]): Control[Nothing] = {
+    override def execute[Q](machine: Machine[Q]): Control[Q] = {
       assert(args.length == builtin.arity)
       val actuals = args.map(_.lookupValue(machine))
       builtin.compute(actuals) match {
@@ -261,12 +261,19 @@ private[lf] object SExpr {
 
   /** Exception handler */
   final case class SETryCatchV1(body: SExpr, handler: SExpr) extends SExpr {
-    override def execute[Q](machine: Machine[Q]): Control[Q] =
-      machine.asUpdateMachine(productPrefix) { machine =>
-        machine.pushKont(KTryCatchV1Handler(machine, handler))
-        machine.ptx = machine.ptx.beginTry
-        Control.Expression(body)
+    override def execute[Q](machine: Machine[Q]): Control[Q] = {
+      machine.pushKont(KTryCatchV1Handler(machine, handler))
+      machine match {
+        case machine: UpdateMachine =>
+          machine.ptx = machine.ptx.beginTry
+          Control.Expression(body)
+        case _: PureMachine =>
+          throw SError.Crash(getClass.getCanonicalName, "unexpected pure machine")
+        case machine: CmdMachine =>
+          machine.pushKont(KPure(_ => Control.Expression(body)))
+          Control.Question(Question.Cmd.OpenTry)
       }
+    }
   }
 
   /** Exercise scope (begin..end) */
@@ -279,10 +286,11 @@ private[lf] object SExpr {
   }
 
   final case class SEPreventCatch(body: SExpr) extends SExpr {
-    override def execute[Q](machine: Machine[Q]): Control.Expression = {
-      machine.pushKont(KPreventException())
-      Control.Expression(body)
-    }
+    override def execute[Q](machine: Machine[Q]): Control[Q] =
+      machine.asUpdateMachine(getClass.getSimpleName) { machine =>
+        machine.pushKont(KPreventException)
+        Control.Expression(body)
+      }
   }
 
   /** Case patterns */

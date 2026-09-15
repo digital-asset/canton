@@ -98,7 +98,7 @@ final case class SequencerNodeParameterConfig(
     disableAggregationRuleSizeCheckForTesting: Boolean = false,
     disableReleaseVersionHandshakeCheck: Boolean = false,
     enablePrevalidation: Boolean = true,
-    enableAsyncSequencerLogging: Boolean = false,
+    enableAsyncSequencerLogging: Boolean = true,
 ) extends ProtocolConfig
     with LocalNodeParametersConfig
 

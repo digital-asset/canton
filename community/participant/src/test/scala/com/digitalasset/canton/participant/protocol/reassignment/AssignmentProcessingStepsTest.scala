@@ -1179,6 +1179,7 @@ final class AssignmentProcessingStepsTest
       Target(defaultStaticSynchronizerParameters),
       clock,
       Target(testedProtocolVersion),
+      reassignmentMetrics = ParticipantTestMetrics.synchronizer.reassignments,
       loggerFactory = loggerFactory,
     )
   }

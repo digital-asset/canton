@@ -1,0 +1,128 @@
+name: Canton Release
+on:
+  # TODO(i35487) During migration, keep this workflow manual and branch-scoped for safe rollout.
+  workflow_dispatch: {}
+  push:
+    branches:
+      - 'gha-migration/*'
+
+permissions:
+  contents: read
+
+jobs:
+  pick_runner:
+    name: Pick runner
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.pick_runner.outputs.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+      - id: pick_runner
+        uses: ./.github/actions/utils/pick_runner
+
+  compile:
+    name: Compile
+    needs: pick_runner
+    uses: ./.github/workflows/_compile.yml
+    secrets: inherit
+    with:
+      reset_classes_if_requested: true
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_community:
+    name: Package Community
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_community.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_sequencer_driver_api:
+    name: Package Sequencer Driver API
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_sequencer_driver_api.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  build_scaladoc:
+    name: Build Scaladoc
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_build_scaladoc.yml
+    secrets: inherit
+    with:
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_jsonapi:
+    name: Package JSON API
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_jsonapi.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  package_kms_driver:
+    name: Package KMS Driver
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_package_kms_driver.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  assembly_ledger_api_test_tool:
+    name: Assembly Ledger API Test Tool
+    needs: [pick_runner, compile]
+    uses: ./.github/workflows/_assembly_ledger_api_test_tool.yml
+    secrets: inherit
+    with:
+      is_nightly_workflow: false
+      is_manual: false
+      runner: ${{ needs.pick_runner.outputs.runner }}
+
+  notify:
+    name: Notify on Failure
+    needs:
+      - pick_runner
+      - compile
+      - package_community
+      - package_sequencer_driver_api
+      - build_scaladoc
+      - package_jsonapi
+      - package_kms_driver
+      - assembly_ledger_api_test_tool
+#      - build_and_publish_docker
+#      - publish_libraries
+#      - publish_release
+#      - release_test
+#      - tag_new_releases
+#      - run_propose_script
+#      - generate_data_continuity_dumps
+    if: |
+      always() &&
+      (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    uses: ./.github/workflows/_notify.yml
+    secrets: inherit
+    with:
+      needs_json: ${{ toJSON(needs) }}
+      # Keep required-notify runner selection independent from pick_runner output to avoid
+      # issues with notify if pick_runner fails before emitting outputs.
+      # Keep repo-to-runner labels in sync with .github/actions/utils/pick_runner/action.yml.
+      runner: >-
+        ${{
+          case(
+            github.repository == 'DACH-NY/canton', 'dach-ny-canton',
+            github.repository == 'digital-asset/canton', 'digital-asset-canton',
+            'ubuntu-latest'
+          )
+        }}

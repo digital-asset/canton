@@ -109,34 +109,47 @@ final class AcsImportNoSynchronizerConnectionIntegrationTest
       val examplesMainPackageId =
         participant3.dars.upload(CantonExamplesPath, vetAllPackages = false)
 
-      participant2.repair.import_acs(daId, acsFilename.canonicalPath)
-      participant3.repair.import_acs(daId, acsFilename.canonicalPath)
+      // participant2 and participant3 have an empty ledger end when the ACS import switches the
+      // indexer into repair mode the in-memory state is defensively reset, which restarts the
+      // Ledger API offset dispatcher and aborts the already running admin workflow subscriptions
+      // with SERVICE_NOT_RUNNING.
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          participant2.repair.import_acs(daId, acsFilename.canonicalPath)
+          participant3.repair.import_acs(daId, acsFilename.canonicalPath)
 
-      participants.all.synchronizers.reconnect_all()
-      participant2.dars.vetting.enable(examplesMainPackageId)
-      participant3.dars.vetting.enable(examplesMainPackageId)
+          participants.all.synchronizers.reconnect_all()
+          participant2.dars.vetting.enable(examplesMainPackageId)
+          participant3.dars.vetting.enable(examplesMainPackageId)
 
-      Seq(participant1, participant2).foreach(
-        _.topology.party_to_participant_mappings.propose_delta(
-          party = alice,
-          adds = List(participant2.id -> ParticipantPermission.Submission),
-          store = daId,
-        )
+          Seq(participant1, participant2).foreach(
+            _.topology.party_to_participant_mappings.propose_delta(
+              party = alice,
+              adds = List(participant2.id -> ParticipantPermission.Submission),
+              store = daId,
+            )
+          )
+
+          eventually() {
+            participant1.topology.party_to_participant_mappings.is_known(
+              daId,
+              alice,
+              Seq(participant2),
+            ) shouldBe true
+
+            participant2.topology.party_to_participant_mappings.is_known(
+              daId,
+              alice,
+              Seq(participant2),
+            ) shouldBe true
+          }
+        },
+        logEntries =>
+          forEvery(logEntries) { logEntry =>
+            logEntry.loggerName should include("ResilientLedgerSubscription")
+            logEntry.message should include("Ledger subscription PingService failed with an error")
+          },
       )
-
-      eventually() {
-        participant1.topology.party_to_participant_mappings.is_known(
-          daId,
-          alice,
-          Seq(participant2),
-        ) shouldBe true
-
-        participant2.topology.party_to_participant_mappings.is_known(
-          daId,
-          alice,
-          Seq(participant2),
-        ) shouldBe true
-      }
     }
   }
 

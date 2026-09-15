@@ -20,6 +20,7 @@ import com.digitalasset.canton.admin.pruning.v30 as pruningProto
 import com.digitalasset.canton.admin.sequencer.v30 as sequencerProto
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters as InternalSsp
 import com.digitalasset.canton.sequencer.admin.v30 as proto
 import com.digitalasset.canton.sequencer.admin.v30.SequencerAdministrationServiceGrpc
 import com.digitalasset.canton.sequencing.protocol.{SubmissionRequestType, TrafficState}
@@ -34,8 +35,8 @@ import com.digitalasset.canton.synchronizer.sequencer.{SequencerPruningStatus, S
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Member, SequencerId, SynchronizerId}
-import com.digitalasset.canton.util.{GrpcStreamingUtils, ResourceUtil}
-import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
+import com.digitalasset.canton.util.{EitherUtil, GrpcStreamingUtils, ResourceUtil}
+import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion, ReleaseVersion}
 import com.google.protobuf.ByteString
 import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
@@ -332,7 +333,8 @@ object SequencerAdminCommands {
   )
   final case class InitializeFromGenesisState(
       topologySnapshotStream: InputStream,
-      synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
+      synchronizerParameters: InternalSsp,
+      serverVersion: Option[ReleaseVersion],
   ) extends GrpcAdminCommand[
         Unit,
         proto.InitializeSequencerFromGenesisStateResponse,
@@ -379,7 +381,8 @@ object SequencerAdminCommands {
         )
       }
 
-    override protected def createRequest(): Either[String, Unit] = Right(())
+    override protected def createRequest(): Either[String, Unit] =
+      checkSspCompatibility(synchronizerParameters, serverVersion)
 
     override protected def handleResponse(
         response: proto.InitializeSequencerFromGenesisStateResponse
@@ -389,11 +392,31 @@ object SequencerAdminCommands {
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
   }
 
+  private def checkSspCompatibility(
+      synchronizerParameters: InternalSsp,
+      serverVersion: Option[ReleaseVersion],
+  ): Either[String, Unit] =
+    if (synchronizerParameters.protocolVersion < ProtocolVersion.v36) {
+      Either.unit
+    } else {
+      serverVersion
+        .toRight("Server version is not known")
+        .flatMap { sv =>
+          import scala.math.Ordered.orderingToOrdered
+          EitherUtil.condUnit(
+            // sv >= ReleaseVersion(3, 6, 0) does not work with pre-releases: 3.6.0-SNAPSHOT < 3.6.0 :-/
+            sv.majorMinor >= (3, 6),
+            s"Server version $sv does not support protocol version 36",
+          )
+        }
+    }
+
   final case class InitializeFromLsuPredecessor(
       topologySnapshotStream: InputStream,
-      synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
+      synchronizerParameters: InternalSsp,
       ignorePsidCheck: Boolean,
       synchronizerId: SynchronizerId,
+      serverVersion: Option[ReleaseVersion],
   ) extends GrpcAdminCommand[
         Unit,
         proto.InitializeSequencerFromLsuPredecessorResponse,
@@ -442,7 +465,8 @@ object SequencerAdminCommands {
         )
       }
 
-    override protected def createRequest(): Either[String, Unit] = Right(())
+    override protected def createRequest(): Either[String, Unit] =
+      checkSspCompatibility(synchronizerParameters, serverVersion)
 
     override protected def handleResponse(
         response: proto.InitializeSequencerFromLsuPredecessorResponse
@@ -453,7 +477,8 @@ object SequencerAdminCommands {
 
   final case class InitializeFromGenesisStateV2(
       topologySnapshotStream: InputStream,
-      synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
+      synchronizerParameters: InternalSsp,
+      serverVersion: Option[ReleaseVersion],
   ) extends GrpcAdminCommand[
         Unit,
         proto.InitializeSequencerFromGenesisStateV2Response,
@@ -500,7 +525,8 @@ object SequencerAdminCommands {
         )
       }
 
-    override protected def createRequest(): Either[String, Unit] = Right(())
+    override protected def createRequest(): Either[String, Unit] =
+      checkSspCompatibility(synchronizerParameters, serverVersion)
 
     override protected def handleResponse(
         response: proto.InitializeSequencerFromGenesisStateV2Response

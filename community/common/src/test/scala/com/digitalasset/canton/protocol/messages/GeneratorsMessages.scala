@@ -387,12 +387,12 @@ final class GeneratorsMessages(
         classOf[LegacyAcsCommitmentProtocolMessage],
       ),
       GeneratorForClass(
-        if (protocolVersion < ProtocolVersion.acsCommitmentRedesign) Gen.fail
+        if (protocolVersion < ProtocolVersion.v36) Gen.fail
         else acsCommitmentProtocolMessageArb.arbitrary,
         classOf[AcsCommitmentProtocolMessage],
       ),
       GeneratorForClass(
-        if (protocolVersion < ProtocolVersion.acsCommitmentRedesign) Gen.fail
+        if (protocolVersion < ProtocolVersion.v36) Gen.fail
         else acsCommitmentSummaryProtocolMessageArb.arbitrary,
         classOf[AcsCommitmentSummaryProtocolMessage],
       ),

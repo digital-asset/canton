@@ -1,11 +1,9 @@
 name: Check release notes
 
-# For PRs targeting a release-line* branch this check is REQUIRED: it fails
-# unless UNRELEASED.md is updated. For PRs targeting main it is a NON-BLOCKING
-# reminder (see #33711): it posts the same guidance inline but always passes, so
-# it never blocks a merge. PRs that legitimately need no release note
-# (forward-ports, CI-only, docs) can bypass with the "no-release-note" label in
-# both modes.
+# For PRs targeting main or a release-line* branch this check is REQUIRED: it
+# fails unless UNRELEASED.md is updated. PRs that legitimately need no release
+# note (forward-ports, CI-only, docs) can bypass with the "no-release-note"
+# label.
 #
 # Either way the check posts a single "sticky" PR comment (updated in place,
 # cleared/marked passed when the check passes) so the guidance is visible inline
@@ -18,11 +16,19 @@ on:
       - 'main'
     # labeled/unlabeled so toggling the skip label re-evaluates the check.
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  # main merges through a merge queue. A required status check must also report in
+  # the merge_group context, otherwise the queue entry waits forever for a result
+  # that never arrives and stalls everything behind it. The job runs here too and
+  # passes immediately, since the PR-level run already enforced the gate before the
+  # PR entered the queue.
+  merge_group:
 
 # Cancel superseded runs on the same PR so only the latest commit's run posts the
 # sticky comment / status, avoiding racing runs that leave a stale comment.
 concurrency:
-  group: check-unreleased-${{ github.event.pull_request.number }}
+  # Falls back to github.ref on merge_group, where pull_request.number is empty, so
+  # queue entries do not collapse into one group and cancel each other.
+  group: check-unreleased-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -57,6 +63,15 @@ jobs:
             const SKIP_LABEL = 'no-release-note';
             const RELEASE_NOTES_FILE = 'UNRELEASED.md';
             const MARKER = '<!-- check-unreleased-notes -->';
+
+            // Nothing to inspect in the merge queue: the gate already ran on the PR
+            // before it entered the queue. Return success so the required check
+            // reports a result and the queue does not stall.
+            if (context.eventName === 'merge_group') {
+              core.info('merge_group event: release-notes gate already enforced on the PR, passing.');
+              return;
+            }
+
             const pr = context.payload.pull_request;
             const { owner, repo } = context.repo;
 
@@ -68,10 +83,9 @@ jobs:
             const skipped = labels.includes(SKIP_LABEL);
             const ok = touched || skipped;
 
-            // release-line* is a required gate that fails when the note is missing.
-            // main is a non-blocking reminder: post the same comment but never fail.
-            // TODO(#33711): make main blocking too once the reminder phase is validated.
-            const blocking = /^release-line/.test(pr.base.ref);
+            // This check is a required gate on every branch it runs on (main and
+            // release-line*): it fails when the release note is missing and no
+            // skip label is present.
 
             // Diagnostics: record event + mergeability on every run so that, if a
             // PR ever stalls (required check left with no result on its head), we
@@ -96,7 +110,7 @@ jobs:
               .addHeading('Release-notes check', 3)
               .addTable([
                 [{ data: 'field', header: true }, { data: 'value', header: true }],
-                ['decision', ok ? '✅ pass' : (blocking ? '⚠️ fail' : '⚠️ reminder (non-blocking)')],
+                ['decision', ok ? '✅ pass' : '⚠️ fail'],
                 ['event', `${diag.event} / ${diag.action}`],
                 ['head', diag.head],
                 ['base', diag.base],
@@ -115,7 +129,8 @@ jobs:
             const sticky = comments.find(c => c.body && c.body.includes(MARKER));
 
             // Fork PRs get a read-only token, so comment writes 403. Keep them
-            // best-effort so the non-blocking main reminder never fails on a fork.
+            // best-effort: the check still fails via setFailed, we just skip the
+            // sticky comment when the token cannot post it.
             async function writeSticky(commentBody, createIfMissing) {
               try {
                 if (sticky) {
@@ -128,14 +143,10 @@ jobs:
               }
             }
 
-            const missingBody = blocking
-              ? `${MARKER}\n⚠️ **Release note required.** This PR targets \`${pr.base.ref}\` but does not ` +
-                `modify \`${RELEASE_NOTES_FILE}\`.\n\nPlease add a release note to \`${RELEASE_NOTES_FILE}\`, ` +
-                `or apply the \`${SKIP_LABEL}\` label if this change needs none (e.g. forward-port, CI-only, docs).`
-              : `${MARKER}\n⚠️ **Release note reminder.** This PR targets \`${pr.base.ref}\` but does not ` +
-                `modify \`${RELEASE_NOTES_FILE}\`.\n\nIf this change is user-facing, please add a release note to ` +
-                `\`${RELEASE_NOTES_FILE}\`, or apply the \`${SKIP_LABEL}\` label if it needs none (e.g. CI-only, docs). ` +
-                `This is a reminder only and does not block merging.`;
+            const missingBody =
+              `${MARKER}\n⚠️ **Release note required.** This PR targets \`${pr.base.ref}\` but does not ` +
+              `modify \`${RELEASE_NOTES_FILE}\`.\n\nPlease add a release note to \`${RELEASE_NOTES_FILE}\`, ` +
+              `or apply the \`${SKIP_LABEL}\` label if this change needs none (e.g. forward-port, CI-only, docs).`;
             const body = ok ? `${MARKER}\n✅ Release-notes check passed.` : missingBody;
 
             if (ok) {
@@ -146,12 +157,7 @@ jobs:
             }
 
             await writeSticky(body, true);
-            const detail =
+            core.setFailed(
               `This PR targets '${pr.base.ref}' but does not modify ${RELEASE_NOTES_FILE}. ` +
-              `Add a release note, or apply the '${SKIP_LABEL}' label if this change needs none (e.g. forward-port, CI-only, docs).`;
-            if (blocking) {
-              core.setFailed(detail);
-            } else {
-              // main: reminder only, keep the check green so it never blocks a merge.
-              core.warning(`${detail} Reminder posted (non-blocking).`);
-            }
+              `Add a release note, or apply the '${SKIP_LABEL}' label if this change needs none (e.g. forward-port, CI-only, docs).`
+            );

@@ -64,12 +64,6 @@ class InMemoryState(
       ledgerEndO: Option[LedgerEnd],
       achsState: AchsState,
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    def clearCaches(): Unit = {
-      contractStateCaches.reset(ledgerEndO)
-      inMemoryFanoutBuffer.flush()
-      ledgerEndCache.set(ledgerEndO)
-      achsStateCache.set(achsState)
-    }
     def resetInMemoryState(): Future[Unit] =
       for {
         // First stop the active dispatcher (if exists) to ensure
@@ -79,7 +73,11 @@ class InMemoryState(
         _ <- dispatcherState.stopDispatcher()
         // Reset the Ledger API caches to the latest ledger end
         _ <- Future {
-          clearCaches()
+          contractStateCaches.reset(ledgerEndO)
+          cachesUpdatedUpto.set(ledgerEndO.map(_.lastOffset))
+          inMemoryFanoutBuffer.flush()
+          ledgerEndCache.set(ledgerEndO)
+          achsStateCache.set(achsState)
           transactionSubmissionTracker.close()
           reassignmentSubmissionTracker.close()
         }
@@ -107,11 +105,11 @@ class InMemoryState(
       )
       resetInMemoryState()
     } else if (cachesUpdatedUpto.get().isEmpty) {
-      // cachesUpdatedUpto can signal an incomplete cache state update, therefore we clear the caches
+      // with empty ledger we cannot detect a broken cache state, so we reset the caches to be safe
       logger.info(
-        s"Participant in-memory state with empty cachesUpdatedUpTo: resetting caches. $ledgerEndComparisonLog"
+        s"Participant in-memory state/persisted ledger end possible mismatch: resetting in-memory state to be safe. $ledgerEndComparisonLog"
       )
-      Future(clearCaches())
+      resetInMemoryState()
     } else {
       logger.info(
         s"Participant in-memory state is up-to-date, continue without reset. $ledgerEndComparisonLog"

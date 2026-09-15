@@ -15,7 +15,11 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableStates.LockableStatesCheckHandle
@@ -861,9 +865,13 @@ private[conflictdetection] object ConflictDetector {
   final case class LockedStates(
       reassignments: Set[ReassignmentId],
       contracts: Seq[LfContractId],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[LockedStates] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[LockedStates] = LockedStates
+  }
+
+  object LockedStates extends PrettyPrintingCompanion[LockedStates] {
+    override protected val pretty: Pretty[LockedStates] = prettyOfClass(
       paramIfNonEmpty("reassignments", _.reassignments),
       paramIfNonEmpty("contracts", _.contracts),
     )

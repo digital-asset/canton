@@ -20,7 +20,6 @@ test_jobs:
   - ledger_api_compatibility_tests
   - protocol_continuity_test_latest
   - smoke_test
-  - temp_acs_commitment_tests_pv_dev
   - test_data_continuity_dumps
   - toxiproxy_test_fast
   - toxiproxy_test_fast_requires_external_kms

@@ -7,7 +7,11 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{CryptoConfig, NonNegativeFiniteDuration, ProtocolConfig}
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerLimits}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
@@ -62,23 +66,10 @@ final case class SynchronizerParametersConfig(
     override val dontWarnOnDeprecatedPV: Boolean = false,
     synchronizerLimits: Option[SynchronizerLimits] = None,
 ) extends ProtocolConfig
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[SynchronizerParametersConfig] = prettyOfClass(
-    param("requiredSigningAlgorithmSpecs", _.requiredSigningAlgorithmSpecs),
-    param("requiredSigningKeySpecs", _.requiredSigningKeySpecs),
-    param("requiredEncryptionAlgorithmSpecs", _.requiredEncryptionAlgorithmSpecs),
-    param("requiredEncryptionKeySpecs", _.requiredEncryptionKeySpecs),
-    param("requiredSymmetricKeySchemes", _.requiredSymmetricKeySchemes),
-    param("requiredHashAlgorithms", _.requiredHashAlgorithms),
-    param("requiredCryptoKeyFormats", _.requiredCryptoKeyFormats),
-    param("requiredSignatureFormats", _.requiredSignatureFormats),
-    param("topologyChangeDelay", _.topologyChangeDelay),
-    param("alphaVersionSupport", _.alphaVersionSupport),
-    param("betaVersionSupport", _.betaVersionSupport),
-    param("dontWarnOnDeprecatedPV", _.dontWarnOnDeprecatedPV),
-    param("synchronizerLimits", _.synchronizerLimits),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SynchronizerParametersConfig] =
+    SynchronizerParametersConfig
 
   /** Converts the synchronizer parameters config into a synchronizer parameters protocol message.
     *
@@ -170,4 +161,22 @@ final case class SynchronizerParametersConfig(
         .leftMap(_.toString)
     } yield staticSynchronizerParameters
   }
+}
+
+object SynchronizerParametersConfig extends PrettyPrintingCompanion[SynchronizerParametersConfig] {
+  override protected val pretty: Pretty[SynchronizerParametersConfig] = prettyOfClass(
+    param("requiredSigningAlgorithmSpecs", _.requiredSigningAlgorithmSpecs),
+    param("requiredSigningKeySpecs", _.requiredSigningKeySpecs),
+    param("requiredEncryptionAlgorithmSpecs", _.requiredEncryptionAlgorithmSpecs),
+    param("requiredEncryptionKeySpecs", _.requiredEncryptionKeySpecs),
+    param("requiredSymmetricKeySchemes", _.requiredSymmetricKeySchemes),
+    param("requiredHashAlgorithms", _.requiredHashAlgorithms),
+    param("requiredCryptoKeyFormats", _.requiredCryptoKeyFormats),
+    param("requiredSignatureFormats", _.requiredSignatureFormats),
+    param("topologyChangeDelay", _.topologyChangeDelay),
+    param("alphaVersionSupport", _.alphaVersionSupport),
+    param("betaVersionSupport", _.betaVersionSupport),
+    param("dontWarnOnDeprecatedPV", _.dontWarnOnDeprecatedPV),
+    param("synchronizerLimits", _.synchronizerLimits),
+  )
 }

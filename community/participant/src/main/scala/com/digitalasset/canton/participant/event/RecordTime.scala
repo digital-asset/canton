@@ -7,7 +7,11 @@ import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.{getResultOptionTimestamp, getResultTimestamp}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import slick.jdbc.GetResult
@@ -23,11 +27,9 @@ import slick.jdbc.GetResult
   *   - Requests (regular as well as repair requests) use the repair counter as `tieBreaker`.
   *   - Empty ACS changes (ticks, received ACS commitments, time proofs) use `Long.MinValue`
   */
-final case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long) extends PrettyPrinting {
-  override lazy val pretty: Pretty[RecordTime] = prettyOfClass(
-    param("timestamp", _.timestamp),
-    param("tieBreaker", _.tieBreaker),
-  )
+final case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long)
+    extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[RecordTime] = RecordTime
 
   /** Note that there is no guarantee that this will result in a time of change with an existing
     * repair counter.
@@ -36,7 +38,7 @@ final case class RecordTime(timestamp: CantonTimestamp, tieBreaker: Long) extend
     TimeOfChange.negativeCounterToNone(timestamp, RepairCounter(tieBreaker))
 }
 
-object RecordTime {
+object RecordTime extends PrettyPrintingCompanion[RecordTime] {
   val lowestTiebreaker: Long = Long.MinValue
   val highestTiebreaker: Long = Long.MaxValue
 
@@ -68,4 +70,9 @@ object RecordTime {
 
   def apply(timestamp: EffectiveTime, tieBreaker: Long): RecordTime =
     RecordTime(timestamp.value, tieBreaker)
+
+  override protected val pretty: Pretty[RecordTime] = prettyOfClass(
+    param("timestamp", _.timestamp),
+    param("tieBreaker", _.tieBreaker),
+  )
 }

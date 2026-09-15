@@ -8,14 +8,14 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLoggingContext}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.*
-import com.digitalasset.daml.lf.data.{Ref, Time}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Error.Interpretation
 import com.digitalasset.daml.lf.engine.Result.Need
-import com.digitalasset.daml.lf.engine.refinement.Enricher as LfEnricher
+import com.digitalasset.daml.lf.engine.refinement.{CommandPreprocessor, Enricher as LfEnricher}
 import com.digitalasset.daml.lf.engine.{Engine, Result, TransactionCoder}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.*
-import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
+import com.digitalasset.daml.lf.speedy.SExpr.SEApp
 import com.digitalasset.daml.lf.speedy.SResult.*
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot
 import com.digitalasset.daml.lf.transaction.{NextGenContractStateMachine as CSMachine, *}
@@ -293,7 +293,7 @@ private[lf] object IdeLedgerRunner {
       ledger: LedgerApi[R],
       committers: Set[Party],
       readAs: Set[Party],
-      commands: SExpr,
+      commands: List[command.ApiCommand],
       location: Option[Location],
       seed: crypto.Hash,
       machineLogger: MachineLogger,
@@ -310,12 +310,21 @@ private[lf] object IdeLedgerRunner {
         .filter(_.contractKeyWithMaintainers.isDefined)
         .groupMapReduce(_.contractKeyWithMaintainers.get.globalKey)(Vector(_))(_ ++ _)
 
+    // preprocessing/compilation errors are thrown, matching the previous behaviour of the callers
+    val preprocessor = new CommandPreprocessor(
+      compiledPackages.pkgInterface,
+      forbidLocalContractIds = true,
+    )
+    val compiledCommands = compiledPackages.compiler.unsafeCompile(
+      preprocessor.unsafePreprocessApiCommands(packageResolution, commands.to(ImmArray))
+    )
+
     val ledgerMachine = Speedy.UpdateMachine(
       packageResolution = packageResolution,
       compiledPackages = compiledPackages,
       preparationTime = Time.Timestamp.MinValue,
       initialSeeding = InitialSeeding.TransactionSeed(seed),
-      expr = SEApp(commands, ArraySeq(SValue.SToken)),
+      expr = SEApp(compiledCommands, ArraySeq(SValue.SToken)),
       committers = committers,
       readAs = readAs,
       commitLocation = location,

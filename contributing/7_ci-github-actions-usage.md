@@ -131,6 +131,9 @@ Tip: combine this with the attempt selector described above. Attempts show retri
 
 # How to rerun failed tests
 
+For the full picture of when and how often failed tests are retried automatically,
+see [7_gha-rerun-strategy.md](7_gha-rerun-strategy.md).
+
 There are two rerun paths:
 
 1. **Automatic failed-jobs rerun workflow**

@@ -9,7 +9,11 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.store.ParticipantPruningStore.ParticipantPruningStatus
 import com.digitalasset.canton.participant.store.db.{
   DbParticipantPruningStore,
@@ -66,11 +70,16 @@ object ParticipantPruningStore {
   final case class ParticipantPruningStatus(
       startedO: Option[Offset],
       completedO: Option[Offset],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
     def isInProgress: Boolean =
       startedO.exists(started => completedO.forall(completed => started > completed))
 
-    override protected def pretty: Pretty[ParticipantPruningStatus] =
+    override def prettyCompanion: PrettyPrintingCompanion[ParticipantPruningStatus] =
+      ParticipantPruningStatus
+  }
+
+  object ParticipantPruningStatus extends PrettyPrintingCompanion[ParticipantPruningStatus] {
+    override protected val pretty: Pretty[ParticipantPruningStatus] =
       prettyOfClass(
         paramIfDefined("started", _.startedO),
         paramIfDefined("completed", _.completedO),

@@ -10,7 +10,11 @@ import com.digitalasset.canton.ProtoDeserializationError.InvariantViolation
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -63,7 +67,7 @@ final case class SynchronizerConnectionConfig(
     timeTracker: SynchronizerTimeTrackerConfig = SynchronizerTimeTrackerConfig(),
     initializeFromTrustedSynchronizer: Boolean = false,
 ) extends HasVersionedWrapper[SynchronizerConnectionConfig]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   /** Merges this connection config with provided config, but only if the provided config is
     * subsumed by this config. The provided configuration is considered subsumed, if all its
@@ -176,22 +180,8 @@ final case class SynchronizerConnectionConfig(
 
   override protected def companionObj = SynchronizerConnectionConfig
 
-  override protected def pretty: Pretty[SynchronizerConnectionConfig] =
-    prettyOfClass(
-      param("synchronizer", _.synchronizerAlias),
-      paramIfDefined("physicalSynchronizerId", _.psid),
-      param("sequencerConnections", _.sequencerConnections),
-      param("manualConnect", _.manualConnect),
-      paramIfDefined("priority", x => Option.when(x.priority != 0)(x.priority)),
-      paramIfDefined("initialRetryDelay", _.initialRetryDelay),
-      paramIfDefined("maxRetryDelay", _.maxRetryDelay),
-      paramIfNotDefault("timeTracker", _.timeTracker, SynchronizerTimeTrackerConfig()),
-      paramIfNotDefault(
-        "initializeFromTrustedSynchronizer",
-        _.initializeFromTrustedSynchronizer,
-        false,
-      ),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[SynchronizerConnectionConfig] =
+    SynchronizerConnectionConfig
 
   def toProtoV30: v30.SynchronizerConnectionConfig =
     v30.SynchronizerConnectionConfig(
@@ -209,7 +199,8 @@ final case class SynchronizerConnectionConfig(
 
 object SynchronizerConnectionConfig
     extends HasVersionedMessageCompanion[SynchronizerConnectionConfig]
-    with HasVersionedMessageCompanionDbHelpers[SynchronizerConnectionConfig] {
+    with HasVersionedMessageCompanionDbHelpers[SynchronizerConnectionConfig]
+    with PrettyPrintingCompanion[SynchronizerConnectionConfig] {
   val supportedProtoVersions: SupportedProtoVersions = SupportedProtoVersions(
     ProtoVersion(30) -> ProtoCodec(
       ProtocolVersion.v35,
@@ -267,4 +258,21 @@ object SynchronizerConnectionConfig
       initializeFromTrustedSynchronizer,
     )
   }
+
+  override protected val pretty: Pretty[SynchronizerConnectionConfig] =
+    prettyOfClass(
+      param("synchronizer", _.synchronizerAlias),
+      paramIfDefined("physicalSynchronizerId", _.psid),
+      param("sequencerConnections", _.sequencerConnections),
+      param("manualConnect", _.manualConnect),
+      paramIfDefined("priority", x => Option.when(x.priority != 0)(x.priority)),
+      paramIfDefined("initialRetryDelay", _.initialRetryDelay),
+      paramIfDefined("maxRetryDelay", _.maxRetryDelay),
+      paramIfNotDefault("timeTracker", _.timeTracker, SynchronizerTimeTrackerConfig()),
+      paramIfNotDefault(
+        "initializeFromTrustedSynchronizer",
+        _.initializeFromTrustedSynchronizer,
+        false,
+      ),
+    )
 }

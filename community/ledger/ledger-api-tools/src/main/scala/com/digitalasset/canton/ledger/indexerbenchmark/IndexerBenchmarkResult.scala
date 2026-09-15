@@ -67,7 +67,6 @@ class IndexerBenchmarkResult(
        |  inputMapping.batchSize:     ${histogramToString(
         metrics.indexer.inputMapping.batchSize
       )}
-       |  inputMapping.batchWeight:   ${histogramToString(metrics.indexer.inputMapping.batchWeight)}
        |  seqMapping.duration: ${timerToString(
         metrics.indexer.seqMapping.duration
       )}|

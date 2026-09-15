@@ -141,9 +141,7 @@ object JdbcIndexer {
           dbPrepareParallelism = config.dbPrepareParallelism.unwrap,
           batchingParallelism = config.batchingParallelism.unwrap,
           ingestionParallelism = ingestionParallelism,
-          useWeightedBatching = config.useWeightedBatching,
           submissionBatchSize = config.submissionBatchSize,
-          submissionBatchInsertionSize = config.submissionBatchInsertionSize,
           maxTailerBatchSize = config.maxTailerBatchSize,
           postProcessingParallelism = config.postProcessingParallelism,
           parContractReadRowLock = DbLockMeta(

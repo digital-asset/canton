@@ -82,6 +82,7 @@ private[decrypter] class ViewMessageDecrypterImplV1(
   ): EitherT[FutureUnlessShutdown, TransactionProcessorError, DecryptedViews[
     LightTransactionViewTree
   ]] = {
+
     // To recover parallel processing to the largest possible extent, we'll associate a promise to each received
     // view. The promise gets fulfilled once the randomness of that view has been extracted,
     // either from EncryptedViewMessage.sessionKeys or from LightTransactionViewTree.subviewHashesAndKeys.
@@ -231,7 +232,7 @@ private[decrypter] class ViewMessageDecrypterImplV1(
                   // The view will be filtered out when attempting to construct a FullTransactionViewTree.
                   SyncServiceAlarm
                     .Warn(
-                      s"View ${viewTree.viewHash} lists a subview with hash $viewHash, but I haven't received any views for this hash"
+                      s"View ${viewTree.viewHash} lists a subview ViewHash($viewHash), but we haven't received any views with this view hash"
                     )
                     .report()
               }
@@ -254,8 +255,7 @@ private[decrypter] class ViewMessageDecrypterImplV1(
         case Some(Success(Outcome(existingRandomness))) if existingRandomness != randomness =>
           ErrorUtil.internalError(
             new IllegalArgumentException(
-              s"View $viewHash has different encryption keys associated with it. " +
-                s"(previous: $existingRandomness, new: $randomness)"
+              s"View $viewHash has multiple encryption keys associated with it"
             )
           )
         case Some(Failure(cause)) =>

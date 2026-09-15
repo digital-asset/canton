@@ -16,6 +16,7 @@ import com.daml.metrics.api.{
 }
 import com.daml.metrics.grpc.{DamlGrpcServerHistograms, DamlGrpcServerMetrics}
 import com.daml.metrics.{CacheMetrics, HealthMetrics}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.TracedLogger
@@ -36,8 +37,14 @@ import com.digitalasset.canton.metrics.{
   TrafficConsumptionMetrics,
 }
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
+import com.digitalasset.canton.topology.{
+  Member,
+  PhysicalSynchronizerId,
+  SequencerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
 import scala.annotation.unused
@@ -377,8 +384,12 @@ class SequencerMetrics(
   // we use this environment variable approach to guard against instantiation in production; but
   // register the metric for the documentation generation.
   if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
-    val dummyPsid = PhysicalSynchronizerId.tryFromString(
-      "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1::34-0"
+    val dummyPsid = PhysicalSynchronizerId(
+      SynchronizerId.tryFromString(
+        "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1"
+      ),
+      NonNegativeInt.zero,
+      ProtocolVersion.latest,
     )
 
     setLsuContactSuccessorStatus(0, dummyPsid)

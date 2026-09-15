@@ -35,7 +35,7 @@ import com.digitalasset.canton.version.{
   HasVersionedMessageCompanion,
   HasVersionedWrapper,
   ProtoVersion,
-  ReleaseProtocolVersion,
+  ProtocolVersion,
 }
 import com.digitalasset.nonempty.NonEmpty
 
@@ -182,8 +182,7 @@ class ReceivedAcsCommitmentValidatorImpl(
   )(implicit traceContext: TraceContext): ReceivedAcsCommitment = {
     val serializedMessages =
       ReceivedAcsCommitments(messages).toByteString(
-        // TODO(#33849): use latest once the acs commitment redesign becomes stable
-        ReleaseProtocolVersion.acsCommitmentRedesignStorage.v
+        ProtocolVersion.v35
       )
     ReceivedAcsCommitment(
       synchronizerId = physicalSynchronizerId.logical,
@@ -219,8 +218,7 @@ object ReceivedAcsCommitments
   override def supportedProtoVersions: SupportedProtoVersions =
     SupportedProtoVersions(
       ProtoVersion(30) -> ProtoCodec(
-        // TODO(#33849): use the protocol version with which the acs commitment redesign is released
-        ReleaseProtocolVersion.acsCommitmentRedesignStorage.v,
+        ProtocolVersion.v35,
         supportedProtoVersion(v30participant.ReceivedAcsCommitments)(fromProtoV30),
         _.toProtoV30,
       )

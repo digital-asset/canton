@@ -16,9 +16,9 @@ class P2PGrpcBftOrderingService(
           BftOrderingMessage
         ],
         TraceContext,
-    ) => UnlessShutdown[StreamObserver[
+    ) => Option[UnlessShutdown[StreamObserver[
       BftOrderingMessage
-    ]],
+    ]]],
     override val loggerFactory: NamedLoggerFactory,
 ) extends BftOrderingServiceGrpc.BftOrderingService
     with NamedLogging {
@@ -28,8 +28,8 @@ class P2PGrpcBftOrderingService(
   ): StreamObserver[BftOrderingMessage] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     createServerSidePeerReceiver(sendingStreamObserver, traceContext) match {
-      case UnlessShutdown.Outcome(peerReceiver) => peerReceiver
-      case UnlessShutdown.AbortedDueToShutdown =>
+      case Some(UnlessShutdown.Outcome(peerReceiver)) => peerReceiver
+      case Some(UnlessShutdown.AbortedDueToShutdown) =>
         // No receiver created means that we're shutting down
         logger.debug(s"Completing peer sender ${objId(sendingStreamObserver)} due to shutdown")
         // Unsynchronized but we're shutting down, so this observer hasn't been sent anything
@@ -39,6 +39,17 @@ class P2PGrpcBftOrderingService(
             logger.debug(s"Received message $value, ignoring due to shutdown")
           override def onError(t: Throwable): Unit =
             logger.debug(s"Received error, ignoring due to shutdown", t)
+          override def onCompleted(): Unit =
+            logger.debug(s"Received completion")
+        }
+      case None =>
+        logger.error(s"Peer sender ${objId(sendingStreamObserver)} is not a supported type")
+        // `withCallStreamObserverG` has already failed the sender with an INTERNAL status.
+        new StreamObserver[BftOrderingMessage]() {
+          override def onNext(value: BftOrderingMessage): Unit =
+            logger.debug(s"Received message $value, ignoring due to peer sender not supported")
+          override def onError(t: Throwable): Unit =
+            logger.debug(s"Received error, ignoring due to peer sender not supported", t)
           override def onCompleted(): Unit =
             logger.debug(s"Received completion")
         }

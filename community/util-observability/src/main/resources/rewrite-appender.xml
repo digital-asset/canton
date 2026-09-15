@@ -403,5 +403,15 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- Can be removed once the TEA projection writes through DbStorage. If the write pool is briefly full,
+             the retry succeeds a second later, but pekko-projection logs the first failure itself, outside Canton's 
+             log suppression. -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>org.apache.pekko.projection.slick.internal.SlickProjectionImpl$SlickInternalProjectionState</logger>
+            <contains>No active and free KeepAliveConnection available</contains>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
    </appender>
 </included>

@@ -22,6 +22,7 @@ load-metrics() {
 	local metric_file="$1"
 	local prefix="$2"
 	local flt="${3:-}"
+	local calc_time="${4:-}"
 
 	local is_known_missing_metrics="false"
 
@@ -49,12 +50,12 @@ load-metrics() {
 
 	echo "Loading metrics from $METRICS_DIR/$metric_file ..."
 
-	eval "$(read-csv-metric.py "$METRICS_DIR/$metric_file" "$prefix" "$EARLY_EVENT_PERCENTILE" "$LATE_EVENT_PERCENTILE" "$flt")"
+	eval "$(read-csv-metric.py "$METRICS_DIR/$metric_file" "$prefix" "$EARLY_EVENT_PERCENTILE" "$LATE_EVENT_PERCENTILE" "$flt" "$calc_time")"
 }
 
 load-metrics participant1.daml.participant.console.tx-nodes-emitted.csv TX "measurement=canton.transactions-emitted"
 # the indexer metrics include many events, but we are only interested in the indexer event updates
-load-metrics participant1.daml.participant.api.indexer.events.csv UPDATES PerformanceTest
+load-metrics "participant1.daml.participant.api.indexer.events.csv" "UPDATES" "PerformanceTest" "calc_test_time"
 load-metrics participant1.synchronizer.daml.sequencer-client.handler.sequencer-events.csv PARTICIPANT_EVENTS
 load-metrics mediator.daml.sequencer-client.handler.sequencer-events.csv MEDIATOR_EVENTS
 load-metrics canton.performance.failed.csv FAILED_TRADER1 "role=participant1-trader1"
@@ -93,3 +94,50 @@ cat >> "$SLACK_METRICS_FILE" <<EOI
 • Failed commands (trader1): *$FAILED_TRADER1_EARLY_TO_LATE_COUNT*
 
 EOI
+
+# JSON summary creation - and appending to the 'summary.json' file
+TEST_NAME="$CURRENT_JOB_NAME"
+if [[ ! -f "$REPOSITORY_ROOT/VERSION" ]]; then
+	echo "Cannot open $REPOSITORY_ROOT/VERSION to read canton version"
+	exit 1
+fi
+VERSION=$(cat "$REPOSITORY_ROOT/VERSION")
+CANTON_VERSION="canton-open-source-${VERSION}"
+HOST_NAME="$(hostname)"
+
+if [[ -n "$UPDATES_EARLY_TO_LATE_TIME" && "$UPDATES_EARLY_TO_LATE_TIME" -gt 0 ]] 2>/dev/null; then
+  TPS="$(awk "BEGIN {printf \"%.2f\", $UPDATES_EARLY_TO_LATE_COUNT / $UPDATES_EARLY_TO_LATE_TIME}")"
+else
+	echo
+	echo "[ERROR] The extraction of test time is empty or zero!"
+	echo "[ERROR] Hint: Perhaps the data is the same for $EARLY_EVENT_PERCENTILE and $LATE_EVENT_PERCENTILE?"
+	echo "[ERROR] Please check the metrics in $METRICS_DIR/participant1.daml.participant.api.indexer.events.csv to verify!"
+  exit 1
+fi
+
+# We save the summary of the test into the metrics base directory
+# that is the same across the tests run under the same nightly test run
+SUMMARY_JSON_FILE="$METRICS_BASE_DIR/summary.json"
+TEST_START_TIME="$UPDATES_START_TIME"
+TEST_DURATION="$UPDATES_DURATION_IN_SECS seconds"
+
+echo
+echo "Appending data to $SUMMARY_JSON_FILE ..."
+
+jq -n \
+	--arg test "$TEST_NAME" \
+	--arg ver "$CANTON_VERSION" \
+	--arg host "$HOST_NAME" \
+	--arg start "$TEST_START_TIME" \
+	--arg duration "$TEST_DURATION" \
+	--argjson tps "$TPS" \
+	'{
+		"test-name": $test,
+		"version": $ver,
+		"machine": $host,
+		"start-time": $start,
+		"duration": $duration,
+		"results": {
+			"transactions-per-second": $tps
+		}
+	}' >> "$SUMMARY_JSON_FILE"

@@ -34,6 +34,7 @@ import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
 }
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.TransactionProcessorError
 import com.digitalasset.canton.participant.protocol.decrypter.ViewMessageDecrypterImplV2.DecryptedViewsChained
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.protocol.messages.{
   EncryptedViewMessage,
@@ -104,14 +105,22 @@ private[decrypter] class ViewMessageDecrypterImplV2(
     ],
   ] = TrieMap.empty
 
-  /** Stores encrypted view messages indexed by ciphertext ID. Multiple envelopes can theoretically
-    * share the same ciphertext ID, for example if they contain different encrypted randomness
-    * values. Nevertheless, we expect only one of them to decrypt successfully; otherwise, we fail.
+  /** Stores encrypted view messages indexed by ciphertext ID.
+    *
+    * Throws an exception or crashes if multiple envelopes share the same ciphertext ID (e.g.,
+    * differing encrypted randomness values or presence of signatures). This prevents
+    * non-deterministic behavior where the system simply retains whichever envelope it processes
+    * first.
     */
   private[canton] val ciphertextIdsMap: TrieMap[
     Hash,
-    Seq[OpenEnvelope[EncryptedViewMessage[TransactionViewType]]],
+    OpenEnvelope[EncryptedViewMessage[TransactionViewType]],
   ] = TrieMap.empty
+
+  /** Remembers the first randomness observed for each ciphertext ID. A ciphertext ID must not be
+    * associated with more than one randomness value.
+    */
+  private[canton] val ciphertextRandomnessMap: TrieMap[Hash, SecureRandomness] = TrieMap.empty
 
   private def decryptSubviewsAndMergeResults(
       parent: MultipleViewTrees[LightTransactionViewTree],
@@ -127,25 +136,20 @@ private[decrypter] class ViewMessageDecrypterImplV2(
       // Each view may reference multiple subviews via ciphertext IDs.
       MonadUtil.parTraverseWithLimit(pureCrypto.encryptionParallelism)(
         viewTree.subviewReferencesAndKeys
-          .flatMap {
+          .map {
             case SubviewReferenceAndKey(ByCiphertextId(ciphertextId, _), subviewKey) =>
               ciphertextIdsMap.get(ciphertextId) match {
-                case Some(encryptedSubviewsEnvelopes) =>
-                  encryptedSubviewsEnvelopes.map { envelope =>
-                    Right((ciphertextId, subviewKey, envelope))
-                  }
-                // Invalid case: ciphertext reference cannot be resolved
+                case Some(encryptedSubviewsEnvelope) =>
+                  Right((ciphertextId, subviewKey, encryptedSubviewsEnvelope))
                 case None =>
-                  Seq(
-                    Left(
-                      DecryptedViewsChained[LightTransactionViewTree](
-                        Chain.empty,
-                        Chain(
-                          EncryptedViewMessageError.InvalidSubviewReferenceError(
-                            s"Invalid subview reference in view ${viewTree.viewHash}: ciphertext ID $ciphertextId not found"
-                          )
-                        ),
-                      )
+                  Left(
+                    DecryptedViewsChained[LightTransactionViewTree](
+                      Chain.empty,
+                      Chain.one(
+                        EncryptedViewMessageError.InvalidSubviewReferenceError(
+                          s"Invalid subview reference in view ${viewTree.viewHash}: ciphertext ID $ciphertextId not found"
+                        )
+                      ),
                     )
                   )
               }
@@ -177,14 +181,14 @@ private[decrypter] class ViewMessageDecrypterImplV2(
       decryptedSubviewsSeq
         .prepended(
           // Prepend the views decrypted at the current level before combining them
-          // with all recursively decrypted subviews. If a child view fails to decrypt,
-          // the parent view is considered invalid as well, and we report a decryption error.
+          // with all recursively decrypted subviews. If a child view fails to decrypt with the provided randomness,
+          // then the parent view is considered invalid as well, and we report a decryption error.
           if (decryptedSubviewsSeq.exists(_.decryptionErrors.nonEmpty))
             DecryptedViewsChained[LightTransactionViewTree](
               Chain.empty,
               Chain.one(
                 EncryptedViewMessageError.InvalidSubviewReferenceError(
-                  s"Failed to decrypt parent view ${parent.viewTrees.map(_.viewHash).mkString(", ")} " +
+                  s"Parent view ${parent.viewTrees.map(_.viewHash).mkString(", ")} is invalid " +
                     s"because a subview failed to decrypt"
                 )
               ),
@@ -258,6 +262,20 @@ private[decrypter] class ViewMessageDecrypterImplV2(
       futureSupervisor,
     )
 
+    // for now, we make sure that a given ciphertext ID is only associated with the one randomness value
+    ciphertextRandomnessMap
+      .updateWith(ciphertextId) {
+        case Some(existingRandomness) if existingRandomness != randomness =>
+          ErrorUtil.internalError(
+            new IllegalArgumentException(
+              s"Ciphertext ID $ciphertextId has multiple encryption keys associated with it"
+            )
+          )
+        case Some(existingRandomness) => Some(existingRandomness)
+        case None => Some(randomness)
+      }
+      .discard
+
     // we must make sure that only one decryption attempt for a given ciphertext and key is in-flight at any time,
     // so we synchronize the access to the cache
     val decryptionO = underDecryption
@@ -327,14 +345,28 @@ private[decrypter] class ViewMessageDecrypterImplV2(
       val ciphertextId =
         envelope.protocolMessage.encryptedViews.computeCiphertextId(snapshot.pureCrypto)
 
-      // store the envelope in the map of ciphertext IDs to envelopes, allowing multiple envelopes
-      // to share the same ciphertext ID. This is theoretically possible because AES is not key-committing:
-      // the same ciphertext could, in theory, decrypt successfully with different keys to different views.
       ciphertextIdsMap
         .updateWith(ciphertextId) {
-          case Some(envelopes) if !envelopes.contains(envelope) => Some(envelopes :+ envelope)
-          case Some(envelopes) => Some(envelopes) // preserve existing
-          case None => Some(Seq(envelope))
+          // this is not expected to happen, and we crash to avoid inconsistent behavior
+          case Some(existingEnvelope) if existingEnvelope != envelope =>
+            ErrorUtil.internalError(
+              new IllegalArgumentException(
+                s"Duplicate envelope with the same ciphertextID $ciphertextId for participant $participantId: " +
+                  s"existing envelope $existingEnvelope, " +
+                  s"new envelope $envelope"
+              )
+            )
+          // this is not expected to happen, but we handle it gracefully by preserving the existing envelopes
+          case Some(existingEnvelope) =>
+            // TODO(#34769): Check if this is problematic and if we should remove both the original and duplicate views from the map
+            // It is enough to alarm here. The duplicate envelopes are filtered out.
+            SyncServiceAlarm
+              .Warn(
+                s"Discarding duplicate envelope with ciphertext ID $ciphertextId for participant $participantId"
+              )
+              .report()
+            Some(existingEnvelope) // preserve existing
+          case None => Some(envelope)
         }
         .discard
     }
@@ -342,11 +374,22 @@ private[decrypter] class ViewMessageDecrypterImplV2(
     // if the participant is a leaf recipient (within the recipient tree), then it means that the randomness
     // is expected to be encrypted for this participant and can be directly decrypted with its private key.
     val decryptableEnvelopes =
-      ciphertextIdsMap.toSeq.flatMap { case (ciphertextId, envelopes) =>
-        envelopes
-          .filter(_.recipients.leafRecipients.contains(MemberRecipient(participantId)))
-          .map(envelope => ciphertextId -> envelope)
+      ciphertextIdsMap.toSeq.filter { case (_, envelope) =>
+        envelope.recipients.leafRecipients.contains(MemberRecipient(participantId))
       }
+
+    def checkNoDuplicates[A](items: Seq[A], mkErrorMessage: A => String): Unit = {
+      val duplicates = items.diff(items.distinct).distinct
+
+      if (duplicates.nonEmpty) {
+        val duplicateMessages = duplicates.map(mkErrorMessage)
+        ErrorUtil.internalError(
+          new IllegalArgumentException(
+            s"Duplicate item(s): ${duplicateMessages.mkString("; ")}"
+          )
+        )
+      }
+    }
 
     EitherT.right {
       for {
@@ -383,28 +426,16 @@ private[decrypter] class ViewMessageDecrypterImplV2(
           .map(_.combineAll)
 
         viewsList = res.views.toList
-        // Each decrypted view must have a unique ciphertext ID. Duplicate ciphertext IDs indicate that
-        // multiple encrypted views were incorrectly associated with the same ciphertext ID.
-        // We assume multiple successful decryptions with different keys should not occur; if they do,
-        // this may indicate a protocol violation, implementation error, or an attempted attack.
-        // 1. Check for duplicate Ciphertext IDs among views that have one
-        ciphertextIds = viewsList.flatMap(_.ciphertextIdO)
-        _ = if (ciphertextIds.distinct.sizeCompare(viewsList) != 0) {
-          ErrorUtil.internalError(
-            new IllegalArgumentException(
-              "Duplicate ciphertext IDs found in the final decrypted views"
-            )
-          )
-        }
-
-        // 2. Check for duplicate Views with different encryption keys.
-        // TODO(#15022): After transparency is implemented, the participant should not break.
-        views = viewsList.map(_.view)
-        _ = if (views.distinct.sizeCompare(viewsList) != 0) {
-          ErrorUtil.internalError(
-            new IllegalArgumentException(s"A view has different encryption keys associated with it")
-          )
-        }
+        // Each decrypted view must have a unique ciphertext ID. We already guarantee that
+        // a ciphertextID is unique because if we encounter a duplicate ciphertextID associated with different
+        // envelopes we crash. However, we also need to check that the decrypted views themselves are unique, because
+        // it is possible that multiple envelopes with different ciphertexts decrypt to the same view, which should not
+        // happen.
+        _ = checkNoDuplicates[WithRecipients[LightTransactionViewTree]](
+          viewsList.map(_.view),
+          (duplicate: WithRecipients[LightTransactionViewTree]) =>
+            s"The view ${duplicate.unwrap.viewHash} has multiple encryption keys associated with it",
+        )
       } yield {
         DecryptedViews(res.views.toList, res.decryptionErrors.toList)
       }

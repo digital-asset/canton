@@ -4,7 +4,11 @@
 package com.digitalasset.canton.participant.extension
 
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.platform.execution.ExternalCallMode
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -31,10 +35,14 @@ final case class ExtensionCallError(
     retryable: Boolean,
     clientActionable: Boolean,
 )(implicit val traceContext: TraceContext)
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
   // `clientActionable` is deliberately not rendered: the rendering doubles as the client-facing
   // payload for actionable errors, and the flag is control metadata rather than error content.
-  override protected def pretty: Pretty[ExtensionCallError] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[ExtensionCallError] = ExtensionCallError
+}
+
+object ExtensionCallError extends PrettyPrintingCompanion[ExtensionCallError] {
+  override protected val pretty: Pretty[ExtensionCallError] = prettyOfClass(
     param("status code", _.statusCode),
     param("message", _.message.doubleQuoted),
     paramIfDefined("external call id", _.externalCallId.map(_.singleQuoted)),

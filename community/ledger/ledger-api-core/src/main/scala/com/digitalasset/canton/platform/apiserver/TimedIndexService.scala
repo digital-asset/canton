@@ -28,6 +28,7 @@ import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
+import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
@@ -109,6 +110,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
       configOverrides: ActiveContractsServiceStreamsConfigOverrides,
+      continuationToken: Option[ByteString],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[InternalIndexService.ActiveContract, NotUsed] =
@@ -120,6 +122,7 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
         stakeholders1 = stakeholders1,
         stakeholders2 = stakeholders2,
         configOverrides = configOverrides,
+        continuationToken = continuationToken,
       ),
     )
 

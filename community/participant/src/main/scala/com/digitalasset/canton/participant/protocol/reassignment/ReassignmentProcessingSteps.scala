@@ -31,7 +31,11 @@ import com.digitalasset.canton.ledger.participant.state.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   DecryptedViewData,
@@ -65,6 +69,7 @@ import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ContractValidator, MonadUtil, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
@@ -698,13 +703,18 @@ object ReassignmentProcessingSteps {
       extends WrapsProcessorError
       with Product
       with Serializable
-      with PrettyPrinting {
+      with PrettyPrintingFromCompanion {
     override def underlyingProcessorError(): Option[ProcessorError] = None
 
-    override protected def pretty: Pretty[ReassignmentProcessorError.this.type] =
-      adHocPrettyInstance
+    override def prettyCompanion: PrettyPrintingCompanion[this.type] =
+      ReassignmentProcessorError
 
     def message: String
+  }
+
+  object ReassignmentProcessorError extends PrettyPrintingCompanion[ReassignmentProcessorError] {
+    override protected val pretty: Pretty[ReassignmentProcessorError] =
+      adHocPrettyInstance
   }
 
   object ReassignmentSubmissionErrors extends SubmissionErrorGroup {
@@ -755,7 +765,12 @@ object ReassignmentProcessingSteps {
       with ReassignmentValidationError {
     override def message: String = s"Unknown synchronizer $physicalSynchronizerId when $context"
 
-    override protected def pretty: Pretty[UnknownPhysicalSynchronizer] = prettyOfString(_.message)
+    override def prettyCompanion: PrettyPrintingCompanion[UnknownPhysicalSynchronizer] =
+      UnknownPhysicalSynchronizer
+  }
+
+  object UnknownPhysicalSynchronizer extends PrettyPrintingCompanion[UnknownPhysicalSynchronizer] {
+    override protected val pretty: Pretty[UnknownPhysicalSynchronizer] = prettyOfString(_.message)
   }
 
   final case class UnknownSynchronizer(
@@ -766,9 +781,15 @@ object ReassignmentProcessingSteps {
   }
 
   case object ApplicationShutdown extends ReassignmentProcessorError {
-    override protected def pretty: Pretty[ApplicationShutdown.type] =
-      prettyOfObject[ApplicationShutdown.type]
+    override def prettyCompanion: PrettyPrintingCompanion[ApplicationShutdown.this.type] =
+      ApplicationShutdownPrettyPrintingCompanion
     override def message: String = "Application is shutting down"
+  }
+
+  private object ApplicationShutdownPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[ApplicationShutdown.type] {
+    override protected val pretty: Pretty[ApplicationShutdown.type] =
+      prettyOfObject[ApplicationShutdown.type]
   }
 
   final case class SynchronizerNotReady(synchronizerId: PhysicalSynchronizerId, context: String)
@@ -845,7 +866,12 @@ object ReassignmentProcessingSteps {
     override def message: String =
       s"Cannot reassign `$reassignmentId`: invalid conversion for `$field`"
 
-    override protected def pretty: Pretty[FieldConversionError] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[FieldConversionError] =
+      FieldConversionError
+  }
+
+  object FieldConversionError extends PrettyPrintingCompanion[FieldConversionError] {
+    override protected val pretty: Pretty[FieldConversionError] = prettyOfClass(
       param("field", _.field.unquoted),
       param("error", _.error.unquoted),
     )

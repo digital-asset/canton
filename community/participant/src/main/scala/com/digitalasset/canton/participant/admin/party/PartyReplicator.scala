@@ -51,8 +51,8 @@ import com.digitalasset.canton.sequencing.client.channel.SequencerChannelClient
 import com.digitalasset.canton.sequencing.protocol.channel.SequencerChannelId
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.store.{TimeQuery, TopologyStore}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
@@ -60,7 +60,6 @@ import com.digitalasset.canton.topology.transaction.{
   PartyToParticipant,
   SignedTopologyTransaction,
   TopologyChangeOp,
-  TopologyMapping,
   TopologyTransaction,
   TopologyTransactionSignature,
 }
@@ -773,6 +772,7 @@ final class PartyReplicator(
                 response.participantPermission,
               ),
               protocolVersion,
+              AgreementStatus.Proposed,
             )
             partyReplicationStateManager
               .add(newStatus)
@@ -1112,43 +1112,6 @@ final class PartyReplicator(
         } yield ()
     }
 
-  private def partiesHostedByParticipant(
-      participantId: ParticipantId,
-      except: PartyId,
-      topologyStore: TopologyStore[SynchronizerStore],
-      asOfExclusive: EffectiveTime,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Set[PartyId]] =
-    // TODO(#25766): add topology client endpoint
-    EitherT(
-      topologyStore
-        .inspect(
-          proposals = false,
-          timeQuery = TimeQuery.Snapshot(asOfExclusive.value),
-          asOfExclusiveO = None, // ignored for TimeQuery.Snapshot; always exclusive
-          op = Some(TopologyChangeOp.Replace),
-          types = Seq(TopologyMapping.Code.PartyToParticipant),
-          idFilter = None,
-          namespaceFilter = None,
-        )
-        .map(topologyTxns =>
-          Right(
-            topologyTxns
-              .collectOfMapping[PartyToParticipant]
-              .collectOfType[TopologyChangeOp.Replace]
-              .result
-              .filter { x =>
-                val ptp = x.mapping
-                ptp.partyId != except &&
-                ptp.participants.exists(_.participantId == participantId)
-              }
-              .map(_.mapping.partyId)
-              .toSet
-          ): Either[String, Set[PartyId]]
-        )
-    )
-
   private def connectToSequencerChannel(
       requestId: AddPartyRequestId
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
@@ -1171,49 +1134,26 @@ final class PartyReplicator(
         for {
           processorInfo <-
             if (participantId == params.sourceParticipantId) {
-              for {
-                partiesAlreadyHostedByTargetParticipant <- partiesHostedByParticipant(
-                  params.targetParticipantId,
+              PartyReplicationSourceParticipantProcessor
+                .initialize(
+                  connectedSynchronizer.psid,
                   params.partyId,
-                  connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore,
-                  onboardingAt,
-                )
-                effectiveAtLapiOffset <- EitherT(
-                  synchronizeWithClosingF(s"Locate PTP lapi offset for $requestId")(
-                    syncService.participantNodePersistentState.value.ledgerApiStore
-                      .topologyEventOffsetPublishedOnRecordTime(
-                        params.synchronizerId,
-                        onboardingAt.value,
-                      )
-                      .map(
-                        _.toRight(
-                          s"Cannot locate PTP ${params.partyId} offset at $onboardingAt for $requestId"
-                        )
-                      )
-                  )
-                )
-              } yield {
-                (
-                  PartyReplicationSourceParticipantProcessor(
-                    connectedSynchronizer.psid,
-                    params.partyId,
-                    requestId,
-                    effectiveAtLapiOffset,
-                    partiesAlreadyHostedByTargetParticipant,
-                    internalIndexService,
-                    partyReplicationStateManager,
-                    recordSequencerChannelError(requestId, traceContext),
-                    markDisconnected(requestId),
-                    futureSupervisor,
-                    exitOnFatalFailures,
-                    timeouts,
-                    loggerFactory,
-                    testInterceptorO.getOrElse(PartyReplicationTestInterceptor.AlwaysProceed),
-                  ): PartyReplicationProcessor,
+                  requestId,
+                  onboardingAt.value,
                   params.targetParticipantId,
-                  noSessionKey,
+                  internalIndexService,
+                  partyReplicationStateManager,
+                  recordSequencerChannelError(requestId, traceContext),
+                  markDisconnected(requestId),
+                  connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore,
+                  syncService.participantNodePersistentState.value.ledgerApiStore,
+                  futureSupervisor,
+                  exitOnFatalFailures,
+                  timeouts,
+                  loggerFactory,
+                  testInterceptorO.getOrElse(PartyReplicationTestInterceptor.AlwaysProceed),
                 )
-              }
+                .map((_: PartyReplicationProcessor, params.targetParticipantId, noSessionKey))
             } else if (participantId == params.targetParticipantId) {
               EitherT.rightT[FutureUnlessShutdown, String](
                 (

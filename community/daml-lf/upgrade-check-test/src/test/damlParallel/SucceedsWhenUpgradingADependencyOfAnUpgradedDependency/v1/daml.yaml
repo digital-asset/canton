@@ -1,0 +1,20 @@
+name: upgrades-example-SucceedsWhenUpgradingADependencyOfAnUpgradedDependency
+version: 1.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/upgrades-SucceedsWhenUpgradingADependencyOfAnUpgradedDependency-dep-v1.dar
+  - ${TARGET_ROOT}/upgrades-SucceedsWhenUpgradingADependencyOfAnUpgradedDependency-dep-dep-v1.dar
+dependencies:
+  - daml-script
+module-prefixes: null
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-SucceedsWhenUpgradingADependencyOfAnUpgradedDependency-v1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

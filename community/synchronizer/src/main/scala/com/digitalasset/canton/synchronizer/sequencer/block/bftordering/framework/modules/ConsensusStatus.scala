@@ -5,7 +5,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -100,7 +104,7 @@ object ConsensusStatus {
     )
   }
 
-  sealed trait SegmentStatus extends PrettyPrinting {
+  sealed trait SegmentStatus extends PrettyPrintingFromCompanion {
     def toProto: v30.SegmentStatus
   }
 
@@ -109,8 +113,14 @@ object ConsensusStatus {
       override val toProto: v30.SegmentStatus =
         v30.SegmentStatus(v30.SegmentStatus.Status.Complete(com.google.protobuf.empty.Empty()))
 
-      override protected def pretty: Pretty[Complete.this.type] = prettyOfObject[Complete.this.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Complete.this.type] =
+        CompletePrettyPrintingCompanion
     }
+
+    private object CompletePrettyPrintingCompanion extends PrettyPrintingCompanion[Complete.type] {
+      override protected val pretty: Pretty[Complete.type] = prettyOfObject[Complete.type]
+    }
+
     sealed trait Incomplete extends SegmentStatus {
       def viewNumber: ViewNumber
       def areBlocksComplete: Seq[Boolean]
@@ -126,11 +136,16 @@ object ConsensusStatus {
           )
         )
 
-      override protected def pretty: Pretty[InProgress.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[InProgress] = InProgress
+    }
+
+    object InProgress extends PrettyPrintingCompanion[InProgress] {
+      override protected val pretty: Pretty[InProgress] = prettyOfClass(
         param("viewNumber", _.viewNumber),
         param("blockStatuses", _.blockStatuses),
       )
     }
+
     final case class InViewChange(
         viewNumber: ViewNumber,
         viewChangeMessagesPresent: Seq[Boolean],
@@ -142,7 +157,11 @@ object ConsensusStatus {
         )
       )
 
-      override protected def pretty: Pretty[InViewChange.this.type] =
+      override def prettyCompanion: PrettyPrintingCompanion[InViewChange] = InViewChange
+    }
+
+    object InViewChange extends PrettyPrintingCompanion[InViewChange] {
+      override protected val pretty: Pretty[InViewChange] =
         prettyOfClass(
           param("viewNumber", _.viewNumber),
           param("viewChangeMessagesPresent", _.viewChangeMessagesPresent),
@@ -174,7 +193,7 @@ object ConsensusStatus {
 
   }
 
-  sealed trait BlockStatus extends PrettyPrinting {
+  sealed trait BlockStatus extends PrettyPrintingFromCompanion {
     def isComplete: Boolean
     def toProto: v30.BlockStatus
   }
@@ -185,8 +204,14 @@ object ConsensusStatus {
       override val toProto: v30.BlockStatus =
         v30.BlockStatus(v30.BlockStatus.Status.Complete(com.google.protobuf.empty.Empty()))
 
-      override protected def pretty: Pretty[Complete.this.type] = prettyOfObject[Complete.this.type]
+      override def prettyCompanion: PrettyPrintingCompanion[Complete.this.type] =
+        CompletePrettyPrintingCompanion
     }
+
+    private object CompletePrettyPrintingCompanion extends PrettyPrintingCompanion[Complete.type] {
+      override protected val pretty: Pretty[Complete.type] = prettyOfObject[Complete.type]
+    }
+
     final case class InProgress(
         prePrepared: Boolean,
         preparesPresent: Seq[Boolean],
@@ -199,7 +224,11 @@ object ConsensusStatus {
         )
       )
 
-      override protected def pretty: Pretty[InProgress.this.type] = prettyOfClass(
+      override def prettyCompanion: PrettyPrintingCompanion[InProgress] = InProgress
+    }
+
+    object InProgress extends PrettyPrintingCompanion[InProgress] {
+      override protected val pretty: Pretty[InProgress] = prettyOfClass(
         param("prePrepared", _.prePrepared),
         param("preparesPresent", _.preparesPresent),
         param("commitsPresent", _.commitsPresent),

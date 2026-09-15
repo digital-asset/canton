@@ -125,7 +125,6 @@ class MempoolModule[E <: Env[E]](
                 // interval or when explicitly requested by availability
                 createAndSendBatches()
               }
-              emitStateStats(metrics, mempoolState)
               metrics.ingress.labels.outcome.values.Success
             }
           }
@@ -144,7 +143,6 @@ class MempoolModule[E <: Env[E]](
         mempoolState.toBeProvidedToAvailability = atMost.toInt
 
         createAndSendBatches()
-        emitStateStats(metrics, mempoolState)
 
       // From the local output module
       case Mempool.LatestKnownSequencingTimeUpdate(latestKnownSequencingTime) =>
@@ -188,14 +186,15 @@ class MempoolModule[E <: Env[E]](
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.While"))
-  private def createAndSendBatches()(implicit context: E#ActorContextT[Mempool.Message]): Unit =
+  private def createAndSendBatches()(implicit context: E#ActorContextT[Mempool.Message]): Unit = {
     while (
       mempoolState.receivedOrderRequests.nonEmpty && mempoolState.toBeProvidedToAvailability > 0
     ) {
       mempoolState.toBeProvidedToAvailability -= 1
       createAndSendBatch()
-      emitStateStats(metrics, mempoolState)
     }
+    emitStateStats(metrics, mempoolState)
+  }
 
   private def createAndSendBatch()(implicit context: E#ActorContextT[Mempool.Message]): Unit = {
     val queuedRequests =
@@ -207,13 +206,12 @@ class MempoolModule[E <: Env[E]](
       val batchCreationInstant = Instant.now
       locally {
         val requests = queuedRequests.map(_.orderRequest.tx)
-        implicit val traceContext = context.traceContextOfBatch(requests)
+        implicit val tc: TraceContext = context.traceContextOfBatch(requests)
         emitRequestsQueuedForBatchInclusionLatencies(requests, batchCreationInstant)
         availability.asyncSend(Availability.LocalDissemination.LocalBatchCreated(requests))
       }
       queuedRequests.foreach(_.span.end())
     }
-    emitStateStats(metrics, mempoolState)
   }
 
   private def emitRequestsQueuedForBatchInclusionLatencies(

@@ -9,6 +9,8 @@ import com.daml.ledger.api.v2.event.{ArchivedEvent, CreatedEvent}
 import com.daml.ledger.api.v2.value.Identifier
 import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.Party
+import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
+import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -18,7 +20,13 @@ import com.digitalasset.canton.performance.acs.{ContractObserver, ContractStore}
 import com.digitalasset.canton.performance.elements.DriverStatus.MasterStatus
 import com.digitalasset.canton.performance.model.java as M
 import com.digitalasset.canton.performance.model.java.orchestration.runtype.DvpRun
-import com.digitalasset.canton.performance.model.java.orchestration.{ProbeType, Role, TestRun}
+import com.digitalasset.canton.performance.model.java.orchestration.{
+  ParticipantFlag,
+  ProbeType,
+  Role,
+  TestParticipant,
+  TestRun,
+}
 import com.digitalasset.canton.performance.{Connectivity, PartyRole}
 import com.digitalasset.canton.util.ErrorUtil
 import org.apache.pekko.actor.ActorSystem
@@ -73,6 +81,8 @@ class MasterDriver(
     connectivity: Connectivity,
     masterPartyLf: LfPartyId,
     config: PartyRole.Master,
+    prefix: MetricName,
+    metricsFactory: LabeledMetricsFactory,
     loggerFactory: NamedLoggerFactory,
     control: DriverControl,
 )(implicit
@@ -92,6 +102,17 @@ class MasterDriver(
 
   def addConfigAdjustment(amender: AmendMasterConfig): Unit =
     amendedConfig.updateAndGet(x => x :+ amender).discard
+
+  private val actors =
+    metricsFactory.counter(
+      MetricInfo(
+        prefix :+ "actors",
+        "How many actors are currently part of the test and in what state",
+        MetricQualification.Debug,
+      )
+    )(
+      MetricsContext.Empty
+    )
 
   private val requests = new ContractStore[
     M.orchestration.ParticipationRequest.Contract,
@@ -135,7 +156,38 @@ class MasterDriver(
       index = x => new Party(x.data.party),
       filter = x => x.data.master == masterParty.getValue,
       loggerFactory,
-    )
+    ) {
+
+      private def flagAsString(flag: ParticipantFlag): String =
+        if (flag == ParticipantFlag.INITIALISING) "initialising"
+        else if (flag == ParticipantFlag.READY) "ready"
+        else if (flag == ParticipantFlag.FINISHED) "finished"
+        else "unknown"
+
+      private def roleAsString(role: Role): String =
+        if (role == Role.ISSUER) "issuer"
+        else if (role == Role.TRADER) "trader"
+        else "unknown"
+
+      private def contextFromContract(contract: TestParticipant.Contract) = {
+        val flag = flagAsString(contract.data.flag)
+        val role = roleAsString(contract.data.role)
+        MetricsContext(("flag", flag), ("role", role))
+      }
+
+      override protected def contractArchived(
+          archive: TestParticipant.Contract,
+          index: Party,
+      ): Unit =
+        actors.dec()(contextFromContract(archive))
+
+      override protected def contractCreated(
+          create: TestParticipant.Contract,
+          index: Party,
+          synchronizerId: String,
+      ): Unit =
+        actors.inc()(contextFromContract(create))
+    }
 
   private def templateMatches(expected: javaapi.data.Identifier)(actual: Identifier): Boolean =
     Identifier.fromJavaProto(expected.toProto) == actual
@@ -342,7 +394,6 @@ class MasterDriver(
           totalProposals = proTot,
           totalApprovals = accTot,
         )
-
         logger.info(newStatus.toString)
         currentStatus.set(Some(newStatus))
       }

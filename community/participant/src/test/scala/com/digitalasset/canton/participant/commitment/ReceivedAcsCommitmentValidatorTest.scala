@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.commitment
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -52,7 +51,6 @@ import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
-@AcsCommitmentTest
 class ReceivedAcsCommitmentValidatorTest
     extends AnyWordSpec
     with BaseTest
@@ -161,7 +159,7 @@ class ReceivedAcsCommitmentValidatorTest
   )
 
   "ReceivedAcsCommitmentValidatorImpl" should {
-    "pass protocol messages to publish" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "pass protocol messages to publish" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val metrics = TestCommitmentMetrics()
       val validator = mkValidator(metrics)
       val publisher = new Publisher
@@ -200,7 +198,7 @@ class ReceivedAcsCommitmentValidatorTest
       metrics.receivedWatermark.getValue shouldBe CantonTimestamp.ofEpochSecond(10).toMicros
     }
 
-    "not publish invalid protocol messages" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "not publish invalid protocol messages" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val metrics = TestCommitmentMetrics()
       val validator = mkValidator(metrics)
       val publisher = new Publisher
@@ -270,7 +268,7 @@ class ReceivedAcsCommitmentValidatorTest
       metrics.receivedWatermark.getValue shouldBe CantonTimestamp.ofEpochSecond(10).toMicros
     }
 
-    "not publish anything if no envelopes pass validation" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "not publish anything if no envelopes pass validation" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val metrics = TestCommitmentMetrics()
       val validator = mkValidator(metrics)
       val publisher = new Publisher

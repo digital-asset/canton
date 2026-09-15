@@ -14,7 +14,11 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
 import com.digitalasset.canton.sequencing.protocol.{AggregationBySender, AggregationRule}
 import com.digitalasset.canton.topology.Member
@@ -48,7 +52,7 @@ final case class InFlightAggregation(
     maxSequencingTimestamp: CantonTimestamp,
     rule: AggregationRule,
     cachedDeliveredAt: Option[Option[CantonTimestamp]] = None,
-) extends PrettyPrinting
+) extends PrettyPrintingFromCompanion
     with HasLoggerName {
   import InFlightAggregation.*
 
@@ -234,12 +238,7 @@ final case class InFlightAggregation(
       )
     }
 
-  override protected def pretty: Pretty[this.type] = prettyOfClass(
-    param("aggregated senders", _.aggregatedSenders),
-    param("max sequencing time", _.maxSequencingTimestamp),
-    paramIfNonEmpty("sequencing timestamp", _.cachedDeliveredAt.flatten),
-    param("rule", _.rule),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[InFlightAggregation] = InFlightAggregation
 
   /** @throws java.lang.IllegalStateException if the class invariant does not hold */
   def checkInvariant()(implicit loggingContext: NamedLoggingContext): Unit =
@@ -248,7 +247,14 @@ final case class InFlightAggregation(
       .valueOr(err => ErrorUtil.invalidState(err))
 }
 
-object InFlightAggregation {
+object InFlightAggregation extends PrettyPrintingCompanion[InFlightAggregation] {
+
+  override protected val pretty: Pretty[InFlightAggregation] = prettyOfClass(
+    param("aggregated senders", _.aggregatedSenders),
+    param("max sequencing time", _.maxSequencingTimestamp),
+    paramIfNonEmpty("sequencing timestamp", _.cachedDeliveredAt.flatten),
+    param("rule", _.rule),
+  )
 
   def create(
       aggregatedSenders: Map[Member, AggregationBySender],

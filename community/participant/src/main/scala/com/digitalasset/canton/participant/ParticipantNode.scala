@@ -809,6 +809,7 @@ class ParticipantNodeBootstrap(
                 synchronizerConnectionConfigStore,
                 syncPersistentStateManager,
                 parameters.batchingConfig,
+                acsDigestProcessorEnabled = acsDigestProcessorEnabled,
                 timeouts,
                 loggerFactory,
               )

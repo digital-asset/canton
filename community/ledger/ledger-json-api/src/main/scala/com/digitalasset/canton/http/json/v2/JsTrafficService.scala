@@ -96,37 +96,48 @@ object JsTrafficService extends DocumentationEndpoints {
 
   private val accountIdPath = "account-id"
   private val traffic = v2Endpoint.in("traffic")
+  private val TrafficEndpointEnablementNote =
+    "NOTE: This endpoint is exposed only when traffic enforcement feature is enabled (canton.participants.participant1.traffic-enforcement.enabled = true)"
 
   private val getAccountEndpoint =
     traffic.get
       .in("accounts")
       .in(path[String](accountIdPath))
       .out(jsonBody[GetAccountResponse])
-      // TODO(#33681): Use the regular proto-ref
-      .description(
-        "Get the traffic account state for the given account ID (same as the party ID in Canton 3.5)."
-      )
+      .description(s"""|
+                       |${createProtoRef(
+          com.digitalasset.canton.tea.v1.TrafficServiceGrpc.METHOD_GET_ACCOUNT
+        )}
+                        |
+                        |$TrafficEndpointEnablementNote
+       """.stripMargin.trim)
 
   private val updateAccountEndpoint =
     traffic.post
       .in("accounts")
       .in(jsonBody[UpdateAccountRequest])
       .out(jsonBody[UpdateAccountResponse])
-      // TODO(#33681): Use the regular proto-ref
-      .description("Update the traffic account state for the given account ID.")
+      .description(s"""|
+                       |${createProtoRef(
+          com.digitalasset.canton.tea.v1.TrafficServiceGrpc.METHOD_UPDATE_ACCOUNT
+        )}
+                       |
+                       |$TrafficEndpointEnablementNote
+       """.stripMargin.trim)
 
   private val pruneEventsEndpoint =
     traffic.post
       .in("events" / "prune")
       .in(jsonBody[PruneEventsRequest])
       .out(jsonBody[PruneEventsResponse])
-      // TODO(#33681): Use the regular proto-ref
-      .description(
-        "Prune traffic events from the traffic enforcement service. This is an admin-only operation."
-      )
+      .description(s"""|
+                       |${createProtoRef(
+          com.digitalasset.canton.tea.v1.TrafficServiceGrpc.METHOD_PRUNE_EVENTS
+        )}
+                       |
+                       |$TrafficEndpointEnablementNote
+       """.stripMargin.trim)
 
-  // TODO(#33681): Not wired in the static documentation endpoints yet
-  //               because the service is not yet stable and it's disabled by default
   override def documentation: Seq[AnyEndpoint] = List(
     getAccountEndpoint,
     updateAccountEndpoint,

@@ -147,7 +147,7 @@ object UnassignmentRequest {
           sourcePsid.unwrap,
           sourceTopology.unwrap,
           stakeholders.all.view.map(_ -> contracts.sourcePackageIds.unwrap).toMap,
-          sourceTopology.unwrap.referenceTime,
+          sourceTopology.unwrap.timestamp,
         )
         .leftMap[ReassignmentValidationError](unknownPackage =>
           PackageIdUnknownOrUnvetted(contractIds, unknownPackage.unknownTo, sourcePsid.unwrap)
@@ -158,7 +158,7 @@ object UnassignmentRequest {
           targetPsid.unwrap,
           targetTopology.unwrap,
           stakeholders.all.view.map(_ -> contracts.targetPackageIds.unwrap).toMap,
-          targetTopology.unwrap.referenceTime,
+          targetTopology.unwrap.timestamp,
         )
         .leftMap[ReassignmentValidationError](unknownPackage =>
           PackageIdUnknownOrUnvetted(contractIds, unknownPackage.unknownTo, targetPsid.unwrap)

@@ -47,6 +47,16 @@ trait PrettyPrintingFromCompanion extends CanPrettyPrint {
     Pretty.PrettyOps[this.type](this)(prettyCompanion.prettyInternal).toPrettyString()
 }
 
+/** Unfortunately, it does not seem that a case object `Obj` can extend
+  * `PrettyPrintingCompanion[Obj]`, which means that in order for `Obj` to extend
+  * [[PrettyPrintingFromCompanion]], we
+  *
+  *   - Have `Obj` extending [[PrettyPrintingFromCompanion]]
+  *   - Add `ObjPrettyPrintingCompanion`, that extends `PrettyPrintingCompanion[Obj]`.
+  *
+  * This is a bit sad to introduce a new object only for the pretty printing but it allows to
+  * migrate all classes and object to the new tooling.
+  */
 trait PrettyPrintingCompanion[-T] extends ShowUtil with PrettyUtil {
 
   /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to

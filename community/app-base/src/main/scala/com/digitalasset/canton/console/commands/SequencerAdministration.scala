@@ -171,11 +171,14 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   ): InitializeSequencerResponse = {
     if (waitForReady) node.health.wait_for_ready_for_initialization()
 
+    val nodeStatus = node.health.status
+
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromGenesisState(
           genesisState.newInput(),
           synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError),
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }
@@ -199,11 +202,14 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   ): InitializeSequencerResponse = {
     if (waitForReady) node.health.wait_for_ready_for_initialization()
 
+    val nodeStatus = node.health.status
+
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromGenesisStateV2(
           genesisState.newInput(),
           synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError),
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }
@@ -230,6 +236,8 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   ): Unit = {
     if (waitForReady) node.health.wait_for_ready_for_initialization()
 
+    val nodeStatus = node.health.status
+
     consoleEnvironment.run {
       runner.adminCommand(
         InitializeFromLsuPredecessor(
@@ -239,6 +247,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
           synchronizerParameters.toInternal.valueOr(consoleEnvironment.raiseError),
           ignorePsidCheck = ignorePsidCheck,
           synchronizerId = synchronizerId,
+          serverVersion = nodeStatus.releaseVersion,
         )
       )
     }

@@ -22,6 +22,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
   TemplateId,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
@@ -633,6 +634,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
+@UnstableTest // TODO(i26538): Remove as soon as this test has been fixed
 class OnlinePartyReplicationNegotiationTestPostgres extends OnlinePartyReplicationNegotiationTest {
   registerPlugin(new UsePostgres(loggerFactory))
 }

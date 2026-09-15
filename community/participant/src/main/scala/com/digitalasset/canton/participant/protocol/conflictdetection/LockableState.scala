@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.protocol.conflictdetection.LockableState.{
   LockCounter,
   PendingActivenessCheckCounter,
@@ -16,7 +20,8 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.Ordered.orderingToOrdered
 import scala.concurrent.{Future, Promise}
 
-private[conflictdetection] trait LockableState[Status <: PrettyPrinting] extends PrettyPrinting {
+private[conflictdetection] trait LockableState[Status <: PrettyPrintingFromCompanion]
+    extends PrettyPrintingFromCompanion {
 
   /** [[scala.None$]] for no pre-fetched state [[scala.Some$]]`(`[[scala.None$]]`)` for the state
     * where the underlying store has no entry. [[scala.Some$]]`(`[[scala.Some$]]`(...))` for the
@@ -34,15 +39,12 @@ private[conflictdetection] trait LockableState[Status <: PrettyPrinting] extends
 
   def hasPendingWrites: Boolean = !PendingWriteCounter.isEmpty(pendingWrites)
 
-  override protected def pretty: Pretty[LockableState.this.type] = prettyOfClass(
-    unnamedParamIfDefined(_.versionedState),
-    param("pending activeness checks", _.pendingActivenessChecks.toString.unquoted),
-    param("locks", _.lock.toString.unquoted),
-    param("pending writes", _.pendingWrites.toString.unquoted),
-  )
+  override def prettyCompanion
+      : PrettyPrintingCompanion[LockableState[? <: PrettyPrintingFromCompanion]] = LockableState
 }
 
-private[conflictdetection] object LockableState {
+private[conflictdetection] object LockableState
+    extends PrettyPrintingCompanion[LockableState[? <: PrettyPrintingFromCompanion]] {
 
   sealed trait ConflictDetectionCounterModule[T] {
     def empty: T
@@ -116,9 +118,19 @@ private[conflictdetection] object LockableState {
 
   type PendingWriteCounter = counters.PendingWriteCounter
   val PendingWriteCounter: counters.PendingWriteCounter.type = counters.PendingWriteCounter
+
+  override protected val pretty: Pretty[LockableState[? <: PrettyPrintingFromCompanion]] =
+    prettyOfClass(
+      unnamedParamIfDefined(_.versionedState),
+      param("pending activeness checks", _.pendingActivenessChecks.toString.unquoted),
+      param("locks", _.lock.toString.unquoted),
+      param("pending writes", _.pendingWrites.toString.unquoted),
+    )
 }
 
-private[conflictdetection] final case class ImmutableLockableState[Status <: PrettyPrinting](
+private[conflictdetection] final case class ImmutableLockableState[
+    Status <: PrettyPrintingFromCompanion
+](
     override val versionedState: Option[Option[StateChange[Status]]],
     override val pendingActivenessChecks: PendingActivenessCheckCounter,
     override val lock: LockCounter,
@@ -133,10 +145,10 @@ private[conflictdetection] final case class ImmutableLockableState[Status <: Pre
   *   [[scala.Some$]]`(`[[scala.Some$]]`(...))` for the pre-fetched state `...` from the underlying
   *   store.`
   */
-private[conflictdetection] class MutableLockableState[Status <: PrettyPrinting](
+private[conflictdetection] class MutableLockableState[Status <: PrettyPrintingFromCompanion](
     initialState: Option[Option[StateChange[Status]]]
 ) extends LockableState[Status]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   import LockableState.*
 

@@ -1,0 +1,21 @@
+name: upgrades-example-FailsWhenUpgradingAnUnupgradeableDependencyOfAnUpgradedDependency
+version: 2.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/upgrades-FailsWhenUpgradingAnUnupgradeableDependencyOfAnUpgradedDependency-dep-v2.dar
+  - ${TARGET_ROOT}/upgrades-FailsWhenUpgradingAnUnupgradeableDependencyOfAnUpgradedDependency-dep-dep-v2.dar
+dependencies:
+  - daml-script
+module-prefixes: null
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-FailsWhenUpgradingAnUnupgradeableDependencyOfAnUpgradedDependency-v2.dar
+upgrades: ${TARGET_ROOT}/upgrades-FailsWhenUpgradingAnUnupgradeableDependencyOfAnUpgradedDependency-v1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

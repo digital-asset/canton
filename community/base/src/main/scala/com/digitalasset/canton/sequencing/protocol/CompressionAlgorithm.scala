@@ -43,9 +43,6 @@ object CompressionAlgorithm {
       "Cannot serialize zstd to v30.CompressionAlgorithm"
     )
 
-    /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
-      * implement this method.
-      */
     override protected def pretty: Pretty[ZSTD.type] = prettyOfObject[ZSTD.type]
   }
 
