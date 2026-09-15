@@ -3,17 +3,13 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
-import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.{MetricHandle, MetricsContext}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.{
-  P2PEndpoint,
-  failGrpcStreamObserver,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoActorContext
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -31,7 +27,7 @@ import com.digitalasset.canton.util.retry.Jitter
 import org.apache.pekko.actor.typed.scaladsl.{ActorContext, Behaviors}
 import org.apache.pekko.actor.typed.{ActorRef, Behavior, PostStop}
 
-import java.time.{Duration, Instant}
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ThreadLocalRandom
 import java.util.concurrent.atomic.AtomicInteger
@@ -128,6 +124,10 @@ final class PekkoP2PNetworkRef(
 }
 
 object PekkoP2PGrpcNetworking {
+
+  final class SimulatedSendFailureException
+      extends RuntimeException("Simulated send failure for testing")
+      with scala.util.control.NoStackTrace
 
   final class PekkoP2PGrpcNetworkManager(
       val connectionManager: P2PGrpcConnectionManager,
@@ -277,10 +277,13 @@ object PekkoP2PGrpcNetworking {
           case _ =>
             val maxAttempts = config.networkSendAttempts.value
             message match {
-              case sm @ SendMessage(_, _, _, metricsContext, attemptNumber, _, _, _, _) =>
+              case sendMsg @ SendMessage(_, _, _, metricsContext, attemptNumber, _, _, _, _) =>
                 val newAttemptNumber = attemptNumber + 1
-                val retryDelay = sm.jitterStream.next(newAttemptNumber)
+                val retryDelay = sendMsg.jitterStream.next(newAttemptNumber)
                 if (newAttemptNumber <= maxAttempts) {
+                  emitSendFailureMetrics(metrics, metrics.p2p.send.sendsRetried, sendMsg)(
+                    metrics.p2p.send.failure.labels.reason.values.ConnectionInitError
+                  )
                   logger.debug(
                     s"Connection-managing actor $actorName " +
                       s"couldn't yet obtain connection for `Send`, retrying it in $retryDelay, " +
@@ -289,7 +292,7 @@ object PekkoP2PGrpcNetworking {
                   // Retrying after a delay due to not being connected:
                   //  record the send instant and delay to emit the actor queue latency when processing the message
                   val delayedMessage =
-                    sm.copy(
+                    sendMsg.copy(
                       attemptNumber = newAttemptNumber,
                       sendInstantForQueueLatencyMetrics = Instant.now,
                       retryDelayO = Some(retryDelay),
@@ -298,13 +301,16 @@ object PekkoP2PGrpcNetworking {
                   context
                     .scheduleOnce(retryDelay, target = context.self, delayedMessage)
                     .discard
-                  metrics.p2p.send.sendsRetried.inc()(metricsContext)
-                } else
+                } else {
+                  emitSendFailureMetrics(metrics, metrics.p2p.send.sendsDropped, sendMsg)(
+                    metrics.p2p.send.failure.labels.reason.values.ConnectionInitError
+                  )
                   logger.info(
                     s"Connection-managing actor $actorName " +
                       s"couldn't yet obtain connection for `Send`, $maxAttempts retries exhausted, " +
                       s"not retrying anymore"
                   )
+                }
 
               case i @ Initialize(_, attemptNumber, _) =>
                 // Initialize must always be retried, since there are modules that wait for a quorum of
@@ -325,7 +331,11 @@ object PekkoP2PGrpcNetworking {
                     i.copy(attemptNumber = newAttemptNumber),
                   )
                   .discard
-                metrics.p2p.send.sendsRetried.inc()(MetricsContext.Empty)
+                metrics.p2p.send.sendsRetried.inc()(
+                  MetricsContext.Empty.withExtraLabels(
+                    metrics.p2p.send.failure.labels.reason.Key -> metrics.p2p.send.failure.labels.reason.values.ConnectionInitError
+                  )
+                )
 
               case Close(tc) =>
                 implicit val traceContext: TraceContext = tc
@@ -362,41 +372,69 @@ object PekkoP2PGrpcNetworking {
             case sendMsg: SendMessage =>
               implicit val traceContext: TraceContext = sendMsg.traceContext
 
-              def grpcSend(peerSender: PeerSender, messageSendInstant: Instant = Instant.now)
-                  : Unit = {
+              def grpcSend(
+                  peerSender: PeerSender,
+                  delayConfO: Option[BftBlockOrdererConfig.BftBlockOrderingP2PSendDelayConfig],
+                  messageSendInstant: Instant = Instant.now,
+              ): Unit = {
                 val msg = sendMsg.createMessage(Some(messageSendInstant))
+
+                def sendAndRecordDiscard(): Unit =
+                  try {
+                    peerSender.onNext(msg)
+                  } catch {
+                    case exception: PeerSender.FlowControlException =>
+                      logger.debug(
+                        s"Connection-managing actor $actorName failed sending message $msg to sender $peerSender due to flow control",
+                        exception,
+                      )
+                      emitSendFailureMetrics(metrics, metrics.p2p.send.sendsDropped, sendMsg)(
+                        metrics.p2p.send.failure.labels.reason.values.FlowControl
+                      )
+                  }
+
                 logger.debug(
                   s"Connection-managing actor $actorName sending message to sender $peerSender"
                 )
-                val writeStart = Instant.now
                 try {
-                  peerSender.onNext(msg)
-                  // Network send succeeded (but it may still be lost)
-                  updateTimer(
-                    metrics.p2p.send.networkWriteLatency,
-                    Duration.between(writeStart, Instant.now),
-                  )(sendMsg.metricsContext)
+                  val recipientBftNodeId = sendMsg.recipientBftNodeId
+                  val recipientInstanceNameO = instanceName(recipientBftNodeId)
+                  val recipientInstanceNameAndDelayConfO =
+                    recipientInstanceNameO.flatMap(recipientInstanceName =>
+                      delayConfO.map(delayConf => recipientInstanceName -> delayConf)
+                    )
+                  recipientInstanceNameAndDelayConfO.fold {
+                    sendAndRecordDiscard()
+                  } { case (recipientInstanceName, delayConf) =>
+                    if (delayConf.nextGrpcSendAcceptedByFlowControl(recipientInstanceName)) {
+                      if (delayConf.nextGrpcSendSucceeds(recipientInstanceName)) {
+                        sendAndRecordDiscard()
+                      } else {
+                        throw new SimulatedSendFailureException
+                      }
+                    } else {
+                      emitSendFailureMetrics(metrics, metrics.p2p.send.sendsDropped, sendMsg)(
+                        metrics.p2p.send.failure.labels.reason.values.FlowControl
+                      )
+                    }
+                  }
                 } catch {
                   case exception: Exception =>
                     logger.debug(
                       s"Connection-managing actor $actorName failed sending message $msg to sender $peerSender",
                       exception,
                     )
-                    // Failing the stream in case of an exception when sending is required by the gRPC streaming API
-                    failGrpcStreamObserver(peerSender, exception, logger)
-                    // gRPC requires onError to be the last event, so the connection must be invalidated even though
-                    //  the send operation will be retried.
-                    connectionManager.shutdownConnection(
-                      p2pAddress.id,
-                      clearNetworkRefAssociations = false,
-                      closeNetworkRefs = false,
-                    )
+                    connectionManager.handleSendFailure(p2pAddress.id, peerSender, exception)
+                    val SendErrorFailure = metrics.p2p.send.failure.labels.reason.values.SendError
                     val maxAttempts = config.networkSendAttempts.value
                     // Retrying after a delay due to an exception:
                     //  record the send instant and delay to emit the actor queue latency when processing the message
                     val newAttemptNumber = sendMsg.attemptNumber + 1
                     val delay = sendMsg.jitterStream.next(newAttemptNumber)
                     if (newAttemptNumber <= maxAttempts) {
+                      emitSendFailureMetrics(metrics, metrics.p2p.send.sendsRetried, sendMsg)(
+                        SendErrorFailure
+                      )
                       logger.debug(
                         s"Connection-managing actor $actorName couldn't send a message to sender $peerSender, " +
                           s"invalidating the connection and retrying in $delay, " +
@@ -419,11 +457,13 @@ object PekkoP2PGrpcNetworking {
                           delayedMessage,
                         )
                         .discard
-                      metrics.p2p.send.sendsRetried.inc()(sendMsg.metricsContext)
                     } else {
+                      emitSendFailureMetrics(metrics, metrics.p2p.send.sendsDropped, sendMsg)(
+                        SendErrorFailure
+                      )
                       logger.info(
-                        s"Connection-managing actor $actorName couldn't send $msg, " +
-                          s"invalidating the connection. No more retries left.",
+                        s"Connection-managing actor $actorName couldn't send $msg" +
+                          ", invalidating the connection. No more retries left.",
                         exception,
                       )
                     }
@@ -443,7 +483,7 @@ object PekkoP2PGrpcNetworking {
                       s"Connection-managing actor $actorName delaying send of message to $recipientBftNodeId, " +
                         s"instance name $recipientInstanceNameO, sender $peerSender by $delayO"
                     )
-                    delayO.fold(grpcSend(peerSender)) { delay =>
+                    delayO.fold(grpcSend(peerSender, Some(delayConf))) { delay =>
                       // Not setting retry relay and not incrementing the queue size as we want this send to appear
                       //  as already performed in metrics, rather than queued.
                       val now = Instant.now
@@ -462,13 +502,13 @@ object PekkoP2PGrpcNetworking {
                         .discard
                     }
 
-                  case (Some(supposedSendInstantForLatencyTesting), _) =>
+                  case (Some(supposedSendInstantForLatencyTesting), delayConfO) =>
                     // Fake the network send instant to be the supposed send instant,
                     //  before waiting the artificial delay for latency testing, so that we see
                     //  the artificial latency in the gRPC latency metrics
-                    grpcSend(peerSender, supposedSendInstantForLatencyTesting)
+                    grpcSend(peerSender, delayConfO, supposedSendInstantForLatencyTesting)
 
-                  case (None, None) => grpcSend(peerSender)
+                  case (None, None) => grpcSend(peerSender, delayConfO = None)
                 }
               }
               Behaviors.same
@@ -489,5 +529,21 @@ object PekkoP2PGrpcNetworking {
 
     private def instanceName(recipientBftNodeId: BftNodeId): Option[String] =
       recipientBftNodeId.split("::").view.zipWithIndex.map(_.swap).toMap.get(1)
+
+    private def emitSendFailureMetrics(
+        metrics: BftOrderingMetrics,
+        counter: MetricHandle.Counter,
+        sendMsg: SendMessage,
+    )(
+        failureReason: metrics.p2p.send.failure.labels.reason.values.SendFailureReasonValue
+    ): Unit = {
+      import metrics.p2p.send.failure.labels.reason
+      counter.inc()(
+        sendMsg.metricsContext.withExtraLabels(
+          metrics.p2p.send.labels.TargetSequencer -> sendMsg.recipientBftNodeId,
+          reason.Key -> failureReason,
+        )
+      )
+    }
   }
 }

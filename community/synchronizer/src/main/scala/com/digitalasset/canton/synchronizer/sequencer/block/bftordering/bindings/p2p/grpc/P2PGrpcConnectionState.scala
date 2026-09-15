@@ -289,14 +289,39 @@ final class P2PGrpcConnectionState(
     peerSenderO
   }
 
+  def shutdownAndCleanupActiveConnectionAndReturnEndpointIds(
+      peerSender: PeerSender
+  )(implicit traceContext: TraceContext): Seq[P2PEndpoint.Id] = {
+    val (prevState, newState, networkRefO, endpointIds) =
+      AtomicUtil
+        .updateAndGetComputed(stateRef)(_.clearActiveConnectionState(peerSender))
+        .logAndExtract(
+          logger,
+          prefix = s"Shutting down and cleaning up active connection of sender $peerSender: ",
+        )
+    networkRefO.foreach { networkRef =>
+      logger.info(
+        s"Closing network ref ${objId(networkRef)} for $peerSender as part of connection shutdown and cleanup"
+      )
+      networkRef.close()
+    }
+    val trimmedPrevState = prevState.only(peerSender)
+    val trimmedNewState = newState.only(peerSender)
+    logger.info(
+      s"Relevant P2P connection state before and after `shutdownAndCleanupActiveConnection($peerSender)`: " +
+        s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
+    )
+    endpointIds
+  }
+
   def unassociateSenderAndReturnEndpointIds(
       peerSender: PeerSender
   )(implicit traceContext: TraceContext): Seq[P2PEndpoint.Id] = {
-    val (prevState, newState, result) =
+    val (prevState, newState, endpointIds) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(_.unassociateSenderAndReturnEndpointIds(peerSender))
         .logAndExtract(logger, prefix = s"Unassociating sender $peerSender: ")
-    if (result.nonEmpty) {
+    if (endpointIds.nonEmpty) {
       val trimmedPrevState = prevState.only(peerSender)
       val trimmedNewState = newState.only(peerSender)
       logger.info(
@@ -304,9 +329,9 @@ final class P2PGrpcConnectionState(
           s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
       )
     } else {
-      logger.debug(s"No association change for sender $peerSender: $result")
+      logger.debug(s"No association change for sender $peerSender: $endpointIds")
     }
-    result
+    endpointIds
   }
 
   // Only used to simulate a restart
@@ -807,6 +832,51 @@ object P2PGrpcConnectionState {
           ResultWithLogs(
             (this, updatedState, Some(peerSender)),
             Level.DEBUG -> (() => s"Removed  peer sender $bftNodeId <-> $peerSender"),
+          )
+        }
+
+    // Completely clear the state for a connection with a sender (i.e., active); this is used to clean up
+    //  incoming P2P connections that are closed by the counterparty.
+    def clearActiveConnectionState(
+        peerSender: PeerSender
+    ): (
+        State,
+        ResultWithLogs[
+          (State, State, Option[P2PNetworkRef[BftOrderingMessage]], Seq[P2PEndpoint.Id])
+        ],
+    ) =
+      peerSenderToBftNodeId
+        .get(peerSender)
+        .fold {
+          this -> ResultWithLogs(
+            (
+              this,
+              this,
+              Option.empty[P2PNetworkRef[BftOrderingMessage]],
+              Seq.empty[P2PEndpoint.Id],
+            ),
+            Level.DEBUG -> (() =>
+              s"Not removing connection state for $peerSender because it does not exist yet " +
+                "(or possibly removed as duplicate)"
+            ),
+          )
+        } { bftNodeId =>
+          val ResultWithLogs((updatedState1, networkRefO), logs1*) =
+            cleanupNetworkRef(bftNodeId, clearNetworkRefAssociations = true, closeNetworkRef = true)
+          val (updatedState2, ResultWithLogs((_, _, endpointIds), logs2*)) =
+            updatedState1.unassociateSenderAndReturnEndpointIds(peerSender)
+          val (discardedEndpointToBftNodeId, updatedEndpointToBftNodeId) =
+            updatedState2.p2pEndpointIdToBftNodeId.partition { case (endpointId, nodeId) =>
+              endpointIds.contains(endpointId) && nodeId == bftNodeId
+            }
+          val updatedState3 =
+            updatedState2.copy(p2pEndpointIdToBftNodeId = updatedEndpointToBftNodeId)
+          updatedState3 -> ResultWithLogs(
+            (this, updatedState3, networkRefO, discardedEndpointToBftNodeId.keys.toSeq),
+            (logs1 ++ logs2 :+ Level.DEBUG -> (() =>
+              s"Removed connection state for $peerSender <-> $bftNodeId " +
+                s"and cleaned up its associations with $endpointIds"
+            ))*
           )
         }
 

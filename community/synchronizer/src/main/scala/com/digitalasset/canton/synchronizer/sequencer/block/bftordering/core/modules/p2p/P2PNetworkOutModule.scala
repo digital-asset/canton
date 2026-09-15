@@ -123,20 +123,51 @@ final class P2PNetworkOutModule[
       case P2PNetworkOut.Start =>
         val p2pEndpoints =
           context.blockingAwait(p2pEndpointsStore.listEndpoints(), blockingDbReadTimeout)
+        // Seed the module-local cache of configured endpoints.
+        p2pEndpoints.foreach { case (p2pEndpoint, _) =>
+          configuredP2PEndpoints.put(p2pEndpoint.id, p2pEndpoint).discard
+        }
         connectInitialNodes(p2pEndpoints)
         startModulesIfNeeded()
 
-      case P2PNetworkOut.Internal.Connect(p2pEndpoint) =>
-        logger.info(
-          s"Operator added P2P endpoint ${p2pEndpoint.id}, ensuring outgoing connectivity to it"
-        )
-        ensureSendingEnabledTo(P2PAddress.Endpoint(p2pEndpoint))
+      case P2PNetworkOut.Internal.EndpointAdded(p2pEndpoint) =>
+        val p2pEndpointId = p2pEndpoint.id
+        // The P2P endpoints store is insert-only w.r.t. the endpoint set, i.e. adding an endpoint whose ID is
+        //  already present is a no-op that doesn't overwrite its TLS client material. The cache mirrors that
+        //  semantics via `getOrElseUpdate`, so the effective (i.e. persisted) endpoint is the one it returns,
+        //  which may differ from the just-added one when the ID was already configured.
+        //
+        //  Dialing must then use the effective endpoint, else a duplicate `AddEndpoint` carrying different TLS
+        //  material could create a connection based on configuration that was never persisted; this is
+        //  observable, because the runtime state may have already been cleared, e.g. by a teardown whose
+        //  disconnection event hasn't been processed yet, so the connectivity check below can pass.
+        val effectiveP2PEndpoint =
+          configuredP2PEndpoints.getOrElseUpdate(p2pEndpointId, p2pEndpoint)
+        if (p2pConnectionState.isDefined(p2pEndpointId)) {
+          logger.info(
+            s"P2P endpoint $p2pEndpointId that the operator just added is already known at runtime, " +
+              "so not trying to connect to it"
+          )
+        } else {
+          logger.info(
+            s"Ensuring outgoing connectivity to P2P endpoint $p2pEndpointId because the operator added it"
+          )
+          ensureSendingEnabledTo(P2PAddress.Endpoint(effectiveP2PEndpoint))
+        }
 
-      case P2PNetworkOut.Internal.Disconnect(p2pEndpointId) =>
-        logger.info(
-          s"Operator removed P2P endpoint $p2pEndpointId, disconnecting from it if outgoing"
-        )
-        disconnect(p2pEndpointId)
+      case P2PNetworkOut.Internal.EndpointRemoved(p2pEndpointId) =>
+        configuredP2PEndpoints.remove(p2pEndpointId).discard
+        if (p2pConnectionState.isDefined(p2pEndpointId)) {
+          logger.info(
+            s"Operator removed P2P endpoint $p2pEndpointId, disconnecting from it if outgoing"
+          )
+          disconnect(p2pEndpointId)
+        } else {
+          logger.info(
+            s"P2P endpoint $p2pEndpointId that the operator just removed is not known at runtime, " +
+              "so not trying to disconnect from it"
+          )
+        }
 
       case P2PNetworkOut.Network.Connected(maybeP2pEndpointId) =>
         if (maybeP2pEndpointId.forall(connectedP2PEndpointIds.add)) {
@@ -158,6 +189,15 @@ final class P2PNetworkOutModule[
             notifyMempool = true,
           )
         }
+        // A disconnection may wipe out all runtime knowledge of the endpoint; this happens in particular when an
+        //  incoming connection that won connection deduplication is torn down by the peer, because incoming
+        //  connections are not managed by this node, so their state, including the network ref, is fully cleaned up.
+        //
+        //  If the endpoint is still configured on this node, i.e. its operator did not remove it, this node
+        //  is responsible for (re-)establishing an outgoing connection to it; else, the two nodes could remain
+        //  disconnected forever even though this node is configured to connect to the peer, e.g. when the peer's
+        //  operator removed this node's endpoint from the peer's configuration, so the peer will not redial.
+        reconnectIfStillConfigured(p2pEndpointId)
 
       case P2PNetworkOut.Network.Authenticated(bftNodeId, maybeP2PEndpoint) =>
         val maybeP2PEndpointId = maybeP2PEndpoint.map(_.id)
@@ -215,6 +255,13 @@ final class P2PNetworkOutModule[
             blackListed,
             message,
             howManyRecipients,
+          )
+        if (recipientNodeIds.isEmpty)
+          metrics.p2p.send.sendsDropped.inc()(
+            mc.withExtraLabels(
+              metrics.p2p.send.failure.labels.reason.Key ->
+                metrics.p2p.send.failure.labels.reason.values.NoAuthenticatedRecipientCandidates
+            )
           )
         recipientNodeIds.foreach(sendIfKnown(_, message))
         try onRecipientsDecision.foreach(_(recipientNodeIds))
@@ -440,7 +487,7 @@ final class P2PNetworkOutModule[
           )
         locally {
           implicit val mc: MetricsContext = mc1
-          emitSendStats(metrics, serializedMessage)
+          emitSendStats(metrics, serializedMessage, droppedAsUnauthenticated = true)
         }
         logger.info(
           s"Dropping network message to unknown $recipientBftNodeId (possibly unauthenticated as of yet)"
@@ -484,19 +531,9 @@ final class P2PNetworkOutModule[
               logger.info(
                 s"P2P endpoint $p2pEndpoint was already present in store, so it was not inserted"
               )
-            if (p2pConnectionState.isDefined(p2pEndpoint.id)) {
-              logger.info(
-                s"P2P endpoint $p2pEndpoint that was just requested to be added is already known at runtime, " +
-                  "so not trying to connect to it"
-              )
-              None
-            } else {
-              logger.info(
-                s"P2P endpoint $p2pEndpoint that was just requested to be added is not already known at runtime, " +
-                  s"connecting to it now"
-              )
-              Some(P2PNetworkOut.Internal.Connect(p2pEndpoint))
-            }
+            // Always notify the module, so that it can update the cache of configured endpoints
+            //  and decide whether to connect based on the runtime connection state.
+            Some(P2PNetworkOut.Internal.EndpointAdded(p2pEndpoint))
           case Failure(exception) =>
             abort(s"Failed to add P2P endpoint $p2pEndpoint", exception)
         }
@@ -517,19 +554,9 @@ final class P2PNetworkOutModule[
               logger.info(
                 s"P2P endpoint $p2pEndpointId was not present in store, so it was not removed"
               )
-            if (p2pConnectionState.isDefined(p2pEndpointId)) {
-              logger.info(
-                s"P2P endpoint $p2pEndpointId that was just requested to be removed is already known at runtime, " +
-                  "disconnecting from it now if the connection is outgoing"
-              )
-              Some(P2PNetworkOut.Internal.Disconnect(p2pEndpointId))
-            } else {
-              logger.info(
-                s"P2P endpoint $p2pEndpointId that was just requested to be removed is not already known at runtime, " +
-                  "not trying to disconnect from it"
-              )
-              None
-            }
+            // Always notify the module, so that it can update the cache of configured endpoints
+            //  and decide whether to disconnect based on the runtime connection state.
+            Some(P2PNetworkOut.Internal.EndpointRemoved(p2pEndpointId))
           case Failure(exception) =>
             abort(s"Failed to remove P2P endpoint $p2pEndpointId", exception)
         }
@@ -707,11 +734,24 @@ final class P2PNetworkOutModule[
   )(implicit context: E#ActorContextT[P2PNetworkOut.Message], traceContext: TraceContext): Unit =
     if (!initialNodesConnecting) {
       logger.info(s"Connecting to initial P2P endpoints: $otherInitialP2PEndpoints")
-      otherInitialP2PEndpoints.foreach { case (initialP2PEndpoint, nodeIdO) =>
-        val address = nodeIdO.fold[P2PAddress](P2PAddress.Endpoint(initialP2PEndpoint))(
-          P2PAddress.NodeId(_, Some(initialP2PEndpoint))
-        )
-        ensureSendingEnabledTo(address).discard
+      otherInitialP2PEndpoints.foreach { case (initialP2PEndpoint, _) =>
+        // The node ID possibly persisted alongside the endpoint by a previous incarnation of this node is
+        //  deliberately ignored, i.e. connectivity is always ensured by endpoint, because every connection must be
+        //  authenticated anew and, until it is, the peer must not be addressable nor reported as authenticated.
+        //
+        //  Asserting the persisted association upfront would instead register the network ref by BFT node ID, which
+        //  is only correct for incoming connections, and would make the endpoint appear as an authenticated
+        //  incoming connection as soon as its gRPC channel is up but before any authentication happened, which in
+        //  turn would inflate `maxNodesContemporarilyAuthenticated` and could start protocol modules below the
+        //  quorum of authenticated nodes they require.
+        //
+        //  This also means that the persisted association is not used to pin a peer's identity across
+        //  restarts. Within an incarnation, `associateP2PEndpointIdToBftNodeId` currently permits a different,
+        //  authenticated node ID to replace the association; hardening persisted associations is tracked
+        //  separately by TODO(#34191).
+        //  The persisted node ID remains reported to the operator by `Admin.ListConfiguredEndpoints`,
+        //  which is what it was introduced for.
+        ensureSendingEnabledTo(P2PAddress.Endpoint(initialP2PEndpoint)).discard
       }
       initialNodesConnecting = true
     }
@@ -731,6 +771,60 @@ final class P2PNetworkOutModule[
         logger.info(s"Creating new network ref for '$p2pAddress'")
         p2pNetworkManager.createNetworkRef(context, p2pAddress)
       }
+    }
+
+  // Re-establishes an outgoing connection to a disconnected P2P endpoint if it is still configured on this node.
+  //
+  //  The module-local cache of configured endpoints, rather than just the disconnected endpoint ID, is consulted
+  //  for two independent reasons:
+  //
+  //  1. It is the only runtime source of the full `P2PEndpoint` needed to dial: a disconnection only carries a
+  //     `P2PEndpoint.Id`, i.e. address, port and whether TLS is in use, while dialing a TLS endpoint also needs
+  //     its `endpointConfig.tlsConfig` (custom trust collection and client certificate), which the ID doesn't
+  //     carry and which the runtime connection state, keyed by endpoint ID, doesn't retain either. Rebuilding an
+  //     endpoint from its ID alone would thus silently drop the operator-provided TLS client material.
+  //
+  //  2. It mirrors the authoritative set of endpoints this node's operator wants outgoing connectivity to,
+  //     and disconnections are also notified for endpoints that are not in it, so it must be consulted to avoid:
+  //
+  //     - Resurrecting an endpoint the operator just removed.
+  //     - Dialing a node that merely connected to us: incoming connections advertise their endpoint (used for
+  //       connection deduplication) and their teardown notifies a disconnection for it, but this node was never
+  //       configured to connect to such a peer, so it must not start doing so.
+  //
+  //  The cache, rather than the P2P endpoints store, is used to make this decision synchronous, so that
+  //  it cannot race with a concurrent endpoint removal by an operator: reading the store would instead complete
+  //  asynchronously, so a removal processed in between could be undone by a reconnection based on a stale
+  //  snapshot of the store.
+  //
+  //  The cache is safe to keep, because this module is the only writer that can change the endpoint **set**
+  //  after the bootstrap performed by `BftBlockOrderer`: the only other writer, `P2PGrpcConnectionManager`,
+  //  calls `associate` upon successful authentication, which only ever sets the node ID of an already-present
+  //  entry and can neither insert nor remove one, nor alter its TLS settings.
+  //
+  //  In addition, the node ID possibly stored alongside the endpoint is deliberately ignored, i.e. the
+  //  reconnection is performed by endpoint only: the peer must authenticate again
+  //  before it is addressable by node ID, so re-asserting a stored association here would bind an endpoint to a
+  //  node ID that this node hasn't (re-)verified.
+  //
+  //  This is idempotent and cheap when connectivity is already ensured, because `ensureSendingEnabledTo`
+  //  doesn't touch the state when a network ref already exists for the endpoint (or for the BFT node ID
+  //  it is associated to).
+  private def reconnectIfStillConfigured(
+      p2pEndpointId: P2PEndpoint.Id
+  )(implicit context: E#ActorContextT[P2PNetworkOut.Message], traceContext: TraceContext): Unit =
+    configuredP2PEndpoints.get(p2pEndpointId) match {
+      case Some(p2pEndpoint) =>
+        logger.info(
+          s"Disconnected P2P endpoint $p2pEndpointId is still configured on this node, " +
+            "ensuring an outgoing connection to it"
+        )
+        ensureSendingEnabledTo(P2PAddress.Endpoint(p2pEndpoint))
+      case None =>
+        logger.info(
+          s"Disconnected P2P endpoint $p2pEndpointId is not configured on this node, " +
+            "so not reconnecting to it"
+        )
     }
 
   private def disconnect(
@@ -845,6 +939,16 @@ private[bftordering] object P2PNetworkOutModule {
     // For each workflow ID, the set of nodes we have blacklisted for that workflow ID
     //  due to the workflow being retried when they were used, together with their failure instant.
     val workflowBlacklists: mutable.Map[WorkflowId, Map[BftNodeId, Instant]] =
+      mutable.Map.empty
+
+    // Module-local cache of the P2P endpoints configured by this node's operator, i.e. a mirror of the
+    //  P2P endpoints store (minus the associated node IDs, which this module doesn't write).
+    //
+    //  It exists so that the decision of whether a disconnected endpoint must be reconnected to can be taken
+    //  synchronously on the module's thread, avoiding races with concurrent endpoint removals by an operator.
+    //
+    //  It must thus only be read and written on the module's thread, i.e. from `receiveInternal`.
+    val configuredP2PEndpoints: mutable.Map[P2PEndpoint.Id, P2PEndpoint] =
       mutable.Map.empty
   }
 }

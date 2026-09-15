@@ -23,7 +23,7 @@ import com.digitalasset.canton.version.{
   VersioningCompanion,
 }
 import com.google.protobuf.ByteString
-import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
+import io.grpc.stub.{CallStreamObserver, ServerCallStreamObserver, StreamObserver}
 import io.grpc.{Context, Status}
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.pekko.NotUsed
@@ -34,6 +34,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.annotation.tailrec
 import scala.concurrent.duration.{Duration, DurationInt}
 import scala.concurrent.{Await, ExecutionContext, Future, Promise, blocking}
+import scala.reflect.ClassTag
 import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
@@ -205,15 +206,18 @@ object GrpcStreamingUtils {
       inputStream: InputStream,
   ): Future[Resp] = {
     val buffer = new Array[Byte](defaultChunkSize)
+
     def readNextChunk(): Option[Either[Throwable, Req]] = {
       val bytesRead = inputStream.read(buffer)
       if (bytesRead == -1) None
       else Some(Right(requestBuilder(buffer.slice(0, bytesRead))))
     }
+
     streamToServer(load, _ => readNextChunk())
   }
 
   /** Stream data to the server
+    *
     * @param load
     *   Loader (endpoint of the service)
     * @param readNextChunk
@@ -403,6 +407,7 @@ object GrpcStreamingUtils {
         case None =>
           Right(acc.reverse)
       }
+
     read(Nil)
   }
 
@@ -444,6 +449,7 @@ object GrpcStreamingUtils {
               } else {
                 true
               }
+
             sendChunks()
           } match {
             case Failure(ex) =>
@@ -536,18 +542,20 @@ object GrpcStreamingUtils {
       observer.onError(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError)
   }
 
-  private def withServerCallStreamObserverG[R, A](
+  def withCallStreamObserverG[R, A, SO <: CallStreamObserver[R]](
       observer: StreamObserver[R]
   )(ifNotSupported: => A)(
-      handler: ServerCallStreamObserver[R] => A
-  )(implicit errorLoggingContext: ErrorLoggingContext): A =
+      handler: SO => A
+  )(implicit errorLoggingContext: ErrorLoggingContext, tag: ClassTag[SO]): A =
     observer match {
-      case serverCallStreamObserver: ServerCallStreamObserver[R] =>
+      case tag(serverCallStreamObserver: SO) =>
         handler(serverCallStreamObserver)
       case other =>
         val statusException =
           Status.INTERNAL
-            .withDescription(s"Unknown stream observer request")
+            .withDescription(
+              s"Unknown stream observer request, expected ${tag.runtimeClass}"
+            )
             .asException()
         errorLoggingContext.warn(
           s"${statusException.getMessage} StreamObserver:(${other.getClass})",
@@ -557,8 +565,8 @@ object GrpcStreamingUtils {
         ifNotSupported
     }
 
-  /** Ensure the observer is a ServerCallStreamObserver, running `handler` if so. Otherwise reports
-    * an INTERNAL error to the observer. See `withServerCallStreamObserverG`.
+  /** Ensure the observer is a ServerCallStreamObserver, running `handler` if so. Otherwise, reports
+    * an INTERNAL error to the observer. See `withCallStreamObserverG`.
     *
     * @param observer
     *   underlying observer
@@ -570,11 +578,11 @@ object GrpcStreamingUtils {
   )(handler: ServerCallStreamObserver[R] => Unit)(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Unit =
-    withServerCallStreamObserverG(observer)(())(handler)
+    withCallStreamObserverG(observer)(())(handler)
 
-  /** Ensure the observer is a ServerCallStreamObserver, running `handler` if so. Otherwise reports
+  /** Ensure the observer is a ServerCallStreamObserver, running `handler` if so. Otherwise, reports
     * an INTERNAL error to the observer and returns a completed future. See
-    * `withServerCallStreamObserverG`.
+    * `withCallStreamObserverG`.
     *
     * @param observer
     *   underlying observer
@@ -586,9 +594,8 @@ object GrpcStreamingUtils {
   )(handler: ServerCallStreamObserver[R] => Future[Unit])(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Future[Unit] =
-    withServerCallStreamObserverG(observer)(Future.unit)(handler)
+    withCallStreamObserverG(observer)(Future.unit)(handler)
 }
-
 // Define a type class for converting ByteString to the generic type T
 trait FromByteString[T] {
   def toT(chunk: ByteString): T

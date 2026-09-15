@@ -198,18 +198,26 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
     private[metrics] class SendMetrics private[P2PHistograms] {
       val prefix: MetricName = p2pPrefix :+ "send"
 
-      private[metrics] val networkWriteLatency: Item = Item(
+      private[metrics] val grpcOnNextLatency: Item = Item(
         prefix :+ "network-write-latency",
-        summary = "Message network write latency",
-        description = "Records the rate and latency when writing P2P messages to the network.",
+        summary = "P2P gRPC `onNext` latency",
+        description =
+          "Records the rate and latency when sending messages to the P2P stream via gRPC's `onNext`.",
         qualification = MetricQualification.Latency,
       )
 
       private[metrics] val grpcLatency: Item = Item(
         prefix :+ "grpc-latency",
-        summary = "Latency of a gRPC message send",
+        summary = "Total latency of a P2P gRPC message send",
         description =
           "Records the rate of gRPC message sends and their latency (up to receiving them on the other side).",
+        qualification = MetricQualification.Latency,
+      )
+
+      private[metrics] val grpcFlowControlNotReadyLatency: Item = Item(
+        prefix :+ "grpc-flow-control-not-ready",
+        summary = "Duration of gRPC flow control not being ready",
+        description = "Records the rate and duration of gRPC flow control not being ready.",
         qualification = MetricQualification.Latency,
       )
     }
@@ -721,7 +729,7 @@ class BftOrderingMetrics private[metrics] (
         val Sequencer: String = "sequencer"
 
         object violationType {
-          val Key: String = "violationType"
+          val Key: String = "violation-type"
 
           object values {
             sealed trait ViolationTypeValue extends PrettyNameOnlyCase
@@ -1377,12 +1385,29 @@ class BftOrderingMetrics private[metrics] (
         val DroppedAsUnauthenticated: String = "dropped-as-unauthenticated"
 
         object targetModule {
-          val Key: String = "targetModule"
+          val Key: String = "target-module"
 
           object values {
             sealed trait TargetModuleValue extends PrettyNameOnlyCase
             case object Availability extends TargetModuleValue
             case object Consensus extends TargetModuleValue
+          }
+        }
+      }
+
+      object failure {
+        object labels {
+          object reason {
+            val Key: String = "send-failure-reason"
+
+            object values {
+              sealed trait SendFailureReasonValue extends PrettyNameOnlyCase
+              case object ConnectionInitError extends SendFailureReasonValue
+              case object FlowControl extends SendFailureReasonValue
+              case object SendError extends SendFailureReasonValue
+              case object Unauthenticated extends SendFailureReasonValue
+              case object NoAuthenticatedRecipientCandidates extends SendFailureReasonValue
+            }
           }
         }
       }
@@ -1409,17 +1434,28 @@ class BftOrderingMetrics private[metrics] (
         MetricInfo(
           prefix :+ "sends-retried",
           summary = "P2P sends retried",
-          description =
-            "Total P2P network sends retried after a delay due to missing connectivity.",
+          description = "Total P2P network sends retried after a delay.",
           qualification = MetricQualification.Latency,
         )
       )
 
-      val networkWriteLatency: Timer =
-        openTelemetryMetricsFactory.timer(histograms.p2p.send.networkWriteLatency.info)
+      val sendsDropped: Counter = openTelemetryMetricsFactory.counter(
+        MetricInfo(
+          prefix :+ "sends-dropped",
+          summary = "P2P sends dropped",
+          description = "Total P2P network sends dropped, labeled by reason.",
+          qualification = MetricQualification.Latency,
+        )
+      )
+
+      val grpcOnNextLatency: Timer =
+        openTelemetryMetricsFactory.timer(histograms.p2p.send.grpcOnNextLatency.info)
 
       val grpcLatency: Timer =
         openTelemetryMetricsFactory.timer(histograms.p2p.send.grpcLatency.info)
+
+      val grpcFlowControlNotReadyLatency: Timer =
+        openTelemetryMetricsFactory.timer(histograms.p2p.send.grpcFlowControlNotReadyLatency.info)
     }
     val send = new SendMetrics
 
@@ -1431,7 +1467,7 @@ class BftOrderingMetrics private[metrics] (
         val SourceSequencer: String = "source-sequencer"
 
         object source {
-          val Key: String = "targetModule"
+          val Key: String = "source"
 
           object values {
             sealed trait SourceValue extends PrettyNameOnlyCase

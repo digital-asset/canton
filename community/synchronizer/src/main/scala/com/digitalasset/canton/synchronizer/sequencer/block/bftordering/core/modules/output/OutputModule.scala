@@ -647,13 +647,17 @@ class OutputModule[E <: Env[E]](
               val mode = orderedBlockForOutput.orderingMode
               val earlyFetchedBlockO = earlyFetchedBatchesForBlock.remove(blockNumber)
 
-              val newTraceContext: TraceContext = if (orderedBlock.batchRefs.nonEmpty) {
-                val (span, tc) = startSpan(s"BftOrderer.Output")
-                blockSpanMap
-                  .put(blockNumber, (span.setAttribute("block.number", blockNumber), tc))
-                  .discard
-                tc
-              } else traceContext
+              val newTraceContext: TraceContext =
+                if (orderedBlock.batchRefs.nonEmpty && !alreadyProvided) {
+                  blockSpanMap
+                    .getOrElseUpdate(
+                      blockNumber, {
+                        val (span, tc) = startSpan(s"BftOrderer.Output")
+                        (span.setAttribute("block.number", blockNumber), tc)
+                      },
+                    )
+                    ._2
+                } else traceContext
 
               logger.debug(
                 s"Output received from local consensus ordered block (mode = $mode) with batch IDs ${orderedBlock.batchRefs

@@ -151,7 +151,8 @@ class PartitionManagerDatabaseTest
     with BftSequencerBaseTest
     with PostgresTest {
 
-  def create() = PartitionManager.create(storage, timeouts, loggerFactory, None)
+  def create() =
+    PartitionManager.create(storage, timeouts, loggerFactory, None, manualVacuumEnabled = true)
 
   override def cleanDb(storage: DbStorage)(implicit
       tc: TraceContext
@@ -246,7 +247,7 @@ class PartitionManagerDatabaseTest
         // checking that custom autovacuum settings are applied to a new partition
         opts <- getPartitionSettings(s"${PartitionManager.consensusInProgressTable}_p2")
         _ =
-          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=\d+,autovacuum_vacuum_insert_scale_factor=\d+,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\.01,autovacuum_vacuum_cost_limit=\d+,autovacuum_vacuum_cost_delay=\d+\}".r
+          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=-1,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\}".r
 
         _ <- creator
           .createPartitionsIfNeeded(EpochNumber(200))
@@ -333,7 +334,7 @@ class PartitionManagerDatabaseTest
         // checking that custom autovacuum settings are applied to a new partition
         opts <- getPartitionSettings(partitionName)
         _ =
-          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=\d+,autovacuum_vacuum_insert_scale_factor=\d+,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\.01,autovacuum_vacuum_cost_limit=\d+,autovacuum_vacuum_cost_delay=\d+\}".r
+          opts should fullyMatch regex raw"\{autovacuum_vacuum_insert_threshold=-1,autovacuum_vacuum_threshold=\d+,autovacuum_vacuum_scale_factor=0\}".r
 
         _ = eventually() {
           // we should see that manual vacuum took place (twice instead of once because of how unit tests run everything twice)
@@ -353,7 +354,13 @@ class PartitionManagerOnboardingTest
     with PostgresTest {
 
   def create(onboardedSequencerEpochNumber: EpochNumber) =
-    PartitionManager.create(storage, timeouts, loggerFactory, Some(onboardedSequencerEpochNumber))
+    PartitionManager.create(
+      storage,
+      timeouts,
+      loggerFactory,
+      Some(onboardedSequencerEpochNumber),
+      manualVacuumEnabled = true,
+    )
 
   override def cleanDb(storage: DbStorage)(implicit
       tc: TraceContext
