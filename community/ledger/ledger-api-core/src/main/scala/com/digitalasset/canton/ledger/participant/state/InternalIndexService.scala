@@ -8,8 +8,10 @@ import com.daml.ledger.api.v2.state_service.{GetActiveContractsResponse, Partici
 import com.daml.ledger.api.v2.topology_transaction.{TopologyEvent, TopologyTransaction}
 import com.daml.ledger.api.v2.trace_context.TraceContext as LedgerApiTraceContext
 import com.daml.ledger.api.v2.update_service.GetUpdatesResponse
+import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.ledger.client.LedgerClient
+import com.digitalasset.canton.ledger.client.{LedgerClient, LedgerClientUtils}
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   ChangedTo,
@@ -33,26 +35,33 @@ import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStr
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PekkoUtil.RecoveryStrategy
 import com.digitalasset.canton.{LfPartyId, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 import com.google.protobuf.timestamp.Timestamp as ProtoTimestamp
+import io.grpc.StatusRuntimeException
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.Future
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
+
+import InternalIndexService.*
 
 trait InternalIndexService {
   def activeContracts(
       partyIds: Set[LfPartyId],
       validAt: Option[Offset],
+      recoveryStrategy: RecoveryStrategy = defaultRecoveryStrategyFor("activeContracts"),
   )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed]
 
   def topologyTransactions(
       partyId: LfPartyId,
       fromExclusive: Offset,
+      recoveryStrategy: RecoveryStrategy = defaultRecoveryStrategyFor("topologyTransactions"),
   )(implicit traceContext: TraceContext): Source[TopologyTransaction, NotUsed]
 
   /** @return
@@ -62,7 +71,8 @@ trait InternalIndexService {
   def acsUpdates(
       synchronizerId: SynchronizerId,
       fromExclusive: Option[Offset],
-  )(implicit traceContext: TraceContext): Source[InternalIndexService.AcsUpdateContainer, NotUsed]
+      recoveryStrategy: RecoveryStrategy = defaultRecoveryStrategyFor("acsUpdates"),
+  )(implicit traceContext: TraceContext): Source[AcsUpdateContainer, NotUsed]
 
   /** @param stakeholders1
     *   must be nonempty
@@ -80,7 +90,8 @@ trait InternalIndexService {
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
       configOverrides: ActiveContractsServiceStreamsConfigOverrides,
-  )(implicit traceContext: TraceContext): Source[InternalIndexService.ActiveContract, NotUsed]
+      recoveryStrategy: RecoveryStrategy = defaultRecoveryStrategyFor("acs"),
+  )(implicit traceContext: TraceContext): Source[ActiveContract, NotUsed]
 
   /** @return
     *   Unique parties emerging from stakeholders of Active Contracs in an ACS, defined by activeAt
@@ -92,6 +103,7 @@ trait InternalIndexService {
       activeAt: Offset,
       party: Option[Party],
       configOverrides: ActiveContractsServiceStreamsConfigOverrides,
+      recoveryStrategy: RecoveryStrategy = defaultRecoveryStrategyFor("counterParties"),
   )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed]
 
   /** Returns the offset up to which the indexer has been pruned (inclusive). */
@@ -291,5 +303,43 @@ object InternalIndexService {
       contractId: ContractId,
       stakeholders: Set[Party],
       reassignmentCounter: ReassignmentCounter,
+      continuationToken: ByteString,
   )
+
+  /** Default RecoveryStrategy with: infinite retries, INFO logging until ~5 minutes, then on WARN,
+    * exponential backoff and default retry rules.
+    */
+  def defaultRecoveryStrategyFor(
+      streamName: String,
+      initialDelay: FiniteDuration = 100.millis,
+      maxDelay: FiniteDuration = 5.seconds,
+      warnLoggingAttemptThreshold: Int = 65,
+      errorLoggingAttemptThreshold: Int = Int.MaxValue,
+      failingAttemptThreshold: Int = Int.MaxValue,
+      additionalRecoverable: Throwable => Boolean = _ => false,
+  ): RecoveryStrategy =
+    RecoveryStrategy.exponentialBackoff(
+      initialDelay = initialDelay,
+      maxDelay = maxDelay,
+      streamName = streamName,
+      warnLoggingAttemptThreshold = warnLoggingAttemptThreshold,
+      errorLoggingAttemptThreshold = errorLoggingAttemptThreshold,
+      failingAttemptThreshold = failingAttemptThreshold,
+    ) {
+      case sre: StatusRuntimeException if LedgerClientUtils.defaultRetryRulesEx(sre).isDefined =>
+        true
+      case nonRetryable => additionalRecoverable(nonRetryable)
+    }
+
+  // TODO(i35778): Remove TODO or remove this workaround
+  def retryOnPruningError: Throwable => Boolean = {
+    case sre: StatusRuntimeException =>
+      DecodedCantonError
+        .fromStatusRuntimeException(sre)
+        .exists(
+          _.code.id == RequestValidationErrors.ParticipantPrunedDataAccessed.code.id
+        )
+    case _ => false
+  }
+
 }

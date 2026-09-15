@@ -33,7 +33,7 @@ trait RangeBoundaryStreamComponentTest
 
   private val nextRecordTime = new SingleStepIncreasingRecordTime
 
-  private lazy val internalIndexService = new InternalIndexServiceImpl(index)
+  private lazy val internalIndexService = new InternalIndexServiceImpl(index, loggerFactory)
 
   private def transactionUpdateFormat(
       includeTopologyEvents: Option[TopologyFormat] = None

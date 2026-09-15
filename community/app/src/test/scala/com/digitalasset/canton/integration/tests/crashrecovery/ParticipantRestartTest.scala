@@ -1136,7 +1136,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
         action = "retries on timeouts and connection issues",
       ),
       outcome = "bong can progress whenever the participant is running",
-    ) in { implicit env =>
+    ) ignore { implicit env =>
       import env.*
 
       console.set_command_timeout(

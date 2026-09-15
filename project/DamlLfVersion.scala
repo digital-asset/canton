@@ -60,7 +60,7 @@ object DamlLfVersion {
   val namedVersions: Map[String, DamlLfVersion] = Map(
     "defaultLfVersion" -> v2_3,
     "devLfVersion" -> v2_dev,
-    "latestStableLfVersion" -> v2_3,
+    "latestStableLfVersion" -> v2_4,
     "stagingLfVersion" -> v2_5_1,
   )
   val namedVersionsSDKOnly: Map[String, DamlLfVersion] = Map(

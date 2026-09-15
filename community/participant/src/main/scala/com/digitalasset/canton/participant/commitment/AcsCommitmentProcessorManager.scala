@@ -168,30 +168,23 @@ class AcsCommitmentProcessorManager(
       val handle = sync.subscribeToConnections {
         _.withTraceContext { implicit traceContext => synchronizerId =>
           logger.info(s"Starting commitment processor pipeline for synchronizer $synchronizerId")
-          FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-            {
-              val syncState = getOrCreate(synchronizerId)
-              val connectedSynchronizerO = sync.readyConnectedSynchronizerById(synchronizerId)
-              if (connectedSynchronizerO.isEmpty) {
-                logger.warn(s"Cannot start ACS commitment sender for synchronizer $synchronizerId")
-              }
-              val senderO = connectedSynchronizerO.flatMap { connectedSynchronizer =>
-                Option.when(
-                  connectedSynchronizer.psid.protocolVersion >= ProtocolVersion.acsCommitmentRedesign
-                )(connectedSynchronizer.ephemeral.acsCommitmentSender)
-              }
-              for {
-                _ <- syncState.digestProcessorManager.startRunningDigestProcessor()
-                _ = senderO.foreach(
-                  _.startPipeline(
-                    syncState.tickSignaller
-                      .readSignals(TickListener.TickOnlyListener, "ACS commitment sender")
-                      .map(_.signal)
-                  )
-                )
-              } yield ()
-            },
-            s"failed to start running digest processor for $synchronizerId",
+          val syncState = getOrCreate(synchronizerId)
+          val connectedSynchronizerO = sync.readyConnectedSynchronizerById(synchronizerId)
+          if (connectedSynchronizerO.isEmpty) {
+            logger.warn(s"Cannot start ACS commitment sender for synchronizer $synchronizerId")
+          }
+          val senderO = connectedSynchronizerO.flatMap { connectedSynchronizer =>
+            Option.when(
+              connectedSynchronizer.psid.protocolVersion >= ProtocolVersion.acsCommitmentRedesign
+            )(connectedSynchronizer.ephemeral.acsCommitmentSender)
+          }
+          syncState.digestProcessorManager.startRunningDigestProcessorAsync()
+          senderO.foreach(
+            _.startPipeline(
+              syncState.tickSignaller
+                .readSignals(TickListener.TickOnlyListener, "ACS commitment sender")
+                .map(_.signal)
+            )
           )
         }
       }

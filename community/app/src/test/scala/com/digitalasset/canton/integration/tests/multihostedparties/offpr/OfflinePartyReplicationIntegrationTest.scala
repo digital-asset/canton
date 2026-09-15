@@ -501,6 +501,9 @@ final class OfflinePartyReplicationEdgeCasesIntegrationTest
         exportFilePath = acsSnapshotPath,
         waitForActivationTimeout = Some(config.NonNegativeFiniteDuration.ofMillis(5)),
       ),
+      _.warningMessage should include(
+        "Internal stream [Internal Topology Transaction Update Stream] completed with a failure"
+      ),
       _.shouldBeCantonErrorCode(EffectivePartyToParticipantMappingNotFound.code),
     )
   }

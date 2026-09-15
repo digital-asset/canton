@@ -8,7 +8,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
@@ -356,7 +355,6 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
   }
 }
 
-@AcsCommitmentTest
 class AcsCommitmentPipelineToggleIntegrationTestPostgres
     extends AcsCommitmentPipelineToggleIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

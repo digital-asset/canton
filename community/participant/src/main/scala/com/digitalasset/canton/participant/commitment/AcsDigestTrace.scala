@@ -16,7 +16,6 @@ import com.digitalasset.canton.version.{
   HasVersionedJsonWrapper,
   ProtoVersion,
   ProtocolVersion,
-  ReleaseProtocolVersion,
 }
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, ReassignmentCounter}
 import com.digitalasset.daml.lf.data.Bytes
@@ -51,8 +50,7 @@ object AcsDigestTrace
     SupportedProtoVersions(
       ProtoVersion(-1) -> unsupportedProtoCodec(ProtocolVersion.v34),
       ProtoVersion(30) -> ProtoCodec(
-        // TODO(#33849) replace with the stable protocol version that introduces the feature
-        ReleaseProtocolVersion.acsCommitmentRedesignStorage.v,
+        ProtocolVersion.acsCommitmentRedesignStorage,
         supportedProtoVersion(fromProtoV30),
         _.toProtoV30,
       ),
@@ -74,11 +72,9 @@ object AcsDigestTrace
       .map(AcsDigestTrace(_))
 
   implicit val setParameterAcsDigestTrace: SetParameter[AcsDigestTrace] =
-    // TODO(#33849): replace with ReleaseProtocolversion.latest
-    AcsDigestTrace.getVersionedSetParameter(ReleaseProtocolVersion.acsCommitmentRedesignStorage.v)
+    AcsDigestTrace.getVersionedSetParameter(ProtocolVersion.acsCommitmentRedesignStorage)
   implicit val setParameterAcsDigestTraceO: SetParameter[Option[AcsDigestTrace]] =
-    // TODO(#33849): replace with ReleaseProtocolversion.latest
-    AcsDigestTrace.getVersionedSetParameterO(ReleaseProtocolVersion.acsCommitmentRedesignStorage.v)
+    AcsDigestTrace.getVersionedSetParameterO(ProtocolVersion.acsCommitmentRedesignStorage)
 
   val pretty: Pretty[AcsDigestTrace] = prettyOfParam(_.traces)
 }

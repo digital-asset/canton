@@ -18,6 +18,7 @@ import com.daml.ledger.api.v2.state_service.StateServiceGrpc
 import com.daml.ledger.api.v2.trace_context.TraceContext as LedgerApiTraceContext
 import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc
 import com.daml.ledger.api.v2.version_service.VersionServiceGrpc
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.client.LedgerClient.stubWithTracing
 import com.digitalasset.canton.ledger.client.configuration.{
   LedgerClientChannelConfiguration,
@@ -175,6 +176,33 @@ object LedgerClient {
       traceContext: TraceContext,
   ): Future[LedgerClient] =
     fromBuilder(channelConfig.builderFor(hostIp, port), configuration, loggerFactory)
+
+  /** A convenient shortcut to build a [[LedgerClient]], use [[fromBuilder]] for a more flexible
+    * alternative, while also allowing to configure the initial flow control window, e.g., to
+    * disable automatic gRPC flow control by setting it to `None`.
+    *
+    * @param initialFlowControlWindow
+    *   Switches to automatic gRPC flow control and sets its initial window; if `None`, then it is
+    *   not configured and `flowControlWindow` in `LedgerClientChannelConfiguration` takes effect.
+    *   If present, it is set after the `flowControlWindow`, so it overrides it.
+    */
+  def singleHost(
+      hostIp: String,
+      port: Int,
+      configuration: LedgerClientConfiguration,
+      channelConfig: LedgerClientChannelConfiguration,
+      initialFlowControlWindow: Option[PositiveInt],
+      loggerFactory: NamedLoggerFactory,
+  )(implicit
+      ec: ExecutionContext,
+      esf: ExecutionSequencerFactory,
+      traceContext: TraceContext,
+  ): Future[LedgerClient] =
+    fromBuilder(
+      channelConfig.builderFor(hostIp, port, initialFlowControlWindow),
+      configuration,
+      loggerFactory,
+    )
 
   def insecureSingleHost(
       hostIp: String,

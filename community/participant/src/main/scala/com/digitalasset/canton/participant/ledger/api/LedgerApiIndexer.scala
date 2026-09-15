@@ -55,7 +55,7 @@ import com.digitalasset.canton.util.PekkoUtil.{
   RecoveringQueueMetrics,
   ShutdownInProgress,
 }
-import com.digitalasset.canton.util.{PekkoUtil, StateChangedCallback}
+import com.digitalasset.canton.util.{Mutex, PekkoUtil, StateChangedCallback}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 import org.slf4j.event.Level
@@ -82,10 +82,14 @@ class LedgerApiIndexer(
   override protected def initialHealthState: ComponentHealthState =
     ComponentHealthState.NotInitializedState
 
+  private val healthUpdateLock = Mutex()
+
   indexerState.replaceHealthStateChangedCallback { () =>
-    reportHealthState(indexerState.componentHealthState)(
-      TraceContext.empty
-    )
+    healthUpdateLock.exclusive {
+      reportHealthState(indexerState.componentHealthState)(
+        TraceContext.empty
+      )
+    }
   }
   reportHealthState(indexerState.componentHealthState)(
     TraceContext.empty

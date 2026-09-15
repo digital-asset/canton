@@ -15,7 +15,7 @@ import "scalapb/scalapb.proto";
 
 // Compared to v31: HashingSchemeVersion V4 enum added for development-version prepared transactions.
 message ExternalAuthorization {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   // The hashing scheme version used when building the hash
   enum HashingSchemeVersion {
@@ -37,7 +37,7 @@ message ExternalAuthorization {
 
 // Compared to v31: external authorization can carry HashingSchemeVersion V4.
 message SubmitterMetadata {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   com.digitalasset.canton.crypto.v30.Salt salt = 1;
   repeated string act_as = 2;
@@ -54,7 +54,7 @@ message SubmitterMetadata {
 }
 
 message ViewExternalCallResult {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   string extension_id = 1;
   string function_id = 2;
@@ -75,7 +75,7 @@ message ViewExternalCallResult {
 // - rolled_back boolean added
 // - created_core references v31 structure
 message ViewParticipantData {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   com.digitalasset.canton.crypto.v30.Salt salt = 1;
   repeated v30.InputContract core_inputs = 2;
@@ -91,7 +91,7 @@ message ViewParticipantData {
 // are produced using a different compression algorithm. The v31 version uses gzip, while
 // this v32 version uses Zstandard (zstd) for improved compression ratio and speed.
 message EncryptedMultipleViewsMessage {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   // A wrapper for a collection of view trees (serialized, uncompressed)
   message UncompressedViewTrees {

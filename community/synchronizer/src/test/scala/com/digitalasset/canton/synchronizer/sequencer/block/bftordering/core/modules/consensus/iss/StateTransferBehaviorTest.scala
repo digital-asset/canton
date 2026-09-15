@@ -239,11 +239,13 @@ class StateTransferBehaviorTest
               .thenReturn(() => Some(anEpochStoreEpoch))
             when(epochStoreMock.loadEpochProgress(eqTo(epochStateEpoch))(any[TraceContext]))
               .thenReturn(() => EpochInProgress())
+            val catchupDetectorMock = mock[CatchupDetector]
+            when(catchupDetectorMock.currentTarget(EpochNumber(1))).thenReturn(minimumEndEpoch)
             val (context, stateTransferBehavior) =
               createStateTransferBehavior(
                 epochStore = epochStoreMock,
+                maybeCatchupDetector = Some(catchupDetectorMock),
                 maybeStateTransferManager = Some(stateTransferManagerMock),
-                minimumStateTransferEndEpoch = minimumEndEpoch,
               )
             implicit val ctx: ContextType = context
 
@@ -260,6 +262,7 @@ class StateTransferBehaviorTest
               eqTo(aMembership),
               eqTo(aFakeCryptoProviderInstance),
               nodesThatTimedOut = eqTo(Seq(otherIds.head)),
+              eqTo(minimumEndEpoch),
             )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
             succeed
           }
@@ -273,6 +276,7 @@ class StateTransferBehaviorTest
           None,
           Some(EpochNumber(anEpochInfo.number)), // the same as the "current epoch", see below
         ).forEvery { minimumEndEpoch =>
+          val catchupDetector = mock[CatchupDetector]
           val epochStoreMock = mock[EpochStore[ProgrammableUnitTestEnv]]
           val p2pNetworkOutModuleRefMock = mock[ModuleRef[P2PNetworkOut.Message]]
           val epochStateEpoch = EpochState.Epoch(
@@ -280,6 +284,7 @@ class StateTransferBehaviorTest
             aTopologyInfo.currentMembership,
             aTopologyInfo.previousMembership,
           )
+          when(catchupDetector.currentTarget(anEpochInfo.number)).thenReturn(minimumEndEpoch)
           when(epochStoreMock.latestEpoch(any[Boolean])(any[TraceContext]))
             .thenReturn(() => Some(anEpochStoreEpoch))
           when(epochStoreMock.loadEpochProgress(eqTo(epochStateEpoch))(any[TraceContext]))
@@ -287,7 +292,7 @@ class StateTransferBehaviorTest
           val (context, stateTransferBehavior) =
             createStateTransferBehavior(
               epochStore = epochStoreMock,
-              minimumStateTransferEndEpoch = minimumEndEpoch,
+              maybeCatchupDetector = Some(catchupDetector),
               p2pNetworkOutModuleRef = p2pNetworkOutModuleRefMock,
             )
           implicit val ctx: ContextType = context
@@ -429,7 +434,6 @@ class StateTransferBehaviorTest
             case StateTransferBehavior(
                   _,
                   _,
-                  _,
                   `anEpochInfo`,
                   _,
                 ) =>
@@ -442,6 +446,7 @@ class StateTransferBehaviorTest
             eqTo(aMembership),
             eqTo(aFakeCryptoProviderInstance),
             nodesThatTimedOut = eqTo(Seq.empty),
+            eqTo(None),
           )(any[String => Nothing])(eqTo(ctx), any[TraceContext])
 
           succeed
@@ -451,19 +456,39 @@ class StateTransferBehaviorTest
 
   "receiving an unhandled message" should {
     "enqueue it for later" in {
-      val (context, stateTransferBehavior) = createStateTransferBehavior()
+      val catchupDetector = mock[CatchupDetector]
+      val (context, stateTransferBehavior) = createStateTransferBehavior(
+        maybeCatchupDetector = Some(catchupDetector)
+      )
       implicit val ctx: ContextType = context
 
       // PbftUnverifiedNetworkMessage
       val underlyingMessage = mock[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]
       when(underlyingMessage.actualSender).thenReturn(Some(otherId))
-      when(underlyingMessage.from).thenThrow(
-        new RuntimeException("should have used an actual sender")
+      when(underlyingMessage.from).thenReturn(otherId)
+      when(underlyingMessage.blockMetadata).thenReturn(
+        BlockMetadata(EpochNumber(7L), BlockNumber(100L))
       )
       val signedMessage = underlyingMessage.fakeSign
       val pbftUnverifiedNetworkMessage =
         Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(signedMessage)
       stateTransferBehavior.receive(pbftUnverifiedNetworkMessage)
+      verify(catchupDetector).updateLatestKnownNodeEpoch(otherId, EpochNumber(7L))
+
+      // PbftUnverifiedNetworkMessage with different actualSender
+      val underlyingMessageDifferentSender =
+        mock[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]
+      when(underlyingMessageDifferentSender.actualSender).thenReturn(Some(otherId2))
+      when(underlyingMessageDifferentSender.from).thenReturn(otherId)
+      when(underlyingMessageDifferentSender.blockMetadata).thenReturn(
+        BlockMetadata(EpochNumber(7L), BlockNumber(100L))
+      )
+      val signedMessageDifferentSender = underlyingMessageDifferentSender.fakeSign
+      val pbftUnverifiedNetworkMessageDifferentSender =
+        Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(signedMessageDifferentSender)
+      stateTransferBehavior.receive(pbftUnverifiedNetworkMessageDifferentSender)
+      // since actualSender != from, we don't use this for catchup, but it will be enqueued
+      verifyZeroInteractions(catchupDetector)
 
       // PbftVerifiedNetworkMessage
       val underlyingMessage2 = mock[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]
@@ -482,11 +507,27 @@ class StateTransferBehaviorTest
         )
       stateTransferBehavior.receive(anotherMessage)
 
-      @SuppressWarnings(Array("org.wartremover.warts.Serializable"))
+      type PostponedMessage = Consensus.Message[ProgrammableUnitTestEnv]
       val expectedMessages =
-        Seq(pbftUnverifiedNetworkMessage, pbftVerifiedNetworkMessage, anotherMessage)
+        Seq[PostponedMessage](
+          pbftUnverifiedNetworkMessage,
+          pbftUnverifiedNetworkMessageDifferentSender,
+          pbftVerifiedNetworkMessage,
+          anotherMessage,
+        )
 
       stateTransferBehavior.postponedConsensusMessages.dump should contain theSameElementsInOrderAs expectedMessages
+
+      // check that we attribute in the queue to actualSender
+      stateTransferBehavior.postponedConsensusMessages.dumpPerNode shouldBe
+        Map[BftNodeId, Seq[PostponedMessage]](
+          BftNodeId("") -> Seq(anotherMessage),
+          otherId -> Seq[PostponedMessage](
+            pbftUnverifiedNetworkMessage,
+            pbftVerifiedNetworkMessage,
+          ),
+          otherId2 -> Seq(pbftUnverifiedNetworkMessageDifferentSender),
+        )
     }
   }
 
@@ -511,7 +552,6 @@ class StateTransferBehaviorTest
         fakeIgnoringModule,
       maybeStateTransferManager: Option[StateTransferManager[ProgrammableUnitTestEnv]] = None,
       maybeCatchupDetector: Option[CatchupDetector] = None,
-      minimumStateTransferEndEpoch: Option[EpochNumber] = None,
       stateTransferType: StateTransferType = StateTransferType.Catchup,
   ): (ContextType, StateTransferBehavior[ProgrammableUnitTestEnv]) = {
     implicit val context: ContextType = new ProgrammableUnitTestContext
@@ -566,7 +606,6 @@ class StateTransferBehaviorTest
 
     val initialState = StateTransferBehavior.InitialState(
       stateTransferStartEpoch = latestCompletedEpochFromStore.info.number,
-      minimumStateTransferEndEpoch,
       aTopologyInfo,
       initialEpochState,
       latestCompletedEpochFromStore,
@@ -620,6 +659,7 @@ object StateTransferBehaviorTest {
     TopologyActivationTime(CantonTimestamp.Epoch),
   )
   private val otherId: BftNodeId = BftNodeId("other")
+  private val otherId2: BftNodeId = BftNodeId("other2")
   private def aMembership(implicit pv: ProtocolVersion) =
     Membership.forTesting(myId, otherNodes = Set(otherId), epochLength = TestEpochLength)
   private def anEpoch(implicit pv: ProtocolVersion) = EpochState.Epoch(

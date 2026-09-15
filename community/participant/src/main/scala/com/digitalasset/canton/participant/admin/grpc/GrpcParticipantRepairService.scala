@@ -52,12 +52,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{
-  EitherTUtil,
-  FutureUnlessShutdownUtil,
-  GrpcStreamingUtils,
-  OptionUtil,
-}
+import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil}
 import com.digitalasset.canton.{
   LfPartyId,
   ProtoDeserializationError,
@@ -764,12 +759,6 @@ final class GrpcParticipantRepairService(
           digestProcessorManager
             .startReinitializationDigestProcessor()
             .map { reinitTime =>
-              if (request.runningDigestProcessorShouldStartAfter) {
-                FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-                  digestProcessorManager.startRunningDigestProcessor(),
-                  s"failed to restart running digest processor for $synchronizerId",
-                )
-              }
               v30.ReinitializeDigestCommitmentsResponse(Some(reinitTime.toProtoTimestamp))
             }
         }

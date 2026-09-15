@@ -168,7 +168,7 @@ object LedgerApiIndexService {
       packagePreferenceBackend = packagePreferenceBackend,
       lfValueTranslation = lfValueTranslation,
       indexService = indexService,
-      internalIndexService = new InternalIndexServiceImpl(indexService),
+      internalIndexService = new InternalIndexServiceImpl(indexService, loggerFactory),
       timeouts = parameters.processingTimeouts,
       loggerFactory = loggerFactory,
     ))

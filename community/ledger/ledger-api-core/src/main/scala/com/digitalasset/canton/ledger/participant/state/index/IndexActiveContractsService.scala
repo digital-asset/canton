@@ -12,6 +12,7 @@ import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.config.ActiveContractsServiceStreamsConfigOverrides
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref.Party
+import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
@@ -35,6 +36,7 @@ trait IndexActiveContractsService {
       stakeholders1: Set[Party],
       stakeholders2: Set[Party],
       configOverrides: ActiveContractsServiceStreamsConfigOverrides,
+      continuationToken: Option[ByteString],
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[InternalIndexService.ActiveContract, NotUsed]

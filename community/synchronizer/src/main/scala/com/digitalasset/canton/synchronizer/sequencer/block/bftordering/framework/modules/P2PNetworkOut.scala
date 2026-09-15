@@ -28,8 +28,8 @@ object P2PNetworkOut {
 
   sealed trait Internal extends Message
   object Internal {
-    final case class Connect(p2pEndpoint: P2PEndpoint) extends Internal
-    final case class Disconnect(p2pEndpointId: P2PEndpoint.Id) extends Internal
+    final case class EndpointAdded(p2pEndpoint: P2PEndpoint) extends Internal
+    final case class EndpointRemoved(p2pEndpointId: P2PEndpoint.Id) extends Internal
   }
 
   sealed trait Network extends Message

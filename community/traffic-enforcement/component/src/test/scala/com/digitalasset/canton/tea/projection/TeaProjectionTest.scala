@@ -169,8 +169,11 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
   private def stopProjection(
       testKit: ActorTestKit,
       ref: ActorRef[ProjectionBehavior.Command],
-  ): Unit =
-    testKit.stop(ref, 30.seconds)
+  ): Unit = {
+    // Only Stop drains the stream. Killing the actor races testkit shutdown and aborts it.
+    ref ! ProjectionBehavior.Stop
+    testKit.createTestProbe[Nothing]().expectTerminated(ref, 30.seconds)
+  }
 
   private val alice = AccountId.tryCreate("alice")
 
@@ -434,7 +437,11 @@ trait TeaProjectionTest extends BaseTest { this: AnyWordSpec =>
             entries => {
               entries should not be empty
               forEvery(entries) { entry =>
-                entry.warningMessage should include("Error during envelope processing")
+                entry.warningMessage should (
+                  include("Error during envelope processing") or include(
+                    "failed and will be restarted with backoff"
+                  )
+                )
               }
               forAtLeast(1, entries) { entry =>
                 val throwableMessage = entry.throwable.map(_.getMessage).getOrElse("")

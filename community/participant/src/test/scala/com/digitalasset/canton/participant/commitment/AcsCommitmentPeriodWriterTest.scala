@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -29,16 +28,14 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
-import com.digitalasset.canton.{BaseTest, InUS, ProtocolVersionChecksAsyncWordSpec}
+import com.digitalasset.canton.{BaseTest, InUS}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.ExecutionContext
 
-@AcsCommitmentTest
 class AcsCommitmentPeriodWriterTest
     extends AsyncWordSpec
     with BaseTest
-    with ProtocolVersionChecksAsyncWordSpec
     with AcsDigestTestBase
     with InUS {
   self =>

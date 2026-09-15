@@ -26,9 +26,10 @@ object ProtoDescriptionExtractor {
       .map { proto =>
         val fileName = proto.getFilename
         val normalizedFileName =
-          if (fileName.startsWith(s"${ProtoParser.ledgerApiProtoLocation}/")) {
-            fileName.stripPrefix(s"${ProtoParser.ledgerApiProtoLocation}/")
-          } else fileName
+          Seq(ProtoParser.ledgerApiProtoLocation, ProtoParser.teaApiProtoLocation)
+            .find(location => fileName.startsWith(s"$location/"))
+            .map(location => fileName.stripPrefix(s"$location/"))
+            .getOrElse(fileName)
 
         def unnest(m: Message): Seq[Message] =
           m +: m.getMessages.asScala.toSeq.filterNot(_.isMapEntry).flatMap(unnest)

@@ -56,6 +56,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.{
+  StateTransferTimeout,
   UnverifiedStateTransferMessage,
   VerifiedStateTransferMessage,
 }
@@ -155,6 +156,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         aMembershipBeforeOnboarding,
         ProgrammableUnitTestEnv.noSignatureCryptoProvider,
         nodesThatTimedOut = Seq.empty,
+        None,
       )(abort = fail(_))
       context.runPipedMessages()
 
@@ -328,12 +330,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       new ProgrammableUnitTestContext()
 
     val outputRef = mock[ModuleRef[Output.Message[ProgrammableUnitTestEnv]]]
-    val timeoutManagerMock =
-      mock[
-        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
-          ProgrammableUnitTestEnv
-        ], Consensus.Message[ProgrammableUnitTestEnv], String]
-      ]
+    val timeoutManagerMock = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+      ProgrammableUnitTestEnv
+    ], StateTransferTimeout, String]]
     val stateTransferManager =
       createStateTransferManager[ProgrammableUnitTestEnv](
         outputModuleRef = outputRef,
@@ -395,7 +394,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       currentEpochInfo,
     )(fail(_))
 
-    verify(timeoutManagerMock, times(1)).cancelTimeout()
+    verify(timeoutManagerMock, times(1)).cancelTimeoutIf(any[StateTransferTimeout => Boolean])(
+      any[TraceContext]
+    )
 
     // Store the block.
     val blockStoredMessage = context.runPipedMessages()
@@ -470,11 +471,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
   "cancel a timeout" when {
     "an epoch is transferred" in {
-      val timeoutManager = mock[
-        TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
-          ProgrammableUnitTestEnv
-        ], Consensus.Message[ProgrammableUnitTestEnv], String]
-      ]
+      val timeoutManager = mock[TimeoutManager[ProgrammableUnitTestEnv, Consensus.Message[
+        ProgrammableUnitTestEnv
+      ], StateTransferTimeout, String]]
       val stateTransferManager =
         createStateTransferManager[ProgrammableUnitTestEnv](
           p2pNetworkOutModuleRef = fakeIgnoringModule,
@@ -483,7 +482,9 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
 
       stateTransferManager.cancelTimeoutForEpoch(EpochNumber.First)
 
-      verify(timeoutManager, times(1)).cancelTimeout()
+      verify(timeoutManager, times(1)).cancelTimeoutIf(any[StateTransferTimeout => Boolean])(
+        any[TraceContext]
+      )
       succeed
     }
   }
@@ -542,6 +543,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         aMembership,
         ProgrammableUnitTestEnv.noSignatureCryptoProvider,
         Seq.empty,
+        Some(EpochNumber(13)),
       )(fail(_))
 
       context.runPipedMessages()
@@ -731,7 +733,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       p2pNetworkOutModuleRef: ModuleRef[P2PNetworkOut.Message],
       epochStore: EpochStore[E] = new InMemoryUnitTestEpochStore[E],
       maybeCustomTimeoutManager: Option[
-        TimeoutManager[E, Consensus.Message[E], Consensus.Message[E], String]
+        TimeoutManager[E, Consensus.Message[E], StateTransferTimeout, String]
       ] = None,
       epochStateTransferHowManyFutureEpochsToDownloadInParallel: NonNegativeLong =
         NonNegativeLong.tryCreate(0L),

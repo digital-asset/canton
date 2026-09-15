@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -16,16 +17,23 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   LifeCycle,
-  PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.TickSignaller
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{
+  DelayUtil,
+  ErrorUtil,
+  FutureUnlessShutdownUtil,
+  MonadUtil,
+  SimpleExecutionQueue,
+}
+import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 class DigestProcessorManager(
     synchronizerAlias: SynchronizerAlias,
@@ -40,8 +48,6 @@ class DigestProcessorManager(
     extends NamedLogging
     with FlagCloseable {
 
-  import DigestProcessorManager.*
-
   private val healthComponent: MutableHealthComponent = MutableHealthComponent(
     loggerFactory,
     s"digest-processor-manager-$synchronizerId",
@@ -49,10 +55,10 @@ class DigestProcessorManager(
   )
   def health: HealthComponent = healthComponent
 
-  private val state: AtomicReference[State] =
-    new AtomicReference[State](State.initial)
+  private val currentProcessorRef = new AtomicReference[Option[DigestProcessor]](None)
 
-  def currentProcessor: Option[DigestProcessor] = state.get().currentDigestProcessor
+  @VisibleForTesting
+  def currentProcessor: Option[DigestProcessor] = currentProcessorRef.get()
 
   private val sequentialQueue = new SimpleExecutionQueue(
     s"digest-processor-manager-$synchronizerId",
@@ -64,44 +70,61 @@ class DigestProcessorManager(
   )
 
   /** Ensures that a [[com.digitalasset.canton.participant.commitment.RunningDigestProcessor]] is
-    * running or will be running after reinitialization completes. The returned future completes
-    * once a running digest processor pipeline is up and running.
+    * running.
     *
     *   - If there is no digest processor currently running, start a new
     *     [[com.digitalasset.canton.participant.commitment.RunningDigestProcessor]].
     *   - If a [[com.digitalasset.canton.participant.commitment.RunningDigestProcessor]] is already
     *     running or starting up, do nothing.
     *   - If a [[com.digitalasset.canton.participant.commitment.ReinitializingDigestProcessor]] is
-    *     already running or starting up, register the start of a running digest processor after the
-    *     reinitialization completes.
+    *     already running or starting up, do nothing. A new running digest processor will be started
+    *     automatically after the reinitialization completes.
     */
-  def startRunningDigestProcessor()(implicit
+  def startRunningDigestProcessorAsync()(implicit
+      traceContext: TraceContext
+  ): Unit =
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      startRunningDigestProcessor(),
+      s"Failed to start running digest processor for $synchronizerId",
+    )
+
+  /** Starts a [[com.digitalasset.canton.participant.commitment.RunningDigestProcessor]] or joins
+    * one that is starting up.
+    *
+    * @return
+    *   The `startingFuture` of the new or currently starting
+    *   [[com.digitalasset.canton.participant.commitment.RunningDigestProcessor]], except if the
+    *   current processor is a
+    *   [[com.digitalasset.canton.participant.commitment.ReinitializingDigestProcessor]], in which
+    *   case the returned futures is just a completed future. A
+    *   [[com.digitalasset.canton.participant.commitment.RunningDigestProcessor]] will be
+    *   automatically started after the reinitialization completes.
+    */
+  @VisibleForTesting
+  private[canton] def startRunningDigestProcessor()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    val currentProcessorF = sequentialQueue.executeUS(
-      state.get() match {
-        case State.Empty =>
+    val currentProcessorF = sequentialQueue.execute(
+      currentProcessorRef.get() match {
+        case None =>
           val processor = createAndStartRunningDigestProcessor()
-          FutureUnlessShutdown.pure(processor.startingFuture)
-        case State.WithProcessor(oldProcessor, followUp) =>
+          Future.successful(processor.startingFuture)
+        case Some(oldProcessor) =>
           if (!oldProcessor.isStartingOrStarted) {
             // Explicitly stop the old processor in the case that it has not even yet been started
             logger.info(s"Stopping $oldProcessor before starting new running digest processor")
             stopProcessorIgnoringShutdown(oldProcessor).map { _ =>
-              val processor = createAndStartRunningDigestProcessor()
-              processor.startingFuture
+              createAndStartRunningDigestProcessor().startingFuture
             }
           } else
             oldProcessor match {
-              case _: RunningDigestProcessor =>
-                FutureUnlessShutdown.pure(oldProcessor.startingFuture)
+              case p: RunningDigestProcessor =>
+                // nothing to do, there is already a running digest processor
+                Future.successful(p.startingFuture)
               case _: ReinitializingDigestProcessor =>
-                val promise = PromiseUnlessShutdown.unsupervised[Unit]()
-                val newFollowUp = followUp.mergeWith(
-                  FollowUpProcessor.StartRunningDigestProcessor(promise, traceContext)
-                )
-                state.set(State.WithProcessor(oldProcessor, newFollowUp))
-                FutureUnlessShutdown.pure(promise.futureUS)
+                // nothing to do, because the reinitializing digest processor will automatically start a
+                // running digest processor once it finishes reinitialization
+                Future.successful(FutureUnlessShutdown.unit)
             }
       },
       "start running digest processor",
@@ -112,13 +135,9 @@ class DigestProcessorManager(
   def reinitializeIfEmptyAndStartRunningDigestProcessor()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
-    for {
-      needReinitialization <- digestProcessorFactory.needsReinitialization(synchronizerId)
-      _ <-
-        if (needReinitialization) startReinitializationDigestProcessor()
-        else FutureUnlessShutdown.unit
-      _ <- startRunningDigestProcessor()
-    } yield ()
+    MonadUtil.whenM(digestProcessorFactory.needsReinitialization(synchronizerId))(
+      startReinitializationDigestProcessor().void
+    )
 
   /** Starts digest reinitialization for this manager's `synchronizerId`.
     *
@@ -130,15 +149,15 @@ class DigestProcessorManager(
   def startReinitializationDigestProcessor()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[CantonTimestamp] =
-    sequentialQueue.executeUS(
-      state.get() match {
-        case State.Empty =>
+    sequentialQueue.execute(
+      currentProcessorRef.get() match {
+        case None =>
           val reinitDP = createAndStartReinitProcessor()
-          FutureUnlessShutdown.pure(reinitDP.reinitializingTimepoint.recordTime)
-        case State.WithProcessor(oldProcessor, _) =>
+          Future.successful(reinitDP.reinitializingTimepoint.recordTime)
+        case Some(oldProcessor) =>
           if (!oldProcessor.isStartingOrStarted) {
             logger.info(
-              s"Stopping $oldProcessor before starting new reinitialization digest processor"
+              s"Stopping $oldProcessor before starting reinitialization"
             )
             // Explicitly stop the old processor in the case that it has not even yet been started
             stopProcessorIgnoringShutdown(oldProcessor).map { _ =>
@@ -151,7 +170,7 @@ class DigestProcessorManager(
                 logger.info(
                   "A digest reinitialization is already in progress. Joining ongoing run."
                 )
-                FutureUnlessShutdown.pure(reinitProcessor.reinitializingTimepoint.recordTime)
+                Future.successful(reinitProcessor.reinitializingTimepoint.recordTime)
               case otherProcessor: RunningDigestProcessor =>
                 logger.info(s"Stopping $otherProcessor before starting reinitialization")
                 stopProcessorIgnoringShutdown(otherProcessor).map { _ =>
@@ -169,80 +188,88 @@ class DigestProcessorManager(
   ): RunningDigestProcessor = {
     val rdp = digestProcessorFactory
       .createRunningDigestProcessor(synchronizerAlias, synchronizerId, tickSignaller)
-    startAsync(rdp)
+    startAsync(rdp, delayStartOfFollowUpProcessor = true)
   }
 
-  private def createAndStartReinitProcessor()(implicit
+  private def createAndStartReinitProcessor(
+  )(implicit
       traceContext: TraceContext
   ): ReinitializingDigestProcessor = {
     val reinitDp =
       digestProcessorFactory.createReinitializingDigestProcessor(synchronizerAlias, synchronizerId)
-    startAsync(reinitDp)
+    startAsync(reinitDp, delayStartOfFollowUpProcessor = false)
   }
 
-  private def startAsync(processor: DigestProcessor)(implicit
-      traceContext: TraceContext
+  private def startAsync(processor: DigestProcessor, delayStartOfFollowUpProcessor: Boolean)(
+      implicit traceContext: TraceContext
   ): processor.type = {
-    state.set(State.WithProcessor(processor, FollowUpProcessor.NoFollowUpProcessor))
+    currentProcessorRef.set(Some(processor))
     healthComponent.set(processor.health)
     processor.startAsync()
-    scheduleFollowUpOnCompletion(processor)
+    scheduleRunningDigestProcessorOnCompletion(processor, delayStartOfFollowUpProcessor)
     processor
   }
 
-  private def scheduleFollowUpOnCompletion(
-      processor: BaseDigestProcessor
+  private def scheduleRunningDigestProcessorOnCompletion(
+      processor: BaseDigestProcessor,
+      delayStartOfFollowUpProcessor: Boolean,
   )(implicit traceContext: TraceContext): Unit =
-    processor.completionFuture.onComplete { _ =>
-      val scheduledF = sequentialQueue.executeUS(
-        scheduleFollowUpOnCompletionOnQueue(processor),
-        "scheduled follow-up task after digest processor completion",
-      )
-      FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-        scheduledF,
-        "Follow-up task scheduling failed",
-      )
+    processor.completionFuture.onComplete {
+      case Success(_) =>
+        import scala.concurrent.duration.*
+        val maybeDelayedF =
+          if (delayStartOfFollowUpProcessor) {
+            // This short delay prevents a busy retry loop in case of a repeated start and
+            // shutdown of running digest processors.
+            DelayUtil
+              .delayIfNotClosing("schedule-followup-running-digest-processor", 1.second, this)
+          } else FutureUnlessShutdown.unit
+        val scheduledF =
+          maybeDelayedF.flatMap { _ =>
+            sequentialQueue.execute(
+              {
+                scheduleRunningDigestProcessorOnCompletionOnQueue(processor)
+                Future.unit
+              },
+              "scheduled follow-up task after digest processor completion",
+            )
+          }
+        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+          scheduledF,
+          "Follow-up task scheduling failed",
+        )
+      case Failure(_) =>
+      // nothing to do, the follow-up task should only be scheduled if the processor terminated successfully
     }
 
-  private def scheduleFollowUpOnCompletionOnQueue(expectedProcessor: BaseDigestProcessor)(implicit
+  private def scheduleRunningDigestProcessorOnCompletionOnQueue(
+      expectedProcessor: BaseDigestProcessor
+  )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = {
-    state.get() match {
-      case State.Empty =>
+  ): Unit =
+    currentProcessorRef.get() match {
+      case None =>
         ErrorUtil.invalidState(
           "Follow-up task scheduling did not find a digest processor in the state"
         )
-      case State.WithProcessor(currentProcessor, followUp) =>
-        followUp match {
-          case FollowUpProcessor.NoFollowUpProcessor =>
-            logger.info(
-              s"Processor $expectedProcessor has finished. No follow-up processors to be started"
-            )
-
-          case FollowUpProcessor.StartRunningDigestProcessor(promise, tc) =>
-            implicit val traceContext: TraceContext = tc
-            if (currentProcessor != expectedProcessor)
-              logger.info(
-                s"Processor $expectedProcessor has finished. Skipping to start follow-up digest processor because the processor has changed to $currentProcessor"
-              )
-            else {
-              logger.info(
-                s"Processor $expectedProcessor finished. Restarting running digest processor."
-              )
-              val rdp = createAndStartRunningDigestProcessor()
-              promise.completeWithUS(rdp.startingFuture).discard
-            }
+      case Some(currentProcessor) =>
+        if (currentProcessor != expectedProcessor)
+          logger.info(
+            s"Processor $expectedProcessor has finished. Not starting a follow-up running digest processor because the processor has changed to $currentProcessor"
+          )
+        else {
+          logger.info(
+            s"Processor $expectedProcessor finished. Starting a running digest processor."
+          )
+          createAndStartRunningDigestProcessor().discard
         }
-
     }
-    FutureUnlessShutdown.unit
-  }
 
   private def stopProcessorIgnoringShutdown(proc: BaseDigestProcessor)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
+  ): Future[Unit] =
     // Don't let the termination of the old processor with `AbortedDueToShutdown` prevent the startup of a new processor
-    proc.stop().transformOnShutdown {
+    proc.stop().onShutdown {
       logger.debug(
         s"Currently running digest processor $proc stopped with $AbortedDueToShutdown"
       )
@@ -254,55 +281,9 @@ class DigestProcessorManager(
       sequentialQueue,
       AsyncCloseable(
         "current digest processor",
-        state.get().currentDigestProcessor.traverse_(_.stop().onShutdown(())),
+        currentProcessorRef.get().traverse_(_.stop().onShutdown(())),
         timeouts.shutdownProcessing,
       ),
     )(logger)
-  }
-}
-
-object DigestProcessorManager {
-  private sealed trait State extends Product with Serializable {
-    def currentDigestProcessor: Option[DigestProcessor]
-  }
-  private object State {
-    case object Empty extends State {
-      override def currentDigestProcessor: Option[DigestProcessor] = None
-    }
-
-    final case class WithProcessor(
-        processor: DigestProcessor,
-        followUp: FollowUpProcessor,
-    ) extends State {
-      override def currentDigestProcessor: Option[DigestProcessor] = Some(processor)
-    }
-
-    def initial: State = Empty
-  }
-
-  /** A task that should be executed after the current
-    * [[com.digitalasset.canton.participant.commitment.DigestProcessor]] has stopped.
-    */
-  private sealed trait FollowUpProcessor extends Product with Serializable {
-
-    /** Merges two follow-up tasks into one. */
-    def mergeWith(other: FollowUpProcessor): FollowUpProcessor
-  }
-  private object FollowUpProcessor {
-    case object NoFollowUpProcessor extends FollowUpProcessor {
-      override def mergeWith(other: FollowUpProcessor): FollowUpProcessor = other
-    }
-
-    final case class StartRunningDigestProcessor(
-        startedPromise: PromiseUnlessShutdown[Unit],
-        traceContext: TraceContext,
-    ) extends FollowUpProcessor {
-      override def mergeWith(other: FollowUpProcessor): FollowUpProcessor = other match {
-        case NoFollowUpProcessor => this
-        case StartRunningDigestProcessor(otherPromise, _) =>
-          startedPromise.completeWith(otherPromise.future)
-          other
-      }
-    }
   }
 }

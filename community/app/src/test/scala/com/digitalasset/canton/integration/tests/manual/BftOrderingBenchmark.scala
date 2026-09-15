@@ -61,6 +61,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultOutputFetchTimeoutCap,
   DefaultSendBlacklistTtl,
   DefaultSequencerCoreSubscriptionConfig,
+  P2PConnectionManagementConfig,
   SequencerCoreSubscriptionConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.{
@@ -344,6 +345,7 @@ class BftOrderingBenchmark
       p2pServerLimits = bftOrderingBenchmarkConfig.p2pServerLimits,
       p2pServerKeepAliveConfig = bftOrderingBenchmarkConfig.p2pServerKeepAliveConfig,
       p2pClientChannelParams = bftOrderingBenchmarkConfig.p2pClientChannelParams,
+      p2pConnectionManagementConfig = bftOrderingBenchmarkConfig.p2pConnectionManagementConfig,
     )
   registerPlugin(bftSequencerPlugin)
 
@@ -657,6 +659,8 @@ private object BftOrderingBenchmark {
       ),
       p2pClientChannelParams: ClientChannelParams =
         ClientChannelParams.Default.copy(flowControlWindow = None),
+      p2pConnectionManagementConfig: P2PConnectionManagementConfig =
+        P2PConnectionManagementConfig(),
       tracingEnabled: Boolean = false,
       tracingReportingPort: Port = Port.tryCreate(4317),
       tracingSamplerRatio: Double = 0.5,

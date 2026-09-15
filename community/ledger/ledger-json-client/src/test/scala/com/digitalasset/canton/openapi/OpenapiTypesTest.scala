@@ -7,6 +7,13 @@ import com.daml.ledger.api.v2
 import com.daml.ledger.api.v2.version_service.FeaturesDescriptor
 import com.digitalasset.canton.http.json.v2 as json
 import com.digitalasset.canton.openapi.json.{JSON, model as openapi}
+import com.digitalasset.canton.tea.v1.{
+  GetAccountResponse,
+  PruneEventsRequest,
+  PruneEventsResponse,
+  UpdateAccountRequest,
+  UpdateAccountResponse,
+}
 import io.circe.{Decoder, Encoder}
 import io.swagger.parser.OpenAPIParser
 import io.swagger.v3.parser.core.models.ParseOptions
@@ -165,6 +172,7 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
     import com.digitalasset.canton.http.json.v2.JsVersionServiceCodecs.*
     import com.digitalasset.canton.http.json.v2.JsSchema.Crypto.*
     import com.digitalasset.canton.http.json.v2.JsContractServiceCodecs.*
+    import com.digitalasset.canton.http.json.v2.JsTrafficServiceCodecs.*
 
     import magnolify.scalacheck.auto.*
 
@@ -243,6 +251,15 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         } yield v2.admin.package_management_service.UpdateVettedPackagesResponse(
           pastVettedPackages = optionalPastVettedPackages,
           newVettedPackages = Some(someNewVettedPackages),
+        )
+      )
+
+    // Explicitly defined arbitrary instance with the Optional `response` field populated
+    // to match the OpenAPI schema required properties
+    private[Mappings] implicit val updateAccountResponseArb: Arbitrary[UpdateAccountResponse] =
+      Arbitrary(
+        genArbitrary[GetAccountResponse].arbitrary.map(account =>
+          UpdateAccountResponse(response = Some(account))
         )
       )
 
@@ -1049,6 +1066,36 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.GetUpdatesPageRequest,
         ](
           openapi.GetUpdatesPageRequest.fromJson
+        ),
+        Mapping[
+          GetAccountResponse,
+          openapi.GetAccountResponse,
+        ](
+          openapi.GetAccountResponse.fromJson
+        ),
+        Mapping[
+          UpdateAccountRequest,
+          openapi.UpdateAccountRequest,
+        ](
+          openapi.UpdateAccountRequest.fromJson
+        ),
+        Mapping[
+          UpdateAccountResponse,
+          openapi.UpdateAccountResponse,
+        ](
+          openapi.UpdateAccountResponse.fromJson
+        ),
+        Mapping[
+          PruneEventsRequest,
+          openapi.PruneEventsRequest,
+        ](
+          openapi.PruneEventsRequest.fromJson
+        ),
+        Mapping[
+          PruneEventsResponse,
+          openapi.PruneEventsResponse,
+        ](
+          openapi.PruneEventsResponse.fromJson
         ),
       )
     }

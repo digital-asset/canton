@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.commitment
 
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -52,7 +51,6 @@ import com.google.protobuf.ByteString
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
-@AcsCommitmentTest
 class ReceivedAcsCommitmentValidatorTest
     extends AnyWordSpec
     with BaseTest

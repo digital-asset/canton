@@ -159,13 +159,9 @@ object CantonServerBuilder {
         .maxInboundMessageSize(config.maxInboundMessageSize.unwrap)
         .maxConcurrentCallsPerConnection(config.maxConcurrentCallsPerConnection.unwrap)
 
-    config.flowControlWindow.foreach { window =>
-      builder.flowControlWindow(window.unwrap).discard // Mutable builder
-    }
-
-    config.initialFlowControlWindow.foreach { window =>
-      builder.initialFlowControlWindow(window.unwrap).discard // Mutable builder
-    }
+    // Leveraging mutable builder for conciseness
+    config.flowControlWindow.map(_.value).map(builder.flowControlWindow).discard
+    config.initialFlowControlWindow.map(_.value).map(builder.initialFlowControlWindow).discard
 
     val builderWithSsl = config.sslContext match {
       case Some(sslContext) =>

@@ -6,6 +6,7 @@ package interpretation
 
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.NextGenContractStateMachine as ContractStateMachine
+import com.google.common.annotations.VisibleForTesting
 
 case class InterpretationConfig(
     allowedLanguageVersions: List[LanguageVersion],
@@ -13,19 +14,29 @@ case class InterpretationConfig(
 )
 
 object InterpretationConfig {
-  val Default: InterpretationConfig = InterpretationConfig(
-    allowedLanguageVersions = LanguageVersion.stableLfVersions,
+  val V34: InterpretationConfig = InterpretationConfig(
+    allowedLanguageVersions = List(LanguageVersion.v2_1, LanguageVersion.v2_2),
+    contractStateMode = ContractStateMachine.Mode.NoKey,
+  )
+  val V35: InterpretationConfig = InterpretationConfig(
+    allowedLanguageVersions =
+      List(LanguageVersion.v2_1, LanguageVersion.v2_2, LanguageVersion.v2_3),
+    contractStateMode = ContractStateMachine.Mode.Key,
+  )
+  val V36: InterpretationConfig = InterpretationConfig(
+    allowedLanguageVersions =
+      List(LanguageVersion.v2_1, LanguageVersion.v2_2, LanguageVersion.v2_3, LanguageVersion.v2_4),
     contractStateMode = ContractStateMachine.Mode.Key,
   )
   val Dev: InterpretationConfig = InterpretationConfig(
     allowedLanguageVersions = LanguageVersion.allLfVersions,
     contractStateMode = ContractStateMachine.Mode.Key,
   )
-  val Legacy: InterpretationConfig = InterpretationConfig(
-    allowedLanguageVersions = List(LanguageVersion.v2_1, LanguageVersion.v2_2),
-    contractStateMode = ContractStateMachine.Mode.NoKey,
-  )
-  def Key = Default
-  def NoKey = Legacy
-
+  def Default = V36
+  @VisibleForTesting
+  def Legacy = V34
+  @VisibleForTesting
+  private[lf] def Key = Default
+  @VisibleForTesting
+  private[lf] def NoKey = Legacy
 }

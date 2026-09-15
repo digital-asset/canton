@@ -355,7 +355,7 @@ abstract class SubmissionRequestAmplificationIntegrationTest
 
     val sequencerClientMetrics = node match {
       case p: LocalParticipantReference =>
-        p.underlying.value.metrics.connectedSynchronizerMetrics(daName).sequencerClient
+        p.underlying.value.metrics.connectedSynchronizerMetrics(daName, p.id).sequencerClient
 
       case m: LocalMediatorReference =>
         m.underlying.value.replicaManager.mediatorRuntime.value.mediator.metrics.sequencerClient

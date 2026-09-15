@@ -9,8 +9,9 @@ import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.Port
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.participant.config.{ExtensionServiceConfig, ParticipantNodeConfig}
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
@@ -27,6 +28,7 @@ import scala.concurrent.duration.Duration
 import scala.util.chaining.scalaUtilChainingOps
 
 object ConfigValidations extends NamedLogging {
+
   import TraceContext.Implicits.Empty.*
 
   override protected def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
@@ -67,6 +69,7 @@ object ConfigValidations extends NamedLogging {
   }
 
   /** Return the list of validations
+    *
     * @param ensurePortsSet
     *   If set to true, will validate that ports are set. Should be true in `main`.
     * @return
@@ -100,6 +103,8 @@ object ConfigValidations extends NamedLogging {
       defaultUpdatesPageSizeMustBeLeqMaximalPageSize,
       defaultAcsPageSizeMustBeLeqMaxPageSize,
       validateLegacyContractsV11Enabled,
+      serverConfigOnlyOneGrpcControlFlowMode,
+      clientChannelParamsOnlyOneGrpcControlFlowMode,
     ) ++ (if (ensurePortsSet) List(portsArtSet) else Nil)
 
   /** Group node configs by db access to find matching db storage configs. Overcomplicated types
@@ -779,6 +784,7 @@ object ConfigValidations extends NamedLogging {
         )
         .toList
     }
+
     val errors = config.participants.toSeq
       .flatMap { case (name, participantConfig) =>
         List(
@@ -1010,6 +1016,152 @@ object ConfigValidations extends NamedLogging {
           errors += s"Participant $name has 'parameters.validate-legacy-contracts-v-11' disabled. " +
             s"This should only be disabled if advised by the Digital Asset support. " +
             s"Set 'canton.parameters.non-standard-config = true' to override."
+      }
+
+      errors.result()
+    }
+
+  private def serverConfigOnlyOneGrpcControlFlowMode(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated {
+      val errors = Seq.newBuilder[String]
+
+      def validateServerConfig(serverConfig: ServerConfig, nodeName: InstanceName): Unit =
+        if (
+          serverConfig.flowControlWindow.isDefined && serverConfig.initialFlowControlWindow.isDefined
+        )
+          errors.addOne(
+            s"gRPC server config ('$nodeName', ${serverConfig.name}) has both " +
+              "flow-control-window and initial-flow-control-window set, " +
+              "but at most one of them should be set."
+          )
+
+      config.allLocalNodes.foreach { case (nodeName, nodeConfig) =>
+        validateServerConfig(nodeConfig.adminApi, nodeName)
+
+        nodeConfig match {
+          case sequencer: SequencerNodeConfig =>
+            validateServerConfig(sequencer.publicApi, nodeName)
+            sequencer.sequencer match {
+              case sequencerConfig: SequencerConfig.BftSequencer =>
+                sequencerConfig.config.initialNetwork.foreach(initialNetwork =>
+                  validateServerConfig(initialNetwork.serverEndpoint, nodeName)
+                )
+              case _ => ()
+            }
+          case participant: ParticipantNodeConfig =>
+            validateServerConfig(participant.ledgerApi, nodeName)
+          case _: MediatorNodeConfig => () // No public API
+          case _ => () // Tests
+        }
+      }
+
+      errors.result()
+    }
+
+  def clientChannelParamsOnlyOneGrpcControlFlowMode(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] =
+    toValidated {
+      val errors = Seq.newBuilder[String]
+
+      def validateFlowControlWindows(
+          flowControlWindow: Option[PositiveInt],
+          initialFlowControlWindow: Option[PositiveInt],
+          name: String,
+      ): Unit =
+        if (flowControlWindow.isDefined && initialFlowControlWindow.isDefined)
+          errors.addOne(
+            s"gRPC client channel config ($name) has both flow-control-window and initial-flow-control-window set, " +
+              "but at most one of them should be set."
+          )
+
+      def validateClientChannelParams(
+          clientChannelParams: ClientChannelParams,
+          name: String,
+      ): Unit =
+        validateFlowControlWindows(
+          clientChannelParams.flowControlWindow,
+          clientChannelParams.initialFlowControlWindow,
+          name,
+        )
+
+      config.parameters.clock match {
+        case ClockConfig.RemoteClock(remoteApi) =>
+          validateClientChannelParams(remoteApi.channel, "remote clock")
+        case _ => ()
+      }
+
+      config.allLocalNodes.foreach { case (nodeName, nodeConfig) =>
+        nodeConfig match {
+          case sequencer: SequencerNodeConfig =>
+            validateFlowControlWindows(
+              sequencer.sequencerClient.channelFlowControlWindow,
+              sequencer.sequencerClient.channelInitialFlowControlWindow,
+              s"local sequencer '$nodeName', sequencer client",
+            )
+            sequencer.sequencer match {
+              case sequencerConfig: SequencerConfig.BftSequencer =>
+                sequencerConfig.config.initialNetwork.foreach(initialNetwork =>
+                  initialNetwork.peerEndpoints.foreach { peerEndpoint =>
+                    validateClientChannelParams(
+                      peerEndpoint.channel,
+                      s"CantonBFT sequencer '$nodeName', P2P endpoint: ${peerEndpoint.endpointAsString}",
+                    )
+                  }
+                )
+              case _ => ()
+            }
+          case mediator: MediatorNodeConfig =>
+            validateFlowControlWindows(
+              mediator.sequencerClient.channelFlowControlWindow,
+              mediator.sequencerClient.channelInitialFlowControlWindow,
+              s"local mediator '$nodeName', sequencer client",
+            )
+          case participant: ParticipantNodeConfig =>
+            validateFlowControlWindows(
+              participant.sequencerClient.channelFlowControlWindow,
+              participant.sequencerClient.channelInitialFlowControlWindow,
+              s"local participant '$nodeName', sequencer client",
+            )
+          case _ => () // Tests
+        }
+      }
+
+      config.remoteSequencers.foreach { case (nodeName, nodeConfig) =>
+        validateClientChannelParams(
+          nodeConfig.clientAdminApi.channel,
+          s"remote sequencer '$nodeName', client admin API",
+        )
+        validateClientChannelParams(
+          nodeConfig.publicApi.channel,
+          s"remote sequencer '$nodeName', public API",
+        )
+        nodeConfig.grpcHealth.foreach(grpcHealth =>
+          validateClientChannelParams(
+            grpcHealth.channel,
+            s"remote sequencer '$nodeName', gRPC health",
+          )
+        )
+      }
+
+      config.remoteMediators.foreach { case (nodeName, nodeConfig) =>
+        validateClientChannelParams(
+          nodeConfig.clientAdminApi.channel,
+          s"remote mediator '$nodeName', client admin API",
+        )
+      }
+
+      config.remoteParticipants.foreach { case (nodeName, nodeConfig) =>
+        validateClientChannelParams(
+          nodeConfig.clientAdminApi.channel,
+          s"remote participant '$nodeName', client admin API",
+        )
+        validateClientChannelParams(
+          nodeConfig.clientLedgerApi.channel,
+          s"remote participant '$nodeName', ledger API",
+        )
       }
 
       errors.result()

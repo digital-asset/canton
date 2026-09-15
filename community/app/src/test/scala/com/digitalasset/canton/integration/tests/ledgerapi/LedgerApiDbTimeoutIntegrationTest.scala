@@ -126,11 +126,11 @@ trait LedgerApiDbTimeoutIntegrationTest
     logger.info("C1 unlocked")
 
     loggerFactory.assertEventuallyLogsSeq(
-      SuppressionRule.LoggerNameContains("DbDispatcher") && SuppressionRule.Level(event.Level.ERROR)
+      SuppressionRule.LoggerNameContains("DbDispatcher") && SuppressionRule.Level(event.Level.WARN)
     )(
       within = (),
       assertion = logs => {
-        val logMessages = logs.map(_.message)
+        val logMessages = logs.map(_.warningMessage)
         logMessages.size shouldBe 1
         logMessages.forall(_.contains("INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR")) shouldBe true
       },

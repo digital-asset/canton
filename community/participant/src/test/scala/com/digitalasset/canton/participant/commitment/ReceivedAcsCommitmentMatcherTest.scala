@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Signature
@@ -60,7 +59,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.immutable
 import scala.language.implicitConversions
 
-@AcsCommitmentTest
 class ReceivedAcsCommitmentMatcherTest
     extends TestKit(ActorSystem(classOf[ReceivedAcsCommitmentMatcherTest].getSimpleName))
     with BaseTestWordSpec

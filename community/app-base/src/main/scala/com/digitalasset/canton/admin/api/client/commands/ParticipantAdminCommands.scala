@@ -2406,8 +2406,7 @@ object ParticipantAdminCommands {
     )
 
     final case class ReinitializeDigestCommitments(
-        synchronizerId: SynchronizerId,
-        runningDigestProcessorShouldStartAfter: Boolean,
+        synchronizerId: SynchronizerId
     ) extends Base[
           v30.ReinitializeDigestCommitmentsRequest,
           v30.ReinitializeDigestCommitmentsResponse,
@@ -2418,8 +2417,7 @@ object ParticipantAdminCommands {
           : Right[String, v30.ReinitializeDigestCommitmentsRequest] =
         Right(
           v30.ReinitializeDigestCommitmentsRequest(
-            synchronizerId.toProtoPrimitive,
-            runningDigestProcessorShouldStartAfter,
+            synchronizerId.toProtoPrimitive
           )
         )
 

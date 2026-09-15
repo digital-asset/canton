@@ -809,6 +809,7 @@ class ParticipantNodeBootstrap(
                 synchronizerConnectionConfigStore,
                 syncPersistentStateManager,
                 parameters.batchingConfig,
+                acsDigestProcessorEnabled = acsDigestProcessorEnabled,
                 timeouts,
                 loggerFactory,
               )
@@ -1036,7 +1037,7 @@ class ParticipantNodeBootstrap(
                   ledgerApiStore,
                   ledgerApiStore.stringInterningView,
                   parameters.acsCommitments,
-                  metrics.connectedSynchronizerMetrics(_).commitments,
+                  alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
                   enableAdditionalConsistencyChecks = parameters.enableAdditionalConsistencyChecks,
                   timeouts,
                   loggerFactory,
@@ -1048,7 +1049,7 @@ class ParticipantNodeBootstrap(
                   ledgerApiIndexServiceContainer.asEval.value.internalIndexService,
                   ledgerApiStore.stringInterningView,
                   parameters.acsCommitments.matchingParallelism,
-                  metrics.connectedSynchronizerMetrics(_).commitments,
+                  alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
                   loggerFactory,
                 )
 
@@ -1057,7 +1058,7 @@ class ParticipantNodeBootstrap(
                     digestProcessorFactory,
                     matcherFactory,
                     syncPersistentStateManager.aliasForSynchronizerId,
-                    metrics.connectedSynchronizerMetrics(_).commitments,
+                    alias => metrics.connectedSynchronizerMetrics(alias, participantId).commitments,
                     parameters.exitOnFatalFailures,
                     futureSupervisor,
                     timeouts,

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -21,7 +20,9 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   GenericTopologyEvent,
 }
 import com.digitalasset.canton.ledger.participant.state.{AcsChange, InternalIndexService}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   CheckpointFence,
   CheckpointWritten,
@@ -33,6 +34,7 @@ import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   PartyRemovedFromParticipant,
   ProcessingContext,
 }
+import com.digitalasset.canton.participant.commitment.DigestProcessorTopologyLookupImpl.TopologyLookupException
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.{
   TickListener,
   TickSignaller,
@@ -72,14 +74,16 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.signalling.{LocalEventSignaller, NotificationSignal}
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, LfPartyId}
 import com.google.protobuf.ByteString
-import org.apache.pekko.stream.scaladsl.{Sink, Source}
-import org.apache.pekko.stream.testkit.scaladsl.TestSink
+import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
+import org.apache.pekko.stream.testkit.scaladsl.{TestSink, TestSource}
 import org.scalatest.Assertion
+import org.slf4j.event.Level
 
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
+import scala.concurrent.Future
 import scala.concurrent.duration.*
+import scala.util.{Failure, Success, Try}
 
-@AcsCommitmentTest
 class RunningDigestProcessorTest
     extends DigestProcessorTestBase
     with HasExecutionContext
@@ -102,22 +106,8 @@ class RunningDigestProcessorTest
         .reconciliationInterval
         .toFiniteDuration,
       metrics: CommitmentMetrics = TestCommitmentMetrics(),
+      topologyLookupO: Option[DigestProcessorTopologyLookup => DigestProcessorTopologyLookup] = None,
   ): RunningDigestProcessorImpl = {
-    val testingTopology = TestingTopology(
-      topology = partyTopology,
-      synchronizerParameters = List(
-        WithValidity(
-          CantonTimestamp.MinValue,
-          None,
-          DynamicSynchronizerParameters
-            .defaultValues(testedProtocolVersion)
-            .update(reconciliationInterval =
-              PositiveSeconds.tryOfMicros(reconciliationInterval.toMicros)
-            ),
-        )
-      ),
-    ).build()
-
     val mockStringInterning = new MockStringInterning
     val acsDigestStore =
       InMemoryAcsDigestStore.create(Eval.now(mockStringInterning), loggerFactory)
@@ -135,13 +125,47 @@ class RunningDigestProcessorTest
       TestCommitmentMetrics(),
       loggerFactory,
     )
-    val mockTopologyClient = mock[SynchronizerTopologyClient]
-    when(mockTopologyClient.awaitSnapshot(any[CantonTimestamp])(anyTraceContext)).thenAnswer(
-      (timestamp: CantonTimestamp, _: TraceContext) =>
-        FutureUnlessShutdown.pure(
-          testingTopology.topologySnapshot(timestampOfSnapshot = timestamp)
+
+    val testingTopology = TestingTopology(
+      topology = partyTopology,
+      synchronizerParameters = List(
+        WithValidity(
+          CantonTimestamp.MinValue,
+          None,
+          DynamicSynchronizerParameters
+            .defaultValues(testedProtocolVersion)
+            .update(reconciliationInterval =
+              PositiveSeconds.tryOfMicros(reconciliationInterval.toMicros)
+            ),
         )
-    )
+      ),
+    ).build()
+
+    val defaultTopologyLookup = {
+      val mockTopologyClient = mock[SynchronizerTopologyClient]
+      when(mockTopologyClient.awaitSnapshot(any[CantonTimestamp])(anyTraceContext)).thenAnswer(
+        (timestamp: CantonTimestamp, _: TraceContext) =>
+          FutureUnlessShutdown.pure(
+            testingTopology.topologySnapshot(timestampOfSnapshot = timestamp)
+          )
+      )
+
+      new DigestProcessorTopologyLookup {
+        override def topologyClientForRunningDigestProcessor(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+            previousTopologyClientO: Option[SynchronizerTopologyClient],
+        )(implicit traceContext: TraceContext): FutureUnlessShutdown[SynchronizerTopologyClient] =
+          FutureUnlessShutdown.pure(mockTopologyClient)
+
+        override def topologySnapshotForReinitialization(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+        )(implicit traceContext: TraceContext): Option[TopologySnapshot] = ???
+      }
+    }
+    val modifiedTopologyLookup =
+      topologyLookupO.map(_.apply(defaultTopologyLookup)).getOrElse(defaultTopologyLookup)
 
     new RunningDigestProcessorImpl(
       participant,
@@ -158,19 +182,7 @@ class RunningDigestProcessorTest
       acsDigestStore,
       tickSignaller,
       indexService,
-      new DigestProcessorTopologyLookup {
-        override def topologyClientForRunningDigestProcessor(
-            synchronizerId: SynchronizerId,
-            timestamp: CantonTimestamp,
-            previousTopologyClientO: Option[SynchronizerTopologyClient],
-        )(implicit traceContext: TraceContext): FutureUnlessShutdown[SynchronizerTopologyClient] =
-          FutureUnlessShutdown.pure(mockTopologyClient)
-
-        override def topologySnapshotForReinitialization(
-            synchronizerId: SynchronizerId,
-            timestamp: CantonTimestamp,
-        )(implicit traceContext: TraceContext): Option[TopologySnapshot] = ???
-      },
+      modifiedTopologyLookup,
       enableAdditionalConsistencyChecks = true,
       new AcsCommitmentPeriodWriter(acsDigestStore, acsPeriodStore, loggerFactory),
       metrics,
@@ -533,6 +545,92 @@ class RunningDigestProcessorTest
           ProcessingContext(tp(10), Left(CheckpointType.ReconciliationIntervalBoundary)),
           ProcessingContext(tp(11), Right(dummyAcsChange)),
         )
+      }
+
+      "retry getting the topology snapshot" when {
+        val getTopologyClientException =
+          new TopologyLookupException("unable to get topology client")
+        "the topology client lookup fails and recover after retries" in {
+          runTopologyLookupWithHickups(
+            Failure(getTopologyClientException),
+            Some(getTopologyClientException),
+            recoverAfterRetries = true,
+          )
+        }
+        "the topology client lookup fails and stop retrying when the processor gets stopped" in {
+          runTopologyLookupWithHickups(
+            Failure(getTopologyClientException),
+            Some(getTopologyClientException),
+            recoverAfterRetries = false,
+          )
+        }
+
+        {
+          val awaitSnapshotException = new RuntimeException("awaitSnapshotError")
+          val mockTopologyClient = mock[SynchronizerTopologyClient]
+          when(mockTopologyClient.awaitSnapshot(any[CantonTimestamp])(anyTraceContext))
+            .thenReturn(FutureUnlessShutdown.failed(awaitSnapshotException))
+
+          "awaiting the topology snapshot fails and recover after retries" in {
+            runTopologyLookupWithHickups(
+              Success(Outcome(mockTopologyClient)),
+              Some(
+                TopologyLookupException(
+                  cause = awaitSnapshotException
+                )
+              ),
+              recoverAfterRetries = true,
+            )
+          }
+          "awaiting the topology snapshot fails and stop retrying when the processor gets stopped" in {
+            runTopologyLookupWithHickups(
+              Success(Outcome(mockTopologyClient)),
+              Some(
+                TopologyLookupException(
+                  cause = awaitSnapshotException
+                )
+              ),
+              recoverAfterRetries = false,
+            )
+          }
+        }
+
+        "the topology client lookup returns AbortedDueToShutdown and recover after retries" in {
+          runTopologyLookupWithHickups(
+            Success(AbortedDueToShutdown),
+            None,
+            recoverAfterRetries = true,
+          )
+        }
+
+        "the topology client lookup returns AbortedDueToShutdown and stop retrying when the processor gets stopped" in {
+          runTopologyLookupWithHickups(
+            Success(AbortedDueToShutdown),
+            None,
+            recoverAfterRetries = false,
+          )
+        }
+
+        {
+          val mockTopologyClient = mock[SynchronizerTopologyClient]
+          when(mockTopologyClient.awaitSnapshot(any[CantonTimestamp])(anyTraceContext))
+            .thenReturn(FutureUnlessShutdown.abortedDueToShutdown)
+          "awaitSnapshot returns AbortedDueToShutdown and recover after retries" in {
+            runTopologyLookupWithHickups(
+              Success(Outcome(mockTopologyClient)),
+              None,
+              recoverAfterRetries = true,
+            )
+          }
+
+          "awaitSnapshot returns AbortedDueToShutdown and stop retrying when the processor gets stopped" in {
+            runTopologyLookupWithHickups(
+              Success(Outcome(mockTopologyClient)),
+              None,
+              recoverAfterRetries = false,
+            )
+          }
+        }
       }
     }
 
@@ -1219,4 +1317,122 @@ class RunningDigestProcessorTest
       }
     }
   }
+
+  /** Runs a single event through checkpointing and asserts on the retries for the expected
+    * exception or the shutdown.
+    *
+    * @param topologyClientLookupResult
+    *   The result of the topology client lookup. The exception or shutdown can be triggered by the
+    *   topology client lookup itself (via `topologyClientLookupResult`) or the call to
+    *   `awaitSnapshot` on the returned topology client.
+    * @param expectedExceptionO
+    *   the expected exception to use for assertions. Set to None for testing AbortedDueToShutdown
+    * @param recoverAfterRetries
+    *   whether the topology lookup should succeed after some retries
+    */
+  def runTopologyLookupWithHickups(
+      topologyClientLookupResult: Try[UnlessShutdown[SynchronizerTopologyClient]],
+      expectedExceptionO: Option[Exception],
+      recoverAfterRetries: Boolean,
+  ): Assertion = {
+    // for tests in which the pipeline should recover after retries, use this flag to switch to the
+    // the topology client that successfully returns a topology snapshot
+    val useWorkingTopologyLookup = new AtomicBoolean(false)
+
+    def buildTopologyClientLookup(workingLookup: DigestProcessorTopologyLookup) =
+      new DigestProcessorTopologyLookup {
+        override def topologyClientForRunningDigestProcessor(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+            previousTopologyClientO: Option[SynchronizerTopologyClient],
+        )(implicit
+            traceContext: TraceContext
+        ): FutureUnlessShutdown[SynchronizerTopologyClient] =
+          if (useWorkingTopologyLookup.get) {
+            workingLookup.topologyClientForRunningDigestProcessor(
+              synchronizerId,
+              timestamp,
+              previousTopologyClientO,
+            )
+          } else {
+            FutureUnlessShutdown(Future.fromTry(topologyClientLookupResult))
+          }
+
+        override def topologySnapshotForReinitialization(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+        )(implicit traceContext: TraceContext): Option[TopologySnapshot] = ???
+      }
+    val rdp = mkRunningDigestProcessor(topologyLookupO = Some(buildTopologyClientLookup))
+
+    val (source, result) =
+      TestSource()
+        .via(rdp.checkpointing(None, TraceContext.empty))
+        .toMat(Sink.seq)(Keep.both)
+        .run()
+
+    loggerFactory.assertEventuallyLogsSeq(
+      SuppressionRule.forLogger[RunningDigestProcessorImpl] &&
+        SuppressionRule.Level(Level.INFO)
+    )(
+      // the topology snapshot lookup retry loop is triggered by sending an event into the pipeline
+      source.sendNext(
+        ProcessingContext(
+          tp(1),
+          InternalIndexService.AcsUpdate.AcsChangeUpdate(AcsChange(Map.empty, Map.empty)),
+        )
+      ),
+      entries => {
+        LogEntry.assertLogSeq(
+          Seq(
+            (
+              entry =>
+                expectedExceptionO match {
+                  case Some(expectedException) =>
+                    entry.infoMessage should include("Detected an error")
+                    entry.throwable.value shouldBe expectedException
+                  case None => succeed
+                },
+              "error logged by retry policy",
+            ),
+            (
+              _.infoMessage should (include(
+                "The operation 'get topology snapshot' has failed"
+              ) or include("The operation 'get topology snapshot' was not successful")),
+              "operation has failed/was not successful",
+            ),
+            (
+              _.infoMessage should include("Now retrying operation 'get topology snapshot'"),
+              "now retrying",
+            ),
+          )
+        )(entries)
+        entries.count(_.infoMessage contains "Retrying after") should be > 1
+      },
+    )
+
+    // complete the source to end the test
+    source.sendComplete()
+
+    if (recoverAfterRetries) {
+      // if the test should recover after some retries were witnessed,
+      // switch to the working topology lookup and check that the message eventually made it through the pipeline.
+      logger.info("switching to working topology lookup")
+      useWorkingTopologyLookup.set(true)
+      result.futureValue should not be empty
+    } else {
+      // signal the shutdown of the digest processor. this checks that the retry loop terminates when the processor
+      // is being shut down
+      rdp.stop().futureValueUS
+      expectedExceptionO match {
+        case Some(expectedException) =>
+          // if the topology snapshot lookup resulted in an exception, this exception will be the result of the pipeline
+          result.failed.futureValue shouldBe expectedException
+        case None =>
+          // if the topology snapshot lookup resulted in an AbortedDueToShutdown, the result will be empty
+          result.futureValue shouldBe empty
+      }
+    }
+  }
+
 }

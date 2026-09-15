@@ -65,23 +65,6 @@ trait CantonSharedDeprecations {
       )
     }
 
-  implicit val topologyConfigReaderDeprecations: DeprecatedFieldsFor[TopologyConfig] =
-    new DeprecatedFieldsFor[TopologyConfig] {
-
-      override def deprecatePath: List[DeprecatedConfigPath[?]] =
-        List(
-          DeprecatedConfigPath(
-            "use-new-processor",
-            since = "3.5.0",
-            valueFilter = Some(false),
-          ),
-          DeprecatedConfigPath(
-            "use-new-client",
-            since = "3.5.0",
-            valueFilter = Some(false),
-          ),
-        )
-    }
   implicit val sequencerClientConfigReaderDeprecations: DeprecatedFieldsFor[SequencerClientConfig] =
     new DeprecatedFieldsFor[SequencerClientConfig] {
 

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
@@ -51,7 +50,6 @@ import org.apache.pekko.stream.testkit.scaladsl.TestSink
 import java.util.concurrent.atomic.AtomicInteger
 import scala.util.ChainingSyntax
 
-@AcsCommitmentTest
 class ReinitializingDigestProcessorTest
     extends DigestProcessorTestBase
     with HasExecutionContext

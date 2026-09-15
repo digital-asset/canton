@@ -8,6 +8,10 @@ _Write summary of release_
 
 ## What’s New
 
+### Protocol Version 36
+
+Protocol version 36 is now stable.
+
 ### Post Quantum Cryptography
 
 Added experimental support for ML-DSA. Currently only ML-DSA-65 is supported. Experimental algorithms need to be explicitly enabled via a node's crypto configuration in `<node>.crypto.enable-experimental = true`.
@@ -175,6 +179,8 @@ how frequently journal garbage collection shall be triggered if there is a conti
 this was tied to the reconciliation interval of the connected synchronizer.
 
 ### Minor Improvements
+- InternalIndexService streams improved with default retry/recovery and better observability.
+- Database network timeout errors reported via error code `INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR` error category changed to `TransientServerFailure` making it retryable. This problems logged on WARN log level.
 - Interactive submissions can use hashing scheme version `HASHING_SCHEME_VERSION_V4` on synchronizers running protocol version 36 or later (previously only on development-protocol synchronizers). V4 additionally covers recorded external-call results in the prepared transaction hash.
 - Transactions recording external-call results are now accepted on synchronizers running protocol version 36 or later (previously only on development-protocol synchronizers), carried by the new LF serialization version 3.
 - Security. The HTTP server now rejects too deeply nested json structures. The check uses the same values as the already existing gRPC check for nested daml records. This means
@@ -255,10 +261,22 @@ this was tied to the reconciliation interval of the connected synchronizer.
 - *BREAKING*: Updated the list of default cipher suites according to the current OWASP recommendations.
 - getLedgerEnd endpoint in StateService can now return latest observed record time for the requested synchronizers along with ledger end offset.
 - Participant health state now includes indexer as a soft dependency. Indexer health state will be present in readiness endpoint response, but it won't influece response code.
-- CantonBFT: fixed an issue with the P2P grpc connection channel to ensure it closes properly during shutdown.
-- CantonBFT: added metrics about how much time batch fetches take and to count batch fetch timeouts,
-  in both cases labelled by counterparty node.
 - Removed redundant root-hash signature from informee and encrypted view messages.
+- participant_id label is added onto participant metrics
+- Support for OTLP remote metrics reporting, including optional OAuth2 Client Credentials authentication
+  ```
+  canton.monitoring.metrics.reporters = [{
+    type = otlp
+      endpoint = "http://localhost:4317"
+      protocol = grpc
+      auth {
+        type = oauth-client-credentials
+        token-url = "http://localhost:8080/token"
+        client-id = "test-client"
+        client-secret = "test-secret"
+      }
+   }]
+  ```
 
 The list of removed suites:
   - `TLS_DHE_RSA_WITH_AES_256_GCM_SHA384`
@@ -387,6 +405,15 @@ metrics dropped the superfluous leading "SEQ::" string.
 - Versions 3.5 and 3.6 allow configurations using the default or explicitly configured target audiences, and log a warning for non-compliant configurations.
 - In release 3.7, support for "scope-based" tokens will be removed entirely to enforce a valid `aud` field in every incoming JWT.
   The `scope` field will be repurposed to serve exclusively as an additional, optional claim for fine-grained permissions.
+
+## Breaking changes
+
+### Configuration
+
+The following configuration keys were deprecated in 3.5 and no long exist in 3.6:
+- topology.use-new-processor
+- topology.use-new-client
+They need to be removed from the configuration files.
 
 ## Compatibility
 

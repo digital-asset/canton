@@ -129,6 +129,9 @@ class TrafficEnforcementBackendImpl(
         validateBalance(accountId = singleActAs, trafficCost = trafficCost, span = span)
           .leftWiden[TrafficEnforcementErrors.TrafficEnforcementError]
       case nonSingletonActAs if rejectMultiPartySubmissions =>
+        logger.info(
+          s"Rejecting submission with ${nonSingletonActAs.size} actAs parties and trafficCost: $trafficCost"
+        )
         recordOutcome(
           span,
           TrafficEnforcementOutcome.Rejected,
@@ -183,7 +186,7 @@ class TrafficEnforcementBackendImpl(
                   ) =>
                 logger.warn(
                   s"Traffic enforcement account lookup failed for account $accountId; degrading" +
-                    s" and allowing the submission to proceed without a balance check.\n$grpcError"
+                    s" and allowing the submission to proceed without a balance check. Status: ${grpcError.status.getCode}"
                 )
                 recordOutcome(
                   span,
@@ -217,6 +220,9 @@ class TrafficEnforcementBackendImpl(
                 TrafficEnforcementErrors.InsufficientBalance.Reject,
               ](())
             } else {
+              logger.info(
+                s"Rejecting submission for account $accountId: balance ${accountResponse.balance} is insufficient for trafficCost: $trafficCost"
+              )
               recordOutcome(
                 span,
                 TrafficEnforcementOutcome.Rejected,

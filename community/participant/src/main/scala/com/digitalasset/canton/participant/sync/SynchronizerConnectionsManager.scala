@@ -1137,7 +1137,8 @@ private[sync] class SynchronizerConnectionsManager(
 
       case None =>
         logger.debug(s"About to connect to synchronizer: ${synchronizerAlias.unwrap}")
-        val connectedSynchronizerMetrics = metrics.connectedSynchronizerMetrics(synchronizerAlias)
+        val connectedSynchronizerMetrics =
+          metrics.connectedSynchronizerMetrics(synchronizerAlias, participantId)
 
         val ret: EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] = for {
 

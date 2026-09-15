@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
 import cats.syntax.option.*
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.logging.LogEntry
@@ -32,7 +31,6 @@ import org.apache.pekko.stream.scaladsl.{Keep, Sink}
 
 import scala.util.ChainingSyntax
 
-@AcsCommitmentTest
 class ConsistencyCheckProcessorTest
     extends DigestProcessorTestBase
     with HasExecutionContext

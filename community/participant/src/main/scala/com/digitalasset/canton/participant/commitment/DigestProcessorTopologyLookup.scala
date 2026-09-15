@@ -8,7 +8,8 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CachingConfigs
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
+import com.digitalasset.canton.participant.commitment.DigestProcessorTopologyLookupImpl.TopologyLookupException
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.topology.SynchronizerId
@@ -21,9 +22,12 @@ import com.digitalasset.canton.topology.client.{
 import com.digitalasset.canton.topology.store.NoPackageDependencies
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.retry.ErrorKind.{FatalErrorKind, TransientErrorKind}
+import com.digitalasset.canton.util.retry.{ErrorKind, ExceptionRetryPolicy}
 
 import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
+import scala.util.control.NoStackTrace
 
 /** This interface encapsulates the logic for topology access for digest processors.
   */
@@ -50,7 +54,9 @@ trait DigestProcessorTopologyLookup {
       synchronizerId: SynchronizerId,
       timestamp: CantonTimestamp,
       previousTopologyClientO: Option[SynchronizerTopologyClient],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[SynchronizerTopologyClient]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[SynchronizerTopologyClient]
 
   /** Creates a topology snapshot for the given `synchronizerId` at the given `timestamp`. Since the
     * ACS digest reinitialization uses the same topology state for the entire reinitialization
@@ -78,72 +84,82 @@ class DigestProcessorTopologyLookupImpl(
       synchronizerId: SynchronizerId,
       timestamp: CantonTimestamp,
       previousTopologyClientO: Option[SynchronizerTopologyClient],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[SynchronizerTopologyClient] = {
-    val activePsidAtTimestamp = sync.activePsidLookup
-      .activePsidAt(synchronizerId, timestamp)
-      .valueOr(ErrorUtil.invalidState(_))
-
-    // try to get a topology client for a connected synchronizer.
-    val connectedClient =
-      sync.lookupTopologyClient(activePsidAtTimestamp)
-
-    @inline def reuseCachedClient = previousTopologyClientO.filter(cached =>
-      timestamp <= cached.topologyKnownUntilTimestamp && activePsidAtTimestamp <= cached.psid
-    )
-
-    /* Creates an "offline" topology client that can possibly serve the topology state up until the
-     * current synchronizer's ledger end. See the comment around `createTopologyClient` below, for
-     * a more nuanced discussion.
-     */
-    @inline def createOfflineCachedClient =
-      ledgerApiStore.ledgerEnd
-        .flatMap(
-          _.synchronizerIndices.get(synchronizerId).map(_.recordTime)
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[SynchronizerTopologyClient] =
+    FutureUnlessShutdown
+      .fromTry(
+        sync.activePsidLookup
+          .activePsidAt(synchronizerId, timestamp)
+          .leftMap(TopologyLookupException(_))
+          .toTry
+      )
+      .flatMap { activePsidAtTimestamp =>
+        @inline def reuseCachedClient = previousTopologyClientO.filter(cached =>
+          timestamp <= cached.topologyKnownUntilTimestamp && activePsidAtTimestamp <= cached.psid
         )
-        .map { cleanSynchronizerRecordTime =>
-          // creating a new topology factory also creates a new topology state cache that will only be used
-          // for this offline topology client
-          val topologyFactory = sync.syncPersistentStateManager
-            .topologyFactoryFor(activePsidAtTimestamp)
-            .getOrElse(
-              ErrorUtil.invalidState(
-                s"unable to find persistent state for active $activePsidAtTimestamp at $timestamp"
+
+        /* Creates an "offline" topology client that can possibly serve the topology state up until the
+         * current synchronizer's ledger end. See the comment around `createTopologyClient` below, for
+         * a more nuanced discussion.
+         */
+        @inline def createOfflineCachedClient =
+          ledgerApiStore.ledgerEnd
+            .flatMap(
+              _.synchronizerIndices.get(synchronizerId).map(_.recordTime)
+            )
+            .map { cleanSynchronizerRecordTime =>
+              // creating a new topology factory also creates a new topology state cache that will only be used
+              // for this offline topology client
+              val topologyFactoryF = sync.syncPersistentStateManager
+                .topologyFactoryFor(activePsidAtTimestamp)
+                .map(FutureUnlessShutdown.pure)
+                .getOrElse(
+                  FutureUnlessShutdown.failed(
+                    TopologyLookupException(
+                      s"unable to find persistent state for active $activePsidAtTimestamp at $timestamp"
+                    )
+                  )
+                )
+              topologyFactoryF.flatMap(
+                _.createTopologyClient(
+                  NoPackageDependencies,
+                  synchronizerPredecessor = None,
+                  // In an offline catch-up scenario that crosses an LSU upgrade time,
+                  // the `cleanSynchronizerRecordTime` could be after the upgrade time from `psid` to the successor of `psid`.
+                  // However, we check for every timestamp that the psid of the cached synchronizer
+                  // can actually service the topology for the active psid at the requested timestamp.
+                  // Overshooting here allows us to forgo an additional check for the upgrade time of an LsuAnnouncement.
+                  cleanSynchronizerRecordTime = Some(cleanSynchronizerRecordTime),
+                )
+              )
+            }
+
+        // try to get a topology client for a connected synchronizer.
+        val connectedClient = sync.lookupTopologyClient(activePsidAtTimestamp)
+        /* the order between the first two is significiant in the scenario where the digest processor
+        was in an offline catch-up mode and the participants reconnects to the synchronizer:
+        1. `connectedClient` first: the digest processor will start using the
+           connected topology client (and therefore the connected topology state cache) as soon as the
+           participant connects to the synchronizer, even if the digest processor might still be far behind ledger end.
+           This might cause some thrashing on the topology cache.
+
+        2. `reuseCachedClient` first: that the digest processor will use the offline topology client with its
+           own cache (separate from the connected topology state cache) until the record time of the synchronizer's
+           ledger end when it started the offline catch-up.
+         */
+        connectedClient
+          .orElse(reuseCachedClient)
+          .map(FutureUnlessShutdown.pure)
+          .orElse(createOfflineCachedClient)
+          .getOrElse(
+            FutureUnlessShutdown.failed(
+              TopologyLookupException(
+                s"Unable to get topology snapshot for $synchronizerId at $timestamp"
               )
             )
-          topologyFactory
-            .createTopologyClient(
-              NoPackageDependencies,
-              synchronizerPredecessor = None,
-              // In an offline catch-up scenario that crosses an LSU upgrade time,
-              // the `cleanSynchronizerRecordTime` could be after the upgrade time from `psid` to the successor of `psid`.
-              // However, we check for every timestamp that the psid of the cached synchronizer
-              // can actually service the topology for the active psid at the requested timestamp.
-              // Overshooting here allows us to forgo an additional check for the upgrade time of an LsuAnnouncement.
-              cleanSynchronizerRecordTime = Some(cleanSynchronizerRecordTime),
-            )
-        }
-
-    /* the order between the first two is significiant in the scenario where the digest processor
-      was in an offline catch-up mode and the participants reconnects to the synchronizer:
-      1. `connectedClient` first: the digest processor will start using the
-         connected topology client (and therefore the connected topology state cache) as soon as the
-         participant connects to the synchronizer, even if the digest processor might still be far behind ledger end.
-         This might cause some thrashing on the topology cache.
-
-      2. `reuseCachedClient` first: that the digest processor will use the offline topology client with its
-         own cache (separate from the connected topology state cache) until the record time of the synchronizer's
-         ledger end when it started the offline catch-up.
-     */
-    connectedClient
-      .orElse(reuseCachedClient)
-      .map(FutureUnlessShutdown.pure)
-      .orElse(createOfflineCachedClient)
-      .getOrElse(
-        ErrorUtil.invalidState(
-          s"Unable to get topology snapshot for $synchronizerId at $timestamp"
-        )
-      )
-  }
+          )
+      }
 
   def topologySnapshotForReinitialization(
       synchronizerId: SynchronizerId,
@@ -167,6 +183,30 @@ class DigestProcessorTopologyLookupImpl(
         loggerFactoryWithSynchronizer,
         futureSupervisor,
       )
+    }
+  }
+}
+
+object DigestProcessorTopologyLookupImpl {
+
+  /** Internal exception to signal back to the RunningDigestProcessor that the topology lookup was
+    * not successful and should can be retried.
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  private[commitment] final case class TopologyLookupException(
+      msg: String = null,
+      cause: Throwable = null,
+  ) extends RuntimeException(msg, cause)
+      with NoStackTrace
+
+  private[commitment] object TopologyLookupRetryPolicy extends ExceptionRetryPolicy {
+    override protected def determineExceptionErrorKind(exception: Throwable, logger: TracedLogger)(
+        implicit tc: TraceContext
+    ): ErrorKind = exception match {
+      // this is the internal signal to retry the topology lookup
+      case _: TopologyLookupException => TransientErrorKind()
+
+      case _otherwise => FatalErrorKind
     }
   }
 }

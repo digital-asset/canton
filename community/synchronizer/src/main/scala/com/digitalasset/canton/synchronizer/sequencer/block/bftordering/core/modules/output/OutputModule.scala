@@ -17,7 +17,10 @@ import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.deserializeSignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.{
+  CryptoProvider,
+  DelegationCryptoProvider,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.{
   OrderingTopologyProvider,
   TopologyActivationTime,
@@ -249,6 +252,8 @@ class OutputModule[E <: Env[E]](
   private var backPressureStartInstant: Option[Instant] = None
 
   private var backPressureDelayedEvent: Option[CancellableEvent] = None
+
+  private val outputStageDurations = new mutable.HashMap[BlockNumber, Instant]()
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   override def receiveInternal(message: Message[E])(implicit
@@ -630,32 +635,40 @@ class OutputModule[E <: Env[E]](
           case BlockOrdered(orderedBlockForOutput) =>
             val orderedBlock = orderedBlockForOutput.orderedBlock
             val epochNumber = orderedBlock.metadata.epochNumber
+            val blockNumber = orderedBlock.metadata.blockNumber
+            val alreadyProvided = completedBlocksPeanoQueue.alreadyInserted(blockNumber)
+            if (lastAcknowledgedBlockNumber.forall(blockNumber > _) && !alreadyProvided)
+              outputStageDurations.getOrElseUpdate(blockNumber, Instant.now()).discard
+
             if (leaderSelectionPolicy.currentEpoch.exists(_ < epochNumber)) {
               // Leader Selection wants us to process epochs in order and this block is from a future one, so we delay it
               blocksRecoveredFromConsensus.addMessages(Seq(orderedBlockForOutput))
             } else {
-              val blockNumber = orderedBlock.metadata.blockNumber
               val viewNumber = orderedBlockForOutput.viewNumber
               val orderedBatchIds = orderedBlockForOutput.orderedBlock.batchRefs.map(_.batchId)
               val mode = orderedBlockForOutput.orderingMode
               val earlyFetchedBlockO = earlyFetchedBatchesForBlock.remove(blockNumber)
 
-              val newTraceContext: TraceContext = if (orderedBlock.batchRefs.nonEmpty) {
-                val (span, tc) = startSpan(s"BftOrderer.Output")
-                blockSpanMap
-                  .put(blockNumber, (span.setAttribute("block.number", blockNumber), tc))
-                  .discard
-                tc
-              } else traceContext
+              val newTraceContext: TraceContext =
+                if (orderedBlock.batchRefs.nonEmpty && !alreadyProvided) {
+                  blockSpanMap
+                    .getOrElseUpdate(
+                      blockNumber, {
+                        val (span, tc) = startSpan(s"BftOrderer.Output")
+                        (span.setAttribute("block.number", blockNumber), tc)
+                      },
+                    )
+                    ._2
+                } else traceContext
 
               logger.debug(
                 s"Output received from local consensus ordered block (mode = $mode) with batch IDs ${orderedBlock.batchRefs
                     .map(_.batchId)}"
               )
-              if (!completedBlocksPeanoQueue.alreadyInserted(blockNumber))
+              if (!alreadyProvided)
                 leaderSelectionPolicy.addBlock(epochNumber, blockNumber, viewNumber)
 
-              if (completedBlocksPeanoQueue.alreadyInserted(blockNumber)) {
+              if (alreadyProvided) {
                 // This can happen if we start catching up in the middle of an epoch, as state transfer has epoch granularity.
                 logger.debug(s"Skipping block $blockNumber as it's been provided already")
               } else if (orderedBatchIds.isEmpty) {
@@ -801,6 +814,12 @@ class OutputModule[E <: Env[E]](
                 )
 
               blockSubscription.receiveBlock(fullyAssembledBlock)(blockTraceContext, mc)
+              outputStageDurations.remove(orderedBlockNumber).foreach { startInstant =>
+                metrics.performance.orderingStageLatency.emitOrderingStageLatency(
+                  metrics.performance.orderingStageLatency.labels.stage.values.output.OutputStageDuration,
+                  Duration.between(startInstant, Instant.now()),
+                )
+              }
             }
 
           case UpdateLeaderSelection(topologyFetched) =>
@@ -1091,12 +1110,12 @@ class OutputModule[E <: Env[E]](
     emitOrderingStageLatency(
       labels.stage.values.output.Inspection,
       () =>
-        orderedBlockData.requestsView.zipWithIndex.toSeq.findLast {
+        orderedBlockData.requestsView.zipWithIndex.exists {
           case (tracedOrderingRequest @ Traced(orderingRequest), idx) =>
-            requestInspector.mayRequestChangeOrderingTopology(
+            requestInspector.mayChangeOrderingTopology(
+              orderingRequest,
               orderedBlockData.orderedBlockForOutput.orderedBlock.metadata,
               idx,
-              orderingRequest,
               MaxBytesToDecompress(currentMembership.orderingTopology.maxRequestPayloadBytes),
               synchronizerLimits,
               logger,
@@ -1105,7 +1124,7 @@ class OutputModule[E <: Env[E]](
               stricterDetectionOfRequestsPotentiallyChangingOrderingTopology =
                 currentMembership.orderingTopology.sequencingParameters.stricterDetectionOfRequestsPotentiallyChangingOrderingTopology,
             )
-        }.isDefined,
+        },
     )
   }
 
@@ -1205,8 +1224,20 @@ class OutputModule[E <: Env[E]](
       leaderSelectionPolicy.getBlacklistedNodes(orderingTopology, newEpochNumber)
     val newMembership = Membership(thisNode, orderingTopology, newEpochLeaders, newEpochBlacklisted)
     val cryptoProvider =
-      newMembershipAndCryptoProvider.fold(currentEpochCryptoProvider)(_._2)
-
+      newMembershipAndCryptoProvider.fold(currentEpochCryptoProvider) {
+        case (newMembership, newCryptoProvider) =>
+          if (newMembership.orderingTopology.contains(thisNode)) {
+            newCryptoProvider
+          } else {
+            // If our activation time is between two epochs then during onboarding the very first epoch will not contain
+            // our node. So in order to sign messages we use the current crypto provider (which is from a topology later
+            // where we are in, and we have keys we can sign with).
+            DelegationCryptoProvider(
+              signer = currentEpochCryptoProvider,
+              verifier = newCryptoProvider,
+            )
+          }
+      }
     if (epochMetadataStored)
       setEpochMetadataStoredCache(newEpochNumber)
     cleanupEpochMetadataStoredCache(newEpochNumber)
@@ -1422,10 +1453,10 @@ object OutputModule {
 
   trait RequestInspector {
 
-    def mayRequestChangeOrderingTopology(
+    def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         synchronizerLimits: SynchronizerLimits,
         logger: TracedLogger,
@@ -1437,10 +1468,10 @@ object OutputModule {
 
   object DefaultRequestInspector extends RequestInspector {
 
-    override def mayRequestChangeOrderingTopology(
+    override def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         synchronizerLimits: SynchronizerLimits,
         logger: TracedLogger,
@@ -1507,10 +1538,10 @@ object OutputModule {
 
   class FixedResultRequestInspector(result: Boolean) extends RequestInspector {
 
-    override def mayRequestChangeOrderingTopology(
+    override def mayChangeOrderingTopology(
+        request: OrderingRequest,
         blockMetadata: BlockMetadata,
         requestNumber: Int,
-        request: OrderingRequest,
         maxBytesToDecompress: MaxBytesToDecompress,
         synchronizerLimits: SynchronizerLimits,
         logger: TracedLogger,

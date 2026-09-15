@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.PromiseUnlessShutdown
@@ -56,7 +55,6 @@ import scala.annotation.unused
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{Future, Promise}
 
-@AcsCommitmentTest
 class InMemoryDigestAccumulatorTest
     extends TestKit(ActorSystem(classOf[InMemoryDigestAccumulatorTest].getSimpleName))
     with BaseTestWordSpec
@@ -614,10 +612,7 @@ class InMemoryDigestAccumulatorTest
       val (source, sink) = testSource.via(flow).toMat(testSink)(Keep.both).run()
 
       sink.request(2)
-      // Send a checkpoint first because the first element is never going to be conflated when
-      // there is demand.
-      source.sendNext(checkpoint(tp(1)))
-      (2 to 20).foreach { i =>
+      (1 to 20).foreach { i =>
         val stakeholders = Map(alice -> Set(p1)) ++
           (if (i % 2 == 0) Map(bob -> Set(p2)) else Map.empty) ++
           (if (i % 3 == 0) Map(carol -> Set(p3)) else Map.empty)
@@ -644,11 +639,11 @@ class InMemoryDigestAccumulatorTest
 
       // Check that the usage counters are as expected
       val expectedDigestUsage =
-        Seq(p1 -> 19, p2 -> 10, p3 -> 6).map { case (participant, count) =>
+        Seq(p1 -> 20, p2 -> 10, p3 -> 6).map { case (participant, count) =>
           ParticipantDigestIdentifier(
             stringInterning.participantId.internalize(participant)
           ) -> count
-        } ++ Seq(alice -> 19, bob -> 10, carol -> 6)
+        } ++ Seq(alice -> 20, bob -> 10, carol -> 6)
           .map { case (party, count) =>
             PartyDigestIdentifier(stringInterning.party.internalize(party)) -> count
           }
@@ -660,8 +655,6 @@ class InMemoryDigestAccumulatorTest
         expectedDigestUsage.size
 
       storeBlockPromise.success(())
-      sink
-        .expectNext() shouldBe CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary)
       sink.expectNext() shouldBe CheckpointToBeWritten(
         ts(20),
         off(20),
@@ -716,12 +709,6 @@ class InMemoryDigestAccumulatorTest
       val (source, sink) = testSource.via(flow).toMat(testSink)(Keep.both).run()
 
       sink.request(2)
-      // Send a checkpoint first because the first element is never going to be conflated when
-      // there is demand.
-      source.sendNext(checkpoint(tp(1)))
-      eventually() {
-        loadedCounter.get should be >= 1
-      }
       source.sendNext(
         from(tp(2))(
           // 4 digest identifiers (2 parties + 2 participants)
@@ -769,10 +756,10 @@ class InMemoryDigestAccumulatorTest
       source.sendNext(checkpoint(tp(5)))
 
       always() {
-        loadedCounter.get should be <= 4
+        loadedCounter.get should be <= 3
       }
       eventually() {
-        loadedCounter.get shouldBe 4
+        loadedCounter.get shouldBe 3
       }
 
       // Check that the usage counters are as expected
@@ -793,13 +780,10 @@ class InMemoryDigestAccumulatorTest
 
       storeBlockPromise.success(())
       sink
-        .expectNext() shouldBe CheckpointToBeWritten(ts(1), off(1), ReconciliationIntervalBoundary)
-      sink
         .expectNext() shouldBe CheckpointToBeWritten(ts(5), off(5), ReconciliationIntervalBoundary)
 
-      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe ts(
-        5
-      ).toMicros
+      accumulator.metrics.runningDigestProcessor.latestAccumulatedRecordTime.getValue shouldBe
+        ts(5).toMicros
 
       // All in-memory state has been evicted
       accumulator.digestsUsageCounters shouldBe empty

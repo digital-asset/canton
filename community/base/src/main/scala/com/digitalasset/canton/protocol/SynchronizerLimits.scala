@@ -86,20 +86,17 @@ final case class TransactionProtocolLimits(
 }
 
 object TransactionProtocolLimits {
-  // TODO(i35127): determine proper default values
   lazy val DefaultMaxActAs: PositiveInt = PositiveInt.tryCreate(1000)
-  lazy val DefaultMaxEnvelopes: PositiveInt = PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxRecipientsPerBatch: PositiveInt = PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxRecipientsTrees: PositiveInt = PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxRecipientsPerRecipientsTreeLevel: PositiveInt =
-    PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxChildrenPerRecipientsTreeLevel: PositiveInt =
-    PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxRecipientsPerEnvelope: PositiveInt = PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxRecipientsTreeDepth: PositiveInt = PositiveInt.tryCreate(500)
+  lazy val DefaultMaxEnvelopes: PositiveInt = PositiveInt.tryCreate(10_000)
+  lazy val DefaultMaxRecipientsPerBatch: PositiveInt = PositiveInt.tryCreate(10_000)
+  lazy val DefaultMaxRecipientsTrees: PositiveInt = PositiveInt.tryCreate(10_000)
+  lazy val DefaultMaxRecipientsPerRecipientsTreeLevel: PositiveInt = PositiveInt.tryCreate(10_000)
+  lazy val DefaultMaxChildrenPerRecipientsTreeLevel: PositiveInt = PositiveInt.tryCreate(10_000)
+  lazy val DefaultMaxRecipientsPerEnvelope: PositiveInt = PositiveInt.tryCreate(10_000)
+  lazy val DefaultMaxRecipientsTreeDepth: PositiveInt = PositiveInt.tryCreate(100)
   lazy val DefaultMaxTransactionRootViews: PositiveInt = PositiveInt.tryCreate(1_000_000)
   lazy val DefaultMaxTransactionSubViews: PositiveInt = PositiveInt.tryCreate(10_000_000)
-  lazy val DefaultMaxTransactionTreeDepth: PositiveInt = PositiveInt.tryCreate(500)
+  lazy val DefaultMaxTransactionTreeDepth: PositiveInt = PositiveInt.MaxValue
 
   lazy val default: TransactionProtocolLimits =
     TransactionProtocolLimits(
