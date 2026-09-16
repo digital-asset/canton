@@ -20,6 +20,7 @@ private[speedy] object PrettyLightweight { // lightweight pretty printer for CEK
       case Control.Question(_) => "question"
       case Control.Complete(_) => "complete"
       case Control.Error(_) => "error"
+      case Control.Suspend(_) => "suspend"
       case Control.WeAreUnset => "unset"
     }
 

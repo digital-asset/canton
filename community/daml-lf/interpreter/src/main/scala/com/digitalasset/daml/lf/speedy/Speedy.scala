@@ -940,6 +940,9 @@ private[lf] object Speedy {
             interruptionCountDown -= 1
             metrics.incrCount[StepCount](StepCount.StepCtx)
             thisControl match {
+              case Control.Suspend(thunk) =>
+                control = thunk()
+                loop()
               case Control.Value(value) =>
                 popTempStackToBase()
                 control = popKont().execute(this, value)
@@ -1296,9 +1299,10 @@ private[lf] object Speedy {
     final case class Complete(res: SValue) extends Control[Nothing]
     final case class Error(err: interpretation.Error) extends Control[Nothing]
     final case object WeAreUnset extends Control[Nothing]
+    final case class Suspend[Q](thunk: () => Control[Q]) extends Control[Q]
 
     implicit object `Defer Control` extends cats.Defer[Control] {
-      override def defer[A](x: => Control[A]): Control[A] = x
+      override def defer[A](x: => Control[A]): Control[A] = Suspend(() => x)
     }
   }
 
