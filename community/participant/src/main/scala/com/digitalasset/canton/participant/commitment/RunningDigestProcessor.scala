@@ -24,10 +24,16 @@ import com.digitalasset.canton.ledger.participant.state.{
   ContractStakeholdersAndReassignmentCounter,
   InternalIndexService,
 }
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.{
+  NamedLoggerFactory,
+  NamedLogging,
+  NamedLoggingContext,
+  TracedLogger,
+}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.*
+import com.digitalasset.canton.participant.commitment.DigestProcessorTopologyLookupImpl.TopologyLookupException
 import com.digitalasset.canton.participant.commitment.RunningDigestProcessorImpl.CheckpointingState
 import com.digitalasset.canton.participant.commitment.SynchronizerCommitmentState.{
   TickListener,
@@ -53,16 +59,23 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
+import com.digitalasset.canton.util.PekkoUtil.{CombinedKillSwitch, KillSwitchFlagCloseable}
+import com.digitalasset.canton.util.retry.{Backoff, Success}
 import com.digitalasset.canton.util.signalling.Notification
-import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
+import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil, retry}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
 import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
+import org.slf4j.event.Level
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.immutable
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
+import scala.util.Failure
+import scala.util.control.NonFatal
 
 /** Builds the pipeline for processing events that trigger a change in the ACS commitment, namely
   *   - contract activations/deactivations
@@ -90,6 +103,62 @@ class RunningDigestProcessorImpl(
 
   // Val required for pattern matching
   private val thisLfParticipant = thisLfParticipantId
+
+  // this close context is only used for topology lookup retries,
+  // therefore we accept that the shutdown of the digest processor is not synchronized with
+  // an ongoing topology lookup.
+  private val closeContextForTopologyLookupRetries = new FlagCloseable {
+    override protected def timeouts: ProcessingTimeout = RunningDigestProcessorImpl.this.timeouts
+    override protected def logger: TracedLogger = RunningDigestProcessorImpl.this.logger
+    override def isClosing: Boolean = isStoppingOrStopped
+  }
+  private val topologyLookupRetry =
+    Backoff(
+      logger,
+      closeContextForTopologyLookupRetries,
+      retry.Forever,
+      initialDelay = 50.milliseconds,
+      maxDelay = 5.seconds,
+      retryLogLevel = Some(Level.INFO),
+      operationName = "get topology snapshot",
+    )
+  private def lookupTopologyClientAndAwaitSnapshot(
+      recordTime: CantonTimestamp,
+      previousTopologyClient: Option[SynchronizerTopologyClient],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[(SynchronizerTopologyClient, TopologySnapshot)] = {
+    implicit val success: Success[UnlessShutdown[(SynchronizerTopologyClient, TopologySnapshot)]] =
+      Success(_.isOutcome)
+    val isFirstAttempt = new AtomicBoolean(true)
+    val finalResult = topologyLookupRetry.apply(
+      {
+        val innerResult = for {
+          topologyClient <- digestProcessorTopologyLookup
+            .topologyClientForRunningDigestProcessor(
+              synchronizerId,
+              recordTime,
+              // only pass the cached client to the first attempt
+              if (isFirstAttempt.getAndSet(false)) previousTopologyClient
+              else None,
+            )
+          // technically we should call something like `tryGetSnapshot`, because we know that the topology for the record time is known,
+          // otherwise the indexer wouldn't have produced an event with that record time.
+          topologySnapshot <- topologyClient.awaitSnapshot(recordTime).transform {
+            case Failure(NonFatal(t)) =>
+              // Catching this exception locally here allows us to recover and retry
+              Failure(new TopologyLookupException(cause = t))
+            case otherwise => otherwise
+          }
+        } yield topologyClient -> topologySnapshot
+
+        // unwrap the FUS so that we can detect "success"
+        innerResult.unwrap
+      },
+      DigestProcessorTopologyLookupImpl.TopologyLookupRetryPolicy,
+    )
+    FutureUnlessShutdown(finalResult)
+  }
 
   /** Inserts a checkpointing fence into the processing pipeline in the following scenarios:
     *   - after a topology event with the same time as the event
@@ -121,16 +190,12 @@ class RunningDigestProcessorImpl(
         ) = state
         val ProcessingContext(timepoint, event) = context
         val recordTime = timepoint.recordTime
+
         for {
-          topologyClient <- digestProcessorTopologyLookup.topologyClientForRunningDigestProcessor(
-            synchronizerId,
+          (topologyClient, topologySnapshot) <- lookupTopologyClientAndAwaitSnapshot(
             recordTime,
             previousTopologyClient,
           )
-          // technically we should call something like `tryGetSnapshot`, because we know that the topology for the record time is known,
-          // otherwise the indexer wouldn't have produced an event with that record time.
-          // TODO(#33084): handle the topology client being shut down between acquiring it and calling awaitSnapshot
-          topologySnapshot <- topologyClient.awaitSnapshot(recordTime)
           dynamicParameters <- getDynamicSynchronizerParametersOrFail(topologySnapshot)
         } yield {
           // first determine whether the event should be emitted at all, and whether it triggers a checkpoint
@@ -438,9 +503,8 @@ class RunningDigestProcessorImpl(
     )
     val acsUpdates =
       // load the ACS of the party to determine the counterparties that need to have their digest updated
-      DigestProcessor
-        .counterPartiesWithRetries(
-          indexService,
+      indexService
+        .counterParties(
           synchronizerId = synchronizerId,
           activeAt = offset,
           party = Some(partyAffectedByTopologyChange),
@@ -456,13 +520,12 @@ class RunningDigestProcessorImpl(
           // for a group of counterparties, load the acs that is shared with the locally onboarded party
           // and emit the corresponding classification
           Future(
-            DigestProcessor
-              .acsWithRetries(
-                indexService,
-                synchronizerId,
-                offset,
-                counterpartiesSet,
-                Set(partyAffectedByTopologyChange),
+            indexService
+              .acs(
+                synchronizerId = synchronizerId,
+                activeAt = offset,
+                stakeholders1 = counterpartiesSet,
+                stakeholders2 = Set(partyAffectedByTopologyChange),
                 configOverrides = configOverrides,
               )
               .grouped(acsCommitmentConfig.contractChangeClassificationBatchSize.unwrap)
@@ -673,8 +736,12 @@ class RunningDigestProcessorImpl(
       }
     } yield {
       logger.info(s"Starting ACS digest processor from latest checkpoint $latestCheckpointO.")
-      val graph = DigestProcessor
-        .acsUpdatesWithRetries(indexService, synchronizerId, startingOffsetO)
+      val graph = indexService
+        .acsUpdates(
+          synchronizerId = synchronizerId,
+          fromExclusive = startingOffsetO,
+          recoveryStrategy = RunningDigestProcessorImpl.acsUpdateRecoveryStrategy,
+        )
         // we ignore acs updates at topology initialization time, because the topology snapshot is empty, and we cannot do
         // any meaningful topology inspection.
         .dropWhile(_.synchronizerTime <= SignedTopologyTransaction.InitialTopologySequencingTime)
@@ -694,7 +761,13 @@ class RunningDigestProcessorImpl(
         )(Keep.both)
 
       val (ks, doneF) = PekkoUtil.runSupervised(graph, this.toString)
-      (ks, doneF.void)
+      (
+        new CombinedKillSwitch(
+          ks,
+          new KillSwitchFlagCloseable(closeContextForTopologyLookupRetries),
+        ),
+        doneF.void,
+      )
     }
 
   private def writeOutstandingAndCheckpoint(
@@ -813,4 +886,10 @@ object RunningDigestProcessorImpl {
       previousEventCheckpoint: Option[ProcessingContext[CheckpointFence]],
       previousTopologyClient: Option[SynchronizerTopologyClient],
   )
+
+  val acsUpdateRecoveryStrategy: PekkoUtil.RecoveryStrategy =
+    InternalIndexService.defaultRecoveryStrategyFor(
+      streamName = "acsUpdates",
+      additionalRecoverable = InternalIndexService.retryOnPruningError,
+    )
 }

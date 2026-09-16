@@ -18,7 +18,7 @@ message CommitmentPeriod {
 // exactly the one committed to, at every point in time during the specified period.
 // All fields are mandatory.
 message AcsCommitment {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
   string physical_synchronizer_id = 1;
   string sending_participant_uid = 2;
   string counterparticipant_uid = 3;
@@ -28,14 +28,14 @@ message AcsCommitment {
 
 // Represents a protocol message containing an ACS commitment along with its associated signatures.
 message AcsCommitmentProtocolMessage {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   bytes acs_commitment = 1;
   com.digitalasset.canton.crypto.v30.Signature signature = 2;
 }
 
 message AcsCommitmentSummary {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   string physical_synchronizer_id = 1;
   // The interval grid point that triggered sending the commitments
@@ -57,7 +57,7 @@ message DigestForCounterparticipant {
 }
 
 message AcsCommitmentSummaryProtocolMessage {
-  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 
   bytes acs_commitment_summary = 1;
   com.digitalasset.canton.crypto.v30.Signature signature = 2;

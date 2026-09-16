@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.apiserver.services.tracking
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.base.error.ErrorsAssertions
+import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors
 import com.digitalasset.canton.ledger.error.{CommonErrors, LedgerApiErrors}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -20,7 +21,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, config}
 import com.google.rpc.status.Status
 import io.grpc.StatusRuntimeException
-import org.scalatest.concurrent.{Eventually, ScalaFutures}
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.{Assertion, Succeeded}
 
@@ -33,7 +34,6 @@ class SubmissionTrackerSpec
     extends AnyFlatSpec
     with ScalaFutures
     with ErrorsAssertions
-    with Eventually
     with BaseTest
     with HasExecutionContext {
 
@@ -192,6 +192,28 @@ class SubmissionTrackerSpec
           .asGrpcError,
       )
       succeed
+    }
+  }
+
+  it should "accept an immediate resubmission under the same key" in new SubmissionTrackerFixture {
+    override def run: Future[Assertion] = {
+      val complete = () =>
+        submissionTracker.onCompletion(
+          CompletionStreamResponse(completionResponse =
+            CompletionStreamResponse.CompletionResponse.Completion(completionOk)
+          )
+        )
+
+      val first = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
+      // Direct EC so the resubmission runs before any other callback on `first` could.
+      val second = first.flatMap { _ =>
+        val resubmitted = submissionTracker.track(submissionKey, `1 day timeout`, submitSucceeds)
+        complete()
+        resubmitted
+      }(DirectExecutionContext(noTracingLogger))
+      complete()
+
+      second.map(_ shouldBe CompletionResponse(completionOk))
     }
   }
 
@@ -411,7 +433,7 @@ class SubmissionTrackerSpec
     }
   }
 
-  abstract class SubmissionTrackerFixture extends BaseTest with Eventually {
+  abstract class SubmissionTrackerFixture extends BaseTest {
     private val timer = new Timer("test-timer")
     def timeoutSupport: CancellableTimeoutSupport =
       new CancellableTimeoutSupportImpl(timer, loggerFactory)
@@ -479,10 +501,7 @@ class SubmissionTrackerSpec
 
     run.futureValue shouldBe Succeeded
     // We want to assert this for each test
-    // Completion of futures might race with removal of the entries from the map
-    eventually {
-      streamTracker.pending shouldBe empty
-    }
+    streamTracker.pending shouldBe empty
     // Stop the timer
     timer.purge()
     timer.cancel()

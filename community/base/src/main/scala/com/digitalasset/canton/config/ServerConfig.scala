@@ -99,13 +99,14 @@ trait ServerConfig extends Product with Serializable {
   def maxConcurrentCallsPerConnection: NonNegativeInt
 
   /** Switches to manual gRPC flow control and sets its window; if `None`, then it is not configured
-    * and the implementation default is used.
+    * and the implementation default is used. At most one of `flowControlWindow` and
+    * `initialFlowControlWindow` can be set.
     */
   def flowControlWindow: Option[PositiveInt]
 
   /** Switches to automatic gRPC flow control and sets its initial window; if `None`, then it is not
-    * configured and the implementation default is used. If present, it is set after the
-    * `flowControlWindow` parameters, so it overrides it.
+    * configured and the implementation default is used. At most one of `flowControlWindow` and
+    * `initialFlowControlWindow` can be set.
     */
   def initialFlowControlWindow: Option[PositiveInt]
 
@@ -123,8 +124,11 @@ object ServerConfig {
   val defaultMaxInboundMessageSize: NonNegativeInt = NonNegativeInt.tryCreate(10 * 1024 * 1024)
   val defaultMaxInboundMetadataSize: NonNegativeInt = NonNegativeInt.tryCreate(8 * 1024)
   val defaultMaxConcurrentCallsPerConnection: NonNegativeInt = NonNegativeInt.tryCreate(100000)
+  // Unset, i.e. impl. (Netty) defaults, unless overridden by initial flow control window
   val defaultFlowControlWindow: Option[PositiveInt] = None
-  val defaultInitialFlowControlWindow: Option[PositiveInt] = None
+  // Explicit auto flow control with 1MB initial window size
+  val defaultInitialFlowControlWindow: Option[PositiveInt] =
+    Some(PositiveInt.tryCreate(1024 * 1024))
 }
 
 /** A variant of [[ServerConfig]] that by default listens to connections only on the loopback

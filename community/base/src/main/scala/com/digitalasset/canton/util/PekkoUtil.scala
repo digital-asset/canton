@@ -450,21 +450,35 @@ object PekkoUtil extends HasLoggerName {
     *
     * This construction must not be materialized multiple times.
     */
-  def foldConcatF[Mat, Mat2, T, U >: T, R](graph: FlowOps[T, Mat])(
-      init: => R,
-      update: (R, T) => R,
-      cont: R => Future[Source[U, Mat2]],
+  def foldConcatF[Mat, Mat2, T, U >: T, Point](graph: FlowOps[T, Mat])(
+      init: => Point,
+      update: (Point, T) => Point,
+      continue: (Option[Throwable], Point) => Future[Source[U, Mat2]],
   )(implicit ec: ExecutionContext): graph.Repr[U] = {
-    val promise = Promise[R]()
+    val errorPromise = Promise[Option[Throwable]]()
+    val pointPromise = Promise[Point]()
     graph
+      .onErrorComplete { case throwable =>
+        errorPromise.trySuccess(Some(throwable)).discard
+        true
+      }
       .statefulMap(() => init)(
-        (state: R, e: T) => update(state, e) -> e,
-        r => {
-          promise.trySuccess(r).discard
+        f = (state: Point, e: T) => update(state, e) -> e,
+        onComplete = point => {
+          pointPromise.trySuccess(point).discard
+          errorPromise.trySuccess(None).discard
           None
         },
       )
-      .concat(Source.futureSource(promise.future.flatMap(r => cont(r))(ec)))
+      .concat(
+        Source.futureSource(
+          for {
+            error <- errorPromise.future
+            point <- pointPromise.future
+            continuationSource <- continue(error, point)
+          } yield continuationSource
+        )
+      )
   }
 
   /** Combines two kill switches into one */
@@ -932,10 +946,10 @@ object PekkoUtil extends HasLoggerName {
     override def abort(ex: Throwable): Unit = delegate.onComplete(_.foreach(_.abort(ex)))
   }
 
-  /** Aggregates stream elements until downstream pulls them or the aggregation state is full.
-    * Ensures that all aggregation functions (`initial`, `aggregate`, `emit`) execute sequentially
-    * in the order of received elements. For example, if `e1`, ..., `eN` are the elements of the
-    * streams received, the methods execute in the following order:
+  /** Aggregates stream elements until the aggregation state is full or upstream completes. Ensures
+    * that all aggregation functions (`initial`, `aggregate`, `emit`) execute sequentially in the
+    * order of received elements. For example, if `e1`, ..., `eN` are the elements of the streams
+    * received, the methods execute in the following order:
     *
     *   - `initial(e1)`,
     *   - `aggregate(_, e2)`, ..., `aggregate(_, eI)`,
@@ -979,38 +993,22 @@ object PekkoUtil extends HasLoggerName {
       new GraphStageLogic(shape) with InHandler with OutHandler {
         private var accumulator: Acc = _
 
-        override def preStart(): Unit = pull(in)
-
         override def onPush(): Unit = {
           val elem = grab(in)
           val oldAcc = accumulator
           attempt {
             accumulator = if (oldAcc == null) initial(elem) else aggregate(oldAcc, elem)
-          }
-          if (isAvailable(out)) {
-            flush()
-          }
-          attempt {
-            if (accumulator == null || !full(accumulator)) {
-              pull(in)
-            }
+            if (!full(accumulator)) pull(in) else flush()
           }
         }
 
         override def onPull(): Unit =
-          if (accumulator == null) {
-            if (isClosed(in)) completeStage()
-            else if (!hasBeenPulled(in)) pull(in)
-          } else if (isClosed(in)) {
-            flush()
-            completeStage()
-          } else {
-            flush()
-            if (!hasBeenPulled(in)) pull(in)
-          }
+          pull(in)
 
-        override def onUpstreamFinish(): Unit =
-          if (accumulator == null) completeStage()
+        override def onUpstreamFinish(): Unit = {
+          if (accumulator != null) flush()
+          completeStage()
+        }
 
         @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
         private def flush(): Unit =
@@ -1148,18 +1146,25 @@ object PekkoUtil extends HasLoggerName {
         PekkoUtil.dropIf(graph, count, condition)
 
       def foldConcat[Mat2, R, B >: A](init: => R)(update: (R, A) => R)(
-          cont: R => Source[B, Mat2]
+          continue: R => Source[B, Mat2]
       )(implicit ec: ExecutionContext): U#Repr[B] =
         PekkoUtil.foldConcatF[Mat, Mat2, A, B, R](graph)(
-          init,
-          update,
-          r => Future.successful(cont(r)),
-        )(ec)
+          init = init,
+          update = update,
+          continue = {
+            case (None, point) => Future.successful(continue(point))
+            case (Some(t), _) => Future.failed(t) // continue only successful Sources
+          },
+        )
 
       def foldConcatF[Mat2, R, B >: A](init: => R)(update: (R, A) => R)(
-          cont: R => Future[Source[B, Mat2]]
+          continue: (Option[Throwable], R) => Future[Source[B, Mat2]]
       )(implicit ec: ExecutionContext): U#Repr[B] =
-        PekkoUtil.foldConcatF[Mat, Mat2, A, B, R](graph)(init, update, cont)(ec)
+        PekkoUtil.foldConcatF[Mat, Mat2, A, B, R](graph)(
+          init = init,
+          update = update,
+          continue = continue,
+        )
 
       def aggregate[Agg, B](
           initial: A => Agg
@@ -2299,4 +2304,80 @@ object PekkoUtil extends HasLoggerName {
         )
     }
   }
+
+  final case class RecoverAttempt(attempt: Int, delay: FiniteDuration)
+
+  trait RecoveryStrategy {
+    def recoverable(
+        lastAttempt: Option[RecoverAttempt],
+        throwable: Throwable,
+        elc: ErrorLoggingContext,
+    ): Option[RecoverAttempt]
+  }
+  object RecoveryStrategy {
+    def exponentialBackoff(
+        initialDelay: FiniteDuration,
+        maxDelay: FiniteDuration,
+        streamName: String,
+        warnLoggingAttemptThreshold: Int = Int.MaxValue, // by default always log on INFO
+        errorLoggingAttemptThreshold: Int = Int.MaxValue, // by default always log on INFO
+        failingAttemptThreshold: Int = Int.MaxValue, // by default always retry
+    )(recoverable: Throwable => Boolean): RecoveryStrategy = { (lastAttempt, throwable, elc) =>
+      val attemptsSoFar = lastAttempt.map(_.attempt).getOrElse(0)
+      val attempt = lastAttempt match {
+        case Some(last) =>
+          RecoverAttempt(
+            attempt = last.attempt + 1,
+            delay = last.delay.*(2).min(maxDelay),
+          )
+        case None =>
+          RecoverAttempt(
+            attempt = 1,
+            delay = initialDelay,
+          )
+      }
+      val (result, logMessage) =
+        if (!recoverable(throwable))
+          None -> s"$streamName failed with error. Failure is not recoverable (attempt: $attemptsSoFar). Propagating failure."
+        else if (attempt.attempt > failingAttemptThreshold)
+          None -> s"$streamName failed with error. Failed to recover as maximum attempts reached ($attemptsSoFar). Propagating failure."
+        else
+          Some(
+            attempt
+          ) -> s"$streamName failed with error. Recovering (attempt: ${attempt.attempt}) after ${attempt.delay}."
+      if (attempt.attempt > errorLoggingAttemptThreshold) elc.error(logMessage, throwable)
+      else if (attempt.attempt > warnLoggingAttemptThreshold) elc.warn(logMessage, throwable)
+      else elc.info(logMessage, throwable)
+      result
+    }
+  }
+
+  def recoveringSource[A, Mat, Point](
+      init: Point,
+      recoveryStrategy: RecoveryStrategy,
+  )(sourceFactory: Point => Source[A, Mat])(pointOf: A => Point)(implicit
+      executionContext: ExecutionContext,
+      elc: ErrorLoggingContext,
+  ): Source[A, Mat] = {
+    import syntax.*
+    def recursiveRecovery(point: Point, lastAttempt: Option[RecoverAttempt]): Source[A, Mat] =
+      sourceFactory(point)
+        .foldConcatF(point)((_, next) => pointOf(next)) {
+          case (None, _) => Future.successful(Source.empty)
+          case (Some(throwable), lastPoint) =>
+            recoveryStrategy.recoverable(
+              // only do exponential backoff, if the stream cannot progress
+              lastAttempt = lastAttempt.filter(_ => lastPoint == point),
+              throwable = throwable,
+              elc = elc,
+            ) match {
+              case Some(attempt) =>
+                DelayUtil.delay(attempt.delay).map(_ => recursiveRecovery(lastPoint, Some(attempt)))
+              case None => Future.failed(throwable)
+            }
+        }
+
+    recursiveRecovery(init, None)
+  }
+
 }

@@ -9,7 +9,6 @@ import cats.syntax.option.*
 import com.daml.metrics.api.MetricHandle.Counter
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
 import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -920,13 +919,6 @@ trait AcsCommitmentSenderTestDb extends AcsCommitmentSenderTest {
   }
 }
 
-//@AcsCommitmentTest
-//class AcsCommitmentSenderTestPostgres extends AcsCommitmentSenderTestDb with PostgresTest
-//
-//@AcsCommitmentTest
-//class AcsCommitmentSenderTestH2 extends AcsCommitmentSenderTestDb with H2Test
-
-@AcsCommitmentTest
 class AcsCommitmentSenderTestInMemory extends AcsCommitmentSenderTest {
 
   import AcsCommitmentSenderTest.*

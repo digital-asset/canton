@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.metrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.topology.ParticipantId
 
 object ParticipantTestMetrics
     extends ParticipantMetrics(
@@ -13,6 +14,8 @@ object ParticipantTestMetrics
       new NoOpMetricsFactory,
     ) {
 
+  val participantId = ParticipantId("test-participant")
+
   val synchronizer: ConnectedSynchronizerMetrics =
-    this.connectedSynchronizerMetrics(SynchronizerAlias.tryCreate("test"))
+    this.connectedSynchronizerMetrics(SynchronizerAlias.tryCreate("test"), participantId)
 }

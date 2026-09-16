@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.operations
 
 import com.digitalasset.canton.HasExecutionContext
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.integration.plugins.UsePostgres
@@ -102,7 +101,6 @@ sealed trait ViewConsistencyTest
   }
 }
 
-@AcsCommitmentTest
 final class ViewConsistencyTestPostgres extends ViewConsistencyTest {
   registerPlugin(new UsePostgres(loggerFactory))
 }

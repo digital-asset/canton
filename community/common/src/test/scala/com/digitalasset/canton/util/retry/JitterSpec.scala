@@ -92,5 +92,11 @@ class JitterSpec extends AnyFunSpec {
     it("should perform equal jitter correctly") {
       testJitter(Jitter.equal(cap))()
     }
+
+    it("should not drop the delay to zero when the cap is a single unit wide") {
+      val jitter = Jitter.equal(1.second)
+      for (attempt <- 1 to 10)
+        assert(jitter(1.second, 1.second, attempt) === 1.second)
+    }
   }
 }

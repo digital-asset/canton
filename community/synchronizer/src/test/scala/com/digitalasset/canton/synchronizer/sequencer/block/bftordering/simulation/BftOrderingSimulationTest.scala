@@ -435,10 +435,10 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             ) =>
           // Forces always querying for an up-to-date topology, so that we simulate correctly topology changes.
           val requestInspector = new RequestInspector {
-            override def mayRequestChangeOrderingTopology(
+            override def mayChangeOrderingTopology(
+                request: OrderingRequest,
                 blockMetadata: BlockMetadata,
                 requestNumber: Int,
-                request: OrderingRequest,
                 maxBytesToDecompress: MaxBytesToDecompress,
                 synchronizerLimits: SynchronizerLimits,
                 logger: TracedLogger,

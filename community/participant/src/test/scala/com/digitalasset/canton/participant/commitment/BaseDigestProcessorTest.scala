@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.lifecycle.{
@@ -40,7 +39,6 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
-@AcsCommitmentTest
 class BaseDigestProcessorTest
     extends AnyWordSpec
     with AcsDigestTestBase

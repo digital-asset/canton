@@ -9,7 +9,10 @@ import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestCo
 import com.daml.ledger.api.testtool.infrastructure.{LedgerTestSuite, Party}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.test.java.model.test.Dummy
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.util.FutureInstances.parallelFuture
+import com.digitalasset.canton.util.MonadUtil
 
 import scala.concurrent.Future
 
@@ -104,10 +107,18 @@ final class GetCompletionsIT extends LedgerTestSuite {
       _ <- ledger.submit(aliceRequest)
       _ <- ledger.submit(bobRequest)
       _ <- ledger.submit(aliceBobRequest)
-      explicitResponses <- ledger.completions(
-        within,
-        ledger.getCompletionsRequest(beginExclusive)(alice, bob),
-      )
+      explicitRequest = ledger.getCompletionsRequest(beginExclusive)(alice, bob)
+      // The two reads below each wait for two seconds, one after the other. If a completion is
+      // still on its way, the first read can miss it while the second one catches it, and the
+      // comparison then fails. Waiting for all three here means both reads see the same set.
+      _ <- MonadUtil.parTraverseWithLimit_(PositiveInt.three)(
+        Seq(
+          aliceRequest.getCommands.commandId,
+          bobRequest.getCommands.commandId,
+          aliceBobRequest.getCommands.commandId,
+        )
+      )(commandId => ledger.findCompletion(explicitRequest)(_.commandId == commandId))
+      explicitResponses <- ledger.completions(within, explicitRequest)
       wildcardResponses <- ledger.completions(
         within,
         ledger.getCompletionsRequest(beginExclusive)(),

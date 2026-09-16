@@ -126,7 +126,6 @@ class MempoolModule[E <: Env[E]](
                 // interval or when explicitly requested by availability
                 createAndSendBatches()
               }
-              emitStateStats(metrics, mempoolState)
               metrics.ingress.labels.outcome.values.Success
             }
           }
@@ -145,7 +144,6 @@ class MempoolModule[E <: Env[E]](
         mempoolState.toBeProvidedToAvailability = atMost.toInt
 
         createAndSendBatches()
-        emitStateStats(metrics, mempoolState)
 
       // From local output module
       // TODO(#34672): discard queued requests whose max sequencing time has passed
@@ -189,14 +187,15 @@ class MempoolModule[E <: Env[E]](
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.While"))
-  private def createAndSendBatches()(implicit context: E#ActorContextT[Mempool.Message]): Unit =
+  private def createAndSendBatches()(implicit context: E#ActorContextT[Mempool.Message]): Unit = {
     while (
       mempoolState.receivedOrderRequests.nonEmpty && mempoolState.toBeProvidedToAvailability > 0
     ) {
       mempoolState.toBeProvidedToAvailability -= 1
       createAndSendBatch()
-      emitStateStats(metrics, mempoolState)
     }
+    emitStateStats(metrics, mempoolState)
+  }
 
   private def createAndSendBatch()(implicit context: E#ActorContextT[Mempool.Message]): Unit = {
     val requestsAndSpans =
@@ -210,12 +209,11 @@ class MempoolModule[E <: Env[E]](
     val batchCreationInstant = Instant.now
     locally {
       val requests = requestsAndSpans.map(_._1.tx)
-      implicit val traceContext = context.traceContextOfBatch(requests)
+      implicit val tc: TraceContext = context.traceContextOfBatch(requests)
       emitRequestsQueuedForBatchInclusionLatencies(requests, batchCreationInstant)
       availability.asyncSend(Availability.LocalDissemination.LocalBatchCreated(requests))
     }
     requestsAndSpans.foreach(_._2.end())
-    emitStateStats(metrics, mempoolState)
   }
 
   private def emitRequestsQueuedForBatchInclusionLatencies(

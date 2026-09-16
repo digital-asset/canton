@@ -30,18 +30,16 @@ final class ParticipantPurgeStoresAfterLsuScheduler(
 
   override protected def schedulerJob(
       schedule: IndividualSchedule
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[JobScheduler.ScheduledRunResult] = {
-    val purgeableStores = purgeableStoresComputation.compute()
-    logger.debug(s"Purgeable stores: ${purgeableStores.map(_.name)}")
-
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[JobScheduler.ScheduledRunResult] =
     for {
+      purgeableStores <- purgeableStoresComputation.compute()
+      _ = logger.debug(s"Purgeable stores: ${purgeableStores.map(_.name)}")
       deletedSomething <- MonadUtil.parTraverseWithLimit(batchingConfig.pruningParallelism)(
         purgeableStores
       )(_.deleteDataChunk(chunkSize))
     } yield {
       if (deletedSomething.contains(true)) JobScheduler.MoreWorkToPerform else JobScheduler.Done
     }
-  }
 
   override protected def initializeSchedule()(implicit
       traceContext: TraceContext
@@ -55,6 +53,7 @@ object ParticipantPurgeStoresAfterLsuScheduler {
       synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
       syncPersistentStateManager: SyncPersistentStateManager,
       batchingConfig: BatchingConfig,
+      acsDigestProcessorEnabled: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
   )(implicit
@@ -64,6 +63,8 @@ object ParticipantPurgeStoresAfterLsuScheduler {
     val purgeableStoresComputation = new PostLsuPurgeableStoresComputation(
       synchronizerConnectionConfigStore,
       syncPersistentStateManager,
+      acsDigestProcessorEnabled,
+      loggerFactory,
     )
 
     new ParticipantPurgeStoresAfterLsuScheduler(

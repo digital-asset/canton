@@ -94,6 +94,11 @@ trait BaseDigestProcessor extends NamedLogging {
     case Initial | _: Stopping | _: Stopped => false
   }
 
+  def isStoppingOrStopped: Boolean = state.get() match {
+    case _: Stopping | _: Stopped => true
+    case _ => false
+  }
+
   @VisibleForTesting
   private[commitment] def stateInternal: DigestProcessorState = state.get()
 

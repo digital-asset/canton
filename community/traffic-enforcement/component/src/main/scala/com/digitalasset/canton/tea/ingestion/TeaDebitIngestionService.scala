@@ -72,15 +72,24 @@ final class TeaDebitIngestionService(
         implicit val tc: TraceContext =
           fromDamlProtoSafeOpt(noTracingLogger)(c.traceContext).traceContext
 
+        // Only the singleton case names an account; a multi-party actAs is reported as a bounded count.
+        val actAsDescription = c.actAs match {
+          case Seq(one) => one
+          case other => s"${other.size} parties"
+        }
         logger.debug(
-          s"Received a completion: offset=${c.offset}, actAs=${c.actAs}, paidTrafficCost=${c.paidTrafficCost}"
+          s"Received a completion at offset ${c.offset}: actAs=$actAsDescription, paidTrafficCost=${c.paidTrafficCost}"
         )
 
         val synchronizerTime = c.synchronizerTime.getOrElse(
-          throw new IllegalStateException(s"Empty synchronizer time on completion $c")
+          throw new IllegalStateException(
+            s"Empty synchronizer time on completion at offset ${c.offset}"
+          )
         )
         val recordTime = synchronizerTime.recordTime.getOrElse(
-          throw new IllegalStateException(s"Empty recordTime time on completion $c")
+          throw new IllegalStateException(
+            s"Empty recordTime time on completion at offset ${c.offset}"
+          )
         )
         val cantonTimestampRecordTime = CantonTimestamp
           .fromProtoTimestamp(recordTime)
@@ -106,7 +115,9 @@ final class TeaDebitIngestionService(
           }
 
         if (offsetDeltaEvent.isEmpty) {
-          logger.debug("Skipping completion because the paid traffic cost is 0")
+          logger.debug(
+            s"Skipping completion at offset ${c.offset} because the paid traffic cost is 0"
+          )
         }
 
         c.actAs.toList match {
@@ -114,7 +125,7 @@ final class TeaDebitIngestionService(
             AccountId.create(one) match {
               case Left(err) =>
                 logger.warn(
-                  s"actAs $one is not a valid AccountId. Completion will be skipped: $err"
+                  s"actAs $one is not a valid AccountId for completion at offset ${c.offset}. Completion will be skipped: $err"
                 )
                 None
               case Right(accountId) =>
@@ -122,12 +133,14 @@ final class TeaDebitIngestionService(
             }
           case Nil =>
             logger.error(
-              s"No actAs for completion $c. This shouldn't happen. Cost won't be deducted."
+              s"No actAs for completion at offset ${c.offset}. This shouldn't happen. Cost won't be deducted."
             )
             None
-          case _ =>
+          case other =>
             // Should only be possible for local parties for now as we don't support multi party submission for external parties
-            logger.info(s"More than one actAs parties for completion :$c. Cost won't be deducted.")
+            logger.info(
+              s"More than one actAs parties (${other.size}) for completion at offset ${c.offset}. Cost won't be deducted."
+            )
             None
         }
       case _ => None

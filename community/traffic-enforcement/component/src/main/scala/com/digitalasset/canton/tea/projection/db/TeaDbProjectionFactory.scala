@@ -104,7 +104,9 @@ private[projection] class TeaDbProjectionFactory(
       val event = envelope.value.event
       implicit val traceContext: TraceContext = envelope.traceContext
 
-      logger.debug(s"Persisting event ${envelope.value}")
+      logger.debug(
+        s"Persisting event for account ${account.unwrap}, offset ${event.offset}, delta ${event.deltaEvent.delta.value}"
+      )
 
       withSpanDBIO(ApplyDeltaSpanName) { implicit traceContext => span =>
         setApplyDeltaSpanAttributes(span, envelope.value, eventSource)

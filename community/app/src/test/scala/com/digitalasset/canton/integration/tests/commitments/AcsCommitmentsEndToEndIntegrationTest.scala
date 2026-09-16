@@ -9,7 +9,6 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
   DigestCommitmentReinitializationStatusInfo,
 }
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.crypto.LtHash16Blake3
@@ -156,15 +155,6 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
         params.context.validFrom
       }
 
-      // Create another event that makes it to the digest processor
-      // so that the checkpoint for the reconciliation interval change gets published
-      // TODO(#34918) Check whether this is still needed once indexer checkpoints have been wired.
-      createCycleContract(
-        participant1,
-        participant1.adminParty,
-        "notification after reconciliation interval change",
-      )
-
       val digestStore =
         participant1.underlying.value.sync.syncPersistentStateManager.acsDigestStore(daId).value
 
@@ -194,6 +184,10 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
       val bob = participant2.parties.enable("bob-reinit")
 
       val iou = IouSyntax.createIou(participant1)(alice, alice, observers = List(bob))
+
+      // Trigger a checkpoint so the running digest processor persists the digest updates
+      // triggered by the new contract
+      participant1.parties.enable("p1-checkpoint-party-trigger-before-reinit")
 
       eventually() {
         validateDigestAtOffsetOfSharedContract(participant1, participant2, iou.id.contractId)
@@ -280,7 +274,6 @@ sealed trait AcsCommitmentsEndToEndIntegrationTest
 
 }
 
-@AcsCommitmentTest
 class AcsCommitmentsEndToEndIntegrationTestInMemory extends AcsCommitmentsEndToEndIntegrationTest {
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition
@@ -290,14 +283,12 @@ class AcsCommitmentsEndToEndIntegrationTestInMemory extends AcsCommitmentsEndToE
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
-@AcsCommitmentTest
 class AcsCommitmentsBftOrderingEndToEndIntegrationTestH2
     extends AcsCommitmentsEndToEndIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }
 
-@AcsCommitmentTest
 class AcsCommitmentsBftOrderingEndToEndIntegrationTestPostgres
     extends AcsCommitmentsEndToEndIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

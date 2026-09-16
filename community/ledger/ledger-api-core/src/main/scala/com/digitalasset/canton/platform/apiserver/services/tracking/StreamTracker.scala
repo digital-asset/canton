@@ -115,12 +115,12 @@ private[tracking] class StreamTrackerImpl[Key, Item](
     inFlightCounter.check(pendingSize.get()) {
       val promise = Promise[Item]()
       pending.putIfAbsent(key, (errorLoggingContext, promise)) match {
-        case Some(_) => promise.failure(errors.duplicated(key)(errorLoggingContext))
+        case Some(_) =>
+          Future.failed(errors.duplicated(key)(errorLoggingContext))
         case None =>
           pendingSize.incrementAndGet().discard
           trackWithCancelTimeout(key, timeout, promise, start)
       }
-      promise.future
     }
 
   private def trackWithCancelTimeout(
@@ -134,7 +134,7 @@ private[tracking] class StreamTrackerImpl[Key, Item](
       traceContext: TraceContext,
       tracer: Tracer,
       errors: StreamTracker.Errors[Key],
-  ): Unit =
+  ): Future[Item] =
     Try(
       // Start the timeout timer before start to ensure that the timer scheduling
       // happens before its cancellation (on start failure OR onStreamItem)
@@ -150,7 +150,7 @@ private[tracking] class StreamTrackerImpl[Key, Item](
           err,
         )
         pending.remove(key).foreach(_ => pendingSize.decrementAndGet().discard)
-        promise.tryFailure(err).discard
+        Future.failed(err)
       case Success(cancelTimeout) =>
         withSpan("StreamTracker.track") { childContext => _ =>
           start(childContext)
@@ -161,8 +161,9 @@ private[tracking] class StreamTrackerImpl[Key, Item](
                 promise.tryComplete(Failure(throwable)).discard[Boolean]
             }
         }
-        promise.future.onComplete { _ =>
-          // register timeout cancellation and removal from map
+        // Cleanup must finish before the caller sees the result, or an immediate resubmit
+        // can still be rejected as a duplicate.
+        promise.future.thereafter { _ =>
           withSpan("StreamTracker.complete") { _ => _ =>
             cancelTimeout.close()
             pending.remove(key).foreach(_ => pendingSize.decrementAndGet().discard)

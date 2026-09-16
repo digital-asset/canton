@@ -18,7 +18,11 @@ import com.digitalasset.canton.integration.plugins.UseLedgerApiTestTool.{
   LedgerTestTool,
 }
 import com.digitalasset.canton.integration.util.ExternalCommandExecutor
-import com.digitalasset.canton.integration.{EnvironmentSetupPlugin, TestConsoleEnvironment}
+import com.digitalasset.canton.integration.{
+  ConfigTransforms,
+  EnvironmentSetupPlugin,
+  TestConsoleEnvironment,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.version.ReleaseVersion
@@ -104,9 +108,20 @@ class UseLedgerApiTestTool(
     }
 
     // static time tests require this
-    config
+    val withDelayLogging = config
       .focus(_.monitoring.logging.delayLoggingThreshold)
       .replace(NonNegativeFiniteDurationConfig.ofSeconds(1000))
+
+    // Integration tests use a tiny ACHS aggregation threshold (see `ConfigTransforms.enableAchs`).
+    // `LimitsIT` can commit thousands of events at once, so ACHS processes only a few ids per DB round trip.
+    // That can fill the buffer and stall the in-memory ledger end for tens of seconds, making unrelated
+    // conformance tests time out on participant1 (#33462). A larger threshold keeps catch-up to a few rounds.
+    ConfigTransforms.updateAllParticipantConfigs_(
+      _.focus(_.parameters.ledgerApiServer.indexer.achsConfig)
+        .modify(
+          _.map(_.copy(aggregationThreshold = UseLedgerApiTestTool.achsAggregationThreshold))
+        )
+    )(withDelayLogging)
   }
 
   override def afterEnvironmentDestroyed(config: CantonConfig): Unit =
@@ -298,6 +313,10 @@ class UseLedgerApiTestTool(
 }
 
 object UseLedgerApiTestTool {
+  // Small enough that ACHS maintenance still runs many times per conformance shard, large enough
+  // that the biggest LimitsIT transaction is absorbed in a few rounds.
+  val achsAggregationThreshold: Long = 1000L
+
   sealed trait TestInclusions extends Product with Serializable {
     def testCaseEnabled(testCaseName: String): Boolean
   }

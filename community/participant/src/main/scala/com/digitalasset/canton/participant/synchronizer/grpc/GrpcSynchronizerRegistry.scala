@@ -233,7 +233,7 @@ class GrpcSynchronizerRegistry(
       crypto = cryptoApiProvider.crypto,
       seedForRandomnessO = testingConfig.sequencerTransportSeed,
       metrics = metrics
-        .connectedSynchronizerMetrics(storedConfig.config.synchronizerAlias)
+        .connectedSynchronizerMetrics(storedConfig.config.synchronizerAlias, participantId)
         .sequencerClient
         .connectionPool,
       metricsContext = storedConfig.configuredPsid.toOption

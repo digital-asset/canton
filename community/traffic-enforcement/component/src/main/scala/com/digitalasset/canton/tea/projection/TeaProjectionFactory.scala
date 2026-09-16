@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.tea.projection
 
+import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.config.{PositiveFiniteDuration, ProcessingTimeout}
+import com.digitalasset.canton.ledger.error.CommonErrors
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.platform.apiserver.services.metrics.TrafficEnforcementMetrics
 import com.digitalasset.canton.platform.config.TrafficEnforcementServerConfig.ProjectionConfig
@@ -25,6 +27,7 @@ import org.apache.pekko.projection.{
   ProjectionId,
   StatusObserver,
 }
+import org.apache.pekko.stream.AbruptStreamTerminationException
 import org.apache.pekko.stream.scaladsl.Source
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -67,20 +70,34 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
     new StatusObserver[Traced[ProjectionEvent]] {
       override def started(projectionId: ProjectionId): Unit =
         logger.info(s"Starting projection for projectionId $projectionId")(TraceContext.empty)
-      override def failed(projectionId: ProjectionId, cause: Throwable): Unit =
-        logger.info(
-          s"Failed projection for projectionId $projectionId. It will be restarted.",
-          cause,
-        )(TraceContext.empty)
+      override def failed(projectionId: ProjectionId, cause: Throwable): Unit = cause match {
+        // Only happens when the actor system is already going away, so there is nothing to restart.
+        case _: AbruptStreamTerminationException =>
+          logger.info(
+            s"Projection $projectionId was torn down together with its actor system and will not be restarted.",
+            cause,
+          )(TraceContext.empty)
+        // The ledger API goes away before us on node shutdown, so this is routine rather than a fault.
+        case _ if ErrorDetails.matches(cause, CommonErrors.ServiceNotRunning) =>
+          logger.info(
+            s"Projection $projectionId lost its event source because the ledger API is not running. It will be restarted with backoff.",
+            cause,
+          )(TraceContext.empty)
+        case _ =>
+          logger.warn(
+            s"Projection $projectionId failed and will be restarted with backoff. Debit ingestion is degraded until it recovers.",
+            cause,
+          )(TraceContext.empty)
+      }
       override def stopped(projectionId: ProjectionId): Unit =
         logger.info(s"Stopped projection for projectionId $projectionId")(TraceContext.empty)
       override def beforeProcess(
           projectionId: ProjectionId,
           envelope: Traced[ProjectionEvent],
       ): Unit =
-        logger.trace(s"Ready to process event ${envelope.value} for projectionId $projectionId")(
-          envelope.traceContext
-        )
+        logger.trace(
+          s"Ready to process event for projectionId $projectionId, account ${envelope.value.account.unwrap}, offset ${envelope.value.event.offset}"
+        )(envelope.traceContext)
       override def afterProcess(
           projectionId: ProjectionId,
           envelope: Traced[ProjectionEvent],
@@ -89,9 +106,9 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
         metrics.projectionTimestamp.updateValue(
           envelope.value.event.deltaEvent.timestamp.toEpochMilli
         )
-        logger.trace(s"Processed event ${envelope.value} for projectionId $projectionId")(
-          envelope.traceContext
-        )
+        logger.trace(
+          s"Processed event for projectionId $projectionId, account ${envelope.value.account.unwrap}, offset ${envelope.value.event.offset}"
+        )(envelope.traceContext)
       }
       override def offsetProgress(
           projectionId: ProjectionId,
@@ -110,7 +127,7 @@ trait TeaProjectionFactory extends Spanning { this: NamedLogging =>
           recoveryStrategy: HandlerRecoveryStrategy,
       ): Unit =
         logger.warn(
-          s"Error during envelope processing of ${env.value} for projectionId $projectionId",
+          s"Error during envelope processing for projectionId $projectionId, account ${env.value.account.unwrap}, offset ${env.value.event.offset}, recovery strategy $recoveryStrategy",
           cause,
         )(env.traceContext)
     }

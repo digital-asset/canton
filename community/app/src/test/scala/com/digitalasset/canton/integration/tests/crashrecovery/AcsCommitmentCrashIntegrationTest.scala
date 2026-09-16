@@ -24,6 +24,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.ReceivedCmtState.Match
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
 
 class AcsCommitmentCrashIntegrationTest
@@ -89,7 +90,7 @@ class AcsCommitmentCrashIntegrationTest
         passTopologyRegistrationTimeout()
       }
 
-  "checkpoints are at a grid" in { implicit env =>
+  "checkpoints are at a grid" onlyRunWithOrLessThan ProtocolVersion.v35 in { implicit env =>
     import env.*
 
     val simClock = environment.simClock.value

@@ -9,6 +9,7 @@ import org.apache.pekko.actor.typed.scaladsl.Behaviors
 import org.apache.pekko.actor.typed.{ActorRef, ActorSystem, Behavior, DispatcherSelector}
 import org.apache.pekko.projection.{ProjectionBehavior, ProjectionId}
 import org.scalatest.wordspec.AnyWordSpec
+import org.slf4j.event.Level
 
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import scala.concurrent.Future
@@ -52,13 +53,33 @@ class CloseableProjectionTest extends AnyWordSpec with BaseTest with HasExecutio
       val deathWatch = testKit.createTestProbe()
       val projectionRef = testKit.spawn(stoppableProjection(commands.ref))
 
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          val closeable = closeableProjection(projectionRef)
+
+          // close() blocks until the projection has cleanly wound down.
+          closeable.close()
+
+          commands.expectMessage(ProjectionBehavior.Stop)
+          deathWatch.expectTerminated(projectionRef, 10.seconds)
+        },
+        _ shouldBe empty,
+      )
+    }
+
+    "report unexpected projection termination and still complete close" in {
+      val commands = testKit.createTestProbe[ProjectionBehavior.Command]()
+      val projectionRef = testKit.spawn(stoppableProjection(commands.ref))
+
       val closeable = closeableProjection(projectionRef)
-
-      // close() blocks until the projection has cleanly wound down.
+      loggerFactory.assertLogs(
+        testKit.stop(projectionRef),
+        entry => {
+          entry.level shouldBe Level.ERROR
+          entry.message should include(projectionId.toString)
+        },
+      )
       closeable.close()
-
-      commands.expectMessage(ProjectionBehavior.Stop)
-      deathWatch.expectTerminated(projectionRef, 10.seconds)
     }
 
     "complete the close even if the projection has already terminated" in {
@@ -69,10 +90,14 @@ class CloseableProjectionTest extends AnyWordSpec with BaseTest with HasExecutio
       // happened (the watcher sees the already-dead actor and completes immediately).
       testKit.stop(projectionRef)
 
-      val closeable = closeableProjection(projectionRef)
+      val closeable = loggerFactory.assertLogs(
+        closeableProjection(projectionRef),
+        entry => {
+          entry.level shouldBe Level.ERROR
+          entry.message should include(projectionId.toString)
+        },
+      )
       closeable.close()
-
-      succeed
     }
 
     "be idempotent across repeated close calls" in {

@@ -27,6 +27,16 @@ final case class AcsRangeInfo(
 
 object AcsRangeInfo {
   def empty: AcsRangeInfo = AcsRangeInfo(None, AcsContinuationToken.emptyChecksum, None)
+
+  def assertFromContinuationTokenBytes(continuationTokenBytes: Option[ByteString]): AcsRangeInfo =
+    empty.copy(
+      continuationPointer = continuationTokenBytes
+        .map(_.toByteArray)
+        .map(AcsContinuationTokenPayload.parseFrom)
+        .flatMap(_.pointer)
+        .map(_.sequentialId)
+        .map(AcsContinuationPointerActiveContracts.apply)
+    )
 }
 
 /** ADT representation of AcsContinuationTokenPayload defined in acs_continuation.proto serialized

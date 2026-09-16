@@ -798,15 +798,22 @@ class UpdateServiceStreamsIT(testDars: TestDars) extends LedgerTestSuite {
         s"highestPageOffsetInclusive range end does not cover not-dummy contract id",
       )
       assert(emptyPage.updates.isEmpty, s"Expected empty page, got ${emptyPage.updates}")
-      assertEquals(
-        "empty page should cover an empty range",
-        emptyPage.lowestPageOffsetExclusive,
+      // Other participant activity can move the ledger end without adding an update we see here,
+      // so an empty page can still cover a non-empty range. It just must not run backwards.
+      assertGreaterOrEquals(
+        "empty page range must not run backwards",
         emptyPage.highestPageOffsetInclusive,
+        emptyPage.lowestPageOffsetExclusive,
       )
       assertEquals(
-        "page2 range should be a continuation of page1 range",
+        "empty page range should be a continuation of page1 range",
+        emptyPage.lowestPageOffsetExclusive,
         page1.highestPageOffsetInclusive,
+      )
+      assertEquals(
+        "page2 range should be a continuation of the empty page range",
         page2.lowestPageOffsetExclusive,
+        emptyPage.highestPageOffsetInclusive,
       )
       assert(
         page2.nextPageToken.nonEmpty,

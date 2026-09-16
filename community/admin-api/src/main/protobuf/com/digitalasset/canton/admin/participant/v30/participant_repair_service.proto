@@ -392,10 +392,6 @@ message DeletePendingOperationResponse {}
 message ReinitializeDigestCommitmentsRequest {
   // The ID of the synchronizer for which ACS digest reinitialization is requested.
   string synchronizer_id = 1;
-
-  // Whether the running ACS digest processor should start or resume
-  // after reinitialization completes.
-  bool running_digest_processor_should_start_after = 2;
 }
 
 message ReinitializeDigestCommitmentsResponse {

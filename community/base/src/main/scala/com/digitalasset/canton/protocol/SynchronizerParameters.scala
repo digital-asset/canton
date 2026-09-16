@@ -250,6 +250,9 @@ object StaticSynchronizerParameters
     val pvv = ProtocolVersionValidation.AlwaysValidation
 
     for {
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      _ <- checkProtoVersionCompatibility(protocolVersion, ProtoVersion(30))
+
       requiredSigningSpecsP <- requiredSigningSpecsOP.toRight(
         ProtoDeserializationError.FieldNotSet(
           "required_signing_specs"
@@ -291,7 +294,6 @@ object StaticSynchronizerParameters
         "topology_change_delay",
         topologyChangeDelayP,
       )
-      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
       serial <- ProtoConverter.parseNonNegativeInt("serial", serialP)
 
       staticSynchronizerParameters <- create(
@@ -331,6 +333,9 @@ object StaticSynchronizerParameters
     val pvv = ProtocolVersionValidation.AlwaysValidation
 
     for {
+      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
+      _ <- checkProtoVersionCompatibility(protocolVersion, ProtoVersion(31))
+
       requiredSigningSpecsP <- requiredSigningSpecsOP.toRight(
         ProtoDeserializationError.FieldNotSet(
           "required_signing_specs"
@@ -372,7 +377,6 @@ object StaticSynchronizerParameters
         "topology_change_delay",
         topologyChangeDelayP,
       )
-      protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP)
       serial <- ProtoConverter.parseNonNegativeInt("serial", serialP)
       synchronizerLimits <- parseRequired(
         SynchronizerLimits.fromProtoV31,
@@ -395,6 +399,17 @@ object StaticSynchronizerParameters
       ).leftMap(_.toProtoDeserializationError)
     } yield staticSynchronizerParameters
   }
+
+  private def checkProtoVersionCompatibility(
+      protocolVersion: ProtocolVersion,
+      protoVersion: ProtoVersion,
+  ): ParsingResult[Unit] = EitherUtil.condUnit(
+    protoVersionFor(protocolVersion) == protoVersion,
+    InvariantViolation(
+      "protocol_version",
+      s"Synchronizer parameters with PV $protocolVersion cannot be deserialized from $protoVersion",
+    ),
+  )
 
   class InvalidStaticSynchronizerParameters(message: String) extends RuntimeException(message) {
     lazy val toProtoDeserializationError: ProtoDeserializationError.InvariantViolation =

@@ -39,7 +39,12 @@ class TimeoutManager[
 )(implicit metricsContext: MetricsContext)
     extends NamedLogging {
 
-  private val timeoutCancellable: AtomicReference[Option[(Instant, CancellableEvent)]] =
+  case class TimeoutCancellable(
+      timeWhenScheduled: Instant,
+      cancellableEvent: CancellableEvent,
+      eventToBeSent: TimeoutMessageT,
+  )
+  private val timeoutCancellable: AtomicReference[Option[TimeoutCancellable]] =
     new AtomicReference(None)
 
   def scheduleTimeout(
@@ -53,8 +58,10 @@ class TimeoutManager[
       overrideTimeout.getOrElse(timeoutCalculator.calculateTimeoutForEvent(timeoutEvent))
     val cancellableEvent = context.delayedEvent(timeout, timeoutEvent)
     val timeNow = Instant.now()
-    timeoutCancellable.getAndSet(Some(timeNow -> cancellableEvent)) match {
-      case Some((previousTime, previousTimeout)) =>
+    timeoutCancellable.getAndSet(
+      Some(TimeoutCancellable(timeNow, cancellableEvent, timeoutEvent))
+    ) match {
+      case Some(TimeoutCancellable(previousTime, previousTimeout, _)) =>
         previousTimeout.cancel().discard
         val duration = Duration.between(previousTime, timeNow)
         logger.debug(
@@ -69,15 +76,29 @@ class TimeoutManager[
   }
 
   def cancelTimeout()(implicit traceContext: TraceContext): Unit =
-    timeoutCancellable.getAndSet(None).foreach { case (previousTime, timeout) =>
-      timeoutMetric.foreach(
-        _.scheduleChangedAfter(
-          Duration.between(previousTime, Instant.now())
-        )
-      )
-      logger.debug(s"Canceling timeout w/ ID: $timeoutId")
-      timeout.cancel().discard
-    }
+    cancelTimeoutIf(_ => true)
+
+  def cancelTimeoutIf(
+      predicate: TimeoutMessageT => Boolean
+  )(implicit traceContext: TraceContext): Unit =
+    timeoutCancellable.getAndUpdate {
+      case None => None
+      case Some(currentTimeoutCancellable) =>
+        if (predicate(currentTimeoutCancellable.eventToBeSent)) {
+          timeoutMetric.foreach(
+            _.scheduleChangedAfter(
+              Duration.between(currentTimeoutCancellable.timeWhenScheduled, Instant.now())
+            )
+          )
+          logger.debug(
+            s"Canceling timeout w/ ID: $timeoutId event: ${currentTimeoutCancellable.eventToBeSent}"
+          )
+          currentTimeoutCancellable.cancellableEvent.cancel().discard
+          None
+        } else {
+          Some(currentTimeoutCancellable)
+        }
+    }.discard
 }
 
 object TimeoutManager {

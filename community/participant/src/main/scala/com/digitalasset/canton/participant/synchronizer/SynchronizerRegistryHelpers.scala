@@ -235,7 +235,9 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
                   config.copy(recordingConfig = updateMemberRecordingPath(config.recordingConfig))
                 )
             ),
-            metrics.connectedSynchronizerMetrics(config.synchronizerAlias).sequencerClient,
+            metrics
+              .connectedSynchronizerMetrics(config.synchronizerAlias, participantId)
+              .sequencerClient,
             participantNodeParameters.loggingConfig,
             participantNodeParameters.exitOnFatalFailures,
             synchronizerLoggerFactory,

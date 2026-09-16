@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.commitment.Timepoint
 import com.digitalasset.canton.participant.store.db.DbAcsCommitmentSenderWatermarkStore
@@ -117,17 +116,14 @@ abstract class DbAcsCommitmentSenderWatermarkStoreTest
   }
 }
 
-@AcsCommitmentTest
 class DbAcsCommitmentSenderWatermarkStoreTestPostgres
     extends DbAcsCommitmentSenderWatermarkStoreTest
     with PostgresTest
 
-@AcsCommitmentTest
 class DbAcsCommitmentSenderWatermarkStoreTestH2
     extends DbAcsCommitmentSenderWatermarkStoreTest
     with H2Test
 
-@AcsCommitmentTest
 class AcsCommitmentSenderWatermarkStoreTestInMemory extends AcsCommitmentSenderWatermarkStoreTest {
 
   // @nowarn("cat=unused")

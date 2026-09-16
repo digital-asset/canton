@@ -19,6 +19,7 @@ import com.digitalasset.canton.tea.v1.{
   UpdateAccountResponse,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
+import com.digitalasset.canton.util.FutureUtil
 import io.grpc.ServerServiceDefinition
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -38,8 +39,8 @@ class TrafficEnforcementServiceGrpc(
   ): Future[GetAccountResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     EitherT(
-      service
-        .getAccount(request)
+      FutureUtil
+        .logOnFailureUS(service.getAccount(request), "getAccount failed unexpectedly")
         .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }
@@ -49,8 +50,8 @@ class TrafficEnforcementServiceGrpc(
   ): Future[UpdateAccountResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     EitherT(
-      service
-        .updateAccount(request)
+      FutureUtil
+        .logOnFailureUS(service.updateAccount(request), "updateAccount failed unexpectedly")
         .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }
@@ -58,8 +59,8 @@ class TrafficEnforcementServiceGrpc(
   override def pruneEvents(request: PruneEventsRequest): Future[PruneEventsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     EitherT(
-      service
-        .pruneEvents(request)
+      FutureUtil
+        .logOnFailureUS(service.pruneEvents(request), "pruneEvents failed unexpectedly")
         .map(_.leftMap(_.asGrpcError))
     ).asGrpcResponse
   }

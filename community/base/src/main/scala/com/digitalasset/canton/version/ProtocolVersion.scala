@@ -248,7 +248,7 @@ object ProtocolVersion {
     )
 
   val stable: NonEmpty[List[StableProtocolVersion]] =
-    NonEmpty.mk(List, ProtocolVersion.v34, ProtocolVersion.v35)
+    NonEmpty.mk(List, ProtocolVersion.v34, ProtocolVersion.v35, ProtocolVersion.v36)
 
   // LF versions that should only be used with alpha/beta protocol versions
   val alphaOnlyLfVersions: NonEmpty[List[LanguageVersion]] =
@@ -265,7 +265,7 @@ object ProtocolVersion {
     s"stable protocol versions $stable should be in sync with build info $releaseStable",
   )
 
-  val alpha: List[AlphaProtocolVersion] = List(ProtocolVersion.v36)
+  val alpha: List[AlphaProtocolVersion] = List(almostDev)
 
   val beta: List[BetaProtocolVersion] =
     parseFromBuildInfo(BuildInfo.betaProtocolVersions)
@@ -308,6 +308,9 @@ object ProtocolVersion {
   // TODO(#32229) Remove this once we have a stable protocol version that supports transparency
   lazy val transparency: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = dev
 
+  lazy val almostDev: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
+    ProtocolVersion.createAlpha(Int.MaxValue - 1)
+
   lazy val dev: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     ProtocolVersion.createAlpha(Int.MaxValue)
 
@@ -317,11 +320,13 @@ object ProtocolVersion {
   lazy val v35: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
     ProtocolVersion.createStable(35)
 
-  lazy val v36: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
-    ProtocolVersion.createAlpha(36)
+  lazy val v36: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] =
+    ProtocolVersion.createStable(36)
 
-  // TODO(#33849): remove and replace with the target protocol version
-  lazy val acsCommitmentRedesign: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] = v36
+  // local storage doesn't depend on a synchronizer with a specific protocol version
+  lazy val acsCommitmentRedesignStorage
+      : ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] = v35
+  lazy val acsCommitmentRedesign: ProtocolVersionWithStatus[ProtocolVersionAnnotation.Stable] = v36
 
   // Minimum stable protocol version introduced
   lazy val minimum: ProtocolVersion = v34
@@ -340,10 +345,6 @@ final case class ReleaseProtocolVersion(v: ProtocolVersion) extends AnyVal
 
 object ReleaseProtocolVersion {
   val latest: ReleaseProtocolVersion = ReleaseProtocolVersion(ProtocolVersion.latest)
-
-  // TODO(#33849): remove and replace with latest
-  // local storage doesn't depend on a synchronizer with a specific protocol version
-  val acsCommitmentRedesignStorage: ReleaseProtocolVersion = ReleaseProtocolVersion.latest
 }
 
 final case class ProtoVersion(v: Int)

@@ -1069,7 +1069,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("34", "35")),
+          BuildInfoKey("stableProtocolVersions" -> List("34", "35", "36")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1810,7 +1810,7 @@ object BuildCommon {
         .settings(
           sharedCommunitySettings,
           addFilesToHeaderCheck("*.daml", "daml", Compile),
-          damlDarLfVersions := Seq("2.2", "2.3", "2.dev"),
+          damlDarLfVersions := Seq("2.2", "2.3", "2.4", "2.dev"),
           useVersionedDarName := true,
           Compile / damlBuildOrder := Seq(
             "model_iface",
@@ -3006,6 +3006,10 @@ object BuildCommon {
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
+        // `logback-test.xml` lives in `Compile` resources so it's on the classpath of projects
+        // that depend on `testing-utils`, ensuring their tests use the config, but we exclude
+        // it from the published JAR so it doesn't conflict with downstream users' log configs
+        Compile / packageBin / mappings ~= (_.filterNot(_._2 == "logback-test.xml")),
         Compile / packageBin / packageOptions +=
           Package.ManifestAttributes(
             "ScalaPB-Options-Proto" -> "com/daml/platform/hello/package.proto"

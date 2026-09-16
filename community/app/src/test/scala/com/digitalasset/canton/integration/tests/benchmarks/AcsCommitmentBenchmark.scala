@@ -29,6 +29,7 @@ import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsRepor
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Party, PartyId}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmpty
 import monocle.macros.syntax.lens.*
 
@@ -211,91 +212,96 @@ trait AcsCommitmentBenchmark
     s"%1.${d}f" format (value / divider)
   }
 
-  "Benchmarking ACS commitments should be not too terrible" in { implicit env =>
-    import env.*
+  "Benchmarking ACS commitments should be not too terrible" onlyRunWithOrLessThan ProtocolVersion.v35 in {
+    implicit env =>
+      import env.*
 
-    participants.all.foreach(_.dars.upload(CantonTestsPath))
+      participants.all.foreach(_.dars.upload(CantonTestsPath))
 
-    val pkg = participant1.packages.find_by_module(module).headOption.map(_.packageId).value
+      val pkg = participant1.packages.find_by_module(module).headOption.map(_.packageId).value
 
-    val alice = participant1.parties.enable(
-      "Alice",
-      synchronizeParticipants = Seq(participant2),
-    )
-    val bob =
-      participant2.parties.enable(
-        "Bob",
-        synchronizeParticipants = Seq(participant1),
+      val alice = participant1.parties.enable(
+        "Alice",
+        synchronizeParticipants = Seq(participant2),
       )
+      val bob =
+        participant2.parties.enable(
+          "Bob",
+          synchronizeParticipants = Seq(participant1),
+        )
 
-    val metricName = "commitments.time-to-create-contracts"
+      val metricName = "commitments.time-to-create-contracts"
 
-    val creationTimerGenerator =
-      env.environment.metricsRegistry
-        .forParticipant(participant1.name)
-        .openTelemetryMetricsFactory
-        .timer(MetricInfo(MetricName(metricName), "", MetricQualification.Debug))
+      val creationTimerGenerator =
+        env.environment.metricsRegistry
+          .forParticipant(participant1.name)
+          .openTelemetryMetricsFactory
+          .timer(MetricInfo(MetricName(metricName), "", MetricQualification.Debug))
 
-    /** Create the given number of contracts in a single view, by exercising a choice on a helper
-      * contract
-      */
-    def singleViewCreate(nrContracts: Int) = {
+      /** Create the given number of contracts in a single view, by exercising a choice on a helper
+        * contract
+        */
+      def singleViewCreate(nrContracts: Int) = {
 
-      val template = "Creator"
-      val createCmd =
-        ledger_api_utils.create(pkg, module, template, Map("obs" -> bob, "sig" -> alice))
+        val template = "Creator"
+        val createCmd =
+          ledger_api_utils.create(pkg, module, template, Map("obs" -> bob, "sig" -> alice))
 
-      val Value.Sum.ContractId(creatorCid) =
-        extractSubmissionResult(
-          participant1.ledger_api.commands
-            .submit(Seq(alice), Seq(createCmd), transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS)
-        ): @unchecked
+        val Value.Sum.ContractId(creatorCid) =
+          extractSubmissionResult(
+            participant1.ledger_api.commands
+              .submit(
+                Seq(alice),
+                Seq(createCmd),
+                transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+              )
+          ): @unchecked
 
-      val exerciseCmd = ledger_api_utils.exercise(
-        pkg,
-        module,
-        template,
-        "Spawn",
-        Map("count" -> nrContracts),
-        creatorCid,
-      )
+        val exerciseCmd = ledger_api_utils.exercise(
+          pkg,
+          module,
+          template,
+          "Spawn",
+          Map("count" -> nrContracts),
+          creatorCid,
+        )
 
-      creationTimerGenerator.time {
-        participant1.ledger_api.commands.submit(Seq(alice), Seq(exerciseCmd))
+        creationTimerGenerator.time {
+          participant1.ledger_api.commands.submit(Seq(alice), Seq(exerciseCmd))
+        }
+
       }
 
-    }
+      // Alternatives: create in batches, or create in a single view
+      // createInBatches(100, 100)
+      singleViewCreate(1000)
 
-    // Alternatives: create in batches, or create in a single view
-    // createInBatches(100, 100)
-    singleViewCreate(1000)
+      val after = environment.clock.now
 
-    val after = environment.clock.now
+      // wait up to 10 seconds for participant1 to compute the commitments and receive commitments from participant2
+      eventually(10.seconds) {
+        participant1.health.ping(participant2)
+        participant1.testing
+          .find_clean_commitments_timestamp(daName)
+          .fold(fail("Not outstanding is None")) { ts =>
+            ts should be > after
+          }
+      }
 
-    // wait up to 10 seconds for participant1 to compute the commitments and receive commitments from participant2
-    eventually(10.seconds) {
-      participant1.health.ping(participant2)
-      participant1.testing
-        .find_clean_commitments_timestamp(daName)
-        .fold(fail("Not outstanding is None")) { ts =>
-          ts should be > after
-        }
-    }
+      val (cMax, _, _, _) = calcAndPrint(
+        participant1.metrics.get_histogram(computeMetricName),
+        "computing ACS",
+      )
 
-    val (cMax, _, _, _) = calcAndPrint(
-      participant1.metrics.get_histogram(computeMetricName),
-      "computing ACS",
-    )
+      val (crtMax, _, _, _) = calcAndPrint(
+        participant1.metrics.get_histogram(
+          "commitments.time-to-create-contracts.duration.seconds"
+        ),
+        "create contracts",
+      )
 
-    val (crtMax, _, _, _) = calcAndPrint(
-      participant1.metrics.get_histogram(
-        "commitments.time-to-create-contracts.duration.seconds"
-      ),
-      "create contracts",
-    )
-
-    cMax should be <= 2.seconds.toNanos.toDouble
-    crtMax should be <= 30.seconds.toNanos.toDouble
+      cMax should be <= 2.seconds.toNanos.toDouble
+      crtMax should be <= 30.seconds.toNanos.toDouble
   }
 
   // Commitment caching is disabled for participantWithoutCommitmentCaching and enabled for participantWithCommitmentCaching
@@ -313,8 +319,8 @@ trait AcsCommitmentBenchmark
   // caches the commitment for participantWithoutCommitmentCaching.
   // We then trigger another round of commitments and check that the time to compute the updated commitments is smaller
   // on participantWithCommitmentCaching than on participantWithoutCommitmentCaching.
-  "ACS commitment caching should decrease computation time with many stakeholder groups where few see contract updates" in {
-    implicit env =>
+  "ACS commitment caching should decrease computation time with many stakeholder groups where few see contract updates" onlyRunWithOrLessThan
+    ProtocolVersion.v35 in { implicit env =>
       import env.*
 
       logger.debug(s"Starting caching test; testing config ${env.environment.testingConfig}")
@@ -497,7 +503,7 @@ trait AcsCommitmentBenchmark
       val creationTimeMaxTotal = (creationTimeMaxWithout + creationTimeMaxWith) / 2
       logger.debug(s"Contract creation time avg $creationTimeMaxTotal")
       creationTimeMaxTotal should be > reconciliationInterval.duration.toNanos.toDouble
-  }
+    }
 
   def extractSubmissionResult(tx: Transaction): Value.Sum = {
     require(
