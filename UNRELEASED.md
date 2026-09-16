@@ -8,28 +8,18 @@ _Write summary of release_
 
 ## What’s New
 
+### CantonBFT
+- Batch fetching: retry patience defaults are now shorter to avoid long delays in case a batch is not retrieved timely.
+- Improved flow control defaults to avoid slowing down catch-up.
+
 ### Topic A
 Template for a bigger topic
 #### Background
 #### Specific Changes
 #### Impact and Migration
 
-### CantonBFT
-- Added the duration of the "output" stage to the performance metrics.
-- Reduced compute footprint of mempool stage
-- Make speculative download during state transfer only download epochs that are below the target epoch
-of the state transfer.
-- Fix some onboarding issues with catch up.
-- Filter out unordered events in the mempool that exceed their max_sequencing_time
-
 ### Minor Improvements
-- gRPC flow control now defaults to automatic mode with an explicit initial window size of 1MB
-  across all Canton gRPC connections, including CantonBFT P2P.
-  In addition, only one among flow control window size (manual flow control) and initial flow control window size
-  (automatic flow control) can be set at a time, otherwise a validation error is produced.
-  This change removes the dependency on the underlying gRPC implementation's default flow control behavior,
-  which can vary across versions, makes it easier to troubleshoot flow control issues in the future and
-  prevents configuration mistakes.
+- Added runbook for reinitializing commitments to a recent point in time without reading or processing past changes.
 
 ### Preview Features
 - preview feature

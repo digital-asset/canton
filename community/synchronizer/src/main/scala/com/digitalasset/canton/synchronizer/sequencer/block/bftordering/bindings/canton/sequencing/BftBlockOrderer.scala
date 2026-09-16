@@ -331,7 +331,13 @@ final class BftBlockOrderer(
     } yield epochNumber
     awaitFuture(
       PartitionManager
-        .create(localStorage, timeouts, loggerFactory, onboardedSequencerEpochNumberO),
+        .create(
+          localStorage,
+          timeouts,
+          loggerFactory,
+          onboardedSequencerEpochNumberO,
+          manualVacuumEnabled = config.manualVacuumEnabled,
+        ),
       "Initializing partition management",
     )
   }
@@ -593,7 +599,9 @@ final class BftBlockOrderer(
   //  is propagated to the peer as an error.
   private def createPeerReceiverForIncomingConnection(
       sendingStreamObserver: StreamObserver[BftOrderingMessage]
-  )(implicit traceContext: TraceContext): UnlessShutdown[StreamObserver[BftOrderingMessage]] =
+  )(implicit
+      traceContext: TraceContext
+  ): Option[UnlessShutdown[StreamObserver[BftOrderingMessage]]] =
     p2pNetworkManager.connectionManager.createServerSidePeerReceiver(
       p2pNetworkInModuleRef,
       sendingStreamObserver,

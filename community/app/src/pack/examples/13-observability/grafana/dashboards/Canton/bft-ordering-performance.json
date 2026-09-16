@@ -804,6 +804,100 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
+          "description": "How long gRPC reports the sender as not ready",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 47
+          },
+          "id": 121,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "histogram_quantile($percentile, sum by (namespace, job, node, target_sequencer) (irate(daml_sequencer_bftordering_p2p_send_grpc_flow_control_not_ready_duration_seconds{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval])))",
+              "legendFormat": "(reporter: {{namespace}}.{{node}}) {{target_sequencer}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "P2P gRPC not ready duration",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
           "description": "The rate of gRPC message send retries",
           "fieldConfig": {
             "defaults": {
@@ -861,7 +955,7 @@
             "h": 8,
             "w": 24,
             "x": 0,
-            "y": 47
+            "y": 55
           },
           "id": 15,
           "options": {
@@ -883,13 +977,107 @@
                 "uid": "prometheus"
               },
               "editorMode": "code",
-              "expr": "sum by (namespace, job, node, target_sequencer) (irate(daml_sequencer_bftordering_p2p_send_sends_retried{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
-              "legendFormat": "{{namespace}}.{{node}}.{{target_sequencer}}",
+              "expr": "sum by (namespace, job, node, target_sequencer, send_failure_reason) (rate(daml_sequencer_bftordering_p2p_send_sends_retried{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
+              "legendFormat": "(Reporter: {{namespace}}.{{node}}) {{target_sequencer}}, {{send_failure_reason}}",
               "range": true,
               "refId": "A"
             }
           ],
           "title": "gRPC send retry rate",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "description": "The rate of gRPC message send drops",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 63
+          },
+          "id": 122,
+          "options": {
+            "legend": {
+              "calcs": [],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none"
+            }
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              },
+              "editorMode": "code",
+              "expr": "sum by (namespace, job, node, target_sequencer, send_failure_reason) (irate(daml_sequencer_bftordering_p2p_send_sends_dropped{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[$__rate_interval]))",
+              "legendFormat": "(Reporter: {{namespace}}.{{node}}) {{target_sequencer}}, {{send_failure_reason}}",
+              "range": true,
+              "refId": "A"
+            }
+          ],
+          "title": "gRPC send drop rate",
           "type": "timeseries"
         },
         {
@@ -953,7 +1141,7 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 47
+            "y": 71
           },
           "id": 17,
           "options": {
@@ -981,7 +1169,7 @@
               "refId": "A"
             }
           ],
-          "title": "P2P network client write latency",
+          "title": "P2P gRPC onNext latency",
           "type": "timeseries"
         },
         {
@@ -1045,7 +1233,7 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 47
+            "y": 71
           },
           "id": 119,
           "options": {
@@ -3086,7 +3274,7 @@
               "disableTextWrap": false,
               "editorMode": "code",
               "exemplar": false,
-              "expr": "increase(daml_sequencer_bftordering_availability_output_fetch_timeouts{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m])",
+              "expr": "increase(daml_sequencer_bftordering_availability_output_fetch_timeouts_total{namespace=~\"$namespace\",job=~\"$job\",node=~\"$node\"}[1m])",
               "format": "time_series",
               "fullMetaSearch": false,
               "hide": false,

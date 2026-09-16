@@ -68,7 +68,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.BlacklistLeaderSelectionPolicyConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FiniteDurationDistribution
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.{
+  FiniteDurationDistribution,
+  Probability,
+}
 import com.digitalasset.canton.util.retry
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
@@ -241,6 +244,9 @@ import scala.util.Random
   * @param networkSendRetryJitterCap
   *   The maximum jittered delay that a node will use to wait between consecutive gRPC message send
   *   attempts. The minimum delay is added to the jittered delay.
+  * @param manualVacuumEnabled
+  *   If `true`, the BFT block orderer will attempt to manually vacuum each partition after it
+  *   becomes cold.
   */
 final case class BftBlockOrdererConfig(
     segmentLengthForPv34: Option[Long] = None,
@@ -296,6 +302,7 @@ final case class BftBlockOrdererConfig(
     networkSendAttempts: PositiveInt = DefaultNetworkSendAttempts,
     networkSendRetryMinimumDelay: PositiveFiniteDuration = DefaultNetworkSendRetryMinimumDelay,
     networkSendRetryJitterCap: PositiveFiniteDuration = DefaultNetworkSendRetryMaximumDelay,
+    manualVacuumEnabled: Boolean = false,
 ) {
   require(
     initTimeout.underlying >= initQueryTimeout.underlying,
@@ -326,9 +333,9 @@ object BftBlockOrdererConfig {
     NonNegativeLong.tryCreate(5L)
   val DefaultEpochStateTransferTimeout: FiniteDuration = 4.seconds
   val DefaultEpochStateTransferTimeoutForFutureEpoch: FiniteDuration = 500.millis
-  val DefaultOutputFetchTimeout: FiniteDuration = 1_000.millis
-  val DefaultOutputFetchMinimumDelay: FiniteDuration = 1_000.millis
-  val DefaultOutputFetchTimeoutCap: FiniteDuration = 5_000.millis
+  val DefaultOutputFetchTimeout: FiniteDuration = 200.millis
+  val DefaultOutputFetchMinimumDelay: FiniteDuration = 200.millis
+  val DefaultOutputFetchTimeoutCap: FiniteDuration = 200.millis
   val DefaultOutputFetchHowManyRecipients: PositiveInt = PositiveInt.tryCreate(1)
   val DefaultOutputEnqueueMaxRetries: Int = retry.Forever
   val DefaultOutputEnqueueMaxRetryDelay: FiniteDuration = 5.seconds
@@ -402,6 +409,20 @@ object BftBlockOrdererConfig {
     *   The maximum delay between retry attempts to connect to a peer
     * @param connectionRetryDelayMultiplier
     *   The backoff factor applied to the delay between subsequent failed retry attempts
+    * @param flowControlEnabled
+    *   Determines whether flow control is enabled on the sender; if enabled, messages are only sent
+    *   over gRPC if the receiver signals readiness, else queued in a max-sized buffer and
+    *   potentially dropped.
+    * @param flowControlBuffer
+    *   If flow control is enabled, it configures the specified buffer size on the sender side. If
+    *   not set, the gRPC implementation will manage send buffers in case of slow receivers (and may
+    *   OOM).
+    * @param flowControlBufferDropNewest
+    *   If true, newest excess sends, rather than oldest, will be dropped from the flow control
+    *   buffer.
+    * @param flowControlReadyAllowance
+    *   If `flowControlBuffer` is set, a "ready to send" signal will be valid for the specified
+    *   number of messages without further checks.
     */
   final case class P2PConnectionManagementConfig(
       // The maximum number of connection attempts before we log a warning.
@@ -416,6 +437,12 @@ object BftBlockOrdererConfig {
       maxConnectionRetryDelay: config.NonNegativeFiniteDuration =
         config.NonNegativeFiniteDuration.ofMinutes(2),
       connectionRetryDelayMultiplier: NonNegativeInt = NonNegativeInt.two,
+      flowControlEnabled: Boolean = true,
+      // These flow control defaults seem to work well on both a happy case benchmark (16 nodes,
+      //  3KB payload, 4k req/s)  and on a catch-up benchmark.
+      flowControlBuffer: PositiveInt = PositiveInt.tryCreate(2048),
+      flowControlBufferDropNewest: Boolean = false,
+      flowControlReadyAllowance: PositiveInt = PositiveInt.one,
   )
 
   /** Configuration for the peer-to-peer server that accepts incoming connections
@@ -567,19 +594,30 @@ object BftBlockOrdererConfig {
     * network.
     *
     * @param defaultDelayDistribution
-    *   Optional default delay distribution applied to all recipients (for simulation).
+    *   Optional default delay distribution applied to all recipients.
     * @param delaysByRecipients
-    *   Optional list of specific delay distributions applied to specific recipients (for
-    *   simulation).
+    *   Optional list of specific delay distributions and failure probabilities applied to specific
+    *   recipients.
     */
   final case class BftBlockOrderingP2PSendDelayConfig(
       defaultDelayDistribution: Option[FiniteDurationDistribution] = None,
       delaysByRecipients: Seq[DelayByRecipients] = Seq.empty,
   ) {
 
-    private val delayByRecipientInstanceName: Map[String, FiniteDurationDistribution] =
-      delaysByRecipients.flatMap { case DelayByRecipients(instanceNames, delayDistribution) =>
-        instanceNames.map(_ -> delayDistribution)
+    private val delayByRecipientInstanceName
+        : Map[String, (FiniteDurationDistribution, Option[Probability], Option[Probability])] =
+      delaysByRecipients.flatMap {
+        case DelayByRecipients(
+              instanceNames,
+              delayDistribution,
+              probabilityOfGrpcSendSuccess,
+              probabilityOfGrpcReady,
+            ) =>
+          instanceNames.map(
+            _ -> (delayDistribution, probabilityOfGrpcSendSuccess.map(
+              Probability(_)
+            ), probabilityOfGrpcReady.map(Probability(_)))
+          )
       }.toMap
 
     def nextSendDelay(
@@ -587,15 +625,41 @@ object BftBlockOrdererConfig {
     ): Option[FiniteDuration] =
       delayByRecipientInstanceName
         .get(recipientInstanceName)
+        .map(_._1)
         .orElse(defaultDelayDistribution)
         // Not used in simulation, so it's fine to use an actual random generator here
         .map(_.generateRandomDuration(new Random(ThreadLocalRandom.current())))
+
+    def nextGrpcSendSucceeds(recipientInstanceName: String): Boolean =
+      delayByRecipientInstanceName
+        .get(recipientInstanceName)
+        .flatMap(_._2)
+        .fold(true)(p => p.flipCoin(new Random(ThreadLocalRandom.current())))
+
+    def nextGrpcSendAcceptedByFlowControl(recipientInstanceName: String): Boolean =
+      delayByRecipientInstanceName
+        .get(recipientInstanceName)
+        .flatMap(_._3)
+        .fold(true)(p => p.flipCoin(new Random(ThreadLocalRandom.current())))
   }
+
   object BftBlockOrderingP2PSendDelayConfig {
+
     final case class DelayByRecipients(
         instanceNames: Seq[String],
         delayDistribution: FiniteDurationDistribution,
-    )
+        probabilityOfGrpcSendSuccess: Option[Double] = None,
+        probabilityOfGrpcSendAcceptedByFlowControl: Option[Double] = None,
+    ) {
+      require(
+        probabilityOfGrpcSendSuccess.forall(p => p >= 0.0 && p <= 1.0),
+        "probabilityOfGrpcSendSuccess must be between 0.0 and 1.0",
+      )
+      require(
+        probabilityOfGrpcSendAcceptedByFlowControl.forall(p => p >= 0.0 && p <= 1.0),
+        "probabilityOfGrpcSendAcceptedByFlowControl must be between 0.0 and 1.0",
+      )
+    }
   }
 
   /** Configuration for simulating delays in fetching the ordering topology.

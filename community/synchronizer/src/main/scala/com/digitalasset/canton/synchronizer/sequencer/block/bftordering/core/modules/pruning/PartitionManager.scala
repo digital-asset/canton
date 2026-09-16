@@ -46,6 +46,7 @@ object PartitionManager {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       onboardedSequencerEpochNumberO: Option[EpochNumber],
+      manualVacuumEnabled: Boolean,
   )(implicit
       ec: ExecutionContext
   ): PekkoFutureUnlessShutdown[Option[(PartitionCreator[PekkoEnv], PartitionPruner[PekkoEnv])]] =
@@ -69,6 +70,7 @@ object PartitionManager {
                   loggerFactory,
                   maxPartitionNumbers,
                   partitionSize,
+                  manualVacuumEnabled,
                 )
               def partitionPruner(minPartitionNumbers: Map[String, Long]) =
                 new PartitionManager.PartitionPrunerImpl(
@@ -218,6 +220,7 @@ object PartitionManager {
       val loggerFactory: NamedLoggerFactory,
       partitionNumberMap: Map[String, Long] = Map.empty,
       partitionSizeEntry: PartitionSizeEntry,
+      manualVacuumEnabled: Boolean,
   )(implicit ec: ExecutionContext)
       extends PartitionCreator[PekkoEnv]
       with DbStore {
@@ -255,14 +258,13 @@ object PartitionManager {
             _ <-
               sqlu"""alter table #$partitionName set (
                     -- avoid that inserts trigger vacuuming in a hot partition
-                    autovacuum_vacuum_insert_threshold = 1000000000,
-                    autovacuum_vacuum_insert_scale_factor = 0,
-                    -- avoid that a few deletes trigger vacuuming (which is only useful really to the batches table)
-                    autovacuum_vacuum_threshold = 10000,
-                    autovacuum_vacuum_scale_factor = 0.01,
-                    -- if autovacuum gets triggered at some point, spread out the work a bit
-                    autovacuum_vacuum_cost_limit = 500,
-                    autovacuum_vacuum_cost_delay = 10
+                    autovacuum_vacuum_insert_threshold = -1,
+                    -- avoid that a few deletes trigger vacuuming,
+                    -- which is only useful really for the batches table, the only table that is expected to have occasional deletes,
+                    -- and even there, we want to avoid this kind of autovacuuming.
+                    -- the below settings will make it so that 100M deletes will be needed to trigger delete autovacuum
+                    autovacuum_vacuum_threshold = 100000000,
+                    autovacuum_vacuum_scale_factor = 0
                   )"""
           } yield ()
       }
@@ -336,12 +338,15 @@ object PartitionManager {
     // if this is the last epoch in the partition, it means we are not supposed to ever add more data to this partition,
     // i.e. it goes from being a hot to a cold partition. that is a good time to kick off manual vacuum operation,
     // in a sequential manner, asynchronously, and using setting values that will make this a gentle, spread out, operation,
-    // that will affect all rows of the cold partition, such that it shouldn't affect performance of other db operations
+    // that will cover all rows of the cold partition, such that it should have low impact on the performance of other db operations
     // happening (especially inserts) and if autovacuum ever gets triggered again in the future for these partitions,
     // it will mostly skip doing any work here.
+    // Since we noticed the manual vacuum operation can have some impact on the performance of other db operations, we make this optional by config,
+    // and disabled by default, so that it can be enabled if needed while we evaluate. The tradeoff is that the instead of us being able to control
+    // that manual vacuum is happening on each partition at a time sequentially, that work is instead balanced by the postgres autovacuum cost balancing algorithm.
     private def maybeKickOffManualVacuuming(
         newEpochNumber: EpochNumber
-    )(implicit traceContext: TraceContext): Unit = {
+    )(implicit traceContext: TraceContext): Unit = if (manualVacuumEnabled) {
       val currentEpochPartitionNumber = newEpochNumber / partitionSize
       val lastEpochNumber = EpochNumber((currentEpochPartitionNumber + 1) * partitionSize - 1)
       if (newEpochNumber == lastEpochNumber) {
@@ -372,11 +377,12 @@ object PartitionManager {
           // run successfully.
           conn.setAutoCommit(true)
           // spread out the vacuuming work a bit
-          stmt.execute("set vacuum_cost_limit = 200").discard
-          stmt.execute("set vacuum_cost_delay = 10").discard
+          stmt.execute("set vacuum_cost_limit = 50").discard
+          stmt.execute("set vacuum_cost_delay = 1").discard
           // immediately freeze all rows, including very recent ones
           stmt.execute("set vacuum_freeze_min_age = 0").discard
           stmt.execute("set vacuum_freeze_table_age = 0").discard
+          stmt.execute("set maintenance_work_mem = '1GB'").discard
           stmt.execute(s"vacuum (freeze, analyze) $partitionName").discard
           ()
         } finally {
@@ -386,6 +392,7 @@ object PartitionManager {
             stmt.execute("reset vacuum_cost_delay").discard
             stmt.execute("reset vacuum_freeze_min_age").discard
             stmt.execute("reset vacuum_freeze_table_age").discard
+            stmt.execute("reset maintenance_work_mem").discard
           } finally {
             try {
               stmt.close()

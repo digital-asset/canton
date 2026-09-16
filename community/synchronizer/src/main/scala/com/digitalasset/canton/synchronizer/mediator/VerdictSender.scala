@@ -18,7 +18,12 @@ import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
 import com.digitalasset.canton.sequencing.client.SequencerClientSend.SendRequestTimestamps
-import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult, SequencerClientSend}
+import com.digitalasset.canton.sequencing.client.{
+  SendAsyncClientError,
+  SendCallback,
+  SendResult,
+  SequencerClientSend,
+}
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
@@ -162,7 +167,9 @@ private[mediator] class DefaultVerdictSender(
             )
         }
       case UnlessShutdown.Outcome(_: SendResult.Timeout) =>
-        logger.info("Sequencing result message timed out asynchronously.")
+        logger.info(
+          s"Sequencing result message timed out asynchronously for request ${requestId.unwrap}"
+        )
       case UnlessShutdown.AbortedDueToShutdown =>
         logger.debug("Sequencing result processing was aborted due to shutdown")
     }
@@ -193,7 +200,12 @@ private[mediator] class DefaultVerdictSender(
             )
         ) {
           case RequestRefused(refused) if refused.hasMaxSequencingTimeElapsed =>
-            logger.info("Sequencing result message timed out synchronously.")
+            logger.info(
+              s"Sequencing result message timed out synchronously for request ${requestId.unwrap}"
+            )
+            Right(())
+          case SendAsyncClientError.RequestAlreadyExists(err) =>
+            logger.info(s"Verdict aggregation for $requestId already completed $err.")
             Right(())
           case other =>
             Left(other)

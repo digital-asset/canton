@@ -120,6 +120,7 @@ import com.digitalasset.canton.util.{MaxBytesToDecompress, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, LfTimestamp}
 import com.google.protobuf.ByteString
+import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.scaladsl.Sink
 import org.mockito.Mockito.clearInvocations
 import org.scalatest.wordspec.AsyncWordSpecLike
@@ -1916,6 +1917,74 @@ class OutputModuleTest
 
     }
 
+    "not create multiple spans for same block" when {
+      "they come after each other" in {
+        implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+
+        val description = "BftOrderer.Output"
+        val tracer: Tracer = mock[Tracer]
+        val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](
+            availabilityRef = availabilityRef,
+            tracer = tracer,
+          )()
+
+        when(tracer.spanBuilder(description))
+          .thenReturn(NoReportingTracerProvider.tracer.spanBuilder(description))
+
+        output.receive(Output.Start)
+        output.receive(Output.BlockOrdered(initialBlock))
+
+        verify(tracer).spanBuilder(any[String])
+
+        output.receive(Output.BlockOrdered(initialBlock))
+        verifyNoMoreInteractions(tracer)
+
+        succeed
+      }
+
+      "one is stored before the duplicate appears" in {
+        implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext(resolveAwaits = true)
+
+        val description = "BftOrderer.Output"
+        val tracer: Tracer = mock[Tracer]
+        val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+        val output =
+          createOutputModule[ProgrammableUnitTestEnv](
+            availabilityRef = availabilityRef,
+            tracer = tracer,
+          )()
+
+        when(tracer.spanBuilder(description))
+          .thenReturn(NoReportingTracerProvider.tracer.spanBuilder(description))
+
+        output.receive(Output.Start)
+        output.receive(Output.BlockOrdered(initialBlock))
+
+        verify(tracer).spanBuilder(any[String])
+
+        val completeBlockData = CompleteBlockData(
+          initialBlock,
+          batches = initialBlock.orderedBlock.batchRefs.map(poa =>
+            poa.batchId -> OrderingRequestBatch.create(
+              Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
+              EpochNumber.First,
+            )
+          ),
+        )
+        output.receive(Output.BlockDataFetched(completeBlockData))
+        context.runPipedMessagesAndReceiveOnModule(output)
+
+        output.receive(Output.BlockOrdered(initialBlock))
+        verifyNoMoreInteractions(tracer)
+
+        succeed
+      }
+    }
+
   }
 
   "adjust time for a state-transferred block based on the previous BFT time" in {
@@ -2047,6 +2116,7 @@ class OutputModuleTest
       previousBftTimeForOnboarding: Option[CantonTimestamp] = None,
       areTherePendingTopologyChangesInOnboardingEpoch: Boolean = false,
       requestInspector: RequestInspector = DefaultRequestInspector,
+      tracer: Tracer = NoReportingTracerProvider.tracer,
   )(
       blockSubscription: BlockSubscription = new EmptyBlockSubscription
   ): OutputModule[E] = {
@@ -2104,7 +2174,7 @@ class OutputModuleTest
       config,
       synchronizerProtocolVersion,
       MetricsContext.Empty,
-      NoReportingTracerProvider.tracer,
+      tracer,
     )
   }
 
