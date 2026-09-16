@@ -22,7 +22,11 @@ import com.digitalasset.canton.error.MediatorError.ParticipantEquivocation
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.{RequestId, RootHash}
 import com.digitalasset.canton.synchronizer.mediator.MediatorVerdict.MediatorApprove
@@ -36,6 +40,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherUtil.*
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.nonempty.NonEmptyUtil
@@ -72,7 +77,7 @@ final case class ResponseAggregation[VKEY](
     val participantResponseDeadlineTick: Option[SynchronizerTimeTracker.TickRequest],
 )(implicit val viewKeyOps: ViewKey[VKEY])
     extends ResponseAggregator
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override type VKey = VKEY
 
@@ -424,18 +429,27 @@ final case class ResponseAggregation[VKEY](
       )
   }
 
-  override protected def pretty: Pretty[ResponseAggregation.this.type] = prettyOfClass(
-    param("id", _.requestId),
-    param("request", _.request),
-    param("response timeout", _.responseTimeout),
-    param("version", _.version),
-    param("state", _.state),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ResponseAggregation[VKEY]] =
+    ResponseAggregation
 
   def showMergedState: Shown = state.showMerged
 }
 
-object ResponseAggregation {
+object ResponseAggregation extends PrettyPrintingCompanion[ResponseAggregation[?]] {
+
+  private def prettyOfAggregation[VKEY: Pretty]: Pretty[ResponseAggregation[VKEY]] =
+    prettyOfClass(
+      param("id", _.requestId),
+      param("request", _.request),
+      param("response timeout", _.responseTimeout),
+      param("version", _.version),
+      param("state", _.state),
+    )
+
+  override protected val pretty: Pretty[ResponseAggregation[?]] = {
+    case aggregation: ResponseAggregation[vkey] =>
+      prettyOfAggregation(aggregation.viewKeyOps).treeOf(aggregation)
+  }
 
   /** Invariant: approvals, rejections, and abstains are pairwise disjoint. */
   final case class ConsortiumVotingState private (
@@ -444,7 +458,7 @@ object ResponseAggregation {
       approvals: Set[ParticipantId],
       rejections: List[(ParticipantId, LocalReject)],
       abstains: Set[ParticipantId],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     private val rejectedParticipants = rejections.map(_._1).toSet
 
@@ -483,7 +497,13 @@ object ResponseAggregation {
     def nonResponsiveParticipants: Set[ParticipantId] =
       hostingParticipants -- approvals -- rejectedParticipants -- abstains
 
-    override protected def pretty: Pretty[ConsortiumVotingState] =
+    override def prettyCompanion: PrettyPrintingCompanion[ConsortiumVotingState] =
+      ConsortiumVotingState
+  }
+
+  object ConsortiumVotingState extends PrettyPrintingCompanion[ConsortiumVotingState] {
+
+    override protected val pretty: Pretty[ConsortiumVotingState] =
       prettyOfClass(
         param("consortium-threshold", _.threshold, _.threshold.value > 1),
         paramIfNonEmpty("hosting participants", _.hostingParticipants),
@@ -491,9 +511,6 @@ object ResponseAggregation {
         paramIfNonEmpty("rejected by participants", _.rejections),
         paramIfNonEmpty("abstains by participants", _.abstains),
       )
-  }
-
-  object ConsortiumVotingState {
     def initialValue(
         threshold: PositiveInt,
         hostingParticipants: Set[ParticipantId],
@@ -555,9 +572,14 @@ object ResponseAggregation {
       ],
       quorumsState: Seq[Quorum],
       rejections: List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[ViewState] =
+    override def prettyCompanion: PrettyPrintingCompanion[ViewState] = ViewState
+  }
+
+  object ViewState extends PrettyPrintingCompanion[ViewState] {
+
+    override protected val pretty: Pretty[ViewState] =
       prettyOfClass(
         param("quorumsState", _.quorumsState),
         param("consortiumVoting", _.consortiumVoting),

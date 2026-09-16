@@ -55,7 +55,7 @@ The goals of the system are:
   This powers dashboards and lets us spot trends across branches and jobs.
 - **Accountability**: for `main` and `main-2.x`, each distinct failing test gets a GitHub issue in [DACH-NY/canton](https://github.com/DACH-NY/canton), labelled under the "Flaky Tests" milestone and tracked on [the flaky test kanban board](https://github.com/orgs/DACH-NY/projects/38/).
   The issue body accumulates a table of every failure with a link to the specific parallel run, the job name, and the commit.
-  Closed issues are automatically reopened on the next failure, and archived issues on the kanban board are unarchived.
+  Closed issues are automatically reopened on the next failure, and archived issues on the kanban board are unarchived. The exception is a stale flake: if the failing commit predates the issue's close, the reopen is skipped, so a run on pre-fix code cannot resurrect a just-fixed issue.
 - **Alerting**: on `main` and `main-2.x`, a Slack message is sent to `#team-canton-notifications` when a test fails on **3 distinct consecutive commits** (`CONSECUTIVE_FAILURES_THRESHOLD`).
   Multi-shard failures or manual retries on the same commit collapse to one entry for this count.
   The threshold avoids noise from one-off failures or manual retries while ensuring that a genuinely broken test gets human attention quickly.
@@ -70,7 +70,7 @@ First failure on main/main-2.x
   → gh issue create  (issue opened, row appended, added to kanban)
 
 Subsequent failures
-  → gh issue reopen  (if closed)
+  → gh issue reopen  (if closed, unless the failing commit predates the close)
   → gh issue edit    (new row appended to the table)
   → if 3 consecutive commits all fail AND issue has no assignee: Slack alert sent
 

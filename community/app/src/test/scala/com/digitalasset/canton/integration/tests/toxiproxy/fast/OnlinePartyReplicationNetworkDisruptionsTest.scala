@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.toxiproxy.fast
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -368,7 +367,6 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
-@UnstableTest // TODO(i22853): update as soon as the test does not flake anymore
 class OnlinePartyReplicationNetworkDisruptionsTestPostgres
     extends OnlinePartyReplicationNetworkDisruptionsTest {
   registerPlugin(new UsePostgres(loggerFactory))

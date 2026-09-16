@@ -39,16 +39,27 @@ class ParticipantReplayBenchmark extends CommunityIntegrationTest with SharedEnv
     */
   private lazy val FinishIfIdleDuring: FiniteDuration = 5.seconds
 
-  override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition
+  override lazy val environmentDefinition: EnvironmentDefinition = {
+    val envDefFromFiles = EnvironmentDefinition
       .fromFiles(
         File(sys.env("CONFIG_DIR")) / "participants.conf",
         File(sys.env("CONFIG_DIR")) / sys.env("DB_TYPE") / "_persistence.conf",
       )
+
+    val configuredParticipants = envDefFromFiles.baseConfig.participants.keySet
+      .map(_.unwrap)
+
+    envDefFromFiles
       .clearConfigTransforms()
       .addConfigTransforms(
         _.focus(_.parameters.timeouts.console.bounded)
           .replace(NonNegativeDuration.tryFromDuration(10.minutes))
+      )
+      .updateTestingConfig(
+        _.focus(_.participantsWithoutLapiVerification)
+          .replace(
+            configuredParticipants
+          )
       )
       .withManualStart // manual start, as an automatic start would attempt to reconnect to the synchronizers while they are not yet started
       .withSetup { implicit env =>
@@ -63,6 +74,7 @@ class ParticipantReplayBenchmark extends CommunityIntegrationTest with SharedEnv
 
         nodes.local.start()
       }
+  }
 
   private def replayEvents(replayDirectory: Path, overallTimeout: FiniteDuration)(implicit
       env: TestConsoleEnvironment

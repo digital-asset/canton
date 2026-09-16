@@ -5,7 +5,11 @@ package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
@@ -22,8 +26,14 @@ final case class InternalSequencerMemberStatus(
     override val registeredAt: CantonTimestamp,
     override val lastAcknowledged: Option[CantonTimestamp],
 ) extends AbstractSequencerMemberStatus
-    with PrettyPrinting {
-  override protected def pretty: Pretty[InternalSequencerMemberStatus] = prettyOfClass(
+    with PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[InternalSequencerMemberStatus] =
+    InternalSequencerMemberStatus
+}
+
+object InternalSequencerMemberStatus
+    extends PrettyPrintingCompanion[InternalSequencerMemberStatus] {
+  override protected val pretty: Pretty[InternalSequencerMemberStatus] = prettyOfClass(
     param("registered at", _.registeredAt),
     paramIfDefined("last acknowledged", _.lastAcknowledged),
   )
@@ -35,7 +45,7 @@ final case class SequencerMemberStatus(
     lastAcknowledged: Option[CantonTimestamp],
     enabled: Boolean = true,
 ) extends AbstractSequencerMemberStatus
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   def toProtoV30: v30.SequencerMemberStatus =
     v30.SequencerMemberStatus(
@@ -45,12 +55,8 @@ final case class SequencerMemberStatus(
       enabled,
     )
 
-  override protected def pretty: Pretty[SequencerMemberStatus] = prettyOfClass(
-    param("member", _.member),
-    param("registered at", _.registeredAt),
-    paramIfDefined("last acknowledged", _.lastAcknowledged),
-    paramIfTrue("enabled", _.enabled),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerMemberStatus] =
+    SequencerMemberStatus
 }
 
 /** Structure housing both members and instances of those members. Used to list clients that have
@@ -84,7 +90,7 @@ private[canton] final case class InternalSequencerPruningStatus(
     membersMap: Map[Member, InternalSequencerMemberStatus],
     disabledMembers: Set[Member],
 ) extends AbstractSequencerPruningStatus
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override def disabledClients: SequencerClients = SequencerClients(disabledMembers)
 
@@ -108,14 +114,18 @@ private[canton] final case class InternalSequencerPruningStatus(
   def toSequencerPruningStatus(now: CantonTimestamp): SequencerPruningStatus =
     SequencerPruningStatus(lowerBound, now, members)
 
-  override protected def pretty: Pretty[InternalSequencerPruningStatus] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[InternalSequencerPruningStatus] =
+    InternalSequencerPruningStatus
+}
+
+private[canton] object InternalSequencerPruningStatus
+    extends PrettyPrintingCompanion[InternalSequencerPruningStatus] {
+
+  override protected val pretty: Pretty[InternalSequencerPruningStatus] = prettyOfClass(
     param("lower bound", _.lowerBound),
     param("members", _.membersMap),
     param("disabled", _.disabledMembers),
   )
-}
-
-private[canton] object InternalSequencerPruningStatus {
 
   /** Sentinel value to use for Sequencers that don't yet support the status endpoint */
   val Unimplemented =
@@ -144,7 +154,7 @@ final case class SequencerPruningStatus(
     now: CantonTimestamp,
     members: Set[SequencerMemberStatus],
 ) extends AbstractSequencerPruningStatus
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override def disabledClients: SequencerClients = SequencerClients(
     members = members.filterNot(_.enabled).map(_.member)
@@ -181,14 +191,18 @@ final case class SequencerPruningStatus(
       members = members.toSeq.map(_.toProtoV30),
     )
 
-  override protected def pretty: Pretty[SequencerPruningStatus] = prettyOfClass(
-    param("lower bound", _.lowerBound),
-    param("now", _.now),
-    paramIfNonEmpty("members", _.members),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerPruningStatus] =
+    SequencerPruningStatus
 }
 
-object SequencerMemberStatus {
+object SequencerMemberStatus extends PrettyPrintingCompanion[SequencerMemberStatus] {
+
+  override protected val pretty: Pretty[SequencerMemberStatus] = prettyOfClass(
+    param("member", _.member),
+    param("registered at", _.registeredAt),
+    paramIfDefined("last acknowledged", _.lastAcknowledged),
+    paramIfTrue("enabled", _.enabled),
+  )
 
   def fromProtoV30(
       memberStatusP: v30.SequencerMemberStatus
@@ -202,7 +216,13 @@ object SequencerMemberStatus {
     } yield SequencerMemberStatus(member, registeredAt, lastAcknowledgedO, memberStatusP.enabled)
 }
 
-object SequencerPruningStatus {
+object SequencerPruningStatus extends PrettyPrintingCompanion[SequencerPruningStatus] {
+
+  override protected val pretty: Pretty[SequencerPruningStatus] = prettyOfClass(
+    param("lower bound", _.lowerBound),
+    param("now", _.now),
+    paramIfNonEmpty("members", _.members),
+  )
 
   /** Sentinel value to use for Sequencers that don't yet support the status endpoint */
   lazy val Unimplemented: SequencerPruningStatus =

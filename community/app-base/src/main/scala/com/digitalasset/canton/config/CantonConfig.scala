@@ -60,7 +60,12 @@ import com.digitalasset.canton.ledger.runner.common.PureConfigReaderWriter.Secur
   userManagementServiceConfigConvert,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.metrics.{MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.metrics.{
+  MetricsConfig,
+  MetricsReporterConfig,
+  OtlpAuth,
+  OtlpProtocol,
+}
 import com.digitalasset.canton.networking.grpc.ClientChannelParams
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -1098,7 +1103,7 @@ object CantonConfig {
     }
 
     lazy implicit final val topologyConfigReader: ConfigReader[TopologyConfig] =
-      deriveReader[TopologyConfig].applyDeprecations
+      deriveReader[TopologyConfig]
 
     lazy implicit val databaseSequencerExclusiveStorageConfigReader
         : ConfigReader[DatabaseSequencerExclusiveStorageConfig] =
@@ -1366,6 +1371,14 @@ object CantonConfig {
       deriveReader[MetricsFilterConfig]
     implicit val metricsConfigPrometheusReader: ConfigReader[MetricsReporterConfig.Prometheus] =
       deriveReader[MetricsReporterConfig.Prometheus]
+    implicit val metricsConfigOauthReader: ConfigReader[OtlpAuth.OauthClientCredentials] =
+      deriveReader[OtlpAuth.OauthClientCredentials]
+    implicit val metricsConfigOltpAuthReader: ConfigReader[OtlpAuth] =
+      deriveReader[OtlpAuth]
+    implicit val metricsConfigOtlpProtocolReader: ConfigReader[OtlpProtocol] =
+      deriveEnumerationReader[OtlpProtocol]
+    implicit val metricsConfigOltpReader: ConfigReader[MetricsReporterConfig.Otlp] =
+      deriveReader[MetricsReporterConfig.Otlp]
     implicit val metricsConfigCsvReader: ConfigReader[MetricsReporterConfig.Csv] =
       deriveReader[MetricsReporterConfig.Csv]
     implicit val metricsConfigLoggingReader: ConfigReader[MetricsReporterConfig.Logging] =
@@ -1458,7 +1471,8 @@ object CantonConfig {
       implicit val deprecatedFields: DeprecatedFieldsFor[LedgerApiServerParametersConfig] =
         new DeprecatedFieldsFor[LedgerApiServerParametersConfig] {
           override def deprecatePath: List[DeprecatedConfigPath[?]] = List(
-            DeprecatedConfigPath[String]("contract-id-seeding", since = "3.6.0")
+            DeprecatedConfigPath[String]("contract-id-seeding", since = "3.6.0"),
+            DeprecatedConfigPath[String]("use-weighted-batching", since = "3.7.0"),
           )
         }
 
@@ -2212,6 +2226,14 @@ object CantonConfig {
       deriveWriter[MetricsFilterConfig]
     implicit val metricsConfigPrometheusWriter: ConfigWriter[MetricsReporterConfig.Prometheus] =
       deriveWriter[MetricsReporterConfig.Prometheus]
+    implicit val metricsConfigOtlpProtocolWriter: ConfigWriter[OtlpProtocol] =
+      deriveEnumerationWriter[OtlpProtocol]
+    implicit val metricsConfigOauthWriter: ConfigWriter[OtlpAuth.OauthClientCredentials] =
+      deriveWriter[OtlpAuth.OauthClientCredentials]
+    implicit val metricsConfigOltpAuthWriter: ConfigWriter[OtlpAuth] =
+      deriveWriter[OtlpAuth]
+    implicit val metricsConfigOltpWriter: ConfigWriter[MetricsReporterConfig.Otlp] =
+      deriveWriter[MetricsReporterConfig.Otlp]
     implicit val metricsConfigCsvWriter: ConfigWriter[MetricsReporterConfig.Csv] =
       deriveWriter[MetricsReporterConfig.Csv]
     implicit val metricsConfigLoggingWriter: ConfigWriter[MetricsReporterConfig.Logging] =

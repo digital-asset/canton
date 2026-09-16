@@ -11,7 +11,11 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.store.ActiveContractStore.{
   ActivenessChangeDetail,
@@ -81,15 +85,12 @@ final case class CommitmentContractMetadata(
     cid: LfContractId,
     reassignmentCounter: ReassignmentCounter,
 ) extends HasVersionedWrapper[CommitmentContractMetadata]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   @transient override protected lazy val companionObj: CommitmentContractMetadata.type =
     CommitmentContractMetadata
-  override protected def pretty: Pretty[CommitmentContractMetadata.this.type] =
-    prettyOfClass(
-      param("contract id", _.cid),
-      param("reassignment counter", _.reassignmentCounter.v),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[CommitmentContractMetadata] =
+    CommitmentContractMetadata
 
   private def toProtoV30: v30.CommitmentContractMeta = v30.CommitmentContractMeta(
     cid.toBytes.toByteString,
@@ -100,7 +101,8 @@ final case class CommitmentContractMetadata(
 object CommitmentContractMetadata
     extends HasVersionedMessageCompanion[
       CommitmentContractMetadata,
-    ] {
+    ]
+    with PrettyPrintingCompanion[CommitmentContractMetadata] {
   import JsonCodecs.*
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
   implicit val rw: ReadWriter[CommitmentContractMetadata] = macroRW
@@ -153,6 +155,12 @@ object CommitmentContractMetadata
 
     CompareCmtContracts(cidsOnlyLocal.toSeq, cidsOnlyRemote.toSeq, diffReassignmentCounters.toSeq)
   }
+
+  override protected val pretty: Pretty[CommitmentContractMetadata] =
+    prettyOfClass(
+      param("contract id", _.cid),
+      param("reassignment counter", _.reassignmentCounter.v),
+    )
 }
 
 final case class CompareCmtContracts(
@@ -185,17 +193,12 @@ final case class CommitmentInspectContract(
     contract: Option[ContractInstance],
     state: Seq[ContractStateOnSynchronizer],
 ) extends HasVersionedWrapper[CommitmentInspectContract]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   @transient override protected lazy val companionObj: CommitmentInspectContract.type =
     CommitmentInspectContract
 
-  override protected def pretty: Pretty[CommitmentInspectContract.this.type] =
-    prettyOfClass(
-      param("contract id", _.cid),
-      param("active on expected synchronizer", _.activeOnExpectedSynchronizer),
-      paramIfDefined("contract", _.contract),
-      param("contract state", _.state),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[CommitmentInspectContract] =
+    CommitmentInspectContract
 
   private def toProtoV30: v30.CommitmentContract = v30.CommitmentContract(
     cid.toBytes.toByteString,
@@ -205,7 +208,9 @@ final case class CommitmentInspectContract(
   )
 }
 
-object CommitmentInspectContract extends HasVersionedMessageCompanion[CommitmentInspectContract] {
+object CommitmentInspectContract
+    extends HasVersionedMessageCompanion[CommitmentInspectContract]
+    with PrettyPrintingCompanion[CommitmentInspectContract] {
   import JsonCodecs.*
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
   implicit val rw: ReadWriter[CommitmentInspectContract] = macroRW
@@ -435,16 +440,28 @@ object CommitmentInspectContract extends HasVersionedMessageCompanion[Commitment
     val ndjson = items.map(p => write(p)).mkString("\n")
     val _ = file.overwrite(ndjson)
   }
+
+  override protected val pretty: Pretty[CommitmentInspectContract] =
+    prettyOfClass(
+      param("contract id", _.cid),
+      param("active on expected synchronizer", _.activeOnExpectedSynchronizer),
+      paramIfDefined("contract", _.contract),
+      param("contract state", _.state),
+    )
 }
 
-sealed trait MismatchReason extends Product with Serializable with PrettyPrinting
+sealed trait MismatchReason extends Product with Serializable with PrettyPrintingFromCompanion
 
 final case class UnknownContract(
     participantWithContract: ParticipantId,
     active: ContractActive,
     participantWithoutContract: ParticipantId,
 ) extends MismatchReason {
-  override protected def pretty: Pretty[UnknownContract] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[UnknownContract] = UnknownContract
+}
+
+object UnknownContract extends PrettyPrintingCompanion[UnknownContract] {
+  override protected val pretty: Pretty[UnknownContract] = prettyOfClass(
     param("Contract exists on participant", _.participantWithContract),
     param("activated by", _.active),
     param("but does not exist on participant", _.participantWithoutContract),
@@ -458,8 +475,12 @@ final case class DeactivatedContract(
     inactive: ContractInactive,
     whereActive: Option[ContractActive],
 ) extends MismatchReason
-    with PrettyPrinting {
-  override protected def pretty: Pretty[DeactivatedContract] = prettyOfClass(
+    with PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[DeactivatedContract] = DeactivatedContract
+}
+
+object DeactivatedContract extends PrettyPrintingCompanion[DeactivatedContract] {
+  override protected val pretty: Pretty[DeactivatedContract] = prettyOfClass(
     param("participantWithContract", _.participantWithContract),
     param("activated by", _.active),
     param("participantWithoutContract", _.participantWithoutContract),
@@ -472,11 +493,9 @@ final case class ContractStateOnSynchronizer(
     synchronizerId: SynchronizerId,
     contractState: ContractState,
 ) extends HasVersionedWrapper[ContractStateOnSynchronizer]
-    with PrettyPrinting {
-  override def pretty: Pretty[ContractStateOnSynchronizer] = prettyOfClass(
-    param("synchronizer id", _.synchronizerId),
-    param("contract state", _.contractState),
-  )
+    with PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[ContractStateOnSynchronizer] =
+    ContractStateOnSynchronizer
 
   @transient override protected lazy val companionObj: ContractStateOnSynchronizer.type =
     ContractStateOnSynchronizer
@@ -502,7 +521,8 @@ final case class ContractStateOnSynchronizer(
 object ContractStateOnSynchronizer
     extends HasVersionedMessageCompanion[
       ContractStateOnSynchronizer
-    ] {
+    ]
+    with PrettyPrintingCompanion[ContractStateOnSynchronizer] {
   import JsonCodecs.*
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
   implicit val rw: ReadWriter[ContractStateOnSynchronizer] = macroRW
@@ -532,9 +552,14 @@ object ContractStateOnSynchronizer
     } yield ContractStateOnSynchronizer(synchronizerId, contractState)
 
   override def name: String = "contract state on synchronizer"
+
+  override protected val pretty: Pretty[ContractStateOnSynchronizer] = prettyOfClass(
+    param("synchronizer id", _.synchronizerId),
+    param("contract state", _.contractState),
+  )
 }
 
-sealed trait ContractState extends Product with Serializable with PrettyPrinting
+sealed trait ContractState extends Product with Serializable with PrettyPrintingFromCompanion
 
 object ContractState {
   implicit val rw: ReadWriter[ContractState] = macroRW
@@ -555,7 +580,7 @@ object ContractInactive {
 final case class ContractCreated()
     extends ContractActive
     with HasVersionedWrapper[ContractCreated] {
-  override protected def pretty: Pretty[ContractCreated] = prettyOfClass()
+  override def prettyCompanion: PrettyPrintingCompanion[ContractCreated] = ContractCreated
 
   @transient override protected lazy val companionObj: ContractCreated.type =
     ContractCreated
@@ -566,7 +591,8 @@ final case class ContractCreated()
 object ContractCreated
     extends HasVersionedMessageCompanion[
       ContractCreated
-    ] {
+    ]
+    with PrettyPrintingCompanion[ContractCreated] {
 
   implicit val rw: ReadWriter[ContractCreated] = macroRW
 
@@ -584,6 +610,8 @@ object ContractCreated
   ): ParsingResult[ContractCreated] = Right(ContractCreated())
 
   override def name: String = "contract created"
+
+  override protected val pretty: Pretty[ContractCreated] = prettyOfClass()
 }
 
 final case class ContractAssigned(
@@ -592,10 +620,7 @@ final case class ContractAssigned(
     reassignmentId: Option[ReassignmentId],
 ) extends ContractActive
     with HasVersionedWrapper[ContractAssigned] {
-  override protected def pretty: Pretty[ContractAssigned] = prettyOfClass(
-    param("reassignment counter on target", _.reassignmentCounterTarget),
-    paramIfDefined("reasignment id", _.reassignmentId),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ContractAssigned] = ContractAssigned
 
   @transient override protected lazy val companionObj: ContractAssigned.type =
     ContractAssigned
@@ -612,7 +637,8 @@ final case class ContractAssigned(
 object ContractAssigned
     extends HasVersionedMessageCompanion[
       ContractAssigned
-    ] {
+    ]
+    with PrettyPrintingCompanion[ContractAssigned] {
   import JsonCodecs.*
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
   implicit val rw: ReadWriter[ContractAssigned] = macroRW
@@ -642,6 +668,11 @@ object ContractAssigned
   }
 
   override def name: String = "contract assigned"
+
+  override protected val pretty: Pretty[ContractAssigned] = prettyOfClass(
+    param("reassignment counter on target", _.reassignmentCounterTarget),
+    paramIfDefined("reasignment id", _.reassignmentId),
+  )
 }
 
 final case class ContractUnassigned(
@@ -653,11 +684,7 @@ final case class ContractUnassigned(
     reassignmentId: Option[ReassignmentId],
 ) extends ContractInactive
     with HasVersionedWrapper[ContractUnassigned] {
-  override protected def pretty: Pretty[ContractUnassigned] = prettyOfClass(
-    param("target synchronizer id", _.targetSynchronizerId),
-    param("reassignment counter on source", _.reassignmentCounterSrc),
-    paramIfDefined("reassignment id", _.reassignmentId),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ContractUnassigned] = ContractUnassigned
 
   @transient override protected lazy val companionObj: ContractUnassigned.type =
     ContractUnassigned
@@ -672,7 +699,9 @@ final case class ContractUnassigned(
   )
 }
 
-object ContractUnassigned extends HasVersionedMessageCompanion[ContractUnassigned] {
+object ContractUnassigned
+    extends HasVersionedMessageCompanion[ContractUnassigned]
+    with PrettyPrintingCompanion[ContractUnassigned] {
   import JsonCodecs.*
   @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.Var"))
   implicit val rw: ReadWriter[ContractUnassigned] = macroRW
@@ -711,12 +740,18 @@ object ContractUnassigned extends HasVersionedMessageCompanion[ContractUnassigne
     )
 
   override def name: String = "contract assigned"
+
+  override protected val pretty: Pretty[ContractUnassigned] = prettyOfClass(
+    param("target synchronizer id", _.targetSynchronizerId),
+    param("reassignment counter on source", _.reassignmentCounterSrc),
+    paramIfDefined("reassignment id", _.reassignmentId),
+  )
 }
 
 final case class ContractArchived()
     extends ContractInactive
     with HasVersionedWrapper[ContractArchived] {
-  override protected def pretty: Pretty[ContractArchived] = prettyOfClass()
+  override def prettyCompanion: PrettyPrintingCompanion[ContractArchived] = ContractArchived
 
   @transient override protected lazy val companionObj: ContractArchived.type =
     ContractArchived
@@ -727,7 +762,8 @@ final case class ContractArchived()
 object ContractArchived
     extends HasVersionedMessageCompanion[
       ContractArchived
-    ] {
+    ]
+    with PrettyPrintingCompanion[ContractArchived] {
   implicit val rw: ReadWriter[ContractArchived] = macroRW
 
   override def supportedProtoVersions: SupportedProtoVersions =
@@ -744,13 +780,14 @@ object ContractArchived
   ): ParsingResult[ContractArchived] = Right(ContractArchived())
 
   override def name: String = "contract archived"
+
+  override protected val pretty: Pretty[ContractArchived] = prettyOfClass()
 }
 
 final case class ContractUnknown(
 ) extends ContractInactive
     with HasVersionedWrapper[ContractUnknown] {
-  override def pretty: Pretty[ContractUnknown] = prettyOfClass(
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ContractUnknown] = ContractUnknown
 
   @transient override protected lazy val companionObj: ContractUnknown.type =
     ContractUnknown
@@ -762,7 +799,8 @@ final case class ContractUnknown(
 object ContractUnknown
     extends HasVersionedMessageCompanion[
       ContractUnknown
-    ] {
+    ]
+    with PrettyPrintingCompanion[ContractUnknown] {
   implicit val rw: ReadWriter[ContractUnknown] = macroRW
 
   override def supportedProtoVersions: SupportedProtoVersions =
@@ -779,6 +817,9 @@ object ContractUnknown
   ): ParsingResult[ContractUnknown] = Right(ContractUnknown())
 
   override def name: String = "contract unknown"
+
+  override protected val pretty: Pretty[ContractUnknown] = prettyOfClass(
+  )
 }
 
 object OpenCommitmentHelper {

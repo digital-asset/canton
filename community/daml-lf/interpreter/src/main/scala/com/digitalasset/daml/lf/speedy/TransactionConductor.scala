@@ -45,6 +45,7 @@ private[lf] final class TransactionConductor(
     val profile: Profile,
     private[speedy] var ptx: PartialTransaction,
     metricPlugins: Seq[MetricPlugin],
+    transactionTraceMaxLength: Int = 10,
 ) {
 
   import TransactionConductor.*
@@ -68,28 +69,37 @@ private[lf] final class TransactionConductor(
 
   private[this] def driveCmdMachine(
       cmdMachine: Speedy.CmdMachine
-  ): Upd.T[SValue] =
+  ): Upd.WithException[SValue] =
     cmdMachine.run() match {
       case SResult.SResultFinal(value) =>
-        Upd.pure(value)
+        Upd.WithException.pure(value)
       case SResult.SResultInterruption =>
         driveCmdMachine(cmdMachine)
       case SResult.SResultError(err) =>
         err match {
-          case SError.InterpretationError(error) => Upd.raise(error)
-          case crash => throw crash
+          case SError.InterpretationError(error) =>
+            Upd.WithException.raiseError(error)
+          case SError.UnhandledException(excp) =>
+            Upd.WithException.raiseException(excp)
+          case crash =>
+            throw crash
         }
       case SResult.SResultQuestion(cmd) =>
-        for {
-          value <- handleCmd(cmd)
-          _ = cmdMachine.setControl(Speedy.Control.Value(value))
-          value <- driveCmdMachine(cmdMachine)
-        } yield value
-
+        Upd.WithException.liftEither(
+          for {
+            result <- handleCmd(cmd).value
+            ctrl = result match {
+              case Right(value) => Speedy.Control.Value(value)
+              case Left(excp) => Speedy.Control.Expression(SBuiltinFun.SBThrow(SExpr.SEValue(excp)))
+            }
+            _ = cmdMachine.setControl(ctrl)
+            value <- driveCmdMachine(cmdMachine).value
+          } yield value
+        )
     }
 
   // Spawns a nested CmdMachine to interpret `cmdSExpr` (e.g. an choice body).
-  private[this] def runNestedCmdMachine(cmdSExpr: SExpr.SExpr): Upd.T[SValue] = {
+  private[this] def runNestedCmdMachine(cmdSExpr: SExpr.SExpr): Upd.WithException[SValue] = {
     val nested =
       Speedy.Machine.fromCmdSExpr(
         compiledPackages = compiledPackages,
@@ -103,10 +113,11 @@ private[lf] final class TransactionConductor(
 
   // ---------------------------------------------------------------------------
   // Command-driving entry (host-facing)
-  // ---------------------------------------------------------------------------
+  // -----------------------------------------------------------------  ----------
 
   /** Public seam: interpret a single ledger command, yielding a program to drive. */
-  def handleCommand(cmd: Question.Cmd): Upd.T[SValue] = handleCmd(cmd)
+  def handleCommand(cmd: Question.Cmd): Upd.T[SValue] =
+    handleCmd(cmd).valueOrF(raiseFailureWithStatus(_))
 
   /** Runs `create`, then feeds the resulting contract id to `exerciseOn` and runs that command.
     * Used by tests that must set up a contract (e.g. a helper) before exercising it.
@@ -115,14 +126,16 @@ private[lf] final class TransactionConductor(
       create: Question.Cmd.Create,
       exerciseOn: V.ContractId => Question.Cmd,
   ): Upd.T[SValue] =
-    handleCmd(create).flatMap {
-      case SValue.SContractId(cid) => handleCmd(exerciseOn(cid))
-      case other =>
-        throw SError.Crash(
-          NameOf.qualifiedNameOfCurrentFunc,
-          s"expected a contract id from create, got $other",
-        )
-    }
+    handleCmd(create)
+      .flatMap {
+        case SValue.SContractId(cid) => handleCmd(exerciseOn(cid))
+        case other =>
+          throw SError.Crash(
+            NameOf.qualifiedNameOfCurrentFunc,
+            s"expected a contract id from create, got $other",
+          )
+      }
+      .valueOrF(raiseFailureWithStatus(_))
 
   // ---------------------------------------------------------------------------
   // Host questions (Question.Update)
@@ -220,42 +233,63 @@ private[lf] final class TransactionConductor(
   // Pure computations (run on a fresh PureMachine)
   // ---------------------------------------------------------------------------
 
+  private def transactionTrace(numOfCmds: Int): String =
+    "to be implemented"
+
   private def runPure(
       defRef: SExpr.SDefinitionRef,
       args: ArraySeq[SValue],
-  ): Either[interpretation.Error, SValue] =
-    Speedy.Machine
+  ): Upd.WithException[SValue] = {
+
+    val machine = Speedy.Machine
       .fromPureSExpr(compiledPackages, SExpr.SEApp(SExpr.SEVal(defRef), args), logger)
-      .runPure() match {
-      case Right(value) => Right(value)
-      case Left(SError.InterpretationError(error)) => Left(error)
-      case Left(crash) => throw crash
+
+    val abort = { () =>
+      machine.abort()
+      Some(transactionTrace(transactionTraceMaxLength))
     }
 
-  private def runSafely[X](x: => X): Either[IError, X] =
-    try Right(x)
-    catch {
-      case SError.InterpretationError(error) => Left(error)
-    }
+    @scala.annotation.nowarn("msg=dead code following this construct")
+    def loop: Upd.T[Either[SValue.SAny, SValue]] =
+      machine.run() match {
+        case SResult.SResultFinal(v) =>
+          Upd.pure(Right(v))
+        case SResult.SResultError(err) =>
+          err match {
+            case SError.InterpretationError(err) =>
+              Upd.raise(err)
+            case SError.UnhandledException(excp) =>
+              Upd.pure(Left(excp))
+            case crash =>
+              throw crash
+          }
+        case SResult.SResultInterruption =>
+          Upd.lift(Upd.NeedInterruption(abort)).map(_ => Right(SValue.SUnit))
+        case SResult.SResultQuestion(nothing) =>
+          nothing
+      }
+
+    Upd.WithException.liftEither(loop)
+  }
 
   private def computeContractSignatories(
       tmplId: Ref.TypeConId,
       createArg: SValue,
-  ): Either[interpretation.Error, TreeSet[Ref.Party]] =
+  ): Upd.WithException[TreeSet[Ref.Party]] =
     runPure(SExpr.SignatoriesDefRef(tmplId), ArraySeq(createArg))
       .map(TransactionConductor.extractParties("computeContractSignatories", _))
 
   private def computeContractObservers(
       tmplId: Ref.TypeConId,
       createArg: SValue,
-  ): Either[interpretation.Error, TreeSet[Ref.Party]] =
+  ): Upd.WithException[TreeSet[Ref.Party]] =
     runPure(SExpr.ObserversDefRef(tmplId), ArraySeq(createArg))
       .map(TransactionConductor.extractParties("computeContractObservers", _))
 
   private def computeKeyOpt(
       tmplId: Ref.TypeConId,
       createArg: SValue,
-  ): Either[interpretation.Error, Option[GlobalKeyWithMaintainers]] = {
+  ): Upd.WithException[Option[GlobalKeyWithMaintainers]] = {
     val keyDefRef = SExpr.ContractKeyDefRef(tmplId)
     if (compiledPackages.getDefinition(keyDefRef).isDefined)
       for {
@@ -263,33 +297,42 @@ private[lf] final class TransactionConductor(
         gkey <- computeKeyWithMaintainers(tmplId, keyValue)
       } yield Some(gkey)
     else
-      Right(None)
+      Upd.WithException.none
   }
 
   private def computeKeyWithMaintainers(
       tmplId: Ref.TypeConId,
       keyValue: SValue,
-  ): Either[interpretation.Error, GlobalKeyWithMaintainers] =
-    for {
-      maintainersValue <- runPure(SExpr.KeyMaintainersDefRef(tmplId), ArraySeq(keyValue))
-      gkey <- runSafely(
-        Speedy.Machine.assertGlobalKey(tmplId2PackageName(tmplId), tmplId, keyValue)
-      )
-      maintainers = TransactionConductor.extractParties(
-        "computeKeyWithMaintainers",
-        maintainersValue,
-      )
-    } yield GlobalKeyWithMaintainers(gkey, maintainers)
+  ): Upd.WithException[GlobalKeyWithMaintainers] =
+    // TODO(https://github.com/digital-asset/daml/issues/23276)
+    //   check if we want to fail first on ContractIdInContractKey before evaluation maintainers
+    runPure(SExpr.KeyMaintainersDefRef(tmplId), ArraySeq(keyValue)).flatMap { maintainersValue =>
+      Speedy.Machine.globalKey(tmplId2PackageName(tmplId), tmplId, keyValue) match {
+        case Some(gkey) =>
+          Upd.WithException.pure(
+            GlobalKeyWithMaintainers(
+              gkey,
+              TransactionConductor.extractParties("computeKeyWithMaintainers", maintainersValue),
+            )
+          )
+        case None =>
+          Upd.WithException.raiseError(
+            IError.ContractIdInContractKey(keyValue.toUnnormalizedValue)
+          )
+      }
+    }
 
   private def checkPrecondition(
       tmplId: Ref.TypeConId,
       createArg: SValue,
-  ): Either[interpretation.Error, Unit] =
+  ): Upd.WithException[Unit] =
     runPure(SExpr.TemplatePreConditionDefRef(tmplId), ArraySeq(createArg)).flatMap {
       case SValue.SBool(true) =>
-        Right(())
+        Upd.WithException.unit
       case SValue.SBool(false) =>
-        Left(IError.TemplatePreconditionViolated(tmplId, None, createArg.toUnnormalizedValue))
+        Upd.WithException.raiseError(
+          IError.TemplatePreconditionViolated(tmplId, None, createArg.toUnnormalizedValue)
+        )
       case other =>
         throw SError.Crash(
           NameOf.qualifiedNameOfCurrentFunc,
@@ -302,8 +345,9 @@ private[lf] final class TransactionConductor(
       label: String,
       thisValue: SValue,
       choiceArg: SValue,
-  ): Either[interpretation.Error, TreeSet[Ref.Party]] =
+  ): Upd.T[TreeSet[Ref.Party]] =
     runPure(defRef, ArraySeq(thisValue, choiceArg))
+      .valueOrF(raiseFailureWithStatus)
       .map(TransactionConductor.extractParties(label, _))
 
   // ---------------------------------------------------------------------------
@@ -322,9 +366,9 @@ private[lf] final class TransactionConductor(
       compiledPackages.pkgInterface,
       forbidLocalContractIds = forbidLocalContractIds,
       forbidTrailingNones = forbidTrailingNones,
-    )
-      .translateValue(Ast.TTyCon(dstTmplId), createArg) match {
-      case Right(svalue) => Upd.pure(svalue)
+    ).translateValue(Ast.TTyCon(dstTmplId), createArg) match {
+      case Right(svalue) =>
+        Upd.pure(svalue)
       case Left(translationError) =>
         Upd.raise(
           IError.Upgrade(
@@ -344,14 +388,13 @@ private[lf] final class TransactionConductor(
         assert(contract.templateId == templateId)
         Upd.pure(contract)
       case None =>
-        Upd
-          .from(
-            computeContractInfo(templateId, templateArg)
-              .map { contract =>
-                insertContractInfoCache(coid, contract)
-                contract
-              }
-          )
+        computeContractInfo(templateId, templateArg).value.flatMap {
+          case Right(contract) =>
+            insertContractInfoCache(coid, contract)
+            Upd.pure(contract)
+          case Left(excpt) =>
+            raiseFailureWithStatus(excpt)
+        }
     }
 
   // Mirrors ToContractInfoDefRef: verifies the precondition, then computes the contract metadata.
@@ -360,13 +403,13 @@ private[lf] final class TransactionConductor(
   private def computeContractInfo(
       tmplId: Ref.TypeConId,
       createArg: SValue,
-  ): Either[interpretation.Error, ContractInfo] =
+  ): Upd.WithException[ContractInfo] =
     for {
       _ <- checkPrecondition(tmplId, createArg)
       signatories <- computeContractSignatories(tmplId, createArg)
       observers <- computeContractObservers(tmplId, createArg)
       keyOpt <- computeKeyOpt(tmplId, createArg)
-      lfArg <- runSafely(createArg.toNormalizedValue)
+      lfArg <- Upd.WithException.safely(createArg.toNormalizedValue)
       pkgName = tmplId2PackageName(tmplId)
     } yield ContractInfo(
       version = assignSerializationVersion(keyOpt.isDefined),
@@ -378,22 +421,6 @@ private[lf] final class TransactionConductor(
       observers = observers,
       keyOpt = keyOpt,
     )
-
-  // Mirrors SBUCreate: a contract key with no maintainers is rejected, at create time only.
-  private def checkContractKeyMaintainersNonEmpty(
-      contract: ContractInfo
-  ): Either[interpretation.Error, Unit] =
-    contract.keyOpt match {
-      case Some(key) if key.maintainers.isEmpty =>
-        Left(
-          IError.CreateEmptyContractKeyMaintainers(
-            contract.templateId,
-            contract.createArg,
-            key.value,
-          )
-        )
-      case _ => Right(())
-    }
 
   private def ensureContractActive(
       coid: V.ContractId,
@@ -414,6 +441,7 @@ private[lf] final class TransactionConductor(
   ): Boolean = {
     def mkRef(parent: Ref.TypeConId) =
       SExpr.InterfaceInstanceDefRef(parent, interfaceId, templateId)
+
     List(mkRef(templateId), mkRef(interfaceId)).exists(ref =>
       compiledPackages.getDefinition(ref).nonEmpty
     )
@@ -749,9 +777,18 @@ private[lf] final class TransactionConductor(
       }
 
   private def resolveContractKey(
-      context: String,
+      context: => String,
       tmplId: Ref.TypeConId,
       keyValue: SValue,
+  ): Upd.WithException[V.ContractId] =
+    for {
+      keyWithM <- computeKeyWithMaintainers(tmplId, keyValue)
+      coid <- Upd.WithException.liftSuccess(resolveContractKey(context, keyWithM))
+    } yield coid
+
+  private def resolveContractKey(
+      context: => String,
+      keyWithM: GlobalKeyWithMaintainers,
   ): Upd.T[V.ContractId] = {
     def loop(
         keyWithM: GlobalKeyWithMaintainers,
@@ -775,11 +812,10 @@ private[lf] final class TransactionConductor(
       }
 
     for {
-      keyWithM <- Upd.from(computeKeyWithMaintainers(tmplId, keyValue))
       _ <- Upd.assert(keyWithM.maintainers.nonEmpty)(
         IError.FetchEmptyContractKeyMaintainers(
           keyWithM.globalKey.templateId,
-          keyValue.toNormalizedValue,
+          keyWithM.globalKey.key,
           keyWithM.globalKey.packageName,
         )
       )
@@ -794,10 +830,25 @@ private[lf] final class TransactionConductor(
   private def handleCreate(
       tmplId: Ref.TypeConId,
       createArg: SValue,
+  ): Upd.WithException[SValue] =
+    computeContractInfo(tmplId, createArg).semiflatMap(handleCreate(_, createArg))
+
+  private def handleCreate(
+      contract: ContractInfo,
+      createArg: SValue,
   ): Upd.T[SValue] =
     for {
-      contract <- Upd.from(computeContractInfo(tmplId, createArg))
-      _ <- Upd.from(checkContractKeyMaintainersNonEmpty(contract))
+      _ <- contract.keyOpt match {
+        case Some(key) if key.maintainers.isEmpty =>
+          Upd.raise(
+            IError.CreateEmptyContractKeyMaintainers(
+              contract.templateId,
+              contract.createArg,
+              key.value,
+            )
+          )
+        case _ => Upd.unit
+      }
       coid <- ptx.insertCreate(
         preparationTime = preparationTime,
         contract = contract,
@@ -806,7 +857,7 @@ private[lf] final class TransactionConductor(
       ) match {
         case Right((createNode, newPtx)) =>
           val coid = createNode.coid
-          storeLocalContract(coid, tmplId, createArg)
+          storeLocalContract(coid, contract.templateId, createArg)
           ptx = newPtx
           insertContractInfoCache(coid, contract)
           metrics.incrCount[TxNodeCount]()
@@ -843,11 +894,12 @@ private[lf] final class TransactionConductor(
   private def handleFetchTemplate(
       dstTmplId: Ref.TypeConId,
       coid: V.ContractId,
+      byKey: Boolean = false,
   ): Upd.T[SValue] =
     for {
       resolved <- fetchAndValidateContractByTemplate(dstTmplId, coid)
       (value, contract) = resolved
-      _ <- insertFetchNode(coid, contract, byKey = false, interfaceId = None)
+      _ <- insertFetchNode(coid, contract, byKey = byKey, interfaceId = None)
     } yield value
 
   private def handleFetchInterface(
@@ -863,17 +915,21 @@ private[lf] final class TransactionConductor(
   private def handleFetchByKey(
       tmplId: Ref.TypeConId,
       keyValue: SValue,
-  ): Upd.T[SValue] =
+  ): Upd.WithException[SValue] =
     for {
       coid <- resolveContractKey("FetchByKey", tmplId, keyValue)
-      resolved <- fetchAndValidateContractByTemplate(tmplId, coid)
-      (templateArg, contract) = resolved
-      _ <- insertFetchNode(coid, contract, byKey = true, interfaceId = None)
+      templateArg <- Upd.WithException.liftSuccess(handleFetchTemplate(tmplId, coid, byKey = true))
     } yield SValue.SPair(SValue.SContractId(coid), templateArg)
 
   private def handleQueryContractKey(
       tmplId: Ref.TypeConId,
       keyValue: SValue,
+      n: Int,
+  ): Upd.WithException[SValue] =
+    computeKeyWithMaintainers(tmplId, keyValue).semiflatMap(handleQueryContractKey(_, n))
+
+  private def handleQueryContractKey(
+      keyWithM: GlobalKeyWithMaintainers,
       n: Int,
   ): Upd.T[SValue] = {
     def loop(
@@ -889,7 +945,9 @@ private[lf] final class TransactionConductor(
             }
         case Right(Right((mapping, next))) =>
           mapping.queue.toList
-            .traverse(coid => fetchAndValidateContractByTemplate(tmplId, coid).map(_._1))
+            .traverse(coid =>
+              fetchAndValidateContractByTemplate(keyWithM.globalKey.templateId, coid).map(_._1)
+            )
             .map { payloads =>
               ptx = ptx.copy(csmJournal = next)
               (mapping, payloads)
@@ -899,11 +957,10 @@ private[lf] final class TransactionConductor(
       }
 
     for {
-      keyWithM <- Upd.from(computeKeyWithMaintainers(tmplId, keyValue))
       _ <- Upd.assert(keyWithM.maintainers.nonEmpty)(
         IError.FetchEmptyContractKeyMaintainers(
           keyWithM.globalKey.templateId,
-          keyValue.toNormalizedValue,
+          keyWithM.value,
           keyWithM.globalKey.packageName,
         )
       )
@@ -930,61 +987,53 @@ private[lf] final class TransactionConductor(
     )
   }
 
-  private def handleExercise(
-      choiceOwnerId: Ref.TypeConId,
+  private def beginExercise(
       tmplId: Ref.TypeConId,
-      interfaceId: Option[Ref.TypeConId],
+      ifaceId: Option[Ref.TypeConId],
       choiceName: Ref.ChoiceName,
       coid: V.ContractId,
       thisValue: SValue,
       contract: ContractInfo,
       choiceArg: SValue,
       byKey: Boolean,
-      choiceBodyDefRef: SExpr.SDefinitionRef,
-  ): Upd.T[SValue] = {
-    val choice = compiledPackages.pkgInterface.lookupChoice(tmplId, interfaceId, choiceName) match {
+  ): Upd.T[Unit] = {
+    val choice = compiledPackages.pkgInterface.lookupChoice(tmplId, ifaceId, choiceName) match {
       case Left(lookupError) =>
         throw SError.Crash(NameOf.qualifiedNameOfCurrentFunc, lookupError.pretty)
       case Right(choice) => choice
     }
+    val choiceTypeId = ifaceId.getOrElse(tmplId)
     for {
-      controllers <- Upd.from(
-        computeChoiceParties(
-          SExpr.ChoiceControllerDefRef(choiceOwnerId, choiceName),
-          "computeChoiceControllers",
-          thisValue,
-          choiceArg,
-        )
+      controllers <- computeChoiceParties(
+        SExpr.ChoiceControllerDefRef(choiceTypeId, choiceName),
+        "computeChoiceControllers",
+        thisValue,
+        choiceArg,
       )
-      observers <- Upd.from(
-        computeChoiceParties(
-          SExpr.ChoiceObserverDefRef(choiceOwnerId, choiceName),
-          "computeChoiceObservers",
-          thisValue,
-          choiceArg,
-        )
+      observers <- computeChoiceParties(
+        SExpr.ChoiceObserverDefRef(choiceTypeId, choiceName),
+        "computeChoiceObservers",
+        thisValue,
+        choiceArg,
       )
       authorizersOpt <-
         if (choice.choiceAuthorizers.isDefined)
-          Upd
-            .from(
-              computeChoiceParties(
-                SExpr.ChoiceAuthorizersDefRef(choiceOwnerId, choiceName),
-                "computeChoiceAuthorizers",
-                thisValue,
-                choiceArg,
-              )
-            )
-            .map(authorizers => Some(authorizers: Set[Ref.Party]))
+          computeChoiceParties(
+            SExpr.ChoiceAuthorizersDefRef(choiceTypeId, choiceName),
+            "computeChoiceAuthorizers",
+            thisValue,
+            choiceArg,
+          )
+            .map(Some(_))
         else
-          Upd.pure(Option.empty[Set[Ref.Party]])
-      chosenValue <- Upd.from(runSafely(choiceArg.toNormalizedValue))
+          Upd.none
+      chosenValue <- Upd.safely(choiceArg.toNormalizedValue)
       _ <- ptx.beginExercises(
         packageName = tmplId2PackageName(tmplId),
         templateId = tmplId,
         targetId = coid,
         contract = contract,
-        interfaceId = interfaceId,
+        interfaceId = ifaceId,
         choiceId = choiceName,
         optLocation = getLastLocation,
         consuming = choice.consuming,
@@ -1002,17 +1051,42 @@ private[lf] final class TransactionConductor(
         case Left(err) =>
           Upd.raise(err)
       }
-      choiceResult <- runNestedCmdMachine(
-        SExpr.SEApp(
-          SExpr.SEVal(choiceBodyDefRef),
-          ArraySeq(thisValue, choiceArg, SValue.SContractId(coid), SValue.SToken),
-        )
-      )
-      _ = {
-        ptx = ptx.endExercises(choiceResult.toNormalizedValue)
-      }
-    } yield choiceResult
+    } yield ()
   }
+
+  private def handleExercise(
+      tmplId: Ref.TypeConId,
+      interfaceId: Option[Ref.TypeConId],
+      choiceName: Ref.ChoiceName,
+      coid: V.ContractId,
+      thisValue: SValue,
+      contract: ContractInfo,
+      choiceArg: SValue,
+      byKey: Boolean,
+      choiceBodyDefRef: SExpr.SDefinitionRef,
+  ): Upd.WithException[SValue] =
+    for {
+      _ <- Upd.WithException.liftSuccess(
+        beginExercise(tmplId, interfaceId, choiceName, coid, thisValue, contract, choiceArg, byKey)
+      )
+      choiceResult <- Upd.WithException.liftEither(
+        runNestedCmdMachine(
+          SExpr.SEApp(
+            SExpr.SEVal(choiceBodyDefRef),
+            ArraySeq(thisValue, choiceArg, SValue.SContractId(coid), SValue.SToken),
+          )
+        ).value.flatMap {
+          case right @ Right(result) =>
+            for {
+              value <- Upd.safely(result.toNormalizedValue)
+              _ = ptx = ptx.endExercises(value)
+            } yield right
+          case left @ Left(_) =>
+            ptx = ptx.abortExercises
+            Upd.pure(left)
+        }
+      )
+    } yield choiceResult
 
   private def handleExerciseTemplate(
       tmplId: Ref.TypeConId,
@@ -1020,10 +1094,11 @@ private[lf] final class TransactionConductor(
       coid: V.ContractId,
       choiceArg: SValue,
       byKey: Boolean = false,
-  ): Upd.T[SValue] =
-    fetchAndValidateContractByTemplate(tmplId, coid).flatMap { case (contractArg, contract) =>
-      handleExercise(
-        choiceOwnerId = tmplId,
+  ): Upd.WithException[SValue] =
+    for {
+      entry <- Upd.WithException.liftSuccess(fetchAndValidateContractByTemplate(tmplId, coid))
+      (contractArg, contract) = entry
+      result <- handleExercise(
         tmplId = tmplId,
         interfaceId = None,
         choiceName = choiceName,
@@ -1034,14 +1109,14 @@ private[lf] final class TransactionConductor(
         byKey = byKey,
         choiceBodyDefRef = SExpr.CmdChoiceBodyDefRef(tmplId, choiceName),
       )
-    }
+    } yield result
 
   private def handleExerciseByKey(
       tmplId: Ref.TypeConId,
       choiceName: Ref.ChoiceName,
       keyValue: SValue,
       choiceArg: SValue,
-  ): Upd.T[SValue] =
+  ): Upd.WithException[SValue] =
     resolveContractKey("ExerciseByKey", tmplId, keyValue).flatMap { coid =>
       handleExerciseTemplate(
         tmplId,
@@ -1057,28 +1132,25 @@ private[lf] final class TransactionConductor(
       choiceName: Ref.ChoiceName,
       coid: V.ContractId,
       choiceArg: SValue,
-  ): Upd.T[SValue] =
-    fetchAndValidateContractByInterface(coid, ifaceId).flatMap { case (sAny, contract) =>
-      val tmplId = sAny match {
-        case SValue.SAny(Ast.TTyCon(id), _) => id
-        case other =>
-          throw SError.Crash(
-            NameOf.qualifiedNameOfCurrentFunc,
-            s"fetchAndValidateContractByInterface returned an unexpected value: $other",
-          )
-      }
-      handleExercise(
-        choiceOwnerId = ifaceId,
-        tmplId = tmplId,
-        interfaceId = Some(ifaceId),
-        choiceName = choiceName,
-        coid = coid,
-        thisValue = sAny,
-        contract = contract,
-        choiceArg = choiceArg,
-        byKey = false,
-        choiceBodyDefRef = SExpr.CmdInterfaceChoiceBodyDefRef(ifaceId, choiceName),
-      )
+  ): Upd.WithException[SValue] =
+    Upd.WithException.liftSuccess(fetchAndValidateContractByInterface(coid, ifaceId)).flatMap {
+      case (sAny @ SValue.SAny(Ast.TTyCon(tmplId), _), contract) =>
+        handleExercise(
+          tmplId = tmplId,
+          interfaceId = Some(ifaceId),
+          choiceName = choiceName,
+          coid = coid,
+          thisValue = sAny,
+          contract = contract,
+          choiceArg = choiceArg,
+          byKey = false,
+          choiceBodyDefRef = SExpr.CmdInterfaceChoiceBodyDefRef(ifaceId, choiceName),
+        )
+      case other =>
+        throw SError.Crash(
+          NameOf.qualifiedNameOfCurrentFunc,
+          s"fetchAndValidateContractByInterface returned an unexpected value: $other",
+        )
     }
 
   private def handleExternalCall(
@@ -1148,14 +1220,64 @@ private[lf] final class TransactionConductor(
         )
     }
 
-  private def handleCmd(cmd: Question.Cmd): Upd.T[SValue] =
+  private def raiseFailureWithStatus(name: Ref.TypeConId, message: String) =
+    Upd.raise(
+      IError.FailureStatus(
+        "UNHANDLED_EXCEPTION/" + name.qualifiedName.toString,
+        Ast.FCInvalidGivenCurrentSystemStateOther.cantonCategoryId,
+        message,
+        Map(),
+      )
+    )
+
+  private def raiseFailureWithStatus[A](excp: SValue.SAny): Upd.T[A] = excp match {
+    case Speedy.SArithmeticError(msg) =>
+      raiseFailureWithStatus(Speedy.SArithmeticError.tyCon, msg)
+    case SValue.SAny(Ast.TTyCon(excTyp), svalue) =>
+      Speedy.Machine
+        .fromPureSExpr(
+          compiledPackages,
+          SExpr.SEApp(SExpr.SEVal(SExpr.ExceptionMessageDefRef(excTyp)), ArraySeq(svalue)),
+          logger,
+        )
+        .runPure() match {
+        case Right(value) =>
+          value match {
+            case SValue.SText(msg) =>
+              raiseFailureWithStatus(excTyp, msg)
+            case otherwise =>
+              throw SError.Crash(
+                NameOf.qualifiedNameOfCurrentFunc,
+                s"expected a Text got ${otherwise.toUnnormalizedValue}",
+              )
+          }
+        case Left(err) =>
+          err match {
+            case SError.InterpretationError(error) => Upd.raise(error)
+            case SError.UnhandledException(SValue.SAny(Ast.TTyCon(exceptionId), _)) =>
+              raiseFailureWithStatus(
+                excTyp,
+                s"<Failed to calculate message as ${exceptionId.qualifiedName.toString} was thrown during conversion>",
+              )
+            case crash =>
+              throw crash
+          }
+      }
+    case _ =>
+      throw SError.Crash(
+        NameOf.qualifiedNameOfCurrentFunc,
+        "ill-formed exception",
+      )
+  }
+
+  private def handleCmd(cmd: Question.Cmd): Upd.WithException[SValue] =
     cmd match {
       case Question.Cmd.Create(tmplId, createArg) =>
         handleCreate(tmplId, createArg)
       case Question.Cmd.FetchTemplate(tmplId, coid) =>
-        handleFetchTemplate(tmplId, coid)
+        Upd.WithException.liftSuccess(handleFetchTemplate(tmplId, coid))
       case Question.Cmd.FetchInterface(interfaceId, coid) =>
-        handleFetchInterface(interfaceId, coid)
+        Upd.WithException.liftSuccess(handleFetchInterface(interfaceId, coid))
       case Question.Cmd.FetchByKey(tmplId, key) =>
         handleFetchByKey(tmplId, key)
       case Question.Cmd.QueryContractKey(tmplId, key, n) =>
@@ -1182,22 +1304,36 @@ private[lf] final class TransactionConductor(
           ) =>
         handleExerciseInterface(ifaceId, choiceName, coid, choiceArg)
       case Question.Cmd.GetTime =>
-        needTime.map(time => SValue.STimestamp(time))
+        Upd.WithException.liftSuccess(needTime.map(time => SValue.STimestamp(time)))
       case Question.Cmd.ExternalCall(extensionId, functionId, configHash, input) =>
-        handleExternalCall(extensionId, functionId, configHash, input)
+        Upd.WithException.liftSuccess(
+          handleExternalCall(extensionId, functionId, configHash, input)
+        )
       case Question.Cmd.CheckLedgerTimeLT(time) =>
-        needTime.map { now =>
+        Upd.WithException.liftSuccess(needTime.map { now =>
           val Time.Range(lb, ub) = getTimeBoundaries
-          val result =
-            if (now < time) {
-              val newUb = time.subtract(Duration.of(1, ChronoUnit.MICROS))
-              setTimeBoundaries(Time.Range(lb, if (newUb < ub) newUb else ub))
-              SValue.SBool(true)
-            } else {
-              setTimeBoundaries(Time.Range(if (lb < time) time else lb, ub))
-              SValue.SBool(false)
-            }
-          result
+          if (now < time) {
+            val newUb = time.subtract(Duration.of(1, ChronoUnit.MICROS))
+            setTimeBoundaries(Time.Range(lb, if (newUb < ub) newUb else ub))
+            SValue.SBool(true)
+          } else {
+            setTimeBoundaries(Time.Range(if (lb < time) time else lb, ub))
+            SValue.SBool(false)
+          }
+        })
+      case Question.Cmd.OpenTry =>
+        ptx = ptx.beginTry
+        Upd.WithException.sunit
+      case Question.Cmd.CloseTry =>
+        ptx = ptx.endTry
+        Upd.WithException.sunit
+      case Question.Cmd.AbortTry =>
+        ptx.rollbackTry match {
+          case Left(err) =>
+            Upd.WithException.raiseError(err)
+          case Right(newPtx) =>
+            ptx = newPtx
+            Upd.WithException.sunit
         }
     }
 }
@@ -1209,6 +1345,38 @@ private[lf] object TransactionConductor {
 
     type F[X] = Upd[X]
     type E = interpretation.Error
+
+    def safely[A](a: => A): Upd.T[A] =
+      try pure(a)
+      catch {
+        case SError.InterpretationError(err) => raise(err)
+      }
+
+    private[TransactionConductor] type WithException[X] = cats.data.EitherT[Upd.T, SValue.SAny, X]
+
+    private[TransactionConductor] object WithException {
+      def liftEither[A](u: Upd.T[Either[SValue.SAny, A]]): WithException[A] = cats.data.EitherT(u)
+      def liftSuccess[A](u: Upd.T[A]): WithException[A] = cats.data.EitherT.right(u)
+      val unit: WithException[Unit] = pure(())
+      def sunit: WithException[SValue] = pure(SValue.SUnit)
+      def none[A]: WithException[Option[A]] = pure(None)
+      def pure[A](a: A): WithException[A] = liftEither(Upd.pure[Either[SValue.SAny, A]](Right(a)))
+
+      /* raise interpretation error */
+      def raiseError[A](e: E): WithException[A] = liftEither(Upd.raise(e))
+
+      /* throw daml exception */
+      def raiseException[A](e: SValue.SAny): WithException[A] = liftEither(
+        Upd.pure[Either[SValue.SAny, A]](Left(e))
+      )
+
+      def safely[A](a: => A): WithException[A] =
+        try pure(a)
+        catch {
+          case SError.InterpretationError(err) => raiseError(err)
+          case SError.UnhandledException(e) => raiseException(e)
+        }
+    }
 
     /** Update interpretation requires the current ledger time.
       */
@@ -1274,6 +1442,8 @@ private[lf] object TransactionConductor {
       /** Error information from external call failures */
       final case class Error(message: String)
     }
+
+    final case class NeedInterruption(abort: () => Option[String]) extends Upd[Unit]
   }
 
   private val iterationsBetweenInterruptions: Long = 10000

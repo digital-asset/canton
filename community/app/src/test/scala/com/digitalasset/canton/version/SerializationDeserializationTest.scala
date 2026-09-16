@@ -112,7 +112,7 @@ final class SerializationDeserializationTest
         test(DynamicSynchronizerParameters, version)
         test(SequencingParameters, version)
 
-        if (version >= ProtocolVersion.acsCommitmentRedesign) {
+        if (version >= ProtocolVersion.v36) {
           test(AcsCommitment, version)
           test(AcsCommitmentProtocolMessage, version)
 

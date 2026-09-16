@@ -7,19 +7,14 @@ import com.digitalasset.canton.protocol.LfInterpretationConfig
 
 object InterpretationConfig {
 
-  val V35 = LfInterpretationConfig.Default
-  def Default: LfInterpretationConfig = V35
-  val VDev = LfInterpretationConfig.Dev
-  def Dev: LfInterpretationConfig = VDev
-
   def forProtocolVersion(protocolVersion: ProtocolVersion): LfInterpretationConfig =
     protocolVersion match {
-      case ProtocolVersion.v35 => V35
-      case ProtocolVersion.v36 => VDev
-      case ProtocolVersion.v37 => VDev
-      case ProtocolVersion.dev => VDev
-      case other =>
-        throw new IllegalArgumentException(s"Unsupported protocol version: $other")
+      // Do not map to Dev versions, remove mapping
+      case ProtocolVersion.v35 => LfInterpretationConfig.Stable
+      case ProtocolVersion.v36 => LfInterpretationConfig.Stable
+      case ProtocolVersion.v37 => LfInterpretationConfig.Stable
+      case pv if pv.isDev || pv.isAlpha => LfInterpretationConfig.Dev
+      case other => throw new IllegalArgumentException(s"Unsupported protocol version: $other")
     }
 
 }

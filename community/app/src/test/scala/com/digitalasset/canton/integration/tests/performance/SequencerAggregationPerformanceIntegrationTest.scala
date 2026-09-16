@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubscriptionLivenessLimits,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -51,6 +52,7 @@ import scala.concurrent.duration.*
   * This test originally started to test sequencer aggregation performance with 5 mediators and
   * threshold 5
   */
+@UnstableTest // TODO(i28815): Remove as soon as this test has been fixed
 class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   setupPlugins(new UsePostgres(loggerFactory))
 

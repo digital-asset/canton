@@ -1,0 +1,73 @@
+    {
+      "db_name": "lapi_load_test",
+      "report_path": "/home/canton/automated-performance-tests/nightly-lapi-benchmark-output",
+      "log_retention_days": 14,
+      "stages": [
+        {
+          "stage_name": "insert_base_preparation",
+          "scala_test": "InsertPerfTest",
+          "file_pattern": "insert_perf",
+          "description": "Insert",
+          "new_db": true,
+          "xmx": "64G"
+        },
+        {
+          "stage_name": "fetch_acs_base",
+          "scala_test": "AcsFetchPerfTest",
+          "file_pattern": "acs_fetch",
+          "description": "Acs fetch",
+          "new_db": false,
+          "xmx": "32G"
+        },
+        {
+          "stage_name": "insert_base",
+          "scala_test": "InsertPerfTest",
+          "file_pattern": "insert_perf",
+          "description": "Insert",
+          "new_db": false,
+          "xmx": "64G"
+        },
+        {
+          "stage_name": "insert_with_high_archival_rate",
+          "scala_test": "InsertWithIncreasedArchivalRatePerfTest",
+          "file_pattern": "insert_high_archive",
+          "description": "Insert with high archival rate",
+          "new_db": true,
+          "xmx": "64G"
+        },
+        {
+          "stage_name": "fetch_acs_with_high_archival_rate",
+          "scala_test": "AcsFetchPerfTest",
+          "file_pattern": "acs_fetch",
+          "description": "Acs fetch for high archival rate",
+          "new_db": false,
+          "xmx": "32G"
+        }
+      ],
+      "metrics": [
+        {
+          "name": "storing_contracts_of_updates_avg_rate",
+          "description": "Storing contract updates average rate",
+          "upper": 10000,
+          "lower": 6000
+        },
+        {
+          "name": "ingesting_20_cn_nfr_current_rate",
+          "description": "ingestion average rate (update/seconds)",
+          "upper": 10000,
+          "lower": 1000
+        },
+        {
+          "name": "ingesting_20_cn_nfr_time_seconds",
+          "description": "ingestion average time in seconds",
+          "upper": 600,
+          "lower": 300
+        },
+        {
+          "name": "acs_fetch_time_second_s",
+          "description": "fetch duration average in seconds",
+          "upper": 25,
+          "lower": 10
+        }
+      ]
+    }

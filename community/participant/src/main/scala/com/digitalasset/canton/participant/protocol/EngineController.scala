@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.topology.ParticipantId
@@ -63,19 +67,21 @@ final case class EngineController(
 }
 
 object EngineController {
-  final case class EngineAbortStatus(reasonO: Option[String]) extends PrettyPrinting {
+  final case class EngineAbortStatus(reasonO: Option[String]) extends PrettyPrintingFromCompanion {
     def isAborted: Boolean = reasonO.nonEmpty
 
-    override protected def pretty: Pretty[EngineAbortStatus] = prettyOfClass(
-      paramIfTrue("not aborted", _.reasonO.isEmpty),
-      paramIfDefined("aborted with reason", _.reasonO.map(_.unquoted)),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[EngineAbortStatus] = EngineAbortStatus
   }
 
-  object EngineAbortStatus {
+  object EngineAbortStatus extends PrettyPrintingCompanion[EngineAbortStatus] {
     def aborted(reason: String): EngineAbortStatus = EngineAbortStatus(Some(reason))
 
     def notAborted: EngineAbortStatus = EngineAbortStatus(None)
+
+    override protected val pretty: Pretty[EngineAbortStatus] = prettyOfClass(
+      paramIfTrue("not aborted", _.reasonO.isEmpty),
+      paramIfDefined("aborted with reason", _.reasonO.map(_.unquoted)),
+    )
   }
 
   type GetEngineAbortStatus = () => EngineAbortStatus

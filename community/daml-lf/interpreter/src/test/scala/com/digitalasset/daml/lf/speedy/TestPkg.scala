@@ -17,6 +17,7 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKey,
   NeedKeyProgression,
   SerializationVersion,
+  SubmittedTransaction,
 }
 import com.digitalasset.daml.lf.value.Value
 
@@ -33,8 +34,11 @@ object TestPkg {
     type E = Throwable
     object F {
       case class Submit(cmd: Command) extends F[SValue]
+      // Concludes the flow and produces the built transaction.
+      case object Commit extends F[SubmittedTransaction]
     }
     def submit(cmd: Command): CmdFlow[SValue] = lift(F.Submit(cmd))
+    def commit: CmdFlow[SubmittedTransaction] = lift(F.Commit)
   }
   type CmdFlow[X] = CmdFlow.T[X]
 
@@ -60,9 +64,16 @@ object TestPkg {
     case _ => throw new RuntimeException(s"Expected SContractId, got $value")
   }
 
+  trait UnhandledExceptionError {
+    def unapply(error: SError): Option[String]
+  }
 }
 
-class TestPkg(withKey: Boolean, languageVersion: LanguageVersion, cmdMode: Boolean) {
+class TestPkg(
+    withKey: Boolean,
+    languageVersion: LanguageVersion,
+    cmdMode: Compiler.ExecutionMode,
+) {
   import TestPkg.packageId
 
   val serializationVersion: SerializationVersion = SerializationVersion.assign(hasKey = true)
@@ -250,11 +261,11 @@ $ifKey       (\(key : M:TKey) -> TRACE @(List Party) "maintainers" (M:TKey {main
 
 trait CmdFlowRunner {
   import TestPkg.*
-  protected def cmdMode: Boolean
-  protected def runCmdFlow(
+  protected def cmdMode: Compiler.ExecutionMode
+  protected def runCmdFlow[Result](
       pkgs: CompiledPackages,
       setup: CmdFlow[SValue] = CmdFlow.pure(SValue.SUnit),
-      test: SValue => CmdFlow[SValue],
+      test: SValue => CmdFlow[Result],
       parties: Set[Ref.Party],
       readAs: Set[Ref.Party] = Set.empty,
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
@@ -262,7 +273,9 @@ trait CmdFlowRunner {
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]] = PartialFunction.empty,
       authorizationChecker: RecordingMachineLogger => AuthorizationChecker =
         new AuthorizationCheckerLogger(_),
-  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, SValue], Seq[String])
+      interpretationConfig: interpretation.InterpretationConfig =
+        interpretation.InterpretationConfig.Default,
+  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, Result], Seq[String])
 }
 
 // Trait providing UpdateMachine implementation
@@ -270,18 +283,19 @@ trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
 
   import TestPkg.*
 
-  final override protected def cmdMode: Boolean = false
-  final override protected def runCmdFlow(
+  final override protected def cmdMode = Compiler.ExecutionMode.Upd
+  final override protected def runCmdFlow[Result](
       pkgs: CompiledPackages,
       setup: CmdFlow[SValue],
-      test: SValue => CmdFlow[SValue],
+      test: SValue => CmdFlow[Result],
       parties: Set[Ref.Party],
       readAs: Set[Ref.Party],
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
       authorizationChecker: RecordingMachineLogger => AuthorizationChecker,
-  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, SValue], Seq[String]) = {
+      interpretationConfig: interpretation.InterpretationConfig,
+  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, Result], Seq[String]) = {
     val recordingLogger = new RecordingMachineLogger(MachineLogger())
     val machine = Speedy.UpdateMachine(
       compiledPackages = pkgs,
@@ -294,7 +308,7 @@ trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
       limits = interpretation.Limits.Lenient,
       authorizationChecker = authorizationChecker(recordingLogger),
       iterationsBetweenInterruptions = 10000,
-      interpretationConfig = interpretation.InterpretationConfig.Default,
+      interpretationConfig = interpretationConfig,
       logger = recordingLogger,
     )
     import cats.~>
@@ -320,6 +334,8 @@ trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
               }
               .toEither
               .flatten
+          case CmdFlow.F.Commit =>
+            machine.finish.map(_.tx)
         }
     }
 
@@ -337,6 +353,16 @@ trait CmdFlowRunnerWithUpdateMachine extends CmdFlowRunner {
           recordingLogger.recordedMessages.dropWhile(_ != "starts test")
     }
   }
+
+  final object UnhandledExceptionError extends UnhandledExceptionError {
+    override def unapply(error: SError): Option[String] = error match {
+      case SError.UnhandledException(
+            SValue.SAny(_, SValue.SRecord(_, _, ArraySeq(SValue.SText(msg))))
+          ) =>
+        Some(msg)
+      case _ => None
+    }
+  }
 }
 
 // Trait providing TransactionConductor implementation
@@ -344,19 +370,20 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
 
   import TestPkg.*
 
-  final override protected def cmdMode: Boolean = true
+  final override protected def cmdMode = Compiler.ExecutionMode.Cmd
 
-  final override protected def runCmdFlow(
+  final override protected def runCmdFlow[Result](
       pkgs: CompiledPackages,
       setup: CmdFlow[SValue],
-      test: SValue => CmdFlow[SValue],
+      test: SValue => CmdFlow[Result],
       parties: Set[Ref.Party],
       readAs: Set[Ref.Party],
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
       getKeys: PartialFunction[GlobalKey, Vector[FatContractInstance]],
       authorizationChecker: RecordingMachineLogger => AuthorizationChecker,
-  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, SValue], Seq[String]) = {
+      interpretationConfig: interpretation.InterpretationConfig,
+  )(implicit loggingContext: NamedLoggingContext): (Either[Throwable, Result], Seq[String]) = {
     val recordingLogger = new RecordingMachineLogger(MachineLogger())
     val conductor = TransactionConductor(
       compiledPackages = pkgs,
@@ -368,11 +395,12 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
       limits = interpretation.Limits.Lenient,
       authorizationChecker = authorizationChecker(recordingLogger),
       iterationsBetweenInterruptions = 10000,
-      interpretationConfig = interpretation.InterpretationConfig.Default,
+      interpretationConfig = interpretationConfig,
       logger = recordingLogger,
     )
 
     def getContract_ = recordingLogger.tracePartialFunction("queries contract", getContract)
+
     def getKeys_ = recordingLogger.tracePartialFunction("queries key", getKeys)
 
     def wrapContract[X](contract: X) =
@@ -409,9 +437,16 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
         case CmdFlow.Step.Pure(value) => Right(value)
         case CmdFlow.Step.Error(error) => Left(error)
         case impure: CmdFlow.Step.Impure[x, X] =>
-          val upd = impure.fx match {
+          impure.fx match {
+            // Concludes the flow: reads the transaction accumulated in ptx so far, bypassing
+            // handleCommand/loop0 since this isn't a Question.Cmd.
+            case CmdFlow.F.Commit =>
+              for {
+                z <- conductor.ptx.finish.map(_._1)
+                y <- loop(impure.resume(z.asInstanceOf[x]))
+              } yield y
             case CmdFlow.F.Submit(cmd) =>
-              cmd match {
+              val upd = cmd match {
                 case Command.Create(templateId, argument) =>
                   conductor.handleCommand(
                     Question.Cmd.Create(templateId, argument.asInstanceOf[SValue.SRecord])
@@ -455,11 +490,11 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
                     Question.Cmd.QueryContractKey(templateId, key, n.value.toInt)
                   )
               }
+              for {
+                z <- scala.util.Try(loop0(upd.start)).toEither.flatten
+                y <- loop(impure.resume(z.asInstanceOf[x]))
+              } yield y
           }
-          for {
-            z <- scala.util.Try(loop0(upd.start)).toEither.flatten
-            y <- loop(impure.resume(z.asInstanceOf[x]))
-          } yield y
       }
 
     val flow = for {
@@ -473,5 +508,12 @@ trait CmdFlowRunnerWithTransactionConductor extends CmdFlowRunner {
 
     loop(flow.start) ->
       recordingLogger.recordedMessages.dropWhile(_ != "starts test")
+  }
+
+  final object UnhandledExceptionError extends UnhandledExceptionError {
+    def unapply(error: SError): Option[String] = error match {
+      case SError.InterpretationError(interpretation.Error.FailureStatus(_, _, msg, _)) => Some(msg)
+      case _ => None
+    }
   }
 }

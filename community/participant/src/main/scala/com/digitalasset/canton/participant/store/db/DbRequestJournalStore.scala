@@ -12,7 +12,11 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.protocol.RequestJournal.{RequestData, RequestState}
 import com.digitalasset.canton.participant.store.*
@@ -405,9 +409,13 @@ object DbRequestJournalStore {
       requestTimestamp: CantonTimestamp,
       newState: RequestState,
       commitTime: Option[CantonTimestamp],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[ReplaceRequest] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ReplaceRequest] = ReplaceRequest
+  }
+
+  object ReplaceRequest extends PrettyPrintingCompanion[ReplaceRequest] {
+    override protected val pretty: Pretty[ReplaceRequest] = prettyOfClass(
       param("rc", _.rc),
       param("new state", _.newState),
       param("request timestamp", _.requestTimestamp),

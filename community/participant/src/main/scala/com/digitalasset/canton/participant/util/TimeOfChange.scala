@@ -6,7 +6,11 @@ package com.digitalasset.canton.participant.util
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.math.Ordering.Implicits.infixOrderingOps
@@ -24,17 +28,14 @@ import scala.math.Ordering.Implicits.infixOrderingOps
 final case class TimeOfChange private (
     timestamp: CantonTimestamp,
     counterO: Option[RepairCounter],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   def toDbPrimitive: (CantonTimestamp, RepairCounter) =
     (timestamp, counterO.getOrElse(RepairCounter.MinValue))
 
-  override protected def pretty: Pretty[TimeOfChange] = prettyOfClass(
-    param("timestamp", _.timestamp),
-    paramIfNonEmpty("counter", _.counterO),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[TimeOfChange] = TimeOfChange
 }
 
-object TimeOfChange {
+object TimeOfChange extends PrettyPrintingCompanion[TimeOfChange] {
 
   /** Builds a time of change in non-repair cases such as conflict detection/request tracking and
     * timestamp-based boundaries such as pruning and ACS commitments.
@@ -105,4 +106,9 @@ object TimeOfChange {
       )
     )
   }
+
+  override protected val pretty: Pretty[TimeOfChange] = prettyOfClass(
+    param("timestamp", _.timestamp),
+    paramIfNonEmpty("counter", _.counterO),
+  )
 }

@@ -623,6 +623,7 @@ class PackageDarManagementDocumentationIntegrationTest
   }
 }
 
+@UnstableTest // TODO(i35114): Remove as soon as this test has been fixed
 class SynchronizerInstallationManual
     extends SnippetGenerator(
       source = File("docs-open/src/sphinx/synchronizer/howtos/operate/bootstrap.rst"),
@@ -679,7 +680,6 @@ private object DocsGenerationSynchronization {
     }
 }
 
-@UnstableTest // TODO(i35510): remove once the test does not flake anymore
 class UpgradingDocumentationIntegrationTest
     extends SnippetGenerator(
       File("docs-open/src/sphinx/participant/howtos/upgrade/index.rst"),

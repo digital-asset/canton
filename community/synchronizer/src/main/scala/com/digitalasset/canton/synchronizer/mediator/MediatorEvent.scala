@@ -5,7 +5,11 @@ package com.digitalasset.canton.synchronizer.mediator
 
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
@@ -17,7 +21,7 @@ import com.digitalasset.canton.sequencing.protocol.{OpenEnvelope, Recipients}
   * [[ConfirmationRequestAndResponseProcessor]] processes these events without having to perform the
   * same extraction and error handling of the original SequencerEvent.
   */
-private[mediator] sealed trait MediatorEvent extends PrettyPrinting {
+private[mediator] sealed trait MediatorEvent extends PrettyPrintingFromCompanion {
   val requestId: RequestId
   val counter: SequencerCounter
   val sequencingTimestamp: CantonTimestamp
@@ -35,7 +39,11 @@ private[mediator] object MediatorEvent {
 
     def request: MediatorConfirmationRequest = requestEnvelope.protocolMessage
 
-    override protected def pretty: Pretty[Request] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[Request] = Request
+  }
+
+  object Request extends PrettyPrintingCompanion[Request] {
+    override protected val pretty: Pretty[Request] = prettyOfClass(
       param("sequencing timestamp", _.sequencingTimestamp),
       param("requestEnvelope", _.requestEnvelope),
     )
@@ -53,7 +61,11 @@ private[mediator] object MediatorEvent {
   ) extends MediatorEvent {
     override val requestId: RequestId = responses.message.requestId
 
-    override protected def pretty: Pretty[Response] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[Response] = Response
+  }
+
+  object Response extends PrettyPrintingCompanion[Response] {
+    override protected val pretty: Pretty[Response] = prettyOfClass(
       param("sequencing timestamp", _.sequencingTimestamp),
       param("responses", _.responses),
       param("recipient", _.recipients),

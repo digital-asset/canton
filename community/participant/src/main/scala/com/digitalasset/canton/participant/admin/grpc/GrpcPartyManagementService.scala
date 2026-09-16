@@ -565,6 +565,7 @@ class GrpcPartyManagementService(
               packageMetadataSnapshot = sync.getPackageMetadataSnapshot,
               representativePackageIdOverride = representativePackageIdOverride,
               workflowIdPrefix = workflowIdPrefix,
+              forceRepairWhenTopologyTransactionAtLedgerEnd = false,
             )
             .leftMap(err => PartyManagementServiceError.IOStream.Error(err))
 

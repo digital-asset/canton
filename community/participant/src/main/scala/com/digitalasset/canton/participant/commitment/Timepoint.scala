@@ -4,19 +4,21 @@
 package com.digitalasset.canton.participant.commitment
 
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import slick.jdbc.GetResult
 
-final case class Timepoint(offset: Offset)(val recordTime: CantonTimestamp) extends PrettyPrinting {
-  override protected def pretty: Pretty[Timepoint] = prettyOfClass(
-    param("offset", _.offset),
-    param("recordTime", _.recordTime),
-  )
+final case class Timepoint(offset: Offset)(val recordTime: CantonTimestamp)
+    extends PrettyPrintingFromCompanion {
+  override def prettyCompanion: PrettyPrintingCompanion[Timepoint] = Timepoint
 
   def tupled: (Offset, CantonTimestamp) = (offset, recordTime)
 }
 
-object Timepoint {
+object Timepoint extends PrettyPrintingCompanion[Timepoint] {
   implicit val orderingTimepoint: Ordering[Timepoint] = Ordering.by[Timepoint, Offset](_.offset)
 
   implicit val timepointGetResult: GetResult[Timepoint] =
@@ -25,4 +27,9 @@ object Timepoint {
       val timestamp = rs.<<[CantonTimestamp]
       Timepoint(offset)(timestamp)
     }
+
+  override protected val pretty: Pretty[Timepoint] = prettyOfClass(
+    param("offset", _.offset),
+    param("recordTime", _.recordTime),
+  )
 }

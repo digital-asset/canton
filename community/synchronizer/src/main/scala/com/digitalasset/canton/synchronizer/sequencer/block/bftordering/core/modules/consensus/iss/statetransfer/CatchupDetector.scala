@@ -35,6 +35,20 @@ sealed trait CatchupDetector {
   def shouldCatchUpTo(localEpoch: EpochNumber)(implicit
       traceContext: TraceContext
   ): Option[EpochNumber]
+
+  /** Determines whether the local node at epoch number `localEpoch` should continue catch up and
+    * retrieve blocks from the state transfer protocol.
+    *
+    * @param localEpoch
+    *   the active epoch number of the local node
+    * @return
+    *   the current minimum epoch number supported by at least f+1 peers that the local node should
+    *   state transfer to (without interruption), or `None` if the local node is sufficiently caught
+    *   up.
+    */
+  def currentTarget(localEpoch: EpochNumber)(implicit
+      traceContext: TraceContext
+  ): Option[EpochNumber]
 }
 
 final class DefaultCatchupDetector(
@@ -93,9 +107,7 @@ final class DefaultCatchupDetector(
     updated
   }
 
-  override def shouldCatchUpTo(
-      localEpoch: EpochNumber
-  )(implicit traceContext: TraceContext): Option[EpochNumber] = {
+  private def latestEpochNumberThatHasWeakQuorum: Option[EpochNumber] = {
     val weakQuorum = membership.orderingTopology.weakQuorum
 
     if (latestKnownNodeEpochs.sizeIs < weakQuorum) {
@@ -105,23 +117,39 @@ final class DefaultCatchupDetector(
       // Sort the epoch numbers received from peers, drop all but the highest f+1 entries,
       // and then choose the lowest remaining entry -- this is the highest and safest
       // epoch number (observed by the local node so far) to target for catch up
-      val latestEpochNumberThatHasWeakQuorum =
+      Some(
         latestKnownNodeEpochs.view.values.toSeq.sorted
           .drop(latestKnownNodeEpochs.size - weakQuorum)
           .headOption match {
           case None => EpochNumber.First
           case Some(epochNumber) => epochNumber
         }
-
-      if (latestEpochNumberThatHasWeakQuorum >= localEpoch + MinimumEpochDeltaToTriggerCatchUp) {
-        logger.debug(
-          s"Detected need for catch-up state transfer while in epoch $localEpoch; epochs are $latestKnownNodeEpochs"
-        )
-        // Take -1 because the latest one may be in progress
-        Some(EpochNumber(latestEpochNumberThatHasWeakQuorum - 1))
-      } else None
+      )
     }
   }
+
+  override def shouldCatchUpTo(
+      localEpoch: EpochNumber
+  )(implicit traceContext: TraceContext): Option[EpochNumber] =
+    latestEpochNumberThatHasWeakQuorum
+      .filter(_ >= localEpoch + MinimumEpochDeltaToTriggerCatchUp)
+      .map { latest =>
+        logger.debug(
+          s"Detected need for catch-up state transfer (to $latest) while in epoch $localEpoch; epochs are $latestKnownNodeEpochs"
+        )
+        // Take -1 because the latest one may be in progress
+        EpochNumber(latest - 1)
+      }
+
+  override def currentTarget(localEpoch: EpochNumber)(implicit
+      traceContext: TraceContext
+  ): Option[EpochNumber] =
+    latestEpochNumberThatHasWeakQuorum
+      .filter(_ >= localEpoch)
+      .map { latest =>
+        // Take -1 because the latest one may be in progress
+        EpochNumber(latest - 1)
+      }
 }
 
 private object DefaultCatchupDetector {

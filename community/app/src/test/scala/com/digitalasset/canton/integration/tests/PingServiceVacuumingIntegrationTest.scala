@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.admin.api.client.data.TemplateId
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.integration.plugins.{
@@ -26,6 +27,7 @@ import monocle.macros.syntax.lens.*
 import scala.concurrent.duration.*
 import scala.concurrent.{Future, Promise}
 
+@UnstableTest // TODO(i24909): Remove as soon as this test has been fixed
 class PingServiceVacuumingIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment

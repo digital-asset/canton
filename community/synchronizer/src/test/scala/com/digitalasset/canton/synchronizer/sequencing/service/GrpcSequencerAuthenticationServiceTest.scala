@@ -126,7 +126,7 @@ class GrpcSequencerAuthenticationServiceTest
         .value shouldBe Seq(expectedFingerprint.unwrap.toProtoUnvalidated)
     }
 
-    "reject challenge requests with too many member protocol versions" onlyRunWithOrGreaterThan ProtocolVersion.boundsCheck in {
+    "reject challenge requests with too many member protocol versions" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val sequencerLimits = SequencerLimits()
       val maxMemberProtocolVersions = sequencerLimits.maxMemberProtocolVersions.value
       val request = mkChallengeRequest("", Seq.fill(maxMemberProtocolVersions + 1)(30))

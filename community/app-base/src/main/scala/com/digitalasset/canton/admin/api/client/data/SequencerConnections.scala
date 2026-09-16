@@ -322,6 +322,11 @@ final case class SequencerConnectionPoolDelays(
     param("subscriptionRequestDelay", _.subscriptionRequestDelay),
   )
 
+  def withWarnValidationDelay(
+      delay: config.NonNegativeFiniteDuration
+  ): SequencerConnectionPoolDelays =
+    copy(warnValidationDelay = delay)
+
   private[canton] def toInternal: SequencerConnectionPoolDelaysInternal =
     this.transformInto[SequencerConnectionPoolDelaysInternal]
 }

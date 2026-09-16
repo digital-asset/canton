@@ -8,7 +8,11 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencing.protocol.{
   AggregationBySender,
@@ -37,7 +41,7 @@ final case class SequencerSnapshot(
     trafficConsumed: Seq[TrafficConsumed],
 )(override val representativeProtocolVersion: RepresentativeProtocolVersion[SequencerSnapshot.type])
     extends HasProtocolVersionedWrapper[SequencerSnapshot]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   @transient override protected lazy val companionObj: SequencerSnapshot.type = SequencerSnapshot
 
@@ -87,19 +91,7 @@ final case class SequencerSnapshot(
     )
   }
 
-  /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
-    * implement this method.
-    */
-  override protected def pretty: Pretty[SequencerSnapshot.this.type] = prettyOfClass(
-    param("lastTs", _.lastTs),
-    param("latestBlockHeight", _.latestBlockHeight),
-    param("previousTimestamps", _.previousTimestamps),
-    param("status", _.status),
-    param("inFlightAggregations", _.inFlightAggregations.byId),
-    param("additional", _.additional),
-    param("trafficPurchased", _.trafficPurchased),
-    param("trafficConsumed", _.trafficConsumed),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerSnapshot] = SequencerSnapshot
 
   // compares this snapshot with another one for contents equality
   def hasSameContentsAs(otherSnapshot: SequencerSnapshot): Boolean =
@@ -115,7 +107,21 @@ final case class SequencerSnapshot(
       trafficConsumed.toSet == otherSnapshot.trafficConsumed.toSet
 }
 
-object SequencerSnapshot extends VersioningCompanionContext[SequencerSnapshot, ProtocolVersion] {
+object SequencerSnapshot
+    extends VersioningCompanionContext[SequencerSnapshot, ProtocolVersion]
+    with PrettyPrintingCompanion[SequencerSnapshot] {
+
+  override protected val pretty: Pretty[SequencerSnapshot] = prettyOfClass(
+    param("lastTs", _.lastTs),
+    param("latestBlockHeight", _.latestBlockHeight),
+    param("previousTimestamps", _.previousTimestamps),
+    param("status", _.status),
+    param("inFlightAggregations", _.inFlightAggregations.byId),
+    param("additional", _.additional),
+    param("trafficPurchased", _.trafficPurchased),
+    param("trafficConsumed", _.trafficConsumed),
+  )
+
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v35)(v30.SequencerSnapshot)(
       supportedProtoVersion(_)(fromProtoV30),
@@ -148,8 +154,13 @@ object SequencerSnapshot extends VersioningCompanionContext[SequencerSnapshot, P
     )(protocolVersionRepresentativeFor(protocolVersion))
 
   final case class ImplementationSpecificInfo(implementationName: String, info: ByteString)
-      extends PrettyPrinting {
-    override protected def pretty: Pretty[ImplementationSpecificInfo.this.type] = prettyOfClass(
+      extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ImplementationSpecificInfo] =
+      ImplementationSpecificInfo
+  }
+
+  object ImplementationSpecificInfo extends PrettyPrintingCompanion[ImplementationSpecificInfo] {
+    override protected val pretty: Pretty[ImplementationSpecificInfo] = prettyOfClass(
       param("implementationName", _.implementationName),
       param("info", _.info),
     )

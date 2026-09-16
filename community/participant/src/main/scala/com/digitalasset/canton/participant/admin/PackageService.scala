@@ -16,7 +16,11 @@ import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.ledger.participant.state.PackageDescription
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
@@ -723,18 +727,13 @@ object PackageService {
       description: String255,
       name: String255,
       version: String255,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[DarDescription] = prettyOfClass(
-      param("dar-id", _.mainPackageId.unwrap.readableHash),
-      param("name", _.name.str.unquoted),
-      param("version", _.version.str.unquoted),
-      param("description", _.description.str.unquoted),
-    )
+    override def prettyCompanion: PrettyPrintingCompanion[DarDescription] = DarDescription
 
   }
 
-  object DarDescription {
+  object DarDescription extends PrettyPrintingCompanion[DarDescription] {
     implicit val getResult: GetResult[DarDescription] =
       GetResult(r =>
         DarDescription(
@@ -744,6 +743,13 @@ object PackageService {
           version = String255.tryCreate(r.<<),
         )
       )
+
+    override protected val pretty: Pretty[DarDescription] = prettyOfClass(
+      param("dar-id", _.mainPackageId.unwrap.readableHash),
+      param("name", _.name.str.unquoted),
+      param("version", _.version.str.unquoted),
+      param("description", _.description.str.unquoted),
+    )
   }
 
   final case class Dar(descriptor: DarDescription, bytes: Array[Byte]) {

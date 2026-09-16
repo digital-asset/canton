@@ -300,9 +300,8 @@ class ConsistencyCheckProcessor(
   )(implicit
       traceContext: TraceContext
   ): Source[Seq[LfPartyId], NotUsed] =
-    DigestProcessor
-      .counterPartiesWithRetries(
-        indexService,
+    indexService
+      .counterParties(
         synchronizerId = synchronizerId,
         activeAt = timepoint.offset,
         party = None,
@@ -317,9 +316,8 @@ class ConsistencyCheckProcessor(
   )(implicit
       traceContext: TraceContext
   ): Source[ProcessingContext[NotCheckpointFence[ContractChangeBatch]], NotUsed] =
-    DigestProcessor
-      .acsWithRetries(
-        indexService,
+    indexService
+      .acs(
         synchronizerId = synchronizerId,
         activeAt = timepoint.offset,
         stakeholders1 = counterpartiesSet,

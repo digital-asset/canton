@@ -18,7 +18,11 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.MaybeCompressedSequencedEventHandler
@@ -78,7 +82,7 @@ class DirectSequencerConnection(
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContextExecutor)
     extends SequencerConnectionWithPekkoSubscribe
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
 
   override def name: String = config.name
 
@@ -154,8 +158,8 @@ class DirectSequencerConnection(
       traceContext: TraceContext
   ): Either[String, SequencerSubscription[E]] = ???
 
-  override protected def pretty: Pretty[DirectSequencerConnection] =
-    prettyOfClass(param("name", _.name.singleQuoted))
+  override def prettyCompanion: PrettyPrintingCompanion[DirectSequencerConnection] =
+    DirectSequencerConnection
 
   override def attributes: ConnectionAttributes =
     ConnectionAttributes(synchronizerId, sequencerId, staticParameters)
@@ -234,9 +238,20 @@ class DirectSequencerConnection(
 
 }
 
-object DirectSequencerConnection {
-  sealed trait SubscriptionError extends Product with Serializable with PrettyPrinting {
-    override protected def pretty: Pretty[SubscriptionError.this.type] = adHocPrettyInstance
+object DirectSequencerConnection extends PrettyPrintingCompanion[DirectSequencerConnection] {
+
+  override protected val pretty: Pretty[DirectSequencerConnection] =
+    prettyOfClass(param("name", _.name.singleQuoted))
+
+  sealed trait SubscriptionError
+      extends Product
+      with Serializable
+      with PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[SubscriptionError] = SubscriptionError
+  }
+
+  object SubscriptionError extends PrettyPrintingCompanion[SubscriptionError] {
+    override protected val pretty: Pretty[SubscriptionError] = adHocPrettyInstance
   }
   final case class SubscriptionCreationError(error: CreateSubscriptionError)
       extends SubscriptionError

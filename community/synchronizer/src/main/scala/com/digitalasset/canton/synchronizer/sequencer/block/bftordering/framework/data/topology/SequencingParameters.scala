@@ -7,7 +7,11 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.ValueConversionError
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveLong
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
@@ -55,7 +59,7 @@ final case class SequencingParameters private (
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       topology.SequencingParameters.type
     ]
-) extends PrettyPrinting
+) extends PrettyPrintingFromCompanion
     with HasProtocolVersionedWrapper[SequencingParameters] {
 
   private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
@@ -77,12 +81,8 @@ final case class SequencingParameters private (
 
   override protected val companionObj: SequencingParameters.type = SequencingParameters
 
-  override protected def pretty: Pretty[SequencingParameters.this.type] =
-    prettyOfClass(
-      param("pbftViewChangeTimeout", _.pbftViewChangeTimeout),
-      param("segmentLength", _.segmentLength.length.value),
-      param("blacklistConfig", _.blacklistLeaderSelectionPolicyConfig),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencingParameters] =
+    SequencingParameters
 
   def update(
       pbftViewChangeTimeout: PositiveFiniteDuration = this.pbftViewChangeTimeout,
@@ -122,7 +122,16 @@ final case class SequencingParameters private (
   )
 }
 
-object SequencingParameters extends VersioningCompanion[SequencingParameters] {
+object SequencingParameters
+    extends VersioningCompanion[SequencingParameters]
+    with PrettyPrintingCompanion[SequencingParameters] {
+
+  override protected val pretty: Pretty[SequencingParameters] =
+    prettyOfClass(
+      param("pbftViewChangeTimeout", _.pbftViewChangeTimeout),
+      param("segmentLength", _.segmentLength.length.value),
+      param("blacklistConfig", _.blacklistLeaderSelectionPolicyConfig),
+    )
 
   val DefaultPbftViewChangeTimeout: PositiveFiniteDuration =
     PositiveFiniteDuration.tryCreate(Duration.ofSeconds(10))

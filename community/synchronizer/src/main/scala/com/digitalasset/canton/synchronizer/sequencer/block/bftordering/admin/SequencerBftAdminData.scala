@@ -8,7 +8,12 @@ import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
 import com.digitalasset.canton.ProtoDeserializationError.FieldNotSet
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port, PositiveLong}
 import com.digitalasset.canton.config.{PemFile, PemString}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyNameOnlyCase, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyNameOnlyCase,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.sequencer.admin.v30.GetOrderingTopologyResponse.DynamicSequencingParameters
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security.Empty
@@ -141,7 +146,12 @@ object SequencerBftAdminData {
   }
 
   final case class PeerEndpointHealth(status: PeerEndpointHealthStatus, description: Option[String])
-      extends PrettyPrinting {
+      extends PrettyPrintingFromCompanion {
+
+    override def prettyCompanion: PrettyPrintingCompanion[PeerEndpointHealth] = PeerEndpointHealth
+  }
+
+  object PeerEndpointHealth extends PrettyPrintingCompanion[PeerEndpointHealth] {
 
     override protected val pretty: Pretty[PeerEndpointHealth] =
       prettyOfClass(
@@ -150,7 +160,10 @@ object SequencerBftAdminData {
       )
   }
 
-  sealed trait PeerConnectionStatus extends PrettyPrinting with Product with Serializable {
+  sealed trait PeerConnectionStatus
+      extends PrettyPrintingFromCompanion
+      with Product
+      with Serializable {
     def toProto: ProtoPeerConnectionStatus
   }
   object PeerConnectionStatus {
@@ -161,12 +174,8 @@ object SequencerBftAdminData {
         health: PeerEndpointHealth,
     ) extends PeerConnectionStatus {
 
-      override protected val pretty: Pretty[PeerEndpointStatus] =
-        prettyOfClass(
-          param("p2pEndpointId", _.p2pEndpointId),
-          param("isOutgoingConnection", _.isOutgoingConnection),
-          param("health", _.health),
-        )
+      override def prettyCompanion: PrettyPrintingCompanion[PeerEndpointStatus] =
+        PeerEndpointStatus
 
       def toProto: ProtoPeerConnectionStatus =
         ProtoPeerConnectionStatus(
@@ -218,10 +227,20 @@ object SequencerBftAdminData {
         )
     }
 
+    object PeerEndpointStatus extends PrettyPrintingCompanion[PeerEndpointStatus] {
+
+      override protected val pretty: Pretty[PeerEndpointStatus] =
+        prettyOfClass(
+          param("p2pEndpointId", _.p2pEndpointId),
+          param("isOutgoingConnection", _.isOutgoingConnection),
+          param("health", _.health),
+        )
+    }
+
     final case class PeerIncomingConnection(sequencerId: SequencerId) extends PeerConnectionStatus {
 
-      override protected val pretty: Pretty[PeerIncomingConnection] =
-        prettyOfClass(param("sequencerId", _.sequencerId))
+      override def prettyCompanion: PrettyPrintingCompanion[PeerIncomingConnection] =
+        PeerIncomingConnection
 
       override def toProto: ProtoPeerConnectionStatus =
         ProtoPeerConnectionStatus(
@@ -230,13 +249,18 @@ object SequencerBftAdminData {
           )
         )
     }
+
+    object PeerIncomingConnection extends PrettyPrintingCompanion[PeerIncomingConnection] {
+
+      override protected val pretty: Pretty[PeerIncomingConnection] =
+        prettyOfClass(param("sequencerId", _.sequencerId))
+    }
   }
 
   final case class PeerNetworkStatus(endpointStatuses: Seq[PeerConnectionStatus])
-      extends PrettyPrinting {
+      extends PrettyPrintingFromCompanion {
 
-    override protected val pretty: Pretty[PeerNetworkStatus] =
-      prettyOfClass(param("endpoint statuses", _.endpointStatuses))
+    override def prettyCompanion: PrettyPrintingCompanion[PeerNetworkStatus] = PeerNetworkStatus
 
     def +(status: PeerConnectionStatus): PeerNetworkStatus =
       copy(endpointStatuses = endpointStatuses :+ status)
@@ -245,7 +269,10 @@ object SequencerBftAdminData {
       GetPeerNetworkStatusResponse(endpointStatuses.map(_.toProto))
   }
 
-  object PeerNetworkStatus {
+  object PeerNetworkStatus extends PrettyPrintingCompanion[PeerNetworkStatus] {
+
+    override protected val pretty: Pretty[PeerNetworkStatus] =
+      prettyOfClass(param("endpoint statuses", _.endpointStatuses))
 
     def fromProto(response: GetPeerNetworkStatusResponse): Either[String, PeerNetworkStatus] =
       response.statuses
@@ -427,8 +454,13 @@ object SequencerBftAdminData {
       blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
       maxRequestsInBatch: Short,
       maxBatchesPerProposal: Short,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[SequencingParameters] =
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[SequencingParameters] =
+      SequencingParameters
+  }
+  object SequencingParameters extends PrettyPrintingCompanion[SequencingParameters] {
+
+    override protected val pretty: Pretty[SequencingParameters] =
       prettyOfClass(
         param("pbftViewChangeTimeout", _.pbftViewChangeTimeout),
         param("segmentLength", _.segmentLength),
@@ -436,8 +468,7 @@ object SequencerBftAdminData {
         param("maxRequestsInBatch", _.maxRequestsInBatch.toInt),
         param("maxBatchesPerProposal", _.maxBatchesPerProposal.toInt),
       )
-  }
-  object SequencingParameters {
+
     def apply(topologySequencingParameters: topology.SequencingParameters): SequencingParameters =
       SequencingParameters(
         topologySequencingParameters.pbftViewChangeTimeout,

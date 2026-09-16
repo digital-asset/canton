@@ -3,7 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -19,7 +23,10 @@ import com.digitalasset.canton.util.BooleanUtil.implicits.*
 
 import java.time.{Duration, Instant}
 
-sealed trait DisseminationStatus extends Product with Serializable with PrettyPrinting {
+sealed trait DisseminationStatus
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
 
   import DisseminationStatus.*
 
@@ -211,7 +218,13 @@ sealed trait DisseminationStatus extends Product with Serializable with PrettyPr
   // Used by metrics emission
   def resetRegressions(): DisseminationStatus
 
-  override def pretty: Pretty[DisseminationStatus] =
+  override def prettyCompanion: PrettyPrintingCompanion[DisseminationStatus] =
+    DisseminationStatus
+}
+
+object DisseminationStatus extends PrettyPrintingCompanion[DisseminationStatus] {
+
+  override protected val pretty: Pretty[DisseminationStatus] =
     prettyOfClass(
       param("membership", _.membership),
       param("batchId", _.tracedBatchId.value.toString.doubleQuoted),
@@ -225,9 +238,6 @@ sealed trait DisseminationStatus extends Product with Serializable with PrettyPr
       param("regressionsToSigning", _.regressionsToSigning),
       param("disseminationRegressions", _.disseminationRegressions),
     )
-}
-
-object DisseminationStatus {
 
   /** Categorizes nodes to send the batch to, distinguishing between nodes that have not yet
     * received the batch for the first time, nodes that need to receive the batch again due to
@@ -239,7 +249,7 @@ object DisseminationStatus {
       firstDissemination: Set[BftNodeId],
       dueToLostAcks: Set[BftNodeId] = Set.empty,
       redisseminate: Option[Redissemination] = None,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     lazy val all: Set[BftNodeId] =
       firstDissemination ++ dueToLostAcks ++ redisseminate.fold(Set.empty[BftNodeId])(
@@ -248,19 +258,27 @@ object DisseminationStatus {
 
     lazy val allExcludingRedisseminations: Set[BftNodeId] = firstDissemination ++ dueToLostAcks
 
-    override protected def pretty: Pretty[SendBatchTo] =
+    override def prettyCompanion: PrettyPrintingCompanion[SendBatchTo] = SendBatchTo
+  }
+  object SendBatchTo extends PrettyPrintingCompanion[SendBatchTo] {
+
+    override protected val pretty: Pretty[SendBatchTo] =
       prettyOfClass(
         param("firstDissemination", _.firstDissemination.map(_.doubleQuoted)),
         param("dueToLostAcks", _.dueToLostAcks.map(_.doubleQuoted)),
         param("redisseminate", _.redisseminate),
       )
-  }
-  object SendBatchTo {
+
     val empty: SendBatchTo = SendBatchTo(Set.empty)
   }
 
-  final case class TimestampedSend(recipient: BftNodeId, lastSent: Instant) extends PrettyPrinting {
-    override protected def pretty: Pretty[TimestampedSend] =
+  final case class TimestampedSend(recipient: BftNodeId, lastSent: Instant)
+      extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[TimestampedSend] = TimestampedSend
+  }
+
+  object TimestampedSend extends PrettyPrintingCompanion[TimestampedSend] {
+    override protected val pretty: Pretty[TimestampedSend] =
       prettyOfClass(
         param("recipient", _.recipient.doubleQuoted),
         param("lastSent", _.lastSent),
@@ -270,12 +288,17 @@ object DisseminationStatus {
   final case class PatienceAndCurrentTime(
       patience: Duration,
       now: Instant,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     def isExceededBy(sendInstant: Instant): Boolean =
       Duration.between(sendInstant, now).compareTo(patience) > 0
 
-    override protected def pretty: Pretty[PatienceAndCurrentTime] =
+    override def prettyCompanion: PrettyPrintingCompanion[PatienceAndCurrentTime] =
+      PatienceAndCurrentTime
+  }
+
+  object PatienceAndCurrentTime extends PrettyPrintingCompanion[PatienceAndCurrentTime] {
+    override protected val pretty: Pretty[PatienceAndCurrentTime] =
       prettyOfClass(
         param("patience", _.patience),
         param("now", _.now),
@@ -285,8 +308,12 @@ object DisseminationStatus {
   final case class Redissemination(
       patienceAndCurrentTime: PatienceAndCurrentTime,
       lastSentTo: Set[TimestampedSend],
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[Redissemination] =
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[Redissemination] = Redissemination
+  }
+
+  object Redissemination extends PrettyPrintingCompanion[Redissemination] {
+    override protected val pretty: Pretty[Redissemination] =
       prettyOfClass(
         param("patienceAndCurrentTime", _.patienceAndCurrentTime),
         param("lastSentTo", _.lastSentTo),

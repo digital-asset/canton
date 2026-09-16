@@ -10,7 +10,11 @@ import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.store.{ConflictDetectionStore, HasPrunable}
@@ -38,7 +42,7 @@ import scala.reflect.ClassTag
   */
 private[conflictdetection] class LockableStates[
     Key,
-    Status <: PrettyPrinting with HasPrunable,
+    Status <: PrettyPrintingFromCompanion & HasPrunable,
 ] private (
     private val store: ConflictDetectionStore[Key, Status],
     protected override val loggerFactory: NamedLoggerFactory,
@@ -332,7 +336,7 @@ private[conflictdetection] class LockableStates[
       notFree = notFree.result(),
       notActive = notActive.result(),
       priorStates = priorStates.result(),
-    )(handle.prettyK)
+    )
 
     (obtainedLocks.result(), result)
   }
@@ -658,7 +662,7 @@ private[conflictdetection] class LockableStates[
 }
 
 private[conflictdetection] object LockableStates {
-  def empty[K: Pretty: ClassTag, A <: PrettyPrinting with HasPrunable](
+  def empty[K: Pretty: ClassTag, A <: PrettyPrintingFromCompanion with HasPrunable](
       store: ConflictDetectionStore[K, A],
       loggerFactory: NamedLoggerFactory,
       timeouts: ProcessingTimeout,
@@ -703,7 +707,10 @@ private[conflictdetection] object LockableStates {
     *   The items whose state prior to the activeness check shall be returned in the
     *   [[ActivenessCheckResult]].
     */
-  class LockableStatesCheckHandle[Key, Status <: PrettyPrinting] private[LockableStates] (
+  class LockableStatesCheckHandle[
+      Key,
+      Status <: PrettyPrintingFromCompanion,
+  ] private[LockableStates] (
       val requestCounter: RequestCounter,
       val availableF: Future[Unit],
       private[LockableStates] val lockCount: Int,
@@ -716,7 +723,7 @@ private[conflictdetection] object LockableStates {
       private[LockableStates] val priorStates: Seq[KeyStateLock[Key, Status]],
   )(implicit
       val prettyK: Pretty[Key]
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     def toBeFetched: collection.Set[Key] = toBeFetchedM.keySet
 
@@ -727,7 +734,13 @@ private[conflictdetection] object LockableStates {
         .map(_.id)
         .toSet ++ lockOnlyMaybeUnknown.map(_.id).toSet
 
-    override protected def pretty: Pretty[LockableStatesCheckHandle.this.type] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[LockableStatesCheckHandle[?, ?]] =
+      LockableStatesCheckHandle
+  }
+
+  object LockableStatesCheckHandle
+      extends PrettyPrintingCompanion[LockableStatesCheckHandle[?, ?]] {
+    override protected val pretty: Pretty[LockableStatesCheckHandle[?, ?]] = prettyOfClass(
       param("request counter", _.requestCounter)
     )
   }
@@ -739,7 +752,7 @@ private[conflictdetection] object LockableStates {
     * @param doLock
     *   Whether the activeness check shall obtain a lock on this item
     */
-  private final case class KeyStateLock[Key, Status <: PrettyPrinting](
+  private final case class KeyStateLock[Key, Status <: PrettyPrintingFromCompanion](
       id: Key,
       state: MutableLockableState[Status],
       doLock: Boolean,

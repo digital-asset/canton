@@ -2,15 +2,12 @@
 
 # Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-#
-# Build a Canton Docker image and optionally publish it
-#   Usage: ./build_canton_image.sh is_nightly_release
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
 version_tag=$(date +"%Y%m%d")
-release_suffix="local"
+release_suffix="3.7.0-snapshot-$(date -u +%F).$(git rev-parse --short HEAD)"
 
 echo "... Preparing files for docker builds"
 ../pack-performance.sh -p -s
@@ -28,7 +25,7 @@ fi
 )
 
 image_types=(perf-base perf-master perf-participants perf-synchronizer)
-oci_snapshot_path="${OCI_REGISTRY:-"local"}/da-images/public-unstable/docker/"
+oci_snapshot_path="${OCI_REGISTRY:-"local"}/da-images/playground/docker/"
 oci_release_path="${OCI_REGISTRY:-"local"}/da-images/public/docker/"
 
 if [[ "$release_suffix" == *"snapshot"* || "$release_suffix" == *"ad-hoc"* ]]; then

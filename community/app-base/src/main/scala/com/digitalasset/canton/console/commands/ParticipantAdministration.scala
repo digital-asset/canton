@@ -1605,15 +1605,10 @@ class CommitmentsAdministrationGroup(
   )
   @Help.Description(
     """Starts a reinitialization of the ACS digest for the given synchronizer
-      |on this participant and then - depending on the flag - starts/continues
-      |the running digest processor.
+      |on this participant and then starts a running digest processor.
       |Useful for recovering when participant commitments have become corrupted.
       |
       |The target reinitialization timestamp is derived from the current ledger end.
-      |
-      |Default for `runningDigestProcessorShouldStartAfter` is true.
-      |If it is `false`, the running digest processor is not started after the
-      |reinitialization.
       |
       |Since this command doesn't wait until the reinitialization completes,
       |the operator should query the status of the reinitialization using
@@ -1625,14 +1620,12 @@ class CommitmentsAdministrationGroup(
       |Returns the target reinitialization timestamp or an error."""
   )
   def reinitialize_digest_commitments(
-      synchronizerId: SynchronizerId,
-      runningDigestProcessorShouldStartAfter: Boolean = true,
+      synchronizerId: SynchronizerId
   ): DigestCommitmentReinitializationInfo =
     consoleEnvironment.run(
       runner.adminCommand(
         ReinitializeDigestCommitments(
-          synchronizerId,
-          runningDigestProcessorShouldStartAfter,
+          synchronizerId
         )
       )
     )

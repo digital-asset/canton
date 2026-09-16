@@ -74,7 +74,7 @@ object AcsCommitmentProtocolMessage extends VersioningCompanion[AcsCommitmentPro
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.acsCommitmentRedesign)(
+    ProtoVersion(32) -> VersionedProtoCodec(ProtocolVersion.v36)(
       v32.AcsCommitmentProtocolMessage
     )(
       supportedProtoVersionPVV(_)(fromProtoV32),

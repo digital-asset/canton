@@ -5,7 +5,11 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.digitalasset.canton.crypto.HashBuilder
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
@@ -66,15 +70,20 @@ object OrderingRequest {
     traceContext.toString
 }
 
-final case class OrderingRequestBatchStats(requests: Int, bytes: Int) extends PrettyPrinting {
+final case class OrderingRequestBatchStats(requests: Int, bytes: Int)
+    extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[OrderingRequestBatchStats.this.type] =
+  override def prettyCompanion: PrettyPrintingCompanion[OrderingRequestBatchStats] =
+    OrderingRequestBatchStats
+}
+object OrderingRequestBatchStats extends PrettyPrintingCompanion[OrderingRequestBatchStats] {
+
+  override protected val pretty: Pretty[OrderingRequestBatchStats] =
     prettyOfClass(
       param("requests", _.requests),
       param("bytes", _.bytes),
     )
-}
-object OrderingRequestBatchStats {
+
   val ForTesting: OrderingRequestBatchStats = OrderingRequestBatchStats(0, 0)
 }
 

@@ -162,6 +162,7 @@ final class RepairService(
       packageMetadataSnapshot: PackageMetadata,
       representativePackageIdOverride: RepresentativePackageIdOverride,
       workflowIdPrefix: Option[String],
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     contractsImporter.addContracts(
       synchronizerId = synchronizerId,
@@ -170,6 +171,7 @@ final class RepairService(
       packageMetadataSnapshot = packageMetadataSnapshot,
       representativePackageIdOverride = representativePackageIdOverride,
       workflowIdPrefix = workflowIdPrefix,
+      forceRepairWhenTopologyTransactionAtLedgerEnd = forceRepairWhenTopologyTransactionAtLedgerEnd,
     )
 
   /** Participant repair utility for manually purging (archiving) contracts in an offline fashion.
@@ -186,6 +188,7 @@ final class RepairService(
       synchronizerAlias: SynchronizerAlias,
       contractIds: NonEmpty[Seq[LfContractId]],
       ignoreAlreadyPurged: Boolean,
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Unit] = {
     logger.info(
       s"Purging ${contractIds.length} contracts from $synchronizerAlias with ignoreAlreadyPurged=$ignoreAlreadyPurged. " +
@@ -203,7 +206,11 @@ final class RepairService(
               .toRight(s"Could not find $synchronizerAlias")
           )
 
-          repair <- helpers.initRepairRequestAndVerifyPreconditions(synchronizerId, repairIndexer)
+          repair <- helpers.initRepairRequestAndVerifyPreconditions(
+            synchronizerId,
+            repairIndexer,
+            forceRepairWhenTopologyTransactionAtLedgerEnd,
+          )
 
           contractStates <- EitherT.right[String](
             helpers.readContractAcsStates(
@@ -343,6 +350,7 @@ final class RepairService(
       sourceSynchronizer: ReassignmentTag.Source[SynchronizerId],
       targetSynchronizer: ReassignmentTag.Target[SynchronizerId],
       skipInactive: Boolean,
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val contractsCount = PositiveInt.tryCreate(contracts.size)
     for {
@@ -357,6 +365,7 @@ final class RepairService(
             helpers.initRepairRequestAndVerifyPreconditions(
               _,
               repairIndexer,
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
               contractsCount,
             )
           )
@@ -365,6 +374,7 @@ final class RepairService(
             helpers.initRepairRequestAndVerifyPreconditions(
               _,
               repairIndexer,
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
               contractsCount,
             )
           )
@@ -421,16 +431,25 @@ final class RepairService(
       reassignmentId: ReassignmentId,
       source: ReassignmentTag.Source[SynchronizerId],
       target: ReassignmentTag.Target[SynchronizerId],
+      forceRepairWhenTopologyTransactionAtLedgerEnd: Boolean,
   )(implicit context: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     helpers.withRepairIndexer { repairIndexer =>
       (for {
         // Initial init: looks up reassignmentData via target's persistent state. We don't yet know
         // how many RepairCounters we'll need, so allocate the default (1) and rebuild below.
         initialSourceRepairRequest <- source.traverse(
-          helpers.initRepairRequestAndVerifyPreconditions(_, repairIndexer)
+          helpers.initRepairRequestAndVerifyPreconditions(
+            _,
+            repairIndexer,
+            forceRepairWhenTopologyTransactionAtLedgerEnd,
+          )
         )
         initialTargetRepairRequest <- target.traverse(
-          helpers.initRepairRequestAndVerifyPreconditions(_, repairIndexer)
+          helpers.initRepairRequestAndVerifyPreconditions(
+            _,
+            repairIndexer,
+            forceRepairWhenTopologyTransactionAtLedgerEnd,
+          )
         )
         reassignmentData <-
           initialTargetRepairRequest.unwrap.synchronizer.persistentState.reassignmentStore

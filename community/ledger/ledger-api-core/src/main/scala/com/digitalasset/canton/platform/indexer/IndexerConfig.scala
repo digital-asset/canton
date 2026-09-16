@@ -33,10 +33,9 @@ final case class IndexerConfig(
     maxInputBufferSize: NonNegativeInt = NonNegativeInt.tryCreate(DefaultMaxInputBufferSize),
     restartDelay: config.NonNegativeFiniteDuration =
       config.NonNegativeFiniteDuration.ofSeconds(DefaultRestartDelay.toSeconds),
-    useWeightedBatching: Boolean =
-      DefaultUseWeightedBatching, // feature flag to enable improved batching strategy in ingestion pipeline
+    useWeightedBatching: Boolean = false, // TODO(i35563): Remove this deprecated flag
     submissionBatchSize: Long = DefaultSubmissionBatchSize,
-    submissionBatchInsertionSize: Long = DefaultSubmissionBatchInsertionSize,
+    submissionBatchInsertionSize: Long = 5000L, // TODO(i35563): Remove this deprecated flag
     maxOutputBatchedBufferSize: Int = DefaultMaxOutputBatchedBufferSize,
     maxTailerBatchSize: Int = DefaultMaxTailerBatchSize,
     postProcessingParallelism: Int = DefaultPostProcessingParallelism,
@@ -118,9 +117,7 @@ object IndexerConfig {
   val DefaultDbPrepareParallelism: Int = 4
   val DefaultBatchingParallelism: Int = 4
   val DefaultIngestionParallelism: Int = 16
-  val DefaultUseWeightedBatching: Boolean = false
   val DefaultSubmissionBatchSize: Long = 50L
-  val DefaultSubmissionBatchInsertionSize: Long = 5000L
   val DefaultEnableCompression: Boolean = false
   val DefaultMaxOutputBatchedBufferSize: Int = 16
   val DefaultMaxTailerBatchSize: Int = 10

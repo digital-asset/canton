@@ -735,6 +735,7 @@ abstract class LedgerPruningIntegrationTest
         packageMetadataSnapshot = metadataSnapshot,
         representativePackageIdOverride = RepresentativePackageIdOverride.NoOverride,
         workflowIdPrefix = Some("failedAddContractOperation"),
+        forceRepairWhenTopologyTransactionAtLedgerEnd = false,
       )
 
       // add two contracts

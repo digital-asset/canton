@@ -1,0 +1,22 @@
+name: upgrades-example-FailsWhenOnePackageHasTwoIncompatibleDeps
+version: 1.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/upgrades-FailsWhenOnePackageHasTwoIncompatibleDeps-dep-v1.dar
+  - ${TARGET_ROOT}/upgrades-FailsWhenOnePackageHasTwoIncompatibleDeps-dep-v2.dar
+dependencies:
+  - daml-script
+module-prefixes:
+  upgrades-example-FailsWhenOnePackageHasTwoIncompatibleDeps-dep-1.0.0: V1
+  upgrades-example-FailsWhenOnePackageHasTwoIncompatibleDeps-dep-2.0.0: V2
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-FailsWhenOnePackageHasTwoIncompatibleDeps-v1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

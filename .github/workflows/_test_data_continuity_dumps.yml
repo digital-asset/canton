@@ -140,3 +140,4 @@ jobs:
       caller_job: test_data_continuity_dumps
       runner: ${{ inputs.runner }}
       protocol_version: ""
+      allow_empty_current_timings: ${{ !inputs.full_coverage }}

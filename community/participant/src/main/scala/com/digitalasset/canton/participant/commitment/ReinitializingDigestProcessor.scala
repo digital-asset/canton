@@ -141,9 +141,8 @@ class ReinitializingDigestProcessorImpl(
       maxParallelActiveIdQueries = acsCommitmentConfig.maxParallelActiveIdQueries.unwrap,
       maxParallelPayloadCreateQueries = acsCommitmentConfig.maxParallelPayloadCreateQueries.unwrap,
     )
-    val acsUpdates = DigestProcessor
-      .counterPartiesWithRetries(
-        indexService,
+    val acsUpdates = indexService
+      .counterParties(
         synchronizerId = synchronizerId,
         activeAt = reinitializingTimepoint.offset,
         party = None,
@@ -156,9 +155,8 @@ class ReinitializingDigestProcessorImpl(
         metrics.reinitializeParties.updateValue(_ + counterpartiesSet.size)
 
         Future(
-          DigestProcessor
-            .acsWithRetries(
-              indexService,
+          indexService
+            .acs(
               synchronizerId = synchronizerId,
               activeAt = reinitializingTimepoint.offset,
               stakeholders1 = counterpartiesSet,

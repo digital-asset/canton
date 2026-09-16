@@ -14,6 +14,7 @@ import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, ProfilingMode
 import com.digitalasset.daml.lf.speedy.SBuiltinFun.*
 import com.digitalasset.daml.lf.speedy.SExpr as t
 import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.speedy.compiler.Compiler.ExecutionMode
 import com.digitalasset.daml.lf.speedy.compiler.SExpr0.*
 
 import scala.annotation.tailrec
@@ -32,7 +33,7 @@ private[compiler] object PhaseOne {
   final case class Config(
       profiling: ProfilingMode,
       stacktracing: StackTraceMode,
-      cmdMode: Boolean = false,
+      cmdMode: ExecutionMode = ExecutionMode.Upd,
   )
 
   private val SUGetTime = SEBuiltin(SBUGetTime)
@@ -437,7 +438,11 @@ private[lf] final class PhaseOne(
           case BSECP256K1ValidateKey => SBSECP256K1ValidateKey
 
           // External call
-          case BExternalCall => if (config.cmdMode) SBCNeedExternalCall else SBExternalCall
+          case BExternalCall =>
+            config.cmdMode match {
+              case ExecutionMode.Upd => SBExternalCall
+              case ExecutionMode.Cmd => SBCNeedExternalCall
+            }
 
           // TextMap
 
@@ -669,84 +674,92 @@ private[lf] final class PhaseOne(
         compileBlock(env, bindings, body)
       case UpdateFetchTemplate(tmplId, coid) =>
         compileExp(env, coid) { coid =>
-          if (config.cmdMode)
-            Return(t.CmdFetchTemplateDefRef(tmplId)(coid))
-          else
-            Return(t.FetchTemplateDefRef(tmplId)(coid))
+          config.cmdMode match {
+            case ExecutionMode.Cmd => Return(t.CmdFetchTemplateDefRef(tmplId)(coid))
+            case ExecutionMode.Upd => Return(t.FetchTemplateDefRef(tmplId)(coid))
+          }
         }
       case UpdateFetchInterface(ifaceId, coid) =>
         compileExp(env, coid) { coid =>
-          if (config.cmdMode)
-            Return(t.CmdFetchInterfaceDefRef(ifaceId)(coid))
-          else
-            Return(t.FetchInterfaceDefRef(ifaceId)(coid))
+          config.cmdMode match {
+            case ExecutionMode.Cmd => Return(t.CmdFetchInterfaceDefRef(ifaceId)(coid))
+            case ExecutionMode.Upd => Return(t.FetchInterfaceDefRef(ifaceId)(coid))
+          }
         }
       case UpdateEmbedExpr(_, exp) =>
         compileEmbedExpr(env, exp)
       case UpdateCreate(tmplId, arg) =>
         compileExp(env, arg) { arg =>
-          if (config.cmdMode)
-            Return(t.CmdCreateDefRef(tmplId)(arg))
-          else
-            Return(t.CreateDefRef(tmplId)(arg))
+          config.cmdMode match {
+            case ExecutionMode.Cmd => Return(t.CmdCreateDefRef(tmplId)(arg))
+            case ExecutionMode.Upd => Return(t.CreateDefRef(tmplId)(arg))
+          }
         }
       case UpdateCreateInterface(_, arg) =>
         unaryFunction(env) { (tokPos, env) =>
           compileExp(env, arg) { arg =>
             let(env, arg) { (payloadPos, env) =>
-              if (config.cmdMode)
-                Return(SBCResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
-              else
-                Return(SBResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
+              config.cmdMode match {
+                case ExecutionMode.Cmd =>
+                  Return(SBCResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
+                case ExecutionMode.Upd =>
+                  Return(SBResolveCreate(env.toSEVar(payloadPos), env.toSEVar(tokPos)))
+              }
             }
           }
         }
       case UpdateExercise(tmplId, chId, cid, arg) =>
         compileExp(env, cid) { cid =>
           compileExp(env, arg) { arg =>
-            if (config.cmdMode)
-              Return(t.CmdExerciseTemplateDefRef(tmplId, chId)(cid, arg))
-            else
-              Return(t.TemplateChoiceDefRef(tmplId, chId)(cid, arg))
+            config.cmdMode match {
+              case ExecutionMode.Cmd =>
+                Return(t.CmdExerciseTemplateDefRef(tmplId, chId)(cid, arg))
+              case ExecutionMode.Upd =>
+                Return(t.TemplateChoiceDefRef(tmplId, chId)(cid, arg))
+            }
           }
         }
       case UpdateExerciseInterface(ifaceId, chId, cid, arg, _) =>
         compileExp(env, cid) { cid =>
           compileExp(env, arg) { arg =>
-            if (config.cmdMode)
-              Return(t.CmdExerciseInterfaceDefRef(ifaceId, chId)(cid, arg))
-            else
-              Return(t.InterfaceChoiceDefRef(ifaceId, chId)(cid, arg))
+            config.cmdMode match {
+              case ExecutionMode.Cmd =>
+                Return(t.CmdExerciseInterfaceDefRef(ifaceId, chId)(cid, arg))
+              case ExecutionMode.Upd =>
+                Return(t.InterfaceChoiceDefRef(ifaceId, chId)(cid, arg))
+            }
           }
         }
       case UpdateExerciseByKey(tmplId, chId, key, arg) =>
         compileExp(env, key) { key =>
           compileExp(env, arg) { arg =>
-            if (config.cmdMode)
-              Return(t.CmdExerciseByKeyDefRef(tmplId, chId)(key, arg))
-            else
-              Return(t.ChoiceByKeyDefRef(tmplId, chId)(key, arg))
+            config.cmdMode match {
+              case ExecutionMode.Cmd =>
+                Return(t.CmdExerciseByKeyDefRef(tmplId, chId)(key, arg))
+              case ExecutionMode.Upd =>
+                Return(t.ChoiceByKeyDefRef(tmplId, chId)(key, arg))
+            }
           }
         }
       case UpdateGetTime =>
         Return(SUGetTime)
       case UpdateLedgerTimeLT(time) =>
         compileExp(env, time) { time =>
-          if (config.cmdMode)
-            Return(SBCCheckLedgerTimeLT(time))
-          else
-            Return(SBULedgerTimeLT(time))
+          config.cmdMode match {
+            case ExecutionMode.Cmd => Return(SBCCheckLedgerTimeLT(time))
+            case ExecutionMode.Upd => Return(SBULedgerTimeLT(time))
+          }
         }
       case UpdateQueryNByKey(templateId) =>
-        if (config.cmdMode)
-          Return(t.CmdQueryNByKeyDefRef(templateId)())
-        else
-          Return(t.QueryNByKeyDefRef(templateId)())
+        config.cmdMode match {
+          case ExecutionMode.Cmd => Return(t.CmdQueryNByKeyDefRef(templateId)())
+          case ExecutionMode.Upd => Return(t.QueryNByKeyDefRef(templateId)())
+        }
       case UpdateFetchByKey(templateId) =>
-        if (config.cmdMode)
-          Return(t.CmdFetchByKeyDefRef(templateId)())
-        else
-          Return(t.FetchByKeyDefRef(templateId)())
+        config.cmdMode match {
+          case ExecutionMode.Cmd => Return(t.CmdFetchByKeyDefRef(templateId)())
+          case ExecutionMode.Upd => Return(t.FetchByKeyDefRef(templateId)())
+        }
       case UpdateTryCatchV1(_, body, binder, handler) =>
         // Exception handling is not supported in the command path: in cmd mode the resulting
         // SETryCatchV1 crashes at runtime (CmdMachine.asUpdateMachine), so we do not special-case

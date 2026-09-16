@@ -11,7 +11,11 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.ViewHash
 import com.digitalasset.canton.protocol.messages.{EncryptedMultipleViews, EncryptedViewMessage}
@@ -476,7 +480,8 @@ object EncryptedViewMessageFactory {
     )
   }
 
-  private def createRandomnessMap(
+  @VisibleForTesting
+  def createRandomnessMap(
       participants: LazyList[ParticipantId],
       randomness: SecureRandomness,
       cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
@@ -501,13 +506,18 @@ object EncryptedViewMessageFactory {
   sealed trait EncryptedViewMessageCreationError
       extends Product
       with Serializable
-      with PrettyPrinting
+      with PrettyPrintingFromCompanion
 
   /** Indicates that we could not determine the recipients of the underlying view
     */
   final case class UnableToDetermineRecipients(cause: String)
       extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[UnableToDetermineRecipients] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnableToDetermineRecipients] =
+      UnableToDetermineRecipients
+  }
+
+  object UnableToDetermineRecipients extends PrettyPrintingCompanion[UnableToDetermineRecipients] {
+    override protected val pretty: Pretty[UnableToDetermineRecipients] = prettyOfClass(
       param("cause", _.cause.unquoted)
     )
   }
@@ -518,7 +528,13 @@ object EncryptedViewMessageFactory {
       party: Set[LfPartyId],
       physicalSynchronizerId: PhysicalSynchronizerId,
   ) extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[UnableToDetermineParticipant] =
+    override def prettyCompanion: PrettyPrintingCompanion[UnableToDetermineParticipant] =
+      UnableToDetermineParticipant
+  }
+
+  object UnableToDetermineParticipant
+      extends PrettyPrintingCompanion[UnableToDetermineParticipant] {
+    override protected val pretty: Pretty[UnableToDetermineParticipant] =
       prettyOfClass(unnamedParam(_.party), unnamedParam(_.physicalSynchronizerId))
   }
 
@@ -529,7 +545,12 @@ object EncryptedViewMessageFactory {
       cause: SyncCryptoError,
       physicalSynchronizerId: PhysicalSynchronizerId,
   ) extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[UnableToDetermineKey] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnableToDetermineKey] =
+      UnableToDetermineKey
+  }
+
+  object UnableToDetermineKey extends PrettyPrintingCompanion[UnableToDetermineKey] {
+    override protected val pretty: Pretty[UnableToDetermineKey] = prettyOfClass(
       param("participant", _.participant),
       param("cause", _.cause),
       param("physical synchronizer id", _.physicalSynchronizerId),
@@ -538,14 +559,24 @@ object EncryptedViewMessageFactory {
 
   final case class FailedToCreateEncryptionKey(cause: EncryptionKeyCreationError)
       extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[FailedToCreateEncryptionKey] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToCreateEncryptionKey] =
+      FailedToCreateEncryptionKey
+  }
+
+  object FailedToCreateEncryptionKey extends PrettyPrintingCompanion[FailedToCreateEncryptionKey] {
+    override protected val pretty: Pretty[FailedToCreateEncryptionKey] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }
 
   final case class FailedToEncryptViewMessage(cause: EncryptionError)
       extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[FailedToEncryptViewMessage] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[FailedToEncryptViewMessage] =
+      FailedToEncryptViewMessage
+  }
+
+  object FailedToEncryptViewMessage extends PrettyPrintingCompanion[FailedToEncryptViewMessage] {
+    override protected val pretty: Pretty[FailedToEncryptViewMessage] = prettyOfClass(
       unnamedParam(_.cause)
     )
   }
@@ -554,7 +585,13 @@ object EncryptedViewMessageFactory {
     */
   final case class UnableToDetermineSessionKeyRandomness(cause: String)
       extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[UnableToDetermineSessionKeyRandomness] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[UnableToDetermineSessionKeyRandomness] =
+      UnableToDetermineSessionKeyRandomness
+  }
+
+  object UnableToDetermineSessionKeyRandomness
+      extends PrettyPrintingCompanion[UnableToDetermineSessionKeyRandomness] {
+    override protected val pretty: Pretty[UnableToDetermineSessionKeyRandomness] = prettyOfClass(
       param("cause", _.cause.unquoted)
     )
   }
@@ -563,7 +600,14 @@ object EncryptedViewMessageFactory {
       error: String,
       synchronizerId: PhysicalSynchronizerId,
   ) extends EncryptedViewMessageCreationError {
-    override protected def pretty: Pretty[UnableToGetDynamicSynchronizerParameters] = prettyOfClass(
+    override def prettyCompanion
+        : PrettyPrintingCompanion[UnableToGetDynamicSynchronizerParameters] =
+      UnableToGetDynamicSynchronizerParameters
+  }
+
+  object UnableToGetDynamicSynchronizerParameters
+      extends PrettyPrintingCompanion[UnableToGetDynamicSynchronizerParameters] {
+    override protected val pretty: Pretty[UnableToGetDynamicSynchronizerParameters] = prettyOfClass(
       param("error", _.error.unquoted),
       param("physical synchronizer id", _.synchronizerId),
     )

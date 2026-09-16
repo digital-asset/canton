@@ -14,7 +14,14 @@ import com.digitalasset.canton.health.{
   ComponentStatus,
   ToComponentHealthState,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances, PrettyPrinting, PrettyUtil}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyInstances,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+  PrettyUtil,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{
   MediatorId,
@@ -135,18 +142,18 @@ object SequencerHealthStatus extends PrettyUtil with ShowUtil {
   */
 final case class SequencerAdminStatus(acceptsAdminChanges: Boolean)
     extends ToComponentHealthState
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   def toProtoV30: sequencerV30.SequencerAdminStatus =
     sequencerV30.SequencerAdminStatus(acceptsAdminChanges)
 
   override def toComponentHealthState: ComponentHealthState =
     ComponentHealthState.Ok(Option.when(acceptsAdminChanges)("sequencer accepts admin commands"))
 
-  override protected def pretty: Pretty[SequencerAdminStatus] =
-    SequencerAdminStatus.prettySequencerHealthStatus
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerAdminStatus] =
+    SequencerAdminStatus
 }
 
-object SequencerAdminStatus extends PrettyUtil with ShowUtil {
+object SequencerAdminStatus extends PrettyPrintingCompanion[SequencerAdminStatus] {
   def fromProto(
       statusP: sequencerV30.SequencerAdminStatus
   ): ParsingResult[SequencerAdminStatus] =
@@ -157,4 +164,6 @@ object SequencerAdminStatus extends PrettyUtil with ShowUtil {
     prettyOfClass[SequencerAdminStatus](
       param("admin", _.acceptsAdminChanges)
     )
+
+  override protected val pretty: Pretty[SequencerAdminStatus] = prettySequencerHealthStatus
 }

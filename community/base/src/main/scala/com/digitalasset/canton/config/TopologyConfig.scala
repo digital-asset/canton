@@ -56,8 +56,6 @@ final case class TopologyConfig(
       defaultTopologyStateWriteThroughCacheEvictionThreshold,
     maxTopologyStateCacheItems: PositiveInt = defaultTopologyStateWriteThroughCacheSize,
     enableTopologyStateCacheConsistencyChecks: Boolean = false,
-    useNewProcessor: Boolean = true,
-    useNewClient: Boolean = true,
 )
 
 object TopologyConfig {

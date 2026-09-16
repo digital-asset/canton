@@ -68,7 +68,7 @@ sealed trait JsonApiConformanceBase
       connectedSynchronizers = env.environment.config.sequencers.size,
     )
 
-    val availableTests = AvailableTests.latestStableLf
+    val availableTests = AvailableTests.latestStableTestDars
 
     val envArgInclusion = envArgTestsInclusion.getOrElse(TestInclusions.AllIncluded)
     val testsToRun =

@@ -168,14 +168,53 @@ final class StateTransferMessageValidator[E <: Env[E]](
   ): Unit =
     unverifiedMessage.message match {
       case response: BlockTransferResponse =>
-        // Block transfer responses are signed for uniformity/simplicity. However, it is just a thin wrapper around
-        //  commit certificates, which themselves contain signed data that is then verified. As long as there's no other
+        // Block transfer responses are signed for uniformity/simplicity. They are either empty, in which case they mean
+        // nothing to state transfer (and we verify them). Or it is just a commit certificates, which themselves
+        // contain signed data that is then verified. As long as there's no other
         //  data than commit certs included in the responses, the signature verification can be safely skipped.
         //  As a result, any node can help with state transfer (as long as it provides valid commit certs), even when
         //  its responses are signed with a new/rotated key.
-        context.self.asyncSend(
-          Consensus.StateTransferMessage.VerifiedStateTransferMessage(response)
-        )
+
+        if (response.commitCertificate.isDefined) {
+          context.self.asyncSend(
+            Consensus.StateTransferMessage.VerifiedStateTransferMessage(response)
+          )
+        } else {
+          val from = unverifiedMessage.from
+          if (activeMembership.orderingTopology.nodes.contains(from)) {
+
+            context.pipeToSelf(
+              activeCryptoProvider.verifySignedMessage(
+                unverifiedMessage,
+                AuthenticatedMessageType.BftSignedStateTransferMessage,
+              )
+            ) {
+              case Failure(exception) =>
+                logger.error(
+                  s"Block transfer response $response from $from could not be verified, dropping",
+                  exception,
+                )
+                None
+              case Success(Left(errors)) =>
+                logger.warn(
+                  s"Block transfer response $response from $from failed verified, dropping: $errors"
+                )
+                emitNonCompliance(metrics)(
+                  from,
+                  metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
+                )
+                None
+              case Success(Right(())) =>
+                Some(Consensus.StateTransferMessage.VerifiedStateTransferMessage(response))
+            }
+
+          } else {
+            logger.info(
+              s"Got block transfer response from $from which is not in active membership, dropping"
+            )
+          }
+        }
+
       case request: BlockTransferRequest =>
         val from = unverifiedMessage.from
         if (activeMembership.orderingTopology.nodes.contains(from)) {

@@ -66,14 +66,20 @@ private[lf] object Compiler {
   case object NoPackageValidation extends PackageValidationMode
   case object FullPackageValidation extends PackageValidationMode
 
+  sealed abstract class ExecutionMode extends Product with Serializable
+  object ExecutionMode {
+    // run using Update Machine
+    case object Upd extends ExecutionMode
+    // run using Cmd Machine and Transaction Conductor
+    case object Cmd extends ExecutionMode
+  }
+
   final case class Config(
       allowedLanguageVersions: Seq[LanguageVersion],
       packageValidation: PackageValidationMode,
       profiling: ProfilingMode,
       stacktracing: StackTraceMode,
-      // When true, the compiler emits the Question.Cmd builtins for template create/fetch/exercise
-      // so a CmdMachine can interpret them.
-      cmdMode: Boolean = false,
+      cmdMode: ExecutionMode = ExecutionMode.Upd,
   )
 
   object Config {
@@ -379,9 +385,11 @@ private[lf] final class Compiler(
       addDef(compileSignatories(tmplId, tmpl))
       addDef(compileObservers(tmplId, tmpl))
       addDef(compileToContractInfo(tmplId, tmpl))
-      if (config.cmdMode) {
-        addDef(compileCmdCreate(tmplId))
-        addDef(compileCmdFetchTemplate(tmplId))
+      config.cmdMode match {
+        case ExecutionMode.Cmd =>
+          addDef(compileCmdCreate(tmplId))
+          addDef(compileCmdFetchTemplate(tmplId))
+        case ExecutionMode.Upd =>
       }
       tmpl.implements.values.foreach { impl =>
         compileInterfaceInstance(
@@ -398,9 +406,11 @@ private[lf] final class Compiler(
         addDef(compileChoiceController(tmplId, tmpl.param, choice))
         addDef(compileChoiceObserver(tmplId, tmpl.param, choice))
         addDef(compileChoiceAuthorizers(tmplId, tmpl.param, choice))
-        if (config.cmdMode) {
-          addDef(compileCmdExerciseTemplate(tmplId, choice))
-          addDef(compileCmdChoiceBody(tmplId, tmpl, choice))
+        config.cmdMode match {
+          case ExecutionMode.Cmd =>
+            addDef(compileCmdExerciseTemplate(tmplId, choice))
+            addDef(compileCmdChoiceBody(tmplId, tmpl, choice))
+          case ExecutionMode.Upd =>
         }
       }
 
@@ -408,16 +418,20 @@ private[lf] final class Compiler(
         addDef(compileContractKeyWithMaintainers(tmplId, tmpl, tmplKey))
         addDef(compileContractKey(tmplId, tmpl, tmplKey))
         addDef(compileKeyMaintainers(tmplId, tmplKey))
-        addDef(compileFetchByKey(tmplId, tmplKey))
-        addDef(compileQueryNByKey(tmplId, tmplKey))
-        if (config.cmdMode) {
-          addDef(compileCmdFetchByKey(tmplId))
-          addDef(compileCmdQueryNByKey(tmplId))
+        config.cmdMode match {
+          case ExecutionMode.Cmd =>
+            addDef(compileCmdFetchByKey(tmplId))
+            addDef(compileCmdQueryNByKey(tmplId))
+          case ExecutionMode.Upd =>
+            addDef(compileFetchByKey(tmplId, tmplKey))
+            addDef(compileQueryNByKey(tmplId, tmplKey))
         }
         tmpl.choices.values.foreach { x =>
-          addDef(compileChoiceByKey(tmplId, tmpl, tmplKey, x))
-          if (config.cmdMode) {
-            addDef(compileCmdExerciseByKey(tmplId, x))
+          config.cmdMode match {
+            case ExecutionMode.Cmd =>
+              addDef(compileCmdExerciseByKey(tmplId, x))
+            case ExecutionMode.Upd =>
+              addDef(compileChoiceByKey(tmplId, tmpl, tmplKey, x))
           }
         }
       }
@@ -425,18 +439,22 @@ private[lf] final class Compiler(
 
     module.interfaces.foreach { case (ifaceName, iface) =>
       val ifaceId = Identifier(pkgId, QualifiedName(module.name, ifaceName))
-      addDef(compileFetchInterface(ifaceId))
-      if (config.cmdMode) {
-        addDef(compileCmdFetchInterface(ifaceId))
+      config.cmdMode match {
+        case ExecutionMode.Cmd =>
+          addDef(compileCmdFetchInterface(ifaceId))
+        case ExecutionMode.Upd =>
+          addDef(compileFetchInterface(ifaceId))
       }
       iface.choices.values.foreach { choice =>
         addDef(compileInterfaceChoice(ifaceId, iface.param, choice))
         addDef(compileChoiceController(ifaceId, iface.param, choice))
         addDef(compileChoiceObserver(ifaceId, iface.param, choice))
-        if (config.cmdMode) {
-          addDef(compileChoiceAuthorizers(ifaceId, iface.param, choice))
-          addDef(compileCmdInterfaceChoiceBody(ifaceId, iface.param, choice))
-          addDef(compileCmdExerciseInterface(ifaceId, choice))
+        config.cmdMode match {
+          case ExecutionMode.Cmd =>
+            addDef(compileChoiceAuthorizers(ifaceId, iface.param, choice))
+            addDef(compileCmdInterfaceChoiceBody(ifaceId, iface.param, choice))
+            addDef(compileCmdExerciseInterface(ifaceId, choice))
+          case ExecutionMode.Upd =>
         }
       }
       iface.coImplements.values.foreach { coimpl =>
@@ -452,6 +470,12 @@ private[lf] final class Compiler(
 
     builder.result()
   }
+
+  private def preventCatchUnlessCmdMode(expr: s.SExpr): s.SExpr =
+    config.cmdMode match {
+      case ExecutionMode.Cmd => expr
+      case _ => s.SEPreventCatch(expr)
+    }
 
   /** Validates and compiles all the definitions in the package provided.
     *
@@ -529,15 +553,15 @@ private[lf] final class Compiler(
         _env.bindExprVar(tmpl.param, tmplArgPos).bindExprVar(choice.argBinder._1, choiceArgPos)
       // We use a chain of let bindings to make the evaluation order of SBUBeginExercise's arguments is independent
       // from the evaluation strategy imposed by the ANF transformation.
-      val controllersExpr = s.SEPreventCatch(translateExp(env, choice.controllers))
+      val controllersExpr = preventCatchUnlessCmdMode(translateExp(env, choice.controllers))
       let(env, controllersExpr) { (controllersPos, env) =>
         val observersExpr = choice.choiceObservers match {
-          case Some(observers) => s.SEPreventCatch(translateExp(env, observers))
+          case Some(observers) => preventCatchUnlessCmdMode(translateExp(env, observers))
           case None => s.SEValue.EmptyList
         }
         let(env, observersExpr) { (observersPos, env) =>
           val authorizersExpr = choice.choiceAuthorizers match {
-            case Some(authorizers) => s.SEPreventCatch(translateExp(env, authorizers))
+            case Some(authorizers) => preventCatchUnlessCmdMode(translateExp(env, authorizers))
             case None => s.SEValue.EmptyList
           }
           let(env, authorizersExpr) { (authorizersPos, env) =>
@@ -585,15 +609,15 @@ private[lf] final class Compiler(
       let(env, SBExtractSAnyValue(env.toSEVar(payloadPos))) { (castPos, env) =>
         // We use a chain of let bindings to make the evaluation order of SBResolveSBUBeginExercise's arguments
         // is independent from the evaluation strategy imposed by the ANF transformation.
-        val controllersExpr = s.SEPreventCatch(translateExp(env, choice.controllers))
+        val controllersExpr = preventCatchUnlessCmdMode(translateExp(env, choice.controllers))
         let(env, controllersExpr) { (controllersPos, env) =>
           val observersExpr = choice.choiceObservers match {
-            case Some(observers) => s.SEPreventCatch(translateExp(env, observers))
+            case Some(observers) => preventCatchUnlessCmdMode(translateExp(env, observers))
             case None => s.SEValue.EmptyList
           }
           let(env, observersExpr) { (observersPos, env) =>
             val authorizersExpr = choice.choiceAuthorizers match {
-              case Some(authorizers) => s.SEPreventCatch(translateExp(env, authorizers))
+              case Some(authorizers) => preventCatchUnlessCmdMode(translateExp(env, authorizers))
               case None => s.SEValue.EmptyList
             }
             let(env, authorizersExpr) { (authorizersPos, env) =>
@@ -660,7 +684,7 @@ private[lf] final class Compiler(
   ): (t.SDefinitionRef, SDefinition) =
     topLevelFunction2(t.ChoiceControllerDefRef(typeId, choice.name)) {
       (contractPos, choiceArgPos, env) =>
-        s.SEPreventCatch(
+        preventCatchUnlessCmdMode(
           translateExp(
             env
               .bindExprVar(contractVarName, contractPos)
@@ -679,7 +703,7 @@ private[lf] final class Compiler(
       (contractPos, choiceArgPos, env) =>
         choice.choiceObservers match {
           case Some(observers) =>
-            s.SEPreventCatch(
+            preventCatchUnlessCmdMode(
               translateExp(
                 env
                   .bindExprVar(contractVarName, contractPos)
@@ -700,7 +724,7 @@ private[lf] final class Compiler(
       (contractPos, choiceArgPos, env) =>
         choice.choiceAuthorizers match {
           case Some(authorizers) =>
-            s.SEPreventCatch(
+            preventCatchUnlessCmdMode(
               translateExp(
                 env
                   .bindExprVar(contractVarName, contractPos)
@@ -730,7 +754,7 @@ private[lf] final class Compiler(
     //   in  <retValue>
     topLevelFunction3(t.ChoiceByKeyDefRef(tmplId, choice.name)) {
       (keyPos, choiceArgPos, tokenPos, env) =>
-        let(env, s.SEPreventCatch(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
+        let(env, preventCatchUnlessCmdMode(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
           (keyWithMPos, env) =>
             let(env, SBUFetchKey(tmplId)(env.toSEVar(keyWithMPos))) { (cidPos, env) =>
               translateChoiceBody(env, tmplId, tmpl, choice)(
@@ -1121,7 +1145,7 @@ private[lf] final class Compiler(
     //        <mbCid> = $queryNByKey(tmplId, n) <keyWithM>
     //    in <mbCid>
     topLevelFunction3(t.QueryNByKeyDefRef(tmplId)) { (nPos, keyPos, _, env) =>
-      let(env, s.SEPreventCatch(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
+      let(env, preventCatchUnlessCmdMode(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
         (keyWithMPos, env) =>
           let(env, SBUQueryNByKey(tmplId)(env.toSEVar(keyWithMPos), env.toSEVar(nPos))) {
             (resultPos, env) =>
@@ -1148,7 +1172,7 @@ private[lf] final class Compiler(
     //        _ = $insertFetch <coid> <signatories> <observers> (Some <keyWithM> )
     //    in { contractId: ContractId Foo, contract: Foo }
     topLevelFunction2(t.FetchByKeyDefRef(tmplId)) { (keyPos, tokenPos, env) =>
-      let(env, s.SEPreventCatch(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
+      let(env, preventCatchUnlessCmdMode(translateKeyWithMaintainers(env, keyPos, tmplKey))) {
         (keyWithMPos, env) =>
           let(env, SBUFetchKey(tmplId)(env.toSEVar(keyWithMPos))) { (cidPos, env) =>
             let(

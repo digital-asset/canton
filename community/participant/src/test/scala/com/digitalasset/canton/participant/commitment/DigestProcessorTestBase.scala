@@ -21,8 +21,10 @@ import com.digitalasset.canton.topology.transaction.ParticipantAttributes
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Submission
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PekkoUtil.RecoveryStrategy
 import com.digitalasset.canton.{BaseTest, LfPartyId, ReassignmentCounter, ReassignmentDiscriminator}
 import com.digitalasset.daml.lf.data.Ref.Party
+import com.google.protobuf.ByteString
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.KillSwitch
 import org.apache.pekko.stream.scaladsl.Source
@@ -80,7 +82,12 @@ object DigestProcessorTestBase extends TestDigestUtils {
     val acs = for {
       (offset, cid, rawStakeholders) <- contractsWithStakeholders
       stakeholders = rawStakeholders.map(LfPartyId.assertFromString)
-      activeContract = InternalIndexService.ActiveContract(cid, stakeholders.toSet, rc)
+      activeContract = InternalIndexService.ActiveContract(
+        cid,
+        stakeholders.toSet,
+        rc,
+        ByteString.empty(),
+      )
       stakeholder <- stakeholders
     } yield {
       stakeholder -> (offset, activeContract)
@@ -88,24 +95,33 @@ object DigestProcessorTestBase extends TestDigestUtils {
     val partyToContracts = immutable.MultiDict.from(acs)
 
     new InternalIndexService {
-      override def activeContracts(partyIds: Set[LfPartyId], validAt: Option[Offset])(implicit
-          traceContext: TraceContext
-      ): Source[GetActiveContractsResponse, NotUsed] = ???
+      override def activeContracts(
+          partyIds: Set[LfPartyId],
+          validAt: Option[Offset],
+          recoveryStrategy: RecoveryStrategy,
+      )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed] = ???
 
-      override def topologyTransactions(partyId: LfPartyId, fromExclusive: Offset)(implicit
-          traceContext: TraceContext
-      ): Source[TopologyTransaction, NotUsed] = ???
+      override def topologyTransactions(
+          partyId: LfPartyId,
+          fromExclusive: Offset,
+          recoveryStrategy: RecoveryStrategy,
+      )(implicit traceContext: TraceContext): Source[TopologyTransaction, NotUsed] = ???
 
-      override def acsUpdates(synchronizerId: SynchronizerId, fromExclusive: Option[Offset])(
-          implicit traceContext: TraceContext
+      override def acsUpdates(
+          synchronizerId: SynchronizerId,
+          fromExclusive: Option[Offset],
+          recoveryStrategy: RecoveryStrategy,
+      )(implicit
+          traceContext: TraceContext
       ): Source[InternalIndexService.AcsUpdateContainer, NotUsed] = ???
 
-      override def acs(
+      def acs(
           synchronizerId: SynchronizerId,
           activeAt: Offset,
           stakeholders1: Set[Party],
           stakeholders2: Set[Party],
           configOverrides: ActiveContractsServiceStreamsConfigOverrides,
+          recoveryStrategy: RecoveryStrategy,
       )(implicit
           traceContext: TraceContext
       ): Source[InternalIndexService.ActiveContract, NotUsed] = {
@@ -127,11 +143,12 @@ object DigestProcessorTestBase extends TestDigestUtils {
         Source(result)
       }
 
-      override def counterParties(
+      def counterParties(
           synchronizerId: SynchronizerId,
           activeAt: Offset,
           party: Option[Party],
           configOverrides: ActiveContractsServiceStreamsConfigOverrides,
+          recoveryStrategy: RecoveryStrategy,
       )(implicit traceContext: TraceContext): Source[LfPartyId, NotUsed] = Source(
         party
           .flatMap(partyToContracts.sets.get(_))

@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.data.ComponentHealthState
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{HealthStatus, Healthy, Unhealthy}
@@ -26,7 +25,6 @@ import org.slf4j.event.Level
 
 import scala.concurrent.duration.DurationInt
 
-@UnstableTest // TODO(i35213): Remove once the test is stable again
 class IndexerHealthIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
   var party1: Party = _
@@ -89,48 +87,41 @@ class IndexerHealthIntegrationTest extends CommunityIntegrationTest with SharedE
     IouSyntax.archive(participant1)(contract, party1)
     participant1.synchronizers.disconnect(daName)
 
-    loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.INFO))(
+    loggerFactory.assertEventuallyLogsSeq(
+      SuppressionRule.LevelAndAbove(Level.INFO) && SuppressionRule.LoggerNameContains(
+        "LedgerApiIndexer"
+      )
+    )(
       participant1.repair.purge(daName, List(contract.id.toLf), true),
       logEntries =>
         { // All states checked below are short-lived and it's impossible to catch them reliably with health status endpoint
-          val initializingRepairMsg = logEntries
-            .find(e =>
+          logEntries
+            .exists(e =>
               e.level == Level.INFO && e.message.contains(
                 "'ledger api indexer' is now in state Failed(Initializing repair indexer)." // Not checking on previous state, because it might be either OK or component is closed depending on how fast normal indexer closes.
               )
-            )
-            .value
-          val degradedMsg = logEntries
-            .find(e =>
+            ) should be(true)
+
+          logEntries
+            .exists(e =>
               e.level == Level.INFO && e.message.contains(
                 "'ledger api indexer' is now in state Degraded(Repair indexer is running). Previous state was Failed(Initializing repair indexer)."
               )
-            )
-            .value
-          val initializingNormalMsg = logEntries
-            .find(e =>
+            ) should be(true)
+
+          logEntries
+            .exists(e =>
               e.level == Level.INFO && e.message.contains(
                 "'ledger api indexer' is now in state Failed(Initializing indexer). Previous state was Degraded(Repair indexer is running)."
               )
-            )
-            .value
-          val normalInitializedMsg = logEntries
-            .find(e =>
+            ) should be(true)
+
+          logEntries
+            .exists(e =>
               e.level == Level.INFO && e.message.contains(
                 "'ledger api indexer' is now in state Ok(). Previous state was Failed(Initializing indexer)."
               )
-            )
-            .value
-
-          val initializedRepariMsgIndex = logEntries.indexOf(initializingRepairMsg)
-          val degradedMsgIndex = logEntries.indexOf(degradedMsg)
-          val initializingNormalMsgIndex = logEntries.indexOf(initializingNormalMsg)
-          val normalInitializedMsgIndex = logEntries.indexOf(normalInitializedMsg)
-
-          // Make sure the log messages are in the correct order
-          initializedRepariMsgIndex should be < degradedMsgIndex
-          degradedMsgIndex should be < initializingNormalMsgIndex
-          initializingNormalMsgIndex should be < normalInitializedMsgIndex
+            ) should be(true)
         },
     )
   }

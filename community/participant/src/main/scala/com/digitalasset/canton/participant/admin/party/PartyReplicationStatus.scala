@@ -9,7 +9,6 @@ import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{
   Pretty,
-  PrettyPrinting,
   PrettyPrintingCompanion,
   PrettyPrintingFromCompanion,
 }
@@ -57,7 +56,7 @@ final case class PartyReplicationStatus(
       PartyReplicationStatus.type
     ]
 ) extends HasProtocolVersionedWrapper[PartyReplicationStatus]
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   @transient override protected lazy val companionObj: PartyReplicationStatus.type =
     PartyReplicationStatus
 
@@ -139,21 +138,13 @@ final case class PartyReplicationStatus(
     errorO.map(_.toProtoV30),
   )
 
-  override protected def pretty: Pretty[PartyReplicationStatus] = {
-    import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-    prettyOfClass(
-      param("params", _.params),
-      param("agreement", _.agreementStatus),
-      paramIfDefined("authorization", _.authorizationO),
-      paramIfDefined("replication", _.replicationO),
-      paramIfDefined("indexing", _.indexingO),
-      paramIfDefined("error", _.errorO),
-      paramIfTrue("complete", _.hasCompleted),
-    )
-  }
+  override def prettyCompanion: PrettyPrintingCompanion[PartyReplicationStatus] =
+    PartyReplicationStatus
 }
 
-object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus] {
+object PartyReplicationStatus
+    extends VersioningCompanion[PartyReplicationStatus]
+    with PrettyPrintingCompanion[PartyReplicationStatus] {
 
   override val name: String = "PartyReplicationStatus"
 
@@ -166,6 +157,19 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
       _.toProtoV30,
     ),
   )
+
+  override protected val pretty: Pretty[PartyReplicationStatus] = {
+    import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+    prettyOfClass(
+      param("params", _.params),
+      param("agreement", _.agreementStatus),
+      paramIfDefined("authorization", _.authorizationO),
+      paramIfDefined("replication", _.replicationO),
+      paramIfDefined("indexing", _.indexingO),
+      paramIfDefined("error", _.errorO),
+      paramIfTrue("complete", _.hasCompleted),
+    )
+  }
 
   def fromProtoV30(
       proto: v30.PartyReplicationStatus
@@ -218,7 +222,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
       targetParticipantId: ParticipantId,
       serial: PositiveInt,
       participantPermission: ParticipantPermission,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
     def toProtoV30: v30.PartyReplicationStatus.ReplicationParameters =
       v30.PartyReplicationStatus.ReplicationParameters(
         requestId.toHexString,
@@ -242,21 +246,10 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
           v30Topology.Enums.ParticipantPermission.PARTICIPANT_PERMISSION_OBSERVATION
       }
 
-    override protected def pretty: Pretty[ReplicationParams] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("request", _.requestId),
-        param("party", _.partyId),
-        param("synchronizer", _.synchronizerId),
-        param("source participant", _.sourceParticipantId),
-        param("target participant", _.targetParticipantId),
-        param("serial", _.serial),
-        param("permission", _.participantPermission.showType),
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[ReplicationParams] = ReplicationParams
   }
 
-  object ReplicationParams {
+  object ReplicationParams extends PrettyPrintingCompanion[ReplicationParams] {
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.ReplicationParameters
     ): ParsingResult[ReplicationParams] = for {
@@ -321,6 +314,19 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
 
     def fromAgreementParams(agreement: PartyReplicationAgreementParams): ReplicationParams =
       agreement.transformInto[ReplicationParams]
+
+    override protected val pretty: Pretty[ReplicationParams] = {
+      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+      prettyOfClass(
+        param("request", _.requestId),
+        param("party", _.partyId),
+        param("synchronizer", _.synchronizerId),
+        param("source participant", _.sourceParticipantId),
+        param("target participant", _.targetParticipantId),
+        param("serial", _.serial),
+        param("permission", _.participantPermission.showType),
+      )
+    }
   }
 
   sealed trait AgreementStatus extends PrettyPrintingFromCompanion with Product with Serializable {
@@ -434,23 +440,19 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
   final case class PartyReplicationAuthorization(
       onboardingAt: EffectiveTime,
       isOnboardingFlagCleared: Boolean,
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
     def toProtoV30: v30.PartyReplicationStatus.PartyReplicationAuthorization =
       v30.PartyReplicationStatus.PartyReplicationAuthorization(
         Some(onboardingAt.value.toProtoTimestamp),
         isOnboardingFlagCleared,
       )
 
-    override protected def pretty: Pretty[PartyReplicationAuthorization] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("onboarding at", _.onboardingAt.value),
-        paramIfTrue("onboarding cleared", _.isOnboardingFlagCleared),
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[PartyReplicationAuthorization] =
+      PartyReplicationAuthorization
   }
 
-  object PartyReplicationAuthorization {
+  object PartyReplicationAuthorization
+      extends PrettyPrintingCompanion[PartyReplicationAuthorization] {
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.PartyReplicationAuthorization
     ): ParsingResult[PartyReplicationAuthorization] =
@@ -461,9 +463,17 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         EffectiveTime(onboardingAt),
         proto.isOnboardingFlagCleared,
       )
+
+    override protected val pretty: Pretty[PartyReplicationAuthorization] = {
+      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+      prettyOfClass(
+        param("onboarding at", _.onboardingAt.value),
+        paramIfTrue("onboarding cleared", _.isOnboardingFlagCleared),
+      )
+    }
   }
 
-  sealed trait AcsReplicationProgress extends PrettyPrinting {
+  sealed trait AcsReplicationProgress extends PrettyPrintingFromCompanion {
     def processedContractCount: NonNegativeLong
     def nextPersistenceCounter: RepairCounter
     def fullyProcessedAcs: Boolean
@@ -477,15 +487,8 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         fullyProcessedAcs,
       )
 
-    override protected def pretty: Pretty[AcsReplicationProgress] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("contracts", _.processedContractCount),
-        param("next counter", _.nextPersistenceCounter),
-        paramIfTrue("fully replicated", _.fullyProcessedAcs),
-        paramIfDefined("processor", _.processorO.map(_.showType)),
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[AcsReplicationProgress] =
+      AcsReplicationProgress
   }
 
   /** PersistentProgress contains the db-persisted portion of the ACS replication progress. Before
@@ -527,7 +530,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
     override def fileImporterO: Option[PartyReplicationFileImporter] = Some(fileImporter)
   }
 
-  object AcsReplicationProgress {
+  object AcsReplicationProgress extends PrettyPrintingCompanion[AcsReplicationProgress] {
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.AcsReplicationProgress
     ): ParsingResult[PersistentProgress] = for {
@@ -560,13 +563,23 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         fullyProcessedAcs = false,
         fileImporter,
       )
+
+    override protected val pretty: Pretty[AcsReplicationProgress] = {
+      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+      prettyOfClass(
+        param("contracts", _.processedContractCount),
+        param("next counter", _.nextPersistenceCounter),
+        paramIfTrue("fully replicated", _.fullyProcessedAcs),
+        paramIfDefined("processor", _.processorO.map(_.showType)),
+      )
+    }
   }
 
   final case class AcsIndexingProgress(
       indexedContractActivationChangeCount: NonNegativeLong,
       nextIndexingCounter: NonNegativeLong,
       indexingAlmostDoneWatermarkO: Option[NonNegativeLong],
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
     /** Because completing indexing during party replication is a moving target in the face of
       * transactions running concurrently to party replication, check if the watermark tracking the
@@ -584,17 +597,10 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         indexingAlmostDoneWatermarkO.map(_.unwrap),
       )
 
-    override protected def pretty: Pretty[AcsIndexingProgress] = {
-      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
-      prettyOfClass(
-        param("change count", _.indexedContractActivationChangeCount),
-        param("next counter", _.nextIndexingCounter),
-        paramIfDefined("almost done watermark", _.indexingAlmostDoneWatermarkO),
-      )
-    }
+    override def prettyCompanion: PrettyPrintingCompanion[AcsIndexingProgress] = AcsIndexingProgress
   }
 
-  object AcsIndexingProgress {
+  object AcsIndexingProgress extends PrettyPrintingCompanion[AcsIndexingProgress] {
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.AcsIndexingProgress
     ): ParsingResult[AcsIndexingProgress] =
@@ -614,12 +620,22 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         nextIndexingCounter,
         lastFullDrainCountO,
       )
+
+    override protected val pretty: Pretty[AcsIndexingProgress] = {
+      import com.digitalasset.canton.logging.pretty.PrettyInstances.*
+      prettyOfClass(
+        param("change count", _.indexedContractActivationChangeCount),
+        param("next counter", _.nextIndexingCounter),
+        paramIfDefined("almost done watermark", _.indexingAlmostDoneWatermarkO),
+      )
+    }
   }
 
-  sealed trait PartyReplicationError extends PrettyPrinting {
+  sealed trait PartyReplicationError extends PrettyPrintingFromCompanion {
     def message: String
     def toProtoV30: v30.PartyReplicationStatus.PartyReplicationError
-    override protected def pretty: Pretty[PartyReplicationError] = prettyOfString(_.message)
+    override def prettyCompanion: PrettyPrintingCompanion[PartyReplicationError] =
+      PartyReplicationError
   }
 
   final case class Disconnected(message: String) extends PartyReplicationError {
@@ -638,7 +654,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
       )
   }
 
-  object PartyReplicationError {
+  object PartyReplicationError extends PrettyPrintingCompanion[PartyReplicationError] {
     def fromProtoV30(
         proto: v30.PartyReplicationStatus.PartyReplicationError
     ): ParsingResult[PartyReplicationError] = {
@@ -657,5 +673,7 @@ object PartyReplicationStatus extends VersioningCompanion[PartyReplicationStatus
         proto.errorType,
       )
     }
+
+    override protected val pretty: Pretty[PartyReplicationError] = prettyOfString(_.message)
   }
 }

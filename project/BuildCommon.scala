@@ -1069,7 +1069,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("35")),
+          BuildInfoKey("stableProtocolVersions" -> List("35", "36")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1810,7 +1810,7 @@ object BuildCommon {
         .settings(
           sharedCommunitySettings,
           addFilesToHeaderCheck("*.daml", "daml", Compile),
-          damlDarLfVersions := Seq("2.2", "2.3", "2.dev"),
+          damlDarLfVersions := Seq("2.2", "2.3", "2.4", "2.dev"),
           useVersionedDarName := true,
           Compile / damlBuildOrder := Seq(
             "model_iface",
@@ -2015,6 +2015,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(zioTest),
       )
 
+    lazy val Perf = config("perf") extend Test
     lazy val `ledger-api-core` = project
       .in(file("community/ledger/ledger-api-core"))
       .dependsOn(
@@ -2037,6 +2038,7 @@ object BuildCommon {
         `traffic-enforcement-api`,
       )
       .enablePlugins(DamlPlugin)
+      .configs(Perf)
       .settings(
         sharedCantonCommunitySettings,
         Compile / PB.targets := Seq(
@@ -2066,6 +2068,14 @@ object BuildCommon {
         Test / testGrouping := separateRevocationTest((Test / definedTests).value),
         coverageEnabled := false,
         Compile / damlDarLfVersions := Seq("2.2"),
+        inConfig(Perf)(Defaults.testSettings),
+        inConfig(Perf)(Defaults.testTasks),
+        Perf / testFrameworks := (Test / testFrameworks).value,
+        Perf / testOptions := (Test / testOptions).value,
+        Perf / parallelExecution := false,
+        Perf / fork := true,
+        Perf / baseDirectory := (LocalRootProject / baseDirectory).value,
+        Perf / javaOptions += "-Xmx" + sys.props.getOrElse("perf.xmx", "32G"),
       )
 
     lazy val `ledger-json-api` =
@@ -2740,6 +2750,9 @@ object BuildCommon {
       `daml-lf-archive`,
       `daml-lf-stable-packages`,
       `daml-lf-validation`,
+      `daml-lf-upgrade-check`,
+      // NOTE: We leave out the daml-lf-upgrade-check-test subproject here,
+      // consult the comment above its definition to know more.
       `daml-lf-snapshot`,
       `daml-lf-snapshot-proto`,
       `daml-lf-interpreter`,
@@ -3738,6 +3751,78 @@ object BuildCommon {
         `daml-lf-language`,
         `daml-lf-parser`,
         `daml-lf-stable-packages`,
+      )
+
+    lazy val `daml-lf-upgrade-check` = project
+      .in(file("community/daml-lf/upgrade-check"))
+      .disablePlugins(WartRemover)
+      .settings(
+        sharedCommunitySettings,
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        enablePublishLibrary,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java,
+          circe_core,
+          circe_yaml,
+          slf4j_api,
+        ),
+      )
+      .dependsOn(
+        CommunityProjects.`ledger-api-core`,
+        `contextualized-logging`,
+        CommunityProjects.`community-base`,
+        `daml-lf-archive`,
+      )
+
+    // We leave this project out of allProjects since we only want to build its
+    // DARs when the test is explicitly being run by the
+    // nightly_test_upgrades_matrix_and_check job.
+    // If we leave this in allProjects, then all jobs run on CI that build tests
+    // (e.g. lint, testOnly) will build the test, and by extension build around
+    // 200 DARs, which takes a minute or two, even when the test itself is never
+    // run.
+    lazy val `daml-lf-upgrade-check-test` = project
+      .in(file("community/daml-lf/upgrade-check-test"))
+      .disablePlugins(WartRemover)
+      .enablePlugins(DamlPlugin, BuildInfoPlugin)
+      .settings(
+        sharedCommunitySettings,
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        enablePublishLibrary,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          scalatest % Test
+        ),
+        Test / test := (Test / test).dependsOn(Test / parallelDamlBuild).value,
+        Test / testOnly := (Test / testOnly)
+          .dependsOn(Test / parallelDamlBuild)
+          .evaluated,
+        BuildInfoPlugin.buildInfoScopedSettings(Test),
+        Compile / buildInfoKeys := Seq(),
+        Test / buildInfoKeys := Seq[BuildInfoKey](
+          version,
+          scalaVersion,
+          sbtVersion,
+          BuildInfoKey(
+            "parallelDamlSourceDirectory" -> (Test / parallelDamlBuildSourceInput).value.getAbsolutePath
+          ),
+          BuildInfoKey(
+            "parallelDamlBuildDarsOutput" -> (Test / parallelDamlBuildDarsOutput).value.getAbsolutePath
+          ),
+          BuildInfoKey("damlVersion" -> damlCompilerVersion.value),
+        ),
+        buildInfoPackage := "com.digitalasset.daml.lf.validation.buildinfo",
+        buildInfoObject := "BuildInfo",
+      )
+      .dependsOn(
+        CommunityProjects.`ledger-api-core`,
+        `contextualized-logging`,
+        CommunityProjects.`community-base`,
+        `daml-lf-archive`,
+        `daml-lf-upgrade-check`,
       )
 
     // Isolate protobuf and snapshot into separate projects, so that we can

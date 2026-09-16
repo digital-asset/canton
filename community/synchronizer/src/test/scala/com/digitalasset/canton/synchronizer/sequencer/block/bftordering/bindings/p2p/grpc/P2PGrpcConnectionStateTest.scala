@@ -442,6 +442,42 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
+    "shutting down and cleaning up an active (incoming) connection by sender" should {
+
+      "remove the sender, close the network ref and clear its associations" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+        // Incoming connection: a network ref, a sender and an endpoint ID are associated with the BFT node ID
+        val ref = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() => ref)
+        state.addSenderIfMissing(APeerBftNodeId, ASender).discard
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+
+        state.isConnected(APeerP2PNodeAddressId) shouldBe true
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(ref)
+
+        state.shutdownAndCleanupActiveConnectionAndReturnEndpointIds(ASender)
+
+        // The sender is removed and the connection is no longer active
+        state.getSender(APeerP2PNodeAddressId) shouldBe None
+        state.isConnected(APeerP2PNodeAddressId) shouldBe false
+
+        // The network ref is closed and association is cleared
+        verify(ref, times(1)).close()
+        state.getNetworkRef(APeerBftNodeId) shouldBe None
+        state.getBftNodeId(APeerP2PEndpoint.id) shouldBe None
+        state.connections shouldBe empty
+      }
+
+      "be a no-op for an unknown sender" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+        state.shutdownAndCleanupActiveConnectionAndReturnEndpointIds(ASender)
+
+        state.connections shouldBe empty
+      }
+    }
+
     "retrying an outgoing connection after cleanup" should {
       "correctly report `isOutgoing` after the endpoint was already associated with a BFT node ID" in {
         val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
@@ -511,6 +547,99 @@ class P2PGrpcConnectionStateTest extends AnyWordSpec with BftSequencerBaseTest {
         state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
       }
     }
+
+    "handle an incoming connection, endpoint removal, reconnection, shutdown, " +
+      "and a different node reusing the same endpoint" in {
+        val state = new P2PGrpcConnectionState(SelfBftNodeId, loggerFactory)
+
+        // node1 has an endpoint entry for node2 (operator-configured, not yet connected)
+        // Modeled as: an outgoing network ref is added for the endpoint.
+        val outgoingRefToNode2 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PEndpointAddressId)(() => fail())(() =>
+          outgoingRefToNode2
+        )
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe true
+        state.getNetworkRef(APeerBftNodeId) shouldBe None
+
+        // node2 connects first to node1 (incoming) and authenticates as node2's BFT node ID.
+        val incomingRefFromNode2 = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail())(() =>
+          incomingRefFromNode2
+        )
+        // Authentication associates node2's endpoint (known to node1) to node2's BFT node ID:
+        // the incoming ref wins, the outgoing ref is closed.
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+        verify(outgoingRefToNode2, times(1)).close()
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(incomingRefFromNode2)
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        // Sender is registered for the incoming connection.
+        state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+        state.isConnected(APeerP2PNodeAddressId) shouldBe true
+
+        // The operator of node1 removes the endpoint of node2.
+        // The connection is still active (incoming), but its outgoing endpoint entry is dropped.
+        // Modeled as shutting down via the endpoint address ID, clearing associations.
+        state.shutdownConnectionAndReturnPeerSender(
+          APeerP2PEndpointAddressId,
+          clearNetworkRefAssociations = true,
+          closeNetworkRef = false,
+        )
+
+        // The incoming connection (by node ID) is also gone.
+        state.getNetworkRef(APeerBftNodeId) shouldBe None
+        state.isConnected(APeerP2PNodeAddressId) shouldBe false
+        // The endpoint is however still known.
+        state.isDefined(APeerP2PEndpoint.id) shouldBe true
+
+        // node2 reconnects to node1 (incoming, same node ID).
+        val incomingRefFromNode2b = newNetworkRef()
+        state.addNetworkRefIfMissing(APeerP2PNodeAddressId)(() => fail()) { () =>
+          incomingRefFromNode2b
+        }
+        // Authentication associates node2's endpoint (known to node1) to node2's BFT node ID:
+        // the incoming ref wins, the outgoing ref is closed.
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, APeerBftNodeId)
+        state.getNetworkRef(APeerBftNodeId) shouldBe Some(incomingRefFromNode2b)
+        state.isOutgoing(APeerP2PEndpoint.id) shouldBe false
+        // Sender is registered for the incoming connection.
+        state.addSenderIfMissing(APeerBftNodeId, ASender) shouldBe true
+        state.isConnected(APeerP2PNodeAddressId) shouldBe true
+
+        // node2 is then shut down, which causes sender-driven cleanup on node1.
+        state.shutdownAndCleanupActiveConnectionAndReturnEndpointIds(ASender)
+        verify(incomingRefFromNode2b, times(1)).close()
+        state.getSender(APeerP2PNodeAddressId) shouldBe None
+        state.isConnected(APeerP2PNodeAddressId) shouldBe false
+        state.getNetworkRef(APeerBftNodeId) shouldBe None
+        // No lingering peer senders nor network refs for node2, and no endpoint entry.
+        state.connections shouldBe empty
+        state.isDefined(APeerP2PEndpoint.id) shouldBe false
+
+        // node3 connects to node1 (incoming) and communicates the same endpoint of node2
+        // but with a different BFT node ID.
+        val incomingRefFromNode3 = newNetworkRef()
+        state.addNetworkRefIfMissing(AnotherPeerP2PNodeAddressId)(() => fail())(() =>
+          incomingRefFromNode3
+        )
+        // Authentication associates the reused endpoint to node3's BFT node ID.
+        state.associateP2PEndpointIdToBftNodeId(APeerP2PEndpoint.id, AnotherPeerBftNodeId)
+        state.addSenderIfMissing(AnotherPeerBftNodeId, AnotherSender) shouldBe true
+
+        // node1 and node3 are connected.
+        state.getNetworkRef(AnotherPeerBftNodeId) shouldBe Some(incomingRefFromNode3)
+        state.getSender(AnotherPeerP2PNodeAddressId) shouldBe Some(AnotherSender)
+        state.isConnected(AnotherPeerP2PNodeAddressId) shouldBe true
+        state.getBftNodeId(APeerP2PEndpoint.id) shouldBe Some(AnotherPeerBftNodeId)
+
+        // node1 has no peer senders nor network refs to node2 anymore.
+        state.getNetworkRef(APeerBftNodeId) shouldBe None
+        state.getSender(APeerP2PNodeAddressId) shouldBe None
+        state.isConnected(APeerP2PNodeAddressId) shouldBe false
+        // The only remaining connection entry maps the (previously node2's) endpoint to node3.
+        state.connections should contain only Some(APeerP2PEndpoint.id) -> Some(
+          AnotherPeerBftNodeId
+        )
+      }
 
     "consolidate network refs with multiple endpoints for the same node" should {
       "propagate the winning network ref to all associated endpoints" in {
@@ -637,6 +766,7 @@ object P2PGrpcConnectionStateTest {
   private val APeerBftNodeId = BftNodeId("2")
   private val AnotherPeerBftNodeId = BftNodeId("3")
   private val APeerP2PNodeAddressId = P2PAddress.NodeId(APeerBftNodeId).id
+  private val AnotherPeerP2PNodeAddressId = P2PAddress.NodeId(AnotherPeerBftNodeId).id
 
   private val ASender = mock[PeerSender]
   private val AnotherSender = mock[PeerSender]

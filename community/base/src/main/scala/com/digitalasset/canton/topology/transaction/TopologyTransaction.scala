@@ -204,9 +204,6 @@ final case class TopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
       )
     )
 
-  /** Indicates how to pretty print this instance. See `PrettyPrintingTest` for examples on how to
-    * implement this method.
-    */
   override protected def pretty: Pretty[TopologyTransaction.this.type] =
     prettyOfClass(
       unnamedParam(_.mapping),

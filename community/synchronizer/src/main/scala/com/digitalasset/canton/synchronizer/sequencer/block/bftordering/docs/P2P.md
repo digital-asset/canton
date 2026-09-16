@@ -1,9 +1,8 @@
-# DABFT — P2P networking subsystem
+# CantonBFT — P2P networking subsystem
 
 Context doc for the peer-to-peer layer of the BFT block orderer: how sequencer nodes find,
 **authenticate**, connect to, deduplicate, maintain, and tear down the links over which they
-exchange protocol messages. Read [`../DABFT.md`](../DABFT.md) first for the module-framework
-background — P2P is two of its seven modules plus the gRPC transport behind them.
+exchange protocol messages.
 
 Source root (paths below are relative to it unless they start with `community/`):
 `community/synchronizer/src/main/scala/com/digitalasset/canton/synchronizer/sequencer/block/bftordering/`
@@ -31,7 +30,8 @@ Two consequences drive the design:
 
 - **You dial an endpoint but address a node.** Outbound connectivity is keyed by `P2PEndpoint.Id`
   (you only know *where*). But sends from the protocol are keyed by `BftNodeId` (you know *who*).
-  **Authentication is the step that turns a *where* into a verified *who*** (`tryAddPeerEndpoint`,
+  **Authentication is the step that turns a *where* into a verified *who***
+  (`completeConnectivitySetupAfterSuccessfulAuthentication`,
   §2). Until that bridge exists, a send to that node is **dropped, not queued**
   (`P2PNetworkOutModule.networkSendIfKnown`). A connection that hasn't authenticated is, for routing
   purposes, not a connection at all.
@@ -193,12 +193,13 @@ out-module          conn-mgr actor         P2PGrpcConnectionManager            r
  6 │                                   │    ◄─ B's token in response headers ─────┘   │  §2.2 server→client
    │                                   │    AuthenticateServerClient verifies → B's SequencerId
    │                                   │    state: ConnectingOnChannel → ConnectedOnChannel
- 7 │                                   │  tryAddPeerEndpoint(seqId, sender, ep):      │
+ 7 │                                   │  completeConnectivitySetupAfter‐            │
+   │                                   │    SuccessfulAuthentication(seqId,sender,ep):│
    │                                   │    nodeId = toBftNodeId(seqId)               │
    │                                   │    associate endpointId→nodeId  (where→who)  │
    │                                   │    addSenderIfMissing(nodeId, sender)=true   │
-   │  ◄──onSequencerId(nodeId,ep)───────────────────────────────────────────         │
-   │  (Network.Authenticated → ensureConnectivity + startModulesIfNeeded)            │
+   │  ◄──onNodeId(nodeId,ep)────────────────────────────────────────────────         │
+   │  (Network.Authenticated → ensureSendingEnabledTo + startModulesIfNeeded)        │
 ```
 
 Key points, with the code that enforces them:
@@ -211,9 +212,10 @@ Key points, with the code that enforces them:
   `AuthenticateServerClientInterceptor`'s `PromiseUnlessShutdown[SequencerId]`. The connect worker
   literally `await`s that promise; a failed or absent token (5s timeout) fails the worker, not just a
   later send.
-- **Only after that promise resolves** does `tryAddPeerEndpoint` perform the where→who bind
+- **Only after that promise resolves** does
+  `completeConnectivitySetupAfterSuccessfulAuthentication` perform the where→who bind
   (`endpointId→nodeId`, `nodeId↔sender`); *that* is the moment the peer becomes addressable and
-  `onSequencerId` fires, which the out-module turns into `Network.Authenticated` and feeds into
+  `onNodeId` fires, which the out-module turns into `Network.Authenticated` and feeds into
   module-start gating.
 
 ### The outgoing channel state machine
@@ -271,7 +273,7 @@ remote peer (A)        P2PGrpcBftOrderingService        P2PGrpcConnectionManager
    │                                   │   • auth off → backfilled by receiver from first frame
    │                                   │ maybeEndpoint = peerEndpointContextKey  (A's AddEndpointHeader)
    │  ── messages ───────────────────► P2PGrpcStreamingReceiver.onNext
-   │                                   │ on sequencerId: tryAddPeerEndpoint(seqId, sender, maybeEp)
+   │                                   │ on sequencerId: completeConnectivitySetupAfterSuccessfulAuthentication(seqId, sender, maybeEp)
 ```
 
 For an incoming connection, "who is on the other end" was already answered by the standard
@@ -279,7 +281,8 @@ client→server flow **before** `receive` even runs: A's token was verified by
 `authenticationServerInterceptor` and A's verified id placed in the gRPC `Context`, which
 `extractSequencerIdFromGrpcContextInto` reads out. (Meanwhile this node, as server, also ran the
 reverse flow in its response headers so that *A* could authenticate *it*.) Same destination
-(`tryAddPeerEndpoint` → a verified peer `SequencerId`, the where→who bind), different source than §3.
+(`completeConnectivitySetupAfterSuccessfulAuthentication` → a verified peer `SequencerId`, the
+where→who bind), different source than §3.
 
 The crucial asymmetry: **an incoming connection may not tell you its endpoint.** With auth off (or a
 misbehaving/edge-case peer) the client might omit, or send a different, `AddEndpointHeader`. Then
@@ -298,8 +301,9 @@ connections (one per direction). They must collapse to **one** bidirectional str
 once identity is known (§2):
 
 - `addSenderIfMissing(nodeId, sender)` is the referee. The **first** stream to authenticate for a
-  given `nodeId` wins (`true` → bound, `onSequencerId` fires). The **second** loses (`false`) and
-  its `peerSender` is immediately completed/closed (`tryAddPeerEndpoint`), which closes that stream
+  given `nodeId` wins (`true` → bound, `onNodeId` fires). The **second** loses (`false`) and
+  its `peerSender` is immediately completed/closed
+  (`completeConnectivitySetupAfterSuccessfulAuthentication`), which closes that stream
   **end-to-end** — the counterparty's receiver sees `onCompleted` and tears its half down too.
 - `getPeerSenderOrStartConnection` also short-circuits proactively: if a usable sender already
   exists (e.g. via an incoming connection), it `shutdownOutgoingConnectionIfNeeded(...,
@@ -322,19 +326,20 @@ deadlock — *provided the closes actually propagate* (when they may not, see §
 
 ### 5.2 Identity equivocation — the security boundary
 
-Authentication established *who* a peer is; this map keeps that binding honest. The
-`endpointId→nodeId` map is **monotonic**: once set it cannot be silently re-pointed.
-`State.associateP2PEndpointIdToBftNodeId` rejects two cases, logging at WARN and marking a
-`security.noncompliant` metric (`emitIdentityEquivocation`):
-
-- `P2PEndpointIdAlreadyAssociated` — an endpoint already bound to node A now (re)authenticates as
-  node B ("possible impersonation attempt"); `tryAddPeerEndpoint` throws, failing that sender.
-- `CannotAssociateP2PEndpointIdsToSelf` — a peer authenticates as *this* node.
+Authentication established *who* a peer is; this map keeps that binding honest.
+`State.associateP2PEndpointIdToBftNodeId` rejects the one impersonation attempt it currently
+enforces, logging at WARN and marking a `security.noncompliant` metric (`emitIdentityEquivocation`):
+`CannotAssociateP2PEndpointIdsToSelf` — a peer authenticates as *this* node. The error also fails the
+connectivity-setup future, so the offending stream doesn't become usable.
+Re-associating a known endpoint to a *different* authenticated node id is **not** currently rejected:
+the `P2PEndpointIdAlreadyAssociated` error exists (and is handled by the connection manager), but the
+branch that would produce it is commented out, so the association is just updated and logged at INFO.
+Hardening this is tracked by #34191.
 
 A separate check guards the data path: `P2PGrpcStreamingReceiver.validateNodeId` drops any frame
 whose `sentBy` disagrees with the authenticated `SequencerId` (metric
 `WrongGrpcMessageSentByBftNodeId`) and fails the stream. (Payload *signatures* are still verified
-later, downstream, against the inner signed message's `from` field — see `../DABFT.md`.)
+later, downstream, against the inner signed message's `from` field.)
 
 ### 5.3 Retries — two independent loops
 
@@ -358,13 +363,63 @@ all under `P2PConnectionManagementConfig`.
 
 ### 5.4 Disconnect and shutdown
 
-- **Admin / topology-driven** (`P2PNetworkOut.Admin.RemoveEndpoint`, `Internal.Disconnect`) →
+- **Admin / topology-driven** (`P2PNetworkOut.Admin.RemoveEndpoint`, `Internal.EndpointRemoved`) →
   `shutdownConnection(endpointId, clearNetworkRefAssociations=true, closeNetworkRefs=true)`:
   removes associations, completes the sender, shuts the channel, fires `onDisconnect`. A subsequent
   send re-dials and re-authenticates from scratch.
-- **Remote-initiated** (`onError`/`onCompleted` on the receiver) → `shutdown…DueToRemoteCompletion`:
-  cleans up the sender and notifies disconnection **without** clearing associations or closing refs,
-  because the connection is expected to be re-established.
+- **Remote-initiated, outgoing** (`onError`/`onCompleted` on an outgoing connection's receiver) →
+  `shutdownOutgoingConnectionDueToRemoteCompletion`: shuts the outgoing channel, completes the
+  sender and notifies disconnection (`cleanupPeerSender`), but **keeps** the node↔endpoint
+  association and the network ref, because this node manages that connection and its connect worker
+  is expected to re-establish and re-authenticate it.
+- **Remote-initiated, incoming** (`onError`/`onCompleted` on an incoming connection's receiver) →
+  `shutdownIncomingConnectionDueToRemoteCompletion`: completes the sender and fully clears the
+  active connection state (`shutdownAndCleanupActiveConnection` → `clearActiveConnectionState`),
+  removing the network-ref associations and **closing** the network ref. Incoming connections aren't
+  managed by this node, so there is nothing to re-establish at the transport level (the peer re-dials
+  if needed), and a retained ref would wrongly re-assert the transient node↔endpoint association or
+  keep a dead stream addressable. The endpoint→node-id mapping is also cleared.
+- **Re-arming configured endpoints after any disconnection.** Because the cleanup above erases *all*
+  runtime state for the endpoint, `P2PNetworkOut` re-asserts the invariant "every **configured**
+  endpoint has a network ref" on every `Network.Disconnected`: it looks the endpoint up in its
+  module-local cache of configured endpoints and, if it is still there, calls
+  `ensureSendingEnabledTo` (§3, via `reconnectIfStillConfigured`) **synchronously**, i.e. on the
+  module thread, while processing the disconnection. This
+  is idempotent (`addNetworkRefIfMissing` is a no-op when a ref exists), so it only bites when the
+  state was actually erased. Without it, a peer that *won* deduplication with an incoming connection
+  and then dropped it (e.g. its operator removed this node's endpoint, so it will never re-dial)
+  would leave this node permanently disconnected from a peer it is configured to connect to, with
+  sends silently dropped by `networkSendIfKnown` and the endpoint absent from `Admin.GetStatus`,
+  recoverable only by a restart or an admin remove/re-add.
+  **The configured-endpoint lookup is load-bearing, not a mere policy check**, for two independent
+  reasons: (i) a disconnection only carries a `P2PEndpoint.Id` = `(address, port, tls)`, whereas
+  dialing a TLS peer also needs `endpointConfig.tlsConfig` (trust collection, client cert), which
+  neither the ID nor the endpoint-ID-keyed connection state retains — rebuilding an endpoint from its
+  ID would silently drop the operator's TLS client material; and (ii) disconnections are *also*
+  notified for endpoints that are not configured here, so the lookup is what prevents both
+  resurrecting an endpoint the operator just removed and dialing a node that merely connected *to* us
+  (incoming connections advertise an endpoint for dedup, §2.3, and their teardown notifies a
+  disconnection for it).
+  **Why a cache and not a store read.** The cache is what makes the decision *synchronous*, and hence
+  race-free against a concurrent `Admin.RemoveEndpoint`: reading `P2PEndpointsStore` completes
+  asynchronously, so a removal processed in between could be undone by a reconnection based on a
+  stale snapshot. It is safe to keep, because after `BftBlockOrderer`'s bootstrap `P2PNetworkOut` is
+  the only writer of the endpoint *set* (`P2PGrpcConnectionManager` only calls `associate` on
+  successful authentication, implemented as an `update … where` keyed on the endpoint id, so it can
+  only set an existing row's `node_id` and never insert or remove). Coherence is achieved by mutating
+  it exclusively on the module thread: it is seeded from the store when handling `Start`, and updated
+  when handling `Internal.EndpointAdded` / `Internal.EndpointRemoved`, which the admin `pipeToSelf`
+  continuations emit **unconditionally** (they also carry the connect/disconnect decision, which is
+  likewise taken on the module thread against the runtime connection state).
+  The stored `node_id` is deliberately *ignored* when (re)establishing outgoing connectivity, both on
+  this path and in `connectInitialNodes`: connections are always ensured by **endpoint**, because the
+  peer must re-authenticate (§2) before it is addressable by node id again. Asserting a stored
+  association upfront would register the network ref under the node id, which
+  `addNetworkRefIfMissing` treats as *incoming* (`isOutgoingConnection = false`), and would make the
+  endpoint report `Authenticated` as soon as its gRPC channel is up but before any authentication —
+  inflating `maxNodesContemporarilyAuthenticated` and potentially starting Availability/Consensus
+  below their quorum of genuinely authenticated nodes. The persisted node id is for operator
+  visibility (`Admin.ListConfiguredEndpoints`) only; durable identity pinning is tracked by #34191.
 - **Manager close** drains every connection (`closeConnectionState`) and, per endpoint, waits for the
   connect worker to finish before shutting the channel (`closeAsync`), avoiding orphaned gRPC
   channels (channel shutdown blocks on a dedicated long-running executor). The server-side
@@ -383,8 +438,9 @@ The dedup and "shared fate per stream" guarantees in §5.1 assume a stream close
 (`onCompleted`/`onError`) actually reaches the counterparty. It is gRPC trailers / `RST_STREAM` /
 `GOAWAY` over TCP, with **no delivery guarantee and no application-level ACK** — under a network
 partition, blackhole, NAT/firewall idle-eviction, or an abrupt peer-host crash (no FIN/RST at all),
-the close may never arrive. Liveness therefore also leans on keepalive and send-failure, and these
-are **asymmetric** between the two ends of a connection:
+the close may never arrive. Liveness therefore also leans on keepalive and send-failure. Keepalive is
+now enabled on **both** ends, so the *mechanism* is symmetric; the *timing* is not, because each side
+runs an independent timer measured from its own last read:
 
 - **Dialer (gRPC client of the stream): keepalive ON.** P2P client channels use
   `ClientChannelParams.Default` → `KeepAliveClientConfig()`: PING after **40s** of read-inactivity,
@@ -392,29 +448,42 @@ are **asymmetric** between the two ends of a connection:
   long-lived `Receive` RPC keeps a call active, so PINGs flow even on an idle-but-established stream
   → the dialer detects a dead/half-open link in **~55s without app traffic**; the 15s timeout also
   sets the socket `TCP_USER_TIMEOUT`, so unacked sends fail within ~15s.
-- **Acceptor (gRPC server of the stream): keepalive OFF.** `P2PServerConfig.keepAliveServer = None`.
-  The acceptor sends no PINGs and has no `TCP_USER_TIMEOUT`; it detects death only via its **own
-  outbound send failing** (a prompt TCP RST once a path heals, otherwise the default TCP-retransmit
-  timeout — minutes) or by eventually receiving the peer's close.
+- **Acceptor (gRPC server of the stream): keepalive ON too.**
+  `P2PServerConfig.keepAliveServer = Some(BasicKeepAliveServerConfig())`: PING after **40s** of
+  read-inactivity, **20s** ACK timeout, `permitKeepAliveTime = 20s`,
+  `permitKeepAliveWithoutCalls = false` (`config/ServerConfig.scala`,
+  `core/BftBlockOrdererConfig.scala`). The server's keepalive manager is active while the
+  long-lived `Receive` call is in flight, so the acceptor detects a dead/half-open link in
+  **~60s without app traffic**, instead of having to wait for its own outbound send to fail (a
+  prompt TCP RST once a path heals, otherwise TCP-retransmit timescales — minutes) or for the
+  peer's close to arrive. Note the compatibility constraint: the dialer's 40s PING interval is
+  ≥ the acceptor's `permitKeepAliveTime` (20s), so client PINGs are never punished with an
+  `ENHANCE_YOUR_CALM` / `too_many_pings` `GOAWAY`.
 
-**The duplicate-rejection loop.** Combine a non-propagated close, the acceptor's weaker detection,
-and §5.1's referee, and a *transient* version of the asymmetric "one side up, the other perpetually
-rejected" loop can occur. Surviving link `X = A→B` (A dialer, B acceptor); partition, then heal:
+**The duplicate-rejection loop.** Combine a non-propagated close, the fact that each side runs its
+own independent detection timer, and §5.1's referee, and a *transient* version of the asymmetric "one
+side up, the other perpetually rejected" loop can still occur. Surviving link `X = A→B` (A dialer, B
+acceptor); partition, then heal:
 
-1. A's keepalive fails (~55s) → A tears down `X` and re-dials; A's `GOAWAY` to B is lost (still
-   partitioned).
-2. B has no keepalive, isn't told, and keeps the **stale** `bftNodeIdToPeerSender[A]` from `X`.
-3. Heal: A's re-dial `X'` authenticates at B → `addSenderIfMissing(A, …)` returns **false** (a
-   sender for A already exists) → B **rejects `X'` as a duplicate** and closes it.
+1. A's keepalive fails (~55s after A's last read on `X`) → A tears down `X` and re-dials; A's
+   `GOAWAY` to B is lost (still partitioned).
+2. B's own keepalive hasn't fired yet, so B keeps the **stale** `bftNodeIdToPeerSender[A]` from `X`.
+3. Heal before B's deadline: A's re-dial `X'` authenticates at B → `addSenderIfMissing(A, …)` returns
+   **false** (a sender for A already exists) → B **rejects `X'` as a duplicate** and closes it.
 4. A's receiver sees the close → tears down → re-dials → rejected again. **Loop.**
 
-It is **bounded, not permanent**: it ends when B's stale `X` clears, which happens on **B's next send
-to A** over the dead socket — post-heal that draws a prompt TCP RST (A closed the socket), so chatty
-BFT peers recover in seconds; a silent acceptor can drag toward TCP-retransmit timescales (minutes).
-There is no stale-sender liveness check, nor an `addSenderIfMissing` tiebreaker, that shortcuts it.
+It is **bounded by B's own keepalive deadline**, not by the nominal 5s difference between the two
+timeouts. Each side measures from *its own* last read, and those instants can be far apart under
+asymmetric application traffic: if B was reading from A shortly before the partition while A had been
+idle, B's ~60s window starts much later than A's ~55s one, so B can hold the stale sender for close
+to a **full ~60s after A has already timed out** (and the loop lasts for whatever part of that window
+remains once the path heals). The bound is therefore "until B's ~60s deadline, measured from B's last
+read on `X`", with two ways to end sooner: B's next send to A over the dead socket, which post-heal
+draws a prompt TCP RST (A closed the socket), or the peer's close finally arriving. With server
+keepalive on, a silent acceptor no longer drags toward TCP-retransmit timescales.
 
-> **Caveats.** The keepalive values and the client-on/server-off split are from config; the loop
-> *dynamics* are reasoned from gRPC/TCP semantics, not an observed test. And the deterministic
+> **Caveats.** The keepalive values are from config; the loop *dynamics* are reasoned from
+> gRPC/TCP semantics, not an observed test. And the deterministic
 > simulator does **not** exercise this: `NetworkSimulator` replaces the entire gRPC transport, so
 > real keepalive and close-propagation behavior live only in the gRPC binding and would surface only
 > in integration/chaos testing (e.g. Toxiproxy partition-then-heal), not the sim.
@@ -431,7 +500,12 @@ and Consensus at strong quorum (`strongQuorumSize(4)` = 3 others). The peak coun
 flapping right at the threshold doesn't stall startup. (`P2PNetworkOutModule.startModulesIfNeeded`.)
 
 **(b) Operator adds a peer at runtime.** `Admin.AddEndpoint(ep)` → persist to `P2PEndpointsStore`
-→ on success `Internal.Connect(ep)` → `ensureConnectivity(Endpoint(ep))` → §3 (dial + authenticate).
+→ on success `Internal.EndpointAdded(ep)` → cache the configured endpoint and, unless it is already
+known at runtime, `ensureSendingEnabledTo(Endpoint(ep))` → §3 (dial + authenticate). Because the store is
+insert-only for the endpoint set, a re-add of an already-configured endpoint ID does **not** overwrite
+its TLS client material, and the cache mirrors that with `getOrElseUpdate`; dialing therefore uses the
+value the cache *returns* (the persisted endpoint), never the rejected argument, so a duplicate
+`AddEndpoint` carrying different TLS material can't open a connection with unpersisted configuration.
 If the peer was already connected inbound, §5.1 collapses the new outgoing attempt.
 
 **(c) Asymmetric config (A→B only).** A dials B and they authenticate mutually (A still advertises
@@ -442,15 +516,31 @@ needed. If that link drops, A's connect-worker backoff re-establishes and re-aut
 
 **(d) Impersonation attempt.** A forged or expired token is rejected by the standard or reverse auth
 interceptor, failing the call with `UNAUTHENTICATED` before any id is bound (§2.4). If a peer at a
-known endpoint authenticates as a *different* node id than previously recorded, the binding stage
-catches it: `P2PEndpointIdAlreadyAssociated`, WARN + security metric, sender failed, no state change
-(§5.2).
+known endpoint authenticates as *this* node id, the binding stage catches it:
+`CannotAssociateP2PEndpointIdsToSelf`, WARN + security metric, the association is not made and the
+setup future fails (§5.2). A peer that authenticates at a known endpoint as a *different* node id
+than previously recorded is, in contrast, currently **accepted**: the association is simply updated
+and logged at INFO (`P2PEndpointIdAlreadyAssociated` exists and is handled, but the code that would
+emit it is commented out; durable identity pinning is tracked by #34191).
 
 **(e) Partition that heals (the duplicate-rejection loop).** A link `X = A→B` is silently
-partitioned. A's keepalive tears `X` down in ~55s and A re-dials; B (no keepalive) keeps a stale
-sender for A. On heal, A's reconnects are rejected by B as duplicates until B's next send to A draws
-a TCP RST and clears the stale sender — a transient loop, bounded but not instant. Full mechanics and
-caveats in §5.6.
+partitioned. A's keepalive tears `X` down ~55s after A's last read and A re-dials; B's independent
+~60s timer, measured from *B's* last read, may still be far from expiring, so B keeps a stale sender
+for A. If the path heals before B's deadline, A's reconnects are rejected by B as duplicates until
+that deadline (or until B's next send to A draws a TCP RST) clears the stale sender — a transient
+loop bounded by B's own keepalive deadline, which under asymmetric traffic can be nearly a full ~60s
+after A timed out. Full mechanics and caveats in §5.6.
+
+**(f) The peer wins, then unilaterally leaves.** A and B are both configured for each other. B dials
+first and wins deduplication, so the surviving link is *incoming* at A; A's own outgoing attempt is
+closed as a duplicate and its channel entry removed (§5.1). B's operator then runs
+`RemoveEndpoint(A)`: B tears its outgoing connection down and will never re-dial. A's server-side
+receiver sees the close and runs the *incoming* cleanup (§5.4), which erases the network ref, the
+sender, and the `endpointId→nodeId` binding for B. At that point nothing at the transport layer is
+left to retry, and `connectInitialNodes` only ever runs once, on `Start`. The re-arming step in
+§5.4 is what closes the gap: A consults its module-local cache, still finds B's endpoint, and dials
+again, so the pair reconverges on a single link owned by A. (Covered by `P2PNetworkOutModuleTest`, "an
+endpoint gets disconnected" → "re-establish an outgoing connection to it".)
 
 ---
 
@@ -471,11 +561,12 @@ under `src/test/.../bindings/p2p/grpc/`; module logic under `src/test/.../core/m
 ## 8. Reference: modules, wire protocol, config
 
 ### P2PNetworkOut — `core/modules/p2p/P2PNetworkOutModule.scala` (trait `framework/modules/P2PNetworkOut.scala`)
-The send side and connection orchestrator. Also a `P2PConnectionEventListener` (its `onConnect` /
-`onDisconnect` / `onSequencerId` callbacks become `Network.Connected` / `Disconnected` /
-`Authenticated` self-messages). Message ADT: `Start`, `Internal.{Connect,Disconnect}`,
+The send side and connection orchestrator. Also, a `P2PConnectionEventListener` (its `onConnect` /
+`onDisconnect` / `onNodeId` callbacks become `Network.Connected` / `Disconnected` /
+`Authenticated` self-messages). Message ADT: `Start`, `Internal.{EndpointAdded,EndpointRemoved}`,
 `Network.{Connected,Disconnected,Authenticated,TopologyUpdate}`, `Admin.{AddEndpoint,RemoveEndpoint,
-GetStatus}`, `Multicast(message, destinationBftNodeIds)`. Responsibilities: send (drop if no ref for
+ListConfiguredEndpoints,GetStatus}`, `Multicast(message, destinationBftNodeIds)`,
+`SendToRandomAuthenticated(…)`, `EndWorkflow(workflowId)`. Responsibilities: send (drop if no ref for
 the node; iterate recipients **sorted** for determinism; loop self-sends back into `P2PNetworkIn`),
 **module-start gating** (boots Mempool/Output/Pruning immediately, Availability at weak quorum,
 Consensus at strong quorum), and pushing `Mempool.P2PConnectivityUpdate` so the mempool knows it has
@@ -506,7 +597,9 @@ replace the stored set at startup.
 - `serverEndpoint: P2PServerConfig` — internal bind `address`/`internalPort`; **external**
   `externalAddress`/`externalPort` that peers dial and reverse-authenticate against (may be a
   TLS-terminating proxy); `externalTlsConfig` (client TLS used when calling a peer back to
-  authenticate); `tls` (server TLS); `maxInboundMessageSize`.
+  authenticate); `tls` (server TLS); `maxInboundMessageSize`; `keepAliveServer`, defaulting to
+  `BasicKeepAliveServerConfig()` (40s PING / 20s timeout, `permitKeepAliveTime` 20s), which is what
+  gives the acceptor side its own failure detection (§5.6).
 - `endpointAuthentication: P2PNetworkAuthenticationConfig` — `enabled` (keep true outside tests) +
   `authToken` manager config (drives `AuthenticationInitialState.authTokenConfig`).
 - `connectionManagementConfig: P2PConnectionManagementConfig` — the connect-worker retry knobs from

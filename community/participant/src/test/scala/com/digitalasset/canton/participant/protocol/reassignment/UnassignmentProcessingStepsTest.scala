@@ -29,7 +29,11 @@ import com.digitalasset.canton.participant.admin.party.OnboardingClearanceSchedu
 import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
-import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
+import com.digitalasset.canton.participant.metrics.{
+  ParticipantTestMetrics,
+  ReassignmentMetrics,
+  TestReassignmentMetrics,
+}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.{
   IncompleteLightViewTree,
@@ -322,6 +326,7 @@ final class UnassignmentProcessingStepsTest
       cryptoClient: SynchronizerCryptoClient = cryptoClient,
       contractValidator: ContractValidator = ContractValidator.AllowAll,
       participantId: ParticipantId = submittingParticipant,
+      reassignmentMetrics: ReassignmentMetrics = TestReassignmentMetrics(),
   ) =
     new UnassignmentProcessingSteps(
       sourceSynchronizer,
@@ -333,6 +338,7 @@ final class UnassignmentProcessingStepsTest
       contractValidator,
       clock,
       Source(testedProtocolVersion),
+      reassignmentMetrics,
       loggerFactory,
     )(executorService)
 

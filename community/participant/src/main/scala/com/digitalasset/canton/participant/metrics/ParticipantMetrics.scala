@@ -23,7 +23,8 @@ import com.digitalasset.canton.platform.apiserver.services.metrics.{
   TrafficEnforcementInventory,
   TrafficEnforcementMetrics,
 }
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.concurrent.TrieMap
 
@@ -289,8 +290,12 @@ class ParticipantMetrics(
   // we use this environment variable approach to guard against instantiation in production; but
   // register the metric for the documentation generation.
   if (sys.env.contains("GENERATE_METRICS_FOR_DOCS")) {
-    val dummyPsid = PhysicalSynchronizerId.tryFromString(
-      "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1::34-0"
+    val dummyPsid = PhysicalSynchronizerId(
+      SynchronizerId.tryFromString(
+        "da::1220c72c0cdfb591769534ae47a26ee7b2f8ea55e86380eb38499f3fae4702744fe1"
+      ),
+      NonNegativeInt.zero,
+      ProtocolVersion.latest,
     )
 
     resetLsuStatus(dummyPsid)
@@ -326,6 +331,8 @@ class ConnectedSynchronizerHistograms private[metrics] (
     new TransactionProcessingHistograms(prefix)
 
   private[metrics] val commitments: CommitmentHistograms = new CommitmentHistograms(prefix)
+
+  private[metrics] val reassignments: ReassignmentHistograms = new ReassignmentHistograms(prefix)
 
 }
 
@@ -376,6 +383,9 @@ class ConnectedSynchronizerMetrics private[metrics] (
 
   val transactionProcessing: TransactionProcessingMetrics =
     new TransactionProcessingMetrics(histograms.transactionProcessing, factory)
+
+  val reassignments: ReassignmentMetrics =
+    new ReassignmentMetrics(histograms.reassignments, factory)
 
   val numInflightValidations: Counter = factory.counter(
     MetricInfo(

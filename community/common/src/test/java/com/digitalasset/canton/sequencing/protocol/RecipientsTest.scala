@@ -50,7 +50,7 @@ class RecipientsTest
       fromProto shouldBe Right(recipients)
     }
 
-    "deserialization checks the limits" onlyRunWithOrGreaterThan ProtocolVersion.boundsCheck in {
+    "deserialization checks the limits" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val limits = SynchronizerLimits.defaultFor(testedProtocolVersion)
 
       val t123 = RecipientsTree.recipientsLeaf(NonEmpty.mk(Set, recP1, recP2, recP3))

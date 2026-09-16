@@ -4,7 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules
 
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.WriteReadiness
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
@@ -49,9 +53,15 @@ object Mempool {
       membership: Membership,
       authenticatedCountIncludingSelf: Int,
   ) extends Message
-      with PrettyPrinting {
+      with PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[P2PConnectivityUpdate] =
+    override def prettyCompanion: PrettyPrintingCompanion[P2PConnectivityUpdate] =
+      P2PConnectivityUpdate
+  }
+
+  object P2PConnectivityUpdate extends PrettyPrintingCompanion[P2PConnectivityUpdate] {
+
+    override protected val pretty: Pretty[P2PConnectivityUpdate] =
       prettyOfClass(
         param("membership", _.membership),
         param("authenticatedCountIncludingSelf", _.authenticatedCountIncludingSelf),

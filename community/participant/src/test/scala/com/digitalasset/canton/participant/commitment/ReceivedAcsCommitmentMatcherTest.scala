@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Signature
@@ -60,7 +59,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.immutable
 import scala.language.implicitConversions
 
-@AcsCommitmentTest
 class ReceivedAcsCommitmentMatcherTest
     extends TestKit(ActorSystem(classOf[ReceivedAcsCommitmentMatcherTest].getSimpleName))
     with BaseTestWordSpec
@@ -161,7 +159,7 @@ class ReceivedAcsCommitmentMatcherTest
     CommitmentPeriod.tryCreate(from, to)
 
   "ReceivedAcsCommitmentMatcher" should {
-    "process a received ACS commitment and handle mismatch/mismatches" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "process a received ACS commitment and handle mismatch/mismatches" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -217,7 +215,7 @@ class ReceivedAcsCommitmentMatcherTest
       metrics.matchingWatermark.getValue shouldBe ts(42).toMicros
     }
 
-    "process matching after mismatching commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "process matching after mismatching commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -258,7 +256,7 @@ class ReceivedAcsCommitmentMatcherTest
       metrics.matchingWatermark.getValue shouldBe ts(12).toMicros
     }
 
-    "ignore parse errors" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "ignore parse errors" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -292,7 +290,7 @@ class ReceivedAcsCommitmentMatcherTest
     }
 
     // TODO(#34324) Change this so that they are not ignored
-    "ignore unexpected commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "ignore unexpected commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -303,7 +301,7 @@ class ReceivedAcsCommitmentMatcherTest
       metrics.matchingWatermark.getValue shouldBe ts(4).toMicros
     }
 
-    "handle multiple envelopes in the same container" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "handle multiple envelopes in the same container" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -375,7 +373,7 @@ class ReceivedAcsCommitmentMatcherTest
       metrics.matchingWatermark.getValue shouldBe ts(20).toMicros
     }
 
-    "tolerate overlapping and duplicate commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "tolerate overlapping and duplicate commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -403,7 +401,7 @@ class ReceivedAcsCommitmentMatcherTest
       metrics.matchingWatermark.getValue shouldBe ts(14).toMicros
     }
 
-    "correctly process many queued commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "correctly process many queued commitments" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 
@@ -424,7 +422,7 @@ class ReceivedAcsCommitmentMatcherTest
       metrics.matchingWatermark.getValue shouldBe ts(count + 1).toMicros
     }
 
-    "process commitments from different participants concurrently and sequentially per participant" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "process commitments from different participants concurrently and sequentially per participant" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val stringInterning = new MockStringInterning()
       val store = new InMemoryAcsCommitmentPeriodStore(
         Eval.now(stringInterning),
@@ -537,7 +535,7 @@ class ReceivedAcsCommitmentMatcherTest
         ts(22).toMicros
     }
 
-    "increase the watermark upon offset checkpoints" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+    "increase the watermark upon offset checkpoints" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
       val fixture = new Fixture(p1)
       import fixture.*
 

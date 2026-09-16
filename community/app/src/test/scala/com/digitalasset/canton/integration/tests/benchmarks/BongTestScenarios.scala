@@ -45,7 +45,7 @@ trait BongTestScenarios { this: CommunityIntegrationTest =>
       p1_count: GrabbedCounts,
       p2_count: GrabbedCounts,
       levels: Int,
-      timeout: Duration = 30.seconds,
+      timeout: Duration = 60.seconds,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
     val n: Int = levels

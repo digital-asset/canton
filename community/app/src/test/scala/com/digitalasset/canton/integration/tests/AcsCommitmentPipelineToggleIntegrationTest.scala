@@ -8,7 +8,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SynchronizerConnectionConfig,
 }
-import com.digitalasset.canton.annotations.AcsCommitmentTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
@@ -55,39 +54,38 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
       )
 
   // setup happens as a test case rather than `withSetup` so that we don't repeat this on the other environments we create in the test
-  "setup the environment" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
-    implicit env =>
-      import env.*
+  "setup the environment" onlyRunWithOrGreaterThan ProtocolVersion.v36 in { implicit env =>
+    import env.*
 
-      sequencer1.topology.synchronisation.await_idle()
-      sequencer2.topology.synchronisation.await_idle()
-      initializedSynchronizers foreach { case (_, initializedSynchronizer) =>
-        initializedSynchronizer.synchronizerOwners.foreach(
-          _.topology.synchronizer_parameters
-            .propose_update(
-              initializedSynchronizer.synchronizerId,
-              _.update(reconciliationInterval = config.PositiveDurationSeconds(interval)),
-            )
-        )
-      }
-
-      // Set the observation latency to 0 such that `await_time` works in sim clock
-      val daSequencerConnection =
-        SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
-      participants.all.synchronizers.connect(
-        SynchronizerConnectionConfig(
-          synchronizerAlias = daName,
-          sequencerConnections = daSequencerConnection,
-          timeTracker = SynchronizerTimeTrackerConfig(
-            observationLatency = config.NonNegativeFiniteDuration.Zero
-          ),
-        )
+    sequencer1.topology.synchronisation.await_idle()
+    sequencer2.topology.synchronisation.await_idle()
+    initializedSynchronizers foreach { case (_, initializedSynchronizer) =>
+      initializedSynchronizer.synchronizerOwners.foreach(
+        _.topology.synchronizer_parameters
+          .propose_update(
+            initializedSynchronizer.synchronizerId,
+            _.update(reconciliationInterval = config.PositiveDurationSeconds(interval)),
+          )
       )
-      participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
-      participants.all.foreach { p =>
-        p.dars.upload(CantonExamplesPath, synchronizerId = daId)
-        p.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
-      }
+    }
+
+    // Set the observation latency to 0 such that `await_time` works in sim clock
+    val daSequencerConnection =
+      SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
+    participants.all.synchronizers.connect(
+      SynchronizerConnectionConfig(
+        synchronizerAlias = daName,
+        sequencerConnections = daSequencerConnection,
+        timeTracker = SynchronizerTimeTrackerConfig(
+          observationLatency = config.NonNegativeFiniteDuration.Zero
+        ),
+      )
+    )
+    participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
+    participants.all.foreach { p =>
+      p.dars.upload(CantonExamplesPath, synchronizerId = daId)
+      p.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
+    }
   }
 
   private def stopAllNodes()(implicit env: TestConsoleEnvironment): Unit = {
@@ -242,7 +240,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
     }
   }
 
-  "happily toggle pipeline disabled/enabled" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
+  "happily toggle pipeline disabled/enabled" onlyRunWithOrGreaterThan ProtocolVersion.v36 in {
     disabledEnv =>
       {
         implicit val env: TestConsoleEnvironment = disabledEnv
@@ -356,7 +354,6 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
   }
 }
 
-@AcsCommitmentTest
 class AcsCommitmentPipelineToggleIntegrationTestPostgres
     extends AcsCommitmentPipelineToggleIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

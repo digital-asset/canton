@@ -3,7 +3,12 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrinting,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.store.ActiveContractStore
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 
@@ -18,12 +23,16 @@ import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 final case class ActivenessResult(
     contracts: ActivenessCheckResult[LfContractId, ActiveContractStore.Status],
     inactiveReassignments: Set[ReassignmentId],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   def isSuccessful: Boolean =
     contracts.isSuccessful && inactiveReassignments.isEmpty
 
-  override protected def pretty: Pretty[ActivenessResult] =
+  override def prettyCompanion: PrettyPrintingCompanion[ActivenessResult] = ActivenessResult
+}
+
+object ActivenessResult extends PrettyPrintingCompanion[ActivenessResult] {
+  override protected val pretty: Pretty[ActivenessResult] =
     prettyOfClass(
       param("contracts", _.contracts, !_.contracts.isEmpty),
       paramIfNonEmpty("inactiveReassignments", _.inactiveReassignments),
@@ -46,7 +55,10 @@ final case class ActivenessResult(
   *   that were already locked as the prior state of a locked item is not known during conflict
   *   detection. Mapped to [[scala.None$]] if the item is fresh.
   */
-private[conflictdetection] final case class ActivenessCheckResult[Key, Status <: PrettyPrinting](
+private[conflictdetection] final case class ActivenessCheckResult[
+    Key,
+    Status <: PrettyPrintingFromCompanion,
+](
     alreadyLocked: Set[Key],
     notFresh: Set[Key],
     unknown: Set[Key],

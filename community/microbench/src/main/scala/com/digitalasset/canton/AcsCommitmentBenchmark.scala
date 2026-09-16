@@ -503,7 +503,10 @@ class AcsCommitmentBenchmark
       ) {
 
     val synchronizer: ConnectedSynchronizerMetrics =
-      this.connectedSynchronizerMetrics(SynchronizerAlias.tryCreate("test"))
+      this.connectedSynchronizerMetrics(
+        SynchronizerAlias.tryCreate("test"),
+        ParticipantId.tryFromProtoPrimitive("dummy::node"),
+      )
   }
 
   @nowarn("cat=deprecation")

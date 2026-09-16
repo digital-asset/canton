@@ -37,7 +37,7 @@ CODEOWNERS @DACH-NY/canton-change-owners
 /community/kms-driver-api @DACH-NY/canton-change-owners @soren-da
 
 # Crypto changes need to be explicitly reviewed
-/community/base/src/main/scala/com/digitalasset/canton/crypto @soren-da @JoaoSa-da @andreaslochbihler-da
+/community/base/src/main/scala/com/digitalasset/canton/crypto @soren-da @JoaoSa-da @andreaslochbihler-da @simran-da
 
 # Changes to SHA256 checksum files must be flagged
 *.sha256          @DACH-NY/canton-change-owners

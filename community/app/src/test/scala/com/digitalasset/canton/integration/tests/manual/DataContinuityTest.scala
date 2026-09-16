@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.manual
 import better.files.*
 import com.daml.ledger.api.v2.CommandsOuterClass
 import com.daml.ledger.javaapi.data.DisclosedContract
+import com.digitalasset.canton.admin.api.client.data.SynchronizerLimits
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel.Ignore
 import com.digitalasset.canton.config.{DbConfig, RequireTypes, StorageConfig}
@@ -350,7 +351,11 @@ trait DataContinuityTest
       n: NetworkTopologyDescription,
       pv: ProtocolVersion,
   ): NetworkTopologyDescription =
-    n.focus(_.staticSynchronizerParameters.protocolVersion).replace(pv)
+    n
+      .focus(_.staticSynchronizerParameters.protocolVersion)
+      .replace(pv)
+      .focus(_.staticSynchronizerParameters.synchronizerLimits)
+      .replace(SynchronizerLimits.defaultFor(pv))
 }
 
 trait DataContinuityTestFixturePostgres extends DataContinuityTest {

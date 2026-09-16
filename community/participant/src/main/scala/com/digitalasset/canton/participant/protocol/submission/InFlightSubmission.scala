@@ -6,7 +6,11 @@ package com.digitalasset.canton.participant.protocol.submission
 import cats.Functor
 import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightByMessageId
 import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.sequencing.protocol.MessageId
@@ -53,7 +57,7 @@ final case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo]
     rootHashO: Option[RootHash],
     sequencingInfo: SequencingInfo,
     submissionTraceContext: TraceContext,
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
   def messageId: MessageId = MessageId.fromUuid(messageUuid)
 
@@ -78,21 +82,15 @@ final case class InFlightSubmission[+SequencingInfo <: SubmissionSequencingInfo]
       case SequencedSubmission(sequencingTime) => sequencingTime
     }
 
-  override protected def pretty: Pretty[InFlightSubmission.this.type] = prettyOfClass(
-    param("change ID hash", _.changeIdHash),
-    paramIfDefined("submission id", _.submissionId),
-    param("submission synchronizer", _.submissionSynchronizerId),
-    param("message UUID", _.messageUuid),
-    paramIfDefined("root hash", _.rootHashO),
-    param("sequencing info", _.sequencingInfo),
-    param("submission trace context", _.submissionTraceContext),
-  )
+  override def prettyCompanion
+      : PrettyPrintingCompanion[InFlightSubmission[SubmissionSequencingInfo]] = InFlightSubmission
 
   def referenceByMessageId: InFlightByMessageId =
     InFlightByMessageId(submissionSynchronizerId, messageId)
 }
 
-object InFlightSubmission {
+object InFlightSubmission
+    extends PrettyPrintingCompanion[InFlightSubmission[SubmissionSequencingInfo]] {
   implicit def getResultInFlightSubmission[SequencingInfo <: SubmissionSequencingInfo: GetResult](
       implicit getResultTraceContext: GetResult[SerializableTraceContext]
   ): GetResult[InFlightSubmission[SequencingInfo]] = { r =>
@@ -114,10 +112,24 @@ object InFlightSubmission {
       submissionTraceContext.unwrap,
     )
   }
+
+  override protected val pretty: Pretty[InFlightSubmission[SubmissionSequencingInfo]] =
+    prettyOfClass(
+      param("change ID hash", _.changeIdHash),
+      paramIfDefined("submission id", _.submissionId),
+      param("submission synchronizer", _.submissionSynchronizerId),
+      param("message UUID", _.messageUuid),
+      paramIfDefined("root hash", _.rootHashO),
+      param("sequencing info", _.sequencingInfo),
+      param("submission trace context", _.submissionTraceContext),
+    )
 }
 
 /** Information about when an [[InFlightSubmission]] was/will be sequenced */
-sealed trait SubmissionSequencingInfo extends Product with Serializable with PrettyPrinting {
+sealed trait SubmissionSequencingInfo
+    extends Product
+    with Serializable
+    with PrettyPrintingFromCompanion {
 
   /** Whether the [[InFlightSubmission]]'s sequencing was observed. */
   def isSequenced: Boolean = asUnsequenced.isEmpty
@@ -166,13 +178,11 @@ final case class UnsequencedSubmission(
   override def asUnsequenced: Some[UnsequencedSubmission] = Some(this)
   override def asSequenced: None.type = None
 
-  override protected def pretty: Pretty[UnsequencedSubmission] = prettyOfClass(
-    param("timeout", _.timeout),
-    param("tracking data", _.trackingData),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[UnsequencedSubmission] =
+    UnsequencedSubmission
 }
 
-object UnsequencedSubmission {
+object UnsequencedSubmission extends PrettyPrintingCompanion[UnsequencedSubmission] {
   implicit def getResultUnsequencedSubmission(implicit
       getResultByteArray: GetResult[Array[Byte]]
   ): GetResult[UnsequencedSubmission] = GetResult { r =>
@@ -180,6 +190,11 @@ object UnsequencedSubmission {
     val trackingData = r.<<[SubmissionTrackingData]
     UnsequencedSubmission(timeout, trackingData)
   }
+
+  override protected val pretty: Pretty[UnsequencedSubmission] = prettyOfClass(
+    param("timeout", _.timeout),
+    param("tracking data", _.trackingData),
+  )
 }
 
 /** The observed sequencing information of an [[InFlightSubmission]]
@@ -195,14 +210,16 @@ final case class SequencedSubmission(
   override def asUnsequenced: None.type = None
   override def asSequenced: Some[SequencedSubmission] = Some(this)
 
-  override protected def pretty: Pretty[SequencedSubmission] = prettyOfClass(
-    param("sequencing time", _.sequencingTime)
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[SequencedSubmission] = SequencedSubmission
 }
 
-object SequencedSubmission {
+object SequencedSubmission extends PrettyPrintingCompanion[SequencedSubmission] {
   implicit val getResultSequencedSubmission: GetResult[SequencedSubmission] = GetResult { r =>
     val timestamp = r.<<[CantonTimestamp]
     SequencedSubmission(timestamp)
   }
+
+  override protected val pretty: Pretty[SequencedSubmission] = prettyOfClass(
+    param("sequencing time", _.sequencingTime)
+  )
 }

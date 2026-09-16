@@ -338,7 +338,7 @@ class FirstUnsafeOffsetComputation(
 
       legacyDisabled = legacyDigestProcessorDisabled match {
         case AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.OnNewProtocolVersions =>
-          activeProtocolVersion.exists(_ >= ProtocolVersion.acsCommitmentRedesign)
+          activeProtocolVersion.exists(_ >= ProtocolVersion.v36)
         case AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Always => true
         case AcsCommitmentConfig.DisableOldAcsCommitmentProcessor.Never => false
       }

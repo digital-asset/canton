@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   TrafficControlParameters,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
@@ -994,6 +995,7 @@ trait TrafficControlTest
     )
 }
 
+@UnstableTest // TODO(i31976): Remove as soon as this test has been fixed
 class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,

@@ -105,6 +105,10 @@ message PurgeContractsRequest {
   // Useful re-run the same request in case of failure in an idempotent fashion
   // Recommended value is `true`
   bool ignore_already_purged = 3;
+
+  // When set, the topology transaction at the ledger end will not prevent this operation
+  // optional, default is `false`
+  bool force_repair_when_topology_transaction_at_ledger_end = 4;
 }
 
 message PurgeContractsResponse {}
@@ -130,6 +134,10 @@ message ChangeAssignationRequest {
   bool skip_inactive = 3;
 
   repeated Contract contracts = 4;
+
+  // When set, the topology transaction at the ledger end will not prevent this operation
+  // optional, default is `false`
+  bool force_repair_when_topology_transaction_at_ledger_end = 5;
 }
 
 message ChangeAssignationResponse {}
@@ -144,6 +152,10 @@ message MigrateSynchronizerRequest {
   // Whether to force the migration in spite of risking a potential ledger fork
   // Recommended value is `false`
   bool force = 3;
+
+  // When set, the topology transaction at the ledger end will not prevent this operation
+  // optional, default is `false`
+  bool force_repair_when_topology_transaction_at_ledger_end = 4;
 }
 
 message MigrateSynchronizerResponse {}
@@ -232,6 +244,10 @@ message ImportAcsRequest {
   // Any contract that is assigned to another synchronizer will be ignored.
   // Required in the first request, ignored in all subsequent request messages.
   optional string synchronizer_id = 6;
+
+  // When set, the topology transaction at the ledger end will not prevent this operation
+  // optional, default is `false`
+  bool force_repair_when_topology_transaction_at_ledger_end = 7;
 }
 
 message ImportAcsResponse {}
@@ -282,6 +298,10 @@ message RollbackUnassignmentRequest {
   // Must be a valid synchronizer id
   // Required
   string target_synchronizer_id = 3;
+
+  // When set, the topology transaction at the ledger end will not prevent this operation
+  // optional, default is `false`
+  bool force_repair_when_topology_transaction_at_ledger_end = 4;
 }
 
 message RollbackUnassignmentResponse {}
@@ -392,10 +412,6 @@ message DeletePendingOperationResponse {}
 message ReinitializeDigestCommitmentsRequest {
   // The ID of the synchronizer for which ACS digest reinitialization is requested.
   string synchronizer_id = 1;
-
-  // Whether the running ACS digest processor should start or resume
-  // after reinitialization completes.
-  bool running_digest_processor_should_start_after = 2;
 }
 
 message ReinitializeDigestCommitmentsResponse {

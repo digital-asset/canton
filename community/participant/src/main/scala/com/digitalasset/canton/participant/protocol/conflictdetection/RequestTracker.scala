@@ -7,7 +7,11 @@ import cats.data.{EitherT, NonEmptyChain}
 import com.digitalasset.canton.data.{CantonTimestamp, TaskScheduler}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.protocol.conflictdetection.ConflictDetector.{
   LockedStates,
@@ -356,7 +360,10 @@ object RequestTracker {
   }
 
   /** Trait for errors of the request tracker */
-  sealed trait RequestTrackerError extends Product with Serializable with PrettyPrinting
+  sealed trait RequestTrackerError
+      extends Product
+      with Serializable
+      with PrettyPrintingFromCompanion
 
   /** Returned by [[RequestTracker!.addRequest]] if the same request was added before with different
     * parameters (as given).
@@ -366,7 +373,12 @@ object RequestTracker {
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
   ) extends RequestTrackerError {
-    override protected def pretty: Pretty[RequestAlreadyExists] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[RequestAlreadyExists] =
+      RequestAlreadyExists
+  }
+
+  object RequestAlreadyExists extends PrettyPrintingCompanion[RequestAlreadyExists] {
+    override protected val pretty: Pretty[RequestAlreadyExists] = prettyOfClass(
       param("request counter", _.requestCounter),
       param("sequencer counter", _.sequencerCounter),
       param("timestamp", _.timestamp),
@@ -380,7 +392,11 @@ object RequestTracker {
   final case class RequestNotFound(requestCounter: RequestCounter)
       extends ResultError
       with CommitSetError {
-    override protected def pretty: Pretty[RequestNotFound] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[RequestNotFound] = RequestNotFound
+  }
+
+  object RequestNotFound extends PrettyPrintingCompanion[RequestNotFound] {
+    override protected val pretty: Pretty[RequestNotFound] = prettyOfClass(
       unnamedParam(_.requestCounter)
     )
   }
@@ -389,7 +405,11 @@ object RequestTracker {
     * different parameters for the same request
     */
   final case class ResultAlreadyExists(requestCounter: RequestCounter) extends ResultError {
-    override protected def pretty: Pretty[ResultAlreadyExists] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ResultAlreadyExists] = ResultAlreadyExists
+  }
+
+  object ResultAlreadyExists extends PrettyPrintingCompanion[ResultAlreadyExists] {
+    override protected val pretty: Pretty[ResultAlreadyExists] = prettyOfClass(
       unnamedParam(_.requestCounter)
     )
   }
@@ -401,7 +421,11 @@ object RequestTracker {
     * the request
     */
   final case class ResultNotFound(requestCounter: RequestCounter) extends CommitSetError {
-    override protected def pretty: Pretty[ResultNotFound] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ResultNotFound] = ResultNotFound
+  }
+
+  object ResultNotFound extends PrettyPrintingCompanion[ResultNotFound] {
+    override protected val pretty: Pretty[ResultNotFound] = prettyOfClass(
       unnamedParam(_.requestCounter)
     )
   }
@@ -410,7 +434,12 @@ object RequestTracker {
     * supplied for the given request counter.
     */
   final case class CommitSetAlreadyExists(requestCounter: RequestCounter) extends CommitSetError {
-    override protected def pretty: Pretty[CommitSetAlreadyExists] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[CommitSetAlreadyExists] =
+      CommitSetAlreadyExists
+  }
+
+  object CommitSetAlreadyExists extends PrettyPrintingCompanion[CommitSetAlreadyExists] {
+    override protected val pretty: Pretty[CommitSetAlreadyExists] = prettyOfClass(
       unnamedParam(_.requestCounter)
     )
   }

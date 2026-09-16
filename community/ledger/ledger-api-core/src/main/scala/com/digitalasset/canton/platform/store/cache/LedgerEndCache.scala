@@ -25,6 +25,8 @@ object MutableLedgerEndCache {
       private val ledgerEnd: AtomicReference[Option[LedgerEnd]] =
         new AtomicReference[Option[LedgerEnd]](None)
 
+      override def toString: String = s"MutableLedgerEndCache(${ledgerEnd.get()})"
+
       override def set(ledgerEnd: Option[LedgerEnd]): Unit =
         this.ledgerEnd.set(ledgerEnd)
 

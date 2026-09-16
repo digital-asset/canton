@@ -9,7 +9,11 @@ import cats.syntax.either.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.{
   AtMostOnePhysicalActive,
@@ -391,11 +395,18 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
 
 object SynchronizerConnectionConfigStore {
 
-  sealed trait Status extends Serializable with Product with PrettyPrinting {
+  sealed trait Status extends Serializable with Product with PrettyPrintingFromCompanion {
     def dbType: Char
     def canMigrateTo: Boolean
     def canMigrateFrom: Boolean
     def isActive: Boolean
+    def kind: String
+
+    override def prettyCompanion: PrettyPrintingCompanion[Status.this.type] = Status
+  }
+
+  object Status extends PrettyPrintingCompanion[Status] {
+    override protected val pretty: Pretty[Status] = prettyOfString(_.kind)
   }
 
   implicit val setParameterStatus: SetParameter[Status] = (f, pp) => pp >> f.dbType.toString
@@ -426,7 +437,7 @@ object SynchronizerConnectionConfigStore {
     val canMigrateTo: Boolean = true
     val canMigrateFrom: Boolean = true
     val isActive: Boolean = true
-    override protected def pretty: Pretty[Active.type] = prettyOfString(_ => "Active")
+    override val kind = "Active"
   }
 
   // Hard migration
@@ -435,16 +446,14 @@ object SynchronizerConnectionConfigStore {
     val canMigrateTo: Boolean = false
     val canMigrateFrom: Boolean = true
     val isActive: Boolean = false
-    override protected def pretty: Pretty[HardMigratingSource.type] =
-      prettyOfString(_ => "HardMigratingSource")
+    override val kind = "HardMigratingSource"
   }
   case object HardMigratingTarget extends Status {
     val dbType: Char = 'T'
     val canMigrateTo: Boolean = true
     val canMigrateFrom: Boolean = false
     val isActive: Boolean = false
-    override protected def pretty: Pretty[HardMigratingTarget.type] =
-      prettyOfString(_ => "HardMigratingTarget")
+    override val kind = "HardMigratingTarget"
   }
 
   // For logical synchronizer upgrades
@@ -456,8 +465,7 @@ object SynchronizerConnectionConfigStore {
     // cannot connect to the synchronizer anymore
     val isActive: Boolean = false
 
-    override protected def pretty: Pretty[LsuSource.type] =
-      prettyOfString(_ => "LSU source")
+    override val kind = "LSU source"
   }
 
   // For logical synchronizer upgrades
@@ -469,8 +477,7 @@ object SynchronizerConnectionConfigStore {
     // inactive so that we cannot yet connect to the synchronizer
     val isActive: Boolean = false
 
-    override protected def pretty: Pretty[LsuTarget.type] =
-      prettyOfString(_ => "LSU target")
+    override val kind = "LSU target"
   }
 
   case object Inactive extends Status {
@@ -479,7 +486,7 @@ object SynchronizerConnectionConfigStore {
       false // we can not downgrade as we might have pruned all important state
     val canMigrateFrom: Boolean = false
     val isActive: Boolean = false
-    override protected def pretty: Pretty[Inactive.type] = prettyOfString(_ => "Inactive")
+    override val kind = "Inactive"
   }
 
   /** From the point of view of [[SynchronizerConnectionConfigStore]], a config can be identified

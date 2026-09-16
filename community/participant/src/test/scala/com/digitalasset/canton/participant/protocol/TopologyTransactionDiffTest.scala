@@ -572,7 +572,7 @@ class TopologyTransactionDiffTest
       val tx1 = synchronizerParametersState(PositiveSeconds.tryOfSeconds(1))
       val tx2 = synchronizerParametersState(PositiveSeconds.tryOfSeconds(2))
 
-      "be reflected in the diff if something has changed" onlyRunWithOrGreaterThan (ProtocolVersion.acsCommitmentRedesign) in {
+      "be reflected in the diff if something has changed" onlyRunWithOrGreaterThan (ProtocolVersion.v36) in {
         val oldState = List(tx1)
         val newState = List(tx2)
 
@@ -585,12 +585,12 @@ class TopologyTransactionDiffTest
           .SynchronizerParametersState(tx2.transaction.toByteStringChecked)
       }
 
-      "not trigger an update if no values have changed" onlyRunWithOrGreaterThan (ProtocolVersion.acsCommitmentRedesign) in {
+      "not trigger an update if no values have changed" onlyRunWithOrGreaterThan (ProtocolVersion.v36) in {
         val state = List(tx1)
         TopologyTransactionDiff(synchronizerId, state, state, p1) shouldBe None
       }
 
-      "be computed alongside party changes" onlyRunWithOrGreaterThan (ProtocolVersion.acsCommitmentRedesign) in {
+      "be computed alongside party changes" onlyRunWithOrGreaterThan (ProtocolVersion.v36) in {
         val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
         val alicePtp = ptp(alice, List(p1 -> ParticipantPermission.Submission))
 

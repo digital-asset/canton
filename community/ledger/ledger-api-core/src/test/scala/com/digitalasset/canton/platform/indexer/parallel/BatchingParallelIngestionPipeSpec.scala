@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.util.BatchN
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 import org.scalatest.OptionValues
@@ -28,16 +27,8 @@ class BatchingParallelIngestionPipeSpec
   private implicit val ec: ExecutionContext = system.dispatcher
 
   private val input = Iterator.continually(util.Random.nextInt()).take(1000).toList
-  // 1000 items must be separated into 10 iterations of 2 parallel batches, so each batch should hold 50 items
-  // to hold 50 items with the given weight fn we need a capacity of ~280,  rounding it to 300
   private val MaxBatchSize = 300
   private val MaxTailerBatchSize = 4
-
-  def weightFn(i: Int): Long = i match {
-    case n if n % 10 == 0 => 20
-    case n if n % 3 == 0 => 10
-    case _ => 1
-  }
 
   it should "end the stream successfully in a happy path case" in {
     runPipe().map { case (ingested, ingestedTail, err) =>
@@ -105,24 +96,24 @@ class BatchingParallelIngestionPipeSpec
   }
 
   it should "form max-sized batches when back-pressured by downstream" in {
-    val batchWeights = ArrayBuffer.empty[Long]
+    val batchSizes = ArrayBuffer.empty[Int]
     runPipe(
-      // Back-pressure to ensure formation of batches closer to max batch weight
+      // Back-pressure to ensure formation of batches closer to max batch size
       inputMapperHook = () => Threading.sleep(2),
       ingesterHook = batch => {
-        blocking(batchWeights.synchronized {
-          batchWeights.addOne(batch.map(p => weightFn(p._2.toInt)).sum)
+        blocking(batchSizes.synchronized {
+          batchSizes.addOne(batch.size)
         })
         ()
       },
       inputSource = Source(Iterator.continually(util.Random.nextInt()).take(1000).toList),
     ).map { case (_, _, err) =>
-      // The first and last batches can be much smaller than `MaxBatchWeight`, also the second round doesn't seem to
+      // The first and last batches can be much smaller than `MaxBatchSize`, also the second round doesn't seem to
       // have a chance to accumulate full batches.
-      // So we drop 4 (2 rounds) from the front and 2 (1 round) from the back and assert the average batch weight
-      // instead of the weight of individual batches
-      val measurementBatchWeights = batchWeights.drop(4).dropRight(2)
-      measurementBatchWeights.sum.toDouble / measurementBatchWeights.size should be > (MaxBatchSize.toDouble * 0.7)
+      // So we drop 4 (2 rounds) from the front and 2 (1 round) from the back and assert the average batch size
+      // instead of the size of individual batches
+      val measurementBatchSizes = batchSizes.drop(4).dropRight(2)
+      measurementBatchSizes.sum.toDouble / measurementBatchSizes.size should be > (MaxBatchSize.toDouble * 0.7)
       err shouldBe empty
     }
   }
@@ -193,7 +184,7 @@ class BatchingParallelIngestionPipeSpec
     var ingestedTail: Vector[Int] = Vector.empty
     val indexingFlow =
       BatchingParallelIngestionPipe[Int, List[(Int, Int)], List[(Int, String)]](
-        batchingFlow = BatchN.weighted(MaxBatchSize.toLong, 2)(weightFn),
+        submissionBatchSize = MaxBatchSize.toLong,
         inputMappingParallelism = 2,
         contractReInsertion = Future.successful,
         inputMapper = ins =>

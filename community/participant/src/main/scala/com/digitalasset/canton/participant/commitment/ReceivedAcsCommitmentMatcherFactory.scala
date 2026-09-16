@@ -116,8 +116,12 @@ class ReceivedAcsCommitmentMatcherFactoryImpl(
               offset
             }
         )
-      val graph = DigestProcessor
-        .acsUpdatesWithRetries(internalIndexService, synchronizerId, startingOffset)
+      val graph = internalIndexService
+        .acsUpdates(
+          synchronizerId = synchronizerId,
+          fromExclusive = startingOffset,
+          recoveryStrategy = RunningDigestProcessorImpl.acsUpdateRecoveryStrategy,
+        )
         .via(ReceivedAcsCommitmentMatcher.synchronizationFlow(signalSource))
         // The kill switch must sit behind the synchronization flow so that the kill switch's completion signal
         // does not get blocked by buffered elements in front of the gate.

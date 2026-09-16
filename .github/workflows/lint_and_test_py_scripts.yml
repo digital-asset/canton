@@ -50,10 +50,14 @@ jobs:
           working_directory: scripts
 
       - name: ruff format --check
-        uses: ./.github/actions/nix/nix_run
+        uses: ./.github/actions/nix/nix_script_run
         with:
-          command: ruff format --check .
           working_directory: scripts
+          command: |
+            if ! ruff format --check .; then
+              echo "::error::Python formatting check failed. Run 'ruff format .' in scripts/ and commit the result."
+              exit 1
+            fi
 
       - name: pytest (scripts)
         uses: ./.github/actions/nix/nix_run

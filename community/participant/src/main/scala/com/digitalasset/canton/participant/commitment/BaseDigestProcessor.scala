@@ -16,7 +16,11 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.commitment.BaseDigestProcessor.{
   CheckpointToBeWritten,
@@ -92,6 +96,11 @@ trait BaseDigestProcessor extends NamedLogging {
   def isStartingOrStarted: Boolean = state.get() match {
     case _: Starting | _: Started => true
     case Initial | _: Stopping | _: Stopped => false
+  }
+
+  def isStoppingOrStopped: Boolean = state.get() match {
+    case _: Stopping | _: Stopped => true
+    case _ => false
   }
 
   @VisibleForTesting
@@ -457,12 +466,17 @@ object BaseDigestProcessor {
 
   final case class NotCheckpointFence[+A](topologySnapshot: TopologySnapshot, value: A)
       extends CheckpointFenceOr[A]
-      with PrettyPrinting {
+      with PrettyPrintingFromCompanion {
     def withValue[B](newValue: B): NotCheckpointFence[B] = copy(value = newValue)
 
-    override protected def pretty: Pretty[NotCheckpointFence.this.type] =
+    override def prettyCompanion: PrettyPrintingCompanion[NotCheckpointFence[Any]] =
+      NotCheckpointFence
+  }
+
+  object NotCheckpointFence extends PrettyPrintingCompanion[NotCheckpointFence[Any]] {
+    override protected val pretty: Pretty[NotCheckpointFence[Any]] =
       prettyOfClass(
-        unnamedParam(c => prettyOfString[A](_.toString).treeOf(c.value))
+        unnamedParam(c => prettyOfString[Any](_.toString).treeOf(c.value))
       )
   }
 

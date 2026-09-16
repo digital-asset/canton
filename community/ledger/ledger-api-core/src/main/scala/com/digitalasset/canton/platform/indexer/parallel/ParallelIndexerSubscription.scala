@@ -10,19 +10,7 @@ import com.daml.metrics.api.MetricsContext.withMetricLabels
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.ledger.participant.state.Update.{
-  CommitRepair,
-  ContractInfo,
-  EmptyAcsPublicationRequired,
-  LsuTimeReached,
-  ReassignmentAccepted,
-  ReceivedAcsCommitment,
-  SequencedCommandRejected,
-  SequencerIndexMoved,
-  TopologyTransactionEffective,
-  TransactionAccepted,
-  UnSequencedCommandRejected,
-}
+import com.digitalasset.canton.ledger.participant.state.Update.{CommitRepair, ContractInfo}
 import com.digitalasset.canton.ledger.participant.state.{
   Reassignment,
   SynchronizerIndex,
@@ -59,9 +47,9 @@ import com.digitalasset.canton.platform.store.dao.events.{
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
+import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.PekkoUtil.{Commit, FutureQueue, PekkoSourceQueueToFutureQueue}
-import com.digitalasset.canton.util.{BatchN, ErrorUtil}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.nonempty.NonEmpty
@@ -90,9 +78,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
     dbPrepareParallelism: Int,
     batchingParallelism: Int,
     ingestionParallelism: Int,
-    useWeightedBatching: Boolean,
     submissionBatchSize: Long,
-    submissionBatchInsertionSize: Long,
     maxOutputBatchedBufferSize: Int,
     maxTailerBatchSize: Int,
     postProcessingParallelism: Int,
@@ -153,17 +139,6 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
       (contractIds: Iterable[ContractId]) =>
         contractStore
           .lookupBatchedInternalIdsNonReadThrough(contractIds)(tc)
-    def updateBatchWeightMetrics(w: Long): Unit = metrics.indexer.inputMapping.batchWeight.update(w)
-    val batchingFlow: Flow[(Offset, Update), Iterable[(Offset, Update)], NotUsed] =
-      if (useWeightedBatching) {
-        val submissionBatchWeight = submissionBatchInsertionSize * InsertWeight
-        metrics.indexer.inputMapping.submissionBatchConfiguredWeight
-          .updateValue(submissionBatchWeight)
-        BatchN.weighted(submissionBatchWeight, inputMappingParallelism)(
-          updateWeightEstimator,
-          updateBatchWeightMetrics,
-        )
-      } else BatchN(submissionBatchSize.toInt, inputMappingParallelism)
 
     val ((sourceQueue, uniqueKillSwitch), completionFuture) = Source
       .queue[(Long, Update)](
@@ -191,7 +166,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
       )
       .via(
         BatchingParallelIngestionPipe(
-          batchingFlow = batchingFlow,
+          submissionBatchSize = submissionBatchSize,
           inputMappingParallelism = inputMappingParallelism,
           inputMapper = inputMapperExecutor.execute(
             inputMapper(
@@ -1293,29 +1268,6 @@ object ParallelIndexerSubscription {
       missingDeactivatedActivations = Map.empty, // not used anymore
       usedInternalContractIds = Set.empty, // not used anymore
     )
-
-  val LightWeight = 1L
-  val InsertWeight = 100L
-
-  def updateWeightEstimator(input: (Offset, Update)): Long = input match {
-    case (_, u: CommitRepair) => LightWeight
-    case (_, u: LsuTimeReached) => LightWeight
-    case (_, u: SequencerIndexMoved) => LightWeight
-    case (_, u: EmptyAcsPublicationRequired) => LightWeight
-    case (_, u: TransactionAccepted) =>
-      (2 + u.transactionInfo.executionOrder.view
-        .map(_.nodeId)
-        .flatMap(u.transactionInfo.blindingInfo.disclosure.get)
-        .map(_.size + 1)
-        .sum) * InsertWeight
-    case (_, topologyTransactionEffective: TopologyTransactionEffective) =>
-      (topologyTransactionEffective.events.size + topologyTransactionEffective.genericTopologyEvents.size + 1) * InsertWeight
-    case (_, u: SequencedCommandRejected) => InsertWeight
-    case (_, u: UnSequencedCommandRejected) => InsertWeight
-    case (_, u: ReassignmentAccepted) =>
-      (2 + u.reassignment.iterator.map(_.stakeholders.size + 1).sum) * InsertWeight
-    case (_, u: ReceivedAcsCommitment) => 2 // TODO(#33232): verify / correct
-  }
 
   class ReferencedContractNotFoundException
       extends RuntimeException(

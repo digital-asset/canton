@@ -8,7 +8,11 @@ import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.store.InFlightSubmissionStore.InFlightReference
 import com.digitalasset.canton.participant.store.db.DbInFlightSubmissionStore
@@ -226,7 +230,10 @@ object InFlightSubmissionStore {
   }
 
   /** Reference to an in-flight submission */
-  sealed trait InFlightReference extends Product with Serializable with PrettyPrinting {
+  sealed trait InFlightReference
+      extends Product
+      with Serializable
+      with PrettyPrintingFromCompanion {
     def synchronizerId: SynchronizerId
     def toEither: Either[InFlightByMessageId, InFlightBySequencingInfo]
   }
@@ -240,7 +247,11 @@ object InFlightSubmissionStore {
   ) extends InFlightReference {
     override def toEither: Either[InFlightByMessageId, InFlightBySequencingInfo] = Left(this)
 
-    override protected def pretty: Pretty[InFlightByMessageId] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[InFlightByMessageId] = InFlightByMessageId
+  }
+
+  object InFlightByMessageId extends PrettyPrintingCompanion[InFlightByMessageId] {
+    override protected val pretty: Pretty[InFlightByMessageId] = prettyOfClass(
       param("synchronizer id", _.synchronizerId),
       param("message id", _.messageId),
     )
@@ -255,7 +266,12 @@ object InFlightSubmissionStore {
   ) extends InFlightReference {
     override def toEither: Either[InFlightByMessageId, InFlightBySequencingInfo] = Right(this)
 
-    override protected def pretty: Pretty[InFlightBySequencingInfo] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[InFlightBySequencingInfo] =
+      InFlightBySequencingInfo
+  }
+
+  object InFlightBySequencingInfo extends PrettyPrintingCompanion[InFlightBySequencingInfo] {
+    override protected val pretty: Pretty[InFlightBySequencingInfo] = prettyOfClass(
       param("synchronizer id", _.synchronizerId),
       param("sequenced", _.sequenced),
     )

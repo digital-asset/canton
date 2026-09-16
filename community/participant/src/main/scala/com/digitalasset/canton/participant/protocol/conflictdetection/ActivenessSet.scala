@@ -3,9 +3,14 @@
 
 package com.digitalasset.canton.participant.protocol.conflictdetection
 
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.util.SetsUtil.requireDisjoint
+import com.digitalasset.canton.util.ShowUtil.*
 
 /** Defines the contracts and reassignments for conflict detection. Reassignments are not locked
   * because the reassigned contracts are already being locked.
@@ -13,20 +18,22 @@ import com.digitalasset.canton.util.SetsUtil.requireDisjoint
 final case class ActivenessSet(
     contracts: ActivenessCheck[LfContractId],
     reassignmentIds: Set[ReassignmentId],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
 
-  override protected def pretty: Pretty[ActivenessSet] = prettyOfClass(
-    param("contracts", _.contracts),
-    paramIfNonEmpty("reassignmentIds", _.reassignmentIds),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ActivenessSet] = ActivenessSet
 }
 
-object ActivenessSet {
+object ActivenessSet extends PrettyPrintingCompanion[ActivenessSet] {
   val empty: ActivenessSet =
     ActivenessSet(
       ActivenessCheck.empty[LfContractId],
       Set.empty,
     )
+
+  override protected val pretty: Pretty[ActivenessSet] = prettyOfClass(
+    param("contracts", _.contracts),
+    paramIfNonEmpty("reassignmentIds", _.reassignmentIds),
+  )
 }
 
 /** Defines the activeness checks and locking for one kind of states (contracts, keys, ...).
@@ -63,7 +70,7 @@ private[participant] final case class ActivenessCheck[Key] private (
     lockMaybeUnknown: Set[Key],
     needPriorState: Set[Key],
 )(implicit val prettyK: Pretty[Key])
-    extends PrettyPrinting {
+    extends PrettyPrintingFromCompanion {
 
   requireDisjoint(checkFresh -> "fresh", checkFree -> "free")
   requireDisjoint(checkFresh -> "fresh", checkActive -> "active")
@@ -82,17 +89,10 @@ private[participant] final case class ActivenessCheck[Key] private (
   val lockOnly: Set[Key] = lock -- checkFresh -- checkFree -- checkActive
   val lockMaybeUnknownOnly: Set[Key] = lockMaybeUnknown -- checkFresh -- checkFree -- checkActive
 
-  override protected def pretty: Pretty[ActivenessCheck.this.type] = prettyOfClass(
-    paramIfNonEmpty("fresh", _.checkFresh),
-    paramIfNonEmpty("free", _.checkFree),
-    paramIfNonEmpty("active", _.checkActive),
-    paramIfNonEmpty("lock", _.lock),
-    paramIfNonEmpty("lockMaybeKnown", _.lockMaybeUnknown),
-    paramIfNonEmpty("need prior state", _.needPriorState),
-  )
+  override def prettyCompanion: PrettyPrintingCompanion[ActivenessCheck[?]] = ActivenessCheck
 }
 
-private[participant] object ActivenessCheck {
+private[participant] object ActivenessCheck extends PrettyPrintingCompanion[ActivenessCheck[?]] {
   def empty[Key: Pretty]: ActivenessCheck[Key] =
     ActivenessCheck(Set.empty, Set.empty, Set.empty, Set.empty, Set.empty, Set.empty)
 
@@ -105,4 +105,17 @@ private[participant] object ActivenessCheck {
       needPriorState: Set[Key],
   )(implicit prettyK: Pretty[Key]): ActivenessCheck[Key] =
     ActivenessCheck(checkFresh, checkFree, checkActive, lock, lockMaybeUnknown, needPriorState)
+
+  private def prettyOfCheck[Key: Pretty]: Pretty[ActivenessCheck[Key]] = prettyOfClass(
+    paramIfNonEmpty("fresh", _.checkFresh),
+    paramIfNonEmpty("free", _.checkFree),
+    paramIfNonEmpty("active", _.checkActive),
+    paramIfNonEmpty("lock", _.lock),
+    paramIfNonEmpty("lockMaybeKnown", _.lockMaybeUnknown),
+    paramIfNonEmpty("need prior state", _.needPriorState),
+  )
+
+  override protected val pretty: Pretty[ActivenessCheck[?]] = { case check: ActivenessCheck[k] =>
+    prettyOfCheck(check.prettyK).treeOf(check)
+  }
 }

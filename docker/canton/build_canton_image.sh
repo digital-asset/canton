@@ -19,7 +19,7 @@ release_suffix="${RELEASE_SUFFIX:-local}"
 echo "... Preparing files for docker builds"
 ./prepare_dependencies.sh
 ./prepare_canton_tar.sh
-oci_snapshot_path="${OCI_REGISTRY:-"local"}/da-images/public-unstable/docker/"
+oci_snapshot_path="${OCI_REGISTRY:-"local"}${OCI_SNAPSHOT_DIR:-"/da-images/public-unstable/docker/"}"
 oci_release_path="${OCI_REGISTRY:-"local"}/da-images/public/docker/"
 image_types=(base participant sequencer mediator)
 nightly_release="${IS_NIGHTLY_RELEASE:-$1}" # CircleCI parameter nightly_release

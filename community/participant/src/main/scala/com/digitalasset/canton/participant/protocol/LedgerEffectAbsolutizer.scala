@@ -5,7 +5,11 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.data.{KeyResolutionWithMaintainers, ViewParticipantData}
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.protocol.LedgerEffectAbsolutizer.ViewAbsoluteLedgerEffect
 import com.digitalasset.canton.protocol.{
   ContractIdAbsolutizer,
@@ -89,8 +93,13 @@ object LedgerEffectAbsolutizer {
       resolvedKeys: Map[LfGlobalKey, LfVersioned[KeyResolutionWithMaintainers]],
       inRollback: Boolean,
       informees: Set[LfPartyId],
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[ViewAbsoluteLedgerEffect] = prettyOfClass(
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[ViewAbsoluteLedgerEffect] =
+      ViewAbsoluteLedgerEffect
+  }
+
+  object ViewAbsoluteLedgerEffect extends PrettyPrintingCompanion[ViewAbsoluteLedgerEffect] {
+    override protected val pretty: Pretty[ViewAbsoluteLedgerEffect] = prettyOfClass(
       paramIfNonEmpty("core inputs", _.coreInputs),
       paramIfNonEmpty("created core", _.createdCore),
       paramIfNonEmpty("created in subview, archived in core", _.createdInSubviewArchivedInCore),

@@ -13,6 +13,7 @@ import com.digitalasset.canton.participant.admin.data.{
 }
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.PackageResolution
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LfPackageId, LfPackageName}
 
 /** Select new representative package IDs for ACS import contracts based on the precedence rules

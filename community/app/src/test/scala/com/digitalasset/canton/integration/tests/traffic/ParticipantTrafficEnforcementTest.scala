@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.traffic
 
+import anorm.SqlStringInterpolation
 import com.daml.ledger.api.v2.transaction_filter.{EventFormat, Filters}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
@@ -19,6 +20,7 @@ import com.digitalasset.canton.http.json.v2.JsTrafficServiceCodecs.*
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.tests.ledgerapi.DbLockingSupport
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.AuthStartupConfigSuppressionRule
 import com.digitalasset.canton.integration.util.{TestUtils, TrafficControlUtils}
 import com.digitalasset.canton.ledger.error.CommonErrors.ServiceNotRunning
@@ -35,6 +37,7 @@ import com.digitalasset.canton.tea.TrafficEnforcementErrors.{
   InsufficientBalance,
   MultiPartySubmissionRejected,
   TrafficUpdateOutOfBound,
+  TransientFailure,
 }
 import com.digitalasset.canton.tea.v1.{
   GetAccountResponse,
@@ -747,10 +750,12 @@ final class ParticipantTrafficEnforcementWithAuthTest extends ParticipantTraffic
   }
 }
 
-final class ParticipantTrafficEnforcementDegradationTest extends ParticipantTrafficEnforcementTest {
+final class ParticipantTrafficEnforcementDegradationTest
+    extends ParticipantTrafficEnforcementTest
+    with DbLockingSupport {
   registerPlugin(new UsePostgres(loggerFactory))
 
-  // 1ms can't cover the gRPC call plus the DB transaction, so every lookup times out.
+  // These two control how long the test waits before the lookup will fail on the lock that's held below.
   override protected def extraTrafficEnforcementConfigTransforms: Seq[ConfigTransform] = Seq(
     ConfigTransforms.updateParticipantConfig("participant1")(
       _.focus(_.trafficAccounting.allowSubmissionsOnDegradation)
@@ -759,15 +764,16 @@ final class ParticipantTrafficEnforcementDegradationTest extends ParticipantTraf
         .replace(
           TrafficEnforcementServerConfig.Internal(
             teaServerName,
-            databaseQueryTimeout = PositiveFiniteDuration.ofMillis(1),
-            accountLookupTimeout = PositiveFiniteDuration.ofMillis(2),
+            databaseQueryTimeout = PositiveFiniteDuration.ofMillis(100),
+            accountLookupTimeout = PositiveFiniteDuration.ofMillis(500),
           )
         )
     )
   )
 
-  // The `GetAccount` would go through the same client with the impossible deadline, so we
-  //  have to read the balance directly from the DB instead.
+  // `GetAccount` goes through the same client this suite runs with a much shorter lookup timeout
+  //  than the default, so read the balance straight from the table instead so we can fail the lookup
+  //  faster while still not risking failing the balance assertion at the end.
   private def balanceFromDb(
       participant: LocalParticipantReference,
       accountId: String,
@@ -790,6 +796,18 @@ final class ParticipantTrafficEnforcementDegradationTest extends ParticipantTraf
       .futureValueUS
   }
 
+  /** Blocks reads and writes to the TEA balance table until we release them, so the lookup times
+    * out and we reliably hit the degraded path.
+    */
+  private def lockBalanceTable(participant: LocalParticipantReference): CommitAndClose =
+    withConnectionForTest(participant)(testFunction = { conn =>
+      // Set a timeout just in case so we won't hold the whole suite if something goes wrong.
+      SQL"SET LOCAL lock_timeout = 30000".execute()(conn).discard
+      SQL"LOCK TABLE par_traffic_enforcement_balance IN ACCESS EXCLUSIVE MODE"
+        .execute()(conn)
+        .discard
+    })
+
   "Participant" when {
     "the account lookup fails and degradation is allowed" should {
       "let a submission through that the balance check would have rejected" in { implicit env =>
@@ -797,22 +815,26 @@ final class ParticipantTrafficEnforcementDegradationTest extends ParticipantTraf
 
         // Charlie's balance is zero, so a lookup that did complete would reject this submission.
         val degradedMessage = "allowing the submission to proceed without a balance check"
-        // If the lookup is faster than the timeout, the console throws `CommandFailure`, which isn't retried by default.
-        // `logElapsed` shows whether we actually used the retry window or just failed right away.
-        eventually(retryOnTestFailuresOnly = false, logElapsed = Some("degraded submission")) {
+
+        val balanceTableLock = lockBalanceTable(participant1)
+        try {
           loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(WARN))(
             participant1.ledger_api.javaapi.commands
               .submit(Seq(charlie), Seq(createCycleCommandJava(charlie, "degraded")))
               .getUpdateId should not be empty,
             entries => {
               forAtLeast(1, entries)(_.warningMessage should include(degradedMessage))
+              // Either timeout can win: the store failure is retried, or the client hits its deadline first.
               forEvery(entries)(entry =>
-                entry.warningMessage should (include(degradedMessage) or include(
-                  "DEADLINE_EXCEEDED"
-                ))
+                entry.warningMessage should (include(degradedMessage) or
+                  include(TransientFailure.id) or
+                  include("Retry timeout has elapsed, giving up.") or
+                  include("DEADLINE_EXCEEDED"))
               )
             },
           )
+        } finally {
+          balanceTableLock.commitAndClose()
         }
 
         // The submission was still charged even though the balance check was bypassed.

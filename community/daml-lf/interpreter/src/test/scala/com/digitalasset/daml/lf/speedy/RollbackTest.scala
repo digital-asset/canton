@@ -5,11 +5,11 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.digitalasset.canton.logging.SuppressingLogging
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.Party
-import com.digitalasset.daml.lf.language.Ast.Expr
-import com.digitalasset.daml.lf.speedy.SExpr.*
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.interpretation.Error as IE
 import com.digitalasset.daml.lf.speedy.SValue.*
+import com.digitalasset.daml.lf.speedy.TestPkg.*
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.{Node, NodeId, SubmittedTransaction}
@@ -20,38 +20,36 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-class RollbackTest
+// Dual-execution (UpdateMachine and TransactionConductor), dual-config (Legacy and Default)
+// version of the rollback-shape tests.
+abstract class RollbackTestBase
     extends AnyFreeSpec
+    with CmdFlowRunner
     with Matchers
     with TableDrivenPropertyChecks
     with SuppressingLogging {
 
   import RollbackTest.*
 
-  private[this] implicit val defaultParserParameters: ParserParameters[RollbackTest.this.type] =
+  // Legacy (protocol v3.4) allows an effect (create/exercise) inside a rolled-back scope.
+  // Default (protocol v3.5+) forbids it and crashes with EffectfulRollback instead.
+  protected def legacy: Boolean
+
+  private[this] val interpretationConfig: interpretation.InterpretationConfig =
+    if (legacy) interpretation.InterpretationConfig.Legacy
+    else interpretation.InterpretationConfig.Default
+
+  // The only scenarios with an effect inside a rollback: uncatchable under Default.
+  private[this] val effectfulRollbackChoices =
+    Set("Create3ThrowAndCatch", "Create3ThrowAndOuterCatch", "Exer2")
+
+  private[this] implicit val defaultParserParameters: ParserParameters[RollbackTestBase.this.type] =
     ParserParameters.default
 
-  private[this] val transactionSeed = crypto.Hash.hashPrivateKey("RollbackTest.scala")
+  private[this] val alice = Party.assertFromString("Alice")
 
-  private[this] def runUpdateExprGetTx(
-      pkgs1: PureCompiledPackages
-  )(e: Expr, party: Party): SubmittedTransaction = {
-    val se = pkgs1.compiler.unsafeCompile(e)
-    val example = SEApp(se, ArraySeq(SParty(party)))
-    val machine = Speedy.Machine.fromUpdateSExpr(
-      compiledPackages = pkgs1,
-      transactionSeed = transactionSeed,
-      updateSE = example,
-      committers = Set(party),
-      logger = MachineLogger(),
-      interpretationConfig = interpretation.InterpretationConfig.Legacy,
-    )
-    SpeedyTestLib
-      .buildTransaction(machine)
-      .fold(e => fail(Pretty.prettyError(e).render(80)), identity)
-  }
-
-  val pkgs: PureCompiledPackages = SpeedyTestLib.typeAndCompile(p"""
+  val pkgs: PureCompiledPackages = SpeedyTestLib.typeAndCompile(
+    p"""
   metadata ( 'pkg' : '1.0.0' )
 
   module M {
@@ -187,31 +185,138 @@ class RollbackTest
           x3: ContractId M:T1 <- create @M:T1 M:T1 { party = party, info = 300 }
         in upure @Unit ();
 
-   }
-  """)
+    record @serializable Test = { party: Party };
+    template (this: Test) = {
+      precondition True;
+      signatories Cons @Party [M:Test {party} this] Nil @Party;
+      observers Nil @Party;
+      choice Create0 (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create0 (M:Test {party} this);
+      choice Create1 (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create1 (M:Test {party} this);
+      choice Create2 (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create2 (M:Test {party} this);
+      choice Create3 (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create3 (M:Test {party} this);
+      choice Create3Nested (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create3nested (M:Test {party} this);
+      choice Create3CatchNoThrow (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create3catchNoThrow (M:Test {party} this);
+      choice Create3ThrowAndCatch (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create3throwAndCatch (M:Test {party} this);
+      choice Create3ThrowAndOuterCatch (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:create3throwAndOuterCatch (M:Test {party} this);
+      choice Exer1 (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:exer1 (M:Test {party} this);
+      choice Exer2 (self) (u: Unit) : Unit,
+        controllers Cons @Party [M:Test {party} this] Nil @Party
+        to M:exer2 (M:Test {party} this);
+    };
 
-  val testCases = Table[String, List[Tree]](
-    ("expression", "expected-number-of-contracts"),
-    ("create0", Nil),
-    ("create1", List(C(100))),
-    ("create2", List(C(100), C(200))),
-    ("create3", List(C(100), C(200), C(300))),
-    ("create3nested", List(C(100), C(200), C(300))),
-    ("create3catchNoThrow", List(C(100), C(200), C(300))),
-    ("create3throwAndCatch", List[Tree](R(List(C(100), C(200))), C(300))),
-    ("create3throwAndOuterCatch", List[Tree](R(List(C(100), C(200))), C(300))),
-    ("exer1", List[Tree](C(100), X(List(C(400), C(500))), C(200), C(300))),
-    ("exer2", List[Tree](C(100), R(List(X(List(C(400))))), C(300))),
+   }
+  """,
+    cmdMode = cmdMode,
   )
 
-  forEvery(testCases) { (exp: String, expected: List[Tree]) =>
-    s"""$exp, contracts expected: $expected """ in {
-      val party = Party.assertFromString("Alice")
-      val tx: SubmittedTransaction = runUpdateExprGetTx(pkgs)(e"M:$exp", party)
-      val ids: List[Tree] = shapeOfTransaction(tx)
-      ids shouldBe expected
+  private[this] val testTemplateId =
+    Ref.Identifier.assertFromString(s"${defaultParserParameters.defaultPackageId}:M:Test")
+  private[this] val testPayload = SRecord(
+    testTemplateId,
+    ImmArray(Ref.Name.assertFromString("party")),
+    ArraySeq(SParty(alice)),
+  )
+
+  val testCases = Table[String, List[Tree]](
+    ("choice", "expected-number-of-contracts"),
+    ("Create0", Nil),
+    ("Create1", List(C(100))),
+    ("Create2", List(C(100), C(200))),
+    ("Create3", List(C(100), C(200), C(300))),
+    ("Create3Nested", List(C(100), C(200), C(300))),
+    ("Create3CatchNoThrow", List(C(100), C(200), C(300))),
+    ("Create3ThrowAndCatch", List[Tree](R(List(C(100), C(200))), C(300))),
+    ("Create3ThrowAndOuterCatch", List[Tree](R(List(C(100), C(200))), C(300))),
+    ("Exer1", List[Tree](C(100), X(List(C(400), C(500))), C(200), C(300))),
+    ("Exer2", List[Tree](C(100), R(List(X(List(C(400))))), C(300))),
+  )
+
+  forEvery(testCases) { (choiceName: String, expected: List[Tree]) =>
+    val description =
+      if (!legacy && effectfulRollbackChoices(choiceName))
+        s"$choiceName, expected to crash with EffectfulRollback"
+      else
+        s"$choiceName, contracts expected: $expected"
+    description in {
+      val (result, _) = runCmdFlow[SubmittedTransaction](
+        pkgs = pkgs,
+        setup = CmdFlow.submit(Command.Create(testTemplateId, testPayload)),
+        test = cid =>
+          for {
+            _ <- CmdFlow.submit(
+              Command.ExerciseTemplate(
+                testTemplateId,
+                asSCid(cid),
+                Ref.ChoiceName.assertFromString(choiceName),
+                SUnit,
+              )
+            )
+            tx <- CmdFlow.commit
+          } yield tx,
+        parties = Set(alice),
+        packageResolution = Map.empty,
+        interpretationConfig = interpretationConfig,
+      )
+      if (!legacy && effectfulRollbackChoices(choiceName)) {
+        result match {
+          case Left(SError.InterpretationError(IE.EffectfulRollback(_))) => succeed
+          case other => fail(s"expected EffectfulRollback, got: $other")
+        }
+      } else {
+        result match {
+          case Right(tx) =>
+            // The transaction has a root Create (the Test wrapper contract) and a root Exercise
+            // (the wrapper choice itself). Skip both, inspect only what the choice body produced.
+            val exerciseNode = tx.roots.toList
+              .map(tx.nodes)
+              .collectFirst { case node: Node.Exercise => node }
+              .getOrElse(fail(s"expected an Exercise root, got: ${tx.roots.map(tx.nodes)}"))
+            exerciseNode.children.toList
+              .flatMap(nid => RollbackTest.treeOf(tx, nid)) shouldBe expected
+          case Left(err) => fail(err.toString)
+        }
+      }
     }
   }
+}
+
+class RollbackTestWithUpdateMachineLegacy
+    extends RollbackTestBase
+    with CmdFlowRunnerWithUpdateMachine {
+  override protected def legacy: Boolean = true
+}
+class RollbackTestWithUpdateMachineKey
+    extends RollbackTestBase
+    with CmdFlowRunnerWithUpdateMachine {
+  override protected def legacy: Boolean = false
+}
+class RollbackTestWithTransactionConductorLegacy
+    extends RollbackTestBase
+    with CmdFlowRunnerWithTransactionConductor {
+  override protected def legacy: Boolean = true
+}
+class RollbackTestWithTransactionConductorKey
+    extends RollbackTestBase
+    with CmdFlowRunnerWithTransactionConductor {
+  override protected def legacy: Boolean = false
 }
 
 object RollbackTest {
@@ -221,24 +326,24 @@ object RollbackTest {
   final case class X(x: List[Tree]) extends Tree // Exercise Node
   final case class R(x: List[Tree]) extends Tree // Rollback Node
 
-  private def shapeOfTransaction(tx: SubmittedTransaction): List[Tree] = {
-    def trees(nid: NodeId): List[Tree] =
-      tx.nodes(nid) match {
-        case create: Node.Create =>
-          create.arg match {
-            case ValueRecord(_, ImmArray(_, (None, ValueInt64(n)))) =>
-              List(C(n))
-            case _ =>
-              sys.error(s"unexpected create.arg: ${create.arg}")
-          }
-        case _: Node.LeafOnlyAction =>
-          Nil
-        case node: Node.Exercise =>
-          List(X(node.children.toList.flatMap(nid => trees(nid))))
-        case node: Node.Rollback =>
-          List(R(node.children.toList.flatMap(nid => trees(nid))))
-      }
-    tx.roots.toList.flatMap(nid => trees(nid))
-  }
+  def treeOf(tx: SubmittedTransaction, nid: NodeId): List[Tree] =
+    tx.nodes(nid) match {
+      case create: Node.Create =>
+        create.arg match {
+          case ValueRecord(_, ImmArray(_, (None, ValueInt64(n)))) =>
+            List(C(n))
+          case _ =>
+            sys.error(s"unexpected create.arg: ${create.arg}")
+        }
+      case _: Node.LeafOnlyAction =>
+        Nil
+      case node: Node.Exercise =>
+        List(X(node.children.toList.flatMap(nid => treeOf(tx, nid))))
+      case node: Node.Rollback =>
+        List(R(node.children.toList.flatMap(nid => treeOf(tx, nid))))
+    }
+
+  def shapeOfTransaction(tx: SubmittedTransaction): List[Tree] =
+    tx.roots.toList.flatMap(nid => treeOf(tx, nid))
 
 }

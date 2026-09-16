@@ -712,7 +712,6 @@ class TransactionProcessingSteps(
         lens,
         protocolVersion,
         crypto.pureCrypto,
-        topLevelOnly = true,
         decryptedViewsWithMetadata,
       )
 

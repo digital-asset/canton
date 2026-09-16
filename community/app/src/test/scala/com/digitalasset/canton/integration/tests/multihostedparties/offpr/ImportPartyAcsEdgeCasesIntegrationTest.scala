@@ -8,7 +8,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.AcsImportMissingOnboardingMapping
 import com.digitalasset.canton.participant.protocol.party.OnboardingClearanceOperation
 import com.digitalasset.canton.participant.util.TimeOfChange
@@ -17,7 +16,6 @@ import com.digitalasset.canton.store.PendingOperationStore
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.{ReassignmentCounter, RepairCounter}
-import org.slf4j.event.Level
 
 /** General idea is to simulate an operator who is not following the offline party replication steps
   * properly.
@@ -414,21 +412,7 @@ final class OfflinePartyReplicationIdempotencyIntegrationTest
     target.stop()
     target.start()
 
-    // Suppress a warning from ResilientLedgerSubscription caused by stopping/starting the node.
-    // This warning should not happen; ignored here as it is irrelevant to the party ACS import testing.
-    loggerFactory.assertEventuallyLogsSeq(
-      SuppressionRule.Level(Level.WARN) && SuppressionRule.LoggerNameContains(
-        "ResilientLedgerSubscription"
-      )
-    )(
-      within = {
-        target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
-      },
-      logs =>
-        forAtLeast(1, logs)(m =>
-          m.message should include("Ledger subscription PingService failed with an error")
-        ),
-    )
+    target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 
     target.parties.import_party_acs(daId, Some(alice), acsSnapshotPath)
 

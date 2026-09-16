@@ -563,7 +563,7 @@ object AcsCommitmentConfig {
       state match {
         case Always => false
         case Never => true
-        case OnNewProtocolVersions => protocolVersion < ProtocolVersion.acsCommitmentRedesign
+        case OnNewProtocolVersions => protocolVersion < ProtocolVersion.v36
       }
   }
 }

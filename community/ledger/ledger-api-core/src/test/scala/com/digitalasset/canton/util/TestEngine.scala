@@ -23,7 +23,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestContractHasher.SyncContractHasher
 import com.digitalasset.canton.util.TestEngine.{InMemoryPackageStore, TxAndMeta}
-import com.digitalasset.canton.version.InterpretationConfig
 import com.digitalasset.canton.{BaseTest, FutureHelpers}
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.DamlLf
@@ -52,7 +51,7 @@ class TestEngine(
     commandId: String = "TestCmdId",
     iterationsBetweenInterruptions: Long = 1000,
     cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
-    interpretationConfig: LfInterpretationConfig = InterpretationConfig.Default,
+    interpretationConfig: LfInterpretationConfig = LfInterpretationConfig.Stable,
     loggerFactory: NamedLoggerFactory,
 ) extends EitherValues
     with OptionValues {

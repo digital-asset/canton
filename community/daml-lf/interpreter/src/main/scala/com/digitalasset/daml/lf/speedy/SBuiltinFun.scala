@@ -365,7 +365,7 @@ private[lf] object SBuiltinFun {
     override private[speedy] def execute[Q](
         args: ArraySeq[SValue],
         machine: Machine[Q],
-    ): Control[Nothing] =
+    ): Control[Q] =
       compute(args) match {
         case Some(value) =>
           Control.Value(value)
@@ -2328,7 +2328,7 @@ private[lf] object SBuiltinFun {
     override private[speedy] def execute[Q](
         args: ArraySeq[SValue],
         machine: Machine[Q],
-    ): Control[Nothing] = {
+    ): Control[Q] = {
       val excep = getSAny(args, 0)
       machine.handleException(excep)
     }

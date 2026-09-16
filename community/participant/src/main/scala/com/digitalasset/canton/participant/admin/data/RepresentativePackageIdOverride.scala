@@ -5,7 +5,11 @@ package com.digitalasset.canton.participant.admin.data
 
 import cats.implicits.toTraverseOps
 import com.digitalasset.canton.admin.participant.v30
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.{LfPackageId, LfPackageName}
@@ -18,7 +22,7 @@ final case class RepresentativePackageIdOverride(
     contractOverride: Map[ContractId, LfPackageId],
     packageIdOverride: Map[LfPackageId, LfPackageId],
     packageNameOverride: Map[LfPackageName, LfPackageId],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   def toProtoV30: v30.RepresentativePackageIdOverride =
     v30.RepresentativePackageIdOverride(
       // Apparently structurally trivial mappings, but upcasting from domain types to Strings
@@ -27,15 +31,12 @@ final case class RepresentativePackageIdOverride(
       packageNameOverride = packageNameOverride.map { case (k, v) => k -> v },
     )
 
-  override protected def pretty: Pretty[RepresentativePackageIdOverride] =
-    prettyOfClass(
-      paramIfNonEmpty("contractOverride", _.contractOverride),
-      paramIfNonEmpty("packageIdOverride", _.packageIdOverride),
-      paramIfNonEmpty("packageNameOverride", _.packageNameOverride),
-    )
+  override def prettyCompanion: PrettyPrintingCompanion[RepresentativePackageIdOverride] =
+    RepresentativePackageIdOverride
 }
 
-object RepresentativePackageIdOverride {
+object RepresentativePackageIdOverride
+    extends PrettyPrintingCompanion[RepresentativePackageIdOverride] {
   val NoOverride: RepresentativePackageIdOverride =
     RepresentativePackageIdOverride(Map.empty, Map.empty, Map.empty)
 
@@ -68,4 +69,11 @@ object RepresentativePackageIdOverride {
     packageIdOverride = packageIdOverride.toMap,
     packageNameOverride = packageNameOverride.toMap,
   )
+
+  override protected val pretty: Pretty[RepresentativePackageIdOverride] =
+    prettyOfClass(
+      paramIfNonEmpty("contractOverride", _.contractOverride),
+      paramIfNonEmpty("packageIdOverride", _.packageIdOverride),
+      paramIfNonEmpty("packageNameOverride", _.packageNameOverride),
+    )
 }

@@ -5,13 +5,17 @@ package com.digitalasset.canton.participant.admin.data
 
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, UnrecognizedEnum}
 import com.digitalasset.canton.admin.participant.v30
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
 /** Represents the contract processing mode that should be applied on contracts found in an ACS
   * import.
   */
-sealed trait ContractImportMode extends Product with Serializable with PrettyPrinting {
+sealed trait ContractImportMode extends Product with Serializable with PrettyPrintingFromCompanion {
   def toProtoV30: v30.ContractImportMode
 }
 
@@ -21,14 +25,25 @@ object ContractImportMode {
     override def toProtoV30: v30.ContractImportMode =
       v30.ContractImportMode.CONTRACT_IMPORT_MODE_ACCEPT
 
-    override def pretty: Pretty[Accept.type] = prettyOfObject[Accept.type]
+    override def prettyCompanion: PrettyPrintingCompanion[Accept.this.type] =
+      AcceptPrettyPrintingCompanion
+  }
+
+  private object AcceptPrettyPrintingCompanion extends PrettyPrintingCompanion[Accept.type] {
+    override protected val pretty: Pretty[Accept.type] = prettyOfObject[Accept.type]
   }
 
   case object Validation extends ContractImportMode {
     override def toProtoV30: v30.ContractImportMode =
       v30.ContractImportMode.CONTRACT_IMPORT_MODE_VALIDATION
 
-    override def pretty: Pretty[Validation.type] = prettyOfObject[Validation.type]
+    override def prettyCompanion: PrettyPrintingCompanion[Validation.this.type] =
+      ValidationPrettyPrintingCompanion
+  }
+
+  private object ValidationPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[Validation.type] {
+    override protected val pretty: Pretty[Validation.type] = prettyOfObject[Validation.type]
   }
 
   def fromProtoV30(

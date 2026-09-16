@@ -26,7 +26,11 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   PromiseUnlessShutdownFactory,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentValidator
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -1078,9 +1082,14 @@ private[participant] object MessageDispatcher {
   /** @tparam A
     *   The type returned by processors for the given kind
     */
-  sealed trait MessageKind extends Product with Serializable with PrettyPrinting {
-    override protected def pretty: Pretty[MessageKind.this.type] =
-      prettyOfObject[MessageKind.this.type]
+  sealed trait MessageKind extends Product with Serializable with PrettyPrintingFromCompanion {
+    // `this.type` rather than `MessageKind`, so that subclasses can point at their own companion
+    override def prettyCompanion: PrettyPrintingCompanion[this.type] = MessageKind
+  }
+
+  object MessageKind extends PrettyPrintingCompanion[MessageKind] {
+    override protected val pretty: Pretty[MessageKind] =
+      prettyOfObject[MessageKind]
   }
 
   final case class TopologyTransaction(run: () => HandlerResult) extends MessageKind
@@ -1091,10 +1100,18 @@ private[participant] object MessageDispatcher {
       futureEventPublication: FutureUnlessShutdown[EventPublicationData],
       run: () => HandlerResult,
   ) extends MessageKind {
-    override protected def pretty: Pretty[RequestKind] = prettyOfParam(_.viewType)
+    override def prettyCompanion: PrettyPrintingCompanion[RequestKind] = RequestKind
+  }
+
+  object RequestKind extends PrettyPrintingCompanion[RequestKind] {
+    override protected val pretty: Pretty[RequestKind] = prettyOfParam(_.viewType)
   }
   final case class ResultKind(viewType: ViewType, run: () => HandlerResult) extends MessageKind {
-    override protected def pretty: Pretty[ResultKind] = prettyOfParam(_.viewType)
+    override def prettyCompanion: PrettyPrintingCompanion[ResultKind] = ResultKind
+  }
+
+  object ResultKind extends PrettyPrintingCompanion[ResultKind] {
+    override protected val pretty: Pretty[ResultKind] = prettyOfParam(_.viewType)
   }
   final case class AcsCommitment(
       futureEventPublication: Option[FutureEventPublication],

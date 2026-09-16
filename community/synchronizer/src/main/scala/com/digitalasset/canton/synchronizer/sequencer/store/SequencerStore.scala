@@ -22,7 +22,11 @@ import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   HasCloseContext,
 }
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.SynchronizerLimits
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage, ToDbPrimitive}
@@ -64,13 +68,16 @@ import scala.math.Numeric.Implicits.*
 /** In the sequencer database we use integers to represent members. Wrap this in the APIs to not
   * confuse with other numeric types.
   */
-final case class SequencerMemberId(private val id: Int) extends PrettyPrinting {
+final case class SequencerMemberId(private val id: Int) extends PrettyPrintingFromCompanion {
   def unwrap: Int = id
 
-  override protected def pretty: Pretty[SequencerMemberId] = prettyOfParam(_.id)
+  override def prettyCompanion: PrettyPrintingCompanion[SequencerMemberId] = SequencerMemberId
 }
 
-object SequencerMemberId {
+object SequencerMemberId extends PrettyPrintingCompanion[SequencerMemberId] {
+
+  override protected val pretty: Pretty[SequencerMemberId] = prettyOfParam(_.id)
+
   val Broadcast: SequencerMemberId = SequencerMemberId(-1)
 
   implicit val sequencerMemberIdOrdering: Ordering[SequencerMemberId] =
@@ -98,16 +105,18 @@ sealed trait IdOrPayload
   */
 final case class PayloadId(private val id: CantonTimestamp)
     extends IdOrPayload
-    with PrettyPrinting {
+    with PrettyPrintingFromCompanion {
   def unwrap: CantonTimestamp = id
 
-  override protected def pretty: Pretty[PayloadId] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[PayloadId] = PayloadId
+}
+
+object PayloadId extends PrettyPrintingCompanion[PayloadId] {
+
+  override protected val pretty: Pretty[PayloadId] = prettyOfClass(
     unnamedParam(_.id)
   )
 
-}
-
-object PayloadId {
   implicit val payloadIdToDbPrimitive: ToDbPrimitive[PayloadId, CantonTimestamp] = ToDbPrimitive(
     _.unwrap
   )

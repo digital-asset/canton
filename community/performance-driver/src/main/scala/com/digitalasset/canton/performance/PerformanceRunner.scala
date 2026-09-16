@@ -19,6 +19,7 @@ import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.MetricsFactoryProvider
 import com.digitalasset.canton.performance.PartyRole.{DvpIssuer, DvpTrader, Master, Transfer}
+import com.digitalasset.canton.performance.PerformanceRunner.prefix
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings.TargetLatency
 import com.digitalasset.canton.performance.elements.*
@@ -409,7 +410,9 @@ class PerformanceRunner(
               )
             val lf = loggerFactory.append("party-hash", party.take(20))
             val labeledMetricsFactory =
-              metricsRegistry.generateMetricsFactory(MetricsContext("role" -> role.name))
+              metricsRegistry.generateMetricsFactory(
+                MetricsContext("role" -> role.name, "participant" -> config.ledger.name)
+              )
             val driver = role match {
               case trd: DvpTrader =>
                 new dvp.TraderDriver(
@@ -477,11 +480,15 @@ class PerformanceRunner(
   ): EitherT[Future, String, Unit] =
     cnf match {
       case Some(masterConfig) =>
+        val labeledMetricsFactory =
+          metricsRegistry.generateMetricsFactory(MetricsContext("role" -> "master"))
         val driver =
           new MasterDriver(
             config.ledger,
             masterParty,
             masterConfig,
+            prefix :+ "master",
+            labeledMetricsFactory,
             loggerFactory.appendUnnamedKey("driver", "master"),
             this,
           )

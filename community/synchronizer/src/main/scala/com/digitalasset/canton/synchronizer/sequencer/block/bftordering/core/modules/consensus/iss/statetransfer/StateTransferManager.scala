@@ -27,6 +27,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingTopologyInfo,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage.StateTransferTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
@@ -57,7 +58,7 @@ class StateTransferManager[E <: Env[E]](
     override val loggerFactory: NamedLoggerFactory,
 )(
     private val maybeCustomTimeoutManager: Option[
-      TimeoutManager[E, Consensus.Message[E], Consensus.Message[E], String]
+      TimeoutManager[E, Consensus.Message[E], StateTransferTimeout, String]
     ] = None
 )(implicit
     synchronizerProtocolVersion: ProtocolVersion,
@@ -88,7 +89,7 @@ class StateTransferManager[E <: Env[E]](
   )
 
   private val timeoutManager = maybeCustomTimeoutManager.getOrElse(
-    new TimeoutManager[E, Consensus.Message[E], Consensus.Message[E], String](
+    new TimeoutManager[E, Consensus.Message[E], StateTransferTimeout, String](
       loggerFactory,
       ConstantTimeout(config.epochStateTransferRetryTimeout),
       timeoutId = "state transfer",
@@ -142,6 +143,7 @@ class StateTransferManager[E <: Env[E]](
       membership: Membership,
       cryptoProvider: CryptoProvider[E],
       nodesThatTimedOut: Seq[BftNodeId],
+      targetEpochO: Option[EpochNumber],
   )(
       abort: String => Nothing
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
@@ -159,6 +161,9 @@ class StateTransferManager[E <: Env[E]](
       .foreach(delayedMessage => context.self.asyncSend(delayedMessage.message))
 
     if (responsesForNewEpoch.sizeIs >= membership.orderingTopology.epochLength.toInt) {
+      logger.info(
+        s"Might already have all necessary blocks for new epoch (have ${responsesForNewEpoch.size} messages) waiting to send request"
+      )
       // we might already have everything, we schedule a small timeout for us locally to finish first otherwise make a new request
       val reason =
         s"we had ${responsesForNewEpoch.size} requests saved locally, but local timeout reached so we make new request"
@@ -178,27 +183,30 @@ class StateTransferManager[E <: Env[E]](
       )
     }
 
-    // speculatively send for the next epoch
-    (0L until config.epochStateTransferHowManyFutureEpochsToDownloadInParallel.value)
-      .map(extra => EpochNumber(newEpochNumber + 1 + extra))
-      .filter(epochToTransferFrom =>
-        highestEpochWeSpeculativelyRequestedBlocksOf.forall(_ < epochToTransferFrom)
-      )
-      .foreach { epochToTransfer =>
-        highestEpochWeSpeculativelyRequestedBlocksOf = Some(
-          highestEpochWeSpeculativelyRequestedBlocksOf.fold(
-            epochToTransfer
-          )(highestSoFar => EpochNumber(highestSoFar.max(epochToTransfer)))
+    targetEpochO.foreach { targetEpoch =>
+      // speculatively send for the next epoch
+      (0L until config.epochStateTransferHowManyFutureEpochsToDownloadInParallel.value)
+        .map(extra => EpochNumber(newEpochNumber + 1 + extra))
+        .filter(epochToTransferFrom =>
+          highestEpochWeSpeculativelyRequestedBlocksOf.forall(_ < epochToTransferFrom)
         )
-        initiateSendBlockTransferRequest(
-          epochToTransfer,
-          membership, // Assume it is similar enough
-          cryptoProvider,
-          abort,
-          Seq.empty,
-          shouldScheduleTimeout = false,
-        )
-      }
+        .filter(_ <= targetEpoch)
+        .foreach { epochToTransfer =>
+          highestEpochWeSpeculativelyRequestedBlocksOf = Some(
+            highestEpochWeSpeculativelyRequestedBlocksOf.fold(
+              epochToTransfer
+            )(highestSoFar => EpochNumber(highestSoFar.max(epochToTransfer)))
+          )
+          initiateSendBlockTransferRequest(
+            epochToTransfer,
+            membership, // Assume it is similar enough
+            cryptoProvider,
+            abort,
+            Seq.empty,
+            shouldScheduleTimeout = false,
+          )
+        }
+    }
   }
 
   private def initiateSendBlockTransferRequest(
@@ -402,7 +410,12 @@ class StateTransferManager[E <: Env[E]](
       traceContext: TraceContext
   ): Unit = {
     logger.debug(s"State transfer cancelling a timeout for epoch $epochNumber")
-    timeoutManager.cancelTimeout()
+    timeoutManager.cancelTimeoutIf { timeout =>
+      // it is possible we moved to a new epoch while asynchronously verifying a redundant old block. That could cause
+      // confusion, and we would cancel the timeout for the new epoch rather than the old. So we check that the current
+      // timeout is not for an epoch higher than we cancel.
+      timeout.timeoutIsForEpoch <= epochNumber
+    }
   }
 
   def emitEpochTransferLatency(epochNumber: EpochNumber)(implicit
@@ -441,7 +454,6 @@ class StateTransferManager[E <: Env[E]](
         StateTransferMessageResult.Continue
 
       case response: StateTransferMessage.BlockTransferResponse =>
-        // TODO(#25082) consider authorizing/handling a response only if it comes `from` the requested node
         if (inStateTransfer) {
           handleBlockTransferResponse(
             response,

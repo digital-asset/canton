@@ -31,11 +31,20 @@ private[bftordering] object P2PMetrics {
   def emitSendStats(
       metrics: BftOrderingMetrics,
       message: BftOrderingMessageBody,
+      droppedAsUnauthenticated: Boolean = false,
   )(implicit
       mc: MetricsContext
   ): Unit = {
     metrics.p2p.send.sentBytes.mark(message.serializedSize.toLong)
     metrics.p2p.send.sentMessages.mark(1L)
+    if (droppedAsUnauthenticated) {
+      metrics.p2p.send.sendsDropped.inc()(
+        mc.withExtraLabels(
+          metrics.p2p.send.failure.labels.reason.Key ->
+            metrics.p2p.send.failure.labels.reason.values.Unauthenticated
+        )
+      )
+    }
   }
 
   def sendMetricsContext(

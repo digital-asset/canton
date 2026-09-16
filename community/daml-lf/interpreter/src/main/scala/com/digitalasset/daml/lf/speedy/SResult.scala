@@ -115,6 +115,9 @@ object Question {
     ) extends Cmd
     final case object GetTime extends Cmd
     final case class CheckLedgerTimeLT(time: Time.Timestamp) extends Cmd
+    final case object OpenTry extends Cmd
+    final case object CloseTry extends Cmd
+    final case object AbortTry extends Cmd
   }
 }
 

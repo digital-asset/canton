@@ -20,7 +20,11 @@ import com.digitalasset.canton.ledger.participant.state.{AcsChangeFactory, Seque
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
   DecryptedViewData,
@@ -728,13 +732,22 @@ object ProcessingSteps {
 
   object RequestType {
     // Since RequestType is not sealed (extended in tests), we introduce this sealed one
-    sealed trait Values extends RequestType with PrettyPrinting
+    sealed trait Values extends RequestType with PrettyPrintingFromCompanion {
+      def kind: String
+
+      override def prettyCompanion: PrettyPrintingCompanion[Values.this.type] = Values
+    }
+
+    object Values extends PrettyPrintingCompanion[Values] {
+      override protected val pretty: Pretty[Values] = prettyOfString(_.kind)
+    }
 
     case object Transaction extends Values {
       override type PendingRequestData = PendingTransaction
 
-      override protected def pretty: Pretty[Transaction] = prettyOfObject[Transaction]
+      override def kind: String = "Transaction"
     }
+
     type Transaction = Transaction.type
 
     sealed trait Reassignment extends Values
@@ -742,7 +755,7 @@ object ProcessingSteps {
     case object Unassignment extends Reassignment {
       override type PendingRequestData = PendingUnassignment
 
-      override protected def pretty: Pretty[Unassignment] = prettyOfObject[Unassignment]
+      override def kind: String = "Unassignment"
     }
 
     type Unassignment = Unassignment.type
@@ -750,9 +763,9 @@ object ProcessingSteps {
     case object Assignment extends Reassignment {
       override type PendingRequestData = PendingAssignment
 
-      override protected def pretty: Pretty[Assignment] = prettyOfObject[Assignment]
-
+      override def kind: String = "Assignment"
     }
+
     type Assignment = Assignment.type
   }
 

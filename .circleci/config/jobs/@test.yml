@@ -256,21 +256,6 @@ protocol_continuity_test_latest:
         num_parallel_tasks: "1"
         timeout: "30m"
 
-# Job used to run the ACS commitment tests in PV DEV, which are currently excluded from the regular test runs on dev branches.
-# This allows us to run them more frequently and get faster feedback during development of the redesigned ACS commitment feature.
-# TODO(#33536): Remove this job and usages once the ACS commitment redesign development is complete
-temp_acs_commitment_tests_pv_dev:
-  parameters:
-    override_java_version_for_tests:
-      type: string
-      default: ""
-  executor: canton-xlarge-docker-with-postgres
-  parallelism: 1
-  steps:
-    - set_canton_protocol_version:
-        protocol_version: "DEV"
-    - run_temp_acs_commitment_tests
-
 nightly_integration_test:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
   steps:
@@ -330,9 +315,16 @@ nightly_integration_test_bftordering_only:
     - slack_red_main_with_volunteer:
         fixed_volunteer: "U04S25SG9D5" # Daniel
 
-nightly_test_upgrades_matrix:
+nightly_test_upgrades_matrix_and_check:
   executor: canton-xlarge-docker-with-postgres
   steps:
+    - run_tests:
+        command: "\"daml-lf-upgrade-check-test / Test / test\""
+        timeout: "10m"
+        filter: "cat"
+        report_to_datadog: false
+        num_test_buckets: ""
+        skip_cleanup: true
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.UpgradesMatrixIntegration"
@@ -674,7 +666,7 @@ test_data_continuity_dumps:
     - slack_red_main_with_volunteer
 
 print_tests:
-  executor: canton-large-docker
+  executor: canton-xlarge-docker
   steps:
     - checkout_and_restore_caches
     - attach_workspace:

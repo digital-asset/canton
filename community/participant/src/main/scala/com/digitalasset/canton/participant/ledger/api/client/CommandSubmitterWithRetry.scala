@@ -12,7 +12,11 @@ import com.digitalasset.canton.ledger.client.LedgerClientUtils
 import com.digitalasset.canton.ledger.client.services.commands.CommandServiceClient
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
@@ -139,30 +143,48 @@ class CommandSubmitterWithRetry(
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Nil
 }
 
-sealed trait CommandResult extends PrettyPrinting with Product with Serializable
+sealed trait CommandResult extends PrettyPrintingFromCompanion with Product with Serializable
 
 object CommandResult {
   final case class Success(updateId: String) extends CommandResult {
-    override protected def pretty: Pretty[Success.this.type] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[Success] = Success
+  }
+
+  object Success extends PrettyPrintingCompanion[Success] {
+    override protected val pretty: Pretty[Success] = prettyOfClass(
       param("updateId", _.updateId.doubleQuoted)
     )
   }
 
   final case class Failed(commandId: String, errorStatus: Status) extends CommandResult {
-    override protected def pretty: Pretty[Failed] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[Failed] = Failed
+  }
+
+  object Failed extends PrettyPrintingCompanion[Failed] {
+    override protected val pretty: Pretty[Failed] = prettyOfClass(
       param("commandId", _.commandId.doubleQuoted),
       param("errorStatus", _.errorStatus),
     )
   }
 
   final case object AbortedDueToShutdown extends CommandResult {
-    override protected def pretty: Pretty[AbortedDueToShutdown.this.type] =
-      prettyOfObject[AbortedDueToShutdown.this.type]
+    override def prettyCompanion: PrettyPrintingCompanion[AbortedDueToShutdown.this.type] =
+      AbortedDueToShutdownPrettyPrintingCompanion
+  }
+
+  private object AbortedDueToShutdownPrettyPrintingCompanion
+      extends PrettyPrintingCompanion[AbortedDueToShutdown.type] {
+    override protected val pretty: Pretty[AbortedDueToShutdown.type] =
+      prettyOfObject[AbortedDueToShutdown.type]
   }
 
   final case class TimeoutReached(commandId: String, lastErrorStatus: Status)
       extends CommandResult {
-    override protected def pretty: Pretty[TimeoutReached] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[TimeoutReached] = TimeoutReached
+  }
+
+  object TimeoutReached extends PrettyPrintingCompanion[TimeoutReached] {
+    override protected val pretty: Pretty[TimeoutReached] = prettyOfClass(
       param("commandId", _.commandId.doubleQuoted),
       param("lastError", _.lastErrorStatus),
     )

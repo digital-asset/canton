@@ -1,0 +1,19 @@
+name: upgrades-example-WarnsWhenExpressionChangesBindingOrder
+version: 1.0.0
+source: .
+data-dependencies:
+  - ${TARGET_ROOT}/upgrades-WarnsWhenExpressionChangesBindingOrder-dep-v2.dar
+dependencies:
+  - daml-script
+module-prefixes: null
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-WarnsWhenExpressionChangesBindingOrder-v1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

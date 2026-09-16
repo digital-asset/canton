@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.Se
   PeerEndpointHealthStatus,
   PeerNetworkStatus,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionManager.PeerSender
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionState
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.{
   P2PEndpoint,
@@ -865,7 +866,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
 
           // Store and connect to endpoint
           context.runPipedMessagesThenVerifyAndReceiveOnModule(module) { message =>
-            message shouldBe P2PNetworkOut.Internal.Connect(anotherEndpoint)
+            message shouldBe P2PNetworkOut.Internal.EndpointAdded(anotherEndpoint)
           }
           module.p2pEndpointsStore
             .listEndpoints()
@@ -874,6 +875,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           ) :+ (anotherEndpoint -> None)
 
           endpointAdded shouldBe true
+          state.configuredP2PEndpoints.keys should contain(newEndpoint.id)
           p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections :+ Some(
             newEndpoint.id
           ) -> None
@@ -910,7 +912,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             )
           )
 
-          context.runPipedMessages() should contain only P2PNetworkOut.Internal.Connect(
+          context.runPipedMessages() should contain only P2PNetworkOut.Internal.EndpointAdded(
             anotherEndpoint
           )
           endpointAdded shouldBe false
@@ -948,7 +950,11 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             )
           )
 
-          context.runPipedMessages() shouldBe empty
+          // The endpoint addition is always notified to the module, so that it can update its cache of
+          //  configured endpoints, but no new connection is created since the endpoint is already known
+          context.runPipedMessagesThenVerifyAndReceiveOnModule(module) { message =>
+            message shouldBe P2PNetworkOut.Internal.EndpointAdded(anotherEndpoint)
+          }
           module.p2pEndpointsStore
             .listEndpoints()
             .apply() should contain theSameElementsInOrderAs otherInitialEndpoints.map(
@@ -956,6 +962,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           ) :+ (anotherEndpoint -> None)
 
           endpointAdded shouldBe true
+          state.configuredP2PEndpoints.keys should contain(anotherEndpoint.id)
           state.p2pConnectionState.connections should contain theSameElementsAs initialKnownConnections :+ Some(
             anotherEndpoint.id
           ) -> Some(endpointToTestBftNodeId(anotherEndpoint))
@@ -981,7 +988,9 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             )
           )
 
-          context.runPipedMessages() shouldBe empty
+          context.runPipedMessagesThenVerifyAndReceiveOnModule(module) { message =>
+            message shouldBe P2PNetworkOut.Internal.EndpointAdded(otherInitialEndpointsTupled._1)
+          }
           module.p2pEndpointsStore
             .listEndpoints()
             .apply() should contain theSameElementsInOrderAs otherInitialEndpoints.map(_ -> None)
@@ -1056,7 +1065,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             )
           )
 
-          context.runPipedMessages() should contain only P2PNetworkOut.Internal.Disconnect(
+          context.runPipedMessages() should contain only P2PNetworkOut.Internal.EndpointRemoved(
             otherInitialEndpointsTupled._1.id
           )
           endpointRemoved shouldBe false
@@ -1084,7 +1093,11 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             )
           )
 
-          context.runPipedMessages() shouldBe empty
+          context.runPipedMessagesThenVerifyAndReceiveOnModule(module) { message =>
+            message shouldBe P2PNetworkOut.Internal.EndpointRemoved(
+              otherInitialEndpointsTupled._1.id
+            )
+          }
           module.p2pEndpointsStore
             .listEndpoints()
             .apply() should contain theSameElementsInOrderAs Seq(
@@ -1093,6 +1106,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           ).map(_ -> None)
 
           endpointRemoved shouldBe true
+          state.configuredP2PEndpoints.keys should not contain otherInitialEndpointsTupled._1.id
 
           verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 1))
           verify(mempoolSpy, never).asyncSend(Mempool.P2PConnectivityUpdate(aMembership, 2))
@@ -1116,7 +1130,9 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
             )
           )
 
-          context.runPipedMessages() shouldBe empty
+          context.runPipedMessagesThenVerifyAndReceiveOnModule(module) { message =>
+            message shouldBe P2PNetworkOut.Internal.EndpointRemoved(anotherEndpoint.id)
+          }
           module.p2pEndpointsStore
             .listEndpoints()
             .apply() should contain theSameElementsInOrderAs otherInitialEndpoints.map(_ -> None)
@@ -1280,6 +1296,159 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       }
     }
 
+    "an endpoint gets disconnected" should {
+
+      "re-establish an outgoing connection to it" when {
+        "it is still configured and its runtime state has been fully cleaned up, " +
+          "as it happens when a winning incoming connection is torn down by the peer" in {
+            val p2pConnectionState = new P2PGrpcConnectionState(selfNode, loggerFactory)
+            val (context, _, module, p2pNetworkManager) =
+              setupWithIgnoringDefaultDeps(p2pConnectionState = p2pConnectionState)
+
+            implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+            val p2pEndpoint = otherInitialEndpointsTupled._1
+            val bftNodeId = endpointToTestBftNodeId(p2pEndpoint)
+
+            // The peer connects to this node first and wins connection deduplication, so the
+            //  surviving connection is incoming and has an associated peer sender.
+            connect(p2pNetworkManager, p2pEndpoint)
+            authenticate(p2pNetworkManager, p2pEndpoint)
+            context.extractSelfMessages().foreach(module.receive)
+            val peerSender = mock[PeerSender]
+            p2pConnectionState.addSenderIfMissing(bftNodeId, peerSender) shouldBe true
+            p2pConnectionState.isDefined(p2pEndpoint.id) shouldBe true
+
+            // The peer's operator removes this node's endpoint, so the peer closes the incoming
+            //  connection, whose state is then fully cleaned up on this node.
+            p2pConnectionState.shutdownAndCleanupActiveConnectionAndReturnEndpointIds(
+              peerSender
+            ) should contain only p2pEndpoint.id
+            p2pConnectionState.isDefined(p2pEndpoint.id) shouldBe false
+            disconnect(p2pNetworkManager, p2pEndpoint)
+
+            // The disconnection is processed synchronously, i.e. reconnection doesn't require
+            //  reading the P2P endpoints store
+            context.extractSelfMessages().foreach(module.receive) // Process the disconnection
+            context.runPipedMessages() shouldBe empty
+
+            // The peer won't redial, so this node must have re-established outgoing connectivity to it
+            p2pConnectionState.isDefined(p2pEndpoint.id) shouldBe true
+          }
+      }
+
+      "not reconnect to it" when {
+        "it is not configured anymore, as it happens when its operator removed it" in {
+          val p2pConnectionState = new P2PGrpcConnectionState(selfNode, loggerFactory)
+          val p2pEndpointsStore = new InMemoryUnitTestP2PEndpointsStore(otherInitialEndpoints.toSet)
+          val (context, _, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(
+              p2pEndpointsStore = p2pEndpointsStore,
+              p2pConnectionState = p2pConnectionState,
+            )
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          val p2pEndpoint = otherInitialEndpointsTupled._1
+
+          // The operator of this node removes the endpoint; the removal is processed by the module,
+          //  so that its cache of configured endpoints is updated as well
+          var endpointRemoved = false
+          module.receive(
+            P2PNetworkOut.Admin
+              .RemoveEndpoint(p2pEndpoint.id, removed => endpointRemoved = removed)
+          )
+          context.runPipedMessagesAndReceiveOnModule(module)
+          endpointRemoved shouldBe true
+
+          // Its runtime state is then cleaned up
+          p2pConnectionState.shutdownConnectionAndReturnPeerSender(
+            Left(p2pEndpoint.id),
+            clearNetworkRefAssociations = true,
+            closeNetworkRef = true,
+          ) shouldBe None
+          p2pConnectionState.isDefined(p2pEndpoint.id) shouldBe false
+          disconnect(p2pNetworkManager, p2pEndpoint)
+
+          context.extractSelfMessages().foreach(module.receive) // Process the disconnection
+          context.runPipedMessages() shouldBe empty
+
+          p2pConnectionState.isDefined(p2pEndpoint.id) shouldBe false
+        }
+
+        "it was never configured, as it happens when a node merely connected to this one " +
+          "and advertised its endpoint for connection deduplication" in {
+            val p2pConnectionState = new P2PGrpcConnectionState(selfNode, loggerFactory)
+            val (context, _, module, _) =
+              setupWithIgnoringDefaultDeps(p2pConnectionState = p2pConnectionState)
+
+            implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+            // `anotherEndpoint` is not configured on this node, so a disconnection notified for it
+            //  must not make this node start connecting to it
+            p2pConnectionState.isDefined(anotherEndpoint.id) shouldBe false
+
+            module.receive(P2PNetworkOut.Network.Disconnected(anotherEndpoint.id))
+            context.runPipedMessages() shouldBe empty
+
+            p2pConnectionState.isDefined(anotherEndpoint.id) shouldBe false
+          }
+      }
+    }
+
+    "connecting to initial nodes" should {
+
+      "not consider an endpoint connected by a node ID persisted by a previous incarnation, " +
+        "so that protocol modules are not started below their quorum of authenticated nodes" in {
+          val p2pEndpointsStore = new InMemoryUnitTestP2PEndpointsStore(otherInitialEndpoints.toSet)
+          val (ep1, ep2, ep3) = otherInitialEndpointsTupled
+          // Simulate a restart after ep1 and ep2 had authenticated in a previous incarnation
+          p2pEndpointsStore.associate(ep1, endpointToTestBftNodeId(ep1)).apply() shouldBe true
+          p2pEndpointsStore.associate(ep2, endpointToTestBftNodeId(ep2)).apply() shouldBe true
+
+          val p2pConnectionState = new P2PGrpcConnectionState(selfNode, loggerFactory)
+          val consensusSpy = spy(fakeIgnoringModule[Consensus.Message[ProgrammableUnitTestEnv]])
+          val (context, state, module, p2pNetworkManager) =
+            setupWithIgnoringDefaultDeps(
+              consensus = consensusSpy,
+              p2pEndpointsStore = p2pEndpointsStore,
+              p2pConnectionState = p2pConnectionState,
+            )
+
+          implicit val ctx: ProgrammableUnitTestContext[P2PNetworkOut.Message] = context
+
+          // ep1 and ep2 have an open gRPC channel but have not authenticated in this incarnation
+          connect(p2pNetworkManager, ep1)
+          connect(p2pNetworkManager, ep2)
+          context.extractSelfMessages().foreach(module.receive)
+
+          var status: Option[PeerNetworkStatus] = None
+          module.receive(
+            P2PNetworkOut.Admin.GetStatus(s => status = Some(s), Some(Seq(ep1.id, ep2.id)))
+          )
+          status should contain(
+            PeerNetworkStatus(
+              Seq(ep1, ep2).map(p2pEndpoint =>
+                PeerConnectionStatus.PeerEndpointStatus(
+                  p2pEndpoint.id,
+                  isOutgoingConnection = true,
+                  PeerEndpointHealth(PeerEndpointHealthStatus.Unauthenticated, None),
+                )
+              )
+            )
+          )
+
+          // Only ep3 actually authenticates, which is below the strong quorum of a 4-node topology
+          connect(p2pNetworkManager, ep3)
+          authenticate(p2pNetworkManager, ep3)
+          context.extractSelfMessages().foreach(module.receive)
+
+          state.maxNodesContemporarilyAuthenticated shouldBe 2 // Only this node and ep3
+          state.consensusStarted shouldBe false
+          verify(consensusSpy, never).asyncSend(Consensus.Start)
+        }
+    }
+
     "it is sent a topology update" should {
       "send an update to the mempool" in {
         val mempoolSpy =
@@ -1310,6 +1479,10 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         ),
       isGenesis: Boolean = true,
       connectToInitialNodes: Boolean = true,
+      p2pConnectionState: P2PGrpcConnectionState = new P2PGrpcConnectionState(
+        selfNode,
+        loggerFactory,
+      ),
   ): (
       ProgrammableUnitTestContext[P2PNetworkOut.Message],
       P2PNetworkOutModule.State,
@@ -1327,6 +1500,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
       p2pEndpointsStore,
       isGenesis,
       connectToInitialNodes,
+      p2pConnectionState,
     )
 
   private def setupWithDefaultDepsExpectingSilence(
@@ -1343,13 +1517,16 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         ),
       isGenesis: Boolean = true,
       connectToInitialNodes: Boolean = true,
+      p2pConnectionState: P2PGrpcConnectionState = new P2PGrpcConnectionState(
+        selfNode,
+        loggerFactory,
+      ),
   ): (
       ProgrammableUnitTestContext[P2PNetworkOut.Message],
       P2PNetworkOutModule.State,
       P2PNetworkOutModule[ProgrammableUnitTestEnv, FakeP2PNetworkManager],
       FakeP2PNetworkManager,
   ) = {
-    val p2pConnectionState = new P2PGrpcConnectionState(selfNode, loggerFactory)
     val state =
       new P2PNetworkOutModule.State(
         p2pConnectionState,

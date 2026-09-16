@@ -1,0 +1,19 @@
+name: upgrades-example-SucceedsWhenTwoDeeplyNestedTypeSynonymsResolveToTheSameDatatypes
+version: 2.0.0
+source: .
+data-dependencies: []
+dependencies:
+  - daml-script
+module-prefixes: null
+build-options:
+  - --target=2.dev
+  - --typecheck-upgrades=no
+  - --output=${TARGET_ROOT}/upgrades-SucceedsWhenTwoDeeplyNestedTypeSynonymsResolveToTheSameDatatypes-v2.dar
+upgrades: ${TARGET_ROOT}/upgrades-SucceedsWhenTwoDeeplyNestedTypeSynonymsResolveToTheSameDatatypes-v1.dar
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION

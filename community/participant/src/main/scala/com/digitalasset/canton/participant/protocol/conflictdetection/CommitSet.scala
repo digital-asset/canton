@@ -6,8 +6,17 @@ package com.digitalasset.canton.participant.protocol.conflictdetection
 import cats.syntax.functor.*
 import com.digitalasset.canton.data.{ContractReassignment, ContractsReassignmentBatch}
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.*
+import com.digitalasset.canton.logging.pretty.{
+  Pretty,
+  PrettyPrintingCompanion,
+  PrettyPrintingFromCompanion,
+}
+import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet.{
+  ArchivalCommit,
+  AssignmentCommit,
+  CreationCommit,
+  UnassignmentCommit,
+}
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.{
   ContractMetadata,
@@ -50,11 +59,17 @@ final case class CommitSet(
     assignments: Map[LfContractId, AssignmentCommit],
     reassignments: Seq[ReassignmentId],
     hostedOnboardingPartiesO: Option[HostedOnboardingParties],
-) extends PrettyPrinting {
+) extends PrettyPrintingFromCompanion {
   requireDisjoint(unassignments.keySet -> "unassignments", archivals.keySet -> "archivals")
   requireDisjoint(assignments.keySet -> "assignments", creations.keySet -> "creations")
 
-  override protected def pretty: Pretty[CommitSet] = prettyOfClass(
+  override def prettyCompanion: PrettyPrintingCompanion[CommitSet] =
+    CommitSet
+}
+
+object CommitSet extends PrettyPrintingCompanion[CommitSet] {
+
+  override protected val pretty: Pretty[CommitSet] = prettyOfClass(
     paramIfNonEmpty("archivals", _.archivals),
     paramIfNonEmpty("creations", _.creations),
     paramIfNonEmpty("unassignments", _.unassignments),
@@ -62,9 +77,6 @@ final case class CommitSet(
     paramIfNonEmpty("reassignments", _.reassignments),
     paramIfDefined("onboarding", _.hostedOnboardingPartiesO),
   )
-}
-
-object CommitSet {
 
   val empty: CommitSet = CommitSet(Map.empty, Map.empty, Map.empty, Map.empty, Nil, None)
 
@@ -74,8 +86,12 @@ object CommitSet {
   final case class CreationCommit(
       contractMetadata: ContractMetadata,
       reassignmentCounter: ReassignmentCounter,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[CreationCommit] = prettyOfClass(
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[CreationCommit] = CreationCommit
+  }
+
+  object CreationCommit extends PrettyPrintingCompanion[CreationCommit] {
+    override protected val pretty: Pretty[CreationCommit] = prettyOfClass(
       param("contractMetadata", _.contractMetadata),
       param("reassignmentCounter", _.reassignmentCounter),
     )
@@ -84,8 +100,12 @@ object CommitSet {
       targetSynchronizerId: Target[SynchronizerId],
       stakeholders: Set[LfPartyId],
       reassignmentCounter: ReassignmentCounter,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[UnassignmentCommit] = prettyOfClass(
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[UnassignmentCommit] = UnassignmentCommit
+  }
+
+  object UnassignmentCommit extends PrettyPrintingCompanion[UnassignmentCommit] {
+    override protected val pretty: Pretty[UnassignmentCommit] = prettyOfClass(
       param("targetSynchronizerId", _.targetSynchronizerId),
       paramIfNonEmpty("stakeholders", _.stakeholders),
       param("reassignmentCounter", _.reassignmentCounter),
@@ -96,8 +116,12 @@ object CommitSet {
       reassignmentId: ReassignmentId,
       contractMetadata: ContractMetadata,
       reassignmentCounter: ReassignmentCounter,
-  ) extends PrettyPrinting {
-    override protected def pretty: Pretty[AssignmentCommit] = prettyOfClass(
+  ) extends PrettyPrintingFromCompanion {
+    override def prettyCompanion: PrettyPrintingCompanion[AssignmentCommit] = AssignmentCommit
+  }
+
+  object AssignmentCommit extends PrettyPrintingCompanion[AssignmentCommit] {
+    override protected val pretty: Pretty[AssignmentCommit] = prettyOfClass(
       param("source", _.sourceSynchronizerId),
       param("reassignmentId", _.reassignmentId),
       param("contractMetadata", _.contractMetadata),
@@ -113,9 +137,13 @@ object CommitSet {
     */
   final case class ArchivalCommit(
       stakeholders: Set[LfPartyId]
-  ) extends PrettyPrinting {
+  ) extends PrettyPrintingFromCompanion {
 
-    override protected def pretty: Pretty[ArchivalCommit] = prettyOfClass(
+    override def prettyCompanion: PrettyPrintingCompanion[ArchivalCommit] = ArchivalCommit
+  }
+
+  object ArchivalCommit extends PrettyPrintingCompanion[ArchivalCommit] {
+    override protected val pretty: Pretty[ArchivalCommit] = prettyOfClass(
       param("stakeholders", _.stakeholders)
     )
   }
@@ -226,4 +254,5 @@ object CommitSet {
         .forgetNE,
       hostedOnboardingPartiesO = None,
     )
+
 }

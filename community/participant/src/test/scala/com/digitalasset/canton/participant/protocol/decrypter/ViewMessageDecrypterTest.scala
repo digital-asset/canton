@@ -178,34 +178,46 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
     val viewKeyData: Seq[(SymmetricKey, Seq[AsymmetricEncrypted[SecureRandomness]])] =
       randomness.map(mkViewKeyData)
 
-    var lightTree: Seq[LightTransactionViewTree] =
-      allViewIndices.map(i =>
-        LightTransactionViewTree
-          .fromTransactionViewTreeUsingViewHashReference(
-            fullTree(i),
-            subviewKeyRandomness(i),
-            testedProtocolVersion,
-          )
-          .value
-      )
+    var lightTree: Seq[LightTransactionViewTree] = Seq.empty
 
     val encryptedViewMessage: Seq[EncryptedViewMessage[TransactionViewType.type]] =
       interceptEncryptedViewMessages(
-        if (testedProtocolVersion < ProtocolVersion.transparency)
-          allViewIndices.map { i =>
-            EncryptedViewMessageFactory
-              .encryptView(TransactionViewType)(
-                lightTree(i),
-                viewKeyData(i),
-                Signature.noSignature,
-                snapshot,
-                testedProtocolVersion,
-              )
-              .futureValueUS
-              .value
-          }
-        else {
-          val childLvt = lightTree(child)
+        if (testedProtocolVersion < ProtocolVersion.transparency) {
+          val (tree, encryptedTree) =
+            allViewIndices.map { i =>
+              val ltv = LightTransactionViewTree
+                .fromTransactionViewTreeUsingViewHashReference(
+                  fullTree(i),
+                  subviewKeyRandomness(i),
+                  testedProtocolVersion,
+                )
+                .value
+              val encryptedLtv = EncryptedViewMessageFactory
+                .encryptView(TransactionViewType)(
+                  ltv,
+                  viewKeyData(i),
+                  Signature.noSignature,
+                  snapshot,
+                  testedProtocolVersion,
+                )
+                .futureValueUS
+                .value
+              (ltv, encryptedLtv)
+            }.unzip
+
+          // Update the light tree
+          lightTree = tree
+
+          encryptedTree
+        } else {
+          val childLvt = LightTransactionViewTree
+            .fromTransactionViewTreeUsingCiphertextIdReference(
+              fullTree(child),
+              subviewKeyRandomness(child),
+              Map.empty,
+              testedProtocolVersion,
+            )
+            .valueOrFail("Failed to create light transaction view tree for child view")
           val childEnc = EncryptedViewMessageFactory
             .encryptView(TransactionViewType)(
               childLvt,
@@ -219,16 +231,16 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
 
           val ciphertextId = childEnc.encryptedViews.computeCiphertextId(pureCrypto)
 
-          val parentOldLvt = lightTree(parent)
-          val parentLvt = LightTransactionViewTree.tryCreate(
-            parentOldLvt.tree,
-            parentOldLvt.subviewReferencesAndKeys.map(subviewReferenceAndKey =>
-              subviewReferenceAndKey.copy(subviewReference =
-                ByCiphertextId(ciphertextId, NonNegativeInt.zero)
-              )
-            ),
-            testedProtocolVersion,
-          )
+          val parentLvt = LightTransactionViewTree
+            .fromTransactionViewTreeUsingCiphertextIdReference(
+              fullTree(parent),
+              subviewKeyRandomness(parent),
+              Map(
+                fullTree(child).viewHash -> ByCiphertextId(ciphertextId, NonNegativeInt.zero)
+              ),
+              testedProtocolVersion,
+            )
+            .valueOrFail("Failed to create light transaction view tree for child view")
 
           // Update the light tree to reflect the new parent-child transactions views that are linked
           // by the ciphertext ID instead of the view hash.
@@ -401,8 +413,6 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
     }
   }
 
-  protected def reportRandomnessMismatch(env: Env, dummyRandomness: SecureRandomness): Unit
-
   def viewMessageDecrypterTest(): Unit = {
     "successfully decrypt all view messages from envelopes with multiple views" in {
       val env = new Env()
@@ -467,14 +477,16 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       )
       import env.*
 
-      loggerFactory.assertInternalErrorAsyncUS[IllegalArgumentException](
-        decrypter.decryptViews(onlyChildEnvelopes, snapshot, defaultSynchronizerLimits).value,
-        _.getMessage should startWith(
-          s"Can't decrypt the randomness of the message with hash(es) ${encryptedViewMessage(child).viewHashes} where I'm allegedly an informee. " +
-            s"SyncCryptoDecryptError(\n  FailedToDecrypt(\n    org.bouncycastle.jcajce.provider.util.BadBlockException"
-        ),
-      )
-    }.futureValueUS
+      loggerFactory
+        .assertInternalErrorAsyncUS[IllegalArgumentException](
+          decrypter.decryptViews(onlyChildEnvelopes, snapshot, defaultSynchronizerLimits).value,
+          _.getMessage should startWith(
+            s"Can't decrypt the randomness of the message with hash(es) ${encryptedViewMessage(child).viewHashes} where I'm allegedly an informee. " +
+              s"SyncCryptoDecryptError(\n  FailedToDecrypt(\n    org.bouncycastle.jcajce.provider.util.BadBlockException"
+          ),
+        )
+        .futureValueUS
+    }
 
     "fail on missing view keys" in {
       // Note: It would be desirable to filter out envelopes that use unknown keys (according to the topology state)
@@ -488,12 +500,14 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       )
       import env.*
 
-      loggerFactory.assertInternalErrorAsyncUS[IllegalArgumentException](
-        decrypter.decryptViews(onlyChildEnvelopes, snapshot, defaultSynchronizerLimits).value,
-        _.getMessage shouldBe s"Can't decrypt the randomness of the message with hash(es) ${encryptedViewMessage(child).viewHashes} where I'm allegedly an informee. " +
-          s"MissingParticipantKey(PAR::participant::default)",
-      )
-    }.futureValueUS
+      loggerFactory
+        .assertInternalErrorAsyncUS[IllegalArgumentException](
+          decrypter.decryptViews(onlyChildEnvelopes, snapshot, defaultSynchronizerLimits).value,
+          _.getMessage shouldBe s"Can't decrypt the randomness of the message with hash(es) ${encryptedViewMessage(child).viewHashes} where I'm allegedly an informee. " +
+            s"MissingParticipantKey(PAR::participant::default)",
+        )
+        .futureValueUS
+    }
 
     "crash on missing private keys" in {
       // Note: If the private key is missing, the participant needs to crash to avoid a ledger fork.
@@ -519,7 +533,7 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
         .futureValueUS
     }
 
-    "report if the randomness of an EncryptedViewMessage does not match the randomness in the parent tree" in {
+    "fail if the randomness of an EncryptedViewMessage does not match the randomness in the parent tree" in {
       // Note: It is desirable to keep the child view and discard the parent view in this case.
       val dummyRandomness = SecureRandomness
         .fromByteString(16)(ByteString.fromHex("DEADBEEFDEADBEEFDEADBEEFDEADBEEF"))
@@ -528,8 +542,14 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       // We intercept the subview key randomness listed in the parent view and replace it with dummy randomness
       // that fails when used to decrypt the child view.
       val env = new Env(interceptSubviewKeyRandomness = _ => Seq(Seq(dummyRandomness), Seq.empty))
+      import env.*
 
-      reportRandomnessMismatch(env, dummyRandomness)
+      loggerFactory
+        .assertInternalErrorAsyncUS[IllegalArgumentException](
+          decrypter.decryptViews(allEnvelopes, snapshot, defaultSynchronizerLimits).value,
+          _.getMessage should include("has multiple encryption keys associated with it"),
+        )
+        .futureValueUS
     }
 
     "fail if different encrypted view messages contain the same view with different randomnesses" in {
@@ -545,11 +565,13 @@ trait ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
       )
       import env.*
 
-      loggerFactory.assertInternalErrorAsyncUS[IllegalArgumentException](
-        decrypter.decryptViews(allEnvelopes, snapshot, defaultSynchronizerLimits).value,
-        _.getMessage should include("has different encryption keys associated with it"),
-      )
-    }.futureValueUS
+      loggerFactory
+        .assertInternalErrorAsyncUS[IllegalArgumentException](
+          decrypter.decryptViews(allEnvelopes, snapshot, defaultSynchronizerLimits).value,
+          _.getMessage should include("has multiple encryption keys associated with it"),
+        )
+        .futureValueUS
+    }
 
     "successfully decrypt even if the view hash of an EncryptedViewMessage does not match the view hash of the contained tree" in {
       // Note: It is desirable to discard the envelope instead.

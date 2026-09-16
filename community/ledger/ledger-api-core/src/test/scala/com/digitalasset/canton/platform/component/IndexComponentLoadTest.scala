@@ -58,29 +58,9 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
   * ignored, and logs on WARN log level).
   */
 @Ignore
-class IndexComponentLoadTest
-    extends AnyFlatSpec
-    with IndexComponentTest
-    with PersistenceSqlQueries {
-  // How long to wait for a benchmarked data fetch to finish. The test will fail if this is exceeded.
-  private val benchmarkedTaskPatience =
-    PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(2000, "seconds")))
+class IndexComponentLoadTest extends IndexComponentLoadTestBase {
 
-  override val dbConfig: com.digitalasset.canton.config.DbConfig =
-    DbBasicConfig(
-      username = "postgres",
-      password = "",
-      dbName = "load_test",
-      host = "localhost",
-      port = 5432,
-      connectionPoolEnabled = true,
-    ).toPostgresDbConfig
-
-  override implicit val traceContext: TraceContext = TraceContext.createNew("load-test")
-
-  private val testAcsChangeFactory = TestAcsChangeFactory()
-
-  it should "Index assign/unassign updates" ignore {
+  it should "Index assign/unassign updates" in {
     val nextRecordTime = nextRecordTimeFactory()
     logger.warn(s"start preparing updates...")
     val passes = 1
@@ -223,8 +203,33 @@ class IndexComponentLoadTest
       ),
     )
   }
+}
 
-  private def measureAchsInitializationTime(regionName: String, achsConfig: AchsConfig): Unit = {
+trait IndexComponentLoadTestBase
+    extends AnyFlatSpec
+    with IndexComponentTest
+    with PersistenceSqlQueries {
+  val benchmarkedTaskPatience =
+    PatienceConfiguration.Timeout(Span.convertDurationToSpan(Duration(2000, "seconds")))
+
+  val testAcsChangeFactory = TestAcsChangeFactory()
+
+  def reportMetric(key: String, value: Float): Unit =
+    logger.warn(s"Reporting metric: $key : $value")
+
+  override val dbConfig: com.digitalasset.canton.config.DbConfig =
+    DbBasicConfig(
+      username = "postgres",
+      password = "password",
+      dbName = "load_test",
+      host = "localhost",
+      port = 5432,
+      connectionPoolEnabled = true,
+    ).toPostgresDbConfig
+
+  override implicit val traceContext: TraceContext = TraceContext.createNew("load-test")
+
+  protected def measureAchsInitializationTime(regionName: String, achsConfig: AchsConfig): Unit = {
     // Step 1: Clear any existing ACHS state by restarting without ACHS
     restartServices(serviceParams.copy(indexerConfig = IndexerConfig(achsConfig = None)))
 
@@ -287,7 +292,7 @@ class IndexComponentLoadTest
     )
   }
 
-  private def fetchAcs()(implicit traceContext: TraceContext): Unit = {
+  protected def fetchAcs()(implicit traceContext: TraceContext): Unit = {
     val ledgerEndOffset = index.currentLedgerEnd().map(_.lastOffset)
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
@@ -307,6 +312,9 @@ class IndexComponentLoadTest
         logger.warn(
           s"finished fetching acs in ${seconds(totalMillis)} s, ${lastIndex + 1} active contracts returned."
         )
+
+        reportMetric("acs_fetch_time_seconds", totalMillis / 1000.0f)
+
         logger.warn(s"last active contract acs: $last")
       }
       .futureValue(
@@ -314,7 +322,7 @@ class IndexComponentLoadTest
       )
   }
 
-  private def fetchAcsPaginated(pageSize: Int)(implicit traceContext: TraceContext): Unit = {
+  protected def fetchAcsPaginated(pageSize: Int)(implicit traceContext: TraceContext): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
     val ledgerEndOffset = index.currentLedgerEnd().map(_.lastOffset)
@@ -368,14 +376,14 @@ class IndexComponentLoadTest
       .futureValue(benchmarkedTaskPatience)
   }
 
-  private def seconds(milliseconds: Long): String = {
+  protected def seconds(milliseconds: Long): String = {
     val secs = milliseconds / 1000
     val millis = milliseconds.abs - secs.abs * 1000
     val milliString = (1000 + millis).toString.substring(1)
     secs.toString + '.' + milliString
   }
 
-  private def nextRecordTimeFactory(): () => CantonTimestamp = {
+  protected def nextRecordTimeFactory(): () => CantonTimestamp = {
     logger.warn(s"looking up base record time")
     val ledgerEnd = index.currentLedgerEnd().map(_.lastOffset)
     val baseRecordTime: CantonTimestamp = ledgerEnd match {
@@ -418,7 +426,7 @@ class IndexComponentLoadTest
   /** Creates and ingests passes * txsPerPass transactions, each with 5 contracts. After each pass,
     * all but activeTxsPerPass of the txsPerPass transactions are archived.
     */
-  private def cnNFRIngestionFixture(
+  protected def cnNFRIngestionFixture(
       passes: Int = 4320,
       txsPerPass: Int = 2023,
       activeTxsPerPass: Int = 23,
@@ -461,7 +469,7 @@ class IndexComponentLoadTest
     }
   }
 
-  private def withReporter[UpdateT, ResultT, Out](
+  protected def withReporter[UpdateT, ResultT, Out](
       updates: Vector[UpdateT],
       parallelism: Int,
       process: UpdateT => Future[ResultT],
@@ -484,11 +492,12 @@ class IndexComponentLoadTest
         val current = state.get()
         val last = lastState.getAndSet(current)
         val reportRate = (current - last) / reportingSeconds
-        val avgRate = current * 1000 / (System.currentTimeMillis() - startTime)
+        val avgRate = current * 1000L / (System.currentTimeMillis() - startTime)
         val minutesLeft = (numOfUpdates - current) / avgRate / 60
         logger.warn(
-          s"$action $current/$numOfUpdates, ${100 * current / numOfUpdates}% (since last: ${current - last}, $reportRate update/seconds) (avg: $avgRate update/seconds, estimated minutes left: $minutesLeft)..."
+          s"$action $current/$numOfUpdates, ${100L * current / numOfUpdates}% (since last: ${current - last}, $reportRate update/seconds) (avg: $avgRate update/seconds, estimated minutes left: $minutesLeft)..."
         )
+        reportMetric(s"$action current rate", reportRate.toFloat)
       }
     })
     Source
@@ -510,10 +519,15 @@ class IndexComponentLoadTest
           timeUntilSuccess = FiniteDuration(1000, "seconds"),
           maxPollInterval = FiniteDuration(100, "milliseconds"),
         )(endCheck())
-        val avgRate = numOfUpdates * 1000 / (System.currentTimeMillis() - startTime)
+        val avgRate = numOfUpdates * 1000L / (System.currentTimeMillis() - startTime)
         logger.warn(
           s"finished $action $numOfUpdates updates with average rate $avgRate updates/second"
         )
+        reportMetric(
+          s"$action time seconds",
+          ((System.currentTimeMillis() - startTime) / 1000L).toFloat,
+        )
+        reportMetric(s"$action avg rate", avgRate.toFloat)
         result
       }
       .futureValue(
@@ -521,7 +535,7 @@ class IndexComponentLoadTest
       )
   }
 
-  private def indexUpdates(
+  protected def indexUpdates(
       updates: Vector[(Update, Vector[ContractInstance])],
       actionName: String = "ingesting",
   ): Unit = {
@@ -544,10 +558,14 @@ class IndexComponentLoadTest
     ).discard
     val timeSpan = seconds(System.currentTimeMillis - startTime)
     logger.warn(s"Ingestion cycle completed in $timeSpan seconds")
+    reportMetric(
+      "ingestion cycle time seconds",
+      (System.currentTimeMillis - startTime) / 1000.0f,
+    )
     logAchsState()
   }
 
-  private def logAchsState(): Unit = {
+  protected def logAchsState(): Unit = {
     val achsStateRows = getAchsStateRowCount
     if (achsStateRows > 0) {
       val lastEventSeqId = getLastEventSeqId
@@ -572,7 +590,7 @@ class IndexComponentLoadTest
       sink = Sink.seq,
     ).toVector
 
-  private def allAssignsThenAllUnassigns(
+  protected def allAssignsThenAllUnassigns(
       nextRecordTime: () => CantonTimestamp,
       assignPayloadLength: Int,
       unassignPayloadLength: Int,
@@ -592,7 +610,7 @@ class IndexComponentLoadTest
     )
   }
 
-  private def assigns(recordTime: CantonTimestamp, payloadLength: Int)(
+  protected def assigns(recordTime: CantonTimestamp, payloadLength: Int)(
       size: Int
   ): (Update.SequencedReassignmentAccepted, Vector[ContractInstance]) = {
     val (reassignments, contracts) =
@@ -615,7 +633,7 @@ class IndexComponentLoadTest
     )(reassignments) -> contracts.toVector
   }
 
-  private def unassigns(recordTime: CantonTimestamp, payloadLength: Int)(
+  protected def unassigns(recordTime: CantonTimestamp, payloadLength: Int)(
       coids: Seq[ContractId]
   ): Update.SequencedReassignmentAccepted =
     reassignment(
@@ -633,7 +651,7 @@ class IndexComponentLoadTest
       )
     })
 
-  private def assign(
+  protected def assign(
       nodeId: Int,
       ledgerEffectiveTime: Time.Timestamp,
       argumentPayload: String,
@@ -654,7 +672,7 @@ class IndexComponentLoadTest
     ) -> contract
   }
 
-  private def unassign(
+  protected def unassign(
       coid: ContractId,
       nodeId: Int,
   ): Reassignment.Unassign =
@@ -669,7 +687,7 @@ class IndexComponentLoadTest
       keyOpt = None,
     )
 
-  private def reassignment(
+  protected def reassignment(
       sourceSynchronizerId: SynchronizerId,
       targetSynchronizerId: SynchronizerId,
       synchronizerId: SynchronizerId,
@@ -725,7 +743,7 @@ class IndexComponentLoadTest
     includeAcsChanges = None,
   )
 
-  private def fetchUpdatesStream(descendingOrder: Boolean): Unit = {
+  protected def fetchUpdatesStream(descendingOrder: Boolean): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
     logger.warn("start fetching updates stream...")
@@ -748,13 +766,17 @@ class IndexComponentLoadTest
           s"finished fetching updates in ${if (descendingOrder) "descending"
             else "ascending"} order in ${seconds(totalMillis)} s, $count transactions returned."
         )
+        reportMetric(
+          "updates stream fetch time seconds",
+          totalMillis / 1000.0f,
+        )
       }
       .futureValue(
         benchmarkedTaskPatience
       )
   }
 
-  private def fetchUpdatesPaged(pageSize: Int, descendingOrder: Boolean): Unit = {
+  protected def fetchUpdatesPaged(pageSize: Int, descendingOrder: Boolean): Unit = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)
 

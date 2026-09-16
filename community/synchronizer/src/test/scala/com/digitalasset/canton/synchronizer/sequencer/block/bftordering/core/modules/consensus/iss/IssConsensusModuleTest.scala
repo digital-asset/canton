@@ -1079,7 +1079,6 @@ class IssConsensusModuleTest
           case Seq(
                 StateTransferBehavior(
                   `aStartEpochNumber`,
-                  None, // minimum state transfer end epoch
                   `aTopologyInfoWithPv`,
                   `aStartEpoch`,
                   `aBootstrapEpoch`,
@@ -1152,7 +1151,6 @@ class IssConsensusModuleTest
             case Seq(
                   StateTransferBehavior(
                     BootstrapEpochNumber,
-                    `catchUpToEpochNumber`,
                     `aTopologyInfoWithPv`,
                     `aBootstrapEpochInfo`,
                     EpochStore.Epoch(`aBootstrapEpochInfo`, Seq()),

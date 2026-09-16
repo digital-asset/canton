@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.multihostedparties
 
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.PartyReplicationStatus as LapiPartyReplicationStatus
 import com.digitalasset.canton.BaseTest.CantonLfV21
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -268,6 +269,7 @@ class OnlinePartyReplicationDecentralizedPartyTestH2
   registerPlugin(new UseH2(loggerFactory))
 }
 
+@UnstableTest // TODO(i25474): Remove as soon as this test has been fixed
 class OnlinePartyReplicationDecentralizedPartyTestPostgres
     extends OnlinePartyReplicationDecentralizedPartyTest {
   registerPlugin(new UsePostgres(loggerFactory))

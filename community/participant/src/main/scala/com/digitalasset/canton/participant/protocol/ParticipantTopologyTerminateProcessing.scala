@@ -63,7 +63,7 @@ object ParticipantTopologyTerminateProcessing {
   )
 
   def relevantMappingsForEffectiveStateChanges(pv: ProtocolVersion): Seq[TopologyMapping.Code] =
-    if (pv >= ProtocolVersion.acsCommitmentRedesign)
+    if (pv >= ProtocolVersion.v36)
       Seq(
         TopologyMapping.Code.PartyToParticipant,
         TopologyMapping.Code.SynchronizerTrustCertificate,

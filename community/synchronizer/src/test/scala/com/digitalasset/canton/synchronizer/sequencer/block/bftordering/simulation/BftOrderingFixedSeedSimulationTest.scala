@@ -32,7 +32,7 @@ import org.slf4j.event.Level
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.Random
 
-class BftOrderingSimulationTest1NodeNoFaults extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTest1NodeNoFaults extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 10
 
   private val randomSourceToCreateSettings: Random =
@@ -64,7 +64,7 @@ class BftOrderingSimulationTest1NodeNoFaults extends BftOrderingSimulationTest {
   )
 }
 
-class BftOrderingSimulationTestWithProgressiveOnboardingAndDelayNoFaults
+final class BftOrderingSimulationTestWithProgressiveOnboardingAndDelayNoFaults
     extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 2
 
@@ -133,7 +133,8 @@ class BftOrderingSimulationTestWithProgressiveOnboardingAndDelayNoFaults
   )
 }
 
-class BftOrderingSimulationTestWithConcurrentOnboardingsNoFaults extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTestWithConcurrentOnboardingsNoFaults
+    extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 3
 
   private val numberOfOnboardedNodes = 6 // n = 7, f = 2
@@ -183,7 +184,7 @@ class BftOrderingSimulationTestWithConcurrentOnboardingsNoFaults extends BftOrde
   )
 }
 
-class BftOrderingSimulationTestWithOnboardingAndKeyRotationsNoFaults
+final class BftOrderingSimulationTestWithOnboardingAndKeyRotationsNoFaults
     extends BftOrderingSimulationTest {
   override def numberOfRuns: Int = 5
 
@@ -226,7 +227,7 @@ class BftOrderingSimulationTestWithOnboardingAndKeyRotationsNoFaults
 }
 
 // Allows catch-up state transfer testing without requiring CFT.
-class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 4
 
   // Manually remove the seed for fully randomized local runs.
@@ -260,7 +261,7 @@ class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest 
   )
 }
 
-class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 100
 
   private val randomSourceToCreateSettings: Random =
@@ -293,7 +294,7 @@ class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest
 }
 
 // Simulation test about empty blocks, needed to pass the liveness check.
-class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
+final class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 15
 
   private val randomSourceToCreateSettings: Random = new Random(4)
@@ -334,7 +335,7 @@ class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
 }
 
 // Note that simulation tests don't use a real network, so this test doesn't cover gRPC messages.
-class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 1
 
   private val randomSourceToCreateSettings: Random =
@@ -374,7 +375,7 @@ class BftOrderingSimulationTest2NodesLargeRequests extends BftOrderingSimulation
   )
 }
 
-class BftOrderingSimulationTest2NodesCrashFaults extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTest2NodesCrashFaults extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 10
 
   private val randomSourceToCreateSettings: Random =
@@ -409,7 +410,7 @@ class BftOrderingSimulationTest2NodesCrashFaults extends BftOrderingSimulationTe
   )
 }
 
-class BftOrderingSimulationTest4NodesCrashFaults extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTest4NodesCrashFaults extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 5
 
   private val randomSourceToCreateSettings: Random =
@@ -444,7 +445,7 @@ class BftOrderingSimulationTest4NodesCrashFaults extends BftOrderingSimulationTe
   )
 }
 
-class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 4
 
   private val randomSourceToCreateSettings: Random =
@@ -506,7 +507,7 @@ class BftOrderingSimulationTestOffboarding extends BftOrderingSimulationTest {
   )
 }
 
-class BftOrderingSimulationTestCrashAllNodes extends BftOrderingSimulationTest {
+final class BftOrderingSimulationTestCrashAllNodes extends BftOrderingSimulationTest {
   override def numberOfRuns: Int = 2
 
   private val randomSourceToCreateSettings: Random =

@@ -52,12 +52,7 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{
-  EitherTUtil,
-  FutureUnlessShutdownUtil,
-  GrpcStreamingUtils,
-  OptionUtil,
-}
+import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, OptionUtil}
 import com.digitalasset.canton.{
   LfPartyId,
   ProtoDeserializationError,
@@ -112,7 +107,12 @@ final class GrpcParticipantRepairService(
         .toRight(RepairServiceError.InvalidArgument.Error("Missing contract ids to purge"))
 
       _ <- sync.repairService
-        .purgeContracts(synchronizerAlias, cidsNE, request.ignoreAlreadyPurged)
+        .purgeContracts(
+          synchronizerAlias,
+          cidsNE,
+          request.ignoreAlreadyPurged,
+          request.forceRepairWhenTopologyTransactionAtLedgerEnd,
+        )
         .leftMap(RepairServiceError.ContractPurgeError.Error(synchronizerAlias, _))
     } yield ()
 
@@ -228,6 +228,7 @@ final class GrpcParticipantRepairService(
           Set[LfPartyId],
           RepresentativePackageIdOverride,
           SynchronizerId,
+          Boolean, // forceRepairWhenTopologyTransactionAtLedgerEnd
       )
 
     def extractImportArgs(
@@ -262,6 +263,7 @@ final class GrpcParticipantRepairService(
         excludedStakeholders.toSet,
         representativePackageIdOverride,
         synchronizerId,
+        request.forceRepairWhenTopologyTransactionAtLedgerEnd,
       )
 
       resultE
@@ -288,6 +290,7 @@ final class GrpcParticipantRepairService(
                 excludedStakeholders,
                 representativePackageIdOverride,
                 synchronizerId,
+                forceRepairWhenTopologyTransactionAtLedgerEnd,
               ),
               source,
             ) =>
@@ -316,6 +319,8 @@ final class GrpcParticipantRepairService(
             sync.getPackageMetadataSnapshot,
             representativePackageIdOverride,
             workflowIdPrefix = workFlowIdPrefix,
+            forceRepairWhenTopologyTransactionAtLedgerEnd =
+              forceRepairWhenTopologyTransactionAtLedgerEnd,
           )
           EitherTUtil.toFutureUnlessShutdown(
             resultEUS.bimap(
@@ -349,7 +354,14 @@ final class GrpcParticipantRepairService(
           } yield Target(conf))
         _ <- EitherT(
           sync
-            .migrateSynchronizer(sourceSynchronizerAlias, conf, force = request.force)
+            .migrateSynchronizer(
+              sourceSynchronizerAlias,
+              conf,
+              force = request.force,
+              forceRepairWhenTopologyTransactionAtLedgerEnd =
+                request.forceRepairWhenTopologyTransactionAtLedgerEnd,
+              evalAcsCommitmentProcessorManagerO.map(_.value),
+            )
             .leftMap(_.asGrpcError.getStatus.getDescription)
             .value
             .onShutdown {
@@ -432,6 +444,8 @@ final class GrpcParticipantRepairService(
               sourceSynchronizer = sourceSynchronizerId,
               targetSynchronizer = targetSynchronizerId,
               skipInactive = request.skipInactive,
+              forceRepairWhenTopologyTransactionAtLedgerEnd =
+                request.forceRepairWhenTopologyTransactionAtLedgerEnd,
             )
             .leftMap[RepairServiceError](RepairServiceError.ContractAssignationChangeError.Error(_))
       }
@@ -549,6 +563,8 @@ final class GrpcParticipantRepairService(
         reassignmentId,
         sourceSynchronizerId,
         targetSynchronizerId,
+        forceRepairWhenTopologyTransactionAtLedgerEnd =
+          request.forceRepairWhenTopologyTransactionAtLedgerEnd,
       )
 
     } yield RollbackUnassignmentResponse()
@@ -764,12 +780,6 @@ final class GrpcParticipantRepairService(
           digestProcessorManager
             .startReinitializationDigestProcessor()
             .map { reinitTime =>
-              if (request.runningDigestProcessorShouldStartAfter) {
-                FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-                  digestProcessorManager.startRunningDigestProcessor(),
-                  s"failed to restart running digest processor for $synchronizerId",
-                )
-              }
               v30.ReinitializeDigestCommitmentsResponse(Some(reinitTime.toProtoTimestamp))
             }
         }
