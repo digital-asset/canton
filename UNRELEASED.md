@@ -120,7 +120,17 @@ The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, 
 
 ### `external_call`
 
-The `external_call` feature is released and enabled from 2.4(-staging) onwards.
+The `external_call` feature is released and enabled from LF 2.4 onwards.
+
+Daml choices can now make external calls: deterministic calls to extension services that the
+participant operator configures under `canton.participants.<participant>.parameters.engine.extensions`
+(see `ExtensionServiceConfig`). The submitting participant executes each call and records the
+result in the transaction; confirming participants re-validate the recorded results against
+their own extension service before approving, and disagreements are rejected and alarmed.
+The feature requires the Daml package to use LF 2.4 or later and the synchronizer to run
+protocol version 36 or later. For externally signed transactions the
+recorded results are part of the prepared transaction and covered by the signed transaction
+hash (hashing scheme version 4, available from protocol version 36).
 
 ### New ACS commitment pipeline
 
