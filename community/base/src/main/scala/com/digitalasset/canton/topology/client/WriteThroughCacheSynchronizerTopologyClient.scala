@@ -42,6 +42,7 @@ import com.digitalasset.canton.topology.{
   MediatorGroup,
   Member,
   MemberCode,
+  OpaquePhysicalSynchronizerId,
   ParticipantId,
   PartyId,
   PhysicalSynchronizerId,
@@ -539,7 +540,7 @@ class ValidatingTopologySnapshot(
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
     verify("announcedLsu")(_.announcedLsu())
 
-  override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
+  override def sequencerConnectionSuccessors(successorPsid: OpaquePhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
     Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]

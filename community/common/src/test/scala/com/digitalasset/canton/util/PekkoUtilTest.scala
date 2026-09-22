@@ -2390,11 +2390,11 @@ class PekkoUtilTest
         indexerReady.success(Done)
         eventually() {
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.Ok()
+          healthStateCollector.get shouldEqual List[ComponentHealthState](
+            ComponentHealthState.failed("Initializing indexer"),
+            ComponentHealthState.Ok(),
+          )
         }
-        healthStateCollector.get shouldEqual List[ComponentHealthState](
-          ComponentHealthState.failed("Initializing indexer"),
-          ComponentHealthState.Ok(),
-        )
       }
     }
 
@@ -2425,9 +2425,14 @@ class PekkoUtilTest
                 equal(ComponentHealthState.failed("Initializing indexer"))
             )
           }
-          healthStateCollector.get should contain only (ComponentHealthState.failed(
-            "Pausing before indexer restart"
-          ), ComponentHealthState.failed("Initializing indexer"))
+
+          eventually() {
+            val states = healthStateCollector.get
+            states should not be empty
+            states should contain only (ComponentHealthState.failed(
+              "Pausing before indexer restart"
+            ), ComponentHealthState.failed("Initializing indexer"))
+          }
         }
       }
     }
@@ -2528,13 +2533,15 @@ class PekkoUtilTest
         eventually(retryOnTestFailuresOnly = false) { // Retry on mockito verify fail as well
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Should be unhealthy before indexer closed
           verify(futureQueueMock).shutdown()
+          healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         }
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         futureQueueDone.success(Done)
         always(durationOfSuccess = 200.millis) {
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState // Still unhealthy after indexer closed
+          healthStateCollector.get should equal(
+            List(ComponentHealthState.ShutdownState)
+          ) // We ensure that no state transition happened in the meantime
         }
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
       }
     }
 
@@ -2588,8 +2595,8 @@ class PekkoUtilTest
 
         eventually() {
           recoveringQueue.componentHealthState shouldBe ComponentHealthState.ShutdownState
+          healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         }
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
 
         commitPromise.success(Done)
 
@@ -2598,7 +2605,11 @@ class PekkoUtilTest
         }
         healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
         futureQueueDone.success(Done)
-        healthStateCollector.get should equal(List(ComponentHealthState.ShutdownState))
+        always(durationOfSuccess = 200.millis) {
+          healthStateCollector.get should equal(
+            List(ComponentHealthState.ShutdownState)
+          ) // Ensure that no other state changes happened
+        }
       }
     }
   }

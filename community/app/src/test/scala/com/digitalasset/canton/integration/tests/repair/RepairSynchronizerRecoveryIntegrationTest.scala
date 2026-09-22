@@ -48,6 +48,8 @@ trait RepairSynchronizerRecoveryIntegrationTest
     with RepairTestUtil
     with HasProgrammableSequencer {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(

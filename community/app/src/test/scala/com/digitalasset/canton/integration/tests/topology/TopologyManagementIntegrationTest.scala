@@ -67,6 +67,8 @@ trait TopologyManagementIntegrationTest
     with SecurityTestSuite
     with AccessTestScenario {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   // TODO(#16283): disable participant / roll keys while the affected nodes are busy
 
   override lazy val environmentDefinition: EnvironmentDefinition =

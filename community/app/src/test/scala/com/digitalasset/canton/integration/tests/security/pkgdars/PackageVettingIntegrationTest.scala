@@ -3,6 +3,11 @@
 
 package com.digitalasset.canton.integration.tests.security.pkgdars
 
+import com.daml.ledger.api.v2.admin.package_management_service.{
+  UpdateVettedPackagesForceFlag,
+  VettedPackagesChange,
+  VettedPackagesRef,
+}
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.javaapi.data
 import com.daml.test.evidence.scalatest.AccessTestScenario
@@ -10,9 +15,8 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Integrity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.base.error.ErrorCode
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.console.CommandFailure
+import com.digitalasset.canton.console.{CommandFailure, ParticipantReference}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningKeyUsage}
 import com.digitalasset.canton.damltests.java.conflicttest.Many
 import com.digitalasset.canton.data.CantonTimestamp
@@ -28,6 +32,7 @@ import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWi
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFound
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.participant.admin.CantonPackageServiceError
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.UnvettedPackages
 import com.digitalasset.canton.participant.store.DamlPackageStore
@@ -48,6 +53,7 @@ import com.digitalasset.canton.util.MaliciousParticipantNode
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarReader}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import org.scalatest.Assertion
@@ -64,12 +70,14 @@ sealed trait PackageVettingIntegrationTest
     with SecurityTestSuite
     with AccessTestScenario
     with HasCycleUtils
-    with SecurityTestHelpers {
+    with SecurityTestHelpers
+    with VettingOperations {
 
   val ledgerIntegrity: SecurityTest =
     SecurityTest(property = Integrity, asset = "virtual shared ledger")
 
-  private val pvSupportsUnvettedDependencies: Boolean = testedProtocolVersion > ProtocolVersion.v34
+  val pvSupportsUnvettedDependencies: Boolean =
+    testedProtocolVersion > ProtocolVersion.v34
 
   private lazy val pureCryptoRef: AtomicReference[CryptoPureApi] = new AtomicReference()
   def pureCrypto: CryptoPureApi = pureCryptoRef.get()
@@ -153,19 +161,21 @@ sealed trait PackageVettingIntegrationTest
         )
       }
 
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
+  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
+
   "auto-vetting of dars works and doesn't block on disconnected synchronizers" taggedAs_ {
     ledgerIntegrity.setHappyCase(_)
   } in { implicit env =>
     import env.*
 
     def getVetted(synchronizerId: SynchronizerId) =
-      participant1.topology.vetted_packages
-        .list(
-          synchronizerId,
-          filterParticipant = participant1.id.filterString,
-        )
-        .flatMap(_.item.packages)
-        .toSet
+      vettedPackages(participant1, synchronizerId.toPhysical)
 
     val before = getVetted(daId)
 
@@ -180,9 +190,9 @@ sealed trait PackageVettingIntegrationTest
 
     // check that vettings from the DAR upload were registered with the sequencer
     val newPackagesInSync = getVetted(daId) -- before
-    val newPackagesToBeAddedByDar = darPackageIds -- before.map(_.packageId)
+    val newPackagesToBeAddedByDar = darPackageIds.map(_.toString) -- before
 
-    newPackagesInSync.map(_.packageId) shouldBe newPackagesToBeAddedByDar
+    newPackagesInSync shouldBe newPackagesToBeAddedByDar
 
     // reconnect acme
     participant1.synchronizers.reconnect(acmeName)
@@ -357,25 +367,18 @@ sealed trait PackageVettingIntegrationTest
       )
     ) in { implicit env =>
     import env.*
+    val archive = tryReadDar(CantonExamplesPath)
 
     val iouPackage = PackageId.assertFromString(M.iou.Iou.PACKAGE_ID)
     val validityEnd = environment.clock.now
-    val iouVettedPackage = VettedPackage(
-      iouPackage,
-      validFromInclusive = None,
-      validUntilExclusive = Some(validityEnd),
-    )
-    participant1.topology.vetted_packages.propose_delta(
-      participant1,
-      adds = Seq(iouVettedPackage),
-      store = daId,
+
+    vettingCmd(
+      adds = Seq(archive.main),
+      validUntil = Some(validityEnd),
+      targetParticipantOtherwiseParticipant3 = Some(participant1),
     )
     eventually() {
-      participant1.topology.vetted_packages
-        .list(daId, filterParticipant = participant1.id.filterString)
-        .loneElement
-        .item
-        .packages should contain(iouVettedPackage)
+      vettedPackages(participant1, daId) should contain(iouPackage)
     }
 
     val rawCmds =
@@ -387,25 +390,25 @@ sealed trait PackageVettingIntegrationTest
       ledgerTime = validityEnd.plusMillis(1L).underlying,
     )
 
+    def unvettedPackagesError(participant: ParticipantReference): (LogEntry => Assertion, String) =
+      (
+        _.shouldBeCantonError(
+          MalformedRejects.ModelConformance,
+          _ should include(UnvettedPackages(Map(participant1.id -> Set(iouPackage))).toString),
+          loggerAssertion = _ should include(s"participant=${participant.name}"),
+        ),
+        s"unvetted packages error for ${participant.name}",
+      )
+
     val (_, events) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
-      trackingLedgerEvents(Seq(participant2), Seq.empty) {
+      trackingLedgerEvents(Seq(participant1, participant2), Seq.empty) {
         maliciousP2.submitCommand(cmd).futureValueUS
       },
       LogEntry.assertLogSeq(
         mustContainWithClue = Seq(
-          (
-            _.shouldBeCantonError(
-              MalformedRejects.ModelConformance,
-              _ should include(UnvettedPackages(Map(participant1.id -> Set(iouPackage))).toString),
-            ),
-            "unvetted packages error",
-          )
-        ),
-        mayContain = Seq(
-          _.loggerName should include(
-            "participant=participant2"
-          ) // Ignore errors from malicious P2
-        ),
+          unvettedPackagesError(participant1),
+          unvettedPackagesError(participant2),
+        )
       ),
     )
 
@@ -501,42 +504,6 @@ sealed trait PackageVettingIntegrationTest
     val archive = tryReadDar(CantonTestsPath)
     val packId = DamlPackageStore.readPackageId(archive.main)
 
-    def unvettedPackages(packageList: List[DamlLf.Archive])(implicit
-        env: TestConsoleEnvironment
-    ): Set[PackageId] = {
-      import env.*
-      val packages = packageList.map(DamlPackageStore.readPackageId).toSet
-      packages -- participant3.topology.vetted_packages
-        .list(
-          store = daId,
-          filterParticipant = participant3.id.filterString,
-        )
-        .flatMap(_.item.packages.map(_.packageId))
-        .toSet
-    }
-
-    def vettingCmd(
-        adds: Seq[DamlLf.Archive] = Seq.empty,
-        removes: Seq[DamlLf.Archive] = Seq.empty,
-        validFrom: Option[CantonTimestamp] = None,
-        validUntil: Option[CantonTimestamp] = None,
-        force: ForceFlags = ForceFlags.none,
-    )(implicit
-        env: TestConsoleEnvironment
-    ): Unit = {
-      import env.*
-      participant3.topology.vetted_packages.propose_delta(
-        participant3.id,
-        store = daId,
-        adds =
-          adds.map(DamlPackageStore.readPackageId).map(VettedPackage(_, validFrom, validUntil)),
-        removes = removes.map(DamlPackageStore.readPackageId),
-        force = force,
-      )
-      // synchronize package vetting, as "raw" vetting commands are unsynced
-      participant3.packages.synchronize_vetting()
-    }
-
     "a package has not been uploaded" must {
       "refuse to vet the package" taggedAs_ { mit =>
         ledgerIntegrity.setAttack(
@@ -548,13 +515,7 @@ sealed trait PackageVettingIntegrationTest
         )
       } in { implicit env =>
         import env.*
-        val currentVettedPackages = participant3.topology.vetted_packages
-          .list(
-            store = TopologyStoreId.Synchronizer(daId),
-            filterParticipant = participant3.id.filterString,
-          )
-          .flatMap(_.item.packages.map(_.packageId))
-          .toSet
+        val currentVettedPackages = vettedPackages(participant3, daId)
 
         currentVettedPackages should not contain packId
 
@@ -562,11 +523,7 @@ sealed trait PackageVettingIntegrationTest
         clue("vetting of missing packages") {
           loggerFactory.assertThrowsAndLogsSeq[CommandFailure](
             vettingCmd(adds = List(archive.main)),
-            forAll(_)(
-              _.shouldBeCantonErrorCode(
-                ParticipantTopologyManagerError.CannotVetDueToMissingPackages
-              )
-            ),
+            forAll(_)(_.shouldBeCantonErrorCode(vetMissingPackageErrorCode)),
           )
         }
       }
@@ -616,20 +573,13 @@ sealed trait PackageVettingIntegrationTest
         archive.dependencies.foreach { dep =>
           vettingCmd(
             adds = List(dep),
-            force =
-              if (pvSupportsUnvettedDependencies) ForceFlags.none
-              else {
-                // can vet dependencies one by one using force
-                ForceFlags(ForceFlag.AllowUnvettedDependencies)
-              },
+            // can vet dependencies one by one using force
+            allowUnvettedDependencies = true,
           )
           eventually() {
-            participant3.topology.vetted_packages
-              .list(daId, filterParticipant = participant3.filterString)
-              .loneElement
-              .item
-              .packages
-              .map(_.packageId) should contain(PackageId.fromString(dep.getHash).value)
+            vettedPackages(participant3, daId) should contain(
+              PackageId.fromString(dep.getHash).value
+            )
           }
         }
         unvettedPackages(archive.dependencies) shouldBe empty
@@ -739,7 +689,7 @@ sealed trait PackageVettingIntegrationTest
       "allow to vet the package with the force flag" in { implicit env =>
         vettingCmd(
           adds = incompatArchive.all,
-          force = ForceFlags(ForceFlag.AllowVetIncompatibleUpgrades),
+          allowVetIncompatibleUpgrades = true,
         )
       }
 
@@ -783,7 +733,7 @@ sealed trait PackageVettingIntegrationTest
           participant3.dars.upload(VettingDepIncompatPath, vetAllPackages = false)
           vettingCmd(
             adds = Seq(vettingDepIncompatDar.main),
-            force = ForceFlags(ForceFlag.AllowVetIncompatibleUpgrades),
+            allowVetIncompatibleUpgrades = true,
           )
 
           // upload VettingMainIncompat without vetting
@@ -809,7 +759,7 @@ sealed trait PackageVettingIntegrationTest
           participant3.dars.upload(VettingDepSubstitutionPath, vetAllPackages = false)
           vettingCmd(
             adds = Seq(vettingDepSubstitutionDar.main),
-            force = ForceFlags(ForceFlag.AllowVetIncompatibleUpgrades),
+            allowVetIncompatibleUpgrades = true,
           )
 
           // upload VettingMainSubstitution without vetting
@@ -828,21 +778,32 @@ sealed trait PackageVettingIntegrationTest
         import env.*
         // first vet packages again.
         vettingCmd(adds = archive.all)
+        eventually()(unvettedPackages(List(archive.main)) shouldBe empty)
 
-        // unvet the package
+        // unvet the package works without any force flag
         vettingCmd(removes = Seq(archive.main))
+        eventually()(
+          unvettedPackages(List(archive.main)) should contain theSameElementsAs Seq(
+            archive.main.getHash
+          )
+        )
+
+        // vet all the packages again
         vettingCmd(adds = archive.all)
+
+        // Check package is vetted
+        eventually()(unvettedPackages(List(archive.main)) shouldBe empty)
 
         // We don't need the force flag to disable a dar.
         participant3.dars.vetting.disable(
           darMainPackageId
             .get()
             .getOrElse(fail("DAR main package-id should have been set")),
-          synchronizerId = synchronizer1Id,
+          synchronizerId = daId,
         )
-        participant3.packages.synchronize_vetting()
         eventually() {
-          unvettedPackages(List(archive.main)) should not be empty
+          val unvetted = unvettedPackages(List(archive.main))
+          unvetted should contain theSameElementsAs Seq(archive.main.getHash)
         }
 
         loggerFactory.assertThrowsAndLogs[CommandFailure](
@@ -888,7 +849,7 @@ sealed trait PackageVettingIntegrationTest
         implicit env =>
           vettingCmd(
             removes = Seq(vettingDepDar.main),
-            force = ForceFlags(ForceFlag.AllowUnvettedDependencies),
+            allowUnvettedDependencies = true,
           )
       }
 
@@ -1025,12 +986,187 @@ sealed trait PackageVettingIntegrationTest
     IouSyntax.testIou(payer, owner, observers = viewers.toList).create.commands.asScala.toSeq
 }
 
-class PackageVettingIntegrationTestInMemory extends PackageVettingIntegrationTest {
-  registerPlugin(
-    new UseBftSequencer(
-      loggerFactory,
-      MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
-    )
-  )
-  registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
+/** Trait created to allow testing both APIs currently supported for managing/quering vetting on the
+  * Canton participant
+  *
+  * TODO(i35849): Remove this trait and deduplicate the API testing once the vetting APIs are
+  * deduplicated as well
+  */
+private[pkgdars] sealed trait VettingOperations {
+  protected def unvettedPackages(packageList: List[DamlLf.Archive])(implicit
+      env: TestConsoleEnvironment
+  ): Set[PackageId]
+
+  protected def vettingCmd(
+      adds: Seq[DamlLf.Archive] = Seq.empty,
+      removes: Seq[DamlLf.Archive] = Seq.empty,
+      validFrom: Option[CantonTimestamp] = None,
+      validUntil: Option[CantonTimestamp] = None,
+      allowUnvettedDependencies: Boolean = false,
+      allowVetIncompatibleUpgrades: Boolean = false,
+      targetParticipantOtherwiseParticipant3: Option[ParticipantReference] = None,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): Unit
+
+  protected def vettedPackages(
+      participant: => ParticipantReference,
+      synchronizerId: => PhysicalSynchronizerId,
+  ): Set[String]
+
+  // The error differs depending on the API the condition is triggerred from
+  def vetMissingPackageErrorCode: ErrorCode
 }
+
+trait LedgerApiVettingOperations extends VettingOperations {
+  this: PackageVettingIntegrationTest =>
+
+  def unvettedPackages(packageList: List[DamlLf.Archive])(implicit
+      env: TestConsoleEnvironment
+  ): Set[PackageId] = {
+    import env.*
+    val packages = packageList.map(DamlPackageStore.readPackageId).toSet
+    val vettedPkgs = participant3.ledger_api.packages
+      .list_vetted_packages(synchronizerIds = Seq(daId), participantIds = Seq(participant3.id))
+      .vettedPackages
+      .loneElement
+      .packages
+      .map[LfPackageId](_.packageId)
+    packages -- vettedPkgs
+  }
+
+  def vettingCmd(
+      adds: Seq[DamlLf.Archive] = Seq.empty,
+      removes: Seq[DamlLf.Archive] = Seq.empty,
+      validFrom: Option[CantonTimestamp] = None,
+      validUntil: Option[CantonTimestamp] = None,
+      allowUnvettedDependencies: Boolean = false,
+      allowVetIncompatibleUpgrades: Boolean = false,
+      targetParticipantOtherwiseParticipant3: Option[ParticipantReference] = None,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+    import env.*
+    val targetParticipant = targetParticipantOtherwiseParticipant3.getOrElse(participant3)
+
+    targetParticipant.ledger_api.packages.update_vetted_packages(
+      addOrUpdate = adds.map { archive =>
+        val packageId = DamlPackageStore.readPackageId(archive)
+        VettedPackagesChange.Vet(
+          packages =
+            Seq(VettedPackagesRef(packageId = packageId, packageName = "", packageVersion = "")),
+          newValidFromInclusive = validFrom.map(_.toProtoTimestamp),
+          newValidUntilExclusive = validUntil.map(_.toProtoTimestamp),
+        )
+      },
+      remove = removes.map { archive =>
+        val packageId = DamlPackageStore.readPackageId(archive)
+        VettedPackagesRef(packageId = packageId, packageName = "", packageVersion = "")
+      },
+      synchronizerId = Some(daId),
+      forceFlags =
+        (if (pvSupportsUnvettedDependencies || allowUnvettedDependencies) Seq.empty
+         else
+           Seq(
+             UpdateVettedPackagesForceFlag.UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES
+           )) ++ (
+          if (allowVetIncompatibleUpgrades)
+            Seq(
+              UpdateVettedPackagesForceFlag.UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_VET_INCOMPATIBLE_UPGRADES
+            )
+          else Seq.empty
+        ),
+    )
+  }
+
+  protected def vettedPackages(
+      participant: => ParticipantReference,
+      synchronizerId: => PhysicalSynchronizerId,
+  ): Set[String] =
+    participant.ledger_api.packages
+      .list_vetted_packages(
+        synchronizerIds = Seq(synchronizerId),
+        participantIds = Seq(participant.id),
+      )
+      .vettedPackages
+      .loneElement
+      .packages
+      .map(_.packageId)
+      .toSet
+
+  override def vetMissingPackageErrorCode: ErrorCode =
+    CantonPackageServiceError.Vetting.VettingReferenceEmpty
+}
+
+trait AdminApiVettingOperations {
+  this: PackageVettingIntegrationTest =>
+
+  def unvettedPackages(packageList: List[DamlLf.Archive])(implicit
+      env: TestConsoleEnvironment
+  ): Set[PackageId] = {
+    import env.*
+    val packages = packageList.map(DamlPackageStore.readPackageId).toSet
+    packages -- participant3.topology.vetted_packages
+      .list(
+        store = daId,
+        filterParticipant = participant3.id.filterString,
+      )
+      .flatMap(_.item.packages.map(_.packageId))
+      .toSet
+  }
+
+  def vettingCmd(
+      adds: Seq[DamlLf.Archive] = Seq.empty,
+      removes: Seq[DamlLf.Archive] = Seq.empty,
+      validFrom: Option[CantonTimestamp] = None,
+      validUntil: Option[CantonTimestamp] = None,
+      allowUnvettedDependencies: Boolean = false,
+      allowVetIncompatibleUpgrades: Boolean = false,
+      targetParticipantOtherwiseParticipant3: Option[ParticipantReference] = None,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+    import env.*
+    val targetParticipant = targetParticipantOtherwiseParticipant3.getOrElse(participant3)
+    targetParticipant.topology.vetted_packages.propose_delta(
+      targetParticipant.id,
+      store = daId,
+      adds = adds.map(DamlPackageStore.readPackageId).map(VettedPackage(_, validFrom, validUntil)),
+      removes = removes.map(DamlPackageStore.readPackageId),
+      force = ForceFlags(
+        Set(ForceFlag.AllowUnvettedDependencies)
+          // No need for force flag if PV supports unvetted dependencies
+          .filterNot(_ => pvSupportsUnvettedDependencies)
+          .filter(_ => allowUnvettedDependencies) ++
+          Set(ForceFlag.AllowVetIncompatibleUpgrades)
+            .filter(_ => allowVetIncompatibleUpgrades)
+      ),
+    )
+    // synchronize package vetting, as "raw" vetting commands are unsynced
+    participant3.packages.synchronize_vetting()
+  }
+
+  protected def vettedPackages(
+      participant: => ParticipantReference,
+      syncId: => PhysicalSynchronizerId,
+  ): Set[String] =
+    participant.topology.vetted_packages
+      .list(
+        Some(TopologyStoreId.Synchronizer(syncId)),
+        filterParticipant = participant.id.filterString,
+      )
+      .flatMap(_.item.packages)
+      .map(_.packageId)
+      .toSet
+
+  override def vetMissingPackageErrorCode: ErrorCode =
+    ParticipantTopologyManagerError.CannotVetDueToMissingPackages
+}
+
+class PackageVettingIntegrationTestInMemory_AdminApi
+    extends PackageVettingIntegrationTest
+    with AdminApiVettingOperations
+
+class PackageVettingIntegrationTestInMemory_LedgerApi
+    extends PackageVettingIntegrationTest
+    with LedgerApiVettingOperations

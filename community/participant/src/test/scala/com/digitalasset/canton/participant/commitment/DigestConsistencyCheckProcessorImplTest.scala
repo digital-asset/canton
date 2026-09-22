@@ -6,9 +6,11 @@ package com.digitalasset.canton.participant.commitment
 import cats.Eval
 import cats.syntax.option.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.participant.commitment.ConsistencyCheckProcessor.{
+import com.digitalasset.canton.participant.commitment.DigestConsistencyCheckProcessorImpl.{
   DigestInconsistency,
   UnexpectedDigestsInStore,
 }
@@ -24,14 +26,20 @@ import com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigestUpdate
 import com.digitalasset.canton.participant.store.memory.InMemoryAcsDigestStore
 import com.digitalasset.canton.participant.store.{AcsDigestStore, AcsDigestTestBase}
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, TestingTopology}
+import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  ParticipantId,
+  SynchronizerId,
+  TestingTopology,
+}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, LfPartyId}
 import org.apache.pekko.stream.scaladsl.{Keep, Sink}
 
 import scala.util.ChainingSyntax
 
-class ConsistencyCheckProcessorTest
+class DigestConsistencyCheckProcessorImplTest
     extends DigestProcessorTestBase
     with HasExecutionContext
     with HasActorSystem
@@ -39,7 +47,7 @@ class ConsistencyCheckProcessorTest
     with AcsDigestTestBase {
 
   import DigestProcessorTestBase.*
-  import ConsistencyCheckProcessorTest.*
+  import DigestConsistencyCheckProcessorImplTest.*
 
   private def mkConsistencyCheckProcessor(
       participant: ParticipantId = thisParticipant,
@@ -50,14 +58,27 @@ class ConsistencyCheckProcessorTest
       contractChangeClassificationBatchSize: Int = 1,
       writeJournalTombstonesBatchSize: PositiveInt = PositiveInt.tryCreate(5),
       metrics: CommitmentMetrics = ParticipantTestMetrics.synchronizer.commitments,
-  ): ConsistencyCheckProcessor = {
+  ): DigestConsistencyCheckProcessorImpl = {
     val testSynchronizerId = DefaultTestIdentities.synchronizerId
 
-    new ConsistencyCheckProcessor(
+    new DigestConsistencyCheckProcessorImpl(
       thisParticipantId = participant,
       synchronizerId = testSynchronizerId,
       indexService = indexService,
-      stringInterningEval = Eval.always(mockStringInterning),
+      digestProcessorTopologyLookup = new DigestProcessorTopologyLookup {
+        override def topologyClientForRunningDigestProcessor(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+            previousTopologyClientO: Option[SynchronizerTopologyClient],
+        )(implicit traceContext: TraceContext): FutureUnlessShutdown[SynchronizerTopologyClient] =
+          ???
+
+        override def topologySnapshotForReinitialization(
+            synchronizerId: SynchronizerId,
+            timestamp: CantonTimestamp,
+        )(implicit traceContext: TraceContext): Option[TopologySnapshot] = ???
+      },
+      stringInterning = mockStringInterning,
       acsDigestStore = acsDigestStore,
       digestAccumulatorStoreFactory = () =>
         InMemoryAcsDigestStore
@@ -192,7 +213,7 @@ class ConsistencyCheckProcessorTest
         acsDigestStore = acsDigestStore,
       )
 
-      val ((allPartiesF, participantDigestsF), inconsistenciesF) =
+      val (((_, allPartiesF), participantDigestsF), inconsistenciesF) =
         processor
           .partyDigestMissingAndMismatchedInconsistencies(tp100, topologySnapshot)
           .toMat(Sink.seq)(Keep.both)
@@ -284,12 +305,12 @@ class ConsistencyCheckProcessorTest
         .futureValue
 
       inconsistencies should contain theSameElementsAs Seq[
-        ConsistencyCheckProcessor.DigestInconsistency
+        DigestConsistencyCheckProcessorImpl.DigestInconsistency
       ](
-        ConsistencyCheckProcessor.MissingDigestsInStore(
+        DigestConsistencyCheckProcessorImpl.MissingDigestsInStore(
           Set(PartyDigestIdentifier(internedPartyId(alice)))
         ),
-        ConsistencyCheckProcessor.DigestValueMismatch(
+        DigestConsistencyCheckProcessorImpl.DigestValueMismatch(
           PartyDigestIdentifier(internedPartyId(charlie))
         ),
       )
@@ -469,16 +490,16 @@ class ConsistencyCheckProcessorTest
         )
         .futureValue
 
-      val expected: Seq[ConsistencyCheckProcessor.DigestInconsistency] = Seq(
-        ConsistencyCheckProcessor.MissingDigestsInStore(
+      val expected: Seq[DigestConsistencyCheckProcessorImpl.DigestInconsistency] = Seq(
+        DigestConsistencyCheckProcessorImpl.MissingDigestsInStore(
           Set(
             ParticipantDigestIdentifier(internedParticipantId(p1.toLf))
           )
         ),
-        ConsistencyCheckProcessor.DigestValueMismatch(
+        DigestConsistencyCheckProcessorImpl.DigestValueMismatch(
           ParticipantDigestIdentifier(internedParticipantId(p2.toLf))
         ),
-        ConsistencyCheckProcessor.UnexpectedDigestsInStore(
+        DigestConsistencyCheckProcessorImpl.UnexpectedDigestsInStore(
           Set(
             ParticipantDigestIdentifier(internedParticipantId(p3.toLf))
           )
@@ -645,36 +666,36 @@ class ConsistencyCheckProcessorTest
 
       val expectedLoggedInconsistencies: Seq[(DigestInconsistency, String)] = Seq(
         (
-          ConsistencyCheckProcessor
+          DigestConsistencyCheckProcessorImpl
             .MissingDigestsInStore(Set(PartyDigestIdentifier(internedPartyId(alice)))),
           "Missing digest for Alice",
         ),
         (
-          ConsistencyCheckProcessor
+          DigestConsistencyCheckProcessorImpl
             .DigestValueMismatch(PartyDigestIdentifier(internedPartyId(bob))),
           "Mismatched digest value for Bob",
         ),
         (
-          ConsistencyCheckProcessor
+          DigestConsistencyCheckProcessorImpl
             .UnexpectedDigestsInStore(Set(PartyDigestIdentifier(internedPartyId(david)))),
           "Unexpected digest for David",
         ),
         (
-          ConsistencyCheckProcessor
+          DigestConsistencyCheckProcessorImpl
             .MissingDigestsInStore(
               Set(ParticipantDigestIdentifier(internedParticipantId(p1.toLf)))
             ),
           "Missing digest for p1",
         ),
         (
-          ConsistencyCheckProcessor
+          DigestConsistencyCheckProcessorImpl
             .DigestValueMismatch(
               ParticipantDigestIdentifier(internedParticipantId(p2.toLf))
             ),
           "Mismatched digest value for p2",
         ),
         (
-          ConsistencyCheckProcessor
+          DigestConsistencyCheckProcessorImpl
             .UnexpectedDigestsInStore(
               Set(ParticipantDigestIdentifier(internedParticipantId(p3.toLf)))
             ),
@@ -683,7 +704,13 @@ class ConsistencyCheckProcessorTest
       )
 
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        processor.runConsistencyCheck(tp100, topologySnapshot).futureValue,
+        {
+          val (_, doneF) = processor.runConsistencyCheck(tp100, topologySnapshot)
+
+          processor.startTimestamp shouldBe ts(100).some
+
+          doneF.futureValue
+        },
         LogEntry.assertLogSeq(
           mustContainWithClue = expectedLoggedInconsistencies.map { case (inconsistency, clue) =>
             (
@@ -765,7 +792,9 @@ class ConsistencyCheckProcessorTest
         counterpartyBatchSize = 2,
       )
 
-      processor.runConsistencyCheck(tp100, topologySnapshot).futureValue
+      val (_, doneF) = processor.runConsistencyCheck(tp100, topologySnapshot)
+      processor.startTimestamp shouldBe ts(100).some
+      doneF.futureValue
     }
   }
 
@@ -821,7 +850,7 @@ class ConsistencyCheckProcessorTest
         p3.toLf -> genRawDigest(0x4a),
       )
 
-      ConsistencyCheckProcessor.mergeDigestMaps(digestMap1, digestMap2) shouldBe Map(
+      DigestConsistencyCheckProcessorImpl.mergeDigestMaps(digestMap1, digestMap2) shouldBe Map(
         p1.toLf -> genRawDigest(0x1a),
         p2.toLf -> DigestOps
           .combineDigests(
@@ -850,7 +879,7 @@ class ConsistencyCheckProcessorTest
   }
 }
 
-object ConsistencyCheckProcessorTest {
+object DigestConsistencyCheckProcessorImplTest {
   private def acsDigestUpdate[K](
       at: Int,
       key: K,

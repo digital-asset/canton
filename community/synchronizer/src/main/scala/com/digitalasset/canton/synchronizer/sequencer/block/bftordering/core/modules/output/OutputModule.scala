@@ -174,10 +174,10 @@ class OutputModule[E <: Env[E]](
   //  out of order.
   //  There is a further, distinct Peano queue, part of the block subscription, whose job instead is to ensure
   //  that blocks are received in order by the sequencer runtime.
-  private val maybeCompletedBlocksProcessingPeanoQueue =
+  private val maybeCompletedBlocksPeanoQueue =
     new SingleUseCell[PeanoQueue[BlockNumber, CompleteBlockData]]
   private def completedBlocksPeanoQueue: PeanoQueue[BlockNumber, CompleteBlockData] =
-    maybeCompletedBlocksProcessingPeanoQueue.getOrElse(
+    maybeCompletedBlocksPeanoQueue.getOrElse(
       throw new IllegalStateException(
         "Completed block processing Peano queue not initialized: Start message not received"
       )
@@ -223,10 +223,14 @@ class OutputModule[E <: Env[E]](
       loggerFactory,
     )
 
-  private val blocksBeingFetched = mutable.Map[BlockNumber, Instant]()
-  private val earlyFetchedBatchesForBlock =
+  @VisibleForTesting
+  private[output] val blocksBeingFetched = mutable.Map[BlockNumber, Instant]()
+  @VisibleForTesting
+  private[output] val earlyFetchedBatchesForBlock =
     mutable.Map[BlockNumber, Seq[(BatchId, OrderingRequestBatch)]]()
-  private val orderedBlocksWaitingEarlyFetch = mutable.Map[BlockNumber, OrderedBlockForOutput]()
+  @VisibleForTesting
+  private[output] val orderedBlocksWaitingEarlyFetch =
+    mutable.Map[BlockNumber, OrderedBlockForOutput]()
 
   // Used to ensure ordered blocks from an epoch are processed only after the transition to that epoch
   //  has completed, so that epoch-related transient state in this module, which is updated
@@ -253,6 +257,8 @@ class OutputModule[E <: Env[E]](
 
   private var backPressureDelayedEvent: Option[CancellableEvent] = None
 
+  // Tracks the wall-clock permanence of blocks in the output stage, from Consensus pushing it to it having being
+  //  persisted and pushed to post-ordering.
   private val outputStageDurations = new mutable.HashMap[BlockNumber, Instant]()
 
   @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
@@ -418,7 +424,7 @@ class OutputModule[E <: Env[E]](
             metrics.global.labels.IsBlockEmpty -> "false"
           )
         )
-        maybeCompletedBlocksProcessingPeanoQueue
+        maybeCompletedBlocksPeanoQueue
           .putIfAbsent(new PeanoQueue(firstBlockToProcess)(abort))
           .foreach(_ => abort("Completed block processing Peano Queue has already been set"))
 
@@ -636,8 +642,9 @@ class OutputModule[E <: Env[E]](
             val orderedBlock = orderedBlockForOutput.orderedBlock
             val epochNumber = orderedBlock.metadata.epochNumber
             val blockNumber = orderedBlock.metadata.blockNumber
-            val alreadyProvided = completedBlocksPeanoQueue.alreadyInserted(blockNumber)
-            if (lastAcknowledgedBlockNumber.forall(blockNumber > _) && !alreadyProvided)
+            val alreadyCompleted = completedBlocksPeanoQueue.alreadyInserted(blockNumber)
+            if (!alreadyCompleted)
+              // Always matched by a BlockDataStored, where the bookkeeping is cleared
               outputStageDurations.getOrElseUpdate(blockNumber, Instant.now()).discard
 
             if (leaderSelectionPolicy.currentEpoch.exists(_ < epochNumber)) {
@@ -650,7 +657,7 @@ class OutputModule[E <: Env[E]](
               val earlyFetchedBlockO = earlyFetchedBatchesForBlock.remove(blockNumber)
 
               val newTraceContext: TraceContext =
-                if (orderedBlock.batchRefs.nonEmpty && !alreadyProvided) {
+                if (orderedBlock.batchRefs.nonEmpty && !alreadyCompleted) {
                   blockSpanMap
                     .getOrElseUpdate(
                       blockNumber, {
@@ -665,10 +672,10 @@ class OutputModule[E <: Env[E]](
                 s"Output received from local consensus ordered block (mode = $mode) with batch IDs ${orderedBlock.batchRefs
                     .map(_.batchId)}"
               )
-              if (!alreadyProvided)
+              if (!alreadyCompleted)
                 leaderSelectionPolicy.addBlock(epochNumber, blockNumber, viewNumber)
 
-              if (alreadyProvided) {
+              if (alreadyCompleted) {
                 // This can happen if we start catching up in the middle of an epoch, as state transfer has epoch granularity.
                 logger.debug(s"Skipping block $blockNumber as it's been provided already")
               } else if (orderedBatchIds.isEmpty) {
@@ -762,9 +769,26 @@ class OutputModule[E <: Env[E]](
               }
             }
 
-            // This is just a defensive check, as the block subscription will have the head correctly set to the
-            //  initial height and will ignore blocks before that, but we cannot check nor enforce this assumption
-            //  in this module due to the generic Peano queue type needed for simulation testing support.
+            // End the span and drop the output-stage bookkeeping for this stored block regardless of
+            //  whether it is provided to the sequencer runtime. This aligns their removal guard with the
+            //  insertion guard in `BlockOrdered` (`!alreadyProvided`) and ties cleanup to the "stored"
+            //  event, avoiding leaks as well as races with the periodic cleanup based on the last
+            //  processed block (which advances before this asynchronous handler runs).
+            val blockTraceContext = blockSpanMap
+              .remove(orderedBlockNumber)
+              .map { case (span, spanTraceContext) =>
+                span.end()
+                spanTraceContext
+              }
+              .getOrElse(traceContext)
+            val outputStageStartInstant = outputStageDurations.remove(orderedBlockNumber)
+
+            // In a backup-restore scenario with separate storage for CantonBFT and the sequencer core,
+            //  the sequencer core DB backup is taken after the CantonBFT DB backup so that
+            //  post-ordering has processed all blocks that were ordered, and in particular topology transactions
+            //  and ticks, hence no deadlock is possible when the orderer queries the topology for a subsequent epoch.
+            //  In this scenario, post-ordering may subscribe from a "future" (from the point of view of
+            //  the orderer) block height, and blocks below that must not be delivered again to it.
             if (lastAcknowledgedBlockNumber.forall(orderedBlockNumber > _)) {
               val isBlockLastInEpoch = orderedBlockData.orderedBlockForOutput.isLastInEpoch
               // We tick the topology even during state transfer;
@@ -773,14 +797,6 @@ class OutputModule[E <: Env[E]](
               //  avoiding possible future problems e.g. with pruning and/or BFT onboarding from multiple
               //  sequencer snapshots.
               val tickTopology = isBlockLastInEpoch && epochCouldAlterOrderingTopology
-
-              val blockTraceContext = blockSpanMap
-                .remove(orderedBlockNumber)
-                .map { case (span, traceContext) =>
-                  span.end()
-                  traceContext
-                }
-                .getOrElse(traceContext)
 
               // Being able to correlate the trace contexts of submission requests with
               // the block containing them can be useful for troubleshooting issues.
@@ -814,7 +830,7 @@ class OutputModule[E <: Env[E]](
                 )
 
               blockSubscription.receiveBlock(fullyAssembledBlock)(blockTraceContext, mc)
-              outputStageDurations.remove(orderedBlockNumber).foreach { startInstant =>
+              outputStageStartInstant.foreach { startInstant =>
                 metrics.performance.orderingStageLatency.emitOrderingStageLatency(
                   metrics.performance.orderingStageLatency.labels.stage.values.output.OutputStageDuration,
                   Duration.between(startInstant, Instant.now()),
@@ -1242,7 +1258,7 @@ class OutputModule[E <: Env[E]](
       setEpochMetadataStoredCache(newEpochNumber)
     cleanupEpochMetadataStoredCache(newEpochNumber)
 
-    logger.debug(
+    logger.info(
       s"Inserting NewEpochTopology message for epoch $newEpochNumber into Peano queue, " +
         s"(head=$newEpochTopologyMessagePeanoQueue)"
     )
@@ -1326,20 +1342,18 @@ class OutputModule[E <: Env[E]](
         currentEpochNumber = newEpochNumber
         currentMembership = newEpochTopologyMessage.membership
         metrics.topology.update(currentMembership)
+        metrics.topology.validators.updateValue(currentMembership.orderingTopology.nodes.size)
         currentEpochCryptoProvider = newEpochTopologyMessage.cryptoProvider
+        logger.debug(s"New topology $currentMembership for epoch $currentEpochNumber set up")
+
         val pendingTopologyChanges =
           currentMembership.orderingTopology.areTherePendingCantonTopologyChanges
-        logger.debug(
-          s"Pending topology changes in new ordering topology = $pendingTopologyChanges"
-        )
         currentEpochCouldAlterOrderingTopology = pendingTopologyChanges.exists(identity)
-
-        metrics.topology.validators.updateValue(currentMembership.orderingTopology.nodes.size)
-        logger.debug(
-          s"Sending topology $currentMembership of a new epoch $newEpochNumber " +
-            s"to a consensus behavior (epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength})"
+        logger.info(
+          s"Sending topology of new epoch $currentEpochNumber to consensus / state transfer " +
+            s"(epochLength= ${newEpochTopologyMessage.membership.orderingTopology.epochLength}, " +
+            s"pending topology changes = $pendingTopologyChanges)"
         )
-
         consensus.asyncSend(newEpochTopologyMessage)
         epochChecker.check(
           thisNode,
@@ -1351,6 +1365,9 @@ class OutputModule[E <: Env[E]](
         processFetchedBlocks()
       }
     }
+
+    // Backstop against memory leaks from abandoned block numbers in transient block-keyed state.
+    cleanupStaleBlockKeyedState()
   }
 
   private def blockDataToOrderedRequests(
@@ -1385,6 +1402,32 @@ class OutputModule[E <: Env[E]](
     this.epochsWithMetadataStoredCache
       .filterInPlace(_ >= newEpochNumber - 1)
       .discard
+
+  private def cleanupStaleBlockKeyedState(): Unit =
+    // Backstop cleanup for the fetch-related, block-number-keyed transient maps, to avoid unbounded
+    //  growth (i.e. memory leaks) when a block number is abandoned and the follow-up message that
+    //  would normally remove its entry never arrives (e.g. on view changes where a proposed block
+    //  number is early-fetched or ordered but never completed).
+    //
+    //  Only maps whose entries are removed synchronously, before `previousStoredBlock` advances in
+    //  `processFetchedBlocks` after the peano queue is drained, are swept here:
+    //  for any block at or below the last processed block, the corresponding entry has already been
+    //  removed on the normal path, so a remaining entry is stale.
+    //
+    //  Span and output-stage-duration cleanup are deliberately NOT handled here, as they are removed
+    //  in the asynchronous `BlockDataStored` handler (which runs after `previousStoredBlock` has advanced);
+    //  sweeping them by watermark would race with in-flight persistence, which they must include.
+    //  Thus, their insertion and removal guards are aligned instead, so they are always closed and
+    //  cleaned up when the block is stored.
+    previousStoredBlock.getBlockNumberAndBftTime.foreach { case (lastProcessedBlockNumber, _) =>
+      def isStale(blockNumber: BlockNumber): Boolean = blockNumber <= lastProcessedBlockNumber
+
+      earlyFetchedBatchesForBlock.filterInPlace((blockNumber, _) => !isStale(blockNumber)).discard
+      blocksBeingFetched.filterInPlace((blockNumber, _) => !isStale(blockNumber)).discard
+      orderedBlocksWaitingEarlyFetch
+        .filterInPlace((blockNumber, _) => !isStale(blockNumber))
+        .discard
+    }
 
   private def emitFetchLatency(start: Instant): Unit = {
     import metrics.performance.orderingStageLatency.*

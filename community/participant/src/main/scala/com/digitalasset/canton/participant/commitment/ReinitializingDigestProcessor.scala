@@ -34,7 +34,12 @@ import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
-import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
+import org.apache.pekko.stream.{
+  KillSwitch,
+  KillSwitches,
+  Materializer,
+  SubscriptionWithCancelException,
+}
 
 import scala.collection.immutable
 import scala.concurrent.{ExecutionContext, Future}
@@ -117,13 +122,17 @@ class ReinitializingDigestProcessorImpl(
         .toMat(Sink.ignore)(Keep.both)
 
       val (ks, doneF) = PekkoUtil.runSupervised(
-        graph,
-        errorLogMessagePrefix = "RecomputeAndAppendNewDigestsToJournal",
+        graph = graph,
+        errorLogMessagePrefix = s"$toString - pipeline",
+        reportExceptionAtInfo =
+          _.isInstanceOf[SubscriptionWithCancelException.NonFailureCancellation],
       )
       val finishedF = doneF.thereafter { outcome =>
-        logger.info(s"Reinitialization at $reinitializingTimepoint finished with outcome $outcome")
-      }
-      (ks, finishedF.void)
+        logger.info(
+          s"Reinitialization at $reinitializingTimepoint finished with outcome $outcome"
+        )
+      }.void
+      (ks, finishedF)
     }
   }
 

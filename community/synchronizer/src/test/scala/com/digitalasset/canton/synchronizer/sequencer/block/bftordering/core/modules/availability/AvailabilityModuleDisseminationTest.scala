@@ -692,6 +692,10 @@ class AvailabilityModuleDisseminationTest
       availability.receive(
         RemoteOutputFetch.RemoteBatchDataFetched.create(Node0, ABatchId, ABatch)
       )
+      // The batch ID is validated off the actor thread first, and only then stored
+      ctx.runPipedMessagesThenVerifyAndReceiveOnModule(availability) { message =>
+        message shouldBe a[Availability.LocalOutputFetch.LocalFetchedBatchValidated]
+      }
       ctx.runPipedMessagesThenVerifyAndReceiveOnModule(availability) { message =>
         message shouldBe Availability.LocalOutputFetch.FetchedBatchStored(ABatchId)
       }

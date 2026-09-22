@@ -239,7 +239,7 @@ private[topology] class LsuChaos(
     ) {
       currentSequencer.topology.lsu.announcement
         .list()
-        .find(_.item.successorSynchronizerId == newSynchronizer.psid)
+        .find(_.item.successorSynchronizerId == newSynchronizer.psid.opaque)
         .value
     }
 

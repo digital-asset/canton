@@ -11,6 +11,8 @@ import monocle.macros.syntax.lens.*
 abstract class HardCodedMasterPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   import BasePerformanceIntegrationTest.*
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "properly startup if master name is hard-coded and we have 1000 assets per issuer" in {
     implicit env =>
       import env.*

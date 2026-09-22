@@ -28,6 +28,8 @@ abstract class ExtractSnapshotChoicesITBase
     with EntitySyntax
     with BeforeAndAfterEach {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   private val participantId = Ref.ParticipantId.assertFromString("participant1")
   private val snapshotDir = Files.createTempDirectory("ReplayBenchmarkTest")
   private val snapshotFileMatcher =

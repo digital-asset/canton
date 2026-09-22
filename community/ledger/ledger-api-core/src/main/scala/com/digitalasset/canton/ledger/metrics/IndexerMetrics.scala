@@ -194,22 +194,6 @@ class IndexerMetrics(
   val postProcessingEndIngestion =
     new DatabaseMetrics(prefix :+ "post_processing_end_ingestion", factory)
 
-  val achsProcessing =
-    new DatabaseMetrics(prefix :+ "achs_processing", factory)
-
-  val achsBufferLength: Counter =
-    factory.counter(
-      MetricInfo(
-        prefix :+ "achs_buffer_length",
-        summary = "The size of the queue between the indexer and the ACHS maintenance pipe.",
-        description =
-          """This counter counts batches of updates queued before the ACHS maintenance pipe.
-            |When the buffer is mostly full, it indicates that ACHS maintenance is creating
-            |backpressure on the indexing pipeline.""",
-        qualification = MetricQualification.Debug,
-      )
-    )
-
   val achsValidAt: Gauge[Long] =
     factory.gauge(
       MetricInfo(
@@ -242,10 +226,40 @@ class IndexerMetrics(
         summary =
           "The last event sequential id for which deactivations were removed from the ACHS.",
         description = """The last event sequential id for which deactivations were looked up and the
-            |corresponding activations were removed from the ACHS.""",
+                        |corresponding activations were removed from the ACHS.""",
         qualification = MetricQualification.Debug,
       ),
       0L,
+    )
+
+  object achsProcessing {
+    val initialization = new AchsProcessingMetrics(
+      prefix = prefix :+ "achs_processing" :+ "initialization",
+      factory = factory,
+      achsValidAt = achsValidAt,
+      achsLastPopulated = achsLastPopulated,
+      achsLastRemoved = achsLastRemoved,
+    )
+    val maintenance = new AchsProcessingMetrics(
+      prefix = prefix :+ "achs_processing" :+ "maintenance",
+      factory = factory,
+      achsValidAt = achsValidAt,
+      achsLastPopulated = achsLastPopulated,
+      achsLastRemoved = achsLastRemoved,
+    )
+  }
+
+  val achsBufferLength: Counter =
+    factory.counter(
+      MetricInfo(
+        prefix :+ "achs_buffer_length",
+        summary = "The size of the queue between the indexer and the ACHS maintenance pipe.",
+        description =
+          """This counter counts batches of updates queued before the ACHS maintenance pipe.
+            |When the buffer is mostly full, it indicates that ACHS maintenance is creating
+            |backpressure on the indexing pipeline.""",
+        qualification = MetricQualification.Debug,
+      )
     )
 
   val indexerQueueBlocked: Gauge[Int] = factory.gauge(
@@ -355,6 +369,20 @@ class IndexerMetrics(
 
   val acquireContractPruningLock: Timer =
     factory.timer(histograms.acquireContractPruningLock.info)
+}
+
+class AchsProcessingMetrics(
+    factory: LabeledMetricsFactory,
+    val prefix: MetricName,
+    val achsValidAt: Gauge[Long],
+    val achsLastPopulated: Gauge[Long],
+    val achsLastRemoved: Gauge[Long],
+) {
+  val storeAchsValidAt = new DatabaseMetrics(prefix :+ "store_achs_valid_at", factory)
+  val updateAchsLastPointers = new DatabaseMetrics(prefix :+ "update_achs_last_pointers", factory)
+  val addActivationsToAchs = new DatabaseMetrics(prefix :+ "add_activations_to_achs", factory)
+  val removeDeactivatedFromAchs =
+    new DatabaseMetrics(prefix :+ "remove_deactivated_from_achs", factory)
 }
 
 object IndexerMetrics {

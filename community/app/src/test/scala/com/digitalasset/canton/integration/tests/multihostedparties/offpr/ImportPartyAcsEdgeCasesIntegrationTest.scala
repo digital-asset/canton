@@ -122,12 +122,37 @@ final class ImportPartyAcsEdgeCasesIntegrationTest
 
       // Wait for the topology transaction to become effective on the target participant
       // because it was left online.
-      eventually() {
-        target.topology.party_to_participant_mappings.list(
+      val results = eventually() {
+        val results = target.topology.party_to_participant_mappings.list(
           synchronizerId = daId,
           filterParty = alice.filterString,
           filterParticipant = target.id.filterString,
-        ) should not be empty
+        )
+        results should have size 1
+        results
+      }
+
+      // Flake prevention: Wait for the ledger end record time to exceed the PTP topology transaction's
+      // effective timestamp (validFrom). This prevents a race condition where the target participant
+      // disconnects before receiving a background sequencer time tick, stranding its ledger end exactly
+      // on the topology offset.
+      //
+      // If the ledger end does not advance, the subsequent repair command will fail with:
+      //   "IMPORT_ACS_ERROR: Cannot apply a repair command as the last event is a topology offset.
+      //   Please reconnect to the synchronizer to move the ledger end. In case the synchronizer cannot be
+      //   connected again without this operation, contact support."
+      val ptpValidFrom =
+        CantonTimestamp.fromInstant(results.headOption.value.context.validFrom).value
+      val ledgerApiStore =
+        target.testing.state_inspection.syncPersistentStateManager.ledgerApiStore.value
+      eventually() {
+        val ledgerEndRecordTime =
+          ledgerApiStore.ledgerEnd.value.synchronizerIndices
+            .get(daId)
+            .value
+            .recordTime
+
+        ledgerEndRecordTime should be > ptpValidFrom
       }
 
       source.parties.export_party_acs(

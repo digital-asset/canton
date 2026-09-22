@@ -922,7 +922,8 @@ private[sync] class SynchronizerConnectionsManager(
                 )
               )
 
-            _ = if (isLsu) metrics.setLsuStatus(ParticipantMetrics.LsuStatus.HandshakeDone, psid)
+            _ = if (isLsu)
+              metrics.setLsuStatus(ParticipantMetrics.LsuStatus.HandshakeDone, psid.opaque)
 
           } yield connectionInfo.staticSynchronizerParameters
       },
@@ -1552,6 +1553,15 @@ private[sync] class SynchronizerConnectionsManager(
         ),
       )
 
+      successorPsid <- EitherT.fromEither[FutureUnlessShutdown](
+        synchronizerSuccessor.psid.parseAsPhysical.leftMap(err =>
+          // Internal error because preconditions of the method have been violated
+          LsuError.Internal.Error(
+            OpaquePhysicalSynchronizerId.unparseablePSIdMessage(synchronizerSuccessor, err)
+          )
+        )
+      )
+
       upgrader = new AutomaticLogicalSynchronizerUpgrade(
         synchronizerConnectionConfigStore,
         ledgerApiIndexer,
@@ -1577,7 +1587,7 @@ private[sync] class SynchronizerConnectionsManager(
         parameters.lsuConfig,
         loggerFactory.append("lsu", synchronizerSuccessor.psid.suffix),
         parameters.acsCommitments.disableOldAcsCommitmentProcessor,
-      )(FullAutomaticLsuRequest(alias, currentPsid, synchronizerSuccessor))
+      )(FullAutomaticLsuRequest(alias, currentPsid, synchronizerSuccessor, successorPsid))
 
       _ <- upgrader.upgrade()
     } yield ()

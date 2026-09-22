@@ -364,7 +364,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       namespaceFilter = Some(currentPsid.namespace.toProtoPrimitive),
     ).map(
       _.collectOfMapping[LsuAnnouncement]
-        .filter(_.mapping.successor.psid == currentPsid)
+        .filter(_.mapping.successor.psid == currentPsid.opaque)
         .result
         .maxByOption(_.serial)
         .map(_.mapping.upgradeTime)

@@ -124,6 +124,8 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
+  GetPreferredPackageVersionRequest,
+  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
   InteractiveSubmissionServiceGrpc,
@@ -207,6 +209,7 @@ import com.digitalasset.canton.http.json.v2.{
   JsUpdateService,
   JsUserManagementService,
   JsVersionService,
+  LegacyDTOs,
   PagedList,
   ProtocolConverters,
   SchemaProcessorsImpl,
@@ -216,6 +219,7 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.logging.audit.TransportType.Http
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NoLogging}
 import com.digitalasset.canton.networking.grpc.CallMetadata
+import com.digitalasset.canton.serialization.ProtoConverter.InstantConverter
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.packagemeta.PackageMetadata.Implicits.packageMetadataSemigroup
 import com.digitalasset.canton.tracing.TraceContext
@@ -596,12 +600,22 @@ private final class LedgerServicesJson(
         responseObserver: StreamObserver[GetActiveContractsResponse],
     ): Unit = wsCall(
       JsStateService.activeContractsEndpoint,
-      request,
+      toGetActiveContractsRequestLegacy(request),
       responseObserver,
       (v: JsGetActiveContractsResponse) =>
         protocolConverters.GetActiveContractsResponse
           .fromJson(v),
     )
+
+    private def toGetActiveContractsRequestLegacy(
+        req: GetActiveContractsRequest
+    ): LegacyDTOs.GetActiveContractsRequest =
+      LegacyDTOs.GetActiveContractsRequest(
+        filter = None,
+        activeAtOffset = req.activeAtOffset,
+        eventFormat = req.eventFormat,
+        streamContinuationToken = req.streamContinuationToken,
+      )
 
     override def getActiveContractsPage(
         request: GetActiveContractsPageRequest
@@ -819,9 +833,20 @@ private final class LedgerServicesJson(
     ): Unit =
       wsCall(
         JsUpdateService.getUpdatesEndpoint,
-        request,
+        toGetUpdatesRequestLegacy(request),
         responseObserver,
         protocolConverters.GetUpdatesResponse.fromJson,
+      )
+
+    private def toGetUpdatesRequestLegacy(
+        req: GetUpdatesRequest
+    ): LegacyDTOs.GetUpdatesRequest =
+      LegacyDTOs.GetUpdatesRequest(
+        beginExclusive = req.beginExclusive,
+        endInclusive = req.endInclusive,
+        filter = None,
+        updateFormat = req.updateFormat,
+        descendingOrder = req.descendingOrder,
       )
 
     override def getUpdateByOffset(
@@ -986,6 +1011,27 @@ private final class LedgerServicesJson(
         clientCall(
           JsInteractiveSubmissionService.preferredPackagesEndpoint,
           request,
+        )
+
+      override def getPreferredPackageVersion(
+          request: GetPreferredPackageVersionRequest
+      ): Future[GetPreferredPackageVersionResponse] =
+        clientCall(
+          JsInteractiveSubmissionService.preferredPackageVersionEndpoint,
+          (
+            request.parties.toList,
+            request.packageName,
+            request.vettingValidAt.map(
+              InstantConverter
+                .fromProtoPrimitive(_)
+                .getOrElse(
+                  throw new IllegalArgumentException(
+                    s"could not transform ${request.vettingValidAt} to an Instant"
+                  )
+                )
+            ),
+            Option(request.synchronizerId).filter(_.nonEmpty),
+          ),
         )
 
       override def executeSubmissionAndWait(

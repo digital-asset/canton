@@ -62,7 +62,7 @@ class PackageUploaderTest
         .futureValueUS
 
       validationResult.value._1 shouldBe cantonExamplesMainPkgId
-      validationResult.value._2.size shouldBe 32
+      validationResult.value._2.size shouldBe 72
 
       // Assert not persisted
       packageStore.listPackages().futureValueUS shouldBe empty

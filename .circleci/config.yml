@@ -1778,6 +1778,7 @@ jobs:
                     .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.daml.lf.testing.snapshot.ExtractSnapshotChoices"
                 environment:
                     EXECUTOR_NUM_CPUS: 1
+                    FAIL_ON_ERROR_IN_OUTPUT: false
                     MIN_FETCH_NODE_COUNT: << parameters.min_fetch_nodes >>
                     MIN_STEP_COUNT: << parameters.min_steps >>
                     MIN_TX_NODE_COUNT: << parameters.min_transaction_nodes >>

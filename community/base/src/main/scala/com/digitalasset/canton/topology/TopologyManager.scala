@@ -1103,7 +1103,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     EitherT.fromEither(store.storeId.forSynchronizer match {
       case Some(psid) =>
         Either.cond(
-          upgradeAnnouncement.successorSynchronizerId >= psid,
+          upgradeAnnouncement.successorSynchronizerId >= psid.opaque,
           (),
           InvalidSynchronizerSuccessor.Reject.conflictWithCurrentPsid(
             successorSynchronizerId = upgradeAnnouncement.successorSynchronizerId,

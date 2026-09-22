@@ -548,6 +548,13 @@ package api {
       )
   }
 
+  /** Flags to force updating the vetting topology state on potentially unsafe operations.
+    *
+    * @param forceVetIncompatibleUpgrade
+    *   Allow vetting a package that is upgrade-incompatible with other vetted packages
+    * @param forceUnvettedDependencies
+    *   Allow vetting a package without vetting one or more of its dependencies
+    */
   final case class UpdateVettedPackagesForceFlags(
       forceVetIncompatibleUpgrade: Boolean = false,
       forceUnvettedDependencies: Boolean = false,
@@ -706,6 +713,7 @@ package api {
       }
   }
 
+  /** Generic reference to one or more vetted packages. */
   sealed trait VettedPackagesRef extends PrettyPrinting {
     def toProtoLAPI: package_management_service.VettedPackagesRef
     def findMatchingPackages(
@@ -733,6 +741,9 @@ package api {
         prettyOfString(id => s"package-id: ${id.id.singleQuoted}")
     }
 
+    /** A package reference for packages with package-name `name` and version `version` known to the
+      * participant to which the request is addressed.
+      */
     final case class NameAndVersion(
         name: Ref.PackageName,
         version: Ref.PackageVersion,
@@ -808,6 +819,9 @@ package api {
         )
     }
 
+    /** Package reference identifying all packages with package-name `name` known to the participant
+      * to which the request is addressed.
+      */
     final case class Name(
         name: Ref.PackageName
     ) extends VettedPackagesRef {
@@ -941,5 +955,4 @@ package api {
   final case class PriorTopologySerialExists(serial: PositiveInt) extends PriorTopologySerial
 
   case object PriorTopologySerialNone extends PriorTopologySerial
-
 }

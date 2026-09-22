@@ -223,7 +223,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
         forAll(fixture1.oldSynchronizerNodes.all ++ participants.local)(
           _.topology.lsu.announcement
             .list(store = Some(fixture1.currentPsid))
-            .filter(_.item.successorSynchronizerId == fixture1.newPsid)
+            .filter(_.item.successorSynchronizerId == fixture1.newPsid.opaque)
             .loneElement
         )
       }
@@ -231,7 +231,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_) shouldBe Map(
-            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuAnnounced
+            fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuAnnounced
           )
         )
       )
@@ -268,13 +268,13 @@ final class LsuMetricsIntegrationTest extends LsuBase {
 
       checkLsuStatusMetrics(_ =>
         getLsuStatusMetricValues(participant1) shouldBe Map(
-          fixture1.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+          fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
         )
       )
 
       // P2 still needs to see the successor of sequencer2
       getLsuStatusMetricValues(participant2) shouldBe Map(
-        fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuAnnounced
+        fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuAnnounced
       )
 
       sequencer2.topology.lsu.sequencer_successors.propose_successor(
@@ -293,10 +293,10 @@ final class LsuMetricsIntegrationTest extends LsuBase {
         )
 
         getLsuStatusMetricValues(participant1) shouldBe Map(
-          fixture1.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+          fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
         )
         getLsuStatusMetricValues(participant2) shouldBe Map(
-          fixture1.newPsid -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
+          fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.SequencerSuccessorsKnown
         )
       }
     }
@@ -310,7 +310,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local) { p =>
           getLsuStatusMetricValues(p)
-            .get(fixture1.newPsid)
+            .get(fixture1.newPsid.opaque)
             .value should be >= ParticipantMetrics.LsuStatus.LocalCopyDone
         }
       )
@@ -347,7 +347,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_)
-            .get(fixture1.newPsid)
+            .get(fixture1.newPsid.opaque)
             .value shouldBe ParticipantMetrics.LsuStatus.LsuDone
         )
       )
@@ -367,8 +367,8 @@ final class LsuMetricsIntegrationTest extends LsuBase {
 
       eventually() {
         participant1.underlying.value.sync.getLsuStatusMetrics().futureValueUS.value shouldBe Set(
-          fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-          fixture2.newPsid -> ParticipantMetrics.LsuStatus.LocalCopyDone,
+          fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone,
+          fixture2.newPsid.opaque -> ParticipantMetrics.LsuStatus.LocalCopyDone,
         )
       }
 
@@ -388,14 +388,14 @@ final class LsuMetricsIntegrationTest extends LsuBase {
        by prometheus.
        */
       participant1.underlying.value.sync.getLsuStatusMetrics().futureValueUS.value shouldBe Set(
-        fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone
+        fixture2.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone
       )
 
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_) shouldBe Map(
-            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-            fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
+            fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone,
+            fixture2.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone,
           )
         )
       )
@@ -415,7 +415,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
         forAll(participants.local)(
           _.topology.lsu.announcement
             .list(store = Some(fixture2.newPsid))
-            .filter(_.item.successorSynchronizerId == psid4)
+            .filter(_.item.successorSynchronizerId == psid4.opaque)
             .loneElement
         )
       }
@@ -423,9 +423,9 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_) shouldBe Map(
-            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-            fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-            psid4 -> ParticipantMetrics.LsuStatus.LsuAnnounced,
+            fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone,
+            fixture2.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone,
+            psid4.opaque -> ParticipantMetrics.LsuStatus.LsuAnnounced,
           )
         )
       )
@@ -445,7 +445,7 @@ final class LsuMetricsIntegrationTest extends LsuBase {
         forAll(participants.local)(
           _.topology.lsu.announcement
             .list(store = Some(fixture2.newPsid))
-            .filter(_.item.successorSynchronizerId == psid4)
+            .filter(_.item.successorSynchronizerId == psid4.opaque)
             shouldBe empty
         )
       }
@@ -453,9 +453,9 @@ final class LsuMetricsIntegrationTest extends LsuBase {
       checkLsuStatusMetrics(_ =>
         forAll(participants.local)(
           getLsuStatusMetricValues(_) shouldBe Map(
-            fixture1.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-            fixture2.newPsid -> ParticipantMetrics.LsuStatus.LsuDone,
-            psid4 -> ParticipantMetrics.LsuStatus.NoLsu,
+            fixture1.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone,
+            fixture2.newPsid.opaque -> ParticipantMetrics.LsuStatus.LsuDone,
+            psid4.opaque -> ParticipantMetrics.LsuStatus.NoLsu,
           )
         )
       )

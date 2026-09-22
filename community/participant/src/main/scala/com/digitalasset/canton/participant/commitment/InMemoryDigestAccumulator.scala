@@ -609,12 +609,8 @@ class InMemoryDigestAccumulator(
   }
 
   @VisibleForTesting
-  def prettyIdentifier(identifier: DigestIdentifier): String = identifier match {
-    case ParticipantDigestIdentifier(participantId) =>
-      s"Participant(${stringInterning.participantId.externalize(participantId)})"
-    case PartyDigestIdentifier(partyId) =>
-      s"Party(${stringInterning.party.externalize(partyId)})"
-  }
+  def prettyIdentifier(identifier: DigestIdentifier): String =
+    DigestIdentifier.prettyIdentifier(identifier, stringInterning)
 
   @VisibleForTesting
   def digestsUsageCounters: Map[DigestIdentifier, Int] =
@@ -687,6 +683,14 @@ object InMemoryDigestAccumulator {
         case ParticipantDigestIdentifier(participantId) => (true, participantId)
         case PartyDigestIdentifier(partyId) =>
           (false, partyId)
+      }
+
+    def prettyIdentifier(identifier: DigestIdentifier, stringInterning: StringInterning): String =
+      identifier match {
+        case ParticipantDigestIdentifier(participantId) =>
+          s"Participant(${stringInterning.participantId.externalize(participantId)})"
+        case PartyDigestIdentifier(partyId) =>
+          s"Party(${stringInterning.party.externalize(partyId)})"
       }
   }
 

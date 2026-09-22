@@ -101,12 +101,23 @@ object PekkoUtil extends HasLoggerName {
     *
     * By default, a Pekko flow will discard exceptions. Use this method to avoid discarding
     * exceptions.
+    *
+    * @param isDone
+    *   Evaluated on the materialized value when an unhandled exception reaches the supervisor. If
+    *   it returns true (e.g., indicating the stream has already completed naturally), the exception
+    *   is logged at INFO level with the suffix "(encountered after the graph is completed)" to
+    *   prevent false-positive alerts from late straggler exceptions.
+    * @param reportExceptionAtInfo
+    *   Evaluated on the exception itself. If it returns true (e.g., for expected control-flow
+    *   exceptions like aborts due to shutdown or non-failure cancellations), the exception is
+    *   logged at INFO level with the suffix "(explicitly suppressed)" instead of ERROR.
     */
   def runSupervised[MaterializedValueT](
       graph: RunnableGraph[MaterializedValueT],
       errorLogMessagePrefix: String,
       isDone: MaterializedValueT => Boolean = (_: MaterializedValueT) => false,
       debugLogging: Boolean = false,
+      reportExceptionAtInfo: Throwable => Boolean = _ => false,
   )(implicit mat: Materializer, loggingContext: ErrorLoggingContext): MaterializedValueT = {
     val materializedValueCell = new SingleUseCell[MaterializedValueT]
 
@@ -118,10 +129,12 @@ object PekkoUtil extends HasLoggerName {
             ex, // Pass the original error as well so that we don't lose it
           )
         )
-        // Avoid errors on shutdown
+        // Avoid errors on shutdown or if explicitly suppress
         if (isDone(materializedValue)) {
           loggingContext
             .info(s"$errorLogMessagePrefix (encountered after the graph is completed)", ex)
+        } else if (reportExceptionAtInfo(ex)) {
+          loggingContext.info(s"$errorLogMessagePrefix (explicitly suppressed)", ex)
         } else {
           loggingContext.error(errorLogMessagePrefix, ex)
         }

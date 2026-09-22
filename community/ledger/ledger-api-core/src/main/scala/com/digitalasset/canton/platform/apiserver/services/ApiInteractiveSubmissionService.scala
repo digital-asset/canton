@@ -11,8 +11,12 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
+  GetPreferredPackageVersionRequest,
+  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
+  PackagePreference,
+  PackageVettingRequirement,
   PrepareSubmissionRequest as PrepareRequestP,
   PrepareSubmissionResponse as PrepareResponseP,
 }
@@ -146,6 +150,36 @@ class ApiInteractiveSubmissionService(
         interactiveSubmissionService.execute(_),
       )
       .asGrpcResponse
+  }
+
+  override def getPreferredPackageVersion(
+      request: GetPreferredPackageVersionRequest
+  ): Future[GetPreferredPackageVersionResponse] = {
+    implicit val loggingContextWithTrace: LoggingContextWithTrace =
+      LoggingContextWithTrace(loggerFactory)(TraceContextGrpc.fromGrpcContext)
+
+    implicit val traceContext: TraceContext = loggingContextWithTrace.traceContext
+
+    getPreferredPackagesInternal(
+      GetPreferredPackagesRequest(
+        packageVettingRequirements =
+          Seq(PackageVettingRequirement(request.parties, request.packageName)),
+        synchronizerId = request.synchronizerId,
+        vettingValidAt = request.vettingValidAt,
+      )
+    ).map {
+      case Right((Seq(packageReference), synchronizerId)) =>
+        GetPreferredPackageVersionResponse(
+          packagePreference = Some(PackagePreference(Some(packageReference), synchronizerId))
+        )
+      case Right((unexpectedPackageReferences, _)) =>
+        throw new RuntimeException(
+          s"Expected exactly one package reference but got: $unexpectedPackageReferences"
+        )
+      case Left(failureReason) =>
+        logger.debug(s"Could not compute the preferred package versions: $failureReason")
+        GetPreferredPackageVersionResponse(packagePreference = None)
+    }
   }
 
   override def getPreferredPackages(

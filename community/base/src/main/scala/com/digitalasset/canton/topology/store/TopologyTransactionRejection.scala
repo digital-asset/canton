@@ -310,8 +310,8 @@ object TopologyTransactionRejection {
     }
 
     final case class InvalidSynchronizerSuccessor(
-        successorSynchronizerId: PhysicalSynchronizerId,
-        inStoreSuccessorSynchronizerId: PhysicalSynchronizerId,
+        successorSynchronizerId: OpaquePhysicalSynchronizerId,
+        inStoreSuccessorSynchronizerId: OpaquePhysicalSynchronizerId,
     ) extends TopologyTransactionRejection {
       override def asString: String =
         s"The declared successor $successorSynchronizerId is not greater than prior synchronizer $inStoreSuccessorSynchronizerId."
@@ -346,8 +346,8 @@ object TopologyTransactionRejection {
 
     final case class LsuSequencerSuccessorInvalidSuccessorPsid(
         sequencerId: SequencerId,
-        successorPsid: PhysicalSynchronizerId,
-        expectedSuccessorPsid: PhysicalSynchronizerId,
+        successorPsid: OpaquePhysicalSynchronizerId,
+        expectedSuccessorPsid: OpaquePhysicalSynchronizerId,
     ) extends TopologyTransactionRejection {
       override def asString: String =
         s"Lsu sequencer successor for sequencer $sequencerId is invalid because it mentions successor $successorPsid but the current LSU announcement mentions $expectedSuccessorPsid"

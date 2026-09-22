@@ -10,6 +10,8 @@ import com.digitalasset.canton.environment.{Environment, EnvironmentFactory}
 import com.digitalasset.canton.integration.plugins.{UseH2, UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.logging.{LogEntry, NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.metrics.{MetricsFactoryType, ScopedInMemoryMetricsFactory}
+import org.scalatest.concurrent.PatienceConfiguration.Timeout
+import org.scalatest.time.{Seconds, Span}
 import org.scalatest.{Assertion, BeforeAndAfterAll, Suite}
 
 import scala.util.control.NonFatal
@@ -35,6 +37,10 @@ sealed trait EnvironmentSetup[C <: SharedCantonConfig[C], E <: Environment[C]]
 
   protected[integration] def registerPlugin(plugin: BaseEnvironmentSetupPlugin[C, E]): Unit =
     plugins = plugins :+ plugin
+
+  // TODO(#35929) Remove the feature flag after fixing the failures
+  protected val enableAcsDigestConsistencyCheck: Boolean = false
+  protected val acsDigestConsistencyCheckTimeout: Timeout = Timeout(Span(60, Seconds))
 
   override protected def beforeAll(): Unit = {
     plugins.foreach(_.beforeTests())
@@ -207,8 +213,14 @@ sealed trait EnvironmentSetup[C <: SharedCantonConfig[C], E <: Environment[C]]
   protected def destroyEnvironment(environment: BaseTestConsoleEnvironment[C, E]): Unit = {
 
     // Run the Ledger API integrity check before destroying the environment
-    val checker = new LedgerApiStoreIntegrityChecker(loggerFactory)
-    checker.verifyParticipantLapiIntegrity(environment, plugins)
+    val ledgerApiChecker = new LedgerApiStoreIntegrityChecker(loggerFactory)
+    ledgerApiChecker.verifyParticipantLapiIntegrity(environment, plugins)
+
+    if (enableAcsDigestConsistencyCheck) {
+      val acsDigestConsistencyChecker =
+        new AcsDigestConsistencyChecker(loggerFactory, acsDigestConsistencyCheckTimeout)
+      acsDigestConsistencyChecker.verifyParticipantsAcsDigestConsistency(environment, plugins)
+    }
 
     ConcurrentEnvironmentLimiter.destroy(getClass.getName, numPermits) {
       manualDestroyEnvironment(environment)

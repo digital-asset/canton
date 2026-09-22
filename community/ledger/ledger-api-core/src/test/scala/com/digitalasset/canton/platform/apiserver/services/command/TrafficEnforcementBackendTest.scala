@@ -108,6 +108,20 @@ class TrafficEnforcementBackendTest
         case Left(err) =>
           err.code.id shouldBe "TRAFFIC_ACCOUNT_VALIDATION_FAILED"
           err.cause should include regex raw"Insufficient balance \(5\) for actual traffic cost \(10\) for account $alice"
+          err.context should contain allOf (
+            "account_id" -> alice,
+            "balance" -> "5",
+            "traffic_cost" -> "10",
+          )
+          // Check that the values actually survive the round-trip
+          val decoded = DecodedCantonError
+            .fromStatusRuntimeException(err.asGrpcError)
+            .fold(decodeErr => fail(s"expected a decodable status, got $decodeErr"), identity)
+          decoded.context should contain allOf (
+            "account_id" -> alice,
+            "balance" -> "5",
+            "traffic_cost" -> "10",
+          )
         case Right(_) => fail("expected the submission to be rejected")
       }
     }

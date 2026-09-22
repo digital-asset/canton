@@ -1664,7 +1664,13 @@ final class PartyReplicator(
               logger.debug(
                 s"Party replication $requestId has finished replicating all ${progress.processedContractCount} contracts for ${p.partyId}."
               )
-              transitionToIndexing(requestId)
+              for {
+                // Ensure the PartyReplicator has the latest AcsReplicator progress, so that
+                // it doesn't get the impression that indexing started before ACS replication happened
+                // which can flakily happen e.g. if the ACS is empty.
+                _ <- partyReplicationStateManager.updateAcsReplicationProgress(requestId, progress)
+                _ <- transitionToIndexing(requestId)
+              } yield ()
             } else {
               progress match {
                 case EphemeralSequencerChannelProgress(_, _, _, processor) =>

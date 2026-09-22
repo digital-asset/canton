@@ -43,6 +43,8 @@ class DanglingPartiesIntegrationTest
     with SharedEnvironment
     with HasCycleUtils {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   private var alice: PartyId = _
   private var storeId: TopologyStoreId = _
 

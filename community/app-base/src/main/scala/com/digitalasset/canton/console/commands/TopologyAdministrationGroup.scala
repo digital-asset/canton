@@ -4010,7 +4010,7 @@ class TopologyAdministrationGroup(
           ),
       ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] = {
         val mapping = LsuAnnouncement(
-          successorPhysicalSynchronizerId,
+          successorPhysicalSynchronizerId.opaque,
           upgradeTime,
         )
 
@@ -4080,7 +4080,7 @@ class TopologyAdministrationGroup(
           ),
       ): SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement] = {
         val mapping = LsuAnnouncement(
-          successorPhysicalSynchronizerId,
+          successorPhysicalSynchronizerId.opaque,
           upgradeTime,
         )
 
@@ -4169,7 +4169,7 @@ class TopologyAdministrationGroup(
                 .map { case (validatedEndpoints, useTls) =>
                   LsuSequencerConnectionSuccessor(
                     sequencerId,
-                    successorSynchronizerId,
+                    successorSynchronizerId.opaque,
                     GrpcConnection(
                       validatedEndpoints,
                       useTls,

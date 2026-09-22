@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.commitment
 
 import cats.Eval
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Signature
@@ -12,11 +13,8 @@ import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdown}
 import com.digitalasset.canton.participant.commitment.ReceivedAcsCommitmentMatcher.OptionalAcsUpdateContainer
-import com.digitalasset.canton.participant.metrics.{
-  CommitmentMetrics,
-  ParticipantTestMetrics,
-  TestCommitmentMetrics,
-}
+import com.digitalasset.canton.participant.metrics.CommitmentMetrics.CommitmentMatchingGauges
+import com.digitalasset.canton.participant.metrics.{CommitmentMetrics, TestCommitmentMetrics}
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch
 import com.digitalasset.canton.participant.store.AcsCommitmentPeriodStore.{
@@ -53,7 +51,7 @@ import com.google.protobuf.ByteString
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.{Sink, Source}
 import org.apache.pekko.testkit.TestKit
-import org.scalatest.BeforeAndAfterAll
+import org.scalatest.{Assertion, BeforeAndAfterAll}
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.immutable
@@ -118,6 +116,18 @@ class ReceivedAcsCommitmentMatcherTest
         offset,
         recordTime,
       )
+
+    def assertMatchingStatusMetrics(
+        counterparticipant: LedgerParticipantId,
+        expectedStatus: Int,
+        expectedTimestamp: CantonTimestamp,
+    ): Assertion =
+      Fixture.assertMatchingStatusMetrics(
+        metrics,
+        counterparticipant,
+        expectedStatus,
+        expectedTimestamp,
+      )
   }
 
   object Fixture {
@@ -148,6 +158,22 @@ class ReceivedAcsCommitmentMatcherTest
         traceContext,
       )
     }
+
+    def assertMatchingStatusMetrics(
+        metrics: CommitmentMetrics,
+        counterparticipant: LedgerParticipantId,
+        expectedStatus: Int,
+        expectedTimestamp: CantonTimestamp,
+    ): Assertion = {
+      val CommitmentMatchingGauges(statusGauge, periodEndGauge) =
+        metrics.commitmentMatchingStatusPerParticipant
+          .get(MetricsContext("counterparticipant" -> counterparticipant))
+          .value
+          .value
+      statusGauge.getValue shouldBe expectedStatus
+      periodEndGauge.getValue shouldBe expectedTimestamp.toMicros
+    }
+
   }
 
   private def ts(offsetFromEpoch: Long): CantonTimestamp =
@@ -213,6 +239,7 @@ class ReceivedAcsCommitmentMatcherTest
       store.watermark().futureValueUS.matching shouldBe Some(off(17))
 
       metrics.matchingWatermark.getValue shouldBe ts(42).toMicros
+      assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Mismatched, ts(25))
     }
 
     "process matching after mismatching commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -254,6 +281,7 @@ class ReceivedAcsCommitmentMatcherTest
       store.watermark().futureValueUS.matching shouldBe Some(off(14))
 
       metrics.matchingWatermark.getValue shouldBe ts(12).toMicros
+      assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(8))
     }
 
     "ignore parse errors" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -287,6 +315,7 @@ class ReceivedAcsCommitmentMatcherTest
       store.watermark().futureValueUS.matching shouldBe Some(off(13))
 
       metrics.matchingWatermark.getValue shouldBe ts(11).toMicros
+      assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(3))
     }
 
     // TODO(#34324) Change this so that they are not ignored
@@ -299,6 +328,7 @@ class ReceivedAcsCommitmentMatcherTest
       store.watermark().futureValueUS.matching shouldBe Some(off(1))
 
       metrics.matchingWatermark.getValue shouldBe ts(4).toMicros
+      assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.NotDetermined, ts(3))
     }
 
     "handle multiple envelopes in the same container" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -371,6 +401,8 @@ class ReceivedAcsCommitmentMatcherTest
           CommitmentMatchPeriod.matched(intern(p3), ts(15), ts(20), off(23)),
         )
       metrics.matchingWatermark.getValue shouldBe ts(20).toMicros
+      assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(10))
+      assertMatchingStatusMetrics(p3, CommitmentMetrics.MatchingStatusValues.Matched, ts(20))
     }
 
     "tolerate overlapping and duplicate commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -399,6 +431,7 @@ class ReceivedAcsCommitmentMatcherTest
       store.watermark().futureValueUS.matching shouldBe Some(off(13))
 
       metrics.matchingWatermark.getValue shouldBe ts(14).toMicros
+      assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(20))
     }
 
     "correctly process many queued commitments" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -420,6 +453,7 @@ class ReceivedAcsCommitmentMatcherTest
         (1L to count).map(i => CommitmentMatchPeriod.matched(intern(p2), ts(i - 1), ts(i), off(i)))
       store.watermark().futureValueUS.matching shouldBe Some(off(count))
       metrics.matchingWatermark.getValue shouldBe ts(count + 1).toMicros
+      assertMatchingStatusMetrics(p2, CommitmentMetrics.MatchingStatusValues.Matched, ts(count))
     }
 
     "process commitments from different participants concurrently and sequentially per participant" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
@@ -490,11 +524,12 @@ class ReceivedAcsCommitmentMatcherTest
           )(ec)
         }
       }
+      val metrics = TestCommitmentMetrics()
       val matcher =
         new ReceivedAcsCommitmentMatcher(
           slowStore,
           stringInterning,
-          ParticipantTestMetrics.synchronizer.commitments,
+          metrics,
           loggerFactory,
           PositiveInt.tryCreate(10),
         )
@@ -530,9 +565,18 @@ class ReceivedAcsCommitmentMatcherTest
       }
       store.lookupMatched(periods).futureValueUS should contain theSameElementsAs expected
       store.watermark().futureValueUS.matching shouldBe Some(off(updates.size.toLong))
-      ParticipantTestMetrics.synchronizer.commitments.matchingWatermark.getValue shouldBe
+      metrics.matchingWatermark.getValue shouldBe
         // 3 participants indexed from 0, then 20 seconds added for the second update.
         ts(22).toMicros
+
+      participants.foreach { case (p, _) =>
+        Fixture.assertMatchingStatusMetrics(
+          metrics,
+          counterparticipant = p,
+          expectedStatus = CommitmentMetrics.MatchingStatusValues.Matched,
+          expectedTimestamp = ts(10),
+        )
+      }
     }
 
     "increase the watermark upon offset checkpoints" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {

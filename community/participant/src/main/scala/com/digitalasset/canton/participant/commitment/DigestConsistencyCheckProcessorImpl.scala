@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.participant.commitment
 
-import cats.Eval
+import cats.syntax.option.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.LtHash16Blake3
-import com.digitalasset.canton.data.Offset
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.InternalIndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
@@ -28,6 +28,7 @@ import com.digitalasset.canton.participant.store.AcsDigestStore
 import com.digitalasset.canton.participant.store.AcsDigestStore.{
   AcsDigest,
   AcsDigestUpdate,
+  CheckpointType,
   InternedParticipantId,
   RawDigest,
 }
@@ -37,17 +38,20 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.util.PekkoUtil.CombinedKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.pekkoUtilSyntaxForFlowOpsSource
 import com.digitalasset.canton.util.collection.MapsUtil
+import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
 import com.digitalasset.canton.{InternedPartyId, LfPartyId}
+import com.digitalasset.nonempty.NonEmptyUtil
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
-import org.apache.pekko.stream.{KillSwitch, Materializer}
+import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
-class ConsistencyCheckProcessor(
+class DigestConsistencyCheckProcessorImpl(
     override val thisParticipantId: ParticipantId,
     override val synchronizerId: SynchronizerId,
     acsCommitmentConfig: AcsCommitmentConfig,
@@ -55,7 +59,8 @@ class ConsistencyCheckProcessor(
     digestAccumulatorFactory: InMemoryAcsDigestStore => DigestAccumulator,
     protected override val acsDigestStore: AcsDigestStore,
     indexService: InternalIndexService,
-    stringInterningEval: Eval[StringInterning],
+    digestProcessorTopologyLookup: DigestProcessorTopologyLookup,
+    stringInterning: StringInterning,
     enableAdditionalConsistencyChecks: Boolean,
     private[canton] override val metrics: CommitmentMetrics,
     protected override val timeouts: ProcessingTimeout,
@@ -63,11 +68,11 @@ class ConsistencyCheckProcessor(
 )(implicit
     val executionContext: ExecutionContext,
     mat: Materializer,
-) extends BaseDigestProcessor {
+) extends DigestConsistencyCheckProcessor {
 
-  import ConsistencyCheckProcessor.*
+  import DigestConsistencyCheckProcessorImpl.*
 
-  private def stringInterning: StringInterning = stringInterningEval.value
+  private val startTimestampRef = new AtomicReference[Option[CantonTimestamp]](None)
 
   private val partyDigestJournal: AcsDigestStore.DigestJournal[InternedPartyId] =
     acsDigestStore.party
@@ -87,40 +92,61 @@ class ConsistencyCheckProcessor(
 
   type ParticipantDigestMap = Map[InternedParticipantId, RawDigest]
 
+  override def startTimestamp: Option[CantonTimestamp] = startTimestampRef.get()
+
   def runConsistencyCheck(
       timepoint: Timepoint,
       topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
-  ): Future[Unit] = {
-    val (allCounterpartiesF, participantDigestsF) =
+  ): (KillSwitch, Future[Unit]) = {
+    logger.info(s"Starting a consistency check for timepoint $timepoint")
+    startTimestampRef.set(timepoint.recordTime.some)
+
+    val ((firstKillSwitch, allCounterpartiesF), participantDigestsF) =
       partyDigestMissingAndMismatchedInconsistencies(timepoint, topologySnapshot)
         .to(
-          Sink.foreach { inconsistency =>
-            logger.warn(s"Found the digest inconsistency: $inconsistency")
-          }
+          Sink.foreach(logInconsistency)
         )
         .run()
 
-    Source
+    val (secondKillSwitch, doneF) = Source
       .futureSource(allCounterpartiesF.map { allCounterparties =>
         unexpectedPartyDigestsInStore(allCounterparties, timepoint.offset)
       })
+      .viaMat(KillSwitches.single)(Keep.right)
       .concat(
-        Source.futureSource(
-          // The number of participants should be limited, so we can get away with calling Source from a collection
-          for {
-            participantDigests <- participantDigestsF
-            inconsistencies <- participantDigestInconsistencies(participantDigests, timepoint)
-          } yield Source(inconsistencies)
-        )
+        Source
+          .futureSource(
+            // The number of participants should be limited, so we can get away with calling Source from a collection
+            for {
+              participantDigests <- participantDigestsF
+              inconsistencies <- participantDigestInconsistencies(participantDigests, timepoint)
+            } yield Source(inconsistencies)
+          )
       )
-      .runWith(
-        Sink.foreach { inconsistency =>
-          logger.warn(s"Found the digest inconsistency: $inconsistency")
-        }
-      )
-      .map(_ => ())
+      .toMat(
+        Sink.foreach(logInconsistency)
+      )(Keep.both)
+      .run()
+
+    (
+      new CombinedKillSwitch(firstKillSwitch, secondKillSwitch),
+      doneF.map { _ =>
+        logger.info(s"Finished a consistency check for timepoint $timepoint")
+      },
+    )
+  }
+
+  private def logInconsistency(inconsistency: DigestInconsistency)(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    val identifiers =
+      inconsistency.digestIdentifiers.map(DigestIdentifier.prettyIdentifier(_, stringInterning))
+
+    logger.warn(
+      s"Found the digest inconsistency: $inconsistency with identifiers $identifiers."
+    )
   }
 
   private[commitment] def participantDigestInconsistencies(
@@ -176,12 +202,13 @@ class ConsistencyCheckProcessor(
       traceContext: TraceContext
   ): Source[
     DigestInconsistency,
-    (Future[Set[InternedPartyId]], Future[ParticipantDigestMap]),
+    ((KillSwitch, Future[Set[InternedPartyId]]), Future[ParticipantDigestMap]),
   ] =
     counterpartyBatches(timepoint)
-      .alsoToMat(Sink.fold(Set.empty[InternedPartyId])(_ ++ _.map(internedPartyId)))(Keep.right)
+      .alsoToMat(Sink.fold(Set.empty[InternedPartyId])(_ ++ _.map(internedPartyId)))(Keep.both)
       .mapAsyncAndDrainUS(1) { counterparties =>
         val counterpartiesSet = counterparties.toSet
+
         val consistencyCheckStore = digestAccumulatorStoreFactory()
         val digestAccumulator = digestAccumulatorFactory(consistencyCheckStore)
 
@@ -195,7 +222,6 @@ class ConsistencyCheckProcessor(
           )
           .flatMap { _ =>
             val internedCounterparties = counterpartiesSet.map(internedPartyId)
-
             for {
               recomputed <- consistencyCheckStore.party.bulkLookup(
                 internedCounterparties,
@@ -299,7 +325,7 @@ class ConsistencyCheckProcessor(
       timepoint: Timepoint
   )(implicit
       traceContext: TraceContext
-  ): Source[Seq[LfPartyId], NotUsed] =
+  ): Source[Seq[LfPartyId], KillSwitch] =
     indexService
       .counterParties(
         synchronizerId = synchronizerId,
@@ -307,6 +333,7 @@ class ConsistencyCheckProcessor(
         party = None,
         configOverrides = acsRetrievalConfigOverrides,
       )
+      .viaMat(KillSwitches.single)(Keep.right)
       .grouped(counterpartyBatchSize)
 
   private[commitment] def contractChangeBatches(
@@ -356,35 +383,69 @@ class ConsistencyCheckProcessor(
   private def internedPartyId(partyId: LfPartyId): InternedPartyId =
     stringInterning.party.internalize(partyId)
 
-  // TODO(#35274) Replace with a real implementation
   override protected def startPipelineInternal()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] = ???
+  ): FutureUnlessShutdown[(KillSwitch, Future[Unit])] = {
+
+    // TODO(#35929) Change the filter back to all after fixing all the tests and the logic
+    val checkpointsFilter = Some(
+      // We know the list (all - party hosting) is not empty
+      NonEmptyUtil.fromUnsafe(CheckpointType.all - CheckpointType.PartyHostingChange)
+    )
+
+    for {
+      latestCheckpointO <- acsDigestStore.latestCheckpointUpTo(Offset.MaxValue, checkpointsFilter)
+      topologySnapshotO = latestCheckpointO.flatMap { latestCheckpoint =>
+        digestProcessorTopologyLookup
+          .topologySnapshotForReinitialization(
+            synchronizerId,
+            latestCheckpoint.recordTime,
+          )
+      }
+    } yield {
+      (latestCheckpointO, topologySnapshotO) match {
+        case (Some(latestCheckpoint), Some(topologySnapshot)) =>
+          runConsistencyCheck(latestCheckpoint.timepoint, topologySnapshot)
+        case _ => (PekkoUtil.noOpKillSwitch, Future.successful(()))
+      }
+    }
+  }
 }
 
-object ConsistencyCheckProcessor {
+object DigestConsistencyCheckProcessorImpl {
 
   private[commitment] def mergeDigestMaps[K](
       digestMap1: Map[K, RawDigest],
       digestMap2: Map[K, RawDigest],
   ): Map[K, RawDigest] =
-    MapsUtil.mergeWith(digestMap1, digestMap2) { case (digest1, digest2) =>
-      DigestOps
-        .combineDigests(
-          Seq(digest1, digest2).map { digest =>
-            TracedLtHash16Blake3(LtHash16Blake3.tryCreate(digest), Seq.empty)
-          }
-        )
-        .digest
-        .getByteString
+    MapsUtil
+      .mergeWith(digestMap1, digestMap2) { case (digest1, digest2) =>
+        DigestOps
+          .combineDigests(
+            Seq(digest1, digest2).map { digest =>
+              TracedLtHash16Blake3(LtHash16Blake3.tryCreate(digest), Seq.empty)
+            }
+          )
+          .digest
+          .getByteString
 
-    }
+      }
 
-  sealed trait DigestInconsistency extends Product with Serializable
+  sealed trait DigestInconsistency extends Product with Serializable {
+    def digestIdentifiers: Set[DigestIdentifier]
+  }
 
   final case class MissingDigestsInStore(missingKeys: Set[DigestIdentifier])
-      extends DigestInconsistency
+      extends DigestInconsistency {
+    override def digestIdentifiers: Set[DigestIdentifier] = missingKeys
+  }
+
   final case class UnexpectedDigestsInStore(unexpectedKeys: Set[DigestIdentifier])
-      extends DigestInconsistency
-  final case class DigestValueMismatch(identifier: DigestIdentifier) extends DigestInconsistency
+      extends DigestInconsistency {
+    override def digestIdentifiers: Set[DigestIdentifier] = unexpectedKeys
+  }
+
+  final case class DigestValueMismatch(identifier: DigestIdentifier) extends DigestInconsistency {
+    override def digestIdentifiers: Set[DigestIdentifier] = Set(identifier)
+  }
 }

@@ -34,7 +34,7 @@ Set the ``usage`` parameter with the desired usages when you :ref:`generate a ne
 For example, use the following command to generate a signing key restricted to ``Protocol`` usage only:
 
 .. snippet:: key_restrictions
-    .. hidden:: val myNode = mediator1
+    .. hidden:: val myNode = participant1
     .. success:: val myKey = myNode.keys.secret.generate_signing_key(
           name = "mySigningKey",
           usage = SigningKeyUsage.ProtocolOnly,

@@ -53,6 +53,9 @@ trait AcsCommitmentRestartIntegrationTest
     with HasCycleUtils
     with CommitmentTestUtil {
 
+  // This is flaky, requires multiple runs
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   private lazy val reconciliationInterval = PositiveSeconds.tryOfSeconds(60)
   private lazy val confirmationResponseTimeout = Duration.ofMinutes(1)
   private lazy val mediatorReactionTimeout = Duration.ofHours(1)

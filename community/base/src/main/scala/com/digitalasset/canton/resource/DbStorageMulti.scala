@@ -236,7 +236,9 @@ final class DbStorageMulti private (
       maxRetries: Int,
   )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
     runIfSessionIsOpen("reading", operationName, maxRetries)(
-      FutureUnlessShutdown.outcomeF(generalDb.run(action))
+      CloseContext.withCombinedContext(this.closeContext, closeContext, timeouts, logger)(
+        _.context.synchronizeWithClosingF(functionFullName)(generalDb.run(action))
+      )
     )
 
   override protected[canton] def runWrite[A](
@@ -248,7 +250,9 @@ final class DbStorageMulti private (
       closeContext: CloseContext,
   ): FutureUnlessShutdown[A] =
     runIfSessionIsOpen("writing", operationName, maxRetries)(
-      FutureUnlessShutdown.outcomeF(writeDb.run(action))
+      CloseContext.withCombinedContext(this.closeContext, closeContext, timeouts, logger)(
+        _.context.synchronizeWithClosingF(functionFullName)(writeDb.run(action))
+      )
     )
 
   override def isActive: Boolean = writeConnectionPool.isActive
@@ -271,9 +275,9 @@ final class DbStorageMulti private (
       body: Connection => T,
   ): FutureUnlessShutdown[T] =
     runIfSessionIsOpen("writing", "runGenericJdbcWrite", 0)(
-      FutureUnlessShutdown.outcomeF(
+      closeContext.context.synchronizeWithClosingF(functionFullName)(
         writeDb.run(SimpleJdbcAction(c => body(c.connection)))
-      )
+      )(ec, traceContext)
     )(traceContext, closeContext)
 }
 

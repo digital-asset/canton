@@ -126,7 +126,7 @@ final class LsuEarlyHandshakeIntegrationTest extends LsuBase {
           forAll(fixture.oldSynchronizerNodes.all ++ participants.local)(
             _.topology.lsu.announcement
               .list(store = Some(fixture.currentPsid))
-              .filter(_.item.successorSynchronizerId == fixture.newPsid)
+              .filter(_.item.successorSynchronizerId == fixture.newPsid.opaque)
               .loneElement
           )
         }
@@ -161,7 +161,7 @@ final class LsuEarlyHandshakeIntegrationTest extends LsuBase {
         // Sequencer trust threshold for P1 is one
         eventually() {
           getLsuStatusMetricValues(participant1)(
-            fixture.newPsid
+            fixture.newPsid.opaque
           ).value should be >= ParticipantMetrics.LsuStatus.LocalCopyDone.value
         }
 
@@ -201,7 +201,7 @@ final class LsuEarlyHandshakeIntegrationTest extends LsuBase {
 
         eventually() {
           getLsuStatusMetricValues(participant2)(
-            fixture.newPsid
+            fixture.newPsid.opaque
           ).value should be >= ParticipantMetrics.LsuStatus.LocalCopyDone.value
         }
 

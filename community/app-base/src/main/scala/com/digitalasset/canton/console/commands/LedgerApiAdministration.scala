@@ -15,7 +15,13 @@ import com.daml.jwt.{
   StandardJWTPayload,
 }
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
-import com.daml.ledger.api.v2.admin.package_management_service.PackageDetails
+import com.daml.ledger.api.v2.admin.package_management_service.{
+  PackageDetails,
+  UpdateVettedPackagesForceFlag,
+  UpdateVettedPackagesResponse,
+  VettedPackagesChange,
+  VettedPackagesRef,
+}
 import com.daml.ledger.api.v2.admin.party_management_alpha_service.GeneratePartyTopologyUpdateResponse
 import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyResponse
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract, PrefetchContractKey}
@@ -29,9 +35,12 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionResponse as ExecuteResponseProto,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
+  PackagePreference,
   PrepareSubmissionResponse as PrepareResponseProto,
   PreparedTransaction,
 }
+import com.daml.ledger.api.v2.package_reference.PriorTopologySerial
+import com.daml.ledger.api.v2.package_service.ListVettedPackagesResponse
 import com.daml.ledger.api.v2.reassignment.Reassignment as ReassignmentProto
 import com.daml.ledger.api.v2.state_service.{
   ActiveContract,
@@ -930,6 +939,46 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             )
           )
         }.getTransaction
+
+      @Help.Summary("Get the preferred package version for constructing a command submission")
+      @Help.Description(
+        """A preferred package is the highest-versioned package for a provided package-name that is
+          |vetted by all the participants hosting the provided parties.
+          |
+          |Ledger API clients should use this endpoint for constructing command submissions that are
+          |compatible with the provided preferred package, by making informed decisions on:
+          |- which are the compatible packages that can be used to create contracts
+          |- which contract or exercise choice argument version can be used in the command
+          |- which choices can be executed on a template or interface of a contract
+          |
+          |Parameters:
+          |- parties: The parties whose vetting state should be considered when computing the
+          |  preferred package.
+          |- packageName: The package name for which the preferred package is requested.
+          |- synchronizerId: The synchronizer whose topology state to use for resolving this query.
+          |  If not specified. the topology state of all the synchronizers the participant is
+          |  connected to will be used.
+          |- vettingValidAt: The timestamp at which the package vetting validity should be computed
+          |  If not provided, the participant's current clock time is used.
+          """
+      )
+      def preferred_package_version(
+          parties: Set[Party],
+          packageName: LfPackageName,
+          synchronizerId: Option[SynchronizerId] = None,
+          vettingValidAt: Option[CantonTimestamp] = None,
+      ): Option[PackagePreference] =
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.InteractiveSubmissionService
+              .PreferredPackageVersion(
+                parties.map(_.toLf),
+                packageName,
+                synchronizerId,
+                vettingValidAt,
+              )
+          )
+        }
 
       @Help.Summary("Get the preferred packages for constructing a command submission")
       @Help.Description(
@@ -2462,6 +2511,95 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.PackageManagementService.ValidateDarFile(darPath, None)
+          )
+        }
+
+      @Help.Summary("List vetted packages")
+      @Help.Description(
+        """List the packages vetted by participants connected to the same
+           synchronizers as the local participant.
+           - packageIds: Include packages referenced by these package IDs
+             (empty means all package IDs included).
+           - packageNamePrefixes: Include packages whose names start with any of these
+             prefixes (empty means all package names included).
+           - participantIds: Filter packages vetted only by the specified participants
+             (empty means no participant-level filtering).
+           - synchronizerIds: Filter packages vetted only on participants connected to
+             the specified synchronizers only (empty means no synchronizer-level
+             filtering)
+           - pageToken: Pagination token to determine the specific page to fetch.
+             Using the token guarantees that ``VettedPackages`` on a subsequent page
+             are all greater (``VettedPackages`` are sorted by synchronizer ID then
+             participant ID) than the last ``VettedPackages`` on a previous page.
+             Leave None to fetch the first page.
+           - pageSize: Maximum number of ``VettedPackages`` to return in a single page."""
+      )
+      def list_vetted_packages(
+          packageIds: Seq[String] = Seq.empty,
+          packageNamePrefixes: Seq[String] = Seq.empty,
+          participantIds: Seq[ParticipantId] = Seq.empty,
+          synchronizerIds: Seq[SynchronizerId] = Seq.empty,
+          pageToken: Option[String] = None,
+          pageSize: Int = 100,
+      ): ListVettedPackagesResponse =
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PackageService.ListVettedPackages(
+              packageIds = packageIds.map(LfPackageId.assertFromString),
+              packageNamePrefixes = packageNamePrefixes,
+              participantIds = participantIds,
+              synchronizerIds = synchronizerIds,
+              pageToken = pageToken,
+              pageSize = pageSize,
+            )
+          )
+        }
+
+      @Help.Summary("Update or remove vetted packages")
+      @Help.Description(
+        """Update the vetted packages of the participant.
+          - addOrUpdate: Packages to add or update the vetting state with bounds for.
+            Each package reference must uniquely identify a package uploaded on the
+            participant otherwise the command fails.
+            If the referenced package is already vetted, previous vetting bounds are
+            overwritten.
+          - remove: Packages whose vetting states should be removed from this
+            participant's topology.
+            If a reference in this list matches multiple packages, they are all unvetted
+          - dryRun: If true, the command only performs validation without applying any
+            changes.
+            Use this flag to preview the effects of a change before applying it.
+          - synchronizerId: The synchronizer on which the vetting is effected.
+            If unset, the sole synchronizer the participant is connected to is used.
+            If unset and the participant is connected to multiple synchronizers, the
+            request will error out with PACKAGE_SERVICE_CANNOT_AUTODETECT_SYNCHRONIZER.
+          - expectedPriorTopologySerial: The serial of the last ``VettedPackages``
+            topology transaction of this participant and on this synchronizer.
+            Execution of the request fails if this is not correct.
+            Use this to guard against concurrent changes.
+            If left unspecified, no validation is done against the last transaction's
+            serial.
+          - forceFlags: Controls whether potentially unsafe vetting updates are allowed.
+          """
+      )
+      def update_vetted_packages(
+          addOrUpdate: Seq[VettedPackagesChange.Vet] = Nil,
+          remove: Seq[VettedPackagesRef] = Nil,
+          dryRun: Boolean = false,
+          synchronizerId: Option[SynchronizerId] = None,
+          expectedPriorTopologySerial: Option[PriorTopologySerial] = None,
+          forceFlags: Seq[UpdateVettedPackagesForceFlag] = Seq.empty,
+      ): UpdateVettedPackagesResponse =
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PackageManagementService.UpdateVettedPackages(
+              addOrUpdate = addOrUpdate,
+              remove = remove,
+              dryRun = dryRun,
+              synchronizerId = synchronizerId,
+              expectedPriorTopologySerial = expectedPriorTopologySerial,
+              forceFlags = forceFlags,
+            )
           )
         }
     }

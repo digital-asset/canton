@@ -53,7 +53,7 @@ object TeaMemoryTrafficStore {
   ): PartialFunction[Throwable, TrafficEnforcementError] = {
     case _: ArithmeticException | _: TrafficUpdateOutOfBoundException =>
       TrafficEnforcementErrors.TrafficUpdateOutOfBound
-        .Reject(accountId.toString, trafficDelta.toString)
+        .Reject(accountId.toString, trafficDelta.value, trafficDelta.eventType.toString)
   }
 }
 

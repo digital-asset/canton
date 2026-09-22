@@ -161,6 +161,8 @@ private[bftordering] final class P2PGrpcConnectionManager(
 
   // Called by the network ref factory on behalf of the P2P network out module when it
   //  receives a disconnect admin command, or it detects identity equivocation.
+  //  Also called when a self-connection is detected, to stop the connection-managing actor
+  //  and thus the connection attempts to an endpoint that points back to this node.
   def shutdownConnection(
       p2pEndpointId: P2PEndpoint.Id
   )(implicit traceContext: TraceContext): Unit =
@@ -191,16 +193,26 @@ private[bftordering] final class P2PGrpcConnectionManager(
     maybeP2PEndpointId.foreach(
       shutdownOutgoingConnectionIfNeeded(_, onlyIfNotFullyConnected = false).discard
     )
-    p2pGrpcConnectionState
-      .shutdownConnectionAndReturnPeerSender(
-        p2pAddressId,
-        clearNetworkRefAssociations,
-        closeNetworkRefs,
-      )
-      .foreach { peerSender =>
-        completeGrpcStreamObserver(peerSender, logger)
-        maybeP2PEndpointId.foreach(notifyEndpointDisconnection)
-      }
+    val (peerSenderO, affectedP2PEndpointIds) =
+      p2pGrpcConnectionState
+        .shutdownConnectionAndReturnPeerSender(
+          p2pAddressId,
+          clearNetworkRefAssociations,
+          closeNetworkRefs,
+        )
+    peerSenderO.foreach(completeGrpcStreamObserver(_, logger))
+    // Notify the disconnection of every endpoint that shared the torn-down sender/network ref,
+    //  not just of the requesting endpoint ID: a single sender can back several endpoints via
+    //  `consolidateNetworkRefs`, and all of them are effectively disconnected once it is torn
+    //  down, so the P2P network out module's `connectedP2PEndpointIds` must be updated for each
+    //  of them.
+    //  The notification is also emitted when no sender was found: `onConnect` was already fired
+    //  when the channel/incoming call was established, so the matching `onDisconnect` is needed
+    //  even if the sender was never registered (e.g. because the connection was refused before
+    //  `addSenderIfMissing`, as happens for a self-connection).
+    //  The notification is idempotent: the module's `Network.Disconnected` handler is guarded by
+    //  `if (connectedP2PEndpointIds.remove(...))`.
+    affectedP2PEndpointIds.foreach(notifyEndpointDisconnection)
   }
 
   // Called by the peer receiver of an outgoing connection on error and on completion,
@@ -573,19 +585,38 @@ private[bftordering] final class P2PGrpcConnectionManager(
 
       case Some(Left(error)) =>
         error match {
+          // A self-connection is not an equivocation nor, more generally, a security-relevant event,
+          //  but may be due to an endpoint pointing back to this node that is part of the configured
+          //  (or stored) P2P endpoints, i.e., a misconfiguration.
           case Error.CannotAssociateP2PEndpointIdsToSelf(p2pEndpointId, thisBftNodeId) =>
-            emitIdentityEquivocation(metrics, p2pEndpointId, thisBftNodeId)
+            logger.info(
+              s"P2P endpoint $p2pEndpointId resolves to this node ($thisBftNodeId), " +
+                "so the self-connection is being shut down; " +
+                "consider removing this endpoint from the configured P2P endpoints"
+            )
+            // Shut down the connection as if the endpoint had been disconnected by the admin, so that
+            //  the connection-managing actor is stopped rather than retrying to connect indefinitely.
+            //  If the endpoint is later fixed and reconnected or re-added, connections to it will be
+            //  attempted again: the shutdown also clears the endpoint-to-node mapping left over by
+            //  the pre-associated case (see `P2PGrpcConnectionState.State.shutdownConnectionAndReturnPeerSender`
+            //  for `Right(bftNodeId)`), so `isDefined(endpointId)` reflects the shutdown and the
+            //  admin re-add path does not skip reconnecting.
+            //  `shutdownConnection` also takes care of notifying the disconnection of all affected
+            //  endpoints (either the requesting endpoint alone if it had no association, or every
+            //  endpoint sharing the peer sender in the pre-associated case), so that the earlier
+            //  `onConnect` is properly balanced.
+            shutdownConnection(p2pEndpointId)
           case Error.P2PEndpointIdAlreadyAssociated(
                 p2pEndpointId,
-                _,
+                previousBftNodeId,
                 newBftNodeId,
               ) =>
             emitIdentityEquivocation(metrics, p2pEndpointId, newBftNodeId)
+            logger.warn(
+              s"Detected identity equivocation when trying to associate P2P endpoint $maybeP2PEndpointId " +
+                s"with $bftNodeId: it is already associated with $previousBftNodeId"
+            )
         }
-        logger.warn(
-          s"Detected identity equivocation when trying to associate P2P endpoint $maybeP2PEndpointId " +
-            s"with $bftNodeId"
-        )
         FutureUnlessShutdown.failed(new RuntimeException(error.toString))
     }
   }
@@ -931,6 +962,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
                 val peerSender =
                   new PeerSender(
                     callSendingStreamObserver,
+                    p2pConnectionManagementConfig.flowControlEnabled,
                     p2pConnectionManagementConfig.flowControlBuffer,
                     p2pConnectionManagementConfig.flowControlBufferDropNewest,
                     p2pConnectionManagementConfig.flowControlReadyAllowance,
@@ -1159,6 +1191,7 @@ private[bftordering] final class P2PGrpcConnectionManager(
       val peerSender =
         new PeerSender(
           callSendingStreamObserver,
+          p2pConnectionManagementConfig.flowControlEnabled,
           p2pConnectionManagementConfig.flowControlBuffer,
           p2pConnectionManagementConfig.flowControlBufferDropNewest,
           p2pConnectionManagementConfig.flowControlReadyAllowance,
@@ -1367,7 +1400,8 @@ private[bftordering] object P2PGrpcConnectionManager {
   // Non-final for mocking in tests
   class PeerSender(
       val grpcStreamObserver: CallStreamObserver[BftOrderingMessage],
-      maxSendQueueSizeO: Option[PositiveInt],
+      flowControlEnabled: Boolean,
+      maxSendQueueSize: PositiveInt,
       dropNewest: Boolean,
       readyAllowance: PositiveInt,
       installOnReadyHandlerO: Option[Runnable => Unit],
@@ -1382,7 +1416,7 @@ private[bftordering] object P2PGrpcConnectionManager {
     private var notReadySinceO: Option[Instant] = None
     private var signalledReadyAgain: Boolean = true
     private val sendQueueO: Option[BoundedQueue[BftOrderingMessage]] =
-      maxSendQueueSizeO.map(maxSendQueueSize =>
+      Option.when(flowControlEnabled)(
         new BoundedQueue(
           maxSendQueueSize.unwrap,
           if (dropNewest) DropStrategy.DropNewest else DropStrategy.DropOldest,
@@ -1422,13 +1456,11 @@ private[bftordering] object P2PGrpcConnectionManager {
     // Returns false if a message was discarded due to a full queue, true otherwise
     private def ifReadyOnNext(msg: BftOrderingMessage): Boolean =
       sendQueueO.fold {
-        mutex.exclusive {
-          timedOnNext(msg)
-        }
+        immediateOnNext(msg)
         true
       } { sendQueue =>
         val queueHasRoom = mutex.exclusive {
-          val hasRoom = maxSendQueueSizeO.forall(s => sendQueue.sizeIs < s.unwrap)
+          val hasRoom = sendQueue.sizeIs < maxSendQueueSize.unwrap
           sendQueue.enqueue(msg).discard
           hasRoom
         }
@@ -1438,7 +1470,9 @@ private[bftordering] object P2PGrpcConnectionManager {
 
     @SuppressWarnings(Array("org.wartremover.warts.While"))
     private def sendWhileReady(): Unit = {
-      @volatile var continueQueuePull = true
+      // This sending loop must only be enabled when flow control is enabled,
+      //  else it spins and breaks p2p connectivity
+      @volatile var continueQueuePull = sendQueueO.isDefined
       while (continueQueuePull) {
         mutex.exclusive {
           sendQueueO.foreach { sendQueue =>
@@ -1573,10 +1607,10 @@ private[bftordering] object P2PGrpcConnectionManager {
                     UnlessShutdown.Outcome(p2pConnectionsStatus.updated(p2pEndpointId, newState))
                   ) -> ResultWithLogs(true, Level.INFO -> (() => s"$oldState -> $newState)"))
 
-                case oldState: P2POutgoingConnectionStatus.ConnectedOnChannel =>
-                  this -> ResultWithLogs(false, Level.WARN -> (() => s"$oldState (unchanged)"))
-
                 case oldState: P2POutgoingConnectionStatus.ConnectingOnChannel =>
+                  this -> ResultWithLogs(false, Level.INFO -> (() => s"$oldState (unchanged)"))
+
+                case oldState: P2POutgoingConnectionStatus.ConnectedOnChannel =>
                   this -> ResultWithLogs(false, Level.WARN -> (() => s"$oldState (unchanged)"))
 
                 case oldState: P2POutgoingConnectionStatus.DisconnectingFromChannel =>
@@ -1629,10 +1663,10 @@ private[bftordering] object P2PGrpcConnectionManager {
                     this -> ResultWithLogs((), Level.DEBUG -> (() => s"$oldState (unchanged)"))
                   }
 
-                case oldState: P2POutgoingConnectionStatus.DisconnectingFromChannel =>
-                  this -> ResultWithLogs((), Level.WARN -> (() => s"$oldState (unchanged)"))
-
                 case oldState @ P2POutgoingConnectionStatus.Connecting =>
+                  this -> ResultWithLogs((), Level.INFO -> (() => s"$oldState (unchanged)"))
+
+                case oldState: P2POutgoingConnectionStatus.DisconnectingFromChannel =>
                   this -> ResultWithLogs((), Level.WARN -> (() => s"$oldState (unchanged)"))
 
                 case oldState: P2POutgoingConnectionStatus.ConnectedOnChannel =>

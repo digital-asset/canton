@@ -121,8 +121,10 @@ import com.digitalasset.canton.util.{MaxBytesToDecompress, SingleUseCell}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasActorSystem, HasExecutionContext, LfTimestamp}
 import com.google.protobuf.ByteString
-import io.opentelemetry.api.trace.Tracer
+import io.opentelemetry.api.trace.{Span, SpanBuilder, Tracer}
+import io.opentelemetry.context.Context
 import org.apache.pekko.stream.scaladsl.Sink
+import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.clearInvocations
 import org.scalatest.wordspec.AsyncWordSpecLike
 
@@ -1986,6 +1988,129 @@ class OutputModuleTest
       }
     }
 
+    "end the span when a recovery-replayed block at or below the acknowledged height is stored" in {
+      implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext(resolveAwaits = true)
+
+      val description = "BftOrderer.Output"
+      val tracer: Tracer = mock[Tracer]
+      val spanBuilder: SpanBuilder = mock[SpanBuilder]
+      val span: Span = mock[Span]
+      val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+      // With an initial height of 1, the acknowledged height is block 0, so replaying block 0
+      //  (which carries a batch and thus a span) exercises the recovery path where the block
+      //  number is not strictly greater than the acknowledged height. The old code only ended
+      //  the span for blocks above the acknowledged height, leaking the span (and its map entry)
+      //  on this path.
+      val output =
+        createOutputModule[ProgrammableUnitTestEnv](
+          initialHeight = 1L,
+          availabilityRef = availabilityRef,
+          tracer = tracer,
+        )()
+
+      when(tracer.spanBuilder(description)).thenReturn(spanBuilder)
+      when(spanBuilder.setParent(any[Context])).thenReturn(spanBuilder)
+      when(spanBuilder.startSpan()).thenReturn(span)
+      when(span.setAttribute(anyString, anyLong)).thenReturn(span)
+      when(span.storeInContext(any[Context])).thenReturn(Context.root())
+
+      output.receive(Output.Start)
+      output.receive(Output.BlockOrdered(initialBlock))
+
+      verify(tracer).spanBuilder(description)
+      verify(span, never).end()
+
+      val completeBlockData = CompleteBlockData(
+        initialBlock,
+        batches = initialBlock.orderedBlock.batchRefs.map(poa =>
+          poa.batchId -> OrderingRequestBatch.create(
+            Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
+            EpochNumber.First,
+          )
+        ),
+      )
+      output.receive(Output.BlockDataFetched(completeBlockData))
+      context.runPipedMessagesUntilNoMorePiped(output)
+
+      // The span must be ended exactly once when the block is stored, even though the block is at
+      //  the acknowledged height and hence not provided to the sequencer runtime.
+      verify(span).end()
+
+      succeed
+    }
+
+    "sweep stale entries from the fetch-related block-keyed maps on the periodic check" in {
+      implicit val context: ProgrammableUnitTestContext[Output.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext(resolveAwaits = true)
+
+      val availabilityRef = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
+      val output =
+        createOutputModule[ProgrammableUnitTestEnv](availabilityRef = availabilityRef)()
+
+      output.receive(Output.Start)
+
+      val batch =
+        OrderingRequestBatch.create(
+          Seq(Traced(OrderingRequest(aTag, messageId = "", ByteString.EMPTY))),
+          EpochNumber.First,
+        )
+      val batchId = BatchId.from(batch)
+
+      // Watermark: blocks at or below this are stale (their normal removal already happened before
+      //  `previousStoredBlock` advanced), blocks above it are still legitimately in flight.
+      val staleWatermark = 100L
+
+      def consensusStartedFor(blockNumber: Long): Output.BlockConsensusStarted =
+        Output.BlockConsensusStarted(
+          BlockNumber(blockNumber),
+          BftNodeId("leader"),
+          OrderingBlock(Seq.empty),
+        )
+
+      // Create abandoned early-fetch state via the regular message paths, so that follow-up
+      //  messages that would normally remove these entries never arrive:
+      //  - `earlyFetchedBatchesForBlock`: batches fetched early for a block that is never ordered.
+      //  - `blocksBeingFetched`: a consensus-started block whose fetch never completes.
+      //  - `orderedBlocksWaitingEarlyFetch`: a block ordered while its early fetch is in progress,
+      //    whose early fetch never completes.
+      // One stale entry (at or below the watermark) and one fresh entry (above it) per map.
+      output.receive(Output.EarlyBlockDataFetched(BlockNumber(10L), Seq(batchId -> batch)))
+      output.receive(Output.EarlyBlockDataFetched(BlockNumber(110L), Seq(batchId -> batch)))
+
+      output.receive(consensusStartedFor(20L))
+      output.receive(consensusStartedFor(120L))
+
+      output.receive(consensusStartedFor(30L))
+      output.receive(
+        Output.BlockOrdered(anOrderedBlockForOutput(blockNumber = 30L, batchIds = Seq(batchId)))
+      )
+      output.receive(consensusStartedFor(130L))
+      output.receive(
+        Output.BlockOrdered(anOrderedBlockForOutput(blockNumber = 130L, batchIds = Seq(batchId)))
+      )
+
+      output.earlyFetchedBatchesForBlock.keySet should contain allOf (BlockNumber(10L), BlockNumber(
+        110L
+      ))
+      output.blocksBeingFetched.keySet should contain allOf (BlockNumber(20L), BlockNumber(120L))
+      output.orderedBlocksWaitingEarlyFetch.keySet should contain allOf (BlockNumber(
+        30L
+      ), BlockNumber(130L))
+
+      // Advance the last processed block past the stale entries, then trigger the periodic check
+      //  (which runs even when no epoch transition occurs).
+      output.previousStoredBlock.update(BlockNumber(staleWatermark), aTimestamp)
+      output.receive(Output.ProcessNewEpochTopologyMessagesIfPossible)
+
+      output.earlyFetchedBatchesForBlock.keySet should contain only BlockNumber(110L)
+      // Blocks 30 and 130 also remain tracked as being fetched, since the ordered-waiting-early-fetch
+      //  path does not clear `blocksBeingFetched`; only the stale ones (20 and 30) are swept.
+      output.blocksBeingFetched.keySet should contain only (BlockNumber(120L), BlockNumber(130L))
+      output.orderedBlocksWaitingEarlyFetch.keySet should contain only BlockNumber(130L)
+
+      succeed
+    }
   }
 
   "adjust time for a state-transferred block based on the previous BFT time" in {

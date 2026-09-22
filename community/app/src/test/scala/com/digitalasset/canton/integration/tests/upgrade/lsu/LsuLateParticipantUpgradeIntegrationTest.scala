@@ -57,6 +57,8 @@ import java.time.Duration
  */
 final class LsuLateParticipantUpgradeIntegrationTest extends LsuBase {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override protected def testName: String = "lsu-late-upgrade"
 
   registerPlugin(

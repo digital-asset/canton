@@ -9,7 +9,6 @@ import cats.implicits.catsSyntaxOptionId
 import cats.syntax.alternative.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
-import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.metrics.Timed
@@ -33,6 +32,7 @@ import com.digitalasset.canton.health.{
   HealthQuasiComponent,
 }
 import com.digitalasset.canton.lifecycle.*
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.LifeCycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.pretty.{CantonPrettyPrinter, Pretty, PrettyPrinting}
@@ -2150,7 +2150,7 @@ class SequencerClientImplPekko[E: Pretty](
             val (subscriptionKillSwitch, (doneF, health)) = subscriptionMat
             val combinedKillSwitch =
               new CombinedKillSwitch(replayedKillSwitch, subscriptionKillSwitch)
-            (combinedKillSwitch, FutureUnlessShutdown.outcomeF(doneF), health)
+            (combinedKillSwitch, FutureUnlessShutdown.recoverFromAbortException(doneF), health)
         }
 
         type F2[+X] = WithKillSwitch[F1[X]]
@@ -2190,19 +2190,23 @@ class SequencerClientImplPekko[E: Pretty](
               error
           }
           .toMat(Sink.lastOption) { (matEventSource, lastF) =>
-            val extractedFailureF = lastF.map {
+            val extractedFailureF = FutureUnlessShutdown.recoverFromAbortException(lastF).flatMap {
               case None =>
                 logger.debug("sequencer subscription stream terminated normally")
-                AbortedDueToShutdown
+                FutureUnlessShutdown.abortedDueToShutdown
               case Some(error) =>
                 logger.debug(s"sequencer subscription stream terminated abnormally: $error")
-                Outcome(error)
+                FutureUnlessShutdown.pure(error)
             }
-            matEventSource -> FutureUnlessShutdown(extractedFailureF)
+            matEventSource -> extractedFailureF
           }
 
         val ((killSwitch, subscriptionDoneF, health), completion) =
-          PekkoUtil.runSupervised(stream, errorLogMessagePrefix = "Sequencer subscription failed")
+          PekkoUtil.runSupervised(
+            stream,
+            errorLogMessagePrefix = "Sequencer subscription failed",
+            reportExceptionAtInfo = UnlessShutdown.isAbortedDueToShutdownException,
+          )
         val handle = SubscriptionHandle(killSwitch, subscriptionDoneF, completion)
         subscriptionHandle.getAndSet(Some(handle)).foreach { _ =>
           // TODO(#13789) Clean up the error logging.

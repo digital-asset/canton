@@ -1362,11 +1362,13 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           endpointRemoved shouldBe true
 
           // Its runtime state is then cleaned up
-          p2pConnectionState.shutdownConnectionAndReturnPeerSender(
-            Left(p2pEndpoint.id),
-            clearNetworkRefAssociations = true,
-            closeNetworkRef = true,
-          ) shouldBe None
+          p2pConnectionState
+            .shutdownConnectionAndReturnPeerSender(
+              Left(p2pEndpoint.id),
+              clearNetworkRefAssociations = true,
+              closeNetworkRef = true,
+            )
+            ._1 shouldBe None
           p2pConnectionState.isDefined(p2pEndpoint.id) shouldBe false
           disconnect(p2pNetworkManager, p2pEndpoint)
 

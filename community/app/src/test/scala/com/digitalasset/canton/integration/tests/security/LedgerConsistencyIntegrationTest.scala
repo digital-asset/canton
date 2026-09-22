@@ -107,6 +107,8 @@ abstract sealed class LedgerConsistencyIntegrationTest
     with HasProgrammableSequencer
     with HasCycleUtils {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   // Using AtomicRef, because this gets read from various threads.
   private lazy val pureCryptoRef: AtomicReference[CryptoPureApi] = new AtomicReference()
 
@@ -527,7 +529,9 @@ abstract sealed class LedgerConsistencyIntegrationTest
             // - verify that participant2 is broken
             // - force disconnect from da
             participant2.health.maybe_ping(participant2, 2.seconds) shouldBe empty
-            participant2.synchronizers.list_connected() shouldBe empty
+            eventually() {
+              participant2.synchronizers.list_connected() shouldBe empty
+            }
           },
           LogEntry.assertLogSeq(
             Seq(

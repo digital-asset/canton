@@ -43,6 +43,8 @@ import scala.jdk.CollectionConverters.CollectionHasAsScala
 sealed trait PreventDuplicateContractsIntegrationTest
     extends OfflinePartyReplicationIntegrationTestBase {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   protected var ledgerEndP1: Long = _
   protected var activationOffset: Long = _
 

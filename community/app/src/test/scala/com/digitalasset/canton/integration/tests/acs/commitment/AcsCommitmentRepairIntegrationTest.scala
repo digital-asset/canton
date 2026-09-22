@@ -8,7 +8,6 @@ import com.digitalasset.canton.admin.api.client.commands.ParticipantAdminCommand
   TimeRange,
 }
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
 import com.digitalasset.canton.config.{CommitmentSendDelay, NonNegativeDuration}
@@ -38,7 +37,8 @@ import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervals
 import com.digitalasset.canton.participant.store.UpdateMode
 import com.digitalasset.canton.participant.store.db.DbIncrementalCommitmentStore
 import com.digitalasset.canton.protocol.messages.{Digest, LegacyCommitmentPeriod}
-import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.{SynchronizerAlias, config}
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
@@ -109,12 +109,16 @@ trait AcsCommitmentRepairIntegrationTest
         passTopologyRegistrationTimeout()
       }
 
-  def createContractsAndCheck(sequencer: LocalSequencerReference, synchronizerId: SynchronizerId)(
-      implicit env: FixtureParam
+  def createContractsAndCheck(
+      sequencer: LocalSequencerReference,
+      synchronizerAlias: SynchronizerAlias,
+  )(implicit
+      env: FixtureParam
   ): (Seq[Iou.Contract], LegacyCommitmentPeriod, Digest.HashedDigestType) = {
     import env.*
     val nContracts = PositiveInt.three
     val simClock = environment.simClock.value
+    val synchronizerId = getInitializedSynchronizer(synchronizerAlias).synchronizerId
 
     val initialTimestamp =
       sequencer.underlying.value.sequencer.timeTracker.fetchTime().futureValueUS
@@ -145,12 +149,20 @@ trait AcsCommitmentRepairIntegrationTest
             _.futureValue
           )
       )
-      // and the participant observes it as well, so that the commitments are computed
+      // and the participant observes it as well, so that the commitments are computed.
+      // with a frozen sim clock, `fetch_synchronizer_times` can keep treating a stale event as fresh.
+      // waiting for the tick checks synchronizer time instead and requests a time proof if needed.
+      participant1.testing.await_synchronizer_time(
+        synchronizerAlias,
+        tick1.forgetRefinement.immediateSuccessor,
+        NonNegativeDuration.ofSeconds(10),
+      )
+      // the await only covers this synchronizer, the fetch still nudges the other one
       participant1.testing.fetch_synchronizer_times()
 
       val p1Computed = participant1.commitments
         .computed(
-          daName,
+          synchronizerAlias,
           initialTimestamp.toInstant,
           now.toInstant,
           Some(participant2),
@@ -183,8 +195,8 @@ trait AcsCommitmentRepairIntegrationTest
       }
 
       // Deploy three contracts. P1 and P2 exchange commitments
-      createContractsAndCheck(sequencer1, daId)
-      createContractsAndCheck(sequencer2, acmeId)
+      createContractsAndCheck(sequencer1, daName)
+      createContractsAndCheck(sequencer2, acmeName)
 
       // P1 reinitializes commitments on da and acme. We should see the reinit in the DB, but no errors or warnings
       // in particular regarding inconsistencies or commitment mismatches.
@@ -220,8 +232,8 @@ trait AcsCommitmentRepairIntegrationTest
       participant1.synchronizers.reconnect(daName)
 
       // exchange commitments again, all should be fine
-      createContractsAndCheck(sequencer1, daId)
-      val (_, period2a, _) = createContractsAndCheck(sequencer2, acmeId)
+      createContractsAndCheck(sequencer1, daName)
+      val (_, period2a, _) = createContractsAndCheck(sequencer2, acmeName)
 
       // Corrupt P2's running commitments on da by emptying them in the DB and adding a bogus entry to the DB.
       // We do that while disconnecting P2 from da so upon reconnect P2 initializes its running commitments from the DB.
@@ -282,7 +294,7 @@ trait AcsCommitmentRepairIntegrationTest
           }
 
           // exchange commitments
-          val (_, period3da, _) = createContractsAndCheck(sequencer1, daId)
+          val (_, period3da, _) = createContractsAndCheck(sequencer1, daName)
           eventually() {
             val p1Received = participant1.commitments.lookup_received_acs_commitments(
               synchronizerTimeRanges = Seq(
@@ -380,7 +392,7 @@ trait AcsCommitmentRepairIntegrationTest
       }
 
       logger.debug("Check that the commitments match again")
-      val (_, period4da, _) = createContractsAndCheck(sequencer1, daId)
+      val (_, period4da, _) = createContractsAndCheck(sequencer1, daName)
       checkMatch(period4da)
 
       logger.debug("Restart to verify that the repair survives a crash")
@@ -396,7 +408,7 @@ trait AcsCommitmentRepairIntegrationTest
           .map(_.physicalSynchronizerId) should contain(daId)
       }
 
-      val (_, period5da, _) = createContractsAndCheck(sequencer1, daId)
+      val (_, period5da, _) = createContractsAndCheck(sequencer1, daName)
       checkMatch(period5da)
     }
 

@@ -2315,6 +2315,8 @@ object BuildCommon {
         assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
         assembly / assemblyJarName := s"ledger-api-test-tool-2.3-${version.value}.jar",
+        // logback.xml is scoped only to the assembly JAR to avoid classpath conflicts in community-app / Test
+        assembly / fullClasspath += Attributed.blank(sourceDirectory.value / "assembly"),
         assembly / assemblyMergeStrategy := {
           case PathList("logback.xml") => MergeStrategy.last
           case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last

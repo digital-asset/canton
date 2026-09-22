@@ -49,6 +49,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
+  GetPreferredPackageVersionResponse,
   GetPreferredPackagesResponse,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
@@ -182,6 +183,16 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
     s"Execute submission and wait",
     delegate.executeSubmissionAndWaitForTransaction(executeSubmissionAndWaitForTransactionRequest),
   )
+  override def getPreferredPackageVersion(
+      parties: Seq[Party],
+      packageName: String,
+      vettingValidAt: Option[Instant] = None,
+      synchronizerIdO: Option[String] = None,
+  ): Future[GetPreferredPackageVersionResponse] = withTimeout(
+    s"Get preferred package version for parties $parties, $packageName, $synchronizerIdO at $vettingValidAt",
+    delegate.getPreferredPackageVersion(parties, packageName, vettingValidAt, synchronizerIdO),
+  )
+
   override def getPreferredPackages(
       vettingRequirements: Map[String, Seq[Party]],
       vettingValidAt: Option[Instant] = None,

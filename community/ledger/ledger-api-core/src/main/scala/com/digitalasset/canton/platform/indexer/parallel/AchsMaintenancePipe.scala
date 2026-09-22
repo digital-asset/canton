@@ -6,7 +6,7 @@ package com.digitalasset.canton.platform.indexer.parallel
 import com.daml.logging.entries.LoggingEntries
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, TracedLogger}
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.metrics.AchsProcessingMetrics
 import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.EventSeqIdRange
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
@@ -21,7 +21,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Flow
 
-import java.sql.Connection
 import scala.concurrent.{ExecutionContext, Future}
 
 /** A pipe that runs ACHS (Active Contracts Head Snapshot) maintenance. It consists of 5 stages:
@@ -44,7 +43,7 @@ object AchsMaintenancePipe {
       populationParallelism: Int,
       removalParallelism: Int,
       aggregationThreshold: Long,
-      metrics: LedgerApiServerMetrics,
+      metrics: AchsProcessingMetrics,
       executionContext: ExecutionContext,
       logger: TracedLogger,
       fullDrain: Boolean,
@@ -53,8 +52,8 @@ object AchsMaintenancePipe {
       toAchsWork = toAchsWorkDistance,
       initialWork = initialWork,
       bumpAchsValidAt = bumpAchsValidAt(
-        storeAchsValidAt = storeAchsState(
-          storeAchsStateFunction = parameterStorageBackend.updateAchsValidAt(_: Long),
+        persistAchsValidAt = persistAchsValidAt(
+          parameterStorageBackend = parameterStorageBackend,
           dbDispatcher = dbDispatcher,
           metrics = metrics,
           logger = logger,
@@ -65,8 +64,8 @@ object AchsMaintenancePipe {
         metrics = metrics,
       ),
       populateAchsActivations = populateAchsActivations(
-        persistActivationsF = persistChangesF(
-          persistChanges = eventStorageBackend.addActivationsToAchs,
+        persistActivations = persistActivations(
+          eventStorageBackend = eventStorageBackend,
           dbDispatcher = dbDispatcher,
           metrics = metrics,
         ),
@@ -74,8 +73,8 @@ object AchsMaintenancePipe {
         executionContext = executionContext,
       ),
       removeDeactivatedFromAchs = removeDeactivatedFromAchs(
-        removeDeactivatedF = persistChangesF(
-          persistChanges = eventStorageBackend.removeDeactivatedFromAchs,
+        persistRemoveDeactivated = persistRemoveDeactivated(
+          eventStorageBackend = eventStorageBackend,
           dbDispatcher = dbDispatcher,
           metrics = metrics,
         ),
@@ -84,9 +83,9 @@ object AchsMaintenancePipe {
       ),
       populationParallelism = populationParallelism,
       removalParallelism = removalParallelism,
-      updateAchsLastPointers = storeAchsLastPointersF(
-        persistAchsLastPointersF = storeAchsState(
-          storeAchsStateFunction = parameterStorageBackend.updateAchsLastPointers,
+      updateAchsLastPointers = updateAchsLastPointers(
+        persistAchsLastPointers = persistAchsLastPointers(
+          parameterStorageBackend = parameterStorageBackend,
           dbDispatcher = dbDispatcher,
           metrics = metrics,
           logger = logger,
@@ -254,11 +253,11 @@ object AchsMaintenancePipe {
     * deactivatedRemoval.endInclusive).
     */
   private[platform] def bumpAchsValidAt(
-      storeAchsValidAt: Long => Future[Unit],
+      persistAchsValidAt: Long => Future[Unit],
       achsStateCache: AchsStateCache,
       executionContext: ExecutionContext,
       logger: TracedLogger,
-      metrics: LedgerApiServerMetrics,
+      metrics: AchsProcessingMetrics,
   )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
     val newValidAt = workRange.deactivatedRemoval.endInclusive.max(0L)
     val currentValidAt = achsStateCache.get().validAt
@@ -273,15 +272,15 @@ object AchsMaintenancePipe {
       // the in-memory state is used to determine whether the ACHS is valid to fetch from it, so it must be updated before persisting to the database
       achsStateCache
         .updateValidAt(newValidAt)
-      metrics.indexer.achsValidAt.updateValue(newValidAt)
-      storeAchsValidAt(newValidAt)
+      metrics.achsValidAt.updateValue(newValidAt)
+      persistAchsValidAt(newValidAt)
         .map(_ => workRange)(executionContext)
     }
   }
 
   /** Adds activations to the ACHS. */
   private[platform] def populateAchsActivations(
-      persistActivationsF: AchsAddActivationsParams => LoggingContextWithTrace => Future[Unit],
+      persistActivations: AchsAddActivationsParams => LoggingContextWithTrace => Future[Unit],
       logger: TracedLogger,
       executionContext: ExecutionContext,
   )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
@@ -297,7 +296,7 @@ object AchsMaintenancePipe {
       logger.debug(
         s"Adding activations to ACHS in range [$startInclusive, $endInclusive] active at $activeAt."
       )
-      persistActivationsF(
+      persistActivations(
         AchsAddActivationsParams(
           range = EventSeqIdRange(
             startInclusive = startInclusive,
@@ -314,7 +313,7 @@ object AchsMaintenancePipe {
     * removing them.
     */
   private[platform] def removeDeactivatedFromAchs(
-      removeDeactivatedF: EventSeqIdRange => LoggingContextWithTrace => Future[Unit],
+      persistRemoveDeactivated: EventSeqIdRange => LoggingContextWithTrace => Future[Unit],
       executionContext: ExecutionContext,
       logger: TracedLogger,
   )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
@@ -333,7 +332,7 @@ object AchsMaintenancePipe {
       logger.debug(
         s"Removing deactivated entries from ACHS in range [$startInclusive, $endInclusive]."
       )
-      removeDeactivatedF(
+      persistRemoveDeactivated(
         EventSeqIdRange(
           startInclusive = startInclusive,
           endInclusive = endInclusive,
@@ -343,12 +342,12 @@ object AchsMaintenancePipe {
   }.map(_ => workRange)(executionContext)
 
   /** Persists the ACHS lastPopulated and lastRemoved pointers and updates the in-memory cache. */
-  private[platform] def storeAchsLastPointersF(
-      persistAchsLastPointersF: AchsLastPointers => Future[Unit],
+  private[platform] def updateAchsLastPointers(
+      persistAchsLastPointers: AchsLastPointers => Future[Unit],
       achsStateCache: AchsStateCache,
       executionContext: ExecutionContext,
       logger: TracedLogger,
-      metrics: LedgerApiServerMetrics,
+      metrics: AchsProcessingMetrics,
   )(workRange: AchsWorkRange)(implicit traceContext: TraceContext): Future[AchsWorkRange] = {
     val lastPopulated = workRange.activationsPopulation.endInclusive
     val lastRemoved = workRange.deactivatedRemoval.endInclusive
@@ -357,9 +356,9 @@ object AchsMaintenancePipe {
       val lastPointers = AchsLastPointers(lastRemoved = lastRemoved, lastPopulated = lastPopulated)
       // the in-memory state is used to determine whether the ACHS is valid to fetch from it, so it must be updated before persisting to the database
       achsStateCache.updateLastPointers(lastPointers)
-      metrics.indexer.achsLastPopulated.updateValue(lastPopulated)
-      metrics.indexer.achsLastRemoved.updateValue(lastRemoved)
-      persistAchsLastPointersF(lastPointers)
+      metrics.achsLastPopulated.updateValue(lastPopulated)
+      metrics.achsLastRemoved.updateValue(lastRemoved)
+      persistAchsLastPointers(lastPointers)
         .map { _ =>
           logger.debug(
             s"Updated ACHS last pointers: lastRemoved=$lastRemoved, lastPopulated=$lastPopulated."
@@ -374,25 +373,47 @@ object AchsMaintenancePipe {
     }
   }
 
-  private def persistChangesF[T](
-      persistChanges: T => Connection => Unit,
+  private def persistActivations(
+      eventStorageBackend: EventStorageBackend,
       dbDispatcher: DbDispatcher,
-      metrics: LedgerApiServerMetrics,
-  )(params: T)(loggingContext: LoggingContextWithTrace): Future[Unit] =
-    dbDispatcher.executeSql(metrics.indexer.achsProcessing) { connection =>
-      persistChanges(params)(connection)
+      metrics: AchsProcessingMetrics,
+  )(params: AchsAddActivationsParams)(loggingContext: LoggingContextWithTrace): Future[Unit] =
+    dbDispatcher.executeSql(metrics.addActivationsToAchs) { connection =>
+      eventStorageBackend.addActivationsToAchs(params)(connection)
     }(loggingContext)
 
-  private def storeAchsState[T](
-      storeAchsStateFunction: T => Connection => Unit,
+  private def persistRemoveDeactivated(
+      eventStorageBackend: EventStorageBackend,
       dbDispatcher: DbDispatcher,
-      metrics: LedgerApiServerMetrics,
+      metrics: AchsProcessingMetrics,
+  )(eventSeqIdRange: EventSeqIdRange)(loggingContext: LoggingContextWithTrace): Future[Unit] =
+    dbDispatcher.executeSql(metrics.removeDeactivatedFromAchs) { connection =>
+      eventStorageBackend.removeDeactivatedFromAchs(eventSeqIdRange)(connection)
+    }(loggingContext)
+
+  private def persistAchsValidAt(
+      parameterStorageBackend: ParameterStorageBackend,
+      dbDispatcher: DbDispatcher,
+      metrics: AchsProcessingMetrics,
       logger: TracedLogger,
-  )(changes: T)(implicit traceContext: TraceContext): Future[Unit] =
+  )(validAt: Long)(implicit traceContext: TraceContext): Future[Unit] =
     LoggingContextWithTrace.withNewLoggingContext() { implicit loggingContext =>
-      dbDispatcher.executeSql(metrics.indexer.achsProcessing) { connection =>
-        storeAchsStateFunction(changes)(connection)
-        logger.debug(s"Changed ACHS state to $changes.")(traceContext)
+      dbDispatcher.executeSql(metrics.storeAchsValidAt) { connection =>
+        parameterStorageBackend.updateAchsValidAt(validAt)(connection)
+        logger.debug(s"Changed ACHS ValidAt to $validAt.")(traceContext)
+      }
+    }
+
+  private def persistAchsLastPointers(
+      parameterStorageBackend: ParameterStorageBackend,
+      dbDispatcher: DbDispatcher,
+      metrics: AchsProcessingMetrics,
+      logger: TracedLogger,
+  )(achsLastPointers: AchsLastPointers)(implicit traceContext: TraceContext): Future[Unit] =
+    LoggingContextWithTrace.withNewLoggingContext() { implicit loggingContext =>
+      dbDispatcher.executeSql(metrics.updateAchsLastPointers) { connection =>
+        parameterStorageBackend.updateAchsLastPointers(achsLastPointers)(connection)
+        logger.debug(s"Changed ACHS last pointers to $achsLastPointers.")(traceContext)
       }
     }
 }

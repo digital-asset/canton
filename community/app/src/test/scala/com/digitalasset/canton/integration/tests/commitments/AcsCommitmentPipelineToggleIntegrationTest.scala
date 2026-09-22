@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.integration.tests
+package com.digitalasset.canton.integration.tests.commitments
 
 import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
 import com.digitalasset.canton.admin.api.client.data.{
@@ -13,15 +13,9 @@ import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.examples.java.iou
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  SharedEnvironment,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.store.AcsDigestStore.allCheckpointsFilter
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
@@ -154,6 +148,7 @@ abstract class AcsCommitmentPipelineToggleIntegrationTest
       traceContext: TraceContext,
   ): iou.Iou.Contract = {
     import env.*
+
     import scala.jdk.CollectionConverters.*
 
     val issuer = submittingParticipant.adminParty

@@ -546,7 +546,10 @@ trait CheckedLogicalSynchronizerUpgrade[Req <: LsuRequest] extends LogicalSynchr
           ): LsuError
         )
 
-      _ = metrics.setLsuStatus(ParticipantMetrics.LsuStatus.LsuDone, request.successorPsid)
+      _ = metrics.setLsuStatus(
+        ParticipantMetrics.LsuStatus.LsuDone,
+        request.successorPsid.opaque,
+      )
     } yield logger.info(s"${kind.capitalize} upgrade was successful")
   }
 }
@@ -731,7 +734,7 @@ class AutomaticLogicalSynchronizerUpgrade(
         )
 
         successors <- EitherT.liftF(
-          topologySnapshot.sequencerConnectionSuccessors(request.successorPsid)
+          topologySnapshot.sequencerConnectionSuccessors(request.successorPsid.opaque)
         )
 
         successorSynchronizerConnectionConfig <- LogicalSynchronizerUpgrade
@@ -832,7 +835,7 @@ sealed trait ManualLogicalSynchronizerUpgrade[Req <: ManualLsuRequest]
           sequencerSuccessors.map { case (sequencerId, connection) =>
             sequencerId -> LsuSequencerConnectionSuccessor(
               sequencerId,
-              successorPsid = request.successorPsid,
+              successorPsid = request.successorPsid.opaque,
               connection,
             )
           }
@@ -1161,7 +1164,10 @@ class UncheckedLateLogicalSynchronizerUpgrade(
             )
       }
 
-      _ = metrics.setLsuStatus(ParticipantMetrics.LsuStatus.LsuDone, request.successorPsid)
+      _ = metrics.setLsuStatus(
+        ParticipantMetrics.LsuStatus.LsuDone,
+        request.successorPsid.opaque,
+      )
     } yield logger.info("Late upgrade was successful")
   }
 }
@@ -1203,8 +1209,8 @@ object LogicalSynchronizerUpgrade {
       alias: SynchronizerAlias,
       currentPsid: PhysicalSynchronizerId,
       successor: SynchronizerSuccessor,
+      override val successorPsid: PhysicalSynchronizerId,
   ) extends AutomaticLsu {
-    override def successorPsid: PhysicalSynchronizerId = successor.psid
     def upgradeTime: CantonTimestamp = successor.upgradeTime
 
     override def isOnline: Boolean = true
@@ -1312,9 +1318,10 @@ object LogicalSynchronizerUpgrade {
       successorConfig: SynchronizerConnectionConfig,
       currentPsid: PhysicalSynchronizerId,
       successor: SynchronizerSuccessor,
+      override val successorPsid: PhysicalSynchronizerId,
   ) extends LsuRequest {
     def alias: SynchronizerAlias = successorConfig.synchronizerAlias
-    override def successorPsid: PhysicalSynchronizerId = successor.psid
+
     override def isOnline: Boolean = false
 
     def upgradeTime: CantonTimestamp = successor.upgradeTime

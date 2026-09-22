@@ -4,6 +4,8 @@ def runBootstrap(
     signingKmsKey: String,
     encryptionKmsKey: String,
 ): Unit = {
+  import com.digitalasset.nonempty.NonEmpty
+
   val namespaceKey = participant1.keys.secret.register_kms_signing_key(
     namespaceKmsKey,
     SigningKeyUsage.NamespaceOnly,
@@ -32,8 +34,9 @@ def runBootstrap(
     CanSignAllMappings,
   )
 
-  participant1.topology.owner_to_key_mappings.add_keys(
-    keys =
-      Seq(sequencerAuthKey, signingKey, encryptionKey).map(key => (key.fingerprint, key.purpose))
+  participant1.topology.owner_to_key_mappings.propose(
+    member = participant1.id.member,
+    keys = NonEmpty(Seq, sequencerAuthKey, signingKey, encryptionKey),
+    signedBy = Seq(namespaceKey.fingerprint, sequencerAuthKey.fingerprint, signingKey.fingerprint),
   )
 }

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import cats.syntax.functor.*
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
@@ -54,7 +53,6 @@ import scala.util.chaining.*
   *     - ActiveContractStore is cleaned
   */
 @nowarn("cat=deprecation")
-@UnstableTest // TODO(i31581): remove once the test is no longer flaky
 final class LsuPruningIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-pruning"

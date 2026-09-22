@@ -92,13 +92,6 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
       )(env)
   }
   def excludedTests(version: ReleaseVersion, protocolType: ProtocolType): Seq[String] = {
-    val removedGetPreferredPackageVersionTests =
-      Seq(
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionKnown",
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownParty",
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownPackageName",
-        "InteractiveSubmissionServiceIT:ISSPreferredPackageVersionUnknownSynchronizerId",
-      )
     val perReleaseExclusions =
       if (version.majorMinor == (3, 4))
         Seq(
@@ -112,7 +105,7 @@ trait MultiVersionLedgerApiConformanceBase extends LedgerApiConformanceBase {
         )
       else Seq.empty
 
-    removedGetPreferredPackageVersionTests ++ perReleaseExclusions ++ LedgerApiConformanceBase
+    perReleaseExclusions ++ LedgerApiConformanceBase
       .excludedTests(testedProtocolVersion, protocolType)
   }
 
