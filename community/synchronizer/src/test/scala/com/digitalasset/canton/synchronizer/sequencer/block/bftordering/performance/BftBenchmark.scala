@@ -124,11 +124,15 @@ final class BftBenchmark(
     log.info(s"Starting scheduled writes every ${config.perNodeWritePeriod.toNanos} nanos")
     val testCatchup = config.testCatchup
 
-    val delayForNodesThatAreDown =
-      testCatchup.durationNodesAreDown.plus(testCatchup.durationNodeNeedToStartup).toNanos
+    val writeRelayForNodesThatAreDown =
+      testCatchup.durationNodesAreDown.plus(testCatchup.durationNodeNeedToStartup)
+    val writeRelayForNodesThatAreDownNanos = writeRelayForNodesThatAreDown.toNanos
     writeNodes.map { case (nodeIx, node) =>
+      log.info(
+        s"Scheduling writes for node $nodeIx with initial delay of $writeRelayForNodesThatAreDown"
+      )
       val initialDelay = if (testCatchup.nodesToStop.contains(nodeIx)) {
-        delayForNodesThatAreDown
+        writeRelayForNodesThatAreDownNanos
       } else {
         0L // No initial delay.
       }

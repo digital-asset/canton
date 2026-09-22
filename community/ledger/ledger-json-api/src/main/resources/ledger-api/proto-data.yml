@@ -3060,6 +3060,37 @@ fileComments:
         message:
           comments: null
           fieldComments: {}
+      GetPreferredPackageVersionRequest:
+        message:
+          comments: null
+          fieldComments:
+            parties: |-
+              The parties whose participants' vetting state should be considered when resolving the preferred package.
+
+              Required: must be non-empty
+            package_name: |-
+              The package-name for which the preferred package should be resolved.
+
+              Required
+            synchronizer_id: |-
+              The synchronizer whose vetting state should be used for resolving this query.
+              If not specified, the vetting states of all synchronizers to which the participant is connected are used.
+
+              Optional
+            vetting_valid_at: |-
+              The timestamp at which the package vetting validity should be computed
+              on the latest topology snapshot as seen by the participant.
+              If not provided, the participant's current clock time is used.
+
+              Optional
+      GetPreferredPackageVersionResponse:
+        message:
+          comments: null
+          fieldComments:
+            package_preference: |-
+              Not populated when no preferred package is found
+
+              Optional
       GetPreferredPackagesRequest:
         message:
           comments: null
@@ -3184,6 +3215,19 @@ fileComments:
           fieldComments:
             node_id: Required
             seed: 'Required: must be non-empty'
+      PackagePreference:
+        message:
+          comments: null
+          fieldComments:
+            package_reference: |-
+              The package reference of the preferred package.
+
+              Required
+            synchronizer_id: |-
+              The synchronizer for which the preferred package was computed.
+              If the synchronizer_id was specified in the request, then it matches the request synchronizer_id.
+
+              Required
       PackageVettingRequirement:
         message:
           comments: Defines a package-name for which the commonly vetted package with
@@ -3427,6 +3471,8 @@ fileComments:
                 Specifies the start of the deduplication period by a completion stream offset (exclusive).
                 Must be a valid absolute offset (positive integer).
       ExecuteSubmissionResponse: {}
+      GetPreferredPackageVersionRequest: {}
+      GetPreferredPackageVersionResponse: {}
       GetPreferredPackagesRequest: {}
       GetPreferredPackagesResponse: {}
       Metadata: {}
@@ -3450,6 +3496,7 @@ fileComments:
                 Same as min_ledger_time_abs, but specified as a duration, starting from the time this request is received by the server.
                 Must not be set at the same time as min_ledger_time_abs.
                 Optional
+      PackagePreference: {}
       PackageVettingRequirement: {}
       PartySignatures: {}
       PrepareSubmissionRequest: {}
@@ -3472,6 +3519,20 @@ fileComments:
       - name: ExecuteSubmissionAndWaitForTransaction
         comments: Similar to ExecuteSubmissionAndWait but additionally returns the
           transaction
+      - name: GetPreferredPackageVersion
+        comments: |-
+          A preferred package is the highest-versioned package for a provided package-name
+          that is vetted by all the participants hosting the provided parties.
+
+          Ledger API clients should use this endpoint for constructing command submissions
+          that are compatible with the provided preferred package, by making informed decisions on:
+          - which are the compatible packages that can be used to create contracts
+          - which contract or exercise choice argument version can be used in the command
+          - which choices can be executed on a template or interface of a contract
+
+          Can be accessed by any Ledger API client with a valid token when Ledger API authorization is enabled.
+
+          Deprecated: Use GetPreferredPackages instead.
       - name: GetPreferredPackages
         comments: |-
           Compute the preferred packages for the vetting requirements in the request.

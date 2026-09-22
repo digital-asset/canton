@@ -6,7 +6,6 @@ package com.digitalasset.canton.participant.commitment
 import cats.Eval
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
-import com.daml.metrics.api.MetricHandle.Counter
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt, PositiveLong}
@@ -63,7 +62,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   SequencerErrors,
 }
 import com.digitalasset.canton.store.IndexedSynchronizer
-import com.digitalasset.canton.store.db.DbTest
+import com.digitalasset.canton.store.db.{DbTest, H2Test}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds, WallClock}
 import com.digitalasset.canton.topology.DefaultTestIdentities.{
   participant1,
@@ -77,25 +76,23 @@ import com.digitalasset.canton.topology.{ParticipantId, TestingIdentityFactory, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
-  BaseTest,
   HasActorSystem,
   HasExecutionContext,
   ProtocolVersionChecksAsyncWordSpec,
 }
-import org.scalactic.source.Position
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
-trait AcsCommitmentSenderTest
+trait AcsCommitmentSenderImplTest
     extends AsyncWordSpec
-    with BaseTest
+    with BaseAcsCommitmentSenderTest
     with HasExecutionContext
     with HasActorSystem
     with ProtocolVersionChecksAsyncWordSpec {
-  import AcsCommitmentSenderTest.*
+  import AcsCommitmentSenderImplTest.*
 
   implicit val mc: MetricsContext = MetricsContext.Empty
 
@@ -105,7 +102,7 @@ trait AcsCommitmentSenderTest
   private val defaultCryptoApi = mkCryptoApi(allParticipantsTopology, loggerFactory)
   private val defaultSyncCryptoApi = defaultCryptoApi.snapshot(t3).futureValueUS
 
-  "AcsCommitmentSender" should {
+  "AcsCommitmentSenderImpl" should {
     "send the expected messages when all messages fit in one batch" onlyRunWithOrGreaterThan ProtocolVersion.acsCommitmentRedesign in {
       val sequencerClient = new TestSequencerClientSend(wallClock, successfulSendResultFactory.some)
       val metrics = mkMetrics()
@@ -601,43 +598,6 @@ trait AcsCommitmentSenderTest
     }
   }
 
-  private def assertWatermarkValue(
-      watermarkStore: AcsCommitmentSenderWatermarkStore,
-      expectedTimepoint: Option[Timepoint],
-  )(implicit traceContext: TraceContext): Assertion =
-    watermarkStore.lookupWatermark().futureValueUS.map(_.tupled) shouldBe expectedTimepoint.map(
-      _.tupled
-    )
-
-  private def assertInitialEmptyMetricValues(
-      metrics: CommitmentSenderMetrics
-  )(implicit pos: Position): Assertion = {
-    assertWatermarkMetricsValue(metrics, None)
-    assertCounterMetricValue(metrics.sentBatchCount, 0)
-    assertCounterMetricValue(metrics.sentCommitmentCount, 0)
-    assertCounterMetricValue(metrics.batchSendingErrorCount, 0)
-    assertCounterMetricValue(metrics.sendFailureCount, 0)
-    assertCounterMetricValue(metrics.sendAttemptCount, 0)
-  }
-
-  private def assertWatermarkMetricsValue(
-      metrics: CommitmentSenderMetrics,
-      expectedTimepoint: Option[Timepoint],
-  ): Assertion = {
-    metrics.watermarkOffset.getValue shouldBe expectedTimepoint.fold(0L)(_.offset.unwrap)
-    metrics.watermarkTimestamp.getValue shouldBe expectedTimepoint.fold(
-      CantonTimestamp.MinValue.toMicros
-    )(_.recordTime.toMicros)
-  }
-
-  private def assertCounterMetricValue(counter: Counter, expectedValue: Long)(implicit
-      pos: Position
-  ): Assertion =
-    TestCommitmentMetrics.counterValue(counter)(
-      AcsCommitmentSender.metricsContext,
-      pos,
-    ) shouldBe expectedValue
-
   private def assertCommitmentMessageValidSignature(
       syncCryptoApi: SyncCryptoApi,
       message: AcsCommitmentProtocolMessage,
@@ -666,14 +626,14 @@ trait AcsCommitmentSenderTest
   ): (
       AcsDigestStore,
       AcsCommitmentSenderWatermarkStore,
-      AcsCommitmentSender,
+      AcsCommitmentSenderImpl,
   ) = {
     val (digestStore, watermarkStore) = mkStores()
 
     (
       digestStore,
       watermarkStore,
-      new AcsCommitmentSender(
+      new AcsCommitmentSenderImpl(
         digestStore = digestStore,
         cryptoApi = cryptoApi,
         sequencerClient = sequencerClient,
@@ -695,7 +655,7 @@ trait AcsCommitmentSenderTest
   protected def mkStores(): (AcsDigestStore, AcsCommitmentSenderWatermarkStore)
 }
 
-object AcsCommitmentSenderTest extends TestDigestUtils {
+object AcsCommitmentSenderImplTest extends TestDigestUtils {
   private lazy val psid = physicalSynchronizerId
   private lazy val initialSynchronizerParameters = TestSynchronizerParameters.defaultDynamic
 
@@ -889,10 +849,10 @@ object AcsCommitmentSenderTest extends TestDigestUtils {
   }
 }
 
-trait AcsCommitmentSenderTestDb extends AcsCommitmentSenderTest {
+trait AcsCommitmentSenderImplTestDb extends AcsCommitmentSenderImplTest {
   self: DbTest =>
 
-  import AcsCommitmentSenderTest.*
+  import AcsCommitmentSenderImplTest.*
 
   override protected def mkStores(): (AcsDigestStore, AcsCommitmentSenderWatermarkStore) = (
     new DbAcsDigestStore(
@@ -919,9 +879,11 @@ trait AcsCommitmentSenderTestDb extends AcsCommitmentSenderTest {
   }
 }
 
-class AcsCommitmentSenderTestInMemory extends AcsCommitmentSenderTest {
+class AcsCommitmentSenderImplTestH2 extends AcsCommitmentSenderImplTestDb with H2Test
 
-  import AcsCommitmentSenderTest.*
+class AcsCommitmentSenderImplTestInMemory extends AcsCommitmentSenderImplTest {
+
+  import AcsCommitmentSenderImplTest.*
 
   override protected def mkStores(): (AcsDigestStore, AcsCommitmentSenderWatermarkStore) = (
     (InMemoryAcsDigestStore

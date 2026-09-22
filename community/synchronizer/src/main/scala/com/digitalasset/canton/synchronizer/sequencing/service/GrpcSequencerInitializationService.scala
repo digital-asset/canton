@@ -306,7 +306,7 @@ class GrpcSequencerInitializationService(
       _ <- EitherT.fromEither[Future](
         expectedUpgradePsidO.fold(Right(()): Either[RpcError, Unit])(expectedUpgradePsid =>
           Either.cond(
-            ignoreLsuPsidCheck || expectedUpgradePsid == physicalSynchronizerId,
+            ignoreLsuPsidCheck || expectedUpgradePsid == physicalSynchronizerId.opaque,
             (),
             TopologyManagerError.InconsistentTopologySnapshot.UnexpectedPhysicalSynchronizerId(
               physicalSynchronizerId,

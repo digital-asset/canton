@@ -161,7 +161,7 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
         "update-account",
         "traffic-service",
         TrafficEnforcementErrors.TrafficUpdateOutOfBound
-          .Reject(accountId = "alice", delta = "-100")
+          .Reject(accountId = "alice", trafficDelta = -100L, deltaType = "debit_delta")
           .asGrpcError,
       )
       RichTrafficServiceClient.retryUnlessClientGaveUp(error) shouldBe false
@@ -253,17 +253,23 @@ class RichTrafficServiceClientTest extends AnyWordSpec with BaseTest with HasExe
       decodedId(result) shouldBe "NA"
     }
 
-    "forward a TrafficUpdateOutOfBound (TEA origin, FAILED_PRECONDITION) untouched" in {
+    "forward a TrafficUpdateOutOfBound (TEA origin, FAILED_PRECONDITION) untouched, metadata included" in {
       val error = GrpcError(
         "update-account",
         "traffic-service",
         TrafficEnforcementErrors.TrafficUpdateOutOfBound
-          .Reject(accountId = "alice", delta = "-100")
+          .Reject(accountId = "alice", trafficDelta = -100L, deltaType = "debit_delta")
           .asGrpcError,
       )
-      decodedId(
-        RichTrafficServiceClient.normalizeTeaError(error)
-      ) shouldBe "TRAFFIC_UPDATE_OUT_OF_BOUND"
+      val decoded = DecodedCantonError
+        .fromStatusRuntimeException(RichTrafficServiceClient.normalizeTeaError(error))
+        .fold(decodeErr => fail(s"expected a decodable status, got $decodeErr"), identity)
+      decoded.code.id shouldBe "TRAFFIC_UPDATE_OUT_OF_BOUND"
+      decoded.context should contain allOf (
+        "account_id" -> "alice",
+        "traffic_delta" -> "-100",
+        "delta_type" -> "debit_delta",
+      )
     }
 
     "wrap a bare FAILED_PRECONDITION as a redacted INTERNAL, not exposing the details" in {

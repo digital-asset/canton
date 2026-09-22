@@ -90,6 +90,14 @@ service ParticipantRepairService {
 
   // Queries the latest completed ACS digest reinitialization timestamp for the given synchronizer ID.
   rpc ReinitializeDigestCommitmentsStatus(ReinitializeDigestCommitmentsStatusRequest) returns (ReinitializeDigestCommitmentsStatusResponse);
+
+  // Run a digest consistency check based on the latest checkpoint by:
+  //  - recalculating the digests of the ACS
+  //  - comparing the recalculated results with the digest from the store
+  rpc RunDigestConsistencyCheck(RunDigestConsistencyCheckRequest) returns (RunDigestConsistencyCheckResponse);
+
+  // Checks if the digest consistency check processor is currently running or not
+  rpc DigestConsistencyCheckStatus(DigestConsistencyCheckStatusRequest) returns (DigestConsistencyCheckStatusResponse);
 }
 
 message PurgeContractsRequest {
@@ -408,4 +416,22 @@ message ReinitializeDigestCommitmentsStatusRequest {
 message ReinitializeDigestCommitmentsStatusResponse {
   // The record timestamp of the last completed ACS digest reinitialization.
   google.protobuf.Timestamp last_completed_reinitialization_time = 1;
+}
+
+message RunDigestConsistencyCheckRequest {
+  // The ID of the synchronizer for which to query the last ACS digest reinitialization timestamp.
+  string synchronizer_id = 1;
+}
+
+message RunDigestConsistencyCheckResponse {}
+
+message DigestConsistencyCheckStatusRequest {
+  // The ID of the synchronizer for which to query the last ACS digest reinitialization timestamp.
+  string synchronizer_id = 1;
+}
+
+message DigestConsistencyCheckStatusResponse {
+  bool is_running = 1;
+  // The record timestamp of the checkpoint used for the last started consistency check
+  google.protobuf.Timestamp last_started_check_time = 2;
 }

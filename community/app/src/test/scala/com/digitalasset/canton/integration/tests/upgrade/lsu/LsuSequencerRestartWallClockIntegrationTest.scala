@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
+import com.digitalasset.canton.admin.api.client.data.SequencingParameters
 import com.digitalasset.canton.config.DbConfig
+import com.digitalasset.canton.config.RequireTypes.PositiveLong
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
@@ -15,22 +16,27 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.resource.DbStorageSingle
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.DefaultSegmentLength
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters.SegmentLength
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.{HasExecutionContext, config}
+import com.google.protobuf.ByteString
 
 import scala.concurrent.duration.DurationInt
 import scala.jdk.DurationConverters.ScalaDurationOps
 
-@UnstableTest // TODO(i35208): remove this once the test is no longer flaky
 class LsuSequencerRestartWallClockIntegrationTest extends LsuBase with HasExecutionContext {
 
   override protected def testName: String = "lsu-sequencer-restart"
+
+  // Shortening from the default = 10 to make sequencers progress faster through the epochs
+  private val segmentLength = 2L
 
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
       MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+      consensusEmptyBlockCreationTimeout = 100.millis,
     )
   )
   registerPlugin(new UsePostgres(loggerFactory))
@@ -55,7 +61,27 @@ class LsuSequencerRestartWallClockIntegrationTest extends LsuBase with HasExecut
       }
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
+        import env.*
         defaultEnvironmentSetup()
+        val sequencingParameters =
+          topology.SequencingParameters
+            .create(
+              segmentLength = SegmentLength(PositiveLong.tryCreate(segmentLength))
+            )(testedProtocolVersion)
+        val sequencingParametersByteString: ByteString = sequencingParameters.toByteString
+        S1M1.synchronizerOwners.foreach { owner =>
+          logger.info(
+            s"Proposing sequencing parameters from owner ${owner.name}"
+          )
+          owner.topology.sequencing_parameters
+            .propose(daId, SequencingParameters(Option(sequencingParametersByteString)))
+        }
+
+        eventually() {
+          val currentSequencingParameters =
+            sequencer1.topology.sequencing_parameters.get_sequencing_parameters(daId)
+          currentSequencingParameters.value.payload.value shouldBe sequencingParametersByteString
+        }
       }
 
   "Logical synchronizer upgrade" should {
@@ -81,7 +107,11 @@ class LsuSequencerRestartWallClockIntegrationTest extends LsuBase with HasExecut
           //  are in an ordering epoch > 0 after the restart, so that pending topology changes are checked
           val sampledEpochNumber = sequencer2.bft.get_ordering_topology().currentEpoch
           eventually() {
-            sequencer2.bft.get_ordering_topology().currentEpoch should be > sampledEpochNumber + 5
+            val currentEpochNumber = sequencer2.bft.get_ordering_topology().currentEpoch
+            logger.info(
+              s"Sampled epoch number: $sampledEpochNumber, current epoch number: $currentEpochNumber"
+            )
+            currentEpochNumber should be > sampledEpochNumber + 5
           }
         }
 
@@ -115,7 +145,6 @@ class LsuSequencerRestartWallClockIntegrationTest extends LsuBase with HasExecut
             logger.info(
               s"Current post-ordering block height: $currentBlockHeight, current epoch: $currentEpoch"
             )
-            val segmentLength = DefaultSegmentLength.length.value
             // Ensure we are beyond the first epoch; epoch length = segment length (only 1 sequencer)
             currentBlockHeight should be > segmentLength // Produce more epochs above if this flakes
 

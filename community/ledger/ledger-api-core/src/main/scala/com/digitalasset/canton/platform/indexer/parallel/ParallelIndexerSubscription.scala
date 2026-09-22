@@ -353,7 +353,7 @@ private[platform] final case class ParallelIndexerSubscription[DbBatch](
                   populationParallelism = achsCfg.populationParallelism.unwrap,
                   removalParallelism = achsCfg.removalParallelism.unwrap,
                   aggregationThreshold = achsCfg.aggregationThreshold,
-                  metrics = metrics,
+                  metrics = metrics.indexer.achsProcessing.maintenance,
                   executionContext = executionContext,
                   logger = logger,
                   fullDrain = false,

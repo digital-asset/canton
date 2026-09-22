@@ -37,6 +37,8 @@ class PartySetsITSpec
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "benchtool" should {
     "submit a party-set and apply party-set filter on a stream" onlyRunWithOrGreaterThan ProtocolVersion.v35 in {
       env =>

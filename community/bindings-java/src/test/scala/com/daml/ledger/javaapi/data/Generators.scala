@@ -313,6 +313,29 @@ object Generators {
         .build()
     }
 
+  val packagePreferenceGen: Gen[
+    v2.interactive.InteractiveSubmissionServiceOuterClass.PackagePreference
+  ] =
+    for {
+      packageId <- Arbitrary.arbString.arbitrary
+      packageVersion <- packageVersionGen
+      packageName <- packageNameGen
+      synchronizerId <- Arbitrary.arbString.arbitrary
+    } yield {
+      v2.interactive.InteractiveSubmissionServiceOuterClass.PackagePreference
+        .newBuilder()
+        .setPackageReference(
+          v2.PackageReferenceOuterClass.PackageReference
+            .newBuilder()
+            .setPackageId(packageId)
+            .setPackageName(packageName)
+            .setPackageVersion(packageVersion)
+            .build()
+        )
+        .setSynchronizerId(synchronizerId)
+        .build()
+    }
+
   def createdEventGen(nodeId: Integer): Gen[v2.EventOuterClass.CreatedEvent] =
     for {
       contractId <- contractIdValueGen.map(_.getContractId)
@@ -754,6 +777,37 @@ object Generators {
       synchronizerId.foreach(intermediate.setSynchronizerId)
       packageVettingRequirements.foreach(intermediate.addPackageVettingRequirements)
       intermediate.build()
+    }
+  }
+
+  def getPreferredPackageVersionRequestGen: Gen[
+    v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionRequest
+  ] = {
+    import v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionRequest as Request
+    for {
+      packageNameGen <- packageNameGen
+      synchronizerId <- Arbitrary.arbOption[String].arbitrary
+      vettingValidAt <- protoTimestampGen
+      parties <- Gen.listOf(Arbitrary.arbString.arbitrary)
+    } yield {
+      val intermediate = Request
+        .newBuilder()
+        .setPackageName(packageNameGen)
+        .addAllParties(parties.asJava)
+        .setVettingValidAt(vettingValidAt)
+      synchronizerId.fold(intermediate)(intermediate.setSynchronizerId).build()
+    }
+  }
+
+  def getPreferredPackageVersionResponseGen: Gen[
+    v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionResponse
+  ] = {
+    import v2.interactive.InteractiveSubmissionServiceOuterClass.GetPreferredPackageVersionResponse as Response
+    for {
+      packagePreferenceO <- Gen.option(packagePreferenceGen)
+    } yield {
+      val builder = Response.newBuilder()
+      packagePreferenceO.map(builder.setPackagePreference).getOrElse(builder).build()
     }
   }
 

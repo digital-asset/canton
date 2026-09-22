@@ -71,7 +71,7 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
         forAll(fixture.oldSynchronizerNodes.all)(
           _.topology.lsu.announcement
             .list(store = Some(fixture.currentPsid))
-            .filter(_.item.successorSynchronizerId == fixture.newPsid)
+            .filter(_.item.successorSynchronizerId == fixture.newPsid.opaque)
             .loneElement
         )
       }
@@ -215,7 +215,7 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
         forAll(fixture.oldSynchronizerNodes.all)(
           _.topology.lsu.announcement
             .list(store = Some(fixture.currentPsid))
-            .filter(_.item.successorSynchronizerId == fixture.newPsid)
+            .filter(_.item.successorSynchronizerId == fixture.newPsid.opaque)
             .loneElement
         )
       }

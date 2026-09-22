@@ -118,8 +118,13 @@ final class P2PGrpcConnectionState(
   // All update operations ensure that:
   //
   // - A P2P endpoint ID is associated with a BFT node ID as soon as the association is known.
-  // - Associating a P2P endpoint ID to this BFT node ID returns an error.
-  // - Re-associating a P2P endpoint ID to a different BFT node ID returns an error.
+  // - Associating a P2P endpoint ID to this BFT node ID returns an error (self-association is
+  //   rejected).
+  // TODO(#34191)
+  // - Re-associating a P2P endpoint ID to a different BFT node ID is currently permitted: the
+  //   impersonation check that would return an error (`P2PEndpointIdAlreadyAssociated`) is
+  //   disabled (see #34192), so the mapping is silently updated. The transport auth interceptors
+  //   are thus the only line of defense currently active against endpoint-level impersonation.
   // - All P2P endpoint IDs for a BFT node ID point to the same network reference to which the BFT node ID also points,
   //   replacing and closing duplicates as they are identified.
   // - No new sender is associated with a BFT node ID if one is already associated with it.
@@ -244,18 +249,27 @@ final class P2PGrpcConnectionState(
     }
   }
 
-  // Used to close a connection in various situations
+  /** Tears down the connection identified by `p2pAddressId` and returns:
+    *   - the sender that was associated with the underlying peer (if any), so the caller can
+    *     complete it;
+    *   - all endpoint IDs known to have been affected by the shutdown, i.e., the endpoints that
+    *     were associated with the same peer (possibly more than one, since `consolidateNetworkRefs`
+    *     may have several endpoints share a single sender/network ref), or just the requested
+    *     endpoint ID if the endpoint had no association to a BFT node ID; the caller is responsible
+    *     for notifying the disconnection of each of them, so as to keep the P2P network out
+    *     module's `connectedP2PEndpointIds` in sync.
+    */
   def shutdownConnectionAndReturnPeerSender(
       p2pAddressId: P2PAddress.Id,
       clearNetworkRefAssociations: Boolean,
       closeNetworkRef: Boolean,
-  )(implicit traceContext: TraceContext): Option[PeerSender] = {
+  )(implicit traceContext: TraceContext): (Option[PeerSender], Seq[P2PEndpoint.Id]) = {
     require(
       clearNetworkRefAssociations || !closeNetworkRef,
       "Cannot close network ref without clearing associations first",
     )
 
-    val (prevState, newState, peerSenderO, networkRefO) =
+    val (prevState, newState, peerSenderO, networkRefO, affectedP2PEndpointIds) =
       AtomicUtil
         .updateAndGetComputed(stateRef)(
           _.shutdownConnectionAndReturnPeerSender(
@@ -286,7 +300,7 @@ final class P2PGrpcConnectionState(
         s"${BeforeAndAfter(trimmedPrevState, trimmedNewState)}"
     )
 
-    peerSenderO
+    peerSenderO -> affectedP2PEndpointIds
   }
 
   def shutdownAndCleanupActiveConnectionAndReturnEndpointIds(
@@ -433,6 +447,26 @@ object P2PGrpcConnectionState {
         copy(p2pEndpointIdToBftNodeId =
           p2pEndpointIdToBftNodeId
             .updatedWith(p2pEndpointId) {
+              // The self-association check must come before handling an existing association:
+              //  since re-association is currently allowed (see the disabled impersonation check
+              //  below), an endpoint previously associated with a peer that later resolves to this
+              //  node would otherwise be silently re-associated to this node, and the connection
+              //  wouldn't be shut down as a self-connection.
+              //
+              //  Any existing association is left untouched, i.e., the association is purely refused.
+              case previousBftNodeIdO if bftNodeId == thisNode =>
+                result = Left(
+                  P2PConnectionState.Error
+                    .CannotAssociateP2PEndpointIdsToSelf(p2pEndpointId, thisNode)
+                )
+                annotation =
+                  s"Not associating $p2pEndpointId to this node ($thisNode): the endpoint resolves to this node" +
+                    previousBftNodeIdO.fold("")(previousBftNodeId =>
+                      s"; its existing association with $previousBftNodeId is thus stale " +
+                        "and the connection is being shut down"
+                    )
+                logLevel = Level.WARN
+                previousBftNodeIdO
               case Some(previousBftNodeId) =>
                 if (previousBftNodeId == bftNodeId) {
                   annotation =
@@ -457,15 +491,6 @@ object P2PGrpcConnectionState {
                   result = Right(true)
                 }
                 Some(bftNodeId)
-              case _ if bftNodeId == thisNode =>
-                result = Left(
-                  P2PConnectionState.Error
-                    .CannotAssociateP2PEndpointIdsToSelf(p2pEndpointId, thisNode)
-                )
-                annotation =
-                  s"Possible impersonation attempt: not associating $p2pEndpointId to this node ($thisNode)"
-                logLevel = Level.WARN
-                None
               case _ =>
                 annotation = s"Associated $p2pEndpointId -> $bftNodeId, no previous association"
                 logLevel = Level.INFO
@@ -513,8 +538,10 @@ object P2PGrpcConnectionState {
 
     // Shuts down the connection to the node,
     //  removing the sender and optionally the network ref associations if requested;
-    //  returns the new state, the state transition with logs
-    //  and the sender to close and the network ref to close, if any.
+    //  returns the new state, the state transition with logs, the sender and the network ref
+    //  to close (if any), and all endpoint IDs affected by the shutdown, i.e., all endpoints
+    //  known to be associated to the same peer as the sender being torn down, or just the
+    //  requested endpoint ID if there is no association to a BFT node ID.
     def shutdownConnectionAndReturnPeerSender(
         p2pAddressId: P2PAddress.Id,
         clearNetworkRefAssociations: Boolean,
@@ -527,20 +554,41 @@ object P2PGrpcConnectionState {
               State,
               Option[PeerSender],
               Option[P2PNetworkRef[BftOrderingMessage]],
+              Seq[P2PEndpoint.Id],
           )
         ],
     ) =
       p2pAddressId match {
         case Right(bftNodeId) =>
+          // Snapshot all endpoints associated to this node before unassociation, so that the
+          //  caller can notify their disconnection: a single sender/network ref may back several
+          //  endpoints via `consolidateNetworkRefs`, and all of them are effectively disconnected
+          //  when the sender is torn down.
+          val associatedEndpointIds =
+            p2pEndpointIdToBftNodeId.collect {
+              case (endpointId, nodeId) if nodeId == bftNodeId => endpointId
+            }.toSeq
           // Remove the BFT node ID and its associated sender
           val unassociateR = unassociateAndReturnPeerSender(bftNodeId)
           val (prevState, newState, peerSenderO) = unassociateR.result
           val cleanupR =
             newState.cleanupNetworkRef(bftNodeId, clearNetworkRefAssociations, closeNetworkRef)
-          val (updatedState, networkRefO) = cleanupR.result
+          val (cleanedState, networkRefO) = cleanupR.result
+          // When clearing associations, also clear the endpoint-to-node mappings for this node,
+          //  so that `isDefined(endpointId)` reflects the shutdown (`cleanupNetworkRef` only
+          //  touches the network ref maps): otherwise, a subsequent admin re-add of the same
+          //  endpoint would find a stale mapping and skip reconnecting.
+          val updatedState =
+            if (clearNetworkRefAssociations)
+              cleanedState.copy(
+                p2pEndpointIdToBftNodeId = cleanedState.p2pEndpointIdToBftNodeId.filterNot {
+                  case (_, nodeId) => nodeId == bftNodeId
+                }
+              )
+            else cleanedState
           updatedState ->
             ResultWithLogs(
-              (prevState, updatedState, peerSenderO, networkRefO),
+              (prevState, updatedState, peerSenderO, networkRefO, associatedEndpointIds),
               ResultWithLogs.prefixLogsWith(
                 s"Shutdown connection for $bftNodeId",
                 ResultWithLogs.prefixLogsWith(
@@ -569,6 +617,7 @@ object P2PGrpcConnectionState {
                         this,
                         Option.empty[PeerSender],
                         Option.empty[P2PNetworkRef[BftOrderingMessage]],
+                        Seq(p2pEndpointId),
                       ),
                       Level.DEBUG -> (() =>
                         s"No connection nor network ref found for $p2pEndpointId"
@@ -582,7 +631,7 @@ object P2PGrpcConnectionState {
                       )
                     updatedState ->
                       ResultWithLogs(
-                        (this, updatedState, None, Some(e.networkRef)),
+                        (this, updatedState, None, Some(e.networkRef), Seq(p2pEndpointId)),
                         Level.DEBUG -> (() =>
                           s"Network ref ${objId(e.networkRef)} unassociated from $p2pEndpointId (as requested)"
                         ),
@@ -590,7 +639,7 @@ object P2PGrpcConnectionState {
                   } else {
                     this ->
                       ResultWithLogs(
-                        (this, this, None, Some(e.networkRef)),
+                        (this, this, None, Some(e.networkRef), Seq(p2pEndpointId)),
                         Level.DEBUG -> (() =>
                           s"Network ref ${objId(e.networkRef)} not unassociated from $p2pEndpointId (as requested)"
                         ),
@@ -598,7 +647,7 @@ object P2PGrpcConnectionState {
                   }
                 }
             } { bftNodeId =>
-              // Recur to the other case
+              // Recur to the other case, which will also return all endpoints associated with the node
               shutdownConnectionAndReturnPeerSender(
                 Right(bftNodeId),
                 clearNetworkRefAssociations,

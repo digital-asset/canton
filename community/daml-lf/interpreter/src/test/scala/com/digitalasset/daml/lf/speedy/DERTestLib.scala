@@ -30,10 +30,12 @@ object DERTestLib {
 
   def derBitStringGen: Gen[DERBitString] =
     for {
-      bytes <- Gen.frequency(
-        1 -> Gen.listOf(Arbitrary.arbitrary[Byte]),
-        99 -> Gen.listOfN(32, Arbitrary.arbitrary[Byte]),
-      )
+      bytes <- Gen
+        .frequency(
+          1 -> Gen.listOf(Arbitrary.arbitrary[Byte]),
+          99 -> Gen.listOfN(32, Arbitrary.arbitrary[Byte]),
+        )
+        .suchThat(bs => Try(new DEROctetString(bs.toArray)).isSuccess)
     } yield new DERBitString(new DEROctetString(bytes.toArray))
 
   def asn1ObjectIdentifierGen: Gen[ASN1ObjectIdentifier] =
@@ -51,10 +53,13 @@ object DERTestLib {
 
   def asn1ObjectIdentifierSequenceGen: Gen[DLSequence] =
     for {
-      objIds <- Gen.frequency(
-        1 -> Gen.listOf(asn1ObjectIdentifierGen),
-        99 -> Gen.listOfN(2, asn1ObjectIdentifierGen),
-      )
+      objIds <- Gen
+        .frequency(
+          1 -> Gen.const(List.empty[ASN1ObjectIdentifier]),
+          1 -> asn1ObjectIdentifierGen.map(List(_)),
+          98 -> Gen.listOfN(2, asn1ObjectIdentifierGen),
+        )
+        .suchThat(ids => Try(new DLSequence(ids.toArray[ASN1Encodable])).isSuccess)
     } yield new DLSequence(objIds.toArray[ASN1Encodable])
 
   def derPublicKeyGen: Gen[DLSequence] =

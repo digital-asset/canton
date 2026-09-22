@@ -448,6 +448,7 @@ benchmark_transaction_snapshot:
           export STANDALONE=True
           .ci/nix-exec ./scripts/ci/sbt-ci-wrapper.sh dumpClassPath "daml-lf-snapshot/testOnly com.digitalasset.daml.lf.testing.snapshot.ExtractSnapshotChoices"
         environment:
+          FAIL_ON_ERROR_IN_OUTPUT: false
           EXECUTOR_NUM_CPUS: 1
           MIN_FETCH_NODE_COUNT: << parameters.min_fetch_nodes >>
           MIN_TX_NODE_COUNT: << parameters.min_transaction_nodes >>

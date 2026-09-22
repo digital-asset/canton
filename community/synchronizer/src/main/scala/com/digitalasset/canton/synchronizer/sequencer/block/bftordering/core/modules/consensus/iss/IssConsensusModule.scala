@@ -316,7 +316,7 @@ final class IssConsensusModule[E <: Env[E]](
         if (currentEpochNumber == newEpochNumber) {
           // The output module may re-send the topology for the current epoch upon restart if it didn't store
           //  the first block metadata or if the subscribing sequencer runtime hasn't processed it yet.
-          logger.debug(
+          logger.info(
             s"Received NewEpochTopology event for epoch $newEpochNumber, but the epoch has already started; ignoring it"
           )
         } else if (currentEpochNumber == newEpochNumber - 1) {
@@ -333,7 +333,7 @@ final class IssConsensusModule[E <: Env[E]](
           )
         }
       } else if (latestCompletedEpochNumber < newEpochNumber - 1) {
-        logger.debug(
+        logger.info(
           s"Epoch (${newEpochNumber - 1}) has not yet been completed: remembering the topology and " +
             s"waiting for the completed epoch to be stored; latest completed epoch is $latestCompletedEpochNumber"
         )

@@ -10,7 +10,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   TrafficControlParameters,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeLong,
@@ -475,7 +474,9 @@ trait TrafficControlTest
     val consumptionRound2 =
       trafficBeforeRerun.extraTrafficRemainder - trafficAfterRerun.extraTrafficRemainder
 
-    (consumptionRound1 - consumptionRound2) should equal(0L +- maxTrafficDiffTolerance)
+    (consumptionRound1 - consumptionRound2) should equal(
+      0L +- maxTrafficDiffTolerance(consumptionRound1)
+    )
   }
 
   "support restarting of sequencers" in { implicit env =>
@@ -993,7 +994,6 @@ trait TrafficControlTest
     )
 }
 
-@UnstableTest // TODO(i31976): Remove once the test is stable again
 class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,
@@ -1006,7 +1006,6 @@ class TrafficControlTestBftOrderingPostgres extends TrafficControlTest {
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 
-@UnstableTest // TODO(i32073): Remove once the test is stable again
 class TrafficControlTestBftOrderingH2 extends TrafficControlTest {
   private val useBftSequencer = new UseBftSequencer(
     loggerFactory,

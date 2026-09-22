@@ -105,6 +105,10 @@ sealed case class ProtocolVersion private[version] (v: Int)
   def toProtoPrimitiveS: String = v.toString
 
   override def compare(that: ProtocolVersion): Int = v.compare(that.v)
+
+  def nextSupported: Option[ProtocolVersion] = supported.filter(_.v > v).minOption
+
+  def previousSupported: Option[ProtocolVersion] = supported.filter(_.v < v).maxOption
 }
 
 object ProtocolVersion {

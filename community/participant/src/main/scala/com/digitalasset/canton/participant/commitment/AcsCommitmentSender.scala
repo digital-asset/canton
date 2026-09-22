@@ -66,6 +66,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, 
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, MonadUtil, PekkoUtil}
+import com.google.common.annotations.VisibleForTesting
 import com.google.rpc.status.Status
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
@@ -78,30 +79,25 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.javaapi.DurationConverters
 import scala.util.{Failure, Random, Success}
 
-class AcsCommitmentSender(
+/** Shared base class that handles the startup logic for commitment sender implementations, which
+  * only need to implement `sendAcsCommitmentsUpTo`.
+  */
+abstract class AcsCommitmentSender(
     digestStore: AcsDigestStore,
-    cryptoApi: SynchronizerCryptoClient,
-    sequencerClient: SequencerClientSend,
     watermarkStore: AcsCommitmentSenderWatermarkStore,
-    clock: Clock,
     stringInterningEval: Eval[StringInterning],
     metrics: CommitmentSenderMetrics,
     synchronizerId: PhysicalSynchronizerId,
-    participantId: ParticipantId,
-    config: AcsCommitmentSenderConfig,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, mat: Materializer)
     extends NamedLogging
     with HasCloseContext
     with FlagCloseable {
-  import AcsCommitmentSender.*
 
-  private implicit def metricsContext: MetricsContext = AcsCommitmentSender.metricsContext
+  protected implicit def metricsContext: MetricsContext = AcsCommitmentSender.metricsContext
 
-  private def stringInterning = stringInterningEval.value
-
-  private val digestJournal = digestStore.participant
+  protected def stringInterning: StringInterning = stringInterningEval.value
 
   private val pipelineShutdownHandle: AtomicReference[Option[(KillSwitch, Future[Done])]] =
     new AtomicReference(None)
@@ -137,8 +133,8 @@ class AcsCommitmentSender(
       .concat(tickSource)
       .viaMat(KillSwitches.single)(Keep.right)
       .mapAsyncAndDrainUS(1) { tickOffset =>
-        // send commitments for the checkpoints after the send watermark up to `latestTickOffset`
-        sendAcsCommitmentsUpTo(tickOffset)
+        // process commitments for the checkpoints after the send watermark up to `latestTickOffset`
+        processCommitmentsUpTo(tickOffset)
       }
       .toMat(Sink.ignore)(Keep.both)
 
@@ -170,14 +166,77 @@ class AcsCommitmentSender(
     }.onShutdown {
       metrics.senderHealth.updateValue(CommitmentMetrics.HealthValues.Stopped)
     }
+  }
+
+  /** Process commitments up the provided timestamp `upToInclusive`.
+    */
+  @VisibleForTesting
+  private[commitment] def processCommitmentsUpTo(
+      upToInclusive: Offset
+  ): FutureUnlessShutdown[Unit]
+
+  protected def increaseWatermark(
+      timepoint: Timepoint
+  )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] =
+    watermarkStore.increaseWatermark(timepoint).map { _ =>
+      metrics.watermarkOffset.updateValue(_ max timepoint.offset.unwrap)
+      metrics.watermarkTimestamp.updateValue(timepoint.recordTime.toMicros)
+    }
+
+  override protected def onClosed(): Unit = {
+    import TraceContext.Implicits.Empty.*
+    val handleO = pipelineShutdownHandle.getAndSet(None)
+    val closeables = handleO.toList.flatMap { case (ks, doneF) =>
+      Seq(
+        SyncCloseable("killSwitch shutdown", ks.shutdown()),
+        AsyncCloseable(
+          "pipeline completion future",
+          doneF,
+          timeouts.shutdownProcessing,
+        ),
+      )
+    }
+    LifeCycle.close(closeables)(logger)
 
   }
+}
+class AcsCommitmentSenderImpl(
+    digestStore: AcsDigestStore,
+    cryptoApi: SynchronizerCryptoClient,
+    sequencerClient: SequencerClientSend,
+    watermarkStore: AcsCommitmentSenderWatermarkStore,
+    clock: Clock,
+    stringInterningEval: Eval[StringInterning],
+    metrics: CommitmentSenderMetrics,
+    synchronizerId: PhysicalSynchronizerId,
+    participantId: ParticipantId,
+    config: AcsCommitmentSenderConfig,
+    override val timeouts: ProcessingTimeout,
+    override val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext, mat: Materializer)
+    extends AcsCommitmentSender(
+      digestStore,
+      watermarkStore,
+      stringInterningEval,
+      metrics,
+      synchronizerId,
+      timeouts,
+      loggerFactory,
+    )
+    with NamedLogging
+    with HasCloseContext
+    with FlagCloseable {
+
+  import AcsCommitmentSender.*
+
+  private val digestJournal = digestStore.participant
 
   /** Sends the ACS commitments for all checkpoints after the send watermark and the provided offset
     * `upToInclusive`. If the sending for a particular checkpoint fails with an error, it makes
     * another attempt to send commitments for the same checkpoint again.
     */
-  private def sendAcsCommitmentsUpTo(
+  @VisibleForTesting
+  override private[commitment] def processCommitmentsUpTo(
       upToInclusive: Offset
   ): FutureUnlessShutdown[Unit] =
     // TODO(#33084) revisit this retry lopp
@@ -242,6 +301,7 @@ class AcsCommitmentSender(
       }
     }
 
+  @VisibleForTesting
   def sendAcsCommitments(
       timepoint: Timepoint
   )(implicit
@@ -263,14 +323,6 @@ class AcsCommitmentSender(
       error
     }
   }
-
-  private def increaseWatermark(
-      timepoint: Timepoint
-  )(implicit tc: TraceContext): FutureUnlessShutdown[Unit] =
-    watermarkStore.increaseWatermark(timepoint).map { _ =>
-      metrics.watermarkOffset.updateValue(_ max timepoint.offset.unwrap)
-      metrics.watermarkTimestamp.updateValue(timepoint.recordTime.toMicros)
-    }
 
   /** The B type of the returned EitherT is either:
     *   - The next recursion step if there are more batches to send
@@ -558,22 +610,57 @@ class AcsCommitmentSender(
     lastBatch = lastBatch,
     protocolVersion = synchronizerId.protocolVersion,
   )
+}
 
-  override protected def onClosed(): Unit = {
-    import TraceContext.Implicits.Empty.*
-    val handleO = pipelineShutdownHandle.getAndSet(None)
-    val closeables = handleO.toList.flatMap { case (ks, doneF) =>
-      Seq(
-        SyncCloseable("killSwitch shutdown", ks.shutdown()),
-        AsyncCloseable(
-          "pipeline completion future",
-          doneF,
-          timeouts.shutdownProcessing,
-        ),
-      )
-    }
-    LifeCycle.close(closeables)(logger)
+/** Instead of actually sending the commitments to counterparticipants, this sender merely increases
+  * the sender watermark. This is useful in the following scenario:
+  *
+  *   - the ACS commitment pipeline is turned on for reinitialization and computing digests while
+  *     being connected to synchronizers with protocol version < 36.
+  *   - After some time, the synchronizer upgrades to a protocol version >= 36.
+  *
+  * Without this component, the participant would send commitments to all counterparticipants for
+  * all reconciliation periods since the first reinitialization. Not only is this not really useful,
+  * it also floods the sequencer with many (stale) commitment messages and might trigger message
+  * caps that then prevent other messages from being sent due to the rate limiting.
+  */
+class AcsCommitmentNoopSender(
+    digestStore: AcsDigestStore,
+    watermarkStore: AcsCommitmentSenderWatermarkStore,
+    stringInterningEval: Eval[StringInterning],
+    metrics: CommitmentSenderMetrics,
+    synchronizerId: PhysicalSynchronizerId,
+    override val timeouts: ProcessingTimeout,
+    override val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext, mat: Materializer)
+    extends AcsCommitmentSender(
+      digestStore,
+      watermarkStore,
+      stringInterningEval,
+      metrics,
+      synchronizerId,
+      timeouts,
+      loggerFactory,
+    ) {
 
+  /** Bumps the sender watermark to the latest checkpoint up to `upToInclusive`.
+    */
+  @VisibleForTesting
+  override private[commitment] def processCommitmentsUpTo(
+      upToInclusive: Offset
+  ): FutureUnlessShutdown[Unit] = {
+    implicit val freshTraceContext = TraceContext.createNew("send-commitments")
+    for {
+      watermarkO <- watermarkStore.lookupWatermark()
+      checkpointO <-
+        digestStore.latestCheckpointUpTo(
+          upToInclusive,
+          AcsDigestStore.checkpointReconciliationFilter,
+        )
+      _ <- checkpointO
+        .filter(cp => watermarkO.forall(wm => wm.offset < cp.offset))
+        .traverse(cp => increaseWatermark(cp.timepoint))
+    } yield ()
   }
 }
 
@@ -582,7 +669,7 @@ object AcsCommitmentSender {
     "type" -> "acs-commitment-sender"
   )
 
-  private final case class RecursionStep[T](
+  private[commitment] final case class RecursionStep[T](
       paginationToken: Either[
         T,
         Offset,
@@ -592,7 +679,7 @@ object AcsCommitmentSender {
       attemptNumber: NonNegativeInt = NonNegativeInt.zero,
   )
 
-  private final case class BatchSendingResult[T](
+  private[commitment] final case class BatchSendingResult[T](
       paginationResult: Either[
         PaginationTokenDone,
         T,
@@ -601,8 +688,8 @@ object AcsCommitmentSender {
       commitmentCount: Int, // Not using NonNegativeInt for simplicity, because we pass the value of .length here
   )
 
-  private val immediately = FiniteDuration(0, TimeUnit.SECONDS)
-  private val defaultRetryDelay = FiniteDuration(1, TimeUnit.SECONDS)
+  private[commitment] val immediately = FiniteDuration(0, TimeUnit.SECONDS)
+  private[commitment] val defaultRetryDelay = FiniteDuration(1, TimeUnit.SECONDS)
 
   /** An internal case class representing a digest from
     * [[com.digitalasset.canton.participant.store.AcsDigestStore.AcsDigest]] after filtering empty
@@ -612,7 +699,7 @@ object AcsCommitmentSender {
     *   - Got rid of the generic types
     *   - The key (participant id) is not interned
     */
-  private final case class InternalAcsDigest(
+  private[commitment] final case class InternalAcsDigest(
       participantId: ParticipantId,
       offset: Offset,
       timestamp: CantonTimestamp,
@@ -659,7 +746,7 @@ object AcsCommitmentSender {
     def retryStrategy: RetryStrategy
   }
 
-  private object AcsCommitmentSenderError {
+  private[commitment] object AcsCommitmentSenderError {
     final case class SigningError(error: SyncCryptoError) extends AcsCommitmentSenderError {
       override val retryStrategy: RetryStrategy = RetryStrategy(retryDelay = None)
     }

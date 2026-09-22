@@ -1317,14 +1317,14 @@ class CantonSyncService(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     // psid -> successor for all successors that are a LsuTarget
-    val psidToSuccessor: Map[PhysicalSynchronizerId, SynchronizerSuccessor] =
+    val psidToSuccessor: Map[PhysicalSynchronizerId, PhysicalSynchronizerId] =
       synchronizerConnectionConfigStore
         .getAll()
         .mapFilter { connection =>
           if (connection.status == SynchronizerConnectionConfigStore.LsuTarget) {
             (connection.predecessor, connection.configuredPsid.toOption).mapN {
               case (predecessor, psid) =>
-                predecessor.psid -> SynchronizerSuccessor(psid, predecessor.upgradeTime)
+                predecessor.psid -> psid
             }
           } else None
         }
@@ -1335,11 +1335,11 @@ class CantonSyncService(
         connectionConfig.configuredPsid.toOption.flatMap { currentPsid =>
           psidToSuccessor
             .get(currentPsid)
-            .map(successor =>
+            .map(successorPsid =>
               FinishAutomaticLsuRequest(
                 connectionConfig.config.synchronizerAlias,
                 currentPsid = currentPsid,
-                successorPsid = successor.psid,
+                successorPsid = successorPsid,
               )
             )
         }
@@ -1403,7 +1403,9 @@ class CantonSyncService(
     */
   def getLsuStatusMetrics()(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, Set[(PhysicalSynchronizerId, NonNegativeInt)]] = {
+  ): EitherT[FutureUnlessShutdown, String, Set[
+    (OpaquePhysicalSynchronizerId, NonNegativeInt)
+  ]] = {
     import ParticipantMetrics.LsuStatus.*
 
     val topologyLookup = new TopologyLookup(
@@ -1435,24 +1437,26 @@ class CantonSyncService(
       announcedLsu <- EitherT.liftF(snapshot.announcedLsu())
     } yield announcedLsu.map { case (successor, _) => successor }
 
-    def getSequencerSuccessorsKnown(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+    def getSequencerSuccessorsKnown(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
       synchronizerConnectionConfigStore
-        .get(successor.psid)
+        .get(successorPsid)
         .fold(_ => None, _ => Some(SequencerSuccessorsKnown))
 
-    def getHandshakeDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
-      syncPersistentStateManager.get(successor.psid).map(_ => HandshakeDone)
-
-    def getLocalCopyDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+    def getHandshakeDone(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
       syncPersistentStateManager
-        .get(successor.psid)
+        .get(successorPsid)
+        .map(_ => HandshakeDone)
+
+    def getLocalCopyDone(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
+      syncPersistentStateManager
+        .get(successorPsid)
         .flatMap(state =>
           Option.when(state.connectivityStatusStore.isTopologyInitialized)(LocalCopyDone)
         )
 
-    def isLsuDone(successor: SynchronizerSuccessor): Option[NonNegativeInt] =
+    def isLsuDone(successorPsid: PhysicalSynchronizerId): Option[NonNegativeInt] =
       synchronizerConnectionConfigStore
-        .get(successor.psid)
+        .get(successorPsid)
         .fold(
           _ => None,
           config =>
@@ -1468,15 +1472,21 @@ class CantonSyncService(
           syncPersistentStateManager.getAll.values.toSeq
         ) { persistentState =>
           getLsuAnnounced(persistentState).map {
-            _.map { successor =>
-              val lsuStatus = Seq(
-                getSequencerSuccessorsKnown(successor),
-                getHandshakeDone(successor),
-                getLocalCopyDone(successor),
-                isLsuDone(successor),
-              ).maxOption.flatten.getOrElse(LsuAnnounced)
+            _.flatMap { successor =>
+              successor.psid.parseAsPhysical match {
+                case Left(err) =>
+                  logger.warn(OpaquePhysicalSynchronizerId.unparseablePSIdMessage(successor, err))
+                  None
+                case Right(successorPsid) =>
+                  val lsuStatus = Seq(
+                    getSequencerSuccessorsKnown(successorPsid),
+                    getHandshakeDone(successorPsid),
+                    getLocalCopyDone(successorPsid),
+                    isLsuDone(successorPsid),
+                  ).maxOption.flatten.getOrElse(LsuAnnounced)
 
-              (successor.psid, lsuStatus)
+                  Some((successorPsid, lsuStatus))
+              }
             }
           }
         }
@@ -1504,6 +1514,9 @@ class CantonSyncService(
             }
 
             lsuStatuses.take(if (allDone) 1 else 2).toSet
+          }
+          .map { case (psid, lsuStatus) =>
+            (psid.opaque, lsuStatus)
           }
           .toSet
       }

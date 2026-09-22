@@ -47,5 +47,20 @@ class PhysicalSynchronizerIdTest extends AnyWordSpec with EitherValues with Matc
       val inCorrectOptionOrder = None :: inCorrectOrder.map(Some(_))
       Random.shuffle(inCorrectOptionOrder).sorted shouldBe inCorrectOptionOrder
     }
+
+    "parse non-supported PVs with OpaquePhysicalSynchronizerId" in {
+      val namespace: Namespace = Namespace(Fingerprint.tryFromString("default"))
+      val lsid1: SynchronizerId = SynchronizerId(UniqueIdentifier.tryCreate("da1", namespace))
+      val lsid2: SynchronizerId = SynchronizerId(UniqueIdentifier.tryCreate("da2", namespace))
+
+      val opaqueSupported = OpaquePhysicalSynchronizerId(lsid1, zero, latest.v)
+      val opaqueSupportedParsed = opaqueSupported.parseAsPhysical
+      opaqueSupportedParsed shouldBe Right(PhysicalSynchronizerId(lsid1, zero, latest))
+      opaqueSupportedParsed.value.opaque == opaqueSupported shouldBe true
+
+      val opaqueUnsupported = OpaquePhysicalSynchronizerId(lsid2, one, 9999)
+      val opaqueUnsupportedParsed = opaqueUnsupported.parseAsPhysical
+      opaqueUnsupportedParsed.isLeft shouldBe true
+    }
   }
 }

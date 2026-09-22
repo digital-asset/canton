@@ -2495,7 +2495,7 @@ object SequencerSynchronizerState extends TopologyMappingCompanion {
 // Indicates the beginning of synchronizer upgrade. Only topology transactions related to synchronizer upgrades are permitted
 // after this transaction has become effective. Removing this mapping effectively unfreezes the topology state again.
 final case class LsuAnnouncement(
-    successorSynchronizerId: PhysicalSynchronizerId,
+    successorSynchronizerId: OpaquePhysicalSynchronizerId,
     upgradeTime: CantonTimestamp,
 ) extends TopologyMapping {
 
@@ -2521,7 +2521,7 @@ final case class LsuAnnouncement(
       )
       .asRight
 
-  override def namespace: Namespace = successorSynchronizerId.namespace
+  override def namespace: Namespace = successorSynchronizerId.logical.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(successorSynchronizerId.uid)
   override def referencedUids: Set[UniqueIdentifier] = Set(successorSynchronizerId.uid)
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(
@@ -2530,7 +2530,7 @@ final case class LsuAnnouncement(
 
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
-  ): RequiredAuth = RequiredNamespaces(successorSynchronizerId)
+  ): RequiredAuth = RequiredNamespaces(successorSynchronizerId.logical)
 
   override def uniqueKey: MappingHash =
     LsuAnnouncement.uniqueKey(successorSynchronizerId.logical)
@@ -2552,7 +2552,7 @@ object LsuAnnouncement extends TopologyMappingCompanion {
         value.successorPhysicalSynchronizerId,
         "successor_physical_synchronizer_id",
         pvv,
-      )(PhysicalSynchronizerId.fromProtoPrimitive)
+      )(OpaquePhysicalSynchronizerId.fromProtoPrimitive)
       upgradeTime <- ProtoConverter
         .parseRequired(
           CantonTimestamp.fromProtoTimestamp,
@@ -2605,7 +2605,7 @@ object GrpcConnection {
 
 final case class LsuSequencerConnectionSuccessor(
     sequencerId: SequencerId,
-    successorPsid: PhysicalSynchronizerId,
+    successorPsid: OpaquePhysicalSynchronizerId,
     connection: GrpcConnection,
 ) extends TopologyMapping {
   override def companion: TopologyMappingCompanion = LsuSequencerConnectionSuccessor
@@ -2674,7 +2674,7 @@ object LsuSequencerConnectionSuccessor extends TopologyMappingCompanion {
         value.successorPhysicalSynchronizerId,
         "successor_physical_synchronizer_id",
         pvv,
-      )(PhysicalSynchronizerId.fromProtoPrimitive)
+      )(OpaquePhysicalSynchronizerId.fromProtoPrimitive)
       connection <- ProtoConverter.parseRequired(
         GrpcConnection.fromProtoV30(pvv, _),
         "connection",

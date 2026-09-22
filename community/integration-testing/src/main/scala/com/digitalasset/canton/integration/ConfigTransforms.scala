@@ -154,7 +154,13 @@ object ConfigTransforms {
 
   lazy val enableNewAcsCommitmentProcessorPipeline: ConfigTransform =
     updateAllParticipantConfigs_(
-      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor).replace(true)
+      _.focus(_.parameters.acsCommitments.enableNewAcsCommitmentProcessor)
+        .replace(true)
+        // Let's change the maxNumUpdatesBetweenCheckpoints to a very small value,
+        // so we always have a meaningful checkpoint (close to the ledger end)
+        // for AcsDigestConsistencyChecker
+        .focus(_.parameters.acsCommitments.maxNumUpdatesBetweenCheckpoints)
+        .replace(PositiveInt.one)
     )
 
   lazy val disableNewAcsCommitmentProcessorPipeline: ConfigTransform =

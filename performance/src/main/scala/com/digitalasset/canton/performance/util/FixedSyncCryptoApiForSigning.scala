@@ -237,7 +237,7 @@ class FixedSyncCryptoApiForSigning(
         traceContext: TraceContext
     ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] = notImplementedUS
 
-    override def sequencerConnectionSuccessors(successorPsid: PhysicalSynchronizerId)(implicit
+    override def sequencerConnectionSuccessors(successorPsid: OpaquePhysicalSynchronizerId)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[
       Map[SequencerId, TopologyTransaction[Replace, LsuSequencerConnectionSuccessor]]

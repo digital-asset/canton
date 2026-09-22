@@ -104,14 +104,18 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
       // LSU announced, sequencer not known yet
       performSynchronizerNodesLsu(fixture, announceSequencerSuccessors = false)
       eventually() {
-        getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(fixture.newPsid -> 0)
+        getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(
+          fixture.newPsid.opaque -> 0
+        )
       }
 
       // Value of the metric is updated upon start up
       sequencer1.stop()
       sequencer1.start()
       eventually() {
-        getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(fixture.newPsid -> 0)
+        getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(
+          fixture.newPsid.opaque -> 0
+        )
       }
     }
 
@@ -158,7 +162,7 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
       )
 
       // metric is not updated
-      getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(fixture.newPsid -> 0)
+      getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(fixture.newPsid.opaque -> 0)
     }
 
     "not update the metric if sequencer id is incorrect" in { implicit env =>
@@ -203,7 +207,7 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
       )
 
       // metric is not updated
-      getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(fixture.newPsid -> 0)
+      getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(fixture.newPsid.opaque -> 0)
     }
 
     "update the metric when the successor is correct" in { implicit env =>
@@ -216,7 +220,9 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
       )
 
       eventually() {
-        getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(fixture.newPsid -> 1)
+        getLsuSuccessorContactStatusMetricValues(sequencer1) shouldBe Map(
+          fixture.newPsid.opaque -> 1
+        )
       }
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
@@ -242,19 +248,25 @@ final class LsuSequencerContactSuccessorIntegrationTest extends LsuBase {
       sequencer3.topology.lsu.announcement.propose(psid2, upgradeTime2)
 
       eventually() {
-        getLsuSuccessorContactStatusMetricValues(sequencer3) shouldBe Map(psid2 -> 0)
+        getLsuSuccessorContactStatusMetricValues(sequencer3) shouldBe Map(psid2.opaque -> 0)
       }
 
       sequencer3.topology.lsu.announcement.propose(psid3, upgradeTime3)
 
       eventually() {
-        getLsuSuccessorContactStatusMetricValues(sequencer3) shouldBe Map(psid2 -> 0, psid3 -> 0)
+        getLsuSuccessorContactStatusMetricValues(sequencer3) shouldBe Map(
+          psid2.opaque -> 0,
+          psid3.opaque -> 0,
+        )
       }
 
       sequencer3.topology.lsu.announcement.revoke(psid3, upgradeTime3)
 
       eventually() {
-        getLsuSuccessorContactStatusMetricValues(sequencer3) shouldBe Map(psid2 -> 0, psid3 -> -1)
+        getLsuSuccessorContactStatusMetricValues(sequencer3) shouldBe Map(
+          psid2.opaque -> 0,
+          psid3.opaque -> -1,
+        )
       }
     }
   }

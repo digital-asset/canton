@@ -15,7 +15,10 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShu
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
-import com.digitalasset.canton.participant.commitment.AcsCommitmentSender
+import com.digitalasset.canton.participant.commitment.{
+  AcsCommitmentNoopSender,
+  AcsCommitmentSenderImpl,
+}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
@@ -37,6 +40,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.ShowUtil.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{RepairCounter, RequestCounter, SequencerCounter}
 import org.apache.pekko.stream.Materializer
 
@@ -109,20 +113,33 @@ class SyncEphemeralStateFactoryImpl(
         synchronizerPredecessor,
       )
 
-      acsCommitmentSender = new AcsCommitmentSender(
-        persistentState.acsDigestStore,
-        synchronizerCrypto,
-        synchronizerHandle.sequencerClient,
-        persistentState.acsCommitmentSenderWatermarkStore,
-        clock,
-        ledgerApiIndexer.map(_.ledgerApiStore.stringInterningView),
-        metrics.commitments.sender,
-        persistentState.psid,
-        participantId,
-        parameters.acsCommitments.sender,
-        timeouts,
-        synchronizerLoggerFactory,
-      )
+      acsCommitmentSender =
+        if (persistentState.psid.protocolVersion >= ProtocolVersion.v36)
+          new AcsCommitmentSenderImpl(
+            persistentState.acsDigestStore,
+            synchronizerCrypto,
+            synchronizerHandle.sequencerClient,
+            persistentState.acsCommitmentSenderWatermarkStore,
+            clock,
+            ledgerApiIndexer.map(_.ledgerApiStore.stringInterningView),
+            metrics.commitments.sender,
+            persistentState.psid,
+            participantId,
+            parameters.acsCommitments.sender,
+            timeouts,
+            synchronizerLoggerFactory,
+          )
+        else {
+          new AcsCommitmentNoopSender(
+            persistentState.acsDigestStore,
+            persistentState.acsCommitmentSenderWatermarkStore,
+            ledgerApiIndexer.map(_.ledgerApiStore.stringInterningView),
+            metrics.commitments.sender,
+            persistentState.psid,
+            timeouts,
+            synchronizerLoggerFactory,
+          )
+        }
 
       _ <- SyncEphemeralStateFactory.cleanupPersistentState(persistentState, synchronizerIndex)
 

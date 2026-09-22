@@ -67,7 +67,6 @@ import com.digitalasset.canton.platform.store.utils.{
 import com.digitalasset.canton.platform.{FatContract, TemplatePartiesFilter}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
-import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.FullIdentifier
 import io.opentelemetry.api.trace.Tracer
@@ -77,7 +76,6 @@ import org.apache.pekko.stream.{Attributes, OverflowStrategy}
 
 import java.sql.Connection
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.Success
 import scala.util.chaining.*
 
 /** Streams ACS events (active contracts) in a two step process consisting of:
@@ -245,7 +243,7 @@ class ACSReader(
           .fold(Source.empty[Long]) { initialEventSeqIdRange =>
             paginatingAsyncStream
               .streamIdPagesFromSeekPaginationWithIdFilter(
-                idStreamName = s"ActiveContractIds $filter",
+                idStreamName = s"ActiveContractIds(ACHS) $filter",
                 idPageSizing = idQueryPageSizing,
                 initialEventSeqIdRange = initialEventSeqIdRange,
                 descendingOrder = false,
@@ -311,7 +309,7 @@ class ACSReader(
         .fold(Source.empty[(PaginationInput, Vector[Long])]) { initialEventSeqIdRange =>
           paginatingAsyncStream
             .streamIdPagesFromSeekPaginationWithIdFilter(
-              idStreamName = s"ActiveContractIds $filter",
+              idStreamName = s"ActiveContractIds(Non-ACHS) $filter",
               idPageSizing = achsLastInput
                 .map(lastInput =>
                   idQueryPageSizing.copy(
@@ -382,10 +380,17 @@ class ACSReader(
           withValidatedActiveAt(
             dispatcher
               .executeSql(metrics.index.db.getActiveContractBatch) {
-                eventStorageBackend.activeContractBatch(
-                  eventSequentialIds = ids,
-                  allFilterParties = allFilterParties,
-                )
+                Utils.wrapDbQuery(
+                  eventStorageBackend.activeContractBatch(
+                    eventSequentialIds = ids,
+                    allFilterParties = allFilterParties,
+                  )
+                ) { result =>
+                  val last = ids.lastOption
+                    .map(last => s"until $last")
+                    .getOrElse("")
+                  s"activeContractBatch returned ${result.size}/${ids.size} $last"
+                }
               }
               .flatMap(
                 withFatContracts(_.thinCreatedEventProperties.internalContractId)
@@ -402,13 +407,7 @@ class ACSReader(
                   ),
                 ),
             )
-          ).thereafterP { case Success(result) =>
-            logger.debug(
-              s"getActiveContractBatch returned ${result.size}/${ids.size} ${ids.lastOption
-                  .map(last => s"until $last")
-                  .getOrElse("")}"
-            )
-          }
+          )
         )
       )
 
@@ -416,17 +415,19 @@ class ACSReader(
         offsets: Iterable[Offset]
     ): Future[Vector[Long]] =
       globalIdQueriesLimiter.execute(
-        dispatcher.executeSql(metrics.index.db.getAssingIdsForOffsets) { connection =>
+        dispatcher.executeSql(metrics.index.db.getAssingIdsForOffsets) {
           // all activations for an incomplete offset should be assignments
-          val ids =
+          Utils.wrapDbQuery(
             eventStorageBackend
-              .lookupActivationSequentialIdByOffset(offsets.map(_.unwrap))(connection)
-          logger.debug(
-            s"Assign Ids for offsets returned #${ids.size} (from ${offsets.size}) ${ids.lastOption
-                .map(last => s"until $last")
-                .getOrElse("")}"
-          )
-          ids
+              .lookupActivationSequentialIdByOffset(offsets.map(_.unwrap))
+          ) { result =>
+            val resultSize = result.size
+            val inputSize = offsets.size
+            val last = result.lastOption
+              .map(last => s"until $last")
+              .getOrElse("")
+            s"Assign Ids for offsets returned #$resultSize (from $inputSize) $last"
+          }
         }
       )
 
@@ -434,17 +435,19 @@ class ACSReader(
         offsets: Iterable[Offset]
     ): Future[Vector[Long]] =
       globalIdQueriesLimiter.execute(
-        dispatcher.executeSql(metrics.index.db.getUnassingIdsForOffsets) { connection =>
-          // all deactivations for an incomplete offset should be assignments
-          val ids =
+        dispatcher.executeSql(metrics.index.db.getUnassingIdsForOffsets) {
+          // all deactivations for an incomplete offset should be unassignments
+          Utils.wrapDbQuery(
             eventStorageBackend
-              .lookupDeactivationSequentialIdByOffset(offsets.map(_.unwrap))(connection)
-          logger.debug(
-            s"Unassign Ids for offsets returned #${ids.size} (from ${offsets.size}) ${ids.lastOption
-                .map(last => s"until $last")
-                .getOrElse("")}"
-          )
-          ids
+              .lookupDeactivationSequentialIdByOffset(offsets.map(_.unwrap))
+          ) { result =>
+            val resultSize = result.size
+            val inputSize = offsets.size
+            val last = result.lastOption
+              .map(last => s"until $last")
+              .getOrElse("")
+            s"Unassign Ids for offsets returned #$resultSize (from $inputSize) $last"
+          }
         }
       )
 
@@ -460,17 +463,24 @@ class ACSReader(
                 .executeSql(
                   metrics.index.db.updatesAcsDeltaStream.fetchEventActivatePayloads
                 )(
-                  eventStorageBackend.fetchEventPayloadsAcsDelta(
-                    EventPayloadSourceForUpdatesAcsDelta.Activate
-                  )(
-                    eventSequentialIds = Ids(ids),
-                    requestingPartiesForTx = None,
-                    requestingPartiesForReassignment = allFilterParties,
-                  )
+                  Utils.wrapDbQuery(
+                    eventStorageBackend.fetchEventPayloadsAcsDelta(
+                      EventPayloadSourceForUpdatesAcsDelta.Activate
+                    )(
+                      eventSequentialIds = Ids(ids),
+                      requestingPartiesForTx = None,
+                      requestingPartiesForReassignment = allFilterParties,
+                    )
+                  ) { result =>
+                    val resultSize = result.size
+                    val idsSize = ids.size
+                    val last = ids.lastOption
+                      .map(last => s"until $last")
+                      .getOrElse("")
+                    s"assignEventBatch returned $resultSize/$idsSize $last"
+                  }
                 )
-                .map(_.collect { case raw: RawThinAssignEvent =>
-                  raw
-                })
+                .map(_.collect { case raw: RawThinAssignEvent => raw })
                 .flatMap(withFatContracts(_.thinCreatedEventProperties.internalContractId))
             ).map(
               resolveFatInstance(
@@ -485,13 +495,7 @@ class ACSReader(
                     sourceSynchronizerId = thin.sourceSynchronizerId,
                   ),
               )
-            ).thereafterP { case Success(result) =>
-              logger.debug(
-                s"assignEventBatch returned ${result.size}/${ids.size} ${ids.lastOption
-                    .map(last => s"until $last")
-                    .getOrElse("")}"
-              )
-            }
+            )
           )
         )
 
@@ -505,24 +509,27 @@ class ACSReader(
               .executeSql(
                 metrics.index.db.updatesAcsDeltaStream.fetchEventDeactivatePayloads
               )(
-                eventStorageBackend.fetchEventPayloadsAcsDelta(
-                  EventPayloadSourceForUpdatesAcsDelta.Deactivate
-                )(
-                  eventSequentialIds = Ids(ids),
-                  requestingPartiesForTx = None,
-                  requestingPartiesForReassignment = allFilterParties,
-                )
+                Utils.wrapDbQuery(
+                  eventStorageBackend.fetchEventPayloadsAcsDelta(
+                    EventPayloadSourceForUpdatesAcsDelta.Deactivate
+                  )(
+                    eventSequentialIds = Ids(ids),
+                    requestingPartiesForTx = None,
+                    requestingPartiesForReassignment = allFilterParties,
+                  )
+                ) { result =>
+                  val resultSize = result.size
+                  val idsSize = ids.size
+                  val last = ids.lastOption
+                    .map(last => s"until $last")
+                    .getOrElse("")
+                  s"unassignEventBatch returned $resultSize/$idsSize $last"
+                }
               )
               .map(_.collect { case raw: RawUnassignEvent =>
                 raw
               })
-          ).thereafterP { case Success(result) =>
-            logger.debug(
-              s"unassignEventBatch returned ${result.size}/${ids.size} ${ids.lastOption
-                  .map(last => s"until $last")
-                  .getOrElse("")}"
-            )
-          }
+          )
         )
       )
 

@@ -67,6 +67,10 @@ final class MainOutputFetchProtocolState {
   // in order to avoid re-requesting it when batch is needed
   val pendingRemoteBatchIdsToStore: mutable.SortedSet[BatchId] =
     mutable.SortedSet[BatchId]()
+  // tracks remote batches whose payload is being (re)hashed and validated off the actor thread,
+  // in order to avoid re-requesting or re-validating them while validation is still in flight
+  val pendingRemoteBatchIdsToValidate: mutable.SortedSet[BatchId] =
+    mutable.SortedSet[BatchId]()
 
   def findProofOfAvailabilityForMissingBatchId(
       missingBatchId: BatchId

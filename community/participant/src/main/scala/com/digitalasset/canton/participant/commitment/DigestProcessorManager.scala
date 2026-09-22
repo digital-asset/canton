@@ -56,6 +56,8 @@ class DigestProcessorManager(
   def health: HealthComponent = healthComponent
 
   private val currentProcessorRef = new AtomicReference[Option[DigestProcessor]](None)
+  private val currentConsistencyCheckProcessorRef =
+    new AtomicReference[Option[DigestConsistencyCheckProcessor]](None)
 
   @VisibleForTesting
   def currentProcessor: Option[DigestProcessor] = currentProcessorRef.get()
@@ -183,6 +185,47 @@ class DigestProcessorManager(
       "start reinitialization digest processor",
     )
 
+  def startConsistencyCheckProcessor()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val currentProcessorF = sequentialQueue.execute(
+      currentConsistencyCheckProcessorRef.get() match {
+        case None =>
+          val processor = createAndStartConsistencyCheckProcessor()
+          Future.successful(processor.startingFuture)
+        case Some(oldProcessor) =>
+          if (!oldProcessor.isStartingOrStarted) {
+            // Explicitly stop the old processor in the case that it has not even yet been started
+            logger.info(
+              s"Stopping $oldProcessor before starting new digest consistency check processor"
+            )
+            stopProcessorIgnoringShutdown(oldProcessor).map { _ =>
+              createAndStartConsistencyCheckProcessor().startingFuture
+            }
+          } else
+            // nothing to do, there is already a digest consistency check processor
+            Future.successful(oldProcessor.startingFuture)
+
+      },
+      "start digest consistency check processor",
+    )
+    currentProcessorF.flatten
+  }
+
+  def getConsistencyCheckProcessorStatus(): DigestConsistencyCheckProcessor.Status =
+    currentConsistencyCheckProcessorRef
+      .get()
+      .map { oldProcessor =>
+        // We can rely on completionFuture if the processor has already started
+        DigestConsistencyCheckProcessor.Status(
+          isRunning = !oldProcessor.completionFuture.isCompleted,
+          startTimestamp = oldProcessor.startTimestamp,
+        )
+      }
+      .getOrElse(
+        DigestConsistencyCheckProcessor.Status(isRunning = false, startTimestamp = None)
+      )
+
   private def createAndStartRunningDigestProcessor()(implicit
       traceContext: TraceContext
   ): RunningDigestProcessor = {
@@ -207,6 +250,17 @@ class DigestProcessorManager(
     healthComponent.set(processor.health)
     processor.startAsync()
     scheduleRunningDigestProcessorOnCompletion(processor, delayStartOfFollowUpProcessor)
+    processor
+  }
+
+  private def createAndStartConsistencyCheckProcessor()(implicit
+      traceContext: TraceContext
+  ): DigestConsistencyCheckProcessor = {
+    val processor =
+      digestProcessorFactory.createConsistencyCheckProcessor(synchronizerAlias, synchronizerId)
+
+    currentConsistencyCheckProcessorRef.set(Some(processor))
+    processor.startAsync()
     processor
   }
 

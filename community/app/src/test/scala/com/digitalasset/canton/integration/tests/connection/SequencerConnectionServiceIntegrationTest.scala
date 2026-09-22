@@ -5,11 +5,11 @@ package com.digitalasset.canton.integration.tests.connection
 
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnection,
+  SequencerConnectionPoolDelays,
   SequencerConnectionValidation,
   SequencerConnections,
   SubmissionRequestAmplification,
 }
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.bootstrap.NetworkTopologyDescription.MediatorSequencersConfiguration
@@ -97,6 +97,10 @@ sealed trait SequencerConnectionServiceIntegrationTest
           synchronizerAlias = daName,
           physicalSynchronizerId = Some(daId),
           validation = SequencerConnectionValidation.Disabled,
+          // Set delay before a failing connection starts logging warnings ridiculously long
+          // so that it does not interfere with the test
+          sequencerConnectionPoolDelays =
+            SequencerConnectionPoolDelays.default.withWarnValidationDelay(1.day),
         )
       }
 
@@ -195,17 +199,12 @@ sealed trait SequencerConnectionServiceIntegrationTest
             OptionalMany,
             _.warningMessage should include regex raw"Response message for request.*timed out at",
           ),
-          (
-            OptionalMany,
-            _.warningMessage should include("Connection has failed validation"),
-          ),
         )
       }
     }
   }
 }
 
-@UnstableTest // TODO(i31810): remove once the test is no longer flaky
 class SequencerConnectionServiceIntegrationTestDefault
     extends SequencerConnectionServiceIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

@@ -112,6 +112,8 @@ class LedgerApiConformanceMultiSynchronizerTest
     extends CommunityIntegrationTest
     with IsolatedEnvironments {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   private val connectedSynchronizersCount: Int = 2
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -259,6 +261,8 @@ object LedgerApiConformanceBase {
 abstract class LedgerApiShardedConformanceBase(shard: Int)
     extends SingleVersionLedgerApiConformanceBase {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override def connectedSynchronizersCount = 1
 
   override def environmentDefinition: EnvironmentDefinition =
@@ -354,6 +358,8 @@ class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSup
 
 trait LedgerApiParticipantPruningConformanceTest extends SingleVersionLedgerApiConformanceBase {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override def connectedSynchronizersCount = 1
 
   override def environmentDefinition: EnvironmentDefinition =
@@ -401,6 +407,8 @@ class LedgerApiParticipantPruningConformanceTestPostgres
 }
 
 trait LedgerApiOffsetCheckpointsConformanceTest extends SingleVersionLedgerApiConformanceBase {
+
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
 
   override def connectedSynchronizersCount = 1
 

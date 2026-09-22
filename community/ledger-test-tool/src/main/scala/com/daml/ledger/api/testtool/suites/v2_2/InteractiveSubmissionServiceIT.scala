@@ -1015,6 +1015,125 @@ final class InteractiveSubmissionServiceIT(override protected val testDars: Test
     }
   })
 
+  test(
+    "ISSPreferredPackageVersionKnown",
+    "Getting preferred package version should return a valid result",
+    allocate(TwoParties),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party1, party2))) =>
+    for {
+      result <- ledger.getPreferredPackageVersion(Seq(party1, party2), Dummy.PACKAGE_NAME)
+    } yield {
+      result.packagePreference
+        .flatMap(_.packageReference)
+        .map(
+          assertEquals(
+            _,
+            PackageReference(
+              packageId = dummyCompanion.PACKAGE_ID,
+              packageName = Dummy.PACKAGE_NAME,
+              packageVersion = Dummy.PACKAGE_VERSION.toString,
+            ),
+          )
+        )
+        .getOrElse(fail(s"Invalid preference response: $result"))
+    }
+  })
+
+  test(
+    "ISSPreferredPackageVersionUnknownParty",
+    "Getting preferred package version for an unknown party should fail",
+    allocate(NoParties),
+  )(implicit ec => { case Participants(Participant(ledger, Seq())) =>
+    for {
+      invalidPartyFailure <- ledger
+        .getPreferredPackageVersion(
+          // Manually craft invalid party
+          Seq(Party(new data.Party("invalid-party"))),
+          Dummy.PACKAGE_NAME,
+        )
+        .mustFail("invalid party")
+      unknownPartyFailure <- ledger
+        .getPreferredPackageVersion(
+          // Manually craft invalid party
+          Seq(Party(new data.Party("unknownParty::ns"))),
+          Dummy.PACKAGE_NAME,
+        )
+        .mustFail("unknown party")
+    } yield {
+      assertGrpcError(
+        // TODO(#25385): Here we should first report the invalid party-id format
+        invalidPartyFailure,
+        UnknownInformees,
+        None,
+      )
+      assertGrpcError(
+        unknownPartyFailure,
+        UnknownInformees,
+        None,
+      )
+    }
+  })
+
+  test(
+    "ISSPreferredPackageVersionUnknownPackageName",
+    "Getting preferred package version for an unknown package-name should fail",
+    allocate(SingleParty),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party))) =>
+    for {
+      invalidPackageNameFailure <- ledger
+        .getPreferredPackageVersion(Seq(party), "What-Is-A-Package-Name?")
+        .mustFail("invalid package-name")
+      unknownPackageNameFailure <- ledger
+        .getPreferredPackageVersion(Seq(party), "NoSuchPackage")
+        .mustFail("unknown package-name")
+    } yield {
+      assertGrpcError(
+        invalidPackageNameFailure,
+        InvalidField,
+        Some("package_name/packageName"),
+      )
+      assertGrpcError(
+        unknownPackageNameFailure,
+        PackageNamesNotFound,
+        None,
+      )
+    }
+  })
+
+  test(
+    "ISSPreferredPackageVersionUnknownSynchronizerId",
+    "Getting preferred package version for an unknown synhcronizer-id should fail",
+    allocate(TwoParties),
+  )(implicit ec => { case Participants(Participant(ledger, Seq(party1, party2))) =>
+    for {
+      invalidSynchronizerIdFailure <- ledger
+        .getPreferredPackageVersion(
+          Seq(party1, party2),
+          Dummy.PACKAGE_NAME,
+          synchronizerIdO = Some("invalidSyncId"),
+        )
+        .mustFail("unknown synchronizer-id")
+      unknownSynchronizerIdFailure <- ledger
+        .getPreferredPackageVersion(
+          Seq(party1, party2),
+          Dummy.PACKAGE_NAME,
+          synchronizerIdO = Some("unknownSynchronizerId::ns"),
+        )
+        .mustFail("unknown synchronizer-id")
+    } yield {
+      assertGrpcError(
+        invalidSynchronizerIdFailure,
+        InvalidField,
+        Some("synchronizer_id/synchronizerId"),
+      )
+      assertGrpcError(
+        unknownSynchronizerIdFailure,
+        InvalidPrescribedSynchronizerId,
+        None,
+      )
+    }
+  })
+
   private def testExplicitDisclosure(
       ledger: ParticipantTestContext,
       owner: Party,

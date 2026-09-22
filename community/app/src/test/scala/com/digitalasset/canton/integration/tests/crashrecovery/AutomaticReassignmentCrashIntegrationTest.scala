@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.SynchronizerRouterIntegrationTestSetup
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
+import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
@@ -22,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendDecision,
   SendPolicy,
 }
+import org.slf4j.event.Level
 
 import scala.concurrent.Future
 import scala.concurrent.duration.*
@@ -118,12 +120,21 @@ class AutomaticReassignmentCrashIntegrationTest
 
       logger.info(s"Exercise count all")
       val autoReassignmentF =
-        loggerFactory.assertThrowsAndLogsAsync[CommandFailure](
+        loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
           Future {
-            remoteP1.ledger_api.javaapi.commands.submit(Seq(party1Id), exerciseCmd)
+            a[CommandFailure] should be thrownBy
+              remoteP1.ledger_api.javaapi.commands.submit(Seq(party1Id), exerciseCmd)
           },
-          _ => succeed,
-          _.errorMessage should include(AutomaticReassignmentForTransactionFailure.id),
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.errorMessage should include(AutomaticReassignmentForTransactionFailure.id),
+                "the transaction is rejected because the automatic reassignment of its inputs failed",
+              )
+            ),
+            // the exclusivity timeout may have elapsed, in which case participant2 hits the blocked sequencer too
+            mayContain = Seq(_.warningMessage should include("Failed to submit submission")),
+          ),
         )
       eventually() {
         val incomplete = remoteP1.ledger_api.state.acs.incomplete_unassigned_of_party(party1Id)

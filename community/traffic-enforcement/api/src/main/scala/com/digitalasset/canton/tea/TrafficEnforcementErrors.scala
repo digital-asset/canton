@@ -23,16 +23,25 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
     "This error occurs if a Ledger API command submission cannot debit from the given local traffic account."
   )
   @Resolution(
-    "Inspect the error details, adapt your Ledger API submission or contact the participant operator for adjusting your account details."
+    "Inspect the error details, adapt your Ledger API submission or contact the participant operator for adjusting your account details." +
+      " The error metadata contains `account_id`, `balance` and `traffic_cost`."
   )
   object InsufficientBalance
       extends ErrorCode(
         id = "TRAFFIC_ACCOUNT_VALIDATION_FAILED",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class Reject(override val cause: String)(implicit
+    final case class Reject(accountId: String, balance: Long, trafficCost: Long)(implicit
         loggingContext: ErrorLoggingContext
-    ) extends DamlErrorWithDefiniteAnswer(cause = cause)
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"Insufficient balance ($balance) for actual traffic cost ($trafficCost) for account $accountId",
+          extraContext = Map(
+            "account_id" -> accountId,
+            "balance" -> balance,
+            "traffic_cost" -> trafficCost,
+          ),
+        )
         with TrafficEnforcementError
   }
 
@@ -59,21 +68,28 @@ object TrafficEnforcementErrors extends TrafficEnforcementErrorGroup {
     "This error indicates that a traffic delta could not be applied, as it would overflow the current credit balance."
   )
   @Resolution(
-    "Use a lower (absolute) delta value."
+    "Use a lower (absolute) delta value." +
+      " The error metadata contains `account_id`, `traffic_delta` and `delta_type`."
   )
   object TrafficUpdateOutOfBound
       extends ErrorCode(
         id = "TRAFFIC_UPDATE_OUT_OF_BOUND",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    // The account id and the delta are strings because their types live in the TEA module, which this module doesn't depend on.
-    final case class Reject(accountId: String, delta: String)(implicit
+    // Primitives because their types live in the TEA module, which this module doesn't depend on.
+    final case class Reject(accountId: String, trafficDelta: Long, deltaType: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
-            s"The traffic delta $delta cannot be applied to the current balance of $accountId without the credit balance exceeding its maximum value."
+            s"The traffic delta $trafficDelta ($deltaType) cannot be applied to the current balance of $accountId without a running total going out of bounds."
         )
-        with TrafficEnforcementError
+        with TrafficEnforcementError {
+      override def context: Map[String, String] = Map(
+        "account_id" -> accountId,
+        "traffic_delta" -> trafficDelta.toString,
+        "delta_type" -> deltaType,
+      )
+    }
   }
 
   @Explanation(

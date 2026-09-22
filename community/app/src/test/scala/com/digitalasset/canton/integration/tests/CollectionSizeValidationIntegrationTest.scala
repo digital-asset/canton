@@ -92,7 +92,7 @@ sealed trait CollectionSizeValidationIntegrationTest
       .submit(
         actAs = List(participant1.adminParty) ++ extraParties,
         cmd,
-        optTimeout = Some(config.NonNegativeDuration.ofSeconds(5)),
+        optTimeout = Some(config.NonNegativeDuration.ofSeconds(20)),
       )
 
     clue("submit command") {

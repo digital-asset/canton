@@ -17,6 +17,7 @@ import com.daml.ledger.api.v2.admin.command_inspection_service.{
 import com.daml.ledger.api.v2.admin.identity_provider_config_service.*
 import com.daml.ledger.api.v2.admin.identity_provider_config_service.IdentityProviderConfigServiceGrpc.IdentityProviderConfigServiceStub
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
+import com.daml.ledger.api.v2.admin.package_management_service
 import com.daml.ledger.api.v2.admin.package_management_service.*
 import com.daml.ledger.api.v2.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementServiceStub
 import com.daml.ledger.api.v2.admin.participant_pruning_service.*
@@ -93,17 +94,29 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
+  GetPreferredPackageVersionRequest,
+  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
   InteractiveSubmissionServiceGrpc,
   MinLedgerTime,
+  PackagePreference,
   PackageVettingRequirement,
   PartySignatures,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
   PreparedTransaction,
   SinglePartySignatures,
+}
+import com.daml.ledger.api.v2.package_reference.PriorTopologySerial
+import com.daml.ledger.api.v2.package_service.PackageServiceGrpc.PackageServiceStub
+import com.daml.ledger.api.v2.package_service.{
+  ListVettedPackagesRequest,
+  ListVettedPackagesResponse,
+  PackageMetadataFilter,
+  PackageServiceGrpc,
+  TopologyStateFilter,
 }
 import com.daml.ledger.api.v2.reassignment.{
   AssignedEvent,
@@ -618,6 +631,64 @@ object LedgerApiCommands {
     }
 
   }
+
+  object PackageService {
+    abstract class BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
+      override type Svc = PackageServiceStub
+
+      override def createService(channel: ManagedChannel): PackageServiceStub =
+        PackageServiceGrpc.stub(channel)
+    }
+
+    final case class ListVettedPackages(
+        packageIds: Seq[LfPackageId],
+        packageNamePrefixes: Seq[String],
+        participantIds: Seq[ParticipantId],
+        synchronizerIds: Seq[SynchronizerId],
+        pageToken: Option[String],
+        pageSize: Int,
+    ) extends BaseCommand[
+          ListVettedPackagesRequest,
+          ListVettedPackagesResponse,
+          ListVettedPackagesResponse,
+        ] {
+
+      override protected def createRequest(): Either[String, ListVettedPackagesRequest] =
+        Right(
+          ListVettedPackagesRequest(
+            packageMetadataFilter =
+              Option.unless(packageIds.isEmpty && packageNamePrefixes.isEmpty) {
+                PackageMetadataFilter(
+                  packageIds = packageIds,
+                  packageNamePrefixes = packageNamePrefixes,
+                )
+              },
+            topologyStateFilter = Option.unless(
+              participantIds.isEmpty && synchronizerIds.isEmpty
+            ) {
+              TopologyStateFilter(
+                participantIds = participantIds.map(_.uid.toProtoPrimitive),
+                synchronizerIds = synchronizerIds.map(_.uid.toProtoPrimitive),
+              )
+            },
+            pageToken = pageToken.getOrElse(""),
+            pageSize = pageSize,
+          )
+        )
+
+      override protected def submitRequest(
+          service: PackageServiceStub,
+          request: ListVettedPackagesRequest,
+      ): Future[ListVettedPackagesResponse] =
+        service.listVettedPackages(request)
+
+      override protected def handleResponse(
+          response: ListVettedPackagesResponse
+      ): Either[String, ListVettedPackagesResponse] =
+        Right(response)
+    }
+  }
+
   object PackageManagementService {
 
     abstract class BaseCommand[Req, Resp, Res] extends GrpcAdminCommand[Req, Resp, Res] {
@@ -694,6 +765,57 @@ object LedgerApiCommands {
           response: ListKnownPackagesResponse
       ): Either[String, Seq[PackageDetails]] =
         Right(response.packageDetails.take(limit.value))
+    }
+
+    final case class UpdateVettedPackages(
+        addOrUpdate: Seq[VettedPackagesChange.Vet],
+        remove: Seq[VettedPackagesRef],
+        dryRun: Boolean,
+        synchronizerId: Option[SynchronizerId],
+        expectedPriorTopologySerial: Option[PriorTopologySerial],
+        forceFlags: Seq[package_management_service.UpdateVettedPackagesForceFlag],
+    ) extends BaseCommand[
+          UpdateVettedPackagesRequest,
+          UpdateVettedPackagesResponse,
+          UpdateVettedPackagesResponse,
+        ] {
+
+      override protected def createRequest(): Either[String, UpdateVettedPackagesRequest] = {
+        val unvetOps = remove.map { vettedPackagesRef =>
+          package_management_service.VettedPackagesChange.Unvet(packages = Seq(vettedPackagesRef))
+        }
+
+        val changes = addOrUpdate.map(vetOp =>
+          package_management_service.VettedPackagesChange(
+            package_management_service.VettedPackagesChange.Operation.Vet(vetOp)
+          )
+        ) ++ unvetOps.map(unvetOp =>
+          package_management_service.VettedPackagesChange(
+            package_management_service.VettedPackagesChange.Operation.Unvet(unvetOp)
+          )
+        )
+
+        Right(
+          UpdateVettedPackagesRequest(
+            changes = changes,
+            dryRun = dryRun,
+            synchronizerId = synchronizerId.map(_.uid.toProtoPrimitive).getOrElse(""),
+            expectedTopologySerial = expectedPriorTopologySerial,
+            updateVettedPackagesForceFlags = forceFlags,
+          )
+        )
+      }
+
+      override protected def submitRequest(
+          service: PackageManagementServiceStub,
+          request: UpdateVettedPackagesRequest,
+      ): Future[UpdateVettedPackagesResponse] =
+        service.updateVettedPackages(request)
+
+      override protected def handleResponse(
+          response: UpdateVettedPackagesResponse
+      ): Either[String, UpdateVettedPackagesResponse] =
+        Right(response)
     }
   }
 
@@ -2034,6 +2156,38 @@ object LedgerApiCommands {
 
       override def timeoutType: TimeoutType =
         optTimeout.map(CustomClientTimeout(_)).getOrElse(DefaultUnboundedTimeout)
+    }
+
+    final case class PreferredPackageVersion(
+        parties: Set[LfPartyId],
+        packageName: LfPackageName,
+        synchronizerIdO: Option[SynchronizerId],
+        vettingValidAt: Option[CantonTimestamp],
+    ) extends BaseCommand[
+          GetPreferredPackageVersionRequest,
+          GetPreferredPackageVersionResponse,
+          Option[PackagePreference],
+        ] {
+
+      override protected def submitRequest(
+          service: InteractiveSubmissionServiceStub,
+          request: GetPreferredPackageVersionRequest,
+      ): Future[GetPreferredPackageVersionResponse] =
+        service.getPreferredPackageVersion(request)
+
+      override protected def createRequest(): Either[String, GetPreferredPackageVersionRequest] =
+        Right(
+          GetPreferredPackageVersionRequest(
+            parties = parties.toSeq,
+            packageName = packageName,
+            synchronizerId = synchronizerIdO.map(_.toProtoPrimitive).getOrElse(""),
+            vettingValidAt = vettingValidAt.map(_.toProtoTimestamp),
+          )
+        )
+
+      override protected def handleResponse(
+          response: GetPreferredPackageVersionResponse
+      ): Either[String, Option[PackagePreference]] = Right(response.packagePreference)
     }
 
     final case class PreferredPackages(

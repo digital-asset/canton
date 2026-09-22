@@ -283,6 +283,20 @@ trait FutureContext[E <: Env[E]] {
 
   def pureFuture[X](x: X): E#FutureUnlessShutdownT[X]
 
+  /** Runs a synchronous computation off the actor thread on the future execution context. The
+    * computation must be pure.
+    *
+    * Unlike [[pureFuture]], which evaluates its argument eagerly on the calling (actor) thread,
+    * [[runAsync]] defers evaluation to the future's executor. It can therefore be used to move
+    * expensive work (e.g. hashing) out of the actor thread so that it does not block the module's
+    * message processing.
+    */
+  def runAsync[X](
+      action: String,
+      compute: () => X,
+      orderingStage: Option[String] = None,
+  ): E#FutureUnlessShutdownT[X]
+
   /** [[mapFuture]] requires a [[PureFun]] instead of a normal [[scala.Function1]] since we need to
     * be careful not to mutate state of the modules in the [[Env#FutureUnlessShutdownT]], as this
     * would violate the assumptions we use when writing [[Module]]s.
@@ -366,6 +380,13 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
 
   final override def pureFuture[X](x: X): E#FutureUnlessShutdownT[X] =
     futureContext.pureFuture(x)
+
+  final override def runAsync[X](
+      action: String,
+      compute: () => X,
+      orderingStage: Option[String] = None,
+  ): E#FutureUnlessShutdownT[X] =
+    futureContext.runAsync(action, compute, orderingStage)
 
   final override def mapFuture[X, Y](
       future: E#FutureUnlessShutdownT[X]

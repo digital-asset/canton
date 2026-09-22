@@ -539,6 +539,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "AcsDelta/Activate",
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -561,6 +562,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "AcsDelta/Deactivate",
       )
 
     payloadsActivate
@@ -856,6 +858,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "LedgerEffects/Activate",
       )
     val payloadsDeactivate =
       fetchPayloads(
@@ -878,6 +881,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "LedgerEffects/Deactivate",
       )
     val payloadsVariousWitnessed =
       fetchPayloads(
@@ -900,6 +904,7 @@ class UpdatesStreamReader(
         payloadQueriesLimiter = payloadQueriesLimiter,
         contractStore = contractStore,
         skipPruningChecks = skipPruningChecks,
+        queryName = "LedgerEffects/VariousWitnessed",
       )
 
     payloadsActivate
@@ -988,6 +993,7 @@ class UpdatesStreamReader(
       payloadQueriesLimiter: ConcurrencyLimiter,
       contractStore: LedgerApiContractStore,
       skipPruningChecks: Boolean,
+      queryName: String,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[RawEvent, NotUsed] = {
@@ -1008,6 +1014,7 @@ class UpdatesStreamReader(
               pruningOffsetService = pruningOffsetService,
               queryValidRange = queryValidRange,
               dbDispatcher = dbDispatcher,
+              queryName = queryName,
             )
           }
         }
@@ -1033,6 +1040,7 @@ object UpdatesStreamReader {
       pruningOffsetService: PruningOffsetService,
       queryValidRange: QueryValidRange,
       dbDispatcher: DbDispatcher,
+      queryName: String,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -1059,7 +1067,13 @@ object UpdatesStreamReader {
     }
     pruningCheck {
       dbDispatcher
-        .executeSql(dbMetric)(fetchEvents(ids, _))
+        .executeSql(dbMetric)(
+          Utils.wrapDbQuery(fetchEvents(ids, _)) { result =>
+            val resultSize = result.size
+            val idSize = ids.size
+            s"EventPayloadQuery $queryName returned $resultSize/$idSize events"
+          }
+        )
         .flatMap(UpdateReader.withFatContractIfNeeded(contractStore))
     }
       .map(UpdateReader.tryToResolveFatInstance)

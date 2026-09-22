@@ -19,12 +19,9 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.SequencingParameters
-import com.digitalasset.canton.time.PositiveFiniteDuration
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.duration.DurationInt
-import scala.jdk.DurationConverters.ScalaDurationOps
 
 sealed trait BftSynchronizerSequencerConnectionManipulationTest
     extends CommunityIntegrationTest
@@ -191,16 +188,10 @@ final class BftSynchronizerSequencerConnectionManipulationTestPostgres
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,
-      sequencingParameters = Some(
-        SequencingParameters
-          .Default(testedProtocolVersion)
-          .update(
-            // Since this test is starting and stopping sequencers a lot there will be view-changes in CantonBFT.
-            // The default timeout is 10s which can make some blocks be delayed by much, triggering DelayLogger to warn
-            // that wall-clock and bft-time diverges too much. So we lower the view-change timeout to 1s.
-            pbftViewChangeTimeout = PositiveFiniteDuration.tryCreate(1.second.toJava)
-          )
-      ),
+      // Since this test is starting and stopping sequencers a lot there will be view-changes in CantonBFT.
+      // The default timeout is 10s which can make some blocks be delayed by much, triggering DelayLogger to warn
+      // that wall-clock and bft-time diverges too much. So we lower the view-change timeout to 1s.
+      viewChangeTimeoutOverride = Some(1.second),
     )
   )
 }

@@ -67,7 +67,12 @@ import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
 import com.digitalasset.nonempty.NonEmpty
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
-import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
+import org.apache.pekko.stream.{
+  KillSwitch,
+  KillSwitches,
+  Materializer,
+  SubscriptionWithCancelException,
+}
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -103,6 +108,9 @@ class RunningDigestProcessorImpl(
 
   // Val required for pattern matching
   private val thisLfParticipant = thisLfParticipantId
+
+  private val maxNumUpdatesBetweenCheckpoints =
+    acsCommitmentConfig.maxNumUpdatesBetweenCheckpoints.unwrap
 
   // this close context is only used for topology lookup retries,
   // therefore we accept that the shutdown of the digest processor is not synchronized with
@@ -251,20 +259,29 @@ class RunningDigestProcessorImpl(
           val preEventCheckpoint = crossedReconciliationIntervalBoundary
             .orElse(state.previousEventCheckpoint)
 
-          // determine whether the event is the event that reaches the limit of maxNumUpdatesBetweenCheckpoints
-          @inline def checkpointByNumProcessedEvents: Option[ProcessingContext[CheckpointFence]] =
-            Option.when(
-              numEventsSinceLastCheckpoint + 1 == acsCommitmentConfig.maxNumUpdatesBetweenCheckpoints.unwrap
-            )(context.withValue(CheckpointFence(CheckpointType.MaxEventsWithoutCheckpoint)))
-
-          val postEventCheckpoint =
-            postEventTopologyCheckpoint.orElse(checkpointByNumProcessedEvents)
-
           // determine the next `numEventsSinceLastCheckpoint` and the output elements to emit
           val updatedNumEventsSinceLastCheckpoint = preEventCheckpoint match {
             case Some(_) => 1
             case None => numEventsSinceLastCheckpoint + 1
           }
+
+          if (enableAdditionalConsistencyChecks) {
+            ErrorUtil.requireState(
+              updatedNumEventsSinceLastCheckpoint <= maxNumUpdatesBetweenCheckpoints,
+              s"The number of events since last checkpoint $updatedNumEventsSinceLastCheckpoint must not be larger" +
+                s" than the max value specified in the config ($maxNumUpdatesBetweenCheckpoints) at timepoint $timepoint",
+            )
+          }
+
+          // determine whether the event is the event that reaches the limit of maxNumUpdatesBetweenCheckpoints
+          @inline def checkpointByNumProcessedEvents: Option[ProcessingContext[CheckpointFence]] =
+            Option.when(
+              updatedNumEventsSinceLastCheckpoint >= maxNumUpdatesBetweenCheckpoints
+            )(context.withValue(CheckpointFence(CheckpointType.MaxEventsWithoutCheckpoint)))
+
+          val postEventCheckpoint =
+            postEventTopologyCheckpoint.orElse(checkpointByNumProcessedEvents)
+
           val result = preEventCheckpoint.toList ++ eventToEmit.toList
           val newState =
             CheckpointingState(
@@ -725,7 +742,7 @@ class RunningDigestProcessorImpl(
         Offset.MaxValue,
         allCheckpointsFilter,
       )
-      latestReconciliatioCheckpointO <- acsDigestStore.latestReconciliationCheckpoint()
+      latestReconciliationCheckpointO <- acsDigestStore.latestReconciliationCheckpoint()
       startingOffsetO = latestCheckpointO.map(_.offset)
       startingRecordTimeO = latestCheckpointO.map(_.recordTime)
       _ <- startingOffsetO.traverse { startingOffset =>
@@ -751,7 +768,7 @@ class RunningDigestProcessorImpl(
           val timepoint = Timepoint(update.offset)(update.synchronizerTime)
           ProcessingContext(timepoint, update.acsUpdate)(update.traceContext)
         }
-        .via(pipeline(startingRecordTimeO, latestReconciliatioCheckpointO.map(_.recordTime)))
+        .via(pipeline(startingRecordTimeO, latestReconciliationCheckpointO.map(_.recordTime)))
         .toMat(
           Sink.foreach(cp =>
             logger.debug(
@@ -760,7 +777,12 @@ class RunningDigestProcessorImpl(
           )
         )(Keep.both)
 
-      val (ks, doneF) = PekkoUtil.runSupervised(graph, this.toString)
+      val (ks, doneF) = PekkoUtil.runSupervised(
+        graph = graph,
+        errorLogMessagePrefix = s"$toString - pipeline",
+        reportExceptionAtInfo =
+          _.isInstanceOf[SubscriptionWithCancelException.NonFailureCancellation],
+      )
       (
         new CombinedKillSwitch(
           ks,

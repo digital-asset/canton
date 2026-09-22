@@ -658,7 +658,7 @@ abstract class BaseTopologySnapshot(
       filterUid = NonEmpty(Seq, psid.uid),
     ).map(
       _.collectOfMapping[LsuAnnouncement].result
-        .filter(_.mapping.successorSynchronizerId > psid)
+        .filter(_.mapping.successorSynchronizerId > psid.opaque)
         .toList match {
         case Nil => None
         case one :: Nil =>

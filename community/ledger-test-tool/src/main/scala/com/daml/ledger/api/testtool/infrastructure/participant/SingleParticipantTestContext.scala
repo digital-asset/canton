@@ -66,6 +66,8 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
+  GetPreferredPackageVersionRequest,
+  GetPreferredPackageVersionResponse,
   GetPreferredPackagesRequest,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
@@ -265,6 +267,21 @@ final class SingleParticipantTestContext private[participant] (
   ): Future[ExecuteSubmissionAndWaitForTransactionResponse] =
     services.interactiveSubmission.executeSubmissionAndWaitForTransaction(
       executeSubmissionAndWaitForTransactionRequest
+    )
+
+  override def getPreferredPackageVersion(
+      parties: Seq[Party],
+      packageName: String,
+      vettingValidAt: Option[Instant] = None,
+      synchronizerIdO: Option[String] = None,
+  ): Future[GetPreferredPackageVersionResponse] =
+    services.interactiveSubmission.getPreferredPackageVersion(
+      new GetPreferredPackageVersionRequest(
+        parties = parties.map(_.getValue),
+        packageName = packageName,
+        synchronizerId = synchronizerIdO.getOrElse(""),
+        vettingValidAt = vettingValidAt.map(_.asProtobuf),
+      )
     )
 
   override def getPreferredPackages(

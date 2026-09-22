@@ -35,6 +35,7 @@ import com.digitalasset.canton.topology.TopologyManagerError.{
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.{
   KnownPhysicalSynchronizerId,
+  OpaquePhysicalSynchronizerId,
   PhysicalSynchronizerId,
   SequencerId,
   TopologyManagerError,
@@ -330,7 +331,7 @@ final class LsuAnnouncementTopologyIntegrationTest
           entry shouldBeCantonErrorCode (InvalidSynchronizerSuccessor)
           entry.errorMessage should include(
             InvalidSynchronizerSuccessor.Reject
-              .conflictWithPreviousAnnouncement(successor, successor2)
+              .conflictWithPreviousAnnouncement(successor.opaque, successor2.opaque)
               .cause
           )
         },
@@ -354,7 +355,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     // (sequencer id, successor id, port)
     def listKnownSuccessors(
         filterSuccessorPhysicalSynchronizerId: String = ""
-    ): (SequencerId, PhysicalSynchronizerId, Int) = {
+    ): (SequencerId, OpaquePhysicalSynchronizerId, Int) = {
       val m = sequencer1.topology.lsu.sequencer_successors
         .list(
           store = daId,
@@ -385,8 +386,8 @@ final class LsuAnnouncementTopologyIntegrationTest
         LsuSequencerSuccessorInvalidSuccessorPsid
           .Reject(
             sequencer1.id,
-            successorPsid = successor2,
-            expectedSuccessorPsid = successor1,
+            successorPsid = successor2.opaque,
+            expectedSuccessorPsid = successor1.opaque,
           )
           .cause
       ),
@@ -398,7 +399,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       successorSynchronizerId = successor1,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
-    listKnownSuccessors() shouldBe (sequencer1.id, successor1, 5001)
+    listKnownSuccessors() shouldBe (sequencer1.id, successor1.opaque, 5001)
 
     synchronizerOwners1.foreach { owner =>
       owner.topology.lsu.announcement.revoke(
@@ -431,7 +432,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       successorSynchronizerId = successor2,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
-    listKnownSuccessors() shouldBe (sequencer1.id, successor2, 5002)
+    listKnownSuccessors() shouldBe (sequencer1.id, successor2.opaque, 5002)
 
     // Update to a new value
     sequencer1.topology.lsu.sequencer_successors.propose_successor(
@@ -440,7 +441,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       successorSynchronizerId = successor2,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
-    listKnownSuccessors() shouldBe (sequencer1.id, successor2, 5003)
+    listKnownSuccessors() shouldBe (sequencer1.id, successor2.opaque, 5003)
 
     // Override for the new announcement
     synchronizerOwners1.foreach { owner =>
@@ -455,7 +456,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       successorSynchronizerId = successor3,
       customTrustCertificates = Some(ByteString.copyFromUtf8("test")),
     )
-    listKnownSuccessors() shouldBe (sequencer1.id, successor3, 5004)
+    listKnownSuccessors() shouldBe (sequencer1.id, successor3.opaque, 5004)
   }
 
   private def connectionConfigStore(participant: LocalParticipantReference) =

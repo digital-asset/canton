@@ -13,8 +13,11 @@ import org.scalatest.Assertion
 
 trait TrafficBalanceSupport extends BaseTest {
 
-  // Maximum expected traffic tolerance. For context see #32073 or #32031.
-  protected def maxTrafficDiffTolerance = 150L
+  // Maximum expected traffic tolerance. For context see #32073.
+  // zstd compression used with PV=36+ has significantly higher
+  // compression deltas than gzip used with PV=35-.
+  // Tolerate a difference of at least 100 and 2% of the baseline size.
+  protected def maxTrafficDiffTolerance(baselineCost: Long): Long = 100L.max(baselineCost / 50L)
 
   protected def getTrafficForMember(
       member: Member

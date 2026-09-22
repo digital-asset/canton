@@ -359,6 +359,25 @@ class FutureSupervisorImplTest extends FutureSupervisorTest {
           val logs1 = eventually() {
             val entries = loggerFactory.fetchRecordedLogEntries
             entries.filter(isInitialWarn) should have size 5
+
+            // Flake prevention: Force the test thread to wait for the first round of summaries
+            // BEFORE moving on to add tc3.
+            // We must wait for the first round of summaries to be logged before adding tc3.
+            // If we don't synchronize here, the test thread can race ahead of the background
+            // supervisor, causing tc3 to either contaminate this first batch of summaries
+            // or be missed entirely in the final assertions.
+            // We explicitly check for both tc1 and tc2 to ensure we have caught a complete
+            // summary batch, rather than a partial round where tc1 timed out before tc2.
+            val summaries = entries.filter(isSummary)
+            val tc1Id = tc1.traceId.getOrElse("<no trace id>")
+            val tc2Id = tc2.traceId.getOrElse("<no trace id>")
+
+            Seq(Level.WARN, Level.ERROR).forall { level =>
+              summaries.exists(e =>
+                e.level == level && e.message.contains(tc1Id) && e.message.contains(tc2Id)
+              )
+            } shouldBe true
+
             entries.size
           }
 

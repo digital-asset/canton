@@ -405,7 +405,7 @@ class RequiredTopologyMappingChecks(
         announcements = NonEmpty.from(
           results.flatMap(
             _.selectMapping[LsuAnnouncement]
-              .filter(_.mapping.successorSynchronizerId > psid)
+              .filter(_.mapping.successorSynchronizerId > psid.opaque)
           ) // past upgrades are irrelevant
         )
         _ <- announcements match {

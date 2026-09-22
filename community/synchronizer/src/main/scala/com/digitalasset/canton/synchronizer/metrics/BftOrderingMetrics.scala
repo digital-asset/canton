@@ -296,6 +296,17 @@ class BftOrderingMetrics private[metrics] (
               //  it can be present multiple times for a given batch if it regresses due to topology changes
               val BatchDissemination = "batch-dissemination-total"
 
+              object hashing {
+                // Duration of computing a batch ID (i.e. hashing the whole batch payload) when a
+                //  batch is created locally; performed synchronously on the actor thread
+                val LocalBatchIdComputation = "availability-local-batch-id-computation"
+
+                // Duration of validating a batch ID (i.e. hashing the whole batch payload) of a
+                //  batch fetched from a remote node, e.g. during state transfer; performed
+                //  asynchronously off the actor thread
+                val FetchedBatchIdValidation = "availability-fetched-batch-id-validation"
+              }
+
               object dissemination {
                 // The following latencies can be present multiple times for a given batch
                 //  in case of multiple ack collections and regressions due to topology changes

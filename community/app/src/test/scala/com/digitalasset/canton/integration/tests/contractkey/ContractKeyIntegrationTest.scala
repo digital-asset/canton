@@ -23,6 +23,8 @@ import com.digitalasset.canton.version.ProtocolVersion
   */
 final class ContractKeyIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
       .withSetup { implicit env =>

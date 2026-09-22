@@ -192,6 +192,8 @@ trait RepairServiceIntegrationTest
 sealed trait RepairServiceIntegrationTestStableLf extends RepairServiceIntegrationTest {
   override protected def cantonTestsPath: String = CantonTestsPath
 
+  override protected val enableAcsDigestConsistencyCheck: Boolean = false
+
   "RepairService" should {
     "prevent concurrent synchronizer reconnect" when {
       "a repair command is being processed" in { implicit env =>

@@ -178,4 +178,12 @@ object UnlessShutdown {
   private final case class AbortedDueToShutdownException(action: String)
       extends RuntimeException(s"'$action' was aborted due to shutdown.")
       with NoStackTrace
+
+  /** Checks if the given throwable is the internal exception used to tunnel shutdowns through
+    * futures/streams.
+    */
+  def isAbortedDueToShutdownException(ex: Throwable): Boolean = ex match {
+    case _: AbortedDueToShutdownException => true
+    case _ => false
+  }
 }

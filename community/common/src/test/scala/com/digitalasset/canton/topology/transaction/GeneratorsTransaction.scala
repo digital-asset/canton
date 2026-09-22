@@ -33,9 +33,9 @@ import com.digitalasset.canton.topology.{
   MediatorId,
   Member,
   Namespace,
+  OpaquePhysicalSynchronizerId,
   ParticipantId,
   PartyId,
-  PhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
 }
@@ -108,7 +108,7 @@ final class GeneratorsTransaction(
 
   implicit val synchronizerUpgradeAnnouncementArb: Arbitrary[LsuAnnouncement] =
     Arbitrary(for {
-      psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+      psid <- Arbitrary.arbitrary[OpaquePhysicalSynchronizerId]
       upgradeTime <- Arbitrary.arbitrary[CantonTimestamp]
     } yield LsuAnnouncement(psid, upgradeTime))
 

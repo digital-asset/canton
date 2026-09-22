@@ -93,34 +93,19 @@ The Ledger API command completion service now exposes a `GetCompletionByHash` en
   * JSON API: `GET /v2/jose/jwks/synchronizer/<synchronizer-id>/party/<party-id>`
 - A `type = party-jwt` can be added to `participants.<participant>.ledger-api.auth-services` to enable this feature.
 
-### Removal of the legacy JSON API endpoints and fields
-
-*BREAKING*: The Ledger JSON API has been cleaned up of endpoints and fields/params that were deprecated
-and announced for removal in Canton 3.5. The following changes have been made:
-- The following endpoints have been removed:
-  - `GET /v2/interactive-submission/preferred-package-version`. Use `POST /v2/interactive-submission/preferred-packages` instead.
-  - `GET /v2/package-vetting`. Use `POST /v2/package-vetting/list` instead.
-  - `POST /v2/package-vetting`. Use `POST /v2/package-vetting/update` instead.
-  - `(WebSocket) GET`/`POST /v2/updates/trees`. Use `/v2/updates` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
-  - `(WebSocket) GET`/`POST /v2/updates/flats`. Use `/v2/updates` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
-  - `GET /v2/updates/transaction-tree-by-offset/{offset}`. Use `POST /v2/updates/update-by-offset` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`.
-  - `POST /v2/updates/transaction-by-offset`. Use `POST /v2/updates/update-by-offset` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
-  - `GET /v2/updates/transaction-tree-by-id/{update-id}`. Use `POST /v2/updates/update-by-id` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
-  - `POST /v2/updates/transaction-by-id`. Use `POST /v2/updates/update-by-id` instead with `updateFormat.includeTransactions.transactionShape = TRANSACTION_SHAPE_ACS_DELTA`
-  - `POST /v2/commands/submit-and-wait-for-transaction-tree` has been removed. Use
-    `POST /v2/commands/submit-and-wait-for-transaction` with `transactionFormat.transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS`
-    instead. Note that the response carries a flat `transaction.events` array rather than a `transactionTree.eventsById` map.
-- The following existing endpoints no longer support deprecated fields:
-  - `(WebSocket) GET /v2/updates` and `POST /v2/updates` no longer accept the `filter` and `verbose` fields. `updateFormat` is now required.
-  - `(WebSocket) GET /v2/state/active-contracts` and `POST /v2/state/active-contracts` no longer accept the `filter` and `verbose` fields.
-    `eventFormat` is now required.
-
-The `TransactionFilter`, `TreeEvent`, `CreatedTreeEvent`, `ExercisedTreeEvent`, `JsTransactionTree` and
-`JsSubmitAndWaitForTransactionTreeResponse` schemas have been dropped from the OpenAPI and AsyncAPI definitions.
-
 ### `external_call`
 
-The `external_call` feature is released and enabled from 2.4(-staging) onwards.
+The `external_call` feature is released and enabled from LF 2.4 onwards.
+
+Daml choices can now make external calls: deterministic calls to extension services that the
+participant operator configures under `canton.participants.<participant>.parameters.engine.extensions`
+(see `ExtensionServiceConfig`). The submitting participant executes each call and records the
+result in the transaction; confirming participants re-validate the recorded results against
+their own extension service before approving, and disagreements are rejected and alarmed.
+The feature requires the Daml package to use LF 2.4 or later and the synchronizer to run
+protocol version 36 or later. For externally signed transactions the
+recorded results are part of the prepared transaction and covered by the signed transaction
+hash (hashing scheme version 4, available from protocol version 36).
 
 ### New ACS commitment pipeline
 
@@ -157,6 +142,9 @@ The new commitment processor provides an API to trigger reinitialization `<parti
 and query the status of reinitialization `<participant reference>.commitments.digest_commitments_reinitialization_status`.
 Reinitialization now also works when the participant is not connected to the targeted synchronizer.
 
+The new commitment processor also provides an API to trigger a consistency check of the ACS digests `<participant reference>.commitments.run_digest_consistency_check`
+and query the status of the check `<participant reference>.commitments.digest_consistency_check_status`. This can be used before performing a LSU.
+
 The new commitment processor exposes among others the following metrics. They are disjoint from the old commitment processor metrics.
 - `daml.participant.sync.commitments.checkpoint-watermark` tracks the progress of the digest processor in record time of the connected synchronizer.
   It corresponds to the former `daml.participant.sync.commitments.last-locally-checkpointed` metric.
@@ -172,6 +160,8 @@ The new commitment processor exposes among others the following metrics. They ar
   report on the health of the different components.
 - `daml.participant.sync.commitments.running-digest-processor.loaded-digests` counts the number of loaded digests in memory
   and gives an indication of the memory usage of the new processor.
+- `daml.participant.sync.commitments.latest-matching-status` tracks the matching status of the youngest reported commitment period. The metric is labeled with the `counterparticipant`.
+- `daml.participant.sync.commitments.latest-matching-status-period-end` tracks the timestamp of the end of the youngest reported commitment period. The metric is labeled with the `counterparticipant`.
 
 With the new pipeline, journal garbage collection can now be controlled independently of the reconciliation interval:
 `canton.participants.<participant>.parameters.journal-garbage-collection-minimum-gap` (default 30 minutes) determines
@@ -179,6 +169,20 @@ how frequently journal garbage collection shall be triggered if there is a conti
 this was tied to the reconciliation interval of the connected synchronizer.
 
 ### Minor Improvements
+- *BREAKING*: Fine-grained metrics for ACHS processing. Please note ACHS is disabled by default.
+    - Removed database metric `daml.participant.api.indexer.achs_processing.*` which captured runtime metrics for all types of database calls.
+    - Added the following metrics to capture individual database metrics for ACHS initialization (establish snapshot baseline):
+        - `daml.participant.api.indexer.achs_processing.initialization.store_achs_valid_at`
+        - `daml.participant.api.indexer.achs_processing.initialization.update_achs_last_pointers`
+        - `daml.participant.api.indexer.achs_processing.initialization.add_activations_to_achs`
+        - `daml.participant.api.indexer.achs_processing.initialization.remove_deactivated_from_achs`
+    - Added the following metrics to capture individual database metrics for ACHS maintenance (during indexing):
+        - `daml.participant.api.indexer.achs_processing.maintenance.store_achs_valid_at`
+        - `daml.participant.api.indexer.achs_processing.maintenance.update_achs_last_pointers`
+        - `daml.participant.api.indexer.achs_processing.maintenance.add_activations_to_achs`
+        - `daml.participant.api.indexer.achs_processing.maintenance.remove_deactivated_from_achs`
+- Improved observability of indexer initialization (all related logs populated with a newly forged trace-context, terminating log-reporter upon failed ACHS initialization, additional WARN logs on failed ACHS initialization).
+- Improved observability of Ledger API streaming (improved DEBUG log markers to of ID queries, DEBUG logging with timing information for payload queries).
 - InternalIndexService streams improved with default retry/recovery and better observability.
 - Database network timeout errors reported via error code `INDEX_DB_SQL_NETWORK_TIMEOUT_ERROR` error category changed to `TransientServerFailure` making it retryable. This problems logged on WARN log level.
 - Interactive submissions can use hashing scheme version `HASHING_SCHEME_VERSION_V4` on synchronizers running protocol version 36 or later (previously only on development-protocol synchronizers). V4 additionally covers recorded external-call results in the prepared transaction hash.
@@ -263,6 +267,10 @@ this was tied to the reconciliation interval of the connected synchronizer.
 - Participant health state now includes indexer as a soft dependency. Indexer health state will be present in readiness endpoint response, but it won't influece response code.
 - Removed redundant root-hash signature from informee and encrypted view messages.
 - participant_id label is added onto participant metrics
+- Added `ErrorInfo` metadata to traffic enforcement rejections so callers don’t need to parse the message text.
+  * `TRAFFIC_ACCOUNT_VALIDATION_FAILED`: `account_id`, `balance`, `traffic_cost`
+  * `TRAFFIC_UPDATE_OUT_OF_BOUND`: `account_id`, `traffic_delta`, `delta_type`
+- Deprecated configuration settings: `canton.participants.<participant>.parameters.ledger-api-server.indexer.use-weighted-batching` and `canton.participants.<participant>.parameters.ledger-api-server.indexer.submission-batch-insertion-size`. These are no longer supported.
 - Support for OTLP remote metrics reporting, including optional OAuth2 Client Credentials authentication
   ```
   canton.monitoring.metrics.reporters = [{
@@ -362,6 +370,16 @@ requirement. For details on TLS version deprecations, see [RFC 8996](https://www
   requests are accepted.
 - **Console BREAKING**: Canton console command `<sequencerReference>.setup.initialize_from_lsu_predecessor`, admin console command class `SequencerAdminCommands.InitializeFromLsuPredecessor` and the respective proto `InitializeSequencerFromLsuPredecessorRequest`
   now require to specify `synchronizerId` (logical) on the request.
+- The Ledger API vetting endpoints are exposed in the Canton console:
+    - The Ledger API endpoint `PackageService.ListVettedPackages` is exposed as `participant.ledger_api.packages.list_vetted_packages`
+    - The Ledger API endpoint `PackageManagementService.UpdateVettedPackages` is exposed as `participant.ledger_api.packages.update_vetted_packages`
+- Added the request type to the sequencer cap rejection message.
+- `PrefetchContractKey` has a new optional `limit` field stating how many contracts to prefetch for that key, on top of disclosed contracts. Absence is interpreted as `1` (the previous behavior), `0` is rejected, and values are capped at `2^31 - 1`. The system may impose further limits.
+- Commands referencing a contract ID whose Canton contract ID version is not supported (for example a malformed or foreign-format ID, including via a disclosed contract) are now rejected with `UNSUPPORTED_CONTRACT_ID` (gRPC `NOT_FOUND`), carrying the contract ID as an error resource. Previously this path raised an internal error. The same applies to contract key lookups resolving to such a contract.
+- `canton.participants.<participant>.parameters.engine.transaction-limits` bounds what the engine may produce during interpretation (`value-size`, `node-children`, `transaction-nodes`, `total-informees`, and others). All bounds default to their maximum, so the default behavior is unchanged.
+- The `nonempty` and `base-validation` libraries are now published to Maven Central.
+- *Console BREAKING*: `NonEmpty` has moved from `com.daml.nonempty` to `com.digitalasset.nonempty`, and its scalaz type class instances have been replaced by cats ones. Separately, scalaz has been removed from the published Daml-LF modules: for example the `Order` and `Equal` instances on `Value.ContractId` are now a standard Scala `Ordering`.
+  This is relevant as these classes can be used in the console and scripts. Such usages must be updated to account for this change.
 
 #### Improved Sequencer Logging
 On the sequencer, the log line mentioning all events in a block now also can contain the outcome of the event.

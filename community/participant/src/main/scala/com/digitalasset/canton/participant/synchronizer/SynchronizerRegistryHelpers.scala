@@ -558,7 +558,7 @@ object SynchronizerRegistryHelpers {
           copyAction.thereafter(_ =>
             metrics.setLsuStatus(
               ParticipantMetrics.LsuStatus.LocalCopyDone,
-              persistentState.psid,
+              persistentState.psid.opaque,
             )
           )
         }

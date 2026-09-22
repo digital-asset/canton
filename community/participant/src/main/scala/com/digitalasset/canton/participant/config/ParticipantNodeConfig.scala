@@ -44,7 +44,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
 /** Base for all participant configs - both local and remote */
-trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
+sealed trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
   def clientLedgerApi: ClientConfig
 }
 
